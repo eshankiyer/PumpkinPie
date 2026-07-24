@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pumpkin vanilla-parity tracker</title>
+<style>
+:root { color-scheme: dark; }
+body { margin:0; padding:32px; background:#15171c; color:#e8eaed;
+  font:15px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
+.wrap { max-width:980px; margin:0 auto; }
+h1 { font-size:26px; margin:0 0 4px; }
+.sub { color:#9aa0a6; margin-bottom:28px; }
+.caveat { background:#241f16; border:1px solid #5c4a22; border-radius:10px;
+  padding:14px 18px; margin-bottom:28px; color:#e0c9a0; }
+.cards { display:flex; gap:20px; flex-wrap:wrap; margin-bottom:28px; }
+.card { background:#1c1f26; border:1px solid #2a2f3a; border-radius:12px;
+  padding:18px; text-align:center; flex:1; min-width:190px; }
+.card h3 { font-size:14px; font-weight:500; color:#9aa0a6; margin:10px 0 0; }
+.sparks { display:flex; gap:16px; flex-wrap:wrap; margin-bottom:28px; }
+.spark { background:#1c1f26; border:1px solid #2a2f3a; border-radius:12px;
+  padding:14px 16px; flex:1; min-width:280px; }
+.spark span { color:#9aa0a6; font-size:13px; display:block; }
+.spark em { font-style:normal; font-size:24px; font-weight:600; display:block; margin:2px 0 6px; }
+.spark small { color:#6b7280; font-size:12px; }
+table { border-collapse:collapse; width:100%; background:#1c1f26;
+  border:1px solid #2a2f3a; border-radius:12px; overflow:hidden; }
+td { padding:10px 16px; border-bottom:1px solid #2a2f3a; }
+tr:last-child td { border-bottom:none; }
+td:last-child { text-align:right; font-variant-numeric:tabular-nums; color:#f0932b; }
+ul { color:#9aa0a6; font-size:13px; padding-left:20px; }
+footer { margin-top:32px; color:#6b7280; font-size:13px; }
+a { color:#f0932b; }
+</style></head><body><div class="wrap">
+<h1>Pumpkin vanilla-parity tracker</h1>
+<div class="sub">Pumpkin-MC/Pumpkin at <code>afbe839</code> &middot;
+  collected 2026-07-24</div>
+
+<div class="caveat"><b>These are coverage proxies, not a parity score.</b>
+Nobody can put a meaningful single percentage on "how much of Minecraft is implemented".
+Most vanilla blocks need no behaviour code, so the block figure understates parity;
+conversely a registered behaviour may still be incomplete, which overstates it.
+Treat the direction of travel as the signal, not the absolute numbers.</div>
+
+<div class="cards"><div class="card">
+  <svg viewBox="0 0 140 140" width="140" height="140">
+    <circle cx="70" cy="70" r="54" fill="none" stroke="#2a2f3a" stroke-width="16"/>
+    <circle cx="70" cy="70" r="54" fill="none" stroke="#f0932b" stroke-width="16"
+            stroke-dasharray="44.8 339.3" stroke-linecap="round"
+            transform="rotate(-90 70 70)"/>
+    <text x="70" y="66" text-anchor="middle" fill="#e8eaed" font-size="26"
+          font-weight="600">13%</text>
+    <text x="70" y="88" text-anchor="middle" fill="#9aa0a6" font-size="15">158/1196</text>
+  </svg>
+  <h3>Blocks with behaviour</h3>
+</div>
+<div class="card">
+  <svg viewBox="0 0 140 140" width="140" height="140">
+    <circle cx="70" cy="70" r="54" fill="none" stroke="#2a2f3a" stroke-width="16"/>
+    <circle cx="70" cy="70" r="54" fill="none" stroke="#f0932b" stroke-width="16"
+            stroke-dasharray="64.2 339.3" stroke-linecap="round"
+            transform="rotate(-90 70 70)"/>
+    <text x="70" y="66" text-anchor="middle" fill="#e8eaed" font-size="26"
+          font-weight="600">19%</text>
+    <text x="70" y="88" text-anchor="middle" fill="#9aa0a6" font-size="15">32/169</text>
+  </svg>
+  <h3>Mobs with AI</h3>
+</div>
+<div class="card">
+  <svg viewBox="0 0 140 140" width="140" height="140">
+    <circle cx="70" cy="70" r="54" fill="none" stroke="#2a2f3a" stroke-width="16"/>
+    <circle cx="70" cy="70" r="54" fill="none" stroke="#f0932b" stroke-width="16"
+            stroke-dasharray="334.8 339.3" stroke-linecap="round"
+            transform="rotate(-90 70 70)"/>
+    <text x="70" y="66" text-anchor="middle" fill="#e8eaed" font-size="26"
+          font-weight="600">99%</text>
+    <text x="70" y="88" text-anchor="middle" fill="#9aa0a6" font-size="15">74/75</text>
+  </svg>
+  <h3>Commands</h3>
+</div></div>
+<h2 style="font-size:18px">Trend</h2>
+<div class="sparks"><div class="spark"><span>Blocks with behaviour</span><em>158</em><small>needs 2+ data points to trend</small></div>
+<div class="spark"><span>Mobs with AI</span><em>32</em><small>needs 2+ data points to trend</small></div>
+<div class="spark"><span>Commands</span><em>74</em><small>needs 2+ data points to trend</small></div>
+<div class="spark"><span>TODO / FIXME</span><em>415</em><small>needs 2+ data points to trend</small></div>
+<div class="spark"><span>Open issues</span><em>128</em><small>needs 2+ data points to trend</small></div>
+<div class="spark"><span>Open PRs</span><em>82</em><small>needs 2+ data points to trend</small></div></div>
+<h2 style="font-size:18px">Raw counts</h2>
+<table><tr><td>AI goals</td><td>31</td></tr>
+<tr><td>Block entities</td><td>53</td></tr>
+<tr><td>Items with behaviour</td><td>31</td></tr>
+<tr><td>TODO / FIXME markers</td><td>415</td></tr>
+<tr><td>Open issues</td><td>128</td></tr>
+<tr><td>Open PRs</td><td>82</td></tr></table>
+<h2 style="font-size:18px;margin-top:28px">What each figure means</h2>
+<ul><li><b>Blocks with behaviour</b> — Blocks registered in the block registry, over every block in the game data. Many vanilla blocks need no behaviour code at all, so this undercounts real parity.</li>
+<li><b>Mobs with AI</b> — Mob types with an AI module, over every entity type (which includes projectiles, vehicles and display entities that need no AI).</li>
+<li><b>Commands</b> — Command modules implemented, against roughly 75 player-facing commands in vanilla 1.21.</li></ul>
+<footer>Regenerate: <code>collect.sh &amp;&amp; render.py</code>.
+History in <code>history.csv</code> (1 sample).
+Source: <a href="https://github.com/Pumpkin-MC/Pumpkin">Pumpkin-MC/Pumpkin</a>.</footer>
+</div></body></html>
