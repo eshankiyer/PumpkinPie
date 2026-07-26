@@ -1706,6 +1706,36 @@ impl World {
         self.weather.lock().await.raining
     }
 
+    /// Returns whether rain is currently falling on `position`.
+    ///
+    /// Mirrors vanilla `Level#isRainingAt`: the world must be raining, the position must
+    /// see the sky with nothing motion-blocking above it, and the biome must produce
+    /// precipitation that falls as rain (not snow) at that position.
+    pub async fn is_raining_at(&self, position: &BlockPos) -> bool {
+        if !self.is_raining().await {
+            return false;
+        }
+        if !self.can_see_sky(position) {
+            return false;
+        }
+        // Vanilla compares `pos.y` against the first free Y above the surface, whereas
+        // `get_heightmap_height` returns the Y of the topmost blocking block itself, so
+        // the comparison is shifted by one.
+        if self.get_heightmap_height(MotionBlocking, position.0.x, position.0.z) >= position.0.y {
+            return false;
+        }
+        let biome_weather = &self.get_biome(position).weather;
+        if !biome_weather.has_precipitation() {
+            return false;
+        }
+        !biome_weather.cold_enough_to_snow(
+            f64::from(position.0.x),
+            position.0.y,
+            f64::from(position.0.z),
+            self.sea_level,
+        )
+    }
+
     pub async fn set_raining(&self, raining: bool) {
         let mut weather = self.weather.lock().await;
         if weather.raining != raining {
@@ -4407,6 +4437,14 @@ impl World {
         self.level
             .light_engine
             .get_sky_light_level(&self.level, position)
+    }
+
+    /// Returns whether `position` receives full, unobstructed sky light.
+    ///
+    /// Mirrors vanilla `LevelReader#canSeeSky`, which compares the raw (time-of-day
+    /// independent) sky light at the position against the maximum light level.
+    pub fn can_see_sky(&self, position: &BlockPos) -> bool {
+        self.get_sky_light_level(position) >= 15
     }
 
     pub fn set_block_light_level(&self, position: &BlockPos, light_level: u8) {
