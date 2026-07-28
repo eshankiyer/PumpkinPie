@@ -35,6 +35,7 @@ mod item;
 mod kick;
 mod kill;
 mod list;
+mod locate;
 mod loot;
 mod me;
 mod msg;
@@ -176,6 +177,7 @@ pub async fn default_dispatcher(
     execute::register(&mut dispatcher, registry);
     fillbiome::register(&mut dispatcher, registry);
     forceload::register(&mut dispatcher, registry);
+    locate::register(&mut dispatcher, registry);
     ride::register(&mut dispatcher, registry);
     recipe::register(&mut dispatcher, registry);
     help::register(&mut dispatcher, registry);
