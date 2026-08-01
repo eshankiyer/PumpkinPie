@@ -1025,9 +1025,15 @@ impl Player {
         damage = damage.max(0.0);
 
         let pos = victim_entity.pos.load();
-        let attack_type = AttackType::new(self, attack_cooldown_progress as f32).await;
+        let attack_type = AttackType::new(
+            self,
+            attack_cooldown_progress as f32,
+            victim.get_living_entity().is_some(),
+        )
+        .await;
+        let is_critical_hit = matches!(attack_type, AttackType::Critical);
 
-        if matches!(attack_type, AttackType::Critical) {
+        if is_critical_hit {
             damage *= 1.5;
         }
 

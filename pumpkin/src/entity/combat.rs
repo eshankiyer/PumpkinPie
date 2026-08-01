@@ -3,6 +3,7 @@ use std::sync::atomic::Ordering;
 use crate::entity::EntityBase;
 use pumpkin_data::{
     attributes::Attributes,
+    effect::StatusEffect,
     particle::Particle,
     sound::{Sound, SoundCategory},
 };
@@ -23,42 +24,98 @@ pub enum AttackType {
     MaceSmash,
 }
 
-impl AttackType {
-    pub async fn new(player: &Player, attack_cooldown_progress: f32) -> Self {
-        let entity = &player.get_entity();
+#[derive(Debug, Clone, Copy)]
+pub struct AttackConditions {
+    pub cooldown_progress: f32,
+    pub is_mace: bool,
+    pub is_sword: bool,
+    pub target_is_living: bool,
+    pub sprinting: bool,
+    pub on_ground: bool,
+    pub touching_water: bool,
+    pub climbing: bool,
+    pub mobility_restricted: bool,
+    pub has_vehicle: bool,
+    pub fall_distance: f32,
+    pub horizontal_movement: f64,
+    pub movement_speed: f64,
+}
 
-        let sprinting = entity.is_sprinting();
-        let on_ground = entity.on_ground.load(Ordering::Relaxed);
-        let fall_distance = player.living_entity.fall_distance.load();
+impl AttackType {
+    pub async fn new(
+        player: &Player,
+        attack_cooldown_progress: f32,
+        target_is_living: bool,
+    ) -> Self {
+        let entity = &player.get_entity();
         let held_item = player.inventory().held_item();
-        let is_mace = {
+        let (is_mace, is_sword) = {
             let stack = held_item.lock().await;
-            stack.item.id == pumpkin_data::item::Item::MACE.id
+            (
+                stack.item.id == pumpkin_data::item::Item::MACE.id,
+                stack.is_sword(),
+            )
         };
 
-        if is_mace && !on_ground && fall_distance > 1.5 {
+        Self::classify(AttackConditions {
+            cooldown_progress: attack_cooldown_progress,
+            is_mace,
+            is_sword,
+            target_is_living,
+            sprinting: entity.is_sprinting(),
+            on_ground: entity.on_ground.load(Ordering::Relaxed),
+            touching_water: entity.touching_water.load(Ordering::Relaxed),
+            climbing: player.living_entity.climbing.load(Ordering::Relaxed),
+            mobility_restricted: player
+                .living_entity
+                .has_effect(&StatusEffect::BLINDNESS)
+                .await,
+            has_vehicle: entity.has_vehicle().await,
+            fall_distance: player.living_entity.fall_distance.load(),
+            horizontal_movement: player.living_entity.get_movement().horizontal_length(),
+            movement_speed: player
+                .living_entity
+                .get_attribute_value(&Attributes::MOVEMENT_SPEED),
+        })
+    }
+
+    pub const fn classify(conditions: AttackConditions) -> Self {
+        if conditions.is_mace && !conditions.on_ground && conditions.fall_distance > 1.5 {
             return Self::MaceSmash;
         }
 
-        let sword = {
-            let stack = held_item.lock().await;
-            stack.is_sword()
-        };
-
-        let is_strong = attack_cooldown_progress > 0.9;
-        if sprinting && is_strong {
+        let full_strength = conditions.cooldown_progress > 0.9;
+        if conditions.sprinting && full_strength {
             return Self::Knockback;
         }
 
-        if is_strong && !on_ground && fall_distance > 0.0 {
+        let critical = full_strength
+            && conditions.target_is_living
+            && !conditions.on_ground
+            && conditions.fall_distance > 0.0
+            && !conditions.sprinting
+            && !conditions.touching_water
+            && !conditions.climbing
+            && !conditions.mobility_restricted
+            && !conditions.has_vehicle;
+        if critical {
             return Self::Critical;
         }
 
-        if sword && is_strong {
+        if conditions.is_sword
+            && full_strength
+            && conditions.on_ground
+            && !conditions.sprinting
+            && conditions.horizontal_movement < conditions.movement_speed * 2.5
+        {
             return Self::Sweeping;
         }
 
-        if is_strong { Self::Strong } else { Self::Weak }
+        if full_strength {
+            Self::Strong
+        } else {
+            Self::Weak
+        }
     }
 }
 
@@ -134,7 +191,117 @@ pub async fn player_attack_sound(pos: &Vector3<f64>, world: &World, attack_type:
 
 #[cfg(test)]
 mod tests {
-    use super::knockback_after_resistance;
+    use super::{AttackConditions, AttackType, knockback_after_resistance};
+
+    const fn critical_conditions() -> AttackConditions {
+        AttackConditions {
+            cooldown_progress: 1.0,
+            is_mace: false,
+            is_sword: false,
+            target_is_living: true,
+            sprinting: false,
+            on_ground: false,
+            touching_water: false,
+            climbing: false,
+            mobility_restricted: false,
+            has_vehicle: false,
+            fall_distance: 1.0,
+            horizontal_movement: 0.0,
+            movement_speed: 0.1,
+        }
+    }
+
+    const fn sweeping_conditions() -> AttackConditions {
+        AttackConditions {
+            cooldown_progress: 1.0,
+            is_mace: false,
+            is_sword: true,
+            target_is_living: false,
+            sprinting: false,
+            on_ground: true,
+            touching_water: false,
+            climbing: false,
+            mobility_restricted: false,
+            has_vehicle: false,
+            fall_distance: 0.0,
+            horizontal_movement: 0.249,
+            movement_speed: 0.1,
+        }
+    }
+
+    #[test]
+    fn critical_attack_decision_table() {
+        let mut non_living_target = critical_conditions();
+        non_living_target.target_is_living = false;
+        let mut grounded = critical_conditions();
+        grounded.on_ground = true;
+        let mut no_fall = critical_conditions();
+        no_fall.fall_distance = 0.0;
+        let mut sprinting = critical_conditions();
+        sprinting.sprinting = true;
+        let mut in_water = critical_conditions();
+        in_water.touching_water = true;
+        let mut climbing = critical_conditions();
+        climbing.climbing = true;
+        let mut mobility_restricted = critical_conditions();
+        mobility_restricted.mobility_restricted = true;
+        let mut riding = critical_conditions();
+        riding.has_vehicle = true;
+        let mut insufficient_charge = critical_conditions();
+        insufficient_charge.cooldown_progress = 0.9;
+
+        let cases = [
+            (critical_conditions(), AttackType::Critical),
+            (non_living_target, AttackType::Strong),
+            (grounded, AttackType::Strong),
+            (no_fall, AttackType::Strong),
+            (sprinting, AttackType::Knockback),
+            (in_water, AttackType::Strong),
+            (climbing, AttackType::Strong),
+            (mobility_restricted, AttackType::Strong),
+            (riding, AttackType::Strong),
+            (insufficient_charge, AttackType::Weak),
+        ];
+
+        for (conditions, expected) in cases {
+            assert_eq!(AttackType::classify(conditions), expected);
+        }
+    }
+
+    #[test]
+    fn sweeping_attack_decision_table() {
+        let mut insufficient_charge = sweeping_conditions();
+        insufficient_charge.cooldown_progress = 0.9;
+        let mut airborne = sweeping_conditions();
+        airborne.on_ground = false;
+        let mut not_a_sword = sweeping_conditions();
+        not_a_sword.is_sword = false;
+        let mut critical = sweeping_conditions();
+        critical.target_is_living = true;
+        critical.on_ground = false;
+        critical.fall_distance = 1.0;
+        let mut sprinting = sweeping_conditions();
+        sprinting.sprinting = true;
+        let mut at_speed_limit = sweeping_conditions();
+        at_speed_limit.horizontal_movement = 0.25;
+        let mut above_speed_limit = sweeping_conditions();
+        above_speed_limit.horizontal_movement = 0.251;
+
+        let cases = [
+            (sweeping_conditions(), AttackType::Sweeping),
+            (insufficient_charge, AttackType::Weak),
+            (airborne, AttackType::Strong),
+            (not_a_sword, AttackType::Strong),
+            (critical, AttackType::Critical),
+            (sprinting, AttackType::Knockback),
+            (at_speed_limit, AttackType::Strong),
+            (above_speed_limit, AttackType::Strong),
+        ];
+
+        for (conditions, expected) in cases {
+            assert_eq!(AttackType::classify(conditions), expected);
+        }
+    }
 
     #[test]
     fn zero_resistance_keeps_full_strength() {
