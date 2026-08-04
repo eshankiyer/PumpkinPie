@@ -40,18 +40,25 @@ impl CoralMushroomFeature {
                     let condition_b = (o != 0 && o != k) || (n != 0 && n != i);
                     let condition_c = (m != 0 && m != j) || (o != 0 && o != k);
                     let condition_d = m == 0 || m == j || n == 0 || n == i || o == 0 || o == k;
-                    let random_check = random.next_f32() < 0.1f32;
 
-                    if !((condition_a && condition_b && condition_c && condition_d)
-                        && !random_check
-                        && CoralFeature::generate_coral_piece(
+                    // Java's && short-circuits: nextFloat() is only drawn when the shape
+                    // conditions already hold (CoralMushroomFeature.java ~L29-34). The
+                    // previous code called next_f32() unconditionally every iteration,
+                    // desyncing the RNG stream from vanilla.
+                    if condition_a
+                        && condition_b
+                        && condition_c
+                        && condition_d
+                        && random.next_f32() >= 0.1f32
+                    {
+                        CoralFeature::generate_coral_piece(
                             chunk,
                             block_registry,
                             random,
                             block,
                             candidate,
-                        ))
-                    {}
+                        );
+                    }
                 }
             }
         }
