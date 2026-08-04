@@ -31,9 +31,10 @@ impl CoralMushroomFeature {
         for m in 0..=j {
             for n in 0..=i {
                 for o in 0..=k {
-                    let mut pos = pos;
-                    pos = pos.offset(Vector3::new(pos.0.x + m, pos.0.y + n, pos.0.z + o));
-                    pos = pos.down_height(l);
+                    // CoralMushroomFeature.java ~L27: mutPos.set(x + origin.getX(), y +
+                    // origin.getY(), z + origin.getZ()) is an absolute offset from the
+                    // untouched origin each iteration, not a running/self-fed position.
+                    let candidate = pos.offset(Vector3::new(m, n, o)).down_height(l);
 
                     let condition_a = (m != 0 && m != j) || (n != 0 && n != i);
                     let condition_b = (o != 0 && o != k) || (n != 0 && n != i);
@@ -48,12 +49,35 @@ impl CoralMushroomFeature {
                             block_registry,
                             random,
                             block,
-                            pos,
+                            candidate,
                         ))
                     {}
                 }
             }
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn candidate_position_is_origin_relative_not_self_fed() {
+        let origin = BlockPos::new(100, 64, -200);
+        let (m, n, o, l) = (2, 1, 3, 2);
+
+        let candidate = origin.offset(Vector3::new(m, n, o)).down_height(l);
+
+        assert_eq!(candidate.0.x, origin.0.x + m);
+        assert_eq!(candidate.0.y, origin.0.y + n - l);
+        assert_eq!(candidate.0.z, origin.0.z + o);
+
+        // The previous implementation reassigned through a mutated `pos` fed back
+        // into itself, doubling the origin: origin*2 + (m, n, o) instead of
+        // origin + (m, n, o).
+        let buggy_x = origin.0.x + (origin.0.x + m);
+        assert_ne!(candidate.0.x, buggy_x);
     }
 }
