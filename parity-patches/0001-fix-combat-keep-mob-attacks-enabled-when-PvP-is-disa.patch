@@ -1,0 +1,97 @@
+From b5a4bd2ebb9bfa2f6216d0d8a549ccdf91b77729 Mon Sep 17 00:00:00 2001
+From: "Eshan I." <79593316+eshankiyer@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 12:11:11 -0400
+Subject: [PATCH] fix(combat): keep mob attacks enabled when PvP is disabled
+
+---
+ pumpkin/src/net/java/play.rs | 43 ++++++++++++++++++++++++++++--------
+ 1 file changed, 34 insertions(+), 9 deletions(-)
+
+diff --git a/pumpkin/src/net/java/play.rs b/pumpkin/src/net/java/play.rs
+index adf850f..1951419 100644
+--- a/pumpkin/src/net/java/play.rs
++++ b/pumpkin/src/net/java/play.rs
+@@ -84,6 +84,11 @@ use tokio::sync::Mutex;
+ /// Vanilla: 2 minutes
+ const CHAT_MESSAGE_MAX_AGE: i64 = 1000 * 60 * 2;
+ 
++/// PvP controls attacks against other players only; mobs remain attackable.
++const fn pvp_allows_attack(pvp_enabled: bool, target_is_player: bool) -> bool {
++    pvp_enabled || !target_is_player
++}
++
+ #[derive(Debug, Error)]
+ pub enum BlockPlacingError {
+     BlockOutOfReach,
+@@ -1722,11 +1727,6 @@ impl JavaClient {
+         let player_entity = &player.get_entity();
+         let world = player_entity.world.load_full();
+ 
+-        let config = &server.advanced_config.pvp;
+-        if !config.enabled {
+-            return;
+-        }
+-
+         if entity_id.0 == player.entity_id() {
+             self.kick(TextComponent::translate_cross(
+                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED,
+@@ -1751,6 +1751,10 @@ impl JavaClient {
+             .await;
+             return;
+         };
++        let config = &server.advanced_config.pvp;
++        if !pvp_allows_attack(config.enabled, player_target.is_some()) {
++            return;
++        }
+         if let Some(player_victim) = &player_target {
+             if player_victim.living_entity.health.load() <= 0.0 {
+                 return;
+@@ -1821,16 +1825,16 @@ impl JavaClient {
+                     match event.action {
+                         ActionType::Attack => {
+                             let config = &server.advanced_config.pvp;
+-                            if !config.enabled {
+-                                return;
+-                            }
+-
+                             if entity_id.0 == player.entity_id() {
+                                 self.kick(TextComponent::translate_cross(translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED, translation::java::MULTIPLAYER_DISCONNECT_INVALID_ENTITY_ATTACKED, [],))
+                                 .await;
+                                 return;
+                             }
+ 
++                            if !pvp_allows_attack(config.enabled, player_target.is_some()) {
++                                return;
++                            }
++
+                             if let Some(player_victim) = &player_target {
+                                 if player_victim.living_entity.health.load() <= 0.0 {
+                                     return;
+@@ -2927,3 +2931,24 @@ impl JavaClient {
+         );
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::pvp_allows_attack;
++
++    #[test]
++    fn disabled_pvp_allows_attacks_against_non_players() {
++        assert!(pvp_allows_attack(false, false));
++    }
++
++    #[test]
++    fn disabled_pvp_blocks_attacks_against_players() {
++        assert!(!pvp_allows_attack(false, true));
++    }
++
++    #[test]
++    fn enabled_pvp_allows_attacks_against_all_targets() {
++        assert!(pvp_allows_attack(true, false));
++        assert!(pvp_allows_attack(true, true));
++    }
++}
+-- 
+2.55.0
+

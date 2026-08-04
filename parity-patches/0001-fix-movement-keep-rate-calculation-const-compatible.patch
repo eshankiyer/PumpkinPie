@@ -1,0 +1,27 @@
+From aa8d6c3ff523036a6e7e61974f10c2039e56b284 Mon Sep 17 00:00:00 2001
+From: "Eshan I." <79593316+eshankiyer@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 13:42:32 -0400
+Subject: [PATCH] fix(movement): keep rate calculation const compatible
+
+---
+ pumpkin/src/net/java/play.rs | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/pumpkin/src/net/java/play.rs b/pumpkin/src/net/java/play.rs
+index ebd338f..3197aa7 100644
+--- a/pumpkin/src/net/java/play.rs
++++ b/pumpkin/src/net/java/play.rs
+@@ -170,7 +170,9 @@ const fn movement_requires_correction(
+     let delta_y = target_position.y - current_position.y;
+     let delta_z = target_position.z - current_position.z;
+     let moved_distance_squared = delta_x * delta_x + delta_y * delta_y + delta_z * delta_z;
+-    let expected_distance_squared = expected_velocity.length_squared();
++    let expected_distance_squared = expected_velocity.x * expected_velocity.x
++        + expected_velocity.y * expected_velocity.y
++        + expected_velocity.z * expected_velocity.z;
+     let maximum_excess_distance_squared = if context.fall_flying { 300.0 } else { 100.0 };
+ 
+     moved_distance_squared - expected_distance_squared > maximum_excess_distance_squared
+-- 
+2.55.0
+

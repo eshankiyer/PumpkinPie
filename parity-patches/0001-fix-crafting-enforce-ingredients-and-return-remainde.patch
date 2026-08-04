@@ -1,0 +1,24 @@
+From 53d8b8b47a172d522bd186f9512212709def8ea2 Mon Sep 17 00:00:00 2001
+From: "Eshan I." <79593316+eshankiyer@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 12:19:26 -0400
+Subject: [PATCH] fix(crafting): enforce ingredients and return remainders
+
+---
+ pumpkin-inventory/Cargo.toml | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/pumpkin-inventory/Cargo.toml b/pumpkin-inventory/Cargo.toml
+index 93bd827..ca4df94 100644
+--- a/pumpkin-inventory/Cargo.toml
++++ b/pumpkin-inventory/Cargo.toml
+@@ -12,6 +12,7 @@ pumpkin-data = { workspace = true, features = [
+     "screen",
+     "data_component",
+     "recipes",
++    "recipe_remainder",
+     "tag",
+     "fuels",
+     "enchantment",
+-- 
+2.55.0
+

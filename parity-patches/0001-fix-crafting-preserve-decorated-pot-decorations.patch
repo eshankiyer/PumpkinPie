@@ -1,0 +1,205 @@
+From bb52fe4eb0617b919ebcda0ade64f5184a7566ae Mon Sep 17 00:00:00 2001
+From: "Eshan I." <79593316+eshankiyer@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 13:20:53 -0400
+Subject: [PATCH] fix(crafting): preserve decorated pot decorations
+
+---
+ pumpkin-codegen/src/item.rs                   | 20 ++++++-
+ pumpkin-data/src/data_component_impl/basic.rs | 26 ++++++++-
+ pumpkin-data/src/data_component_impl/mod.rs   |  1 +
+ pumpkin-data/src/generated/item.rs            | 12 ++++-
+ .../src/crafting/crafting_screen_handler.rs   | 54 ++++++++++++++++++-
+ 5 files changed, 107 insertions(+), 6 deletions(-)
+
+diff --git a/pumpkin-codegen/src/item.rs b/pumpkin-codegen/src/item.rs
+index eab3964..fc445b6 100644
+--- a/pumpkin-codegen/src/item.rs
++++ b/pumpkin-codegen/src/item.rs
+@@ -817,8 +817,24 @@ impl ToTokens for ItemComponents {
+         if self.piercing_weapon.is_some() {
+             tokens.extend(quote! { (PiercingWeapon, &PiercingWeaponImpl), });
+         }
+-        if self.pot_decorations.is_some() {
+-            tokens.extend(quote! { (PotDecorations, &PotDecorationsImpl), });
++        if let Some(decorations) = &self.pot_decorations
++            && let Some(decorations) = decorations.as_array()
++            && decorations.len() == 4
++        {
++            let decorations = decorations
++                .iter()
++                .map(|decoration| decoration.as_str())
++                .collect::<Option<Vec<_>>>();
++            if let Some(decorations) = decorations {
++                let decorations = decorations
++                    .iter()
++                    .map(|decoration| LitStr::new(decoration, Span::call_site()));
++                tokens.extend(quote! {
++                    (PotDecorations, &PotDecorationsImpl {
++                        decorations: [#(Cow::Borrowed(#decorations)),*],
++                    }),
++                });
++            }
+         }
+         if self.potion_contents.is_some() {
+             tokens.extend(quote! {
+diff --git a/pumpkin-data/src/data_component_impl/basic.rs b/pumpkin-data/src/data_component_impl/basic.rs
+index 1cceb55..aa24024 100644
+--- a/pumpkin-data/src/data_component_impl/basic.rs
++++ b/pumpkin-data/src/data_component_impl/basic.rs
+@@ -225,8 +225,32 @@ impl DataComponentImpl for BannerPatternsImpl {
+ }
+ 
+ #[derive(Clone, Debug, Hash, PartialEq, Eq)]
+-pub struct PotDecorationsImpl;
++pub struct PotDecorationsImpl {
++    pub decorations: [Cow<'static, str>; 4],
++}
++impl PotDecorationsImpl {
++    pub fn read_data(data: &NbtTag) -> Option<Self> {
++        let decorations = data.extract_list()?;
++        let decorations: Vec<_> = decorations
++            .iter()
++            .map(|tag| {
++                tag.extract_string()
++                    .map(|value| Cow::Owned(value.to_string()))
++            })
++            .collect::<Option<_>>()?;
++        let decorations = decorations.try_into().ok()?;
++        Some(Self { decorations })
++    }
++}
+ impl DataComponentImpl for PotDecorationsImpl {
++    fn write_data(&self) -> NbtTag {
++        NbtTag::List(
++            self.decorations
++                .iter()
++                .map(|decoration| NbtTag::String(decoration.to_string().into_boxed_str()))
++                .collect(),
++        )
++    }
+     default_impl!(PotDecorations);
+ }
+ 
+diff --git a/pumpkin-data/src/data_component_impl/mod.rs b/pumpkin-data/src/data_component_impl/mod.rs
+index cbfdc8d..d1e2c3f 100644
+--- a/pumpkin-data/src/data_component_impl/mod.rs
++++ b/pumpkin-data/src/data_component_impl/mod.rs
+@@ -542,6 +542,7 @@ pub fn read_data(id: DataComponent, data: &NbtTag) -> Option<Box<dyn DataCompone
+             Some(OminousBottleAmplifierImpl::read_data(data)?.to_dyn())
+         }
+         DataComponent::BlockState => Some(BlockStateImpl::read_data(data)?.to_dyn()),
++        DataComponent::PotDecorations => Some(PotDecorationsImpl::read_data(data)?.to_dyn()),
+         DataComponent::Profile => Some(ProfileImpl::read_data(data)?.to_dyn()),
+         DataComponent::ChickenVariant => Some(ChickenVariantImpl::read_data(data)?.to_dyn()),
+         DataComponent::VillagerVariant => Some(VillagerVariantImpl::read_data(data)?.to_dyn()),
+diff --git a/pumpkin-data/src/generated/item.rs b/pumpkin-data/src/generated/item.rs
+index 82bc72e..f5ea8fc 100644
+--- a/pumpkin-data/src/generated/item.rs
++++ b/pumpkin-data/src/generated/item.rs
+@@ -17289,7 +17289,17 @@ impl Item {
+                 },
+             ),
+             (Lore, &LoreImpl),
+-            (PotDecorations, &PotDecorationsImpl),
++            (
++                PotDecorations,
++                &PotDecorationsImpl {
++                    decorations: [
++                        Cow::Borrowed("minecraft:brick"),
++                        Cow::Borrowed("minecraft:brick"),
++                        Cow::Borrowed("minecraft:brick"),
++                        Cow::Borrowed("minecraft:brick"),
++                    ],
++                },
++            ),
+             (Rarity, &RarityImpl),
+             (RepairCost, &RepairCostImpl),
+             (SwingAnimation, &SwingAnimationImpl),
+diff --git a/pumpkin-inventory/src/crafting/crafting_screen_handler.rs b/pumpkin-inventory/src/crafting/crafting_screen_handler.rs
+index 4650656..2c18c06 100644
+--- a/pumpkin-inventory/src/crafting/crafting_screen_handler.rs
++++ b/pumpkin-inventory/src/crafting/crafting_screen_handler.rs
+@@ -30,7 +30,7 @@ use crate::screen_handler::{
+ use crate::slot::{BoxFuture, NormalSlot, Slot};
+ 
+ use pumpkin_data::data_component::DataComponent;
+-use pumpkin_data::data_component_impl::DataComponentImpl;
++use pumpkin_data::data_component_impl::{DataComponentImpl, PotDecorationsImpl};
+ use pumpkin_data::item_stack::ItemStack;
+ use pumpkin_data::recipe_remainder::get_recipe_remainder_id;
+ use pumpkin_data::recipes::{CraftingRecipeTypes, RECIPES_CRAFTING};
+@@ -268,6 +268,7 @@ async fn recipe_matches(
+             if count != 4 || inventory.get_width() != 3 || inventory.get_height() != 3 {
+                 return None;
+             }
++            let mut decorations = Vec::with_capacity(4);
+             for position in (1..=7).step_by(2) {
+                 let slot = inventory.get_stack(position).await;
+                 let slot = slot.lock().await;
+@@ -278,8 +279,19 @@ async fn recipe_matches(
+                 {
+                     return None;
+                 }
++                decorations.push(std::borrow::Cow::Borrowed(slot.item.registry_key));
+             }
+-            Some(RecipeResult::new("minecraft:decorated_pot".to_string(), 1))
++            let decorations = decorations
++                .try_into()
++                .expect("decorated pot recipe has exactly four ingredients");
++            Some(RecipeResult {
++                item_id: "minecraft:decorated_pot".to_string(),
++                count: 1,
++                component_patch: vec![(
++                    DataComponent::PotDecorations,
++                    Some(PotDecorationsImpl { decorations }.to_dyn()),
++                )],
++            })
+         }
+         GenericRecipe::Dynamic(OwnedCraftingRecipe::Shaped {
+             pattern,
+@@ -842,4 +854,42 @@ mod tests {
+ 
+         assert_eq!(output.get_damage(), 26);
+     }
++
++    #[tokio::test]
++    async fn decorated_pot_preserves_sherd_order_in_its_component() {
++        let inventory = CraftingInventory::new(3, 3);
++        for (slot, item) in [
++            (1, &Item::ANGLER_POTTERY_SHERD),
++            (3, &Item::ARCHER_POTTERY_SHERD),
++            (5, &Item::ARMS_UP_POTTERY_SHERD),
++            (7, &Item::BLADE_POTTERY_SHERD),
++        ] {
++            inventory.set_stack(slot, ItemStack::new(1, item)).await;
++        }
++
++        let recipe = CraftingRecipeTypes::CraftingDecoratedPot {
++            category: RecipeCategoryTypes::Misc,
++        };
++        let result = recipe_matches(GenericRecipe::Vanilla(&recipe), 3, 3, 0, 0, 4, &inventory)
++            .await
++            .expect("decorated pot recipe should match");
++        let output = ItemStack::new_with_component(
++            result.count,
++            &Item::DECORATED_POT,
++            result.component_patch,
++        );
++        let decorations = output
++            .get_data_component::<PotDecorationsImpl>()
++            .expect("decorated pot output has decorations");
++
++        assert_eq!(
++            decorations.decorations,
++            [
++                std::borrow::Cow::Borrowed("angler_pottery_sherd"),
++                std::borrow::Cow::Borrowed("archer_pottery_sherd"),
++                std::borrow::Cow::Borrowed("arms_up_pottery_sherd"),
++                std::borrow::Cow::Borrowed("blade_pottery_sherd"),
++            ]
++        );
++    }
+ }
+-- 
+2.55.0
+

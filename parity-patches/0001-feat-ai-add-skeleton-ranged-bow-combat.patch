@@ -1,0 +1,304 @@
+From 1b8c405ae0941cc3fb4afa620bbe273f3a071b26 Mon Sep 17 00:00:00 2001
+From: "Eshan I." <79593316+eshankiyer@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 14:15:54 -0400
+Subject: [PATCH] feat(ai): add skeleton ranged bow combat
+
+
+diff --git a/pumpkin/src/entity/ai/goal/mod.rs b/pumpkin/src/entity/ai/goal/mod.rs
+index 1b5f13d..3580002 100644
+--- a/pumpkin/src/entity/ai/goal/mod.rs
++++ b/pumpkin/src/entity/ai/goal/mod.rs
+@@ -23,6 +23,7 @@ pub mod owner_hurt_by_target;
+ pub mod owner_hurt_target;
+ pub mod pick_up_block;
+ pub mod place_block;
++pub mod ranged_bow_attack;
+ pub mod revenge;
+ pub mod step_and_destroy_block;
+ pub mod swim;
+diff --git a/pumpkin/src/entity/ai/goal/ranged_bow_attack.rs b/pumpkin/src/entity/ai/goal/ranged_bow_attack.rs
+new file mode 100644
+index 0000000..4e52e87
+--- /dev/null
++++ b/pumpkin/src/entity/ai/goal/ranged_bow_attack.rs
+@@ -0,0 +1,208 @@
++use std::sync::Arc;
++
++use pumpkin_data::entity::EntityType;
++use pumpkin_data::sound::{Sound, SoundCategory};
++use pumpkin_protocol::IdOr;
++use pumpkin_protocol::java::client::play::CSoundEffect;
++use pumpkin_util::math::vector3::Vector3;
++
++use crate::entity::{
++    Entity, EntityBase,
++    ai::goal::{Controls, Goal, GoalFuture},
++    mob::Mob,
++    projectile::arrow::{ArrowEntity, ArrowPickup},
++};
++
++/// The common bow attack loop used by skeleton-family mobs.
++///
++/// This follows vanilla's `RangedBowAttackGoal` timing while Pumpkin does not
++/// yet model item-use state.  A shot is still created by the same projectile
++/// path as player bows, with the vanilla skeleton trajectory adjustment from
++/// `AbstractSkeleton#performRangedAttack`.
++pub struct RangedBowAttackGoal {
++    attack_interval: i32,
++    attack_cooldown: i32,
++    range: f64,
++}
++
++impl RangedBowAttackGoal {
++    #[must_use]
++    pub const fn new(attack_interval: i32, range: f64) -> Self {
++        Self {
++            attack_interval,
++            attack_cooldown: 0,
++            range,
++        }
++    }
++
++    async fn has_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
++        let entity = mob.get_entity();
++        entity
++            .world
++            .load_full()
++            .raycast(
++                entity.get_eye_pos(),
++                target.get_entity().get_eye_pos(),
++                async |block_pos, world| world.get_block_state(block_pos).is_solid(),
++            )
++            .await
++            .is_none()
++    }
++
++    fn target_vector(shooter: &Entity, target: &dyn EntityBase) -> Vector3<f64> {
++        // `ArrowEntity::new_shot` starts an arrow at eye height minus 0.1.
++        let mut arrow_pos = shooter.get_eye_pos();
++        arrow_pos.y -= 0.1;
++        let target_pos = target.get_entity().pos.load();
++        Self::target_vector_from_positions(
++            arrow_pos,
++            target_pos,
++            target.get_entity().get_eye_height(),
++        )
++    }
++
++    fn target_vector_from_positions(
++        arrow_pos: Vector3<f64>,
++        target_pos: Vector3<f64>,
++        target_eye_height: f64,
++    ) -> Vector3<f64> {
++        let horizontal_distance = (target_pos.x - arrow_pos.x).hypot(target_pos.z - arrow_pos.z);
++
++        // Vanilla: target.getY(1 / 3) - arrow.getY() + horizontalDistance * 0.2.
++        Vector3::new(
++            target_pos.x - arrow_pos.x,
++            target_pos.y + target_eye_height / 3.0 - arrow_pos.y + horizontal_distance * 0.2,
++            target_pos.z - arrow_pos.z,
++        )
++    }
++
++    async fn shoot(&self, mob: &dyn Mob, target: &dyn EntityBase) {
++        let shooter = mob.get_entity();
++        let world = shooter.world.load_full();
++        let arrow_entity = Entity::new(world.clone(), shooter.pos.load(), &EntityType::ARROW);
++        let arrow = ArrowEntity::new_shot(arrow_entity, shooter, ArrowPickup::Disallowed);
++        let direction = Self::target_vector(shooter, target);
++
++        // `AbstractSkeleton#performRangedAttack`: power 1.6, inaccuracy 14 - difficulty * 4.
++        // Normal difficulty is the server default, so use its 10 degree inaccuracy until
++        // local difficulty is represented by the world API.
++        arrow.set_velocity(direction.x, direction.y, direction.z, 1.6, 10.0);
++        world.spawn_entity(Arc::new(arrow)).await;
++
++        let sound = CSoundEffect::new(
++            IdOr::Id(Sound::EntitySkeletonShoot as u16),
++            SoundCategory::Hostile,
++            &shooter.pos.load(),
++            1.0,
++            1.0 / (rand::random::<f32>() * 0.4 + 0.8),
++            0.0,
++        );
++        world.broadcast_to_chunk(shooter.chunk_pos.load(), &sound);
++    }
++}
++
++impl Goal for RangedBowAttackGoal {
++    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
++        Box::pin(async move {
++            mob.get_mob_entity()
++                .target
++                .lock()
++                .await
++                .as_ref()
++                .is_some_and(|target| target.get_entity().is_alive())
++        })
++    }
++
++    fn should_continue<'a>(&'a self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
++        Box::pin(async move {
++            mob.get_mob_entity()
++                .target
++                .lock()
++                .await
++                .as_ref()
++                .is_some_and(|target| target.get_entity().is_alive())
++        })
++    }
++
++    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
++        Box::pin(async move {
++            self.attack_cooldown = 0;
++        })
++    }
++
++    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
++        Box::pin(async move {
++            mob.get_mob_entity().navigator.lock().unwrap().stop();
++        })
++    }
++
++    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
++        Box::pin(async move {
++            let Some(target) = mob.get_mob_entity().target.lock().await.clone() else {
++                return;
++            };
++            let shooter = mob.get_entity();
++            let target_pos = target.get_entity().pos.load();
++            let distance_squared = shooter.pos.load().squared_distance_to_vec(&target_pos);
++
++            mob.get_mob_entity()
++                .look_control
++                .lock()
++                .unwrap()
++                .look_at_entity_with_range(&target, 30.0, 30.0);
++            self.attack_cooldown = (self.attack_cooldown - 1).max(0);
++
++            if distance_squared > self.range * self.range {
++                mob.get_mob_entity().navigator.lock().unwrap().set_progress(
++                    crate::entity::ai::pathfinder::NavigatorGoal {
++                        current_progress: shooter.pos.load(),
++                        destination: target_pos,
++                        speed: 1.0,
++                    },
++                );
++                return;
++            }
++
++            mob.get_mob_entity().navigator.lock().unwrap().stop();
++            if self.attack_cooldown == 0 && Self::has_line_of_sight(mob, target.as_ref()).await {
++                self.shoot(mob, target.as_ref()).await;
++                self.attack_cooldown = self.attack_interval;
++            }
++        })
++    }
++
++    fn should_run_every_tick(&self) -> bool {
++        true
++    }
++
++    fn controls(&self) -> Controls {
++        Controls::MOVE | Controls::LOOK
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::RangedBowAttackGoal;
++    use pumpkin_util::math::vector3::Vector3;
++
++    #[test]
++    fn preserves_vanilla_skeleton_bow_interval() {
++        let goal = RangedBowAttackGoal::new(40, 15.0);
++        assert_eq!(goal.attack_interval, 40);
++        assert_eq!(goal.range, 15.0);
++    }
++
++    #[test]
++    fn adds_vanilla_ballistic_vertical_lead() {
++        let direction = RangedBowAttackGoal::target_vector_from_positions(
++            Vector3::new(0.0, 1.52, 0.0),
++            Vector3::new(3.0, 0.0, 4.0),
++            1.8,
++        );
++
++        assert_eq!(direction.x, 3.0);
++        assert_eq!(direction.z, 4.0);
++        // target Y + targetEyeHeight / 3 - arrow Y + horizontalDistance * 0.2
++        assert!((direction.y - 0.08).abs() < f64::EPSILON);
++    }
++}
+diff --git a/pumpkin/src/entity/mob/skeleton/mod.rs b/pumpkin/src/entity/mob/skeleton/mod.rs
+index 249c420..5136f6f 100644
+--- a/pumpkin/src/entity/mob/skeleton/mod.rs
++++ b/pumpkin/src/entity/mob/skeleton/mod.rs
+@@ -1,13 +1,16 @@
+ use std::sync::{Arc, Weak};
+ 
+-use pumpkin_data::entity::EntityType;
++use pumpkin_data::{
++    data_component_impl::EquipmentSlot, entity::EntityType, item::Item, item_stack::ItemStack,
++};
+ 
+ use crate::entity::{
+     Entity, NBTStorage, NbtFuture,
+     ai::goal::{
+         active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
+-        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, revenge::RevengeGoal,
+-        swim::SwimGoal, wander_around::WanderAroundGoal,
++        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal,
++        ranged_bow_attack::RangedBowAttackGoal, revenge::RevengeGoal, swim::SwimGoal,
++        wander_around::WanderAroundGoal,
+     },
+     mob::{Mob, MobEntity},
+ };
+@@ -26,6 +29,7 @@ pub struct SkeletonEntityBase {
+ 
+ impl SkeletonEntityBase {
+     pub fn new(entity: Entity) -> Arc<Self> {
++        let uses_bow = entity.entity_type != &EntityType::WITHER_SKELETON;
+         let mob_entity = MobEntity::new(entity);
+         let mob = Self { mob_entity };
+         let mob_arc = Arc::new(mob);
+@@ -34,11 +38,35 @@ impl SkeletonEntityBase {
+             Arc::downgrade(&mob_arc)
+         };
+         {
++            // Vanilla `AbstractSkeleton#populateDefaultEquipmentSlots` equips a bow;
++            // WitherSkeleton overrides that hook with a stone sword.
++            let main_hand = if uses_bow {
++                &Item::BOW
++            } else {
++                &Item::STONE_SWORD
++            };
++            mob_arc
++                .mob_entity
++                .living_entity
++                .entity_equipment
++                .try_lock()
++                .expect("new skeleton equipment is uncontended")
++                .equipment
++                .insert(
++                    EquipmentSlot::MAIN_HAND,
++                    Arc::new(tokio::sync::Mutex::new(ItemStack::new(1, main_hand))),
++                );
++
+             let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+             let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
+ 
+             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
+-            goal_selector.add_goal(2, Box::new(MeleeAttackGoal::new(1.2, false)));
++            if uses_bow {
++                // Vanilla `AbstractSkeleton#reassessWeaponGoal` selects this at priority 4.
++                goal_selector.add_goal(4, Box::new(RangedBowAttackGoal::new(40, 15.0)));
++            } else {
++                goal_selector.add_goal(4, Box::new(MeleeAttackGoal::new(1.2, false)));
++            }
+             goal_selector.add_goal(7, Box::new(WanderAroundGoal::new(1.0)));
+             goal_selector.add_goal(
+                 8,
+-- 
+2.55.0
+

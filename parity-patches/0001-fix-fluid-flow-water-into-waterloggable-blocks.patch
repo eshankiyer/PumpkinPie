@@ -1,0 +1,103 @@
+From 3c08fb9a429677d23a832e6bbccf41f8b8b106e2 Mon Sep 17 00:00:00 2001
+From: "Eshan I." <79593316+eshankiyer@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 13:49:31 -0400
+Subject: [PATCH] fix(fluid): flow water into waterloggable blocks
+
+---
+ pumpkin/src/block/fluid/flowing_trait.rs | 15 +++++++++
+ pumpkin/src/block/fluid/physics.rs       | 42 ++++++++++++++++++++++--
+ 2 files changed, 55 insertions(+), 2 deletions(-)
+
+diff --git a/pumpkin/src/block/fluid/flowing_trait.rs b/pumpkin/src/block/fluid/flowing_trait.rs
+index 3b3bb3a..c0342ba 100644
+--- a/pumpkin/src/block/fluid/flowing_trait.rs
++++ b/pumpkin/src/block/fluid/flowing_trait.rs
+@@ -366,6 +366,21 @@ pub trait FlowingFluid: Send + Sync {
+             } else {
+                 // Replace non-fluid blocks
+                 let block = world.get_block(pos);
++                let state = world.get_block_state(pos);
++                if let Some(waterlogged_state) =
++                    physics::waterlogged_replacement_state(state, block, fluid)
++                {
++                    world
++                        .set_block_state(pos, waterlogged_state, BlockFlags::NOTIFY_ALL)
++                        .await;
++                    world.schedule_fluid_tick(
++                        fluid,
++                        *pos,
++                        self.get_flow_speed(world),
++                        TickPriority::Normal,
++                    );
++                    return;
++                }
+                 if block.id != Block::AIR.id {
+                     world.break_block(pos, None, BlockFlags::NOTIFY_ALL).await;
+                 }
+diff --git a/pumpkin/src/block/fluid/physics.rs b/pumpkin/src/block/fluid/physics.rs
+index a90a246..3f78c32 100644
+--- a/pumpkin/src/block/fluid/physics.rs
++++ b/pumpkin/src/block/fluid/physics.rs
+@@ -1,15 +1,21 @@
+ use pumpkin_data::BlockState;
+ use pumpkin_data::tag::Taggable;
+-use pumpkin_data::{Block, fluid::Fluid, tag};
++use pumpkin_data::{Block, BlockStateId, fluid::Fluid, tag};
+ 
+ /// Check if a specific block can be replaced by fluid (based on block properties)
+ #[must_use]
+ pub fn can_be_replaced(block_state: &BlockState, block: &Block, fluid: &Fluid) -> bool {
+-    // Waterlogged blocks should not be replaced by water
++    // An already waterlogged block retains its host state and is not replaceable.
+     if block.is_waterlogged(block_state.id) {
+         return false;
+     }
+ 
++    // Vanilla `LiquidBlockContainer` accepts water into a dry waterloggable block. The caller
++    // must change it to the waterlogged state rather than replace the block with a fluid state.
++    if fluid.matches_type(&Fluid::WATER) && block.with_waterlogged(block_state.id).is_some() {
++        return true;
++    }
++
+     // Fluid Logic
+     if let Some(other_fluid) = Fluid::from_state_id(block_state.id) {
+         if !fluid.matches_type(other_fluid) {
+@@ -58,3 +64,35 @@ pub fn can_be_replaced(block_state: &BlockState, block: &Block, fluid: &Fluid) -
+         // Only use PistonBehavior::Destroy if it didn't pass the checks above
+         || block_state.piston_behavior == pumpkin_data::block_state::PistonBehavior::Destroy
+ }
++
++#[must_use]
++pub fn waterlogged_replacement_state(
++    block_state: &BlockState,
++    block: &Block,
++    fluid: &Fluid,
++) -> Option<BlockStateId> {
++    fluid
++        .matches_type(&Fluid::WATER)
++        .then(|| block.with_waterlogged(block_state.id))
++        .flatten()
++        .map(|state| state.id)
++}
++
++#[cfg(test)]
++mod tests {
++    use pumpkin_data::{Block, fluid::Fluid};
++
++    use super::{can_be_replaced, waterlogged_replacement_state};
++
++    #[test]
++    fn water_flows_into_dry_waterloggable_blocks_without_replacing_them() {
++        let block = &Block::OAK_SLAB;
++        let dry = block.default_state;
++        let waterlogged_id = waterlogged_replacement_state(dry, block, &Fluid::WATER)
++            .expect("oak slabs have a waterlogged state");
++
++        assert!(can_be_replaced(dry, block, &Fluid::WATER));
++        assert!(block.is_waterlogged(waterlogged_id));
++        assert!(waterlogged_replacement_state(dry, block, &Fluid::LAVA).is_none());
++    }
++}
+-- 
+2.55.0
+

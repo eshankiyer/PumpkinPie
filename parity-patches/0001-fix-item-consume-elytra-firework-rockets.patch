@@ -1,0 +1,37 @@
+From 9ffaa59cfe7fa5520a33343d2f5be9484130d6f4 Mon Sep 17 00:00:00 2001
+From: "Eshan I." <79593316+eshankiyer@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 13:58:05 -0400
+Subject: [PATCH] fix(item): consume elytra firework rockets
+
+
+diff --git a/pumpkin/src/item/items/firework_rocket.rs b/pumpkin/src/item/items/firework_rocket.rs
+index 9ce49b0..6f42a2a 100644
+--- a/pumpkin/src/item/items/firework_rocket.rs
++++ b/pumpkin/src/item/items/firework_rocket.rs
+@@ -71,6 +71,23 @@ impl ItemBehaviour for FireworkRocketItem {
+                 );
+                 let entity = FireworkRocketEntity::new_shot(entity, player.get_entity());
+                 world.spawn_entity(Arc::new(entity)).await;
++
++                // Vanilla `FireworkRocketItem::use` consumes the hand that launched
++                // the attached rocket, except in Creative mode.
++                if should_consume_rocket(player.is_creative()) {
++                    let held_item = player.inventory.held_item();
++                    let mut held_item = held_item.lock().await;
++                    if held_item.item == &Item::FIREWORK_ROCKET {
++                        held_item.decrement(1);
++                    } else {
++                        drop(held_item);
++                        let off_hand_item = player.inventory.off_hand_item().await;
++                        let mut off_hand_item = off_hand_item.lock().await;
++                        if off_hand_item.item == &Item::FIREWORK_ROCKET {
++                            off_hand_item.decrement(1);
++                        }
++                    }
++                }
+             }
+         })
+     }
+-- 
+2.55.0
+

@@ -1,0 +1,25 @@
+From b7a1f6a3fc5321f022408c2bb2b63af5281416fd Mon Sep 17 00:00:00 2001
+From: "Eshan I." <79593316+eshankiyer@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 13:56:10 -0400
+Subject: [PATCH] fix(combat): preserve hurt cooldown damage baseline
+
+
+diff --git a/pumpkin/src/entity/living.rs b/pumpkin/src/entity/living.rs
+index 75c6f10..6304226 100644
+--- a/pumpkin/src/entity/living.rs
++++ b/pumpkin/src/entity/living.rs
+@@ -2356,7 +2356,10 @@ impl EntityBase for LivingEntity {
+                 };
+ 
+             // Finalize state
+-            self.last_damage_taken.store(amount);
++            // Keep the full post-reduction amount in the same domain used by the
++            // next cooldown comparison. Vanilla stores `damage`, not the incremental
++            // difference applied for this hit.
++            self.last_damage_taken.store(effective_amount);
+             let damage_amount = damage_amount.max(0.0);
+ 
+             let config = &world.server.upgrade().unwrap().advanced_config.pvp;
+-- 
+2.55.0
+

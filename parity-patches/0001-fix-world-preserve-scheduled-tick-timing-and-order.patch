@@ -1,0 +1,407 @@
+From f5bc7f4ef651bdc19956715b0141192a89aee931 Mon Sep 17 00:00:00 2001
+From: "Eshan I." <79593316+eshankiyer@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 13:03:14 -0400
+Subject: [PATCH] fix(world): preserve scheduled tick timing and order
+
+---
+ pumpkin-world/src/chunk/format/mod.rs |  12 +-
+ pumpkin-world/src/level.rs            |   4 +-
+ pumpkin-world/src/tick/mod.rs         |  13 +-
+ pumpkin-world/src/tick/scheduler.rs   | 214 ++++++++++++++++++--------
+ 4 files changed, 168 insertions(+), 75 deletions(-)
+
+diff --git a/pumpkin-world/src/chunk/format/mod.rs b/pumpkin-world/src/chunk/format/mod.rs
+index 724e5e5..e6265fe 100644
+--- a/pumpkin-world/src/chunk/format/mod.rs
++++ b/pumpkin-world/src/chunk/format/mod.rs
+@@ -139,7 +139,7 @@ where
+     let x = nbt.get_int("x")?;
+     let y = nbt.get_int("y")?;
+     let z = nbt.get_int("z")?;
+-    let delay = nbt.get_int("t")? as u8;
++    let delay = i64::from(nbt.get_int("t")?);
+     let priority = TickPriority::try_from(nbt.get_int("p")?).ok()?;
+     let res_loc_str = nbt.get_string("i")?;
+     let res_loc = ResourceLocation::from_str(res_loc_str).ok()?;
+@@ -520,7 +520,10 @@ impl ChunkData {
+             tick_comp.put_int("x", tick.position.0.x);
+             tick_comp.put_int("y", tick.position.0.y);
+             tick_comp.put_int("z", tick.position.0.z);
+-            tick_comp.put_int("t", tick.delay as i32);
++            tick_comp.put_int(
++                "t",
++                i32::try_from(tick.delay).expect("scheduled tick delay must fit vanilla's NBT int"),
++            );
+             tick_comp.put_int("p", tick.priority as i32);
+             tick_comp.put_string("i", tick.value.to_resource_location());
+             block_ticks_list.push(NbtTag::Compound(tick_comp));
+@@ -533,7 +536,10 @@ impl ChunkData {
+             tick_comp.put_int("x", tick.position.0.x);
+             tick_comp.put_int("y", tick.position.0.y);
+             tick_comp.put_int("z", tick.position.0.z);
+-            tick_comp.put_int("t", tick.delay as i32);
++            tick_comp.put_int(
++                "t",
++                i32::try_from(tick.delay).expect("scheduled tick delay must fit vanilla's NBT int"),
++            );
+             tick_comp.put_int("p", tick.priority as i32);
+             tick_comp.put_string("i", tick.value.to_resource_location());
+             fluid_ticks_list.push(NbtTag::Compound(tick_comp));
+diff --git a/pumpkin-world/src/level.rs b/pumpkin-world/src/level.rs
+index 760f6a6..08b9e45 100644
+--- a/pumpkin-world/src/level.rs
++++ b/pumpkin-world/src/level.rs
+@@ -918,7 +918,7 @@ impl Level {
+     ) {
+         let tick_order = self.schedule_tick_counts.fetch_add(1, Ordering::Relaxed);
+         let scheduled_tick = ScheduledTick {
+-            delay,
++            delay: i64::from(delay),
+             position: block_pos,
+             priority,
+             value: unsafe { &*std::ptr::from_ref::<Block>(block) },
+@@ -944,7 +944,7 @@ impl Level {
+     ) {
+         let tick_order = self.schedule_tick_counts.fetch_add(1, Ordering::Relaxed);
+         let scheduled_tick = ScheduledTick {
+-            delay,
++            delay: i64::from(delay),
+             position: block_pos,
+             priority,
+             value: unsafe { &*std::ptr::from_ref::<Fluid>(fluid) },
+diff --git a/pumpkin-world/src/tick/mod.rs b/pumpkin-world/src/tick/mod.rs
+index 8b545ca..588cb57 100644
+--- a/pumpkin-world/src/tick/mod.rs
++++ b/pumpkin-world/src/tick/mod.rs
+@@ -10,8 +10,6 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
+ 
+ pub mod scheduler;
+ 
+-const MAX_TICK_DELAY: usize = 1 << 8;
+-
+ #[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd)]
+ #[repr(i32)]
+ pub enum TickPriority {
+@@ -60,7 +58,9 @@ impl TryFrom<i32> for TickPriority {
+ 
+ #[derive(Clone)]
+ pub struct ScheduledTick<T> {
+-    pub delay: u8,
++    /// Ticks remaining until this entry runs. Vanilla stores this as a signed `int` in chunk NBT
++    /// and expands it into a long absolute trigger time while the chunk is loaded.
++    pub delay: i64,
+     pub priority: TickPriority,
+     pub position: BlockPos,
+     pub value: T,
+@@ -120,7 +120,10 @@ where
+         nbt.put_int("x", self.position.0.x);
+         nbt.put_int("y", self.position.0.y);
+         nbt.put_int("z", self.position.0.z);
+-        nbt.put_int("t", self.delay as i32);
++        nbt.put_int(
++            "t",
++            i32::try_from(self.delay).expect("scheduled tick delay must fit vanilla's NBT int"),
++        );
+         nbt.put_int("p", self.priority as i32);
+         nbt.put_string("i", self.value.to_resource_location());
+         nbt.serialize(serializer)
+@@ -147,7 +150,7 @@ where
+         let y = get_int("y")?;
+         let z = get_int("z")?;
+ 
+-        let delay = get_int("t")? as u8;
++        let delay = i64::from(get_int("t")?);
+ 
+         let priority = TickPriority::try_from(get_int("p")?)
+             .map_err(|_| D::Error::custom("Invalid tick priority"))?;
+diff --git a/pumpkin-world/src/tick/scheduler.rs b/pumpkin-world/src/tick/scheduler.rs
+index 69c85ae..a4fbc3e 100644
+--- a/pumpkin-world/src/tick/scheduler.rs
++++ b/pumpkin-world/src/tick/scheduler.rs
+@@ -1,29 +1,36 @@
+-use std::sync::{
+-    Mutex,
+-    atomic::{AtomicUsize, Ordering},
++use std::{
++    collections::BTreeMap,
++    sync::{
++        Mutex,
++        atomic::{AtomicI64, Ordering},
++    },
+ };
+ 
+ use pumpkin_util::math::position::BlockPos;
+ use rustc_hash::FxHashSet;
+ 
+-use crate::tick::{MAX_TICK_DELAY, OrderedTick, ScheduledTick};
++use crate::tick::{OrderedTick, ScheduledTick, TickPriority};
+ 
++/// Per-chunk scheduled-tick queue.
++///
++/// Entries are keyed by their absolute trigger tick instead of a fixed-size timing wheel. This
++/// mirrors vanilla's long trigger time and prevents chunk NBT delays greater than 255 from
++/// wrapping into an earlier slot.
+ pub struct ChunkTickScheduler<T> {
+     inner: Mutex<Option<Box<ChunkTickSchedulerInner<T>>>>,
+-    offset: AtomicUsize,
++    current_tick: AtomicI64,
+ }
+ 
+ struct ChunkTickSchedulerInner<T> {
+-    tick_queue: [Vec<OrderedTick<T>>; MAX_TICK_DELAY],
++    tick_queue: BTreeMap<(i64, TickPriority, u64), OrderedTick<T>>,
+     queued_ticks: FxHashSet<(BlockPos, T)>,
+ }
+ 
+ impl<'a, T: std::hash::Hash + Eq> ChunkTickScheduler<&'a T> {
++    /// Advances this chunk's scheduler and returns every tick due at this world tick in vanilla
++    /// priority/sub-tick order.
+     pub fn step_tick(&self) -> Vec<OrderedTick<&'a T>> {
+-        // Atomic update for the offset
+-        let current_offset = self.offset.fetch_add(1, Ordering::SeqCst) % MAX_TICK_DELAY;
+-        let next_offset = (current_offset + 1) % MAX_TICK_DELAY;
+-        self.offset.store(next_offset, Ordering::SeqCst);
++        let current_tick = self.current_tick.fetch_add(1, Ordering::SeqCst) + 1;
+ 
+         let mut inner_guard = self
+             .inner
+@@ -33,19 +40,22 @@ impl<'a, T: std::hash::Hash + Eq> ChunkTickScheduler<&'a T> {
+             return Vec::new();
+         };
+ 
+-        let res = std::mem::take(&mut inner.tick_queue[current_offset]);
+-
+-        if !res.is_empty() {
+-            for next_tick in &res {
+-                inner
+-                    .queued_ticks
+-                    .remove(&(next_tick.position, next_tick.value));
+-            }
+-            if inner.queued_ticks.is_empty() {
+-                *inner_guard = None;
+-            }
++        let future_ticks = inner.tick_queue.split_off(&(
++            current_tick.saturating_add(1),
++            TickPriority::ExtremelyHigh,
++            0,
++        ));
++        let due_ticks = std::mem::replace(&mut inner.tick_queue, future_ticks);
++        let due_ticks: Vec<_> = due_ticks.into_values().collect();
++
++        for tick in &due_ticks {
++            inner.queued_ticks.remove(&(tick.position, tick.value));
++        }
++        if inner.queued_ticks.is_empty() {
++            *inner_guard = None;
+         }
+-        res
++
++        due_ticks
+     }
+ 
+     pub fn schedule_tick(&self, tick: &ScheduledTick<&'a T>, sub_tick_order: u64) {
+@@ -55,21 +65,25 @@ impl<'a, T: std::hash::Hash + Eq> ChunkTickScheduler<&'a T> {
+             .unwrap_or_else(std::sync::PoisonError::into_inner);
+         let inner = inner_guard.get_or_insert_with(|| {
+             Box::new(ChunkTickSchedulerInner {
+-                tick_queue: std::array::from_fn(|_| Vec::new()),
++                tick_queue: BTreeMap::new(),
+                 queued_ticks: FxHashSet::default(),
+             })
+         });
+ 
+         if inner.queued_ticks.insert((tick.position, tick.value)) {
+-            let offset = self.offset.load(Ordering::SeqCst);
+-            let index = (offset + tick.delay as usize) % MAX_TICK_DELAY;
+-
+-            inner.tick_queue[index].push(OrderedTick {
+-                priority: tick.priority,
+-                sub_tick_order,
+-                position: tick.position,
+-                value: tick.value,
+-            });
++            let trigger_tick = self
++                .current_tick
++                .load(Ordering::SeqCst)
++                .saturating_add(tick.delay);
++            inner.tick_queue.insert(
++                (trigger_tick, tick.priority, sub_tick_order),
++                OrderedTick {
++                    priority: tick.priority,
++                    sub_tick_order,
++                    position: tick.position,
++                    value: tick.value,
++                },
++            );
+         }
+     }
+ 
+@@ -89,9 +103,11 @@ impl<'a, T: std::hash::Hash + Eq> ChunkTickScheduler<&'a T> {
+             .is_some_and(|inner| !inner.queued_ticks.is_empty())
+     }
+ 
++    /// Produces the saved-tick form in sub-tick order, matching vanilla's
++    /// `LevelChunkTicks.pack`. Loading the NBT list reconstructs that same order.
+     #[must_use]
+     pub fn to_vec(&self) -> Vec<ScheduledTick<&'a T>> {
+-        let offset = self.offset.load(Ordering::SeqCst);
++        let current_tick = self.current_tick.load(Ordering::SeqCst);
+         let inner_guard = self
+             .inner
+             .lock()
+@@ -100,18 +116,23 @@ impl<'a, T: std::hash::Hash + Eq> ChunkTickScheduler<&'a T> {
+             return Vec::new();
+         };
+ 
+-        let mut res = Vec::new();
+-
+-        for i in 0..MAX_TICK_DELAY {
+-            let index = (offset + i) % MAX_TICK_DELAY;
+-            res.extend(inner.tick_queue[index].iter().map(|x| ScheduledTick {
+-                delay: i as u8,
+-                priority: x.priority,
+-                position: x.position,
+-                value: x.value,
+-            }));
+-        }
+-        res
++        let mut ticks: Vec<_> = inner
++            .tick_queue
++            .iter()
++            .map(|((trigger_tick, priority, sub_tick_order), tick)| {
++                (
++                    *sub_tick_order,
++                    ScheduledTick {
++                        delay: trigger_tick.saturating_sub(current_tick),
++                        priority: *priority,
++                        position: tick.position,
++                        value: tick.value,
++                    },
++                )
++            })
++            .collect();
++        ticks.sort_unstable_by_key(|(sub_tick_order, _)| *sub_tick_order);
++        ticks.into_iter().map(|(_, tick)| tick).collect()
+     }
+ }
+ 
+@@ -120,25 +141,11 @@ impl<'a, T: std::hash::Hash + Eq + 'static> FromIterator<ScheduledTick<&'a T>>
+ {
+     fn from_iter<I: IntoIterator<Item = ScheduledTick<&'a T>>>(iter: I) -> Self {
+         let scheduler = Self::default();
+-        let iter = iter.into_iter();
+-
+-        let (lower, _) = iter.size_hint();
+-        if lower > 0 {
+-            let mut inner_guard = scheduler
+-                .inner
+-                .lock()
+-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+-            let inner = inner_guard.get_or_insert_with(|| {
+-                Box::new(ChunkTickSchedulerInner {
+-                    tick_queue: std::array::from_fn(|_| Vec::new()),
+-                    queued_ticks: FxHashSet::default(),
+-                })
+-            });
+-            inner.queued_ticks.reserve(lower);
+-        }
+-
+-        for tick in iter {
+-            scheduler.schedule_tick(&tick, 0);
++        for (sub_tick_order, tick) in iter.into_iter().enumerate() {
++            scheduler.schedule_tick(
++                &tick,
++                u64::try_from(sub_tick_order).expect("iterator index must fit into u64"),
++            );
+         }
+         scheduler
+     }
+@@ -148,7 +155,84 @@ impl<T> Default for ChunkTickScheduler<T> {
+     fn default() -> Self {
+         Self {
+             inner: Mutex::new(None),
+-            offset: AtomicUsize::new(0),
++            current_tick: AtomicI64::new(0),
++        }
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use pumpkin_data::Block;
++    use pumpkin_util::math::position::BlockPos;
++
++    use super::ChunkTickScheduler;
++    use crate::tick::{ScheduledTick, TickPriority};
++
++    #[test]
++    fn delay_larger_than_timing_wheel_does_not_run_early() {
++        let scheduler = ChunkTickScheduler::default();
++        let tick = ScheduledTick {
++            delay: 300,
++            priority: TickPriority::Normal,
++            position: BlockPos::new(0, 0, 0),
++            value: &Block::STONE,
++        };
++        scheduler.schedule_tick(&tick, 0);
++
++        for _ in 0..299 {
++            assert!(scheduler.step_tick().is_empty());
++        }
++        assert_eq!(scheduler.step_tick().len(), 1);
++    }
++
++    #[test]
++    fn loaded_tick_list_order_is_preserved_for_equal_priority() {
++        let ticks = [
++            ScheduledTick {
++                delay: 1,
++                priority: TickPriority::Normal,
++                position: BlockPos::new(2, 0, 0),
++                value: &Block::STONE,
++            },
++            ScheduledTick {
++                delay: 1,
++                priority: TickPriority::Normal,
++                position: BlockPos::new(1, 0, 0),
++                value: &Block::DIRT,
++            },
++        ];
++        let scheduler = ticks.into_iter().collect::<ChunkTickScheduler<_>>();
++
++        let due = scheduler.step_tick();
++        assert_eq!(due.len(), 2);
++        assert_eq!(due[0].position, BlockPos::new(2, 0, 0));
++        assert_eq!(due[1].position, BlockPos::new(1, 0, 0));
++    }
++
++    #[test]
++    fn saved_ticks_retain_long_delay_and_sub_tick_order() {
++        let scheduler = ChunkTickScheduler::default();
++        for (sub_tick_order, position) in [BlockPos::new(1, 0, 0), BlockPos::new(2, 0, 0)]
++            .into_iter()
++            .enumerate()
++        {
++            scheduler.schedule_tick(
++                &ScheduledTick {
++                    delay: 300,
++                    priority: TickPriority::Normal,
++                    position,
++                    value: &Block::STONE,
++                },
++                u64::try_from(sub_tick_order).expect("test index must fit into u64"),
++            );
+         }
++
++        let saved = scheduler.to_vec();
++        assert_eq!(
++            saved.iter().map(|tick| tick.delay).collect::<Vec<_>>(),
++            [300, 300]
++        );
++        assert_eq!(saved[0].position, BlockPos::new(1, 0, 0));
++        assert_eq!(saved[1].position, BlockPos::new(2, 0, 0));
+     }
+ }
+-- 
+2.55.0
+

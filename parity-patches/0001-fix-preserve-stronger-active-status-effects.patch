@@ -1,0 +1,90 @@
+From dd9648d6f4c884b782401b2e38fcc2d5720907b8 Mon Sep 17 00:00:00 2001
+From: "Eshan I." <79593316+eshankiyer@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 11:38:28 -0400
+Subject: [PATCH] fix: preserve stronger active status effects
+
+---
+ pumpkin/src/entity/living.rs | 53 ++++++++++++++++++++++++++++++++----
+ 1 file changed, 48 insertions(+), 5 deletions(-)
+
+diff --git a/pumpkin/src/entity/living.rs b/pumpkin/src/entity/living.rs
+index 6f56270..f7ac73f 100644
+--- a/pumpkin/src/entity/living.rs
++++ b/pumpkin/src/entity/living.rs
+@@ -479,11 +479,20 @@ impl LivingEntity {
+                     .await;
+             }
+         } else {
+-            // Apply non-instant effects
+-            self.active_effects
+-                .lock()
+-                .await
+-                .insert(effect.effect_type, effect.clone());
++            let did_apply = {
++                let mut active_effects = self.active_effects.lock().await;
++                let should_replace = active_effects
++                    .get(effect.effect_type)
++                    .is_none_or(|current| should_replace_effect(current, &effect));
++                if should_replace {
++                    active_effects.insert(effect.effect_type, effect.clone());
++                }
++                should_replace
++            };
++
++            if !did_apply {
++                return;
++            }
+ 
+             // Effects that modify attributes (ex. speed) should also update the
+             // entity's attribute instances (server-side) and then notify clients.
+@@ -2801,6 +2810,11 @@ impl EntityBase for LivingEntity {
+     }
+ }
+ 
++fn should_replace_effect(current: &Effect, candidate: &Effect) -> bool {
++    candidate.amplifier > current.amplifier
++        || (candidate.amplifier == current.amplifier && candidate.duration > current.duration)
++}
++
+ /// Returns `true` if `damage_type` is in `#minecraft:bypasses_armor` (1.21.11).
+ /// These sources bypass armor entirely (fall, drown, freeze, etc.).
+ pub(crate) const fn bypasses_armor_durability(damage_type: &DamageType) -> bool {
+@@ -2856,6 +2870,35 @@ pub(crate) const fn bypasses_armor_durability(damage_type: &DamageType) -> bool
+ mod tests {
+     use super::*;
+ 
++    fn effect(amplifier: u8, duration: i32) -> Effect {
++        Effect {
++            effect_type: &StatusEffect::SPEED,
++            duration,
++            amplifier,
++            ambient: false,
++            show_particles: true,
++            show_icon: true,
++            blend: false,
++        }
++    }
++
++    #[test]
++    fn stronger_effect_replaces_weaker_effect_even_when_shorter() {
++        assert!(should_replace_effect(&effect(0, 1_200), &effect(1, 100)));
++    }
++
++    #[test]
++    fn longer_effect_replaces_effect_with_same_amplifier() {
++        assert!(should_replace_effect(&effect(1, 100), &effect(1, 101)));
++    }
++
++    #[test]
++    fn weaker_or_shorter_effect_does_not_replace_active_effect() {
++        assert!(!should_replace_effect(&effect(1, 100), &effect(0, 1_200)));
++        assert!(!should_replace_effect(&effect(1, 100), &effect(1, 99)));
++        assert!(!should_replace_effect(&effect(1, 100), &effect(1, 100)));
++    }
++
+     // ── bypasses_armor_durability ─────────────────────────────────────
+ 
+     /// Every member of `minecraft:bypasses_armor` (1.21.11) must return `true`.
+-- 
+2.55.0
+

@@ -1,0 +1,48 @@
+From f5c3caeaa7f26bdb06eb3a1b8f76c137722e36b3 Mon Sep 17 00:00:00 2001
+From: "Eshan I." <79593316+eshankiyer@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 13:48:18 -0400
+Subject: [PATCH] fix(combat): include melee source positions
+
+---
+ pumpkin/src/entity/mob/mod.rs | 2 +-
+ pumpkin/src/entity/player.rs  | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/pumpkin/src/entity/mob/mod.rs b/pumpkin/src/entity/mob/mod.rs
+index f04dcfa..7374e5f 100644
+--- a/pumpkin/src/entity/mob/mod.rs
++++ b/pumpkin/src/entity/mob/mod.rs
+@@ -270,7 +270,7 @@ impl MobEntity {
+                 target,
+                 attack_damage,
+                 DamageType::MOB_ATTACK,
+-                None,
++                Some(caller.get_entity().pos.load()),
+                 Some(caller),
+                 Some(caller),
+             )
+diff --git a/pumpkin/src/entity/player.rs b/pumpkin/src/entity/player.rs
+index 32a83b4..a88ba98 100644
+--- a/pumpkin/src/entity/player.rs
++++ b/pumpkin/src/entity/player.rs
+@@ -1046,7 +1046,7 @@ impl Player {
+                 } else {
+                     DamageType::PLAYER_ATTACK
+                 },
+-                None,
++                Some(self.living_entity.entity.pos.load()),
+                 Some(self),
+                 Some(self),
+             )
+@@ -1139,7 +1139,7 @@ impl Player {
+                                     other_victim.as_ref(),
+                                     sweep_damage,
+                                     DamageType::PLAYER_ATTACK,
+-                                    None,
++                                    Some(self.living_entity.entity.pos.load()),
+                                     Some(self),
+                                     Some(self),
+                                 )
+-- 
+2.55.0
+

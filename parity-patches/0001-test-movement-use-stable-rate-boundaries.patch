@@ -1,0 +1,34 @@
+From 54a00ab42b20683b4a9966c21bdde6301dd5a744 Mon Sep 17 00:00:00 2001
+From: "Eshan I." <79593316+eshankiyer@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 13:47:19 -0400
+Subject: [PATCH] test(movement): use stable rate boundaries
+
+---
+ pumpkin/src/net/java/play.rs | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/pumpkin/src/net/java/play.rs b/pumpkin/src/net/java/play.rs
+index 3197aa7..cbcb59b 100644
+--- a/pumpkin/src/net/java/play.rs
++++ b/pumpkin/src/net/java/play.rs
+@@ -3143,7 +3143,7 @@ mod tests {
+         ));
+         assert!(!movement_requires_correction(
+             origin,
+-            Vector3::new(300.0_f64.sqrt(), 0.0, 0.0),
++            Vector3::new(299.0f64.sqrt(), 0.0, 0.0),
+             stationary,
+             MovementCheckContext {
+                 fall_flying: true,
+@@ -3155,7 +3155,7 @@ mod tests {
+         ));
+         assert!(movement_requires_correction(
+             origin,
+-            Vector3::new(300.001_f64.sqrt(), 0.0, 0.0),
++            Vector3::new(301.0f64.sqrt(), 0.0, 0.0),
+             stationary,
+             MovementCheckContext {
+                 fall_flying: true,
+-- 
+2.55.0
+

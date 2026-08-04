@@ -1,0 +1,61 @@
+From c59bc5794d69bbc73d4c3a376f05c761bfe2d6ae Mon Sep 17 00:00:00 2001
+From: "Eshan I." <79593316+eshankiyer@users.noreply.github.com>
+Date: Fri, 31 Jul 2026 13:44:05 -0400
+Subject: [PATCH] fix(item): consume placed firework rockets
+
+---
+ pumpkin/src/item/items/firework_rocket.rs | 20 +++++++++++++++++++-
+ 1 file changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/pumpkin/src/item/items/firework_rocket.rs b/pumpkin/src/item/items/firework_rocket.rs
+index e8f88ff..9ce49b0 100644
+--- a/pumpkin/src/item/items/firework_rocket.rs
++++ b/pumpkin/src/item/items/firework_rocket.rs
+@@ -16,6 +16,10 @@ use pumpkin_util::math::vector3::Vector3;
+ 
+ pub struct FireworkRocketItem;
+ 
++const fn should_consume_rocket(is_creative: bool) -> bool {
++    !is_creative
++}
++
+ impl ItemMetadata for FireworkRocketItem {
+     fn ids() -> Box<[u16]> {
+         [Item::FIREWORK_ROCKET.id].into()
+@@ -25,7 +29,7 @@ impl ItemMetadata for FireworkRocketItem {
+ impl ItemBehaviour for FireworkRocketItem {
+     fn use_on_block<'a>(
+         &'a self,
+-        _item: &'a mut ItemStack,
++        item: &'a mut ItemStack,
+         player: &'a Player,
+         location: BlockPos,
+         _face: BlockDirection,
+@@ -46,6 +50,9 @@ impl ItemBehaviour for FireworkRocketItem {
+             );
+             let entity = FireworkRocketEntity::new(entity);
+             world.spawn_entity(Arc::new(entity)).await;
++            if should_consume_rocket(player.is_creative()) {
++                item.decrement(1);
++            }
+         })
+     }
+ 
+@@ -72,3 +79,14 @@ impl ItemBehaviour for FireworkRocketItem {
+         self
+     }
+ }
++
++#[cfg(test)]
++mod tests {
++    use super::should_consume_rocket;
++
++    #[test]
++    fn rockets_are_consumed_outside_creative() {
++        assert!(should_consume_rocket(false));
++        assert!(!should_consume_rocket(true));
++    }
++}
+-- 
+2.55.0
+
