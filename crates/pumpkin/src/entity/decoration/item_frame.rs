@@ -106,6 +106,23 @@ impl ItemFrameEntity {
             .unwrap_or(Self::DEFAULT_FACING)
     }
 
+    /// `HangingEntity.setDirection` (`HangingEntity.java:56-67`), used when a frame is
+    /// freshly placed. Only horizontal directions are valid; the caller (the placement
+    /// item) already rejects `Up`/`Down` clicks before constructing the entity.
+    pub fn set_facing(&self, facing: BlockDirection) {
+        let index = facing.to_index();
+        self.facing.store(index, Ordering::Relaxed);
+        self.entity.data.store(i32::from(index), Ordering::Relaxed);
+        // Direction.get2DDataValue() * 90 (Direction.java:33-37: SOUTH=0, WEST=1, NORTH=2, EAST=3).
+        let yaw = match facing {
+            BlockDirection::West => 90.0,
+            BlockDirection::North => 180.0,
+            BlockDirection::East => 270.0,
+            _ => 0.0,
+        };
+        self.entity.set_rotation(yaw, 0.0);
+    }
+
     /// `GlowItemFrame` overrides every sound and the dropped frame item.
     fn is_glow(&self) -> bool {
         self.entity.entity_type == &EntityType::GLOW_ITEM_FRAME
@@ -178,7 +195,7 @@ impl ItemFrameEntity {
 
     /// Vanilla `ItemFrame.survives`. The collision and `canCoexist` checks are
     /// not modelled; only the support block is tested.
-    fn survives(&self) -> bool {
+    pub(crate) fn survives(&self) -> bool {
         if self.fixed.load(Ordering::Relaxed) {
             return true;
         }
