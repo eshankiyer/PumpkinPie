@@ -158,3 +158,6 @@ patchbukkit/
 # Mechanically transliterated vanilla skeletons (tools/transpile_vanilla.py).
 # Local scaffold only: Mojang proprietary structure, does not compile, never committed.
 reference/transpiled
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/
