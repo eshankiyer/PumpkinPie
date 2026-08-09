@@ -116,7 +116,7 @@ impl EntityBase for LingeringPotionEntity {
             extinguish_fire_if_water_potion(&world, hit_pos, &stack).await;
 
             // Play impact particles
-            world.send_entity_status(self.get_entity(), EntityStatus::Death);
+            world.send_entity_status(self.get_entity(), EntityStatus::Death, None);
 
             // Read stored item stack and compute potion effects
             let stack = self.item_stack.read().await.clone();

@@ -181,7 +181,7 @@ impl EntityBase for EnderPearlEntity {
                     .await;
             }
 
-            world.send_entity_status(entity, EntityStatus::Death);
+            world.send_entity_status(entity, EntityStatus::Death, None);
         })
     }
 }

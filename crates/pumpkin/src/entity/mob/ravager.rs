@@ -202,7 +202,7 @@ impl RavagerEntity {
             }
         }
 
-        world.send_entity_status(entity, EntityStatus::RavagerRoared);
+        world.send_entity_status(entity, EntityStatus::RavagerRoared, None);
     }
 }
 
@@ -307,7 +307,7 @@ impl Mob for RavagerEntity {
             self.attack_tick.store(10, Relaxed);
             let entity = &self.mob_entity.living_entity.entity;
             let world = entity.world.load();
-            world.send_entity_status(entity, EntityStatus::StartAttacking);
+            world.send_entity_status(entity, EntityStatus::StartAttacking, None);
             world.play_sound(
                 Sound::EntityRavagerAttack,
                 SoundCategory::Hostile,
@@ -339,7 +339,7 @@ impl Mob for RavagerEntity {
                 entity
                     .world
                     .load()
-                    .send_entity_status(entity, EntityStatus::RavagerStunned);
+                    .send_entity_status(entity, EntityStatus::RavagerStunned, None);
                 // Scope reduction: vanilla's `defender.push(this)` is a generic physics
                 // separation push (not a knockback formula); not replicated here.
             } else {

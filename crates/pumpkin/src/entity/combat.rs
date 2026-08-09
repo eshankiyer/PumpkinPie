@@ -15,6 +15,8 @@ use crate::{
     world::World,
 };
 
+use crate::net::ClientPlatform;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AttackType {
     Knockback,
@@ -82,6 +84,7 @@ impl AttackType {
         }
 
         let sword = held_item.is_sword();
+        let is_bedrock = matches!(player.client.as_ref(), ClientPlatform::Bedrock(_));
 
         let in_water = player.living_entity.is_in_water();
         let mobility_restricted = player
@@ -123,7 +126,8 @@ impl AttackType {
             on_ground,
             movement.horizontal_length_squared(),
             movement_speed,
-        ) {
+        ) && !is_bedrock
+        {
             return Self::Sweeping;
         }
 

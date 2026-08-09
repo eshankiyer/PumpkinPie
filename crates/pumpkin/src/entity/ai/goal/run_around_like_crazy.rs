@@ -140,7 +140,7 @@ impl<T: AbstractHorse + Mob + ?Sized + Send + Sync + 'static> Goal for RunAround
 
             horse.make_mad();
             let world = entity.world.load();
-            world.send_entity_status(entity, EntityStatus::TamingFailed);
+            world.send_entity_status(entity, EntityStatus::TamingFailed, None);
         })
     }
 

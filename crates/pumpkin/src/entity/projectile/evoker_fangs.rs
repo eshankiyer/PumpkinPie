@@ -106,10 +106,11 @@ impl EntityBase for EvokerFangsEntity {
                 }
 
                 if !self.sent_spike_event.swap(true, Relaxed) {
-                    self.entity
-                        .world
-                        .load()
-                        .send_entity_status(&self.entity, EntityStatus::StartAttacking);
+                    self.entity.world.load().send_entity_status(
+                        &self.entity,
+                        EntityStatus::StartAttacking,
+                        None,
+                    );
                 }
 
                 if self.life_ticks.fetch_sub(1, Relaxed) - 1 < 0 {

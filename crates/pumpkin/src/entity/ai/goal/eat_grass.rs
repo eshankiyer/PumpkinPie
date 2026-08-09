@@ -117,7 +117,7 @@ impl Goal for EatGrassGoal {
             // client-side head-eating animation (Sheep.handleEntityEvent / getHeadEatAngleScale).
             let entity = &mob.get_mob_entity().living_entity.entity;
             let world = entity.world.load();
-            world.send_entity_status(entity, pumpkin_data::entity::EntityStatus::EatGrass);
+            world.send_entity_status(entity, pumpkin_data::entity::EntityStatus::EatGrass, None);
             let mut navigator = mob
                 .get_mob_entity()
                 .navigator

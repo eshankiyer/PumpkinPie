@@ -79,7 +79,7 @@ impl EntityBase for LlamaSpitEntity {
     fn on_hit(&self, hit: ProjectileHit) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             let world = self.get_entity().world.load();
-            world.send_entity_status(self.get_entity(), EntityStatus::Death);
+            world.send_entity_status(self.get_entity(), EntityStatus::Death, None);
 
             if let ProjectileHit::Entity { ref entity, .. } = hit {
                 let entity_clone = entity.clone();

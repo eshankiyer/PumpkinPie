@@ -81,6 +81,7 @@ impl Goal for SilverfishWakeUpFriendsGoal {
                                 world.send_entity_status(
                                     new_entity.get_entity(),
                                     pumpkin_data::entity::EntityStatus::SilverfishMergeAnim,
+                                    None,
                                 );
                             }
                         } else {

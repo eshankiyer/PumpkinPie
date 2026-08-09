@@ -189,7 +189,7 @@ impl Mob for IronGolemEntity {
 
             let entity = &living.entity;
             let world = entity.world.load();
-            world.send_entity_status(entity, EntityStatus::StartAttacking);
+            world.send_entity_status(entity, EntityStatus::StartAttacking, None);
 
             let base_attack_damage = living.get_attribute_value(&Attributes::ATTACK_DAMAGE) as f32;
             let rand_int = if base_attack_damage as i32 > 0 {

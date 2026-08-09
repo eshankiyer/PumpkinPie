@@ -100,10 +100,11 @@ impl ZombieVillagerEntity {
             })
             .await;
 
-        self.get_entity()
-            .world
-            .load()
-            .send_entity_status(self.get_entity(), EntityStatus::ZombieConverting);
+        self.get_entity().world.load().send_entity_status(
+            self.get_entity(),
+            EntityStatus::ZombieConverting,
+            None,
+        );
     }
 
     /// ZombieVillager.java:279-302 (`getConversionProgress`): base decrement of 1 per

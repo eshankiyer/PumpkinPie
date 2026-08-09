@@ -435,7 +435,23 @@ impl LivingEntity {
             && item.get_data_component::<BlocksAttacksImpl>().is_some()
         {
             let use_time = self.item_use_time.load(Ordering::Relaxed);
-            return item.get_max_use_time() - use_time >= 5;
+            let required_time = if let Some(dyn_self) = self
+                .entity
+                .world
+                .load()
+                .get_entity_by_id(self.entity.entity_id)
+                && let Some(player) = dyn_self
+                    .cast_any()
+                    .downcast_ref::<crate::entity::player::Player>()
+                && matches!(
+                    player.client.as_ref(),
+                    crate::net::ClientPlatform::Bedrock(_)
+                ) {
+                0
+            } else {
+                5
+            };
+            return item.get_max_use_time() - use_time >= required_time;
         }
         false
     }
@@ -1659,7 +1675,11 @@ impl LivingEntity {
             }
 
             // Plays the death sound
-            world.send_entity_status(&self.entity, EntityStatus::Death);
+            world.send_entity_status(
+                &self.entity,
+                EntityStatus::Death,
+                Some(ActorEventType::Death),
+            );
             let looting_level;
             let tool = if let Some(cause_ent) = cause {
                 if let Some(player) = cause_ent
@@ -2117,10 +2137,11 @@ impl LivingEntity {
                         .insert(slot, stack);
                 }
                 self.set_health(1.0);
-                self.entity
-                    .world
-                    .load()
-                    .send_entity_status(&self.entity, EntityStatus::ProtectedFromDeath);
+                self.entity.world.load().send_entity_status(
+                    &self.entity,
+                    EntityStatus::ProtectedFromDeath,
+                    Some(ActorEventType::TalismanActivate),
+                );
 
                 self.remove_all_effects().await;
 
@@ -2210,8 +2231,11 @@ impl LivingEntity {
                 if slot_result != pumpkin_data::item_stack::DamageResult::Untouched {
                     if slot_result == pumpkin_data::item_stack::DamageResult::Broken {
                         let world = self.entity.world.load();
-                        world
-                            .send_entity_status(&self.entity, super::equipment_break_status(&slot));
+                        world.send_entity_status(
+                            &self.entity,
+                            super::equipment_break_status(&slot),
+                            None,
+                        );
                     }
                     equipment_updates.push((slot.clone(), stack.clone()));
                     if let Some(player) = caller.get_player() {
@@ -2568,7 +2592,7 @@ impl LivingEntity {
                 if air <= -20 {
                     self.air_supply.store(0, Relaxed);
                     self.send_air_supply();
-                    world.send_entity_status(&self.entity, EntityStatus::DrownParticles);
+                    world.send_entity_status(&self.entity, EntityStatus::DrownParticles, None);
                     self.damage(caller.as_ref(), 2.0, DamageType::DROWN).await;
                 }
             } else if refill_air && self.air_supply.load(Relaxed) < max_air {
@@ -3129,6 +3153,7 @@ impl EntityBase for LivingEntity {
                                 world.send_entity_status(
                                     &self.entity,
                                     crate::entity::equipment_break_status(&slot),
+                                    None,
                                 );
                                 *stack = ItemStack::EMPTY.clone();
                                 let broken_stack = stack.clone();
@@ -3509,6 +3534,7 @@ impl EntityBase for LivingEntity {
                             world.send_entity_status(
                                 &self.entity,
                                 crate::entity::equipment_break_status(&slot),
+                                None,
                             );
                             stack = ItemStack::EMPTY.clone();
                             let broken_stack = stack.clone();
@@ -3877,10 +3903,11 @@ impl EntityBase for LivingEntity {
                     // Only send death particles once (on the exact tick death_time reaches 20)
                     // and then remove the entity, preventing entity_event spam.
                     if time == 20 && !self.entity.removed.swap(true, Ordering::Relaxed) {
-                        self.entity
-                            .world
-                            .load()
-                            .send_entity_status(&self.entity, EntityStatus::Death);
+                        self.entity.world.load().send_entity_status(
+                            &self.entity,
+                            EntityStatus::Death,
+                            Some(ActorEventType::Death),
+                        );
                         self.entity.remove().await;
                     }
                 }
@@ -4068,7 +4095,7 @@ impl LivingEntity {
         }
 
         if show_particles {
-            world.send_entity_status(&self.entity, EntityStatus::Teleport);
+            world.send_entity_status(&self.entity, EntityStatus::Teleport, None);
         }
 
         true

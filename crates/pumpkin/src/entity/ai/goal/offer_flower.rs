@@ -124,14 +124,14 @@ impl Goal for OfferFlowerGoal {
         Box::pin(async move {
             self.ticks_left.store(OFFER_TICKS, Ordering::Relaxed);
             let world = mob.get_entity().world.load();
-            world.send_entity_status(mob.get_entity(), EntityStatus::OfferFlower);
+            world.send_entity_status(mob.get_entity(), EntityStatus::OfferFlower, None);
         })
     }
 
     fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
             let world = mob.get_entity().world.load();
-            world.send_entity_status(mob.get_entity(), EntityStatus::StopOfferFlower);
+            world.send_entity_status(mob.get_entity(), EntityStatus::StopOfferFlower, None);
             *self.entity.lock().await = None;
         })
     }

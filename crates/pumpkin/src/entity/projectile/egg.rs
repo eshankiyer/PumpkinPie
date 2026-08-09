@@ -114,7 +114,7 @@ impl EntityBase for EggEntity {
             let spawn_pos = hit_pos.add(&normal.multiply(0.5, 0.5, 0.5));
 
             // Play egg break particles
-            world.send_entity_status(self.get_entity(), EntityStatus::Death);
+            world.send_entity_status(self.get_entity(), EntityStatus::Death, None);
 
             // Decide spawn count per probabilities:
             // r == 0 -> spawn 4 (1/256)

@@ -164,10 +164,11 @@ impl Goal for GuardianAttackGoal {
 
             if self.attack_time == 0 {
                 Self::set_active_attack_target(mob, target.get_entity().entity_id);
-                mob.get_entity()
-                    .world
-                    .load()
-                    .send_entity_status(mob.get_entity(), EntityStatus::GuardianAttackSound);
+                mob.get_entity().world.load().send_entity_status(
+                    mob.get_entity(),
+                    EntityStatus::GuardianAttackSound,
+                    None,
+                );
             } else if self.attack_time >= Self::attack_duration(elder) {
                 let world = mob.get_entity().world.load();
                 let damage = Self::magic_damage(world.level_info.load().difficulty, elder);

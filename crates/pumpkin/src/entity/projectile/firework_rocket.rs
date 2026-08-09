@@ -11,6 +11,7 @@ use pumpkin_data::{
     item_stack::ItemStack, meta_data_type::MetaDataType, sound::Sound, sound::SoundCategory,
     tracked_data::TrackedData,
 };
+use pumpkin_protocol::bedrock::server::actor_event::ActorEventType;
 use pumpkin_protocol::{
     codec::{item_stack_seralizer::ItemStackSerializer, optional_int::OptionalInt},
     java::client::play::Metadata,
@@ -154,7 +155,11 @@ impl FireworkRocketEntity {
 
     pub async fn explode_and_remove(&self, world: &Arc<World>) {
         let entity = self.get_entity();
-        world.send_entity_status(entity, EntityStatus::FireworksExplode);
+        world.send_entity_status(
+            entity,
+            EntityStatus::FireworksExplode,
+            Some(ActorEventType::FireworksExplode),
+        );
 
         let explosion_count = self
             .item_stack

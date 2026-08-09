@@ -816,10 +816,11 @@ pub trait Mob: EntityBase + Send + Sync {
                     let updated_stack = stack.clone();
                     living.entity_equipment.lock().await.put(&slot, stack);
                     if broken {
-                        entity
-                            .world
-                            .load()
-                            .send_entity_status(entity, equipment_break_status(&slot));
+                        entity.world.load().send_entity_status(
+                            entity,
+                            equipment_break_status(&slot),
+                            None,
+                        );
                     }
                     living.send_equipment_changes(&[(slot, updated_stack)]);
                 }

@@ -315,6 +315,7 @@ impl Mob for CreeperEntity {
                     crate::entity::equipment_break_status(
                         &pumpkin_data::data_component_impl::EquipmentSlot::MAIN_HAND,
                     ),
+                    None,
                 );
                 *item_stack = ItemStack::EMPTY.clone();
                 player

@@ -137,7 +137,7 @@ impl Goal for SilverfishMergeWithStoneGoal {
                 .set_block_state(&target_pos, new_state_id, BlockFlags::NOTIFY_ALL)
                 .await;
 
-            world.send_entity_status(entity, EntityStatus::SilverfishMergeAnim);
+            world.send_entity_status(entity, EntityStatus::SilverfishMergeAnim, None);
             entity.remove().await;
         })
     }

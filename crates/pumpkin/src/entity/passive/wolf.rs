@@ -230,13 +230,13 @@ impl WolfEntity {
         if was_wet && !self.is_shaking.load(Ordering::Relaxed) && !is_pathfinding && on_ground {
             self.is_shaking.store(true, Ordering::Relaxed);
             self.shake_anim.store(0f32.to_bits(), Ordering::Relaxed);
-            world.send_entity_status(entity, EntityStatus::ShakeWetness);
+            world.send_entity_status(entity, EntityStatus::ShakeWetness, None);
         }
 
         if touching_water {
             self.is_wet.store(true, Ordering::Relaxed);
             if self.is_shaking.load(Ordering::Relaxed) {
-                world.send_entity_status(entity, EntityStatus::CancelShakeWetness);
+                world.send_entity_status(entity, EntityStatus::CancelShakeWetness, None);
                 self.is_shaking.store(false, Ordering::Relaxed);
                 self.shake_anim.store(0f32.to_bits(), Ordering::Relaxed);
             }
