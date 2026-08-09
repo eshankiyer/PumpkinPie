@@ -96,8 +96,8 @@ impl LoadConfiguration for PumpkinConfig {
         // https://minecraft.wiki/w/Server.properties, https://minecraft.wiki/w/Simulation_distance
         // Out-of-range values are clamped rather than asserted so an existing config
         // doesn't turn into a startup panic now that simulation_distance is read.
-        let min_sd = NonZeroU8::new(3).unwrap();
-        let max_sd = NonZeroU8::new(32).unwrap();
+        let min_sd = NonZeroU8::new(3).unwrap_or(NonZeroU8::MIN);
+        let max_sd = NonZeroU8::new(32).unwrap_or(NonZeroU8::MIN);
 
         // Validate Java
         assert!(
