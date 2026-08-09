@@ -112,10 +112,13 @@ impl HoglinEntity {
                     10,
                     true,
                     false,
-                    Some(move |_target, _world| {
-                        let pacify_check = pacify_check.clone();
-                        async move { pacify_check.load(Relaxed) <= 0 }
-                    }),
+                    Some(
+                        move |_target: crate::entity::ai::target_predicate::TargetData,
+                              _world: Arc<World>| {
+                            let pacify_check = pacify_check.clone();
+                            async move { pacify_check.load(Relaxed) <= 0 }
+                        },
+                    ),
                 )),
             );
         };

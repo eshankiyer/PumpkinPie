@@ -1,8 +1,7 @@
 use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::ai::goal::GoalFuture;
 use crate::entity::ai::goal::track_target::TrackTargetGoal;
-use crate::entity::ai::target_predicate::TargetPredicate;
-use crate::entity::living::LivingEntity;
+use crate::entity::ai::target_predicate::{TargetData, TargetPredicate};
 use crate::entity::mob::Mob;
 use crate::entity::{EntityBase, mob::MobEntity};
 use crate::world::World;
@@ -33,7 +32,7 @@ impl ActiveTargetGoal {
         predicate: Option<F>,
     ) -> Self
     where
-        F: Fn(Arc<LivingEntity>, Arc<World>) -> Fut + Send + Sync + 'static,
+        F: Fn(TargetData, Arc<World>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = bool> + Send + 'static,
     {
         let track_target_goal = TrackTargetGoal::new(check_visibility, check_can_navigate);
@@ -117,18 +116,18 @@ impl ActiveTargetGoal {
             });
             let mut result = None;
             for player in candidates {
-                // Vanilla `TargetingConditions.test` (combat branch, `TargetingConditions.java:78`)
-                // consults `targeter.canAttack(target)` before the rest of the predicate.
-                if !TrackTargetGoal::is_allied(mob, player.as_ref()).await
+                // Vanilla evaluates the selector inside `TargetingConditions.test` before the
+                // targeter's combat checks, so run the predicate before those caller-side checks.
+                if self
+                    .target_predicate
+                    .test(
+                        &world,
+                        Some(&mob_entity.living_entity),
+                        &player.living_entity,
+                    )
+                    .await
+                    && !TrackTargetGoal::is_allied(mob, player.as_ref()).await
                     && mob.can_attack(player.get_entity())
-                    && self
-                        .target_predicate
-                        .test(
-                            &world,
-                            Some(&mob_entity.living_entity),
-                            &player.living_entity,
-                        )
-                        .await
                 {
                     result = Some(player as Arc<dyn EntityBase>);
                     break;
@@ -147,12 +146,12 @@ impl ActiveTargetGoal {
             let mut result = None;
             for entity in candidates {
                 if let Some(living) = entity.get_living_entity()
-                    && !TrackTargetGoal::is_allied(mob, entity.as_ref()).await
-                    && mob.can_attack(entity.get_entity())
                     && self
                         .target_predicate
                         .test(&world, Some(&mob_entity.living_entity), living)
                         .await
+                    && !TrackTargetGoal::is_allied(mob, entity.as_ref()).await
+                    && mob.can_attack(entity.get_entity())
                 {
                     result = Some(entity);
                     break;

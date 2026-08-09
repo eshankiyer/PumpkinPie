@@ -297,8 +297,9 @@ impl FoxEntity {
                 false,
                 false,
                 Some(
-                    |target: Arc<crate::entity::living::LivingEntity>, _world| async move {
-                        target.entity.age.load(Relaxed) < 0 && !target.is_in_water()
+                    |target: crate::entity::ai::target_predicate::TargetData,
+                     _world: Arc<World>| async move {
+                        target.age < 0 && !target.in_water
                     },
                 ),
             )),

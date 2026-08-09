@@ -13,7 +13,6 @@ use crate::entity::{
         non_tame_random_target::NonTameRandomTargetGoal, swim::SwimGoal,
         wander_around::WanderAroundGoal,
     },
-    living::LivingEntity,
     mob::{Mob, MobEntity},
     player::Player,
 };
@@ -39,8 +38,11 @@ const AXOLOTL_TARGET_TYPES: &[&EntityType] = &[
 /// The sensor's `HAS_HUNTING_COOLDOWN` gate (a 2400-tick cooldown on re-targeting hunt-tag prey
 /// after leaving the FIGHT activity) is not ported -- axolotls here are always willing to retarget
 /// prey, so they hunt slightly more eagerly than vanilla after a fight ends.
-async fn axolotl_attackable(target: Arc<LivingEntity>, _world: Arc<World>) -> bool {
-    target.entity.touching_water.load(Relaxed)
+async fn axolotl_attackable(
+    target: crate::entity::ai::target_predicate::TargetData,
+    _world: Arc<World>,
+) -> bool {
+    target.touching_water
 }
 
 /// Represents an Axolotl, a passive aquatic mob that can play dead to regenerate health.

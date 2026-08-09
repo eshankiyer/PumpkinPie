@@ -11,7 +11,6 @@ use crate::entity::ai::goal::drowned_go_to_water::DrownedGoToWaterGoal;
 use crate::entity::ai::goal::drowned_swim_up::DrownedSwimUpGoal;
 use crate::entity::ai::goal::drowned_util::is_bright_outside;
 use crate::entity::ai::goal::ranged_trident_attack::DrownedTridentAttackGoal;
-use crate::entity::living::LivingEntity;
 use crate::entity::mob::zombie::ZombieEntityBase;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage,
@@ -33,8 +32,11 @@ pub struct DrownedEntity {
 
 /// `Drowned#okTarget` (`Drowned.java:223-225`): a potential player target is only valid while
 /// it's not bright outside, or while the target itself is in water.
-async fn ok_target(target: Arc<LivingEntity>, world: Arc<World>) -> bool {
-    !is_bright_outside(&world) || target.entity.touching_water.load(Relaxed)
+async fn ok_target(
+    target: crate::entity::ai::target_predicate::TargetData,
+    world: Arc<World>,
+) -> bool {
+    !is_bright_outside(&world) || target.touching_water
 }
 
 impl DrownedEntity {

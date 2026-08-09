@@ -8,8 +8,7 @@ use rand::RngExt;
 
 use super::{Controls, Goal, GoalFuture, to_goal_ticks};
 use crate::entity::ai::goal::track_target::TrackTargetGoal;
-use crate::entity::ai::target_predicate::TargetPredicate;
-use crate::entity::living::LivingEntity;
+use crate::entity::ai::target_predicate::{TargetData, TargetPredicate};
 use crate::entity::mob::{Mob, MobEntity};
 use crate::entity::{EntityBase, player::Player};
 
@@ -20,14 +19,10 @@ pub(crate) const TURTLE_TYPES: &[&EntityType] = &[&EntityType::TURTLE];
 
 /// Vanilla `Turtle.BABY_ON_LAND_SELECTOR`: `target.isBaby() && !target.isInWater()`.
 pub(crate) async fn baby_turtle_on_land(
-    target: Arc<LivingEntity>,
+    target: TargetData,
     _world: Arc<crate::world::World>,
 ) -> bool {
-    let entity = &target.entity;
-    entity.age.load(std::sync::atomic::Ordering::Relaxed) < 0
-        && !entity
-            .touching_water
-            .load(std::sync::atomic::Ordering::SeqCst)
+    target.age < 0 && !target.touching_water
 }
 
 /// Makes a *non-tamed* `TamableAnimal` (wolf, cat) target a nearby entity of one of the given
@@ -57,7 +52,7 @@ impl NonTameRandomTargetGoal {
         predicate: Option<F>,
     ) -> Box<Self>
     where
-        F: Fn(Arc<LivingEntity>, Arc<crate::world::World>) -> Fut + Send + Sync + 'static,
+        F: Fn(TargetData, Arc<crate::world::World>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = bool> + Send + 'static,
     {
         let track_target_goal = TrackTargetGoal::new(check_visibility, false);
@@ -88,7 +83,7 @@ impl NonTameRandomTargetGoal {
         target_types: &'static [&'static EntityType],
         check_visibility: bool,
     ) -> Box<Self> {
-        async fn always_true(_target: Arc<LivingEntity>, _world: Arc<crate::world::World>) -> bool {
+        async fn always_true(_target: TargetData, _world: Arc<crate::world::World>) -> bool {
             true
         }
 
@@ -128,16 +123,16 @@ impl NonTameRandomTargetGoal {
 
             let mut result = None;
             for player in candidates {
-                if !TrackTargetGoal::is_allied(mob, player.as_ref()).await
+                if self
+                    .target_predicate
+                    .test(
+                        &world,
+                        Some(&mob_entity.living_entity),
+                        &player.living_entity,
+                    )
+                    .await
+                    && !TrackTargetGoal::is_allied(mob, player.as_ref()).await
                     && mob.can_attack(player.get_entity())
-                    && self
-                        .target_predicate
-                        .test(
-                            &world,
-                            Some(&mob_entity.living_entity),
-                            &player.living_entity,
-                        )
-                        .await
                 {
                     result = Some(player as Arc<dyn EntityBase>);
                     break;
@@ -163,12 +158,12 @@ impl NonTameRandomTargetGoal {
             let mut result = None;
             for entity in candidates {
                 if let Some(living) = entity.get_living_entity()
-                    && !TrackTargetGoal::is_allied(mob, entity.as_ref()).await
-                    && mob.can_attack(entity.get_entity())
                     && self
                         .target_predicate
                         .test(&world, Some(&mob_entity.living_entity), living)
                         .await
+                    && !TrackTargetGoal::is_allied(mob, entity.as_ref()).await
+                    && mob.can_attack(entity.get_entity())
                 {
                     result = Some(entity);
                     break;

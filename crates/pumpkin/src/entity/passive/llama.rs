@@ -190,9 +190,9 @@ pub fn register_llama_goals(
             false,
             true,
             Some(
-                |target: Arc<crate::entity::living::LivingEntity>,
+                |target: crate::entity::ai::target_predicate::TargetData,
                  world: Arc<crate::world::World>| async move {
-                    let id = target.entity.entity_id;
+                    let id = target.entity_id;
                     world
                         .get_entity_by_id(id)
                         .is_none_or(|e| e.get_mob().is_none_or(|m| !m.get_mob_entity().is_tamed()))

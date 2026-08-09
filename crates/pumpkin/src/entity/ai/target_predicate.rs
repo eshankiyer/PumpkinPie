@@ -7,13 +7,35 @@ use crate::world::World;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::Ordering::Relaxed;
+use std::sync::atomic::Ordering::{Relaxed, SeqCst};
 
 const MIN_DISTANCE: f64 = 2.0;
 
-pub type PredicateFn = dyn Fn(Arc<LivingEntity>, Arc<World>) -> Pin<Box<dyn Future<Output = bool> + Send>>
-    + Send
-    + Sync;
+#[derive(Clone, Copy)]
+pub struct TargetData {
+    pub entity_id: i32,
+    pub entity_uuid: uuid::Uuid,
+    pub age: i32,
+    pub target_y: f64,
+    pub touching_water: bool,
+    pub in_water: bool,
+}
+
+impl TargetData {
+    fn from_living(target: &LivingEntity) -> Self {
+        Self {
+            entity_id: target.entity.entity_id,
+            entity_uuid: target.entity.entity_uuid,
+            age: target.entity.age.load(Relaxed),
+            target_y: target.entity.pos.load().y,
+            touching_water: target.entity.touching_water.load(SeqCst),
+            in_water: target.is_in_water(),
+        }
+    }
+}
+
+pub type PredicateFn =
+    dyn Fn(TargetData, Arc<World>) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync;
 
 pub struct TargetPredicate {
     pub attackable: bool,
@@ -84,19 +106,17 @@ impl TargetPredicate {
 
     pub fn set_predicate<F, Fut>(&mut self, predicate: F)
     where
-        F: Fn(Arc<LivingEntity>, Arc<World>) -> Fut + Send + Sync + 'static,
+        F: Fn(TargetData, Arc<World>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = bool> + Send + 'static,
     {
-        self.predicate = Some(Arc::new(
-            move |living_entity: Arc<LivingEntity>, world: Arc<World>| {
-                Box::pin(predicate(living_entity, world))
-            },
-        ));
+        self.predicate = Some(Arc::new(move |target, world| {
+            Box::pin(predicate(target, world))
+        }));
     }
 
     pub async fn test(
         &self,
-        world: &World,
+        world: &Arc<World>,
         tester: Option<&LivingEntity>,
         target: &LivingEntity,
     ) -> bool {
@@ -105,6 +125,12 @@ impl TargetPredicate {
         }
 
         if !target.is_part_of_game() {
+            return false;
+        }
+
+        if let Some(predicate) = &self.predicate
+            && !(predicate)(TargetData::from_living(target), world.clone()).await
+        {
             return false;
         }
 

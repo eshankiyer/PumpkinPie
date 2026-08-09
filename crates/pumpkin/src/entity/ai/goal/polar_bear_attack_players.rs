@@ -3,7 +3,6 @@ use std::sync::atomic::Ordering::Relaxed;
 
 use super::{Controls, Goal, GoalFuture};
 use crate::entity::ai::goal::active_target::ActiveTargetGoal;
-use crate::entity::living::LivingEntity;
 use crate::entity::mob::{Mob, MobEntity};
 use crate::world::World;
 use pumpkin_data::entity::EntityType;
@@ -30,7 +29,10 @@ impl PolarBearAttackPlayersGoal {
                 20,
                 true,
                 true,
-                Some(|_target: Arc<LivingEntity>, _world: Arc<World>| async move { true }),
+                Some(
+                    |_target: crate::entity::ai::target_predicate::TargetData,
+                     _world: Arc<World>| async move { true },
+                ),
             ),
         })
     }

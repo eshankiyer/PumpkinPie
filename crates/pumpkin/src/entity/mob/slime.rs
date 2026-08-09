@@ -19,7 +19,6 @@ use crate::entity::{
     Entity, EntityBase, NBTStorage, NbtFuture,
     ai::control::{Control, MoveControlTrait},
     ai::goal::{Goal, GoalFuture, active_target::ActiveTargetGoal},
-    living::LivingEntity,
     mob::{Mob, MobEntity},
 };
 use crate::world::World;
@@ -99,14 +98,16 @@ impl SlimeEntity {
                     10,
                     true,
                     false,
-                    Some(move |target: Arc<LivingEntity>, _world: Arc<World>| {
-                        let slime = y_check_slime.clone();
-                        async move {
-                            let slime_y = slime.entity.living_entity.entity.pos.load().y;
-                            let target_y = target.entity.pos.load().y;
-                            is_within_slime_target_y_range(slime_y, target_y)
-                        }
-                    }),
+                    Some(
+                        move |target: crate::entity::ai::target_predicate::TargetData,
+                              _world: Arc<World>| {
+                            let slime = y_check_slime.clone();
+                            async move {
+                                let slime_y = slime.entity.living_entity.entity.pos.load().y;
+                                is_within_slime_target_y_range(slime_y, target.target_y)
+                            }
+                        },
+                    ),
                 )),
             );
             target_selector.add_goal(

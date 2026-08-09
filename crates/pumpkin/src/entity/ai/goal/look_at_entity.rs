@@ -1,9 +1,10 @@
 use super::{Controls, Goal};
 use crate::entity::ai::goal::GoalFuture;
-use crate::entity::ai::target_predicate::TargetPredicate;
+use crate::entity::ai::target_predicate::{TargetData, TargetPredicate};
 use crate::entity::mob::Mob;
 use crate::entity::predicate::EntityPredicate;
 use crate::entity::{EntityBase, player::Player};
+use crate::world::World;
 use pumpkin_data::entity::EntityType;
 use rand::RngExt;
 use std::sync::{Arc, Weak};
@@ -88,12 +89,15 @@ impl LookAtEntityGoal {
         let mut target_predicate = TargetPredicate::create_non_attackable();
         target_predicate.base_max_distance = range as f64; // TODO
         if target_type == Some(&EntityType::PLAYER) {
-            target_predicate.set_predicate(move |living_entity, _world| {
+            target_predicate.set_predicate(move |target: TargetData, world: Arc<World>| {
                 let mob_weak = mob_weak.clone();
                 async move {
                     if let Some(mob_arc) = mob_weak.upgrade() {
+                        let Some(target_entity) = world.get_entity_by_id(target.entity_id) else {
+                            return false;
+                        };
                         let predicate = EntityPredicate::Rides(mob_arc.get_entity());
-                        predicate.test(&living_entity.entity).await
+                        predicate.test(target_entity.get_entity()).await
                     } else {
                         // MobEntity is destroyed
                         false

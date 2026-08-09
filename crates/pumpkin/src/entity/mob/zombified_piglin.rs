@@ -20,7 +20,6 @@ use crate::entity::{
         spear_use::SpearUseGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
     },
     attributes::{Modifier, ModifierOperation, send_attribute_updates_for_living},
-    living::LivingEntity,
     mob::{Mob, MobEntity},
     persistent_anger::PersistentAnger,
 };
@@ -104,23 +103,26 @@ impl ZombifiedPiglinEntity {
                     10,
                     true,
                     false,
-                    Some(move |target: Arc<LivingEntity>, world: Arc<World>| {
-                        let angry_weak = angry_weak.clone();
-                        async move {
-                            let Some(mob) = angry_weak.upgrade() else {
-                                return false;
-                            };
-                            let Some(anger) = mob.persistent_anger() else {
-                                return false;
-                            };
-                            if anger.is_angry_at(target.entity.entity_uuid).await {
-                                return true;
+                    Some(
+                        move |target: crate::entity::ai::target_predicate::TargetData,
+                              world: Arc<World>| {
+                            let angry_weak = angry_weak.clone();
+                            async move {
+                                let Some(mob) = angry_weak.upgrade() else {
+                                    return false;
+                                };
+                                let Some(anger) = mob.persistent_anger() else {
+                                    return false;
+                                };
+                                if anger.is_angry_at(target.entity_uuid).await {
+                                    return true;
+                                }
+                                let universal_anger =
+                                    world.level_info.load().game_rules.universal_anger;
+                                anger.is_angry_at_all_players(universal_anger).await
                             }
-                            let universal_anger =
-                                world.level_info.load().game_rules.universal_anger;
-                            anger.is_angry_at_all_players(universal_anger).await
-                        }
-                    }),
+                        },
+                    ),
                 )),
             );
 
