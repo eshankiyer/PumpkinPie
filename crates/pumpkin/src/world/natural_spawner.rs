@@ -985,9 +985,9 @@ pub fn is_valid_empty_spawn_block(
     if state.is_full_cube() {
         return false;
     }
-    // if state.is_signal_source() {
-    //     return false;
-    // }
+    if state.is_signal_source() {
+        return false;
+    }
     if state.is_liquid() {
         return false;
     }
@@ -1119,6 +1119,40 @@ mod tests {
         assert!(is_valid_empty_spawn_block(
             Block::FIRE.default_state,
             &EntityType::BLAZE,
+        ));
+    }
+
+    #[test]
+    fn signal_sources_reject_empty_spawn_positions() {
+        assert!(!is_valid_empty_spawn_block(
+            Block::REDSTONE_TORCH.default_state,
+            &EntityType::ZOMBIE,
+        ));
+        assert!(!is_valid_empty_spawn_block(
+            Block::LEVER.default_state,
+            &EntityType::ZOMBIE,
+        ));
+        assert!(!is_valid_empty_spawn_block(
+            Block::OAK_BUTTON.default_state,
+            &EntityType::ZOMBIE,
+        ));
+        assert!(!is_valid_empty_spawn_block(
+            Block::REDSTONE_BLOCK.default_state,
+            &EntityType::ZOMBIE,
+        ));
+        assert!(!is_valid_empty_spawn_block(
+            Block::EXPOSED_LIGHTNING_ROD.default_state,
+            &EntityType::ZOMBIE,
+        ));
+        assert!(!is_valid_empty_spawn_block(
+            Block::WAXED_OXIDIZED_LIGHTNING_ROD.default_state,
+            &EntityType::ZOMBIE,
+        ));
+        assert!(!Block::POWERED_RAIL.default_state.is_signal_source());
+        assert!(!Block::ACTIVATOR_RAIL.default_state.is_signal_source());
+        assert!(is_valid_empty_spawn_block(
+            Block::AIR.default_state,
+            &EntityType::ZOMBIE,
         ));
     }
 

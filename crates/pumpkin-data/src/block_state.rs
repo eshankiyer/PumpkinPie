@@ -124,6 +124,46 @@ impl BlockState {
         self.state_flags & IS_SOLID_BLOCK != 0
     }
 
+    /// Returns whether this block state can emit a redstone signal.
+    ///
+    /// Vanilla derives this from the concrete block implementation rather than
+    /// from the state properties. The generated registry retains the block name,
+    /// which is the equivalent type discriminator here.
+    #[must_use]
+    pub fn is_signal_source(&self) -> bool {
+        let name = Block::from_state_id(self.id).name;
+        name.ends_with("_button")
+            || name.ends_with("_pressure_plate")
+            || matches!(
+                name,
+                "calibrated_sculk_sensor"
+                    | "comparator"
+                    | "daylight_detector"
+                    | "detector_rail"
+                    | "jukebox"
+                    | "lectern"
+                    | "lever"
+                    | "lightning_rod"
+                    | "observer"
+                    | "redstone_block"
+                    | "redstone_torch"
+                    | "redstone_wall_torch"
+                    | "redstone_wire"
+                    | "repeater"
+                    | "sculk_sensor"
+                    | "target"
+                    | "trapped_chest"
+                    | "tripwire_hook"
+                    | "exposed_lightning_rod"
+                    | "weathered_lightning_rod"
+                    | "oxidized_lightning_rod"
+                    | "waxed_lightning_rod"
+                    | "waxed_exposed_lightning_rod"
+                    | "waxed_weathered_lightning_rod"
+                    | "waxed_oxidized_lightning_rod"
+            )
+    }
+
     #[must_use]
     pub const fn has_random_ticks(&self) -> bool {
         self.state_flags & HAS_RANDOM_TICKS != 0
