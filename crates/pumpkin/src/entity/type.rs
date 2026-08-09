@@ -458,6 +458,15 @@ pub fn check_spawn_rules(
             && world.get_block(pos) == &Block::WATER;
     }
 
+    // `MushroomCow.checkMushroomSpawnRules`: mooshrooms only spawn on the
+    // dedicated mycelium tag and require the normal animal light threshold.
+    if id == EntityType::MOOSHROOM.id {
+        return world
+            .get_block(&pos.down())
+            .has_tag(&tag::Block::MINECRAFT_MOOSHROOMS_SPAWNABLE_ON)
+            && world.get_raw_brightness(pos, 0) > 8;
+    }
+
     if uses_animal_spawn_rules(id) {
         return world
             .get_block(&pos.down())
