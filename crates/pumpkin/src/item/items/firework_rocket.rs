@@ -79,15 +79,15 @@ impl ItemBehaviour for FireworkRocketItem {
                 );
                 // The entity keeps the pre-consumption stack. Its Fireworks component
                 // determines both the client payload and the vanilla lifetime.
-                let main_hand = player.inventory.held_item();
+                let mut main_hand = player.inventory.held_item().await;
                 let mut used_main_hand = true;
                 let mut source_stack = {
-                    let stack = main_hand.lock().await.clone();
+                    let stack = main_hand.clone();
                     (stack.item == &Item::FIREWORK_ROCKET).then_some(stack)
                 };
                 if source_stack.is_none() {
                     let off_hand = player.inventory.off_hand_item().await;
-                    let stack = off_hand.lock().await.clone();
+                    let stack = off_hand.clone();
                     if stack.item == &Item::FIREWORK_ROCKET {
                         source_stack = Some(stack);
                         used_main_hand = false;
@@ -108,15 +108,15 @@ impl ItemBehaviour for FireworkRocketItem {
                 // the attached rocket, except in Creative mode.
                 if should_consume_rocket(player.is_creative()) {
                     if used_main_hand {
-                        main_hand.lock().await.decrement(1);
+                        main_hand.decrement(1);
+                        player.inventory.set_held_item(main_hand).await;
                     } else {
+                        let mut off_hand = player.inventory.off_hand_item().await;
+                        off_hand.decrement(1);
                         player
                             .inventory
-                            .off_hand_item()
-                            .await
-                            .lock()
-                            .await
-                            .decrement(1);
+                            .set_stack_in_hand(pumpkin_util::Hand::Left, off_hand)
+                            .await;
                     }
                 }
             }

@@ -44,7 +44,7 @@ impl DrownedTridentAttackGoal {
     async fn holding_trident(mob: &dyn Mob) -> bool {
         let entity = mob.get_entity();
         let held_item = mob.get_mob_entity().living_entity.held_item(entity).await;
-        held_item.lock().await.item == &Item::TRIDENT
+        held_item.item == &Item::TRIDENT
     }
 
     async fn has_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
@@ -83,9 +83,8 @@ impl DrownedTridentAttackGoal {
         let world = shooter.world.load_full();
         let held_item = mob.get_mob_entity().living_entity.held_item(shooter).await;
         let trident_item = {
-            let held = held_item.lock().await;
-            if held.item == &Item::TRIDENT {
-                held.clone()
+            if held_item.item == &Item::TRIDENT {
+                held_item
             } else {
                 ItemStack::new(1, &Item::TRIDENT)
             }

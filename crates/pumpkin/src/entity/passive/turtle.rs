@@ -73,7 +73,11 @@ impl TurtleEntity {
         };
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // Priorities follow `Turtle.registerGoals` (`Turtle.java:151-160`). No float/swim
             // goal: vanilla doesn't register one for Turtle either.

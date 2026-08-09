@@ -118,7 +118,11 @@ impl Goal for EatGrassGoal {
             let entity = &mob.get_mob_entity().living_entity.entity;
             let world = entity.world.load();
             world.send_entity_status(entity, pumpkin_data::entity::EntityStatus::EatGrass);
-            let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+            let mut navigator = mob
+                .get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             navigator.stop();
         })
     }

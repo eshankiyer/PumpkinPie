@@ -3,6 +3,7 @@ use std::sync::Arc;
 use pumpkin_data::{
     Block, BlockDirection, BlockStateId,
     block_properties::{BlockProperties, HorizontalFacing},
+    item::Item,
 };
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::{boundingbox::BoundingBox, position::BlockPos};
@@ -98,10 +99,7 @@ impl BlockBehaviour for TripwireBlock {
 
     fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            let has_shears = {
-                let main_hand_item_stack = args.player.inventory().held_item();
-                main_hand_item_stack.lock().await.is_shears()
-            };
+            let has_shears = args.player.inventory().held_item().await.get_item() == &Item::SHEARS;
             if has_shears {
                 let mut props = TripwireProperties::from_state_id(args.state.id, args.block);
                 props.disarmed = true;
@@ -192,7 +190,11 @@ impl TripwireBlock {
                 if current_block == &Block::TRIPWIRE_HOOK {
                     let current_props =
                         TripwireHookProperties::from_state_id(current_state, &Block::TRIPWIRE_HOOK);
-                    if current_props.facing == dir.opposite().to_horizontal_facing().unwrap() {
+                    if dir
+                        .opposite()
+                        .to_horizontal_facing()
+                        .is_some_and(|f| current_props.facing == f)
+                    {
                         TripwireHookBlock::update(
                             world,
                             current_pos,

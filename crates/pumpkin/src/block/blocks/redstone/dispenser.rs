@@ -196,7 +196,7 @@ impl BlockBehaviour for DispenserBlock {
                     return;
                 };
 
-                if let Some(mut item) = dispenser.get_random_slot().await {
+                if let Some((slot_index, mut item)) = dispenser.get_random_slot().await {
                     let props = DispenserLikeProperties::from_state_id(
                         args.world.get_block_state(args.position).id,
                         args.block,
@@ -257,9 +257,7 @@ impl BlockBehaviour for DispenserBlock {
                         // Default / Drop
                         Self::drop_item(&ctx, &mut item).await;
                     }
-
-                    drop(item);
-                    dispenser.mark_dirty();
+                    dispenser.set_stack(slot_index, item).await;
                 } else {
                     args.world
                         .sync_world_event(WorldEvent::SoundDispenserFail, *args.position, 0);

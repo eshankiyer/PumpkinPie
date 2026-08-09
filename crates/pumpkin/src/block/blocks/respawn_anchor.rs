@@ -50,7 +50,7 @@ impl BlockBehaviour for RespawnAnchorBlock {
             let state_id = args.world.get_block_state_id(args.position);
             let mut props = RespawnAnchorLikeProperties::from_state_id(state_id, args.block);
 
-            let item = args.item_stack.lock().await.item;
+            let item = args.item_stack.item;
             if item != &Item::GLOWSTONE || props.charges >= Self::MAX_CHARGES {
                 // Vanilla additionally checks the off-hand item here (`useItemOn`,
                 // `RespawnAnchorBlock.java:92-96`): if the main hand isn't usable but the
@@ -65,7 +65,7 @@ impl BlockBehaviour for RespawnAnchorBlock {
             }
 
             if args.player.gamemode.load() != GameMode::Creative {
-                args.item_stack.lock().await.decrement(1);
+                args.item_stack.decrement(1);
             }
 
             props.charges += 1;

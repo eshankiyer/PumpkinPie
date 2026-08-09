@@ -27,7 +27,11 @@ impl GuardianEntity {
         };
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // Priorities follow Guardian#registerGoals; the attack goal must outrank the
             // wander/look goals it shares MOVE and LOOK controls with. No float/swim goal:
@@ -45,7 +49,11 @@ impl GuardianEntity {
             );
             goal_selector.add_goal(9, Box::new(RandomLookAroundGoal::default()));
 
-            let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
+            let mut target_selector = mob_arc
+                .mob_entity
+                .target_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             target_selector.add_goal(
                 1,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),

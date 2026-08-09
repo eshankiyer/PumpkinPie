@@ -149,7 +149,7 @@ impl Mob for HuskEntity {
         Box::pin(async move {
             let entity = self.get_entity();
             let held_item = self.entity.mob_entity.living_entity.held_item(entity).await;
-            let main_hand_empty = held_item.lock().await.is_empty();
+            let main_hand_empty = held_item.is_empty();
             if !main_hand_empty {
                 return;
             }

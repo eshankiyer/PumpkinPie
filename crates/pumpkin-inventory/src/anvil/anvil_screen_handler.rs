@@ -301,10 +301,7 @@ impl AnvilScreenHandler {
 
     /// `AnvilMenu.createResult` (AnvilMenu.java:117-274).
     pub async fn create_result(&mut self, player: &dyn InventoryPlayer) {
-        let input = {
-            let lock = self.inventory.get_stack(0).await;
-            lock.lock().await.clone()
-        };
+        let input = self.inventory.get_stack(0).await;
 
         self.only_renaming = false;
         self.set_repair_cost(1).await;
@@ -316,10 +313,7 @@ impl AnvilScreenHandler {
         }
 
         let mut result = input.clone();
-        let addition = {
-            let lock = self.inventory.get_stack(1).await;
-            lock.lock().await.clone()
-        };
+        let addition = self.inventory.get_stack(1).await;
         let mut enchantments = enchantments_for_crafting(&result);
         // Prior-work-penalty tax: see module docs, always 0 given the RepairCostImpl gap.
         let tax: i64 = 0;
@@ -471,10 +465,7 @@ impl AnvilScreenHandler {
         }
 
         if self.repair_item_count_cost > 0 {
-            let addition = {
-                let lock = self.inventory.get_stack(1).await;
-                lock.lock().await.clone()
-            };
+            let addition = self.inventory.get_stack(1).await;
             if !addition.is_empty() && i32::from(addition.item_count) > self.repair_item_count_cost
             {
                 let mut shrunk = addition;
@@ -534,48 +525,36 @@ impl ScreenHandler for AnvilScreenHandler {
             let slot = self.get_behaviour().slots[slot_index as usize].clone();
 
             if slot.has_stack().await {
-                let slot_stack_lock = slot.get_stack().await;
-                let slot_stack_guard = slot_stack_lock.lock().await;
-                stack_left = slot_stack_guard.clone();
-                drop(slot_stack_guard);
-
-                let mut slot_stack_mut = slot_stack_lock.lock().await;
-                let prev_count = slot_stack_mut.item_count;
+                let mut slot_stack = slot.get_stack().await;
+                stack_left = slot_stack.clone();
 
                 if slot_index < 3 {
                     // From anvil to player
-                    if !self
-                        .insert_item(
-                            &mut slot_stack_mut,
-                            3,
-                            self.get_behaviour().slots.len() as i32,
-                            true,
-                        )
-                        .await
-                    {
+                    if !self.insert_item(&mut slot_stack, 3, 39, true).await {
                         return ItemStack::EMPTY.clone();
                     }
+                    slot.on_quick_move_crafted(slot_stack.clone(), stack_left.clone())
+                        .await;
                 } else {
-                    // From player to anvil input 0 and 1
-                    if !self.insert_item(&mut slot_stack_mut, 0, 2, false).await {
+                    // From player to anvil
+                    if !self.insert_item(&mut slot_stack, 0, 2, false).await {
                         return ItemStack::EMPTY.clone();
                     }
                 }
 
-                let took = slot_index == 2 && slot_stack_mut.item_count != prev_count;
-
-                if slot_stack_mut.is_empty() {
-                    drop(slot_stack_mut);
-                    slot.set_stack(ItemStack::EMPTY.clone()).await;
-                } else {
-                    drop(slot_stack_mut);
-                    slot.mark_dirty().await;
+                if slot_stack.item_count == stack_left.item_count {
+                    return ItemStack::EMPTY.clone();
                 }
 
-                // `ItemCombinerMenu.quickMoveStack` calls `slot.onTake` unconditionally once the
-                // result slot's count changed, with no `mayPickup` gate (ItemCombinerMenu.java
-                // quickMoveStack, `slotIndex == this.getResultSlot()` branch).
-                if took {
+                slot.set_stack_prev(slot_stack.clone(), stack_left.clone())
+                    .await;
+                slot.on_take_item(player, &slot_stack).await;
+                slot.mark_dirty().await;
+
+                // `ItemCombinerMenu.quickMoveStack` calls `slot.onTake` once the result
+                // count changes. Preserve the anvil's XP/input consumption and recompute
+                // its output after that callback.
+                if slot_index == 2 {
                     self.on_take(player).await;
                     self.create_result(player).await;
                     self.send_content_updates().await;

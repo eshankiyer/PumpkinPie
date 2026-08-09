@@ -53,22 +53,23 @@ impl ItemBehaviour for WindChargeItem {
                 super::throw_sound_pitch(rand::random()),
             );
 
-            let held_item = player.inventory.held_item();
-            let consumed = {
-                let mut main_hand = held_item.lock().await;
-                if !main_hand.is_empty() && main_hand.item.id == Item::WIND_CHARGE.id {
-                    main_hand.decrement_unless_creative(player.gamemode.load(), 1);
-                    true
-                } else {
-                    false
-                }
+            let mut main_hand = player.inventory.held_item().await;
+            let consumed = if !main_hand.is_empty() && main_hand.item.id == Item::WIND_CHARGE.id {
+                main_hand.decrement_unless_creative(player.gamemode.load(), 1);
+                player.inventory.set_held_item(main_hand).await;
+                true
+            } else {
+                false
             };
 
             if !consumed {
-                let off_hand_item = player.inventory.off_hand_item().await;
-                let mut off_hand = off_hand_item.lock().await;
+                let mut off_hand = player.inventory.off_hand_item().await;
                 if !off_hand.is_empty() && off_hand.item.id == Item::WIND_CHARGE.id {
                     off_hand.decrement_unless_creative(player.gamemode.load(), 1);
+                    player
+                        .inventory
+                        .set_stack_in_hand(pumpkin_util::Hand::Left, off_hand)
+                        .await;
                 }
             }
         })

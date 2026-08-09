@@ -64,7 +64,11 @@ impl ZombifiedPiglinEntity {
         };
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, SpearUseGoal::new(1.0, 1.0, 10.0, 2.0));
@@ -76,7 +80,11 @@ impl ZombifiedPiglinEntity {
             );
             goal_selector.add_goal(7, Box::new(RandomLookAroundGoal::default()));
 
-            let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
+            let mut target_selector = mob_arc
+                .mob_entity
+                .target_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             // Zombified piglins are neutral: vanilla `ZombifiedPiglin.java:75-77` registers no
             // unconditional player target, only `HurtByTargetGoal(this).setAlertOthers()` plus
             // the anger-gated player target below.

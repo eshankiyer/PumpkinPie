@@ -51,7 +51,11 @@ impl PiglinEntity {
         };
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, PiglinAdmireGoal::new(admiring_ticks));
@@ -64,7 +68,11 @@ impl PiglinEntity {
             );
             goal_selector.add_goal(7, Box::new(RandomLookAroundGoal::default()));
 
-            let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
+            let mut target_selector = mob_arc
+                .mob_entity
+                .target_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             target_selector.add_goal(
                 1,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),
@@ -128,7 +136,7 @@ impl Mob for PiglinEntity {
             item_stack.decrement_unless_creative(player.gamemode.load(), 1);
 
             let mut equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
-            let previous = equipment.put(&EquipmentSlot::OFF_HAND, taken.clone()).await;
+            let previous = equipment.put(&EquipmentSlot::OFF_HAND, taken.clone());
             drop(equipment);
             if !previous.is_empty() {
                 // `holdInOffhand` (PiglinAi.java:353-359): drop whatever was already
@@ -175,12 +183,8 @@ impl Mob for PiglinEntity {
 
             // `cancelAdmiring` (PiglinAi.java:401-406): drop the offhand item instead
             // of silently voiding it.
-            let equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
-            let offhand = equipment.get(&EquipmentSlot::OFF_HAND);
-            let dropped = {
-                let mut stack = offhand.lock().await;
-                std::mem::replace(&mut *stack, ItemStack::EMPTY.clone())
-            };
+            let mut equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
+            let dropped = equipment.put(&EquipmentSlot::OFF_HAND, ItemStack::EMPTY.clone());
             drop(equipment);
             if !dropped.is_empty() {
                 let pos = self.mob_entity.living_entity.entity.block_pos.load();

@@ -290,17 +290,13 @@ impl Goal for PiglinAdmireGoal {
             ticks.store(0, Ordering::Relaxed);
 
             // `PiglinAi.stopHoldingOffHandItem` (PiglinAi.java:373-399), adult branch.
-            let equipment = mob
+            let mut equipment = mob
                 .get_mob_entity()
                 .living_entity
                 .entity_equipment
                 .lock()
                 .await;
-            let offhand = equipment.get(&EquipmentSlot::OFF_HAND);
-            let taken = {
-                let mut stack = offhand.lock().await;
-                std::mem::replace(&mut *stack, ItemStack::EMPTY.clone())
-            };
+            let taken = equipment.put(&EquipmentSlot::OFF_HAND, ItemStack::EMPTY.clone());
             drop(equipment);
             mob.get_mob_entity()
                 .living_entity

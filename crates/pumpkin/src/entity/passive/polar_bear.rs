@@ -56,7 +56,11 @@ impl PolarBearEntity {
         };
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // Priorities follow vanilla `PolarBear.registerGoals`.
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
@@ -70,7 +74,11 @@ impl PolarBearEntity {
             );
             goal_selector.add_goal(7, Box::new(RandomLookAroundGoal::default()));
 
-            let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
+            let mut target_selector = mob_arc
+                .mob_entity
+                .target_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             // Vanilla priority 1: a baby bear alerts nearby adults and doesn't fight back.
             target_selector.add_goal(1, PolarBearHurtByTargetGoal::new());
             // Vanilla priority 2: an adult with a cub nearby attacks players on sight.

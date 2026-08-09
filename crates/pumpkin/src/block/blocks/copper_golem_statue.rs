@@ -139,7 +139,7 @@ impl BlockBehaviour for CopperGolemStatueBlock {
         args: UseWithItemArgs<'a>,
     ) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
-            let item: &Item = args.item_stack.lock().await.item;
+            let item: &Item = args.item_stack.item;
             if item.has_tag(&tag::Item::MINECRAFT_AXES) || item.id == Item::HONEYCOMB.id {
                 return BlockActionResult::PassToDefaultBlockAction;
             }

@@ -71,7 +71,7 @@ impl DrownedEntity {
             .mob_entity
             .navigator
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .set_pathfinding_malus(crate::entity::ai::pathfinder::node::PathType::Water, 0.0);
         mob_arc
             .entity
@@ -101,8 +101,18 @@ impl DrownedEntity {
             Box::new(DrownedMoveControl::default());
 
         {
-            let mut goal_selector = mob_arc.entity.mob_entity.goals_selector.lock().unwrap();
-            let mut target_selector = mob_arc.entity.mob_entity.target_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .entity
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut target_selector = mob_arc
+                .entity
+                .mob_entity
+                .target_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // Vanilla `Zombie#registerGoals` (not overridden by `Drowned`) still contributes
             // these three goals on top of `Drowned#addBehaviourGoals` below. Note the base

@@ -58,7 +58,11 @@ impl MuleEntity {
         let horse_weak: Weak<Self> = Arc::downgrade(&mob_arc);
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // See `horse.rs` for the priority citations (`AbstractHorse.java:134-151`); Mule
             // has no `addBehaviourGoals` override, so it also inherits the base tempt goal.

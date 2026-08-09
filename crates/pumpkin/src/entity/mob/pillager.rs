@@ -56,17 +56,18 @@ impl PillagerEntity {
             .try_lock()
             .expect("new pillager equipment is uncontended")
             .equipment
-            .insert(
-                EquipmentSlot::MAIN_HAND,
-                Arc::new(Mutex::new(ItemStack::new(1, &Item::CROSSBOW))),
-            );
+            .insert(EquipmentSlot::MAIN_HAND, ItemStack::new(1, &Item::CROSSBOW));
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
             Arc::downgrade(&mob_arc)
         };
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(2, Box::new(RangedCrossbowAttackGoal::new(15.0)));
@@ -77,7 +78,11 @@ impl PillagerEntity {
             );
             goal_selector.add_goal(7, Box::new(RandomLookAroundGoal::default()));
 
-            let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
+            let mut target_selector = mob_arc
+                .mob_entity
+                .target_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
             target_selector.add_goal(
                 1,

@@ -173,7 +173,7 @@ impl CommandExecutor for CloneExecutor {
                         let should_clone = match self.mask_mode {
                             MaskMode::Replace => true,
                             MaskMode::Masked => !pumpkin_data::block_properties::is_air(state_id),
-                            MaskMode::Filtered => state_id == filter_block.unwrap().id,
+                            MaskMode::Filtered => filter_block.is_some_and(|f| state_id == *f),
                         };
 
                         if should_clone {

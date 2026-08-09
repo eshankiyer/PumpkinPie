@@ -67,7 +67,11 @@ impl Goal for CreeperIgniteGoal {
 
     fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
+            mob.get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .stop();
             let target = mob.get_mob_entity().target.lock().await.clone();
             self.target.clone_from(&target);
         })

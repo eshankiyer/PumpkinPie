@@ -1,7 +1,6 @@
 use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
-use tokio::sync::Mutex;
 
 use crate::player::player_inventory::PlayerInventory;
 use crate::screen_handler::{
@@ -116,10 +115,6 @@ impl SmithingScreenHandler {
         let template = self.input_inventory.get_stack(TEMPLATE_SLOT).await;
         let base = self.input_inventory.get_stack(BASE_SLOT).await;
         let addition = self.input_inventory.get_stack(ADDITION_SLOT).await;
-
-        let template = template.lock().await;
-        let base = base.lock().await;
-        let addition = addition.lock().await;
 
         let result = Self::compute_result(&template, &base, &addition);
         self.output_inventory.set_stack(0, result).await;
@@ -329,14 +324,14 @@ impl Slot for SmithingOutputSlot {
                 .await;
 
             for index in [TEMPLATE_SLOT, BASE_SLOT, ADDITION_SLOT] {
-                let input_stack = self.input_inventory.get_stack(index).await;
-                let mut input_lock = input_stack.lock().await;
-                if !input_lock.is_empty() {
-                    input_lock.item_count -= 1;
-                    if input_lock.item_count == 0 {
-                        *input_lock = ItemStack::EMPTY.clone();
+                let mut input_stack = self.input_inventory.get_stack(index).await;
+                if !input_stack.is_empty() {
+                    input_stack.item_count -= 1;
+                    if input_stack.item_count == 0 {
+                        input_stack = ItemStack::EMPTY.clone();
                     }
                 }
+                self.input_inventory.set_stack(index, input_stack).await;
             }
             self.mark_dirty().await;
         })
@@ -346,22 +341,16 @@ impl Slot for SmithingOutputSlot {
         Box::pin(async move { false })
     }
 
-    fn get_stack(&self) -> BoxFuture<'_, Arc<Mutex<ItemStack>>> {
+    fn get_stack(&self) -> BoxFuture<'_, ItemStack> {
         Box::pin(async move { self.inventory.get_stack(self.index).await })
     }
 
     fn get_cloned_stack(&self) -> BoxFuture<'_, ItemStack> {
-        Box::pin(async move {
-            let stack = self.inventory.get_stack(self.index).await;
-            stack.lock().await.clone()
-        })
+        Box::pin(async move { self.inventory.get_stack(self.index).await })
     }
 
     fn has_stack(&self) -> BoxFuture<'_, bool> {
-        Box::pin(async move {
-            let stack = self.inventory.get_stack(self.index).await;
-            !stack.lock().await.is_empty()
-        })
+        Box::pin(async move { !self.inventory.get_stack(self.index).await.is_empty() })
     }
 
     fn set_stack(&self, stack: ItemStack) -> BoxFuture<'_, ()> {

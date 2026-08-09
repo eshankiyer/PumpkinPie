@@ -66,7 +66,7 @@ impl RangedBowAttackGoal {
             .lock()
             .await
             .get(&EquipmentSlot::MAIN_HAND);
-        let item = stack.lock().await.item;
+        let item = stack.item;
         item.registry_key == Item::BOW.registry_key
     }
 

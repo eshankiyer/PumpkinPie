@@ -98,7 +98,11 @@ impl WolfEntity {
         };
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(1, Box::new(SwimGoal::default()));
             goal_selector.add_goal(2, SitGoal::new());

@@ -310,12 +310,20 @@ impl MobEntity {
     }
 
     pub async fn clear_ai_goals(&self, mob: &dyn Mob) {
-        let running_goals = self.goals_selector.lock().unwrap().clear();
+        let running_goals = self
+            .goals_selector
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
         for mut goal in running_goals {
             goal.goal.stop(mob).await;
         }
 
-        let running_target_goals = self.target_selector.lock().unwrap().clear();
+        let running_target_goals = self
+            .target_selector
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
         for mut goal in running_target_goals {
             goal.goal.stop(mob).await;
         }
@@ -324,7 +332,7 @@ impl MobEntity {
     pub fn add_goal<G: crate::entity::ai::goal::Goal + 'static>(&self, priority: u8, goal: G) {
         self.goals_selector
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .add_goal(priority, Box::new(goal));
     }
 
@@ -335,7 +343,7 @@ impl MobEntity {
     ) {
         self.target_selector
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .add_goal(priority, Box::new(goal));
     }
 
@@ -414,7 +422,6 @@ impl MobEntity {
             .living_entity
             .held_item(&self.living_entity.entity)
             .await;
-        let held_item = held_item.lock().await;
         let (max_range, min_range) = held_item
             .get_data_component::<pumpkin_data::data_component_impl::AttackRangeImpl>()
             .map_or((DEFAULT_ATTACK_RANGE, 0.0), |attack_range| {
@@ -500,7 +507,6 @@ impl MobEntity {
             .living_entity
             .held_item(&self.living_entity.entity)
             .await;
-        let held_item = held_item.lock().await;
         if let Some(enchantments) =
             held_item.get_data_component::<pumpkin_data::data_component_impl::EnchantmentsImpl>()
         {
@@ -788,11 +794,10 @@ pub trait Mob: EntityBase + Send + Sync {
             }
 
             let slot = self.sun_protection_slot();
-            let item = {
+            let mut stack = {
                 let equipment = living.entity_equipment.lock().await;
                 equipment.get(&slot)
             };
-            let mut stack = item.lock().await;
             if living.dead.load(Relaxed) || living.health.load() <= 0.0 || entity.is_removed() {
                 return;
             }
@@ -804,12 +809,12 @@ pub trait Mob: EntityBase + Send + Sync {
                         .get_max_damage()
                         .is_some_and(|max_damage| new_damage >= max_damage);
                     if broken {
-                        *stack = ItemStack::EMPTY.clone();
+                        stack = ItemStack::EMPTY.clone();
                     } else {
                         stack.set_damage(new_damage);
                     }
                     let updated_stack = stack.clone();
-                    drop(stack);
+                    living.entity_equipment.lock().await.put(&slot, stack);
                     if broken {
                         entity
                             .world
@@ -1525,6 +1530,83 @@ impl<T: Mob + Send + 'static> EntityBase for T {
                 }
             }
 
+            self.mob_tick(caller).await;
+
+            let age = mob_entity.living_entity.entity.age.load(Relaxed);
+            let entity_id = mob_entity.living_entity.entity.entity_id;
+
+            // 1. "Take" selectors out of the mutexes
+            let mut target_selector = {
+                let mut guard = mob_entity
+                    .target_selector
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                std::mem::take(&mut *guard)
+            };
+            let mut goals_selector = {
+                let mut guard = mob_entity
+                    .goals_selector
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                std::mem::take(&mut *guard)
+            };
+
+            // 2. Perform AI logic (No locks held, so .await is safe!)
+            if (age + entity_id) % 2 != 0 && age > 1 {
+                target_selector.tick_goals(self, false).await;
+                goals_selector.tick_goals(self, false).await;
+            } else {
+                target_selector.tick(self).await;
+                goals_selector.tick(self).await;
+            }
+
+            // 3. "Put back" selectors
+            {
+                *mob_entity
+                    .target_selector
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = target_selector;
+                *mob_entity
+                    .goals_selector
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = goals_selector;
+            };
+
+            // 4. Repeat for Navigator
+            let mut navigator = {
+                let mut guard = mob_entity
+                    .navigator
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                std::mem::take(&mut *guard)
+            };
+
+            navigator.tick(&mob_entity.living_entity).await;
+
+            {
+                *mob_entity
+                    .navigator
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = navigator;
+            };
+
+            // Controllers are synchronous, so we can just use normal blocks
+            {
+                let mut look_control = mob_entity
+                    .look_control
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                look_control.tick(self);
+            };
+
+            {
+                let mut move_control = mob_entity
+                    .move_control
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                move_control.tick(self);
+            };
+
             mob_entity.living_entity.tick(caller, server).await;
             self.tick_sun_burn().await;
             self.mob_try_pick_up_items().await;
@@ -1765,7 +1847,11 @@ pub trait PathAwareEntity: Mob + Send + Sync {
 
     fn is_navigation<'a>(&'a self) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
         Box::pin(async {
-            let navigator = self.get_mob_entity().navigator.lock().unwrap();
+            let navigator = self
+                .get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             !navigator.is_idle()
         })
     }

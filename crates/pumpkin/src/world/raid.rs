@@ -410,8 +410,7 @@ impl Raid {
                         .entity_equipment
                         .lock()
                         .await
-                        .put(&EquipmentSlot::HEAD, ItemStack::new(1, &Item::WHITE_BANNER))
-                        .await;
+                        .put(&EquipmentSlot::HEAD, ItemStack::new(1, &Item::WHITE_BANNER));
                 }
                 self.join_raid(group_number, uuid, mob.get_mob_entity(), is_leader);
                 // Raid.java:582 passes `false` unconditionally, regardless of leader status.

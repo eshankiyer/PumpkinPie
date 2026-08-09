@@ -176,7 +176,6 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::{BlockAccessor, BlockFlags};
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 use super::BlockIsReplacing;
 use super::blocks::plant::crop::gourds::attached_stem::AttachedStemBlock;
@@ -875,7 +874,7 @@ impl BlockRegistry {
         player: &Arc<Player>,
         position: &BlockPos,
         hit: &BlockHitResult<'_>,
-        item_stack: &Arc<Mutex<ItemStack>>,
+        item_stack: &mut ItemStack,
         equipment_slot: &EquipmentSlot,
         server: &Server,
         world: &Arc<World>,

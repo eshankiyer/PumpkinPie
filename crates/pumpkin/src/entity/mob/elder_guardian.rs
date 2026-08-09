@@ -49,7 +49,11 @@ impl ElderGuardianEntity {
         };
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // Priorities follow Guardian#registerGoals, which ElderGuardian inherits. No
             // float/swim goal: vanilla doesn't register one.
@@ -74,7 +78,11 @@ impl ElderGuardianEntity {
             // matching the same pattern already used by `guardian.rs`. Not ported: the
             // selector's `target.distanceToSqr(this.guardian) > 9.0` distance gate (Guardian.java
             // GuardianAttackSelector#test), same as the existing guardian.rs implementation.
-            let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
+            let mut target_selector = mob_arc
+                .mob_entity
+                .target_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             target_selector.add_goal(
                 1,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),

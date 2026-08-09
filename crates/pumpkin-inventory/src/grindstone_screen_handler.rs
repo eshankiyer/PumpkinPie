@@ -272,9 +272,7 @@ impl GrindstoneScreenHandler {
 
     async fn update_result(&self) {
         let input = self.repair_inventory.get_stack(0).await;
-        let input = input.lock().await.clone();
         let additional = self.repair_inventory.get_stack(1).await;
-        let additional = additional.lock().await.clone();
 
         self.result_inventory
             .set_stack(0, compute_result(&input, &additional))
@@ -353,20 +351,8 @@ impl ScreenHandler for GrindstoneScreenHandler {
                 slot.on_quick_move_crafted(item.clone(), stack_left.clone())
                     .await;
             } else if slot_index != 0 && slot_index != 1 {
-                let input_empty = self
-                    .repair_inventory
-                    .get_stack(0)
-                    .await
-                    .lock()
-                    .await
-                    .is_empty();
-                let additional_empty = self
-                    .repair_inventory
-                    .get_stack(1)
-                    .await
-                    .lock()
-                    .await
-                    .is_empty();
+                let input_empty = self.repair_inventory.get_stack(0).await.is_empty();
+                let additional_empty = self.repair_inventory.get_stack(1).await.is_empty();
 
                 if !input_empty && !additional_empty {
                     if (3..30).contains(&slot_index) {
@@ -496,9 +482,7 @@ impl Slot for GrindstoneResultSlot {
     ) -> BoxFuture<'a, ()> {
         Box::pin(async move {
             let input = self.repair_inventory.get_stack(0).await;
-            let input = input.lock().await.clone();
             let additional = self.repair_inventory.get_stack(1).await;
-            let additional = additional.lock().await.clone();
 
             let amount = experience_amount(&input, &additional);
             if amount > 0 {

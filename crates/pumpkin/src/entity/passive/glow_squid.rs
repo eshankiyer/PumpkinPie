@@ -47,7 +47,11 @@ impl GlowSquidEntity {
         };
         let mob_arc = Arc::new(glow_squid);
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // Glow squid inherits `Squid.registerGoals`; see `Squid.java:57-61`.
             goal_selector.add_goal(0, Box::new(SquidRandomMovementGoal));

@@ -37,12 +37,12 @@ impl BlockBehaviour for VaultBlock {
             let Some(vault) = block_entity.as_any().downcast_ref::<VaultBlockEntity>() else {
                 return BlockActionResult::Pass;
             };
-            let mut item_stack = args.item_stack.lock().await;
+            let item_stack = &mut *args.item_stack;
             if item_stack.is_empty() {
                 return BlockActionResult::Pass;
             }
             if vault
-                .try_insert_key(args.world, args.player, &mut item_stack)
+                .try_insert_key(args.world, args.player, item_stack)
                 .await
             {
                 BlockActionResult::SuccessServer

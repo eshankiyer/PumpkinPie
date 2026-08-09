@@ -109,7 +109,11 @@ impl AllayEntity {
             Arc::downgrade(&mob_arc)
         };
 
-        let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+        let mut goal_selector = mob_arc
+            .mob_entity
+            .goals_selector
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         goal_selector.add_goal(0, Box::new(SwimGoal::default()));
         goal_selector.add_goal(1, Box::new(WanderAroundGoal::new(1.0)));
         goal_selector.add_goal(
@@ -295,14 +299,13 @@ impl Mob for AllayEntity {
     ) -> EntityBaseFuture<'a, bool> {
         Box::pin(async move {
             let world = self.mob_entity.living_entity.entity.world.load_full();
-            let held_slot = self
+            let held = self
                 .mob_entity
                 .living_entity
                 .entity_equipment
                 .lock()
                 .await
                 .get(&EquipmentSlot::MAIN_HAND);
-            let held = held_slot.lock().await.clone();
             let my_pos = self.mob_entity.living_entity.entity.pos.load();
 
             // `Allay.mobInteract`, dancing + DUPLICATES_ALLAYS + canDuplicate branch.
@@ -325,7 +328,12 @@ impl Mob for AllayEntity {
             // Empty-handed Allay + player holding an item: give it to the Allay.
             if held.is_empty() && !item_stack.is_empty() {
                 let to_give = item_stack.copy_with_count(1);
-                *held_slot.lock().await = to_give;
+                self.mob_entity
+                    .living_entity
+                    .entity_equipment
+                    .lock()
+                    .await
+                    .put(&EquipmentSlot::MAIN_HAND, to_give);
                 item_stack.decrement(1);
                 world.play_sound(Sound::EntityAllayItemGiven, SoundCategory::Neutral, &my_pos);
                 *self.liked_player.lock().unwrap() = Some(player.get_entity().entity_uuid);
@@ -334,8 +342,13 @@ impl Mob for AllayEntity {
 
             // Allay holding an item + player empty-handed: take it back.
             if !held.is_empty() && item_stack.is_empty() {
-                let taken =
-                    std::mem::replace(&mut *held_slot.lock().await, ItemStack::EMPTY.clone());
+                let taken = self
+                    .mob_entity
+                    .living_entity
+                    .entity_equipment
+                    .lock()
+                    .await
+                    .put(&EquipmentSlot::MAIN_HAND, ItemStack::EMPTY.clone());
                 world.play_sound(Sound::EntityAllayItemTaken, SoundCategory::Neutral, &my_pos);
                 *self.liked_player.lock().unwrap() = None;
                 let mut taken = taken;

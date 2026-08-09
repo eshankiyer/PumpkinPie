@@ -83,7 +83,11 @@ impl Goal for ChasePlayerGoal {
 
     fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
-            let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+            let mut navigator = mob
+                .get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             navigator.stop();
         })
     }
@@ -93,7 +97,11 @@ impl Goal for ChasePlayerGoal {
             if let Some(player) = &self.target {
                 let player_pos = player.get_entity().pos.load();
                 let eye_y = player_pos.y + PLAYER_EYE_HEIGHT;
-                let mut look_control = mob.get_mob_entity().look_control.lock().unwrap();
+                let mut look_control = mob
+                    .get_mob_entity()
+                    .look_control
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 // EndermanFreezeWhenLookedAt uses `lookAt(target, 10.0F, 10.0F)`;
                 // the generic LookControl limits pitch to 40 degrees for most mobs.
                 look_control.look_at_with_range(player_pos.x, eye_y, player_pos.z, 10.0, 10.0);

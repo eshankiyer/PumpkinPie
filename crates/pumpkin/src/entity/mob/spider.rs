@@ -180,8 +180,16 @@ impl SpiderEntity {
         };
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
-            let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut target_selector = mob_arc
+                .mob_entity
+                .target_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(1, Box::new(SwimGoal::default()));
             // Spider.java:59: `AvoidEntityGoal<>(this, Armadillo.class, 6.0F, 1.0, 1.2,

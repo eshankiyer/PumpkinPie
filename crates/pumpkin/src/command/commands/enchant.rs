@@ -143,8 +143,8 @@ async fn enchant_target(
     };
 
     let player = target.get_player();
-    let lock = if let Some(player) = player {
-        player.inventory.held_item()
+    let mut item = if let Some(player) = player {
+        player.inventory().held_item().await
     } else {
         living
             .entity_equipment
@@ -152,7 +152,6 @@ async fn enchant_target(
             .await
             .get(&EquipmentSlot::MAIN_HAND)
     };
-    let mut item = lock.lock().await;
 
     if item.is_empty() {
         let msg = TextComponent::translate_cross(
@@ -185,11 +184,13 @@ async fn enchant_target(
 
     item.enchant(enchantment, level);
     let updated_item = item.clone();
-    drop(item);
-
     if let Some(player) = player {
+        player.inventory().set_held_item(updated_item.clone()).await;
         player
-            .sync_hand_slot(player.inventory.get_selected_slot() as usize, updated_item)
+            .sync_hand_slot(
+                player.inventory().get_selected_slot() as usize,
+                updated_item,
+            )
             .await;
     } else {
         living.send_equipment_changes(&[(EquipmentSlot::MAIN_HAND, updated_item)]);

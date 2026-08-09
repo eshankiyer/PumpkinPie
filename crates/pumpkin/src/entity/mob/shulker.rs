@@ -87,8 +87,16 @@ impl ShulkerEntity {
         };
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
-            let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut target_selector = mob_arc
+                .mob_entity
+                .target_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // Shulker.java:96: `LookAtPlayerGoal(this, Player.class, 8.0F, 0.02F, true)` --
             // `onlyHorizontal=true` (Rust: `look_forward`), not the crate's `with_default`

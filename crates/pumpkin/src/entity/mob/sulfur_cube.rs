@@ -187,7 +187,6 @@ impl SulfurCubeEntity {
     pub(crate) async fn has_body_item(&self) -> bool {
         let equipment = self.entity.living_entity.entity_equipment.lock().await;
         let stack = equipment.get(&EquipmentSlot::BODY);
-        let stack = stack.lock().await;
         !stack.is_empty()
     }
 
@@ -210,18 +209,13 @@ impl SulfurCubeEntity {
 
         let equipment = self.entity.living_entity.entity_equipment.clone();
         let body_stack = equipment.lock().await.get(&EquipmentSlot::BODY);
-        {
-            let current = body_stack.lock().await;
-            if !current.is_empty() && current.item.id == item_stack.item.id {
-                return false;
-            }
+        if !body_stack.is_empty() && body_stack.item.id == item_stack.item.id {
+            return false;
         }
 
         let previous = {
             let mut equipment = equipment.lock().await;
-            equipment
-                .put(&EquipmentSlot::BODY, item_stack.copy_with_count(1))
-                .await
+            equipment.put(&EquipmentSlot::BODY, item_stack.copy_with_count(1))
         };
 
         if !previous.is_empty() {
@@ -231,7 +225,6 @@ impl SulfurCubeEntity {
         }
 
         let new_body = equipment.lock().await.get(&EquipmentSlot::BODY);
-        let new_body = new_body.lock().await.clone();
         self.entity
             .living_entity
             .send_equipment_changes(&[(EquipmentSlot::BODY, new_body)]);
@@ -245,9 +238,7 @@ impl SulfurCubeEntity {
         let equipment = self.entity.living_entity.entity_equipment.clone();
         let ejected = {
             let mut equipment = equipment.lock().await;
-            equipment
-                .put(&EquipmentSlot::BODY, ItemStack::EMPTY.clone())
-                .await
+            equipment.put(&EquipmentSlot::BODY, ItemStack::EMPTY.clone())
         };
 
         if ejected.is_empty() {
@@ -897,12 +888,12 @@ impl SulfurCubeTemptGoal {
     }
 
     async fn is_holding_tempt_item(&self, player: &Player) -> bool {
-        let main = player.inventory.held_item();
-        if self.is_tempting(&*main.lock().await) {
+        let main = player.inventory.held_item().await;
+        if self.is_tempting(&main) {
             return true;
         }
         let off = player.inventory.off_hand_item().await;
-        self.is_tempting(&*off.lock().await)
+        self.is_tempting(&off)
     }
 }
 
