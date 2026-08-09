@@ -2746,23 +2746,34 @@ impl JavaClient {
         }
         player.update_last_action_time();
 
+        self.update_sequence(player, use_item.sequence.0);
         let inventory = player.inventory();
         let Ok(hand) = Hand::from_interaction_id(use_item.hand.0) else {
             self.kick(TextComponent::text("InvalidHand")).await;
             return;
         };
-        self.update_sequence(player, use_item.sequence.0);
 
         let mut item_in_hand = if uses_main_hand(hand) {
             inventory.held_item().await
         } else {
             inventory.off_hand_item().await
         };
+        if item_in_hand.is_empty() {
+            return;
+        }
 
-        let (item_id, _item) = (item_in_hand.item.id, item_in_hand.item);
-        player
-            .increment_stat(StatisticCategory::Used, item_id as i32, 1)
-            .await;
+        let entity = player.get_entity();
+        let target_yaw = wrap_degrees(use_item.yaw) % 360.0;
+        let target_pitch = wrap_degrees(use_item.pitch);
+        if target_yaw != entity.yaw.load() || target_pitch != entity.pitch.load() {
+            entity.set_rotation(target_yaw, target_pitch);
+        }
+
+        // Vanilla ServerPlayerGameMode.useItem returns PASS for spectators after
+        // packet bookkeeping, but before touching the held item or firing events.
+        if player.gamemode.load() == GameMode::Spectator {
+            return;
+        }
 
         let hit_result = player
             .world()
