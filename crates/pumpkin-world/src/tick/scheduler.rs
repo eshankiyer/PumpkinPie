@@ -139,6 +139,7 @@ impl<'a, T: std::hash::Hash + Eq> ChunkTickScheduler<&'a T> {
 impl<'a, T: std::hash::Hash + Eq + 'static> FromIterator<ScheduledTick<&'a T>>
     for ChunkTickScheduler<&'a T>
 {
+    #[allow(clippy::expect_used)]
     fn from_iter<I: IntoIterator<Item = ScheduledTick<&'a T>>>(iter: I) -> Self {
         let scheduler = Self::default();
         for (sub_tick_order, tick) in iter.into_iter().enumerate() {

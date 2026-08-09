@@ -335,7 +335,7 @@ mod test {
     use pumpkin_data::screen::WindowType;
     use pumpkin_protocol::codec::item_stack_seralizer::ItemStackSerializer;
     use pumpkin_protocol::java::client::play::MerchantOffer;
-    use pumpkin_world::inventory::SimpleInventory;
+    use pumpkin_world::inventory::{Inventory, SimpleInventory};
 
     use super::{MerchantScreenHandler, SlotOrder, offer_matches, payment_slot_indices};
     use crate::screen_handler::ScreenHandlerBehaviour;
@@ -359,12 +359,16 @@ mod test {
         }
     }
 
-    fn handler(offer: MerchantOffer, slot0: ItemStack, slot1: ItemStack) -> MerchantScreenHandler {
-        let mut inventory = SimpleInventory::new(3);
-        inventory.stacks[0] = Arc::new(tokio::sync::Mutex::new(slot0));
-        inventory.stacks[1] = Arc::new(tokio::sync::Mutex::new(slot1));
+    async fn handler(
+        offer: MerchantOffer,
+        slot0: ItemStack,
+        slot1: ItemStack,
+    ) -> MerchantScreenHandler {
+        let inventory = Arc::new(SimpleInventory::new(3));
+        inventory.set_stack(0, slot0).await;
+        inventory.set_stack(1, slot1).await;
         MerchantScreenHandler {
-            inventory: Arc::new(inventory),
+            inventory,
             behaviour: ScreenHandlerBehaviour::new(0, Some(WindowType::Merchant)),
             selected_offer: 0,
             offers: vec![offer],
@@ -382,11 +386,10 @@ mod test {
         assert!(matches!(order, Some(SlotOrder::Normal)));
         assert_eq!(payment_slot_indices(&order.unwrap()), (0, 1));
 
-        let mut handler = handler(offer(1, Some(5)), slot0, slot1);
+        let mut handler = handler(offer(1, Some(5)), slot0, slot1).await;
         handler.update_result_slot().await;
 
         let result = handler.inventory.get_stack(2).await;
-        let result = result.lock().await;
         assert_eq!(result.item.id, Item::DIAMOND.id);
         assert_eq!(result.item_count, 1);
     }
@@ -404,11 +407,10 @@ mod test {
         // Swapped: cost_a (emerald) lives in slot 1, cost_b (wheat) lives in slot 0.
         assert_eq!(payment_slot_indices(&order.unwrap()), (1, 0));
 
-        let mut handler = handler(offer(1, Some(5)), slot0, slot1);
+        let mut handler = handler(offer(1, Some(5)), slot0, slot1).await;
         handler.update_result_slot().await;
 
         let result = handler.inventory.get_stack(2).await;
-        let result = result.lock().await;
         assert_eq!(result.item.id, Item::DIAMOND.id);
         assert_eq!(result.item_count, 1);
     }
@@ -454,11 +456,11 @@ mod test {
 
         let slot0 = ItemStack::new(1, &Item::EMERALD);
         let slot1 = ItemStack::new(5, &Item::WHEAT);
-        let mut inventory = SimpleInventory::new(3);
-        inventory.stacks[0] = Arc::new(tokio::sync::Mutex::new(slot0));
-        inventory.stacks[1] = Arc::new(tokio::sync::Mutex::new(slot1));
+        let inventory = Arc::new(SimpleInventory::new(3));
+        inventory.set_stack(0, slot0).await;
+        inventory.set_stack(1, slot1).await;
         let mut handler = MerchantScreenHandler {
-            inventory: Arc::new(inventory),
+            inventory,
             behaviour: ScreenHandlerBehaviour::new(0, Some(WindowType::Merchant)),
             selected_offer: 0,
             offers: vec![out_of_stock, valid],
@@ -468,13 +470,11 @@ mod test {
         handler.update_result_slot().await;
         {
             let result = handler.inventory.get_stack(2).await;
-            let result = result.lock().await;
             assert!(result.is_empty());
         };
 
         handler.set_selected_offer(1).await;
         let result = handler.inventory.get_stack(2).await;
-        let result = result.lock().await;
         assert_eq!(result.item.id, Item::DIAMOND.id);
         assert_eq!(result.item_count, 1);
     }

@@ -194,10 +194,13 @@ mod tests {
             };
 
             assert_eq!(chunk.section.min_y, dimension.min_y);
-            assert_eq!(chunk.section.count, dimension.height as usize / 16);
+            assert_eq!(
+                chunk.section.section_count(),
+                dimension.height as usize / 16
+            );
             assert_eq!(
                 chunk.light_engine.lock().unwrap().sky_light.len(),
-                chunk.section.count
+                chunk.section.section_count()
             );
 
             let dumped = chunk.section.dump_blocks();

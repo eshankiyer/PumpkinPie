@@ -45,6 +45,7 @@ impl RootRegistryOwner {
         self.state.clone()
     }
 
+    #[allow(clippy::panic)]
     pub async fn lock(&self) {
         let Some(builder) = self.state.mutable.write().await.take() else {
             return;

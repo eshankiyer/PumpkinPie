@@ -110,6 +110,7 @@ impl<T> ScheduledTick<T>
 where
     T: ToResourceLocation,
 {
+    #[allow(clippy::expect_used)]
     #[must_use]
     pub fn to_nbt_compound(&self) -> NbtCompound {
         let mut nbt = NbtCompound::new();

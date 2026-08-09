@@ -505,7 +505,7 @@ impl ChunkData {
         Ok(chunk)
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::expect_used, clippy::too_many_lines)]
     fn internal_to_bytes(&self) -> Bytes {
         use pumpkin_nbt::tag::NbtTag;
 

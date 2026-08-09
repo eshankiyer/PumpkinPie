@@ -1067,9 +1067,11 @@ pub trait ScreenHandler: Send + Sync {
                                 .is_some()
                         {
                             let mut inner_slot_stack = slot.get_stack().await;
-                            let bundle = cursor_stack
+                            let Some(bundle) = cursor_stack
                                 .get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
-                                .expect("checked above");
+                            else {
+                                return;
+                            };
                             let inserted = bundle.try_insert(&mut inner_slot_stack);
                             if inner_slot_stack.item_count == 0 {
                                 inner_slot_stack = ItemStack::EMPTY.clone();

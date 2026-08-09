@@ -295,6 +295,7 @@ impl Slot for StonecutterOutputSlot {
 mod tests {
     use super::*;
     use crate::{build_equipment_slots, entity_equipment::EntityEquipment};
+    use tokio::sync::Mutex;
 
     fn handler() -> StonecutterScreenHandler {
         let player_inventory = Arc::new(PlayerInventory::new(
@@ -316,7 +317,6 @@ mod tests {
         assert_eq!(handler.selected_recipe.load(Ordering::Relaxed), 0);
 
         let output = handler.output_inventory.get_stack(0).await;
-        let output = output.lock().await;
         let expected = Item::from_registry_key(recipes[0].result.id)
             .expect("stonecutter recipe result must be a registered item");
         assert_eq!(output.item.id, expected.id);
@@ -362,6 +362,6 @@ mod tests {
 
         assert_eq!(handler.selected_recipe.load(Ordering::Relaxed), u8::MAX);
         let output = handler.output_inventory.get_stack(0).await;
-        assert!(output.lock().await.is_empty());
+        assert!(output.is_empty());
     }
 }

@@ -33,6 +33,7 @@ pub trait Registry: Any + Send + Sync {
 pub type BoxedRegistry = Box<dyn Registry>;
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::error::{DataKeyBuildError, DataKeyGetError, RegistryInsertError};

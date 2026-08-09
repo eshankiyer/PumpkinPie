@@ -119,6 +119,7 @@ mod tests {
     };
 
     use pumpkin_data::chunk::ChunkStatus;
+    use pumpkin_nbt::compound::NbtCompound;
     use pumpkin_world::{
         chunk::{ChunkData, ChunkHeightmaps, ChunkLight, ChunkSections},
         tick::scheduler::ChunkTickScheduler,
@@ -156,6 +157,7 @@ mod tests {
             blending_data: None,
             dirty: AtomicBool::new(false),
             inhabited_time: AtomicU64::new(0),
+            unknown_nbt: NbtCompound::new(),
         };
         let mut encoded = Vec::new();
         CLevelChunk {

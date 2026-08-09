@@ -99,6 +99,7 @@ impl<T: Send + Sync + 'static> RegistryBuilder<T> {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::*;
 

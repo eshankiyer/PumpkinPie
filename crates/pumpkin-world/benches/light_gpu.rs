@@ -1,5 +1,5 @@
 #![cfg_attr(not(feature = "gpu-experimental-lighting"), allow(unused))]
-#![allow(clippy::print_stdout)]
+#![allow(clippy::print_stderr, clippy::print_stdout)]
 
 #[cfg(not(feature = "gpu-experimental-lighting"))]
 fn main() {}
@@ -448,7 +448,10 @@ mod bench {
                 .collect::<Vec<_>>()
                 .join(",\n  ")
         );
-        std::fs::write(&out, json).expect("failed to write results");
+        if let Err(error) = std::fs::write(&out, json) {
+            eprintln!("failed to write results: {error}");
+            std::process::exit(1);
+        }
         println!("\nwrote {out}");
     }
 }

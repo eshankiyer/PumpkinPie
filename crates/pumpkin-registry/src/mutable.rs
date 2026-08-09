@@ -111,6 +111,7 @@ impl<T: Send + Sync + 'static> Registry for MutableRegistry<T> {
         self
     }
 
+    #[allow(clippy::expect_used)]
     fn into_immutable(self: Box<Self>) -> BoxFuture<'static, BoxedRegistry> {
         Box::pin(async move {
             let erased: Box<dyn Any + Send> = self;

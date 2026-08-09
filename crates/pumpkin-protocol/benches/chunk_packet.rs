@@ -12,7 +12,12 @@
 //! `serialize_and_compress` adds the zlib pass the packet encoder performs above the
 //! 256-byte default threshold at the default level 4.
 
-#![allow(clippy::print_stdout, reason = "a benchmark reporting payload sizes")]
+#![allow(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::print_stdout,
+    reason = "benchmark setup failures are unrecoverable"
+)]
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use flate2::{Compress, Compression, FlushCompress};

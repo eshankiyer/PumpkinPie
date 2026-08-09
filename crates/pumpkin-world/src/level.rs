@@ -676,6 +676,7 @@ impl Level {
     /// Returns `true` if the forced set actually changed. The ticket is only issued/dropped on a
     /// real change, because `ChunkLoading::ticket` is a multiset: issuing two tickets for one
     /// `forceload add` would leave the chunk pinned after `forceload remove`.
+    #[allow(clippy::unwrap_used)]
     pub fn set_chunk_forced(&self, pos: Vector2<i32>, forced: bool) -> bool {
         let changed = {
             let mut set = self.forced_chunks.lock().unwrap();
@@ -698,6 +699,7 @@ impl Level {
     }
 
     /// Drops every `/forceload` ticket. Returns the number of chunks that were forced.
+    #[allow(clippy::unwrap_used)]
     pub fn clear_forced_chunks(&self) -> usize {
         let removed: Vec<_> = {
             let mut set = self.forced_chunks.lock().unwrap();
@@ -714,16 +716,19 @@ impl Level {
     }
 
     #[must_use]
+    #[allow(clippy::unwrap_used)]
     pub fn is_chunk_forced(&self, pos: &Vector2<i32>) -> bool {
         self.forced_chunks.lock().unwrap().contains(pos)
     }
 
+    #[allow(clippy::unwrap_used)]
     #[must_use]
     pub fn forced_chunks(&self) -> Vec<Vector2<i32>> {
         self.forced_chunks.lock().unwrap().iter().copied().collect()
     }
 
     /// Allocation-free variant of `forced_chunks` for the per-tick active-chunk sweep.
+    #[allow(clippy::unwrap_used)]
     pub fn extend_with_forced_chunks(&self, out: &mut FxHashSet<Vector2<i32>>) {
         out.extend(self.forced_chunks.lock().unwrap().iter().copied());
     }

@@ -376,6 +376,7 @@ mod tests {
     use crate::{build_equipment_slots, entity_equipment::EntityEquipment};
     use pumpkin_data::item::Item;
     use pumpkin_data::trim::{TrimMaterial, TrimPattern};
+    use tokio::sync::Mutex;
 
     fn handler() -> SmithingScreenHandler {
         let player_inventory = Arc::new(PlayerInventory::new(
@@ -406,7 +407,6 @@ mod tests {
         handler.update_output().await;
 
         let output = handler.output_inventory.get_stack(0).await;
-        let output = output.lock().await;
         assert!(output.item == &Item::NETHERITE_SWORD);
         assert_eq!(output.item_count, 1);
     }
@@ -432,7 +432,6 @@ mod tests {
         handler.update_output().await;
 
         let output = handler.output_inventory.get_stack(0).await;
-        let output = output.lock().await;
         assert!(output.item == &Item::DIAMOND_CHESTPLATE);
         let trim = output.get_data_component::<TrimImpl>().unwrap();
         assert_eq!(trim.material, TrimMaterial::Quartz);
@@ -468,7 +467,7 @@ mod tests {
         handler.update_output().await;
 
         let output = handler.output_inventory.get_stack(0).await;
-        assert!(output.lock().await.is_empty());
+        assert!(output.is_empty());
     }
 
     #[tokio::test]
@@ -481,7 +480,7 @@ mod tests {
         handler.update_output().await;
 
         let output = handler.output_inventory.get_stack(0).await;
-        assert!(output.lock().await.is_empty());
+        assert!(output.is_empty());
     }
 
     #[tokio::test]
@@ -505,23 +504,24 @@ mod tests {
         handler.update_output().await;
 
         let output = handler.output_inventory.get_stack(0).await;
-        assert!(output.lock().await.item == &Item::NETHERITE_SWORD);
+        assert!(output.item == &Item::NETHERITE_SWORD);
 
         // Simulate SmithingOutputSlot::on_take_item shrinking each input by 1 (all three
         // slots start stacked at 2, so one remains in each after the take).
         for index in [TEMPLATE_SLOT, BASE_SLOT, ADDITION_SLOT] {
             let stack = handler.input_inventory.get_stack(index).await;
-            let mut stack = stack.lock().await;
+            let mut stack = stack;
             stack.item_count -= 1;
             if stack.item_count == 0 {
-                *stack = ItemStack::EMPTY.clone();
+                stack = ItemStack::EMPTY.clone();
             }
+            handler.input_inventory.set_stack(index, stack).await;
         }
         handler.update_output().await;
 
         let output = handler.output_inventory.get_stack(0).await;
         assert!(
-            output.lock().await.item == &Item::NETHERITE_SWORD,
+            output.item == &Item::NETHERITE_SWORD,
             "output should repopulate from the remaining stacked template/addition after a craft"
         );
     }

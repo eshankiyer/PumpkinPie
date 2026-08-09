@@ -1373,6 +1373,7 @@ pub enum TextContent {
 
 /// Tests for the text component implementations.
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 mod test {
     use crate::text::{TextComponent, color::NamedColor};
 

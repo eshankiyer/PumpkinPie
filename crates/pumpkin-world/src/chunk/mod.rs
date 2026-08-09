@@ -130,6 +130,7 @@ impl ChunkSections {
     ///
     /// Derived from the live section array rather than stored, so it cannot go stale after
     /// [`ChunkData::pad_sections_to`] grows the chunk.
+    #[allow(clippy::unwrap_used)]
     #[must_use]
     pub fn section_count(&self) -> usize {
         self.block_sections.read().unwrap().len()
