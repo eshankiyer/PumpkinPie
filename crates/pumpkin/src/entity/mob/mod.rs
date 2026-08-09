@@ -1300,6 +1300,16 @@ pub trait Mob: EntityBase + Send + Sync {
 
     fn mob_set_variant_name(&self, _name: &str) {}
 
+    /// Species-specific gate used by the generic animal breeding goal.
+    fn can_breed(&self) -> bool {
+        true
+    }
+
+    /// Species-specific partner gate used by the generic animal breeding goal.
+    fn can_breed_with(&self, _mate: &dyn EntityBase) -> bool {
+        true
+    }
+
     /// Vanilla `Animal.getBreedOffspring`: builds the baby entity to spawn after a successful
     /// breed with `mate`. Override to customize the offspring (e.g. inherited color/variant)
     /// before it enters the world. Returning `None` skips spawning a baby entity entirely,
@@ -1320,11 +1330,23 @@ pub trait Mob: EntityBase + Send + Sync {
         })
     }
 
+    /// Hook for species whose vanilla breeding path creates a non-mob result, such as a sniffer
+    /// egg. It runs after the shared parent finalization.
+    fn spawn_breeding_item<'a>(&'a self, _world: &'a Arc<World>) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async {})
+    }
+
     /// Called once a breed has been claimed (both parents' love ticks reset) and offspring is
     /// about to be created. Override for side effects vanilla ties to a specific `BreedGoal`
     /// subclass rather than the generic breed path, e.g. `Turtle.TurtleBreedGoal.breed` setting
     /// `hasEgg = true` (`Turtle.java:300-326`).
     fn on_bred(&self, _mate: &dyn EntityBase) {}
+
+    /// Vanilla sends entity event 18 after a successful generic breed. Custom breeding goals
+    /// that replace that event can disable it explicitly.
+    fn sends_breed_event(&self) -> bool {
+        true
+    }
 }
 
 struct MutexTakeGuard<'a, T> {

@@ -23,7 +23,11 @@ use crate::entity::{
     mob::{Mob, MobEntity},
     passive::{
         animal::Animal,
-        equine::{AbstractHorse, AbstractHorseData, HORSE_TEMPT_ITEMS, apply_offspring_attribute},
+        equine::{
+            AbstractHorse, AbstractHorseData, HORSE_TEMPT_ITEMS, MAX_HEALTH, MAX_JUMP_STRENGTH,
+            MAX_MOVEMENT_SPEED, MIN_HEALTH, MIN_JUMP_STRENGTH, MIN_MOVEMENT_SPEED,
+            apply_offspring_attribute,
+        },
     },
     player::Player,
 };
@@ -35,10 +39,6 @@ const COMPATIBLE_MATES: &[&EntityType] = &[&EntityType::HORSE, &EntityType::DONK
 const VARIANT_COUNT: u8 = 7;
 /// Horse.java: 5 marking patterns, packed into the high byte of `DATA_ID_TYPE_VARIANT`.
 const MARKINGS_COUNT: u8 = 5;
-
-/// `AbstractHorse.MIN_HEALTH`/`MAX_HEALTH` used by breed-offspring attribute inheritance.
-const MIN_HEALTH: f64 = 15.0;
-const MAX_HEALTH: f64 = 30.0;
 
 /// Represents a Horse, a passive mob that can be tamed, saddled, ridden and bred.
 ///
@@ -283,6 +283,36 @@ impl Mob for HorseEntity {
                     mate_max_health,
                     MIN_HEALTH,
                     MAX_HEALTH,
+                    &mut random,
+                );
+                apply_offspring_attribute(
+                    baby_mob,
+                    &Attributes::JUMP_STRENGTH,
+                    self.mob_entity
+                        .living_entity
+                        .get_attribute_base(&Attributes::JUMP_STRENGTH),
+                    mate.get_mob().map_or(MIN_JUMP_STRENGTH, |m| {
+                        m.get_mob_entity()
+                            .living_entity
+                            .get_attribute_base(&Attributes::JUMP_STRENGTH)
+                    }),
+                    MIN_JUMP_STRENGTH,
+                    MAX_JUMP_STRENGTH,
+                    &mut random,
+                );
+                apply_offspring_attribute(
+                    baby_mob,
+                    &Attributes::MOVEMENT_SPEED,
+                    self.mob_entity
+                        .living_entity
+                        .get_attribute_base(&Attributes::MOVEMENT_SPEED),
+                    mate.get_mob().map_or(MIN_MOVEMENT_SPEED, |m| {
+                        m.get_mob_entity()
+                            .living_entity
+                            .get_attribute_base(&Attributes::MOVEMENT_SPEED)
+                    }),
+                    MIN_MOVEMENT_SPEED,
+                    MAX_MOVEMENT_SPEED,
                     &mut random,
                 );
             }

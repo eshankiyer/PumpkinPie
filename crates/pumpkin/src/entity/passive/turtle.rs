@@ -176,6 +176,10 @@ impl Mob for TurtleEntity {
         &self.mob_entity
     }
 
+    fn can_breed(&self) -> bool {
+        !self.has_egg()
+    }
+
     /// Vanilla `Turtle.canBeLeashed` -> `false`.
     fn can_be_leashed(&self) -> bool {
         false
@@ -194,6 +198,20 @@ impl Mob for TurtleEntity {
     /// always leaves the turtle carrying an egg, on top of the generic `BreedGoal` effects.
     fn on_bred(&self, _mate: &dyn EntityBase) {
         self.set_has_egg(true);
+    }
+
+    /// `TurtleBreedGoal` lays an egg rather than creating a live baby.
+    fn create_offspring<'a>(
+        &'a self,
+        _mate: &'a dyn EntityBase,
+        _world: &'a Arc<crate::world::World>,
+    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
+        Box::pin(async { None })
+    }
+
+    /// `TurtleBreedGoal` does not broadcast Animal's generic event 18.
+    fn sends_breed_event(&self) -> bool {
+        false
     }
 
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {

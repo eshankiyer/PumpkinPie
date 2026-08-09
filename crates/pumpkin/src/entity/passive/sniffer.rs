@@ -175,6 +175,20 @@ impl Mob for SnifferEntity {
         &self.mob_entity
     }
 
+    fn can_breed_with(&self, mate: &dyn EntityBase) -> bool {
+        let allowed = |state| {
+            matches!(
+                state,
+                SnifferState::Idling | SnifferState::Scenting | SnifferState::FeelingHappy
+            )
+        };
+        allowed(self.get_state())
+            && mate
+                .get_mob()
+                .and_then(|mob| mob.cast_any().downcast_ref::<Self>())
+                .is_some_and(|mate| allowed(mate.get_state()))
+    }
+
     fn mob_interact<'a>(
         &'a self,
         player: &'a Arc<crate::entity::player::Player>,
@@ -185,33 +199,26 @@ impl Mob for SnifferEntity {
     }
 
     /// Vanilla `Sniffer.spawnChildFromBreeding`: drops a `SNIFFER_EGG` item instead of spawning
-    /// a live baby. `BreedGoal::breed` spawns the experience orb *outside* the
-    /// `if let Some(baby)` branch, so returning `None` here still preserves the shared
-    /// cooldown/stat/advancement/XP-orb bookkeeping vanilla's
-    /// `finalizeSpawnChildFromBreeding(level, partner, null)` call also does on this path.
+    /// a live baby. The item is emitted by `spawn_breeding_item` after the shared finalization.
     ///
-    /// Deferred (documented simplification): vanilla's `canMate` additionally gates breeding on
-    /// both sniffers being in `{IDLING, SCENTING, FEELING_HAPPY}`. `BreedGoal`/`Mob` has no
-    /// `can_mate` hook today (adding one would mean changing `find_mate` for every breedable
-    /// mob), so any two grown, in-love sniffers can currently mate regardless of state.
     fn create_offspring<'a>(
         &'a self,
         _mate: &'a dyn EntityBase,
-        world: &'a Arc<World>,
+        _world: &'a Arc<World>,
     ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
+        Box::pin(async move { None })
+    }
+
+    fn spawn_breeding_item<'a>(&'a self, world: &'a Arc<World>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             let entity = &self.mob_entity.living_entity.entity;
             let pos = entity.pos.load();
-
             let item_entity = Arc::new(ItemEntity::new(
                 Entity::new(world.clone(), pos, &EntityType::ITEM),
                 ItemStack::new(1, &Item::SNIFFER_EGG),
             ));
             world.spawn_entity(item_entity).await;
-
             world.play_sound(Sound::BlockSnifferEggPlop, SoundCategory::Neutral, &pos);
-
-            None
         })
     }
 }

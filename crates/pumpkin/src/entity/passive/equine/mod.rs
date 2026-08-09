@@ -59,6 +59,14 @@ pub const HORSE_TEMPT_ITEMS: &[&Item] = &[
     &Item::ENCHANTED_GOLDEN_APPLE,
 ];
 
+/// `AbstractHorse` bounds used by `setOffspringAttributes`.
+pub const MIN_HEALTH: f64 = 15.0;
+pub const MAX_HEALTH: f64 = 30.0;
+pub const MIN_JUMP_STRENGTH: f64 = 0.4;
+pub const MAX_JUMP_STRENGTH: f64 = 1.0;
+pub const MIN_MOVEMENT_SPEED: f64 = 0.1125;
+pub const MAX_MOVEMENT_SPEED: f64 = 0.3375;
+
 /// `AbstractHorse.java` `DATA_ID_FLAGS` bits.
 ///
 /// `FLAG_TAME` (2) is intentionally not here -- `MobEntity::is_tamed`/`set_owner` is the single
@@ -438,6 +446,12 @@ pub trait AbstractHorse: Animal {
             {
                 item_used = true;
                 mob_entity.set_love_ticks(600, Some(player.gameprofile.id));
+                let entity = &mob_entity.living_entity.entity;
+                entity.world.load().send_entity_status(
+                    entity,
+                    pumpkin_data::entity::EntityStatus::InLoveHearts,
+                    Some(pumpkin_protocol::bedrock::server::actor_event::ActorEventType::InLoveHearts),
+                );
             }
 
             let living = &mob_entity.living_entity;

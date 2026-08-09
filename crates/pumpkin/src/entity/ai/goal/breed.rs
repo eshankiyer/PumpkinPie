@@ -26,7 +26,7 @@ impl BreedGoal {
 
     fn find_mate(mob: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
         let mob_entity = mob.get_mob_entity();
-        if !mob_entity.is_in_love() {
+        if !mob_entity.is_in_love() || !mob.can_breed() {
             return None;
         }
 
@@ -47,7 +47,14 @@ impl BreedGoal {
             if c_entity.entity_type != my_type {
                 continue;
             }
-            if !candidate.is_in_love() || !candidate.is_breeding_ready() || candidate.is_panicking()
+            let Some(candidate_mob) = candidate.get_mob() else {
+                continue;
+            };
+            if !candidate_mob.can_breed()
+                || !mob.can_breed_with(candidate.as_ref())
+                || !candidate.is_in_love()
+                || !candidate.is_breeding_ready()
+                || candidate.is_panicking()
             {
                 continue;
             }
@@ -74,11 +81,35 @@ impl BreedGoal {
         let entity = mob.get_entity();
         let world = entity.world.load();
 
-        if let Some(player) = mob_entity
+        mob_entity
+            .breeding_cooldown
+            .store(6000, std::sync::atomic::Ordering::Relaxed);
+
+        let parent_pos = entity.pos.load();
+        let baby = mob.create_offspring(mate, &world).await;
+
+        let player = mob_entity
             .breeder
             .load()
-            .and_then(|uuid| world.get_player_by_uuid(uuid))
-        {
+            .and_then(|uuid| {
+                world
+                    .server
+                    .upgrade()
+                    .and_then(|server| server.get_player_by_uuid(uuid))
+                    .or_else(|| world.get_player_by_uuid(uuid))
+            })
+            .or_else(|| {
+                mate.get_mob()
+                    .and_then(|mate_mob| mate_mob.get_mob_entity().breeder.load())
+                    .and_then(|uuid| {
+                        world
+                            .server
+                            .upgrade()
+                            .and_then(|server| server.get_player_by_uuid(uuid))
+                            .or_else(|| world.get_player_by_uuid(uuid))
+                    })
+            });
+        if let Some(player) = player {
             player
                 .increment_stat(
                     pumpkin_data::statistic::StatisticCategory::Custom,
@@ -96,26 +127,39 @@ impl BreedGoal {
                 .await;
         }
 
-        mob_entity
-            .breeding_cooldown
-            .store(6000, std::sync::atomic::Ordering::Relaxed);
-
-        mate.set_breeding_cooldown(6000);
         mob.on_bred(mate);
 
-        let parent_pos = entity.pos.load();
-        if let Some(baby) = mob.create_offspring(mate, &world).await {
+        let baby = baby.map(|baby| {
             if let Some(baby_mob) = baby.get_mob() {
                 baby_mob.set_persistence_required();
             }
             baby.get_entity().set_age(-24000);
-            world.spawn_entity(baby).await;
+            baby
+        });
+
+        mob.get_entity().set_age(6000);
+        mob.reset_love();
+        mate.get_entity().set_age(6000);
+        mate.reset_love();
+        mate.set_breeding_cooldown(6000);
+        if mob.sends_breed_event() {
+            world.send_entity_status(
+                mob.get_entity(),
+                pumpkin_data::entity::EntityStatus::InLoveHearts,
+                Some(pumpkin_protocol::bedrock::server::actor_event::ActorEventType::InLoveHearts),
+            );
         }
 
-        // Vanilla Animal.java#finalizeSpawnChildFromBreeding: every successful breed spawns an
-        // experience orb worth 1-7 xp.
-        let xp = rng().random_range(1u32..=7);
-        ExperienceOrbEntity::spawn(&world, parent_pos, xp).await;
+        if world.level_info.load().game_rules.mob_drops {
+            let xp = rng().random_range(1u32..=7);
+            ExperienceOrbEntity::spawn(&world, parent_pos, xp).await;
+        }
+
+        mob.spawn_breeding_item(&world).await;
+
+        if let Some(baby) = baby {
+            world.spawn_entity(baby).await;
+        }
     }
 }
 
@@ -123,7 +167,7 @@ impl Goal for BreedGoal {
     fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async {
             let mob_entity = mob.get_mob_entity();
-            if !mob_entity.is_breeding_ready() || !mob_entity.is_in_love() {
+            if !mob_entity.is_breeding_ready() || !mob_entity.is_in_love() || !mob.can_breed() {
                 return false;
             }
 
