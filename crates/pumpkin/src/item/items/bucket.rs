@@ -805,12 +805,9 @@ impl ItemBehaviour for MilkBucketItem {
     fn on_stopped_using<'a>(
         &'a self,
         _stack: &'a ItemStack,
-        player: &'a Player,
+        _player: &'a Player,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            player.living_entity.reset_effects_and_attributes().await;
-            give_player_bucket_item(player, &Item::BUCKET).await;
-        })
+        Box::pin(async {})
     }
 
     fn get_use_duration(&self) -> i32 {

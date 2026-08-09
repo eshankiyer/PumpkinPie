@@ -81,7 +81,7 @@ pub mod mangrove_roots;
 pub mod plant;
 pub mod pumpkin;
 pub mod sculk;
- pub mod sculk_vein;
+pub mod sculk_vein;
 pub mod vine;
 
 // Terrain / environment / physics
@@ -109,7 +109,6 @@ pub mod cake;
 pub mod cauldron;
 pub mod composter;
 pub mod ladder;
-pub mod respawn_anchor;
 pub mod slime;
 pub mod spawner;
 pub mod test_block;

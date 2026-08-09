@@ -51,9 +51,7 @@ impl BlockBehaviour for RespawnAnchorBlock {
             let state_id = args.world.get_block_state_id(args.position);
             let mut props = RespawnAnchorLikeProperties::from_state_id(state_id, args.block);
 
-            if args.item_stack.item.id != Item::GLOWSTONE.id
-                || props.charges >= Self::MAX_CHARGES
-            {
+            if args.item_stack.item.id != Item::GLOWSTONE.id || props.charges >= Self::MAX_CHARGES {
                 // Vanilla additionally checks the off-hand item here (`useItemOn`,
                 // `RespawnAnchorBlock.java:92-96`): if the main hand isn't usable but the
                 // off-hand holds glowstone and the anchor is chargeable, it returns `PASS` so

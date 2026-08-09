@@ -915,10 +915,7 @@ pub trait Mob: EntityBase + Send + Sync {
     /// Vanilla `Mob.requiresCustomPersistence`: passengers and leashed mobs
     /// must not be removed by the normal despawn checks.
     fn requires_custom_persistence(&self) -> EntityBaseFuture<'_, bool> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            entity.vehicle.lock().await.is_some() || entity.leashed_to.lock().await.is_some()
-        })
+        Box::pin(async move { self.get_entity().requires_custom_persistence.load(Relaxed) })
     }
 
     /// Vanilla `Mob.checkDespawn`, called by the server entity tick loop.

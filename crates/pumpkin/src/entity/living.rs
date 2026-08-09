@@ -3829,6 +3829,11 @@ impl EntityBase for LivingEntity {
                                 } else {
                                     held.decrement_unless_creative(player.gamemode.load(), 1);
                                 }
+                                if held.is_empty()
+                                    && let Some(remainder) = consumable_remainder(item)
+                                {
+                                    held = ItemStack::new(1, remainder);
+                                }
                                 player.inventory.set_held_item(held).await;
                                 handled = true;
                             }
@@ -3847,6 +3852,11 @@ impl EntityBase for LivingEntity {
                                     } else {
                                         off_hand
                                             .decrement_unless_creative(player.gamemode.load(), 1);
+                                    }
+                                    if off_hand.is_empty()
+                                        && let Some(remainder) = consumable_remainder(item)
+                                    {
+                                        off_hand = ItemStack::new(1, remainder);
                                     }
                                     player
                                         .inventory
@@ -3873,6 +3883,11 @@ impl EntityBase for LivingEntity {
                                     }
                                 } else {
                                     item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+                                }
+                                if item_stack.is_empty()
+                                    && let Some(remainder) = consumable_remainder(item)
+                                {
+                                    item_stack = ItemStack::new(1, remainder);
                                 }
                                 player
                                     .inventory

@@ -559,7 +559,7 @@ pub trait AbstractHorse: Animal {
                 }
 
                 if item_stack.item.id == Item::SADDLE.id
-                    && !self.is_saddled().await
+                    && !AbstractHorse::is_saddled(self).await
                     && self.can_use_saddle_slot()
                 {
                     self.equip_saddle(player, item_stack).await;

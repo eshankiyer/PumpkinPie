@@ -90,6 +90,7 @@ impl DataComponentImpl for WrittenBookContentImpl {
             .map(|p| NbtTag::String(p.clone().into_boxed_str()))
             .collect();
         compound.put("pages", NbtTag::List(pages_tags));
+        compound.put_int("generation", self.generation);
         NbtTag::Compound(compound)
     }
     default_impl!(WrittenBookContent);

@@ -4,6 +4,7 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::Sound;
 use pumpkin_data::{entity::EntityType, item::Item};
 
+use crate::entity::item_steerable::{ItemBasedSteering, ItemSteerable};
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ageable::AgeableMob,
@@ -16,7 +17,6 @@ use crate::entity::{
     passive::animal::Animal,
     player::Player,
 };
-use crate::entity::item_steerable::{ItemBasedSteering, ItemSteerable};
 use pumpkin_nbt::compound::NbtCompound;
 
 /// `strider_tempt_items` tag (`#strider_food` + `warped_fungus_on_a_stick`).

@@ -296,7 +296,10 @@ impl SpawnState {
     pub fn add_entity(&self, world: &World, entity: &dyn EntityBase) {
         let base_entity = entity.get_entity();
         let entity_type = base_entity.entity_type;
-        if !entity_type.mob || entity_type.category == &MobCategory::MISC {
+        if !counts_toward_natural_spawn_cap(entity) {
+            return;
+        }
+        if base_entity.natural_spawn_cap_counted.swap(true, Relaxed) {
             return;
         }
         let entity_pos = base_entity.block_pos.load();
@@ -317,7 +320,7 @@ impl SpawnState {
     pub fn remove_entity(&self, world: &World, entity: &dyn EntityBase) {
         let base_entity = entity.get_entity();
         let entity_type = base_entity.entity_type;
-        if !entity_type.mob || entity_type.category == &MobCategory::MISC {
+        if !base_entity.natural_spawn_cap_counted.swap(false, Relaxed) {
             return;
         }
         let entity_pos = base_entity.block_pos.load();
@@ -345,18 +348,19 @@ impl SpawnState {
         let counter = MobCounts::default();
         let active_chunks = world.active_chunks.load();
         for entity in entities.load().iter() {
-            let entity = entity.get_entity();
-            let entity_type = entity.entity_type;
-            if !entity_type.mob || entity_type.category == &MobCategory::MISC {
-                // TODO (mob.isPersistenceRequired() || mob.requiresCustomPersistence())
+            let entity_base = entity.get_entity();
+            entity_base.natural_spawn_cap_counted.store(false, Relaxed);
+            if !counts_toward_natural_spawn_cap(entity.as_ref()) {
                 continue;
             }
-            let chunk_pos = entity.chunk_pos.load();
+            let entity_type = entity_base.entity_type;
+            let chunk_pos = entity_base.chunk_pos.load();
             if !active_chunks.contains(&chunk_pos) {
                 continue;
             }
-            let entity_pos = entity.block_pos.load();
-            let biome = entity.current_biome.load();
+            entity_base.natural_spawn_cap_counted.store(true, Relaxed);
+            let entity_pos = entity_base.block_pos.load();
+            let biome = entity_base.current_biome.load();
             if let Some(cost) = biome.spawn_costs.get(entity_type.resource_name) {
                 potential.add_charge(&entity_pos, cost.charge);
             }
@@ -451,6 +455,19 @@ impl SpawnState {
             entity_type.category,
         );
     }
+}
+
+fn counts_toward_natural_spawn_cap(entity: &dyn EntityBase) -> bool {
+    let entity_type = entity.get_entity().entity_type;
+    entity_type.mob
+        && entity_type.category != &MobCategory::MISC
+        && entity
+            .get_mob()
+            .is_some_and(|mob| !mob.is_persistence_required())
+        && !entity
+            .get_entity()
+            .requires_custom_persistence
+            .load(Relaxed)
 }
 
 #[must_use]

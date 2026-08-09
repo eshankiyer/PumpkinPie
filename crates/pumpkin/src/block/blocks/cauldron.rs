@@ -1,12 +1,12 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use crate::world::World;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
     BlockBehaviour, BlockFuture, BlockMetadata, GetComparatorOutputArgs, HandlePrecipitationArgs,
     OnEntityCollisionArgs, Precipitation, UseWithItemArgs,
 };
+use crate::world::World;
 use crate::world::game_event::{GameEventContext, emit_game_event};
 use pumpkin_data::Block;
 use pumpkin_data::BlockId;
