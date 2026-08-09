@@ -2550,12 +2550,12 @@ impl JavaClient {
             }
         }}
 
-        let mut item = if matches!(hand, Hand::Left) {
+        let mut item = if matches!(hand, Hand::Right) {
             held_item
         } else {
             off_hand_item
         };
-        let equipment_slot = if matches!(hand, Hand::Left) {
+        let equipment_slot = if matches!(hand, Hand::Right) {
             EquipmentSlot::MAIN_HAND
         } else {
             EquipmentSlot::OFF_HAND
