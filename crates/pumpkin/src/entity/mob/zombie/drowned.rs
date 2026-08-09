@@ -1,8 +1,10 @@
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::entity::EntityType;
 
+use crate::entity::ai::control::drowned_move_control::DrownedMoveControl;
 use crate::entity::ai::goal::drowned_attack::DrownedAttackGoal;
 use crate::entity::ai::goal::drowned_go_to_beach::DrownedGoToBeachGoal;
 use crate::entity::ai::goal::drowned_go_to_water::DrownedGoToWaterGoal;
@@ -12,7 +14,7 @@ use crate::entity::ai::goal::ranged_trident_attack::DrownedTridentAttackGoal;
 use crate::entity::living::LivingEntity;
 use crate::entity::mob::zombie::ZombieEntityBase;
 use crate::entity::{
-    Entity, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, destroy_egg::DestroyEggGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal, revenge::RevengeGoal,
@@ -24,6 +26,9 @@ use crate::world::World;
 
 pub struct DrownedEntity {
     entity: Arc<ZombieEntityBase>,
+    searching_for_land: AtomicBool,
+    target_in_water: AtomicBool,
+    target_is_above: AtomicBool,
 }
 
 /// `Drowned#okTarget` (`Drowned.java:223-225`): a potential player target is only valid while
@@ -33,6 +38,7 @@ async fn ok_target(target: Arc<LivingEntity>, world: Arc<World>) -> bool {
 }
 
 impl DrownedEntity {
+    #[allow(clippy::too_many_lines)]
     pub fn new(entity: Entity) -> Arc<Self> {
         // Deliberately not `ZombieEntityBase::new(entity)`: that constructor registers the
         // plain-Zombie goal set (SpearUseGoal, ZombieAttackGoal, the generic ActiveTargetGoal
@@ -43,7 +49,12 @@ impl DrownedEntity {
         // "Fix duplicated" TODO was pointing at).
         let mob_entity = MobEntity::new(entity);
         let base = Arc::new(ZombieEntityBase { mob_entity });
-        let drowned = Self { entity: base };
+        let drowned = Self {
+            entity: base,
+            searching_for_land: AtomicBool::new(false),
+            target_in_water: AtomicBool::new(false),
+            target_is_above: AtomicBool::new(false),
+        };
         let mob_arc = Arc::new(drowned);
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
@@ -62,6 +73,32 @@ impl DrownedEntity {
             .lock()
             .unwrap()
             .set_pathfinding_malus(crate::entity::ai::pathfinder::node::PathType::Water, 0.0);
+        mob_arc
+            .entity
+            .mob_entity
+            .navigator
+            .lock()
+            .unwrap()
+            .set_amphibious(true);
+        mob_arc
+            .entity
+            .mob_entity
+            .navigator
+            .lock()
+            .unwrap()
+            .set_pathfinding_malus(crate::entity::ai::pathfinder::node::PathType::Walkable, 6.0);
+        mob_arc
+            .entity
+            .mob_entity
+            .navigator
+            .lock()
+            .unwrap()
+            .set_pathfinding_malus(
+                crate::entity::ai::pathfinder::node::PathType::WaterBorder,
+                4.0,
+            );
+        *mob_arc.entity.mob_entity.move_control.lock().unwrap() =
+            Box::new(DrownedMoveControl::default());
 
         {
             let mut goal_selector = mob_arc.entity.mob_entity.goals_selector.lock().unwrap();
@@ -151,5 +188,103 @@ impl NBTStorage for DrownedEntity {}
 impl Mob for DrownedEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.entity.mob_entity
+    }
+
+    fn wants_to_swim(&self) -> bool {
+        self.searching_for_land.load(Relaxed) || self.target_in_water.load(Relaxed)
+    }
+
+    fn is_searching_for_land(&self) -> bool {
+        self.searching_for_land.load(Relaxed)
+    }
+
+    fn target_is_above(&self) -> bool {
+        self.target_is_above.load(Relaxed)
+    }
+
+    fn mob_is_pushed_by_fluids(&self) -> bool {
+        !self
+            .entity
+            .mob_entity
+            .living_entity
+            .entity
+            .swimming
+            .load(Relaxed)
+    }
+
+    fn set_searching_for_land(&self, searching: bool) {
+        self.searching_for_land.store(searching, Relaxed);
+    }
+
+    fn mob_tick<'a>(
+        &'a self,
+        _caller: &'a Arc<dyn crate::entity::EntityBase>,
+    ) -> crate::entity::EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            let target = self.entity.mob_entity.get_target().await;
+            let living = &self.entity.mob_entity.living_entity;
+            let entity = &living.entity;
+            let pos = entity.pos.load();
+            self.target_in_water.store(
+                target
+                    .as_ref()
+                    .is_some_and(|target| target.get_entity().touching_water.load(Relaxed)),
+                Relaxed,
+            );
+            self.target_is_above.store(
+                target
+                    .as_ref()
+                    .is_some_and(|target| target.get_entity().pos.load().y > pos.y),
+                Relaxed,
+            );
+        })
+    }
+
+    fn update_swimming(&self) -> crate::entity::EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let entity = &self.entity.mob_entity.living_entity.entity;
+            let target = self.entity.mob_entity.get_target().await;
+            let position = entity.pos.load();
+            self.target_in_water.store(
+                target
+                    .as_ref()
+                    .is_some_and(|target| target.get_entity().touching_water.load(Relaxed)),
+                Relaxed,
+            );
+            self.target_is_above.store(
+                target
+                    .as_ref()
+                    .is_some_and(|target| target.get_entity().pos.load().y > position.y),
+                Relaxed,
+            );
+
+            let underwater =
+                entity.touching_water.load(Relaxed) && entity.was_eye_in_water.load(Relaxed);
+            entity
+                .set_swimming(!entity.no_ai.load(Relaxed) && underwater && self.wants_to_swim())
+                .await;
+        })
+    }
+
+    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async move {
+            let living = &self.entity.mob_entity.living_entity;
+            let entity = &living.entity;
+            if !self.wants_to_swim()
+                || !entity.touching_water.load(Relaxed)
+                || !entity.was_eye_in_water.load(Relaxed)
+            {
+                return false;
+            }
+
+            // `Drowned.travelInWater` (`Drowned.java:243-251`) uses a fixed 0.01
+            // movement speed and 0.9 drag while underwater and swimming. It does not
+            // run the generic gravity/0.8-water-drag path.
+            entity.update_velocity_from_input(living.movement_input.load(), 0.01);
+            let velocity = entity.velocity.load();
+            entity.move_entity(caller, velocity).await;
+            entity.velocity.store(entity.velocity.load() * 0.9);
+            true
+        })
     }
 }

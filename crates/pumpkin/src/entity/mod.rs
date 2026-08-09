@@ -895,6 +895,11 @@ pub struct Entity {
     pub on_ground: AtomicBool,
     /// Indicates whether the entity is touching water
     pub touching_water: AtomicBool,
+    /// Indicates whether the entity's eyes were in water at the start of the current tick.
+    /// This is the server-side equivalent of vanilla's `wasEyeInWater` field.
+    pub was_eye_in_water: AtomicBool,
+    /// Cached eye-in-water result from the most recent fluid interaction update.
+    eye_in_water: AtomicBool,
     /// Indicates the fluid height
     pub water_height: AtomicCell<f64>,
     /// Indicates whether the entity is touching lava
@@ -1150,6 +1155,8 @@ impl Entity {
             entity_type,
             on_ground: AtomicBool::new(false),
             touching_water: AtomicBool::new(false),
+            was_eye_in_water: AtomicBool::new(false),
+            eye_in_water: AtomicBool::new(false),
             water_height: AtomicCell::new(0.0),
             touching_lava: AtomicBool::new(false),
             lava_height: AtomicCell::new(0.0),
@@ -2358,7 +2365,7 @@ impl Entity {
 
     // Entity.updateVelocity in yarn
 
-    fn update_velocity_from_input(&self, movement_input: Vector3<f64>, speed: f64) {
+    pub(crate) fn update_velocity_from_input(&self, movement_input: Vector3<f64>, speed: f64) {
         let final_input = self.movement_input_to_velocity(movement_input, speed);
 
         self.velocity.store(self.velocity.load() + final_input);
@@ -4075,7 +4082,18 @@ impl EntityBase for Entity {
 
             self.update_last_pos();
             self.tick_portal(caller).await;
+            self.was_eye_in_water
+                .store(self.eye_in_water.load(Relaxed), Relaxed);
             self.update_fluid_state(caller).await;
+            let world = self.world.load();
+            let eye_y = self.get_eye_y();
+            let eye_pos = self.pos.load();
+            let eye_block = BlockPos::floored(eye_pos.x, eye_y, eye_pos.z);
+            let (fluid, state) = world.get_fluid_and_fluid_state(&eye_block);
+            let eye_in_water = fluid.has_tag(&tag::Fluid::MINECRAFT_WATER)
+                && f64::from(eye_block.0.y) + world.get_fluid_height(&eye_block, fluid, state)
+                    >= eye_y;
+            self.eye_in_water.store(eye_in_water, Relaxed);
             self.check_out_of_world(&**caller).await;
             let fire_ticks = self.fire_ticks.load(Ordering::Relaxed);
 

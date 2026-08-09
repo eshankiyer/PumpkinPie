@@ -259,6 +259,12 @@ impl PathfindingContext {
         collision_height_for_state(BlockState::from_id(state_id))
     }
 
+    #[must_use]
+    pub fn is_water(&self, pos: Vector3<i32>) -> bool {
+        Fluid::from_state_id(self.world.get_block_state_id(&pos.as_blockpos()))
+            .is_some_and(|fluid| fluid.has_tag(&tag::Fluid::MINECRAFT_WATER))
+    }
+
     pub fn clear_caches(&mut self) {
         if let Some(ref mut cache) = self.path_type_cache {
             cache.clear();

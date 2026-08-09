@@ -3412,6 +3412,11 @@ impl EntityBase for LivingEntity {
     ) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             self.entity.tick(caller, server).await;
+            if let Some(mob) = caller.get_mob()
+                && mob.get_entity().entity_id == self.entity.entity_id
+            {
+                mob.update_swimming().await;
+            }
             let was_alive_before_air =
                 !self.dead.load(Relaxed) && self.health.load() > 0.0 && !self.entity.is_removed();
             if self.entity.entity_type == &EntityType::PLAYER

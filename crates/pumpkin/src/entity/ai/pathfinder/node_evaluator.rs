@@ -50,6 +50,7 @@ pub struct MobData {
     pub avoids_fire: bool,
     pub avoids_water: bool,
     pub on_ground: bool,
+    pub in_water: bool,
     pub path_type_malus: [Option<f32>; PATH_TYPE_COUNT],
 }
 
@@ -67,6 +68,7 @@ impl MobData {
             avoids_fire: true,
             avoids_water: false,
             on_ground,
+            in_water: false,
             path_type_malus: [None; PATH_TYPE_COUNT],
         };
 
@@ -97,6 +99,7 @@ impl MobData {
             avoids_fire: true,
             avoids_water: false,
             on_ground: true,
+            in_water: false,
             path_type_malus: [None; PATH_TYPE_COUNT],
         }
     }

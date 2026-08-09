@@ -17,6 +17,7 @@ pub struct WalkNodeEvaluator {
     path_types_cache: FxHashMap<Vector3<i32>, PathType>,
     reusable_neighbors: [Option<Node>; 4],
     flying: bool,
+    amphibious: bool,
 }
 
 impl WalkNodeEvaluator {
@@ -27,6 +28,7 @@ impl WalkNodeEvaluator {
             path_types_cache: FxHashMap::default(),
             reusable_neighbors: [None, None, None, None],
             flying: false,
+            amphibious: false,
         }
     }
 
@@ -39,8 +41,12 @@ impl WalkNodeEvaluator {
         self.flying
     }
 
-    const fn is_amphibious(&self) -> bool {
-        self.base.can_float
+    pub(crate) const fn is_amphibious(&self) -> bool {
+        self.amphibious
+    }
+
+    pub const fn set_amphibious(&mut self, amphibious: bool) {
+        self.amphibious = amphibious;
     }
 
     fn get_floor_level(&self, pos: Vector3<i32>) -> f64 {
@@ -48,7 +54,12 @@ impl WalkNodeEvaluator {
             .context
             .as_ref()
             .map_or(f64::from(pos.y), |context| {
-                f64::from(pos.y) + context.collision_height(pos)
+                if (self.base.can_float || self.is_amphibious()) && context.is_water(pos) {
+                    f64::from(pos.y) + 0.5
+                } else {
+                    let below = pos.add_raw(0, -1, 0);
+                    f64::from(below.y) + context.collision_height(below)
+                }
             })
     }
 
@@ -346,7 +357,7 @@ impl WalkNodeEvaluator {
     /// searching for a floor below them. The fallback candidates cover the same immediate
     /// escape positions for a blocked start while keeping the evaluator's node cache intact.
     async fn get_flying_start(&mut self) -> Option<Node> {
-        let mob_data = self.base.mob_data.as_ref()?;
+        let mob_data = *self.base.mob_data.as_ref()?;
         let start = Vector3::new(
             mob_data.position.x.floor() as i32,
             (mob_data.position.y + 0.5).floor() as i32,
@@ -609,14 +620,13 @@ impl NodeEvaluator for WalkNodeEvaluator {
             return self.get_flying_start().await;
         }
 
-        let mob_data = self.base.mob_data.as_ref()?;
+        let mob_data = *self.base.mob_data.as_ref()?;
         let mob_x = mob_data.position.x;
         let mob_y_f64 = mob_data.position.y;
         let mob_z = mob_data.position.z;
         let on_ground = mob_data.on_ground;
 
-        // TODO: add swimming support
-        let y = if on_ground {
+        let y = if (self.is_amphibious() && mob_data.in_water) || on_ground {
             (mob_y_f64 + 0.5).floor() as i32
         } else {
             let start_y = (mob_y_f64 + 1.0).floor() as i32;
@@ -638,8 +648,16 @@ impl NodeEvaluator for WalkNodeEvaluator {
             found_y
         };
 
-        let block_x = mob_x.floor() as i32;
-        let block_z = mob_z.floor() as i32;
+        let block_x = if self.is_amphibious() && mob_data.in_water {
+            (mob_x - f64::from(mob_data.width) * 0.5).floor() as i32
+        } else {
+            mob_x.floor() as i32
+        };
+        let block_z = if self.is_amphibious() && mob_data.in_water {
+            (mob_z - f64::from(mob_data.width) * 0.5).floor() as i32
+        } else {
+            mob_z.floor() as i32
+        };
         let start_pos = Vector3::new(block_x, y, block_z);
 
         if let Some(node) = self.get_start_node(start_pos).await {
@@ -662,6 +680,7 @@ impl NodeEvaluator for WalkNodeEvaluator {
         Target::new(node)
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn get_neighbors(&mut self, current: &Node, out_neighbors: &mut Vec<Node>) {
         if self.flying {
             self.get_flying_neighbors(current, out_neighbors).await;
@@ -704,6 +723,41 @@ impl NodeEvaluator for WalkNodeEvaluator {
                 if Self::is_neighbor_valid(Some(&neighbor), current) {
                     out_neighbors.push(neighbor);
                 }
+            }
+        }
+
+        if self.is_amphibious() {
+            let up = self
+                .find_accepted_node(
+                    current.pos.0.add_raw(0, 1, 0),
+                    max_y_step.saturating_sub(1),
+                    floor_level,
+                    (0, 0),
+                    current_type,
+                )
+                .await;
+            if up.as_ref().is_some_and(|node| {
+                node.path_type == PathType::Water && Self::is_neighbor_valid(Some(node), current)
+            }) {
+                out_neighbors.push(up.unwrap());
+            }
+
+            let down = self
+                .find_accepted_node(
+                    current.pos.0.add_raw(0, -1, 0),
+                    max_y_step,
+                    floor_level,
+                    (0, 0),
+                    current_type,
+                )
+                .await;
+            if current_type != PathType::Trapdoor
+                && down.as_ref().is_some_and(|node| {
+                    node.path_type == PathType::Water
+                        && Self::is_neighbor_valid(Some(node), current)
+                })
+            {
+                out_neighbors.push(down.unwrap());
             }
         }
 
@@ -757,6 +811,25 @@ impl NodeEvaluator for WalkNodeEvaluator {
                 for dz in 0..mob_data.get_bb_width() {
                     let check_pos = pos.add_raw(dx, dy, dz);
                     let mut cell_type = context.get_land_node_type(check_pos);
+
+                    if self.is_amphibious()
+                        && cell_type == PathType::Water
+                        && [
+                            Vector3::new(1, 0, 0),
+                            Vector3::new(-1, 0, 0),
+                            Vector3::new(0, 1, 0),
+                            Vector3::new(0, -1, 0),
+                            Vector3::new(0, 0, 1),
+                            Vector3::new(0, 0, -1),
+                        ]
+                        .into_iter()
+                        .any(|direction| {
+                            context.get_path_type_from_state(check_pos + direction)
+                                == PathType::Blocked
+                        })
+                    {
+                        cell_type = PathType::WaterBorder;
+                    }
 
                     if cell_type == PathType::DoorWoodClosed
                         && self.base.can_open_doors

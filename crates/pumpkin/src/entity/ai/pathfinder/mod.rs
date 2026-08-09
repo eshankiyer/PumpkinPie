@@ -141,6 +141,10 @@ impl Navigator {
         self.evaluator.set_can_float(can_float);
     }
 
+    pub const fn set_amphibious(&mut self, amphibious: bool) {
+        self.evaluator.set_amphibious(amphibious);
+    }
+
     pub const fn set_mob_dimensions(&mut self, width: f32, height: f32) {
         self.mob_width = width;
         self.mob_height = height;
@@ -162,6 +166,7 @@ impl Navigator {
                 evaluator.set_can_pass_doors(self.evaluator.can_pass_doors());
                 evaluator.set_can_open_doors(self.evaluator.can_open_doors());
                 evaluator.set_can_float(self.evaluator.can_float());
+                evaluator.set_amphibious(self.evaluator.is_amphibious());
                 evaluator.set_flying(self.evaluator.is_flying());
                 evaluator
             },
@@ -222,6 +227,7 @@ impl Navigator {
         let context = PathfindingContext::new(mob_position, entity.entity.world.load_full());
         let mut mob_data = MobData::new(start_pos_f, self.mob_width, self.mob_height, 1.0);
         mob_data.on_ground = entity.entity.on_ground.load(Ordering::Relaxed);
+        mob_data.in_water = entity.entity.touching_water.load(Ordering::Relaxed);
         mob_data.set_pathfinding_malus(PathType::DangerFire, 16.0);
         mob_data.set_pathfinding_malus(PathType::DamageFire, -1.0);
         mob_data.set_pathfinding_malus(PathType::Water, 8.0);
@@ -238,9 +244,12 @@ impl Navigator {
         let mut start_node = self.evaluator.get_start().await?;
 
         // Vanilla NodeEvaluator floors navigation coordinates before resolving the target node.
-        let mut target = self
-            .evaluator
-            .get_target(BlockPos(destination.floor_to_i32()));
+        let target_pos = if self.evaluator.is_amphibious() {
+            BlockPos::floored(destination.x, destination.y + 0.5, destination.z)
+        } else {
+            BlockPos(destination.floor_to_i32())
+        };
+        let mut target = self.evaluator.get_target(target_pos);
 
         start_node.g = 0.0;
         let start_dist = start_node.distance(&target);
@@ -412,6 +421,9 @@ impl Navigator {
             self.last_node_index = 0;
             self.path_start_pos = Some(entity.entity.pos.load());
             self.repath_cooldown = 15; // ~0.75 seconds cooldown before recomputing
+            if self.current_path.is_some() {
+                self.is_idle.store(false, Ordering::Relaxed);
+            }
         }
 
         if self.current_path.is_none() {
@@ -476,6 +488,78 @@ impl Navigator {
 
             let on_ground = entity.entity.on_ground.load(Ordering::Relaxed);
 
+            if self.evaluator.is_amphibious()
+                && path.get_next_node_index() + 1 < path.get_node_count()
+                && let Some(next) = path.get_next_entity_pos(self.mob_width)
+            {
+                let current = path.get_next_node_pos().unwrap();
+                let position = entity.entity.pos.load();
+                let mob_position = Vector3::new(
+                    position.x,
+                    position.y + f64::from(entity.entity.height()) * 0.5,
+                    position.z,
+                );
+                let world = entity.entity.world.load();
+                let dx = mob_position.x - (f64::from(current.x) + 0.5);
+                let dy = mob_position.y - f64::from(current.y);
+                let dz = mob_position.z - (f64::from(current.z) + 0.5);
+                let close_to_current = dx.mul_add(dx, dy.mul_add(dy, dz * dz)) < 4.0;
+                let can_move_directly =
+                    if close_to_current && entity.entity.touching_water.load(Ordering::Relaxed) {
+                        Self::can_move_directly(
+                            &world,
+                            mob_position,
+                            Vector3::new(
+                                f64::from(next.0),
+                                f64::from(next.1) + f64::from(entity.entity.height()) * 0.5,
+                                f64::from(next.2),
+                            ),
+                        )
+                        .await
+                    } else {
+                        false
+                    };
+                if can_move_directly {
+                    path.advance();
+                } else if close_to_current
+                    && path
+                        .get_next_node()
+                        .is_some_and(|node| Self::can_cut_corner(node.path_type))
+                {
+                    let current_node = Vector3::new(
+                        f64::from(current.x) + 0.5,
+                        f64::from(current.y),
+                        f64::from(current.z) + 0.5,
+                    );
+                    let next_node = path
+                        .get_node_pos(path.get_next_node_index() + 1)
+                        .map(|pos| {
+                            Vector3::new(
+                                f64::from(pos.x) + 0.5,
+                                f64::from(pos.y),
+                                f64::from(pos.z) + 0.5,
+                            )
+                        });
+                    if let Some(next_node) = next_node {
+                        let current_delta = current_node - mob_position;
+                        let next_delta = next_node - mob_position;
+                        let current_distance = current_delta.length_squared();
+                        let next_distance = next_delta.length_squared();
+                        let closer_to_next = next_distance < current_distance;
+                        let within_current = current_distance < 0.5;
+                        if (closer_to_next || within_current)
+                            && current_distance > 0.0
+                            && next_distance > 0.0
+                            && current_delta.dot(&next_delta)
+                                / (current_distance.sqrt() * next_distance.sqrt())
+                                < 0.0
+                        {
+                            path.advance();
+                        }
+                    }
+                }
+            }
+
             if let Some(next_block) = path.get_next_node_pos() {
                 let target_pos = Vector3::new(
                     f64::from(next_block.x) + 0.5,
@@ -494,12 +578,18 @@ impl Navigator {
                 // Skip node if we're above it on the same XZ column and airborne (falling toward it)
                 if !on_ground && horizontal_dist < NODE_REACH_XZ && dy < -0.5 {
                     path.advance();
+                    if path.is_done() {
+                        self.is_idle.store(true, Ordering::Relaxed);
+                    }
                     self.current_goal = Some(goal);
                     return;
                 }
 
                 if horizontal_dist < NODE_REACH_XZ && dy.abs() < NODE_REACH_Y {
                     path.advance();
+                    if path.is_done() {
+                        self.is_idle.store(true, Ordering::Relaxed);
+                    }
                     self.current_goal = Some(goal);
                     return;
                 }
@@ -516,7 +606,11 @@ impl Navigator {
                 // Mob.setSpeed(speedModifier * MOVEMENT_SPEED), which also sets zza.
                 let speed = entity.speed_for_modifier(goal.speed);
                 entity.movement_input.store(Vector3::new(0.0, 0.0, 0.0));
-                entity.set_speed(speed);
+                if !self.evaluator.is_amphibious()
+                    || !entity.entity.touching_water.load(Ordering::Relaxed)
+                {
+                    entity.set_speed(speed);
+                }
             } else {
                 self.is_idle.store(true, Ordering::Relaxed);
                 self.current_path = None;
@@ -527,6 +621,24 @@ impl Navigator {
         self.current_goal = Some(goal);
     }
 
+    async fn can_move_directly(
+        world: &std::sync::Arc<crate::world::World>,
+        start: Vector3<f64>,
+        stop: Vector3<f64>,
+    ) -> bool {
+        world
+            .raycast_collision(start, stop, async |_, _| true)
+            .await
+            .is_none()
+    }
+
+    const fn can_cut_corner(path_type: PathType) -> bool {
+        !matches!(
+            path_type,
+            PathType::DangerFire | PathType::DangerOther | PathType::WalkableDoor
+        )
+    }
+
     #[must_use]
     pub const fn get_current_path(&self) -> Option<&Path> {
         self.current_path.as_ref()
@@ -534,6 +646,16 @@ impl Navigator {
 
     pub fn is_idle(&self) -> bool {
         self.is_idle.load(Ordering::Relaxed)
+    }
+
+    pub fn close_to_next_pos(&self, pos: Vector3<f64>) -> bool {
+        self.current_path.as_ref().is_some_and(|path| {
+            let target = path.get_target();
+            let dx = pos.x - f64::from(target.x);
+            let dy = pos.y - f64::from(target.y);
+            let dz = pos.z - f64::from(target.z);
+            dx.mul_add(dx, dy.mul_add(dy, dz * dz)) < 4.0
+        })
     }
 
     /// Returns the next path waypoint in the form consumed by vanilla's

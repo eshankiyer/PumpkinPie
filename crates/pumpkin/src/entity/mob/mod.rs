@@ -695,6 +695,24 @@ impl MobEntity {
 }
 
 pub trait Mob: EntityBase + Send + Sync {
+    /// Vanilla `Drowned.wantsToSwim`; ordinary mobs do not have a swimming controller state.
+    fn wants_to_swim(&self) -> bool {
+        false
+    }
+
+    /// Vanilla `Drowned.isSearchingForLand`.
+    fn is_searching_for_land(&self) -> bool {
+        false
+    }
+
+    /// Vanilla target-height check used by `DrownedMoveControl`.
+    fn target_is_above(&self) -> bool {
+        false
+    }
+
+    /// Vanilla `Drowned.setSearchingForLand`.
+    fn set_searching_for_land(&self, _searching: bool) {}
+
     /// Vanilla `Entity.isAffectedByFluids`; ordinary mobs use the base `true` behavior.
     fn is_affected_by_fluids(&self) -> bool {
         true
@@ -1011,6 +1029,12 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
+    /// Vanilla `PathfinderMob.getWalkTargetValue`; concrete mobs may override the position
+    /// weight used by `DefaultRandomPos`.
+    fn get_walk_target_value(&self, _pos: &BlockPos) -> f64 {
+        0.0
+    }
+
     fn get_meeting_point(&self) -> Option<BlockPos> {
         None
     }
@@ -1022,6 +1046,11 @@ pub trait Mob: EntityBase + Send + Sync {
     /// Per-mob tick hook called after selectors and navigation, before movement controls.
     /// This is vanilla `Mob.customServerAiStep`'s position in `Mob.serverAiStep`.
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async {})
+    }
+
+    /// Vanilla `LivingEntity.updateSwimming`, called from the base tick before mob AI runs.
+    fn update_swimming(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async {})
     }
 
