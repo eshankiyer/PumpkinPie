@@ -3980,8 +3980,11 @@ impl LivingEntity {
                         .await;
                     }
                 }
-                ConsumeEffect::RemoveEffects(effects) => {
-                    if let pumpkin_data::data_component_impl::IDSet::IDs(ids) = effects {
+                ConsumeEffect::ClearAllEffects => {
+                    self.reset_effects_and_attributes().await;
+                }
+                ConsumeEffect::RemoveEffects(idset) => {
+                    if let pumpkin_data::data_component_impl::IDSet::IDs(ids) = idset {
                         for effect_type in ids.iter() {
                             self.remove_effect(effect_type).await;
                         }
@@ -3994,7 +3997,6 @@ impl LivingEntity {
                 ConsumeEffect::TeleportRandomly(diameter) => {
                     self.teleport_randomly_on_consume(*diameter).await;
                 }
-                ConsumeEffect::ClearAllEffects => {}
             }
         }
     }

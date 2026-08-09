@@ -6,7 +6,7 @@ use crate::entity::player::Player;
 use crate::item::{ItemBehaviour, ItemMetadata};
 use crate::server::Server;
 use pumpkin_data::data_component::DataComponent;
-use pumpkin_data::data_component_impl::{LodestoneTarget, LodestoneTrackerImpl};
+use pumpkin_data::data_component_impl::{DataComponentImpl, LodestoneTarget, LodestoneTrackerImpl};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
@@ -18,10 +18,7 @@ pub struct CompassItem;
 
 impl ItemMetadata for CompassItem {
     fn ids() -> Box<[u16]> {
-        // Note: `RECOVERY_COMPASS` is a plain `Item` in vanilla, not a `CompassItem` -
-        // it always points at the player's last death location and never locks onto a
-        // lodestone, so it is intentionally excluded here.
-        Box::new([Item::COMPASS.id])
+        Box::new([Item::COMPASS.id, Item::RECOVERY_COMPASS.id])
     }
 }
 
@@ -61,12 +58,12 @@ impl ItemBehaviour for CompassItem {
             let replace_existing_stack = !player.is_creative() && item.item_count == 1;
             if replace_existing_stack {
                 item.patch
-                    .push((DataComponent::LodestoneTracker, Some(Box::new(target))));
+                    .push((DataComponent::LodestoneTracker, Some(target.to_dyn())));
             } else {
                 let mut lodestone_compass = ItemStack::new(1, &Item::COMPASS);
                 lodestone_compass
                     .patch
-                    .push((DataComponent::LodestoneTracker, Some(Box::new(target))));
+                    .push((DataComponent::LodestoneTracker, Some(target.to_dyn())));
 
                 item.decrement_unless_creative(player.gamemode.load(), 1);
 

@@ -1049,6 +1049,20 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
+    fn get_item_steerable(&self) -> Option<&dyn crate::entity::item_steerable::ItemSteerable> {
+        None
+    }
+
+    fn is_saddled(&self) -> bool {
+        false
+    }
+
+    fn can_be_saddled(&self) -> bool {
+        false
+    }
+
+    fn set_saddled(&self, _saddled: bool) {}
+
     /// Per-mob tick hook called after selectors and navigation, before movement controls.
     /// This is vanilla `Mob.customServerAiStep`'s position in `Mob.serverAiStep`.
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
@@ -1347,6 +1361,10 @@ pub trait Mob: EntityBase + Send + Sync {
     fn sends_breed_event(&self) -> bool {
         true
     }
+
+    fn get_sheep(&self) -> Option<&crate::entity::passive::sheep::SheepEntity> {
+        None
+    }
 }
 
 struct MutexTakeGuard<'a, T> {
@@ -1479,6 +1497,10 @@ impl<T: Mob + Send + 'static> EntityBase for T {
 
     fn check_despawn(&self) -> EntityBaseFuture<'_, ()> {
         Mob::check_despawn(self)
+    }
+
+    fn get_item_steerable(&self) -> Option<&dyn crate::entity::item_steerable::ItemSteerable> {
+        Mob::get_item_steerable(self)
     }
 
     fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {

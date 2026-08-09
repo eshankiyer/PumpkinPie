@@ -788,6 +788,35 @@ impl ItemBehaviour for FilledBucketItem {
 }
 
 impl ItemBehaviour for MilkBucketItem {
+    fn normal_use<'a>(
+        &'a self,
+        _item: &'a Item,
+        player: &'a Player,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            let stack = player.inventory().held_item().await;
+            player
+                .living_entity
+                .set_active_hand(pumpkin_util::Hand::Right, stack, 32)
+                .await;
+        })
+    }
+
+    fn on_stopped_using<'a>(
+        &'a self,
+        _stack: &'a ItemStack,
+        player: &'a Player,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            player.living_entity.reset_effects_and_attributes().await;
+            give_player_bucket_item(player, &Item::BUCKET).await;
+        })
+    }
+
+    fn get_use_duration(&self) -> i32 {
+        32
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

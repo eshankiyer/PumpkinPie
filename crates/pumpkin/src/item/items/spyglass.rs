@@ -20,7 +20,7 @@ impl ItemMetadata for SpyglassItem {
 
 impl SpyglassItem {
     /// Vanilla `SpyglassItem.USE_DURATION`.
-    const USE_DURATION: i32 = 1200;
+    pub const USE_DURATION: i32 = 1200;
 
     /// Vanilla `SpyglassItem#use`: `player.playSound(SPYGLASS_USE, 1.0F, 1.0F)`,
     /// which resolves to `Player#playSound` -> `level().playSound(this, ...)`,

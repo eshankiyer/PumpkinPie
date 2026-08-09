@@ -7,6 +7,7 @@ use pumpkin_data::{
 };
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::GameMode;
+use pumpkin_util::text::TextComponent;
 use pumpkin_world::world::BlockFlags;
 use std::sync::Arc;
 
@@ -50,8 +51,9 @@ impl BlockBehaviour for RespawnAnchorBlock {
             let state_id = args.world.get_block_state_id(args.position);
             let mut props = RespawnAnchorLikeProperties::from_state_id(state_id, args.block);
 
-            let item = args.item_stack.item;
-            if item != &Item::GLOWSTONE || props.charges >= Self::MAX_CHARGES {
+            if args.item_stack.item.id != Item::GLOWSTONE.id
+                || props.charges >= Self::MAX_CHARGES
+            {
                 // Vanilla additionally checks the off-hand item here (`useItemOn`,
                 // `RespawnAnchorBlock.java:92-96`): if the main hand isn't usable but the
                 // off-hand holds glowstone and the anchor is chargeable, it returns `PASS` so
@@ -95,12 +97,6 @@ impl BlockBehaviour for RespawnAnchorBlock {
 
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
-            let state_id = args.world.get_block_state_id(args.position);
-            let props = RespawnAnchorLikeProperties::from_state_id(state_id, args.block);
-            if props.charges == 0 {
-                return BlockActionResult::Pass;
-            }
-
             if !Self::works_here(args.world) {
                 args.world
                     .break_block(args.position, None, BlockFlags::SKIP_DROPS)
@@ -120,25 +116,51 @@ impl BlockBehaviour for RespawnAnchorBlock {
                 return BlockActionResult::SuccessServer;
             }
 
+            let state_id = args.world.get_block_state_id(args.position);
+            let mut props = RespawnAnchorLikeProperties::from_state_id(state_id, args.block);
+            if props.charges == 0 {
+                args.player
+                    .send_system_message(&TextComponent::translate(
+                        pumpkin_data::translation::java::BLOCK_MINECRAFT_BED_NO_SLEEP,
+                        &[],
+                    ))
+                    .await;
+                return BlockActionResult::SuccessServer;
+            }
+
             let changed = args
                 .player
                 .set_respawn_point(
                     args.world.dimension.clone(),
                     *args.position,
-                    0.0,
-                    0.0,
+                    args.player.get_entity().yaw.load(),
+                    args.player.get_entity().pitch.load(),
                     false,
                 )
                 .await;
             if changed {
+                props.charges -= 1;
+                args.world
+                    .set_block_state(
+                        args.position,
+                        props.to_state_id(args.block),
+                        BlockFlags::NOTIFY_ALL,
+                    )
+                    .await;
                 args.world.play_sound(
                     Sound::BlockRespawnAnchorSetSpawn,
                     SoundCategory::Blocks,
                     &args.position.to_centered_f64(),
                 );
-                return BlockActionResult::SuccessServer;
+                args.player
+                    .send_system_message(&TextComponent::translate_cross(
+                        pumpkin_data::translation::java::BLOCK_MINECRAFT_SET_SPAWN,
+                        pumpkin_data::translation::bedrock::TILE_BED_RESPAWNSET,
+                        [],
+                    ))
+                    .await;
             }
-            BlockActionResult::Consume
+            BlockActionResult::SuccessServer
         })
     }
 

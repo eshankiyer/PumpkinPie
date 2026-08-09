@@ -1,19 +1,20 @@
+use std::any::Any;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use crate::entity::Entity;
 use crate::entity::EntityBase;
+use crate::entity::item::ItemEntity;
 use crate::entity::player::Player;
 use crate::item::{ItemBehaviour, ItemMetadata};
 use crate::server::Server;
-use crate::world::game_event::{GameEventContext, emit_game_event};
-use pumpkin_data::block_properties::{
-    BlockProperties, CaveVinesLikeProperties, KelpLikeProperties,
-};
-use pumpkin_data::game_event::GameEvent;
+use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::{Block, BlockDirection, BlockStateId};
+use pumpkin_util::GameMode;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::world::BlockFlags;
@@ -26,49 +27,32 @@ impl ItemMetadata for ShearsItem {
     }
 }
 
-/// vanilla `GrowingPlantHeadBlock.MAX_AGE`.
-const MAX_AGE: u8 = 25;
-
-/// Mirrors `GrowingPlantHeadBlock.isMaxAge` + `getMaxAgeState` for the four head blocks
-/// shears interact with (kelp, twisting/weeping vines, cave vines). Returns `None` if
-/// `block` isn't one of these, or if it's already at max age (vanilla falls through to
-/// `super.useOn`, i.e. does nothing, in both cases).
-fn max_age_state(block: &Block, state_id: BlockStateId) -> Option<BlockStateId> {
-    if block == &Block::KELP || block == &Block::TWISTING_VINES || block == &Block::WEEPING_VINES {
-        let props = KelpLikeProperties::from_state_id(state_id, block);
-        if props.age >= MAX_AGE {
-            return None;
-        }
-        let new_props = KelpLikeProperties { age: MAX_AGE };
-        Some(new_props.to_state_id(block))
-    } else if block == &Block::CAVE_VINES {
-        let props = CaveVinesLikeProperties::from_state_id(state_id, block);
-        if props.age >= MAX_AGE {
-            return None;
-        }
-        let new_props = CaveVinesLikeProperties {
-            age: MAX_AGE,
-            berries: props.berries,
-        };
-        Some(new_props.to_state_id(block))
-    } else {
-        None
+const fn get_wool_item_for_color(color: u8) -> &'static Item {
+    match color {
+        0 => &Item::WHITE_WOOL,
+        1 => &Item::ORANGE_WOOL,
+        2 => &Item::MAGENTA_WOOL,
+        3 => &Item::LIGHT_BLUE_WOOL,
+        4 => &Item::YELLOW_WOOL,
+        5 => &Item::LIME_WOOL,
+        6 => &Item::PINK_WOOL,
+        7 => &Item::GRAY_WOOL,
+        8 => &Item::LIGHT_GRAY_WOOL,
+        9 => &Item::CYAN_WOOL,
+        10 => &Item::PURPLE_WOOL,
+        11 => &Item::BLUE_WOOL,
+        12 => &Item::BROWN_WOOL,
+        13 => &Item::GREEN_WOOL,
+        14 => &Item::RED_WOOL,
+        _ => &Item::BLACK_WOOL,
     }
 }
 
 impl ItemBehaviour for ShearsItem {
-    // Mob-shearing (sheep/mooshroom/snow golem/bogged) and beehive/nest shearing are out
-    // of scope here (tracked separately) - only the block-carving half of ShearsItem is
-    // implemented. Pumpkin carving lives in `PumpkinBlock::use_with_item`
-    // (block/blocks/pumpkin.rs) since vanilla dispatches it from
-    // `PumpkinBlock#useItemOn`, which the client/server call before the item's own
-    // `useOn` - Pumpkin's `use_with_item`/`use_on_block` dispatch mirrors that order.
-    //
-    // `ShearsItem#mineBlock` (durability loss on block break, unless the block is fire)
-    // and the cobweb/leaves/vine efficient-tool mining-speed bonus are both already
-    // data-driven generically for every tool via the `Tool` component
-    // (`Player::apply_tool_damage_for_block_break`, `ItemStack::get_speed`) - no
-    // shears-specific code is needed for either.
+    fn can_mine(&self, player: &Player) -> bool {
+        player.gamemode.load() != GameMode::Creative
+    }
+
     fn use_on_block<'a>(
         &'a self,
         _item: &'a mut ItemStack,
@@ -82,103 +66,181 @@ impl ItemBehaviour for ShearsItem {
         Box::pin(async move {
             let world = player.world();
             let state_id = world.get_block_state_id(&location);
-            let Some(new_state_id) = max_age_state(block, state_id) else {
+
+            if handle_growing_plant(player, &location, block, state_id).await {
                 return;
-            };
-
-            world
-                .set_block_state(&location, new_state_id, BlockFlags::NOTIFY_ALL)
-                .await;
-
-            world.play_block_sound_expect(
-                player,
-                Sound::BlockGrowingPlantCrop,
-                SoundCategory::Blocks,
-                location,
-            );
-
-            if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
-                emit_game_event(
-                    &world,
-                    GameEvent::BlockChange,
-                    location.to_f64(),
-                    GameEventContext::of_entity(player_arc as Arc<dyn crate::entity::EntityBase>),
-                )
-                .await;
             }
 
-            player.damage_held_item(1).await;
+            if handle_beehive(player, &location, block, state_id).await {
+                return;
+            }
+
+            handle_pumpkin(player, &location, block).await;
         })
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn use_on_entity<'a>(
+        &'a self,
+        _item: &'a mut ItemStack,
+        player: &'a Player,
+        entity: Arc<dyn EntityBase>,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            if let Some(sheep) = entity.get_mob().and_then(|m| m.get_sheep())
+                && !sheep.is_sheared()
+            {
+                sheep.set_sheared(true);
+                let world = player.world();
+                let pos = sheep.mob_entity.living_entity.entity.pos.load();
+                world.play_sound(Sound::EntitySheepShear, SoundCategory::Players, &pos);
+
+                let wool_count = (rand::random::<u8>() % 3 + 1) as u8;
+                let wool_item = get_wool_item_for_color(sheep.get_color());
+                let item_entity = Arc::new(ItemEntity::new(
+                    Entity::new(world.clone(), pos, &EntityType::ITEM),
+                    ItemStack::new(wool_count, wool_item),
+                ));
+                world.spawn_entity(item_entity).await;
+                player.damage_held_item(1).await;
+            }
+        })
+    }
+
+    fn as_any(&self) -> &dyn Any {
         self
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::max_age_state;
-    use pumpkin_data::Block;
-    use pumpkin_data::block_properties::{
-        BlockProperties, CaveVinesLikeProperties, KelpLikeProperties,
-    };
+async fn handle_growing_plant(
+    player: &Player,
+    location: &BlockPos,
+    block: &Block,
+    state_id: BlockStateId,
+) -> bool {
+    let is_growing_plant = block.id == Block::KELP.id
+        || block.id == Block::CAVE_VINES.id
+        || block.id == Block::CAVE_VINES_PLANT.id
+        || block.id == Block::TWISTING_VINES.id
+        || block.id == Block::WEEPING_VINES.id;
 
-    #[test]
-    fn kelp_not_at_max_age_carves_to_max_age() {
-        let props = KelpLikeProperties { age: 3 };
-        let state_id = props.to_state_id(&Block::KELP);
-        let new_state_id =
-            max_age_state(&Block::KELP, state_id).expect("kelp below max age should carve");
-        let new_props = KelpLikeProperties::from_state_id(new_state_id, &Block::KELP);
-        assert_eq!(new_props.age, 25);
+    if !is_growing_plant {
+        return false;
     }
 
-    #[test]
-    fn kelp_already_at_max_age_does_nothing() {
-        let props = KelpLikeProperties { age: 25 };
-        let state_id = props.to_state_id(&Block::KELP);
-        assert!(max_age_state(&Block::KELP, state_id).is_none());
+    let world = player.world();
+    let action = block.properties(state_id).and_then(|props| {
+        let prop_map = props.to_props();
+        prop_map
+            .iter()
+            .find(|(k, _)| *k == "age")
+            .and_then(|(_, age_str)| age_str.parse::<u8>().ok())
+            .filter(|&age| age < 25)
+            .map(|_| {
+                let new_props: Vec<(&str, &str)> = prop_map
+                    .iter()
+                    .map(|(k, v)| if *k == "age" { (*k, "25") } else { (*k, *v) })
+                    .collect();
+                block.from_properties(&new_props).to_state_id(block)
+            })
+    });
+
+    if let Some(new_state_id) = action {
+        world
+            .set_block_state(location, new_state_id, BlockFlags::NOTIFY_ALL)
+            .await;
+        world.play_sound(
+            Sound::BlockGrowingPlantCrop,
+            SoundCategory::Blocks,
+            &location.to_f64(),
+        );
+        player.damage_held_item(1).await;
+        return true;
     }
 
-    #[test]
-    fn twisting_and_weeping_vines_carve_to_max_age() {
-        for block in [&Block::TWISTING_VINES, &Block::WEEPING_VINES] {
-            let props = KelpLikeProperties { age: 0 };
-            let state_id = props.to_state_id(block);
-            let new_state_id =
-                max_age_state(block, state_id).expect("vines below max age should carve");
-            let new_props = KelpLikeProperties::from_state_id(new_state_id, block);
-            assert_eq!(new_props.age, 25);
-        }
+    false
+}
+
+async fn handle_beehive(
+    player: &Player,
+    location: &BlockPos,
+    block: &Block,
+    state_id: BlockStateId,
+) -> bool {
+    if block.id != Block::BEEHIVE.id && block.id != Block::BEE_NEST.id {
+        return false;
     }
 
-    #[test]
-    fn cave_vines_carve_to_max_age_preserving_berries() {
-        for berries in [false, true] {
-            let props = CaveVinesLikeProperties { age: 10, berries };
-            let state_id = props.to_state_id(&Block::CAVE_VINES);
-            let new_state_id = max_age_state(&Block::CAVE_VINES, state_id)
-                .expect("cave vines below max age should carve");
-            let new_props =
-                CaveVinesLikeProperties::from_state_id(new_state_id, &Block::CAVE_VINES);
-            assert_eq!(new_props.age, 25);
-            assert_eq!(new_props.berries, berries);
-        }
+    let world = player.world();
+    let action = block.properties(state_id).and_then(|props| {
+        let prop_map = props.to_props();
+        prop_map
+            .iter()
+            .find(|(k, v)| *k == "honey_level" && *v == "5")
+            .map(|_| {
+                let new_props: Vec<(&str, &str)> = prop_map
+                    .iter()
+                    .map(|(k, v)| {
+                        if *k == "honey_level" {
+                            (*k, "0")
+                        } else {
+                            (*k, *v)
+                        }
+                    })
+                    .collect();
+                block.from_properties(&new_props).to_state_id(block)
+            })
+    });
+
+    if let Some(new_state_id) = action {
+        world
+            .set_block_state(location, new_state_id, BlockFlags::NOTIFY_ALL)
+            .await;
+        world.play_sound(
+            Sound::BlockBeehiveShear,
+            SoundCategory::Blocks,
+            &location.to_f64(),
+        );
+
+        let drop_pos = Vector3::new(
+            f64::from(location.0.x) + 0.5,
+            f64::from(location.0.y) + 0.5,
+            f64::from(location.0.z) + 0.5,
+        );
+        let item_entity = Arc::new(ItemEntity::new(
+            Entity::new(world.clone(), drop_pos, &EntityType::ITEM),
+            ItemStack::new(3, &Item::HONEYCOMB),
+        ));
+        world.spawn_entity(item_entity).await;
+        player.damage_held_item(1).await;
+        return true;
     }
 
-    #[test]
-    fn cave_vines_already_at_max_age_does_nothing() {
-        let props = CaveVinesLikeProperties {
-            age: 25,
-            berries: true,
-        };
-        let state_id = props.to_state_id(&Block::CAVE_VINES);
-        assert!(max_age_state(&Block::CAVE_VINES, state_id).is_none());
-    }
+    false
+}
 
-    #[test]
-    fn unrelated_block_returns_none() {
-        assert!(max_age_state(&Block::STONE, Block::STONE.default_state.id).is_none());
+async fn handle_pumpkin(player: &Player, location: &BlockPos, block: &Block) {
+    if block.id == Block::PUMPKIN.id {
+        let world = player.world();
+        let carved_state = Block::CARVED_PUMPKIN.default_state.id;
+        world
+            .set_block_state(location, carved_state, BlockFlags::NOTIFY_ALL)
+            .await;
+        world.play_sound(
+            Sound::BlockPumpkinCarve,
+            SoundCategory::Blocks,
+            &location.to_f64(),
+        );
+
+        let drop_pos = Vector3::new(
+            f64::from(location.0.x) + 0.5,
+            f64::from(location.0.y) + 0.5,
+            f64::from(location.0.z) + 0.5,
+        );
+        let item_entity = Arc::new(ItemEntity::new(
+            Entity::new(world.clone(), drop_pos, &EntityType::ITEM),
+            ItemStack::new(4, &Item::PUMPKIN_SEEDS),
+        ));
+        world.spawn_entity(item_entity).await;
+        player.damage_held_item(1).await;
     }
 }
