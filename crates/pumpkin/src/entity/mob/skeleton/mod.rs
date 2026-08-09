@@ -96,14 +96,18 @@ impl SkeletonEntityBase {
                 .entity_equipment
                 .try_lock()
                 .expect("new skeleton equipment is uncontended")
-                .equipment
-                .insert(
-                    EquipmentSlot::MAIN_HAND,
-                    Arc::new(tokio::sync::Mutex::new(ItemStack::new(1, main_hand))),
-                );
+                .put(&EquipmentSlot::MAIN_HAND, ItemStack::new(1, main_hand));
 
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
-            let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut target_selector = mob_arc
+                .mob_entity
+                .target_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(3, FleeSunGoal::new(1.0));

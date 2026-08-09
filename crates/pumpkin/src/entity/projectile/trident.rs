@@ -327,7 +327,10 @@ impl EntityBase for TridentEntity {
                 } => {
                     self.in_ground.store(true, Ordering::Relaxed);
                     self.shake_time.store(7, Ordering::Relaxed);
-                    *self.last_block_pos.write().unwrap() = Some(pos);
+                    *self
+                        .last_block_pos
+                        .write()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pos);
 
                     if world.get_block(&pos) == &pumpkin_data::Block::TARGET {
                         on_target_block_hit(

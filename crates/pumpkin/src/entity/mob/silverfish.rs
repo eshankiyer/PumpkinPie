@@ -34,8 +34,16 @@ impl SilverfishEntity {
         let mob_arc = Arc::new(silverfish);
 
         {
-            let mut goal_selector = mob_arc.entity.goals_selector.lock().unwrap();
-            let mut target_selector = mob_arc.entity.target_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut target_selector = mob_arc
+                .entity
+                .target_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));

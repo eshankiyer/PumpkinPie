@@ -37,8 +37,16 @@ impl GhastEntity {
         let ghast_weak = Arc::downgrade(&mob_arc);
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
-            let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut target_selector = mob_arc
+                .mob_entity
+                .target_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // Vanilla: Ghast.java:57-59.
             goal_selector.add_goal(5, Box::new(GhastRandomFloatAroundGoal::new()));
@@ -113,7 +121,10 @@ impl Goal for GhastLookGoal {
                 let target_pos = target.get_entity().pos.load();
 
                 if mob_pos.squared_distance_to_vec(&target_pos) < 4096.0 {
-                    let mut look_control = mob_entity.look_control.lock().unwrap();
+                    let mut look_control = mob_entity
+                        .look_control
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     look_control.look_at(mob, target_pos.x, target_pos.y, target_pos.z);
                 }
             } else {

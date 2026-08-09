@@ -33,7 +33,11 @@ impl SquidEntity {
         };
         let mob_arc = Arc::new(squid);
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // `Squid.registerGoals` (`animal/squid/Squid.java:57-61`) contains exactly these
             // two goals. They intentionally do not claim MOVE: both write the shared

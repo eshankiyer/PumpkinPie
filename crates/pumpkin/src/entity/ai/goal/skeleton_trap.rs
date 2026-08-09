@@ -86,16 +86,13 @@ impl SkeletonTrapGoal {
                 .lock()
                 .await
                 .get(&EquipmentSlot::HEAD)
-                .lock()
-                .await
                 .is_empty();
             if head_empty {
                 living
                     .entity_equipment
                     .lock()
                     .await
-                    .put(&EquipmentSlot::HEAD, ItemStack::new(1, &Item::IRON_HELMET))
-                    .await;
+                    .put(&EquipmentSlot::HEAD, ItemStack::new(1, &Item::IRON_HELMET));
             }
         }
     }

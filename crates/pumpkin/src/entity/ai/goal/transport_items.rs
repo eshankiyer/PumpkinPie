@@ -71,7 +71,7 @@ impl TransportItemsGoal {
             };
             for i in 0..inventory.size() {
                 let stack = inventory.get_stack(i).await;
-                if !stack.lock().await.is_empty() {
+                if !stack.is_empty() {
                     return true;
                 }
             }
@@ -87,7 +87,7 @@ impl TransportItemsGoal {
             };
             for i in 0..inventory.size() {
                 let stack = inventory.get_stack(i).await;
-                if stack.lock().await.is_empty() {
+                if stack.is_empty() {
                     return true;
                 }
             }
@@ -145,10 +145,9 @@ impl TransportItemsGoal {
         let block_entity = world.get_block_entity(&pos)?;
         let inventory = block_entity.get_inventory()?;
         for i in 0..inventory.size() {
-            let slot = inventory.get_stack(i).await;
-            let mut stack = slot.lock().await;
+            let stack = inventory.get_stack(i).await;
             if !stack.is_empty() {
-                return Some(stack.split(1));
+                return Some(inventory.remove_stack_specific(i, 1).await);
             }
         }
         None
@@ -159,10 +158,9 @@ impl TransportItemsGoal {
         let inventory = block_entity.get_inventory()?;
         let mut remaining = item;
         for i in 0..inventory.size() {
-            let slot = inventory.get_stack(i).await;
-            let mut stack = slot.lock().await;
+            let mut stack = inventory.get_stack(i).await;
             if stack.is_empty() {
-                *stack = remaining;
+                inventory.set_stack(i, remaining).await;
                 return None;
             }
             if stack.are_items_and_components_equal(&remaining)
@@ -171,6 +169,7 @@ impl TransportItemsGoal {
                 let space = stack.get_max_stack_size() - stack.item_count;
                 let moved = space.min(remaining.item_count);
                 stack.item_count += moved;
+                inventory.set_stack(i, stack).await;
                 remaining.item_count -= moved;
                 if remaining.is_empty() {
                     return None;

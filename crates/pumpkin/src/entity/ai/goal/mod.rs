@@ -8,6 +8,7 @@ pub mod avoid_entity;
 pub mod axolotl_play_dead;
 pub mod beg;
 pub mod blaze_attack;
+pub mod bow_attack;
 pub mod break_door;
 pub mod breath_air;
 pub mod breed;

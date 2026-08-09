@@ -195,8 +195,7 @@ impl ArmorStandEntity {
         let equipped_items: Vec<_> = equipment.equipment.values().cloned().collect();
         drop(equipment);
 
-        for equipped_item in equipped_items {
-            let mut stack = equipped_item.lock().await;
+        for mut stack in equipped_items {
             if stack.is_empty() {
                 continue;
             }

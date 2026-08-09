@@ -796,10 +796,9 @@ pub async fn fill_chest_inventory(
     }
 
     for item in items_to_place {
-        if available_slots.is_empty() {
+        let Some(slot) = available_slots.pop() else {
             break;
-        }
-        let slot = available_slots.pop().unwrap();
+        };
         inventory.set_stack(slot, item).await;
     }
 }

@@ -7,6 +7,7 @@ use pumpkin_world::world::BlockFlags;
 use super::interact_with_door::InteractWithDoorGoal;
 use super::{Controls, Goal, GoalFuture};
 use crate::entity::mob::Mob;
+use crate::world::BlockBreakingProgress;
 
 /// Vanilla: `BreakDoorGoal` (via `Vindicator.VindicatorBreakDoorGoal`).
 ///
@@ -155,7 +156,9 @@ impl Goal for BreakDoorGoal {
             if let Some(door_pos) = self.door_pos {
                 let entity = &mob.get_mob_entity().living_entity.entity;
                 let world = entity.world.load_full();
-                world.set_block_breaking(entity, door_pos, -1).await;
+                world
+                    .set_block_breaking(entity, door_pos, BlockBreakingProgress::Stop)
+                    .await;
             }
         })
     }
@@ -173,7 +176,16 @@ impl Goal for BreakDoorGoal {
             self.break_time += 1;
             let progress = ((self.break_time as f32 / Self::DOOR_BREAK_TIME as f32) * 10.0) as i32;
             if progress != self.last_break_progress {
-                world.set_block_breaking(entity, door_pos, progress).await;
+                world
+                    .set_block_breaking(
+                        entity,
+                        door_pos,
+                        BlockBreakingProgress::Update {
+                            stage: progress,
+                            speed: None,
+                        },
+                    )
+                    .await;
                 self.last_break_progress = progress;
             }
 

@@ -126,9 +126,7 @@ impl Goal for FleeSunGoal {
             if let Ok(eq) = living.entity_equipment.try_lock() {
                 use pumpkin_data::data_component_impl::EquipmentSlot;
                 let head_item = eq.get(&EquipmentSlot::HEAD);
-                if let Ok(stack) = head_item.try_lock()
-                    && !stack.is_empty()
-                {
+                if !head_item.is_empty() {
                     return false;
                 }
             }

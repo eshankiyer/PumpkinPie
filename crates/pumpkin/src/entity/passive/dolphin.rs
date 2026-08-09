@@ -56,7 +56,11 @@ impl DolphinEntity {
         };
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // `Dolphin.registerGoals` (`Dolphin.java:157-171`). No `FloatGoal`/`SwimGoal` is
             // registered in vanilla for Dolphin (it swims via `WaterBoundPathNavigation` +

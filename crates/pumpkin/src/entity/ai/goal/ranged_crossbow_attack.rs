@@ -51,7 +51,7 @@ impl RangedCrossbowAttackGoal {
 
     async fn has_crossbow(mob: &dyn Mob) -> bool {
         let stack = mob.get_mob_entity().living_entity.held_item(mob).await;
-        stack.lock().await.item.id == Item::CROSSBOW.id
+        stack.item.id == Item::CROSSBOW.id
     }
 
     async fn has_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {

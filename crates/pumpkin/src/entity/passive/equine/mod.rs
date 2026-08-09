@@ -312,7 +312,6 @@ pub trait AbstractHorse: Animal {
                 .lock()
                 .await;
             let stack = equipment.get(&EquipmentSlot::SADDLE);
-            let stack = stack.lock().await;
             !stack.is_empty()
         })
     }
@@ -331,9 +330,7 @@ pub trait AbstractHorse: Animal {
                     .entity_equipment
                     .lock()
                     .await;
-                equipment
-                    .put(&EquipmentSlot::SADDLE, new_stack.clone())
-                    .await
+                equipment.put(&EquipmentSlot::SADDLE, new_stack.clone());
             };
             self.get_mob_entity()
                 .living_entity
@@ -697,9 +694,8 @@ pub trait AbstractChestedHorse: AbstractHorse {
             let max = old.size().min(new_inventory.size());
             for i in 0..max {
                 let stack = old.get_stack(i).await;
-                let stack = stack.lock().await;
                 if !stack.is_empty() {
-                    new_inventory.set_stack(i, stack.clone()).await;
+                    new_inventory.set_stack(i, stack).await;
                 }
             }
             *slot = new_inventory;

@@ -74,7 +74,11 @@ impl HorseEntity {
         let horse_weak: Weak<Self> = Arc::downgrade(&mob_arc);
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // `AbstractHorse.java:134-151` (`registerGoals`/`addBehaviourGoals`, base
             // `addBehaviourGoals` applies to Horse/Donkey/Mule): 0 float, 1 run-around-like-crazy

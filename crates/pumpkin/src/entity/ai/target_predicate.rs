@@ -170,7 +170,7 @@ async fn targeter_visibility_modifier(targeter: &LivingEntity, target: &LivingEn
         ];
         let mut covered = 0;
         for slot in &armor_slots {
-            if !equipment.get(slot).lock().await.is_empty() {
+            if !equipment.get(slot).is_empty() {
                 covered += 1;
             }
         }
@@ -182,8 +182,6 @@ async fn targeter_visibility_modifier(targeter: &LivingEntity, target: &LivingEn
         .lock()
         .await
         .get(&EquipmentSlot::HEAD)
-        .lock()
-        .await
         .item
         .id;
     let target_type = targeter.entity.entity_type;

@@ -70,7 +70,7 @@ impl HappyGhastEntity {
         mob_arc
     }
 
-    async fn body_armor_stack(&self) -> Arc<tokio::sync::Mutex<ItemStack>> {
+    async fn body_armor_stack(&self) -> ItemStack {
         self.mob_entity
             .living_entity
             .entity_equipment
@@ -80,7 +80,7 @@ impl HappyGhastEntity {
     }
 
     async fn is_wearing_body_armor(&self) -> bool {
-        !self.body_armor_stack().await.lock().await.is_empty()
+        !self.body_armor_stack().await.is_empty()
     }
 
     fn is_harness(item_stack: &ItemStack) -> Option<&EquippableImpl> {
@@ -108,7 +108,7 @@ impl HappyGhastEntity {
         let new_stack = item_stack.split_unless_creative(player.gamemode.load(), 1);
         {
             let mut equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
-            equipment.put(&EquipmentSlot::BODY, new_stack.clone()).await
+            equipment.put(&EquipmentSlot::BODY, new_stack.clone())
         };
         self.mob_entity
             .living_entity

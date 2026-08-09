@@ -8,12 +8,10 @@ use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::InventoryPlayer;
 use pumpkin_protocol::bedrock::client::take_item_actor::CTakeItemActor;
 use pumpkin_protocol::bedrock::server::actor_event::{ActorEventType, SActorEvent};
-use pumpkin_protocol::codec::var_long::VarLong;
 use pumpkin_protocol::codec::var_ulong::VarULong;
 use pumpkin_util::GameMode;
 use pumpkin_util::Hand;
 use pumpkin_util::math::position::BlockPos;
-use std::mem;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::atomic::{
@@ -541,7 +539,10 @@ impl LivingEntity {
         attribute: &Attributes,
         f: F,
     ) {
-        let mut map = self.attributes.write().unwrap();
+        let mut map = self
+            .attributes
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let inst = map.entry(attribute.id).or_insert_with(|| {
             let base = self
@@ -572,7 +573,10 @@ impl LivingEntity {
     /// Returns the computed value for `attribute` using the local instance, falling back
     /// to `attribute.default_value` if no local instance exists.
     pub fn get_attribute_value(&self, attribute: &Attributes) -> f64 {
-        let map = self.attributes.read().unwrap();
+        let map = self
+            .attributes
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         map.get(&attribute.id)
             .map_or(attribute.default_value, AttributeInstance::value)
     }
@@ -595,7 +599,10 @@ impl LivingEntity {
     /// Returns the base attribute value for `attribute` for this entity's type.
     pub fn get_attribute_base(&self, attribute: &Attributes) -> f64 {
         // Check the local base value first (could be modified)
-        let map = self.attributes.read().unwrap();
+        let map = self
+            .attributes
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(instance) = map.get(&attribute.id) {
             return instance.base_value;
         }
@@ -606,14 +613,16 @@ impl LivingEntity {
             .attributes
             .iter()
             .find(|a| a.0.id == attribute.id)
-            .unwrap()
-            .1
+            .map_or(attribute.default_value, |a| a.1)
     }
 
     /// Update or insert the base value for an attribute on this entity.
     /// If the attribute doesn't exist locally yet, it will be inserted.
     pub fn set_attribute_base(&self, attribute: &Attributes, new_base: f64) {
-        let mut map = self.attributes.write().unwrap();
+        let mut map = self
+            .attributes
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(inst) = map.get_mut(&attribute.id) {
             inst.base_value = new_base;
             inst.dirty.store(true, Ordering::Relaxed);
@@ -1658,14 +1667,13 @@ impl LivingEntity {
                     .downcast_ref::<crate::entity::player::Player>()
                 {
                     let hand_stack = player
-                        .inventory
+                        .inventory()
                         .get_stack_in_hand(pumpkin_util::Hand::Right)
                         .await;
-                    let stack_guard = hand_stack.lock().await;
-                    looting_level = stack_guard
+                    looting_level = hand_stack
                         .get_enchantment_level(&Enchantment::LOOTING)
                         .max(0) as u32;
-                    (stack_guard.item_count > 0).then(|| stack_guard.clone())
+                    (!hand_stack.is_empty()).then(|| hand_stack.clone())
                 } else {
                     looting_level = 0;
                     None
@@ -1761,12 +1769,13 @@ impl LivingEntity {
             if rand::random::<f32>() >= chance {
                 continue;
             }
-            let mut item = {
-                let q = self.entity_equipment.lock().await;
-                let item_arc = q.get(slot);
-                let mut item_lock = item_arc.lock().await;
-                mem::replace(&mut *item_lock, ItemStack::EMPTY.clone())
-            };
+            let mut item = self
+                .entity_equipment
+                .lock()
+                .await
+                .equipment
+                .remove(slot)
+                .unwrap_or_else(|| ItemStack::EMPTY.clone());
             if item.is_empty() {
                 continue;
             }
@@ -1867,11 +1876,8 @@ impl LivingEntity {
                     killer_player.trigger_advancement(crate::entity::player::advancement::trigger::AdvancementTrigger::TwoBirdsOneArrow).await;
                 }
 
-                let held_item = killer_player.inventory().held_item();
-                let is_crossbow = {
-                    let lock = held_item.lock().await;
-                    lock.item.registry_key == "crossbow"
-                };
+                let held_item = killer_player.inventory().held_item().await;
+                let is_crossbow = held_item.item.registry_key == "crossbow";
                 if is_crossbow {
                     killer_player.trigger_advancement(crate::entity::player::advancement::trigger::AdvancementTrigger::Arbalistic).await;
                 }
@@ -2086,12 +2092,30 @@ impl LivingEntity {
     /// Tries to use a totem of undying from the entity's hands. If successful, applies the totem effects and returns true.
     async fn try_use_death_protector(&self, caller: &dyn EntityBase) -> bool {
         for hand in Hand::all() {
-            let stack = self.get_stack_in_hand(caller, hand).await;
-            let mut stack = stack.lock().await;
+            let mut stack = self.get_stack_in_hand(caller, hand).await;
 
             // Clear the stack and use the totem of undying
             if stack.get_data_component::<DeathProtectionImpl>().is_some() {
                 stack.clear();
+                let slot = match hand {
+                    Hand::Right => EquipmentSlot::MAIN_HAND,
+                    Hand::Left => EquipmentSlot::OFF_HAND,
+                };
+                if let Some(player) = caller.get_player() {
+                    player
+                        .inventory()
+                        .entity_equipment
+                        .lock()
+                        .await
+                        .equipment
+                        .insert(slot, stack);
+                } else {
+                    self.entity_equipment
+                        .lock()
+                        .await
+                        .equipment
+                        .insert(slot, stack);
+                }
                 self.set_health(1.0);
                 self.entity
                     .world
@@ -2155,57 +2179,49 @@ impl LivingEntity {
             || damage_type.id == DamageType::FALLING_BLOCK.id
             || damage_type.id == DamageType::FALLING_STALACTITE.id;
 
-        let armor_slots: Vec<(usize, Arc<Mutex<ItemStack>>, EquipmentSlot)> = {
+        let armor_slots: Vec<(usize, ItemStack, EquipmentSlot)> = {
             let equipment_lock = self.entity_equipment.lock().await;
             self.equipment_slots
                 .iter()
                 .filter(|(_, slot)| {
                     slot.is_armor_slot() && (!helmet_only || **slot == EquipmentSlot::HEAD)
                 })
-                .map(|(index, slot)| (*index, equipment_lock.get(slot), slot.clone()))
+                .filter_map(|(index, slot)| {
+                    equipment_lock
+                        .equipment
+                        .get(slot)
+                        .cloned()
+                        .map(|stack| (*index, stack, slot.clone()))
+                })
                 .collect()
         };
 
-        for (slot_index, equipment, slot) in armor_slots {
-            let (slot_result, updated_stack_opt) = {
-                let mut stack = equipment.lock().await;
-                if stack.is_empty() || armor_resists_damage(&stack, damage_type) {
-                    (pumpkin_data::item_stack::DamageResult::Untouched, None)
-                } else {
-                    // Items without `EquippableImpl` component take damage freely.
-                    // Items with `damage_on_hurt: false` (e.g. elytra) are exempt from armor hit durability.
-                    // PERF: Component lookup runs O(1) per armor slot (max 4 per hit). Caching
-                    // at the item type level could optimize, but belongs in a broader caching pass.
-                    let takes_damage = stack
-                        .get_data_component::<EquippableImpl>()
-                        .is_none_or(|equippable| equippable.damage_on_hurt);
+        for (slot_index, mut stack, slot) in armor_slots {
+            if stack.is_empty() || armor_resists_damage(&stack, damage_type) {
+                continue;
+            }
 
-                    if takes_damage {
-                        // Base armor durability damage.
-                        let result = stack.damage_item(armor_damage);
-                        let changed = result != pumpkin_data::item_stack::DamageResult::Untouched;
-                        (result, changed.then_some(stack.clone()))
-                    } else {
-                        // Equippable items can opt out of on-hurt durability loss (e.g. elytra).
-                        (pumpkin_data::item_stack::DamageResult::Untouched, None)
+            let takes_damage = stack
+                .get_data_component::<EquippableImpl>()
+                .is_none_or(|equippable| equippable.damage_on_hurt);
+
+            if takes_damage {
+                let slot_result = stack.damage_item(armor_damage);
+                if slot_result != pumpkin_data::item_stack::DamageResult::Untouched {
+                    if slot_result == pumpkin_data::item_stack::DamageResult::Broken {
+                        let world = self.entity.world.load();
+                        world
+                            .send_entity_status(&self.entity, super::equipment_break_status(&slot));
                     }
-                }
-            };
-
-            if let Some(updated_stack) = updated_stack_opt {
-                // Broadcast break status before clearing the slot.
-                if slot_result == pumpkin_data::item_stack::DamageResult::Broken {
-                    let world = self.entity.world.load();
-                    world.send_entity_status(&self.entity, super::equipment_break_status(&slot));
-                }
-                equipment_updates.push((slot.clone(), updated_stack.clone()));
-                if let Some(player) = caller.get_player() {
-                    player
-                        .enqueue_slot_set_packet(&CSetPlayerInventory::new(
-                            (slot_index as i32).into(),
-                            &ItemStackSerializer::from(updated_stack),
-                        ))
-                        .await;
+                    equipment_updates.push((slot.clone(), stack.clone()));
+                    if let Some(player) = caller.get_player() {
+                        player
+                            .enqueue_slot_set_packet(&CSetPlayerInventory::new(
+                                (slot_index as i32).into(),
+                                &ItemStackSerializer::from(stack),
+                            ))
+                            .await;
+                    }
                 }
             }
         }
@@ -2215,34 +2231,39 @@ impl LivingEntity {
         }
     }
 
-    pub async fn held_item(&self, caller: &dyn EntityBase) -> Arc<Mutex<ItemStack>> {
+    pub async fn held_item(&self, caller: &dyn EntityBase) -> ItemStack {
         if let Some(player) = caller.get_player() {
-            return player.inventory.held_item();
+            return player.inventory.held_item().await;
         }
-        self.entity_equipment
-            .lock()
-            .await
+        let equipment = self.entity_equipment.lock().await;
+        equipment
+            .equipment
             .get(&EquipmentSlot::MAIN_HAND)
+            .cloned()
+            .unwrap_or_else(|| ItemStack::EMPTY.clone())
     }
 
-    pub async fn get_stack_in_hand(
-        &self,
-        caller: &dyn EntityBase,
-        hand: Hand,
-    ) -> Arc<Mutex<ItemStack>> {
+    pub async fn get_stack_in_hand(&self, caller: &dyn EntityBase, hand: Hand) -> ItemStack {
         match hand {
-            Hand::Left => self.off_hand_item().await,
+            Hand::Left => self.off_hand_item(caller).await,
             Hand::Right => self.held_item(caller).await,
         }
     }
 
     /// getOffHandStack in source
-    pub async fn off_hand_item(&self) -> Arc<Mutex<ItemStack>> {
-        let slot = self
-            .equipment_slots
-            .get(&PlayerInventory::OFF_HAND_SLOT)
-            .unwrap();
-        self.entity_equipment.lock().await.get(slot)
+    pub async fn off_hand_item(&self, caller: &dyn EntityBase) -> ItemStack {
+        if let Some(player) = caller.get_player() {
+            return player.inventory.off_hand_item().await;
+        }
+        let Some(slot) = self.equipment_slots.get(&PlayerInventory::OFF_HAND_SLOT) else {
+            return ItemStack::EMPTY.clone();
+        };
+        let equipment = self.entity_equipment.lock().await;
+        equipment
+            .equipment
+            .get(slot)
+            .cloned()
+            .unwrap_or_else(|| ItemStack::EMPTY.clone())
     }
 
     pub fn can_take_damage(&self) -> bool {
@@ -2688,8 +2709,7 @@ impl NBTStorage for LivingEntity {
             let equipment = self.entity_equipment.lock().await;
             let mut hand_items = Vec::with_capacity(2);
             for slot in [EquipmentSlot::MAIN_HAND, EquipmentSlot::OFF_HAND] {
-                let stack_arc = equipment.get(&slot);
-                let stack = stack_arc.lock().await;
+                let stack = equipment.get(&slot);
                 let mut item_nbt = NbtCompound::new();
                 if !stack.is_empty() {
                     stack.write_item_stack(&mut item_nbt);
@@ -2705,8 +2725,7 @@ impl NBTStorage for LivingEntity {
                 EquipmentSlot::CHEST,
                 EquipmentSlot::HEAD,
             ] {
-                let stack_arc = equipment.get(&slot);
-                let stack = stack_arc.lock().await;
+                let stack = equipment.get(&slot);
                 let mut item_nbt = NbtCompound::new();
                 if !stack.is_empty() {
                     stack.write_item_stack(&mut item_nbt);
@@ -2750,14 +2769,14 @@ impl NBTStorage for LivingEntity {
                 if let Some(nbt_effects) = nbt_effects {
                     for effect in nbt_effects {
                         if let NbtTag::Compound(effect_nbt) = effect {
-                            let effect = Effect::create_from_nbt(&mut effect_nbt.clone()).await;
-                            if effect.is_none() {
+                            if let Some(mut effect) =
+                                Effect::create_from_nbt(&mut effect_nbt.clone()).await
+                            {
+                                effect.blend = true; // TODO: change, is taken from effect give command
+                                active_effects.insert(effect.effect_type, effect);
+                            } else {
                                 warn!("Unable to read effect from nbt");
-                                continue;
                             }
-                            let mut effect = effect.unwrap();
-                            effect.blend = true; // TODO: change, is taken from effect give command
-                            active_effects.insert(effect.effect_type, effect);
                         }
                     }
                 }
@@ -2789,7 +2808,7 @@ impl NBTStorage for LivingEntity {
                     let Some(stack) = ItemStack::read_item_stack(compound) else {
                         continue;
                     };
-                    *equipment.get_or_insert(slot).lock().await = stack;
+                    equipment.put(slot, stack);
                 }
             }
         })
@@ -2886,6 +2905,148 @@ impl EntityBase for LivingEntity {
                     .or(cause)
                     .map(|entity| entity.get_entity().pos.load())
             });
+
+            // Vanilla parity: entities in FREEZE_HURTS_EXTRA_TYPES take 5x freezing damage.
+            if damage_type == DamageType::FREEZE
+                && self
+                    .entity
+                    .entity_type
+                    .has_tag(&tag::EntityType::MINECRAFT_FREEZE_HURTS_EXTRA_TYPES)
+            {
+                amount *= 5.0;
+            }
+
+            // These damage types bypass the hurt cooldown and death protection
+            let bypasses_cooldown_protection =
+                damage_type == DamageType::GENERIC_KILL || damage_type == DamageType::OUT_OF_WORLD;
+
+            let mut damage_after_armor = amount;
+            if !bypasses_armor_durability(&damage_type) {
+                let mut armor = 0.0f32;
+                let mut toughness = 0.0f32;
+                {
+                    let equipment_lock = self.entity_equipment.lock().await;
+                    for slot in [
+                        EquipmentSlot::HEAD,
+                        EquipmentSlot::CHEST,
+                        EquipmentSlot::LEGS,
+                        EquipmentSlot::FEET,
+                    ] {
+                        if let Some(stack) = equipment_lock.equipment.get(&slot)
+                            && !stack.is_empty()
+                            && let Some(modifiers) =
+                                stack.get_data_component::<AttributeModifiersImpl>()
+                        {
+                            for modifier in modifiers.attribute_modifiers.iter() {
+                                if modifier.r#type == &Attributes::ARMOR {
+                                    armor += modifier.amount as f32;
+                                } else if modifier.r#type == &Attributes::ARMOR_TOUGHNESS {
+                                    toughness += modifier.amount as f32;
+                                }
+                            }
+                        }
+                    }
+                }
+                let value = 2.0f32 + toughness / 4.0;
+                let clamped_armor = (armor - damage_after_armor / value)
+                    .max(armor / 5.0)
+                    .min(20.0);
+                damage_after_armor *= 1.0 - clamped_armor / 25.0;
+            }
+
+            let mut damage_after_enchantments = damage_after_armor;
+            if damage_type != DamageType::OUT_OF_WORLD {
+                let mut epf = 0i32;
+                {
+                    let equipment_lock = self.entity_equipment.lock().await;
+                    for slot in [
+                        EquipmentSlot::HEAD,
+                        EquipmentSlot::CHEST,
+                        EquipmentSlot::LEGS,
+                        EquipmentSlot::FEET,
+                    ] {
+                        if let Some(stack) = equipment_lock.equipment.get(&slot)
+                            && !stack.is_empty()
+                            && let Some(enchantments) =
+                                stack.get_data_component::<EnchantmentsImpl>()
+                        {
+                            for (enchantment, level) in enchantments.enchantment.iter() {
+                                let mut factor = 0;
+                                let enc = *enchantment;
+                                if enc == &Enchantment::PROTECTION {
+                                    if damage_type != DamageType::DROWN
+                                        && damage_type != DamageType::STARVE
+                                        && damage_type != DamageType::GENERIC_KILL
+                                    {
+                                        factor = *level;
+                                    }
+                                } else if enc == &Enchantment::FIRE_PROTECTION {
+                                    if is_fire_damage {
+                                        factor = *level * 2;
+                                    }
+                                } else if enc == &Enchantment::BLAST_PROTECTION {
+                                    if damage_type == DamageType::EXPLOSION
+                                        || damage_type == DamageType::PLAYER_EXPLOSION
+                                    {
+                                        factor = *level * 2;
+                                    }
+                                } else if enc == &Enchantment::PROJECTILE_PROTECTION {
+                                    if damage_type == DamageType::ARROW
+                                        || damage_type == DamageType::MOB_PROJECTILE
+                                        || damage_type == DamageType::THROWN
+                                    {
+                                        factor = (*level) * 2;
+                                    }
+                                } else if enc == &Enchantment::FEATHER_FALLING
+                                    && damage_type == DamageType::FALL
+                                {
+                                    factor = (*level) * 4;
+                                }
+                                epf += factor;
+                            }
+                        }
+                    }
+                }
+                epf = epf.min(20);
+                if epf > 0 {
+                    damage_after_enchantments *= 1.0 - (epf as f32 * 0.04);
+                }
+            }
+
+            // Apply Resistance effect reduction (20% per level), excluding bypasses_cooldown_protection and starvation damage
+            let resistance_reduction =
+                if !bypasses_cooldown_protection && damage_type != DamageType::STARVE {
+                    self.get_effect(&StatusEffect::RESISTANCE)
+                        .await
+                        .map_or(0.0, |e| 0.2 * (e.amplifier + 1) as f32)
+                } else {
+                    0.0
+                };
+
+            // Total damage after reductions
+            if resistance_reduction > 0.0 {
+                let resisted = damage_after_enchantments * resistance_reduction;
+                if let Some(player) = caller.get_player() {
+                    player
+                        .increment_stat(
+                            StatisticCategory::Custom,
+                            CustomStatistic::DamageResisted as i32,
+                            (resisted * 10.0) as i32,
+                        )
+                        .await;
+                }
+                if let Some(attacker_player) = cause.and_then(|c| c.get_player()) {
+                    attacker_player
+                        .increment_stat(
+                            StatisticCategory::Custom,
+                            CustomStatistic::DamageDealtResisted as i32,
+                            (resisted * 10.0) as i32,
+                        )
+                        .await;
+                }
+            }
+
+            // Check for shield blocking
             if self.is_blocking().await
                 && !bypasses_shield(&damage_type)
                 && let Some(pos) = shield_source_position
@@ -2917,8 +3078,8 @@ impl EntityBase for LivingEntity {
                     }
 
                     if let Some(attacker_player) = cause.and_then(|c| c.get_player()) {
-                        let held_item = attacker_player.inventory().held_item();
-                        let is_axe = held_item.lock().await.is_axe();
+                        let held_item = attacker_player.inventory().held_item().await;
+                        let is_axe = held_item.is_axe();
                         if is_axe {
                             let mut disable_chance = 0.25;
                             let is_sprinting = attacker_player
@@ -2952,33 +3113,30 @@ impl EntityBase for LivingEntity {
                     {
                         let slot = equipment_slot_for_hand(hand);
 
-                        let equipment_lock = self.entity_equipment.lock().await;
-                        let stack_arc = equipment_lock.get(&slot);
-                        let mut stack = stack_arc.lock().await;
+                        let mut equipment_guard = self.entity_equipment.lock().await;
+                        if let Some(stack) = equipment_guard.equipment.get_mut(&slot) {
+                            let durability_damage = (amount / 1.0).floor().max(1.0) as i32;
+                            if stack.damage_item(durability_damage) == DamageResult::Broken {
+                                if let Some(player) = caller.get_player() {
+                                    player
+                                        .increment_stat(
+                                            StatisticCategory::Broken,
+                                            stack.item.id as i32,
+                                            1,
+                                        )
+                                        .await;
+                                }
+                                world.send_entity_status(
+                                    &self.entity,
+                                    crate::entity::equipment_break_status(&slot),
+                                );
+                                *stack = ItemStack::EMPTY.clone();
+                                let broken_stack = stack.clone();
+                                drop(equipment_guard);
 
-                        let durability_damage = amount.floor() as i32 + 1;
-                        if stack.damage_item(durability_damage) == DamageResult::Broken {
-                            if let Some(player) = caller.get_player() {
-                                player
-                                    .increment_stat(
-                                        StatisticCategory::Broken,
-                                        stack.item.id as i32,
-                                        1,
-                                    )
-                                    .await;
+                                self.send_equipment_changes(&[(slot, broken_stack)]);
+                                self.clear_active_hand().await;
                             }
-                            world.send_entity_status(
-                                &self.entity,
-                                crate::entity::equipment_break_status(&slot),
-                            );
-                            *stack = ItemStack::EMPTY.clone();
-                            let broken_stack = stack.clone();
-                            drop(stack);
-                            drop(stack_arc);
-                            drop(equipment_lock);
-
-                            self.send_equipment_changes(&[(slot, broken_stack)]);
-                            self.clear_active_hand().await;
                         }
                     }
 
@@ -3036,8 +3194,7 @@ impl EntityBase for LivingEntity {
                         EquipmentSlot::LEGS,
                         EquipmentSlot::FEET,
                     ] {
-                        let stack_arc = equipment_lock.get(&slot);
-                        let stack = stack_arc.lock().await;
+                        let stack = equipment_lock.get(&slot);
                         if !stack.is_empty()
                             && let Some(modifiers) =
                                 stack.get_data_component::<AttributeModifiersImpl>()
@@ -3064,10 +3221,7 @@ impl EntityBase for LivingEntity {
                         .downcast_ref::<crate::entity::player::Player>()
                 {
                     let held = player.inventory().held_item();
-                    let breach_level = held
-                        .lock()
-                        .await
-                        .get_enchantment_level(&Enchantment::BREACH);
+                    let breach_level = held.await.get_enchantment_level(&Enchantment::BREACH);
                     if breach_level > 0 {
                         armor_fraction = breach_armor_fraction(armor_fraction, breach_level);
                     }
@@ -3126,8 +3280,7 @@ impl EntityBase for LivingEntity {
                         EquipmentSlot::LEGS,
                         EquipmentSlot::FEET,
                     ] {
-                        let stack_arc = equipment_lock.get(&slot);
-                        let stack = stack_arc.lock().await;
+                        let stack = equipment_lock.get(&slot);
                         if !stack.is_empty()
                             && let Some(enchantments) =
                                 stack.get_data_component::<EnchantmentsImpl>()
@@ -3180,7 +3333,10 @@ impl EntityBase for LivingEntity {
             // Finalize state: damage actually applied this hit, after armor/resistance/enchant.
             let damage_amount = damage_after_enchantments.max(0.0);
 
-            let config = &world.server.upgrade().unwrap().advanced_config.pvp;
+            let Some(server) = world.server.upgrade() else {
+                return false;
+            };
+            let config = &server.advanced_config.pvp;
 
             if config.hurt_animation {
                 let entity_id = self.entity.entity_id;
@@ -3191,7 +3347,7 @@ impl EntityBase for LivingEntity {
                         - self.entity.yaw.load()
                 });
                 let hurt_event = SActorEvent {
-                    entity_runtime_id: VarLong(entity_id as i64),
+                    entity_runtime_id: VarULong(entity_id as u64),
                     event_type: ActorEventType::Hurt,
                     event_data: VarInt(0),
                     fire_at_position: None,
@@ -3321,15 +3477,14 @@ impl EntityBase for LivingEntity {
                 // damages the attacker (DamageType::THORNS, uniform 1.0-5.0) and wears
                 // 2 durability off that armor piece.
                 if let Some(attacker) = cause {
-                    let equipment_lock = self.entity_equipment.lock().await;
+                    let mut equipment_lock = self.entity_equipment.lock().await;
                     for slot in [
                         EquipmentSlot::HEAD,
                         EquipmentSlot::CHEST,
                         EquipmentSlot::LEGS,
                         EquipmentSlot::FEET,
                     ] {
-                        let stack_arc = equipment_lock.get(&slot);
-                        let mut stack = stack_arc.lock().await;
+                        let mut stack = equipment_lock.get(&slot);
                         if stack.is_empty() {
                             continue;
                         }
@@ -3355,14 +3510,12 @@ impl EntityBase for LivingEntity {
                                 &self.entity,
                                 crate::entity::equipment_break_status(&slot),
                             );
-                            *stack = ItemStack::EMPTY.clone();
+                            stack = ItemStack::EMPTY.clone();
                             let broken_stack = stack.clone();
-                            drop(stack);
-                            drop(stack_arc);
+                            equipment_lock.put(&slot, stack);
                             self.send_equipment_changes(&[(slot, broken_stack)]);
                         } else {
-                            drop(stack);
-                            drop(stack_arc);
+                            equipment_lock.put(&slot, stack);
                         }
                         attacker
                             .damage(attacker, thorns_damage, DamageType::THORNS)
@@ -3624,54 +3777,51 @@ impl EntityBase for LivingEntity {
                         // finite get_use_duration() that a player holds to completion (e.g.
                         // SpyglassItem at 1200 ticks) gets silently consumed here.
                         if is_consumed_on_finish(item) {
+                            let is_potion = item
+                                .get_data_component::<pumpkin_data::data_component_impl::PotionContentsImpl>()
+                                .is_some();
                             // Prefer modifying the exact stack that matches the consumed item:
                             // 1) selected hotbar (held_item)
                             // 2) off-hand
                             // 3) fallback to active_hand if the above didn't match
                             let mut handled = false;
-                            let mut slot_to_sync = None;
-
                             // Check main hand (hotbar selected)
-                            let held_arc = player.inventory.held_item();
-                            {
-                                let mut held_lock = held_arc.lock().await;
-                                if held_lock.are_items_and_components_equal(item) {
-                                    if let Some(remainder) = consumable_remainder(item) {
-                                        if player.gamemode.load() != GameMode::Creative {
-                                            held_lock.decrement(1);
-                                            if held_lock.is_empty() {
-                                                *held_lock = ItemStack::new(1, remainder);
-                                            }
+                            let mut held = player.inventory.held_item().await;
+                            if held.are_items_and_components_equal(item) {
+                                if is_potion {
+                                    if player.gamemode.load() != GameMode::Creative {
+                                        held.decrement(1);
+                                        if held.is_empty() {
+                                            held = ItemStack::new(1, &Item::GLASS_BOTTLE);
                                         }
-                                    } else {
-                                        held_lock
-                                            .decrement_unless_creative(player.gamemode.load(), 1);
                                     }
-                                    handled = true;
-                                    slot_to_sync =
-                                        Some(player.inventory.get_selected_slot() as usize);
+                                } else {
+                                    held.decrement_unless_creative(player.gamemode.load(), 1);
                                 }
+                                player.inventory.set_held_item(held).await;
+                                handled = true;
                             }
 
                             if !handled {
                                 // Check off-hand
-                                let off_arc = player.inventory.off_hand_item().await;
-                                let mut off_lock = off_arc.lock().await;
-                                if off_lock.are_items_and_components_equal(item) {
-                                    if let Some(remainder) = consumable_remainder(item) {
+                                let mut off_hand = player.inventory.off_hand_item().await;
+                                if off_hand.are_items_and_components_equal(item) {
+                                    if is_potion {
                                         if player.gamemode.load() != GameMode::Creative {
-                                            off_lock.decrement(1);
-                                            if off_lock.is_empty() {
-                                                *off_lock = ItemStack::new(1, remainder);
+                                            off_hand.decrement(1);
+                                            if off_hand.is_empty() {
+                                                off_hand = ItemStack::new(1, &Item::GLASS_BOTTLE);
                                             }
                                         }
                                     } else {
-                                        off_lock
+                                        off_hand
                                             .decrement_unless_creative(player.gamemode.load(), 1);
                                     }
-
+                                    player
+                                        .inventory
+                                        .set_stack_in_hand(Hand::Left, off_hand)
+                                        .await;
                                     handled = true;
-                                    slot_to_sync = Some(PlayerInventory::OFF_HAND_SLOT);
                                 }
                             }
 
@@ -3679,65 +3829,55 @@ impl EntityBase for LivingEntity {
                                 // Use stored active_hand (as a fallback)
                                 let active_hand = *self.active_hand.lock().await;
                                 let hand_to_modify = active_hand.unwrap_or(Hand::Right);
-                                let item_stack = self
+                                let mut item_stack = self
                                     .get_stack_in_hand(caller.as_ref(), hand_to_modify)
                                     .await;
-                                let mut item_lock = item_stack.lock().await;
 
-                                if let Some(remainder) = consumable_remainder(item) {
+                                if is_potion {
                                     if player.gamemode.load() != GameMode::Creative {
-                                        item_lock.decrement(1);
-                                        if item_lock.is_empty() {
-                                            *item_lock = ItemStack::new(1, remainder);
+                                        item_stack.decrement(1);
+                                        if item_stack.is_empty() {
+                                            item_stack = ItemStack::new(1, &Item::GLASS_BOTTLE);
                                         }
                                     }
                                 } else {
-                                    item_lock.decrement_unless_creative(player.gamemode.load(), 1);
+                                    item_stack.decrement_unless_creative(player.gamemode.load(), 1);
                                 }
-                                slot_to_sync = Some(match hand_to_modify {
-                                    Hand::Left => PlayerInventory::OFF_HAND_SLOT,
-                                    Hand::Right => player.inventory.get_selected_slot() as usize,
-                                });
+                                player
+                                    .inventory
+                                    .set_stack_in_hand(hand_to_modify, item_stack)
+                                    .await;
                             }
 
-                            if let Some(slot) = slot_to_sync {
-                                let updated = if slot == PlayerInventory::OFF_HAND_SLOT {
-                                    player.inventory.off_hand_item().await.lock().await.clone()
-                                } else {
-                                    player.inventory.held_item().lock().await.clone()
-                                };
-                                player.sync_hand_slot(slot, updated).await;
+                            if let Some(cooldown) = item.get_use_cooldown() {
+                                let group = cooldown
+                                    .cooldown_group
+                                    .clone()
+                                    .unwrap_or_else(|| item.item.registry_key.to_string());
+                                player
+                                    .start_cooldown(group, (cooldown.seconds * 20.0) as i32)
+                                    .await;
                             }
                         }
 
-                        if let Some(cooldown) = item.get_use_cooldown() {
-                            let group = cooldown
-                                .cooldown_group
-                                .clone()
-                                .unwrap_or_else(|| item.item.registry_key.to_string());
-                            player
-                                .start_cooldown(group, (cooldown.seconds * 20.0) as i32)
-                                .await;
-                        }
+                        self.clear_active_hand().await;
                     }
-
-                    self.clear_active_hand().await;
                 }
-            }
 
-            if self.hurt_cooldown.load(Relaxed) > 0 {
-                self.hurt_cooldown.fetch_sub(1, Relaxed);
-            }
-            if self.health.load() <= 0.0 {
-                let time = self.death_time.fetch_add(1, Relaxed);
-                // Only send death particles once (on the exact tick death_time reaches 20)
-                // and then remove the entity, preventing entity_event spam.
-                if time == 20 && !self.entity.removed.swap(true, Ordering::Relaxed) {
-                    self.entity
-                        .world
-                        .load()
-                        .send_entity_status(&self.entity, EntityStatus::Death);
-                    self.entity.remove().await;
+                if self.hurt_cooldown.load(Relaxed) > 0 {
+                    self.hurt_cooldown.fetch_sub(1, Relaxed);
+                }
+                if self.health.load() <= 0.0 {
+                    let time = self.death_time.fetch_add(1, Relaxed);
+                    // Only send death particles once (on the exact tick death_time reaches 20)
+                    // and then remove the entity, preventing entity_event spam.
+                    if time == 20 && !self.entity.removed.swap(true, Ordering::Relaxed) {
+                        self.entity
+                            .world
+                            .load()
+                            .send_entity_status(&self.entity, EntityStatus::Death);
+                        self.entity.remove().await;
+                    }
                 }
             }
         })

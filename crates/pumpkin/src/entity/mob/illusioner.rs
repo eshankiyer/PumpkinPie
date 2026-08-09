@@ -4,7 +4,6 @@ use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
-use tokio::sync::Mutex;
 
 use pumpkin_nbt::compound::NbtCompound;
 
@@ -48,10 +47,7 @@ impl IllusionerEntity {
             .try_lock()
             .expect("new illusioner equipment is uncontended")
             .equipment
-            .insert(
-                EquipmentSlot::MAIN_HAND,
-                Arc::new(Mutex::new(ItemStack::new(1, &Item::BOW))),
-            );
+            .insert(EquipmentSlot::MAIN_HAND, ItemStack::new(1, &Item::BOW));
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
             Arc::downgrade(&mob_arc)
@@ -59,7 +55,11 @@ impl IllusionerEntity {
         let illusioner_weak = Arc::downgrade(&mob_arc);
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(
@@ -86,7 +86,11 @@ impl IllusionerEntity {
             );
             goal_selector.add_goal(10, Box::new(RandomLookAroundGoal::default()));
 
-            let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
+            let mut target_selector = mob_arc
+                .mob_entity
+                .target_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
             target_selector.add_goal(
                 1,

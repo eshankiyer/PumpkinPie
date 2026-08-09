@@ -27,7 +27,11 @@ impl TadpoleEntity {
         };
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // Vanilla `AbstractFish.registerGoals` (inherited by `Tadpole`) has no float/swim
             // goal.

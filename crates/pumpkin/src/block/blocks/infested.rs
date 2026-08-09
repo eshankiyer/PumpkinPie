@@ -22,9 +22,8 @@ impl BlockBehaviour for InfestedBlock {
                 return;
             }
 
-            let tool = args.player.inventory.held_item();
+            let tool = args.player.inventory.held_item().await;
             let prevents_spawn = {
-                let tool = tool.lock().await;
                 tool.get_data_component::<pumpkin_data::data_component_impl::EnchantmentsImpl>()
                     .is_some_and(|enchantments| {
                         enchantments.enchantment.iter().any(|(enchantment, _)| {

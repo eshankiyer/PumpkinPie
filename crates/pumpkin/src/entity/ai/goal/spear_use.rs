@@ -111,7 +111,6 @@ impl SpearUseGoal {
 
         let living_entity = &mob.get_mob_entity().living_entity;
         let held_item = living_entity.held_item(&living_entity.entity).await;
-        let held_item = held_item.lock().await;
         held_item
             .get_data_component::<KineticWeaponImpl>()
             .is_some()

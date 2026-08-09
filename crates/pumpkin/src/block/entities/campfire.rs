@@ -6,7 +6,7 @@ use pumpkin_data::recipes::CookingRecipeKind;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
-use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture, split_stack};
+use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -231,8 +231,8 @@ impl Inventory for CampfireBlockEntity {
         })
     }
 
-    fn get_stack(&self, slot: usize) -> InventoryFuture<'_, Arc<Mutex<ItemStack>>> {
-        Box::pin(async move { self.items[slot].clone() })
+    fn get_stack(&self, slot: usize) -> InventoryFuture<'_, ItemStack> {
+        Box::pin(async move { self.items[slot].lock().await.clone() })
     }
 
     fn remove_stack(&self, slot: usize) -> InventoryFuture<'_, ItemStack> {
@@ -246,7 +246,7 @@ impl Inventory for CampfireBlockEntity {
 
     fn remove_stack_specific(&self, slot: usize, amount: u8) -> InventoryFuture<'_, ItemStack> {
         Box::pin(async move {
-            let removed = split_stack(&self.items, slot, amount).await;
+            let removed = self.items[slot].lock().await.split(amount);
             self.dirty.store(true, Ordering::Relaxed);
             removed
         })

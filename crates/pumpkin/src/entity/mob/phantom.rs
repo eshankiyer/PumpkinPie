@@ -61,8 +61,16 @@ impl PhantomEntity {
         let phantom_weak = Arc::downgrade(&mob_arc);
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
-            let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut target_selector = mob_arc
+                .mob_entity
+                .target_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // Vanilla `Phantom.registerGoals` (`Phantom.java:70-74`). Note vanilla installs a
             // no-op `PhantomLookControl` (`Phantom.java:375-383`) precisely because it has no

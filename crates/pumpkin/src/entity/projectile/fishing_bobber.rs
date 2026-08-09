@@ -186,7 +186,6 @@ impl FishingBobberEntity {
             let luck_of_the_sea = player
                 .inventory
                 .held_item()
-                .lock()
                 .await
                 .get_enchantment_level(&pumpkin_data::Enchantment::LUCK_OF_THE_SEA);
             let item = if Self::calculate_open_water(&world, &self.entity.block_pos.load()) {
@@ -269,9 +268,9 @@ impl FishingBobberEntity {
             entity.remove().await;
             return;
         }
-        let main_hand_is_rod = owner.inventory.held_item().lock().await.item.id
-            == pumpkin_data::item::Item::FISHING_ROD.id;
-        let off_hand_is_rod = owner.inventory.off_hand_item().await.lock().await.item.id
+        let main_hand_is_rod =
+            owner.inventory.held_item().await.item.id == pumpkin_data::item::Item::FISHING_ROD.id;
+        let off_hand_is_rod = owner.inventory.off_hand_item().await.item.id
             == pumpkin_data::item::Item::FISHING_ROD.id;
         if !main_hand_is_rod && !off_hand_is_rod {
             owner.fishing_bobber.store(-1, Ordering::Relaxed);
@@ -310,7 +309,6 @@ impl FishingBobberEntity {
                 if let Some(owner) = world.get_player_by_id(self.owner_id) {
                     let held = owner.inventory.held_item();
                     reduction += held
-                        .lock()
                         .await
                         .get_enchantment_level(&pumpkin_data::Enchantment::LURE)
                         .max(0)

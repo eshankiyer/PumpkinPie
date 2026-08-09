@@ -24,7 +24,7 @@ impl crate::block::BlockBehaviour for PumpkinBlock {
         args: UseWithItemArgs<'a>,
     ) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
-            if !args.item_stack.lock().await.is_shears() {
+            if args.item_stack.item != &Item::SHEARS {
                 return BlockActionResult::Pass;
             }
 

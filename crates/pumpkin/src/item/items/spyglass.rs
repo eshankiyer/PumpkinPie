@@ -57,8 +57,7 @@ impl ItemBehaviour for SpyglassItem {
                 .increment_stat(StatisticCategory::Used, Item::SPYGLASS.id as i32, 1)
                 .await;
 
-            let held = player.inventory().held_item();
-            let stack = held.lock().await.clone();
+            let stack = player.inventory().held_item().await;
             player
                 .living_entity
                 .set_active_hand(Hand::Right, stack, Self::USE_DURATION)

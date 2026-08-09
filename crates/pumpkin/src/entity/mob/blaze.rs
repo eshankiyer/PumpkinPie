@@ -14,7 +14,7 @@ use crate::entity::{
     ai::goal::{
         active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, move_towards_restriction::MoveTowardsRestrictionGoal,
-        revenge::RevengeGoal, wander_around::WanderAroundGoal,
+        revenge::RevengeGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
     },
     ai::pathfinder::node::PathType,
     mob::{Mob, MobEntity},
@@ -46,7 +46,11 @@ impl BlazeEntity {
             Arc::downgrade(&mob_arc)
         };
         {
-            let mut navigator = mob_arc.entity.navigator.lock().unwrap();
+            let mut navigator = mob_arc
+                .entity
+                .navigator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             // `Blaze.<init>` (`Blaze.java:42-44`). The Rust path evaluator names
             // `FIRE_IN_NEIGHBOR`/`FIRE` as `DangerFire`/`DamageFire`.
             navigator.set_pathfinding_malus(PathType::Water, -1.0);
@@ -55,9 +59,18 @@ impl BlazeEntity {
             navigator.set_pathfinding_malus(PathType::DamageFire, 0.0);
             drop(navigator);
 
-            let mut goal_selector = mob_arc.entity.goals_selector.lock().unwrap();
-            let mut target_selector = mob_arc.entity.target_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut target_selector = mob_arc
+                .entity
+                .target_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            goal_selector.add_goal(0, Box::new(SwimGoal::default()));
 
             goal_selector.add_goal(
                 4,

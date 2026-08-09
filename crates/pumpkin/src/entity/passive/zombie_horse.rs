@@ -64,7 +64,11 @@ impl ZombieHorseEntity {
         let horse_weak: Weak<Self> = Arc::downgrade(&mob_arc);
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // `ZombieHorse.java:126-129` (`addBehaviourGoals`): float + tempt only, no panic
             // goal. Wander/look/stand/run-around-like-crazy come from the base

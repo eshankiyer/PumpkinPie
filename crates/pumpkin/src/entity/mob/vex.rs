@@ -8,7 +8,6 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_util::math::position::BlockPos;
-use tokio::sync::Mutex;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage,
@@ -58,7 +57,7 @@ impl VexEntity {
             .equipment
             .insert(
                 EquipmentSlot::MAIN_HAND,
-                Arc::new(Mutex::new(ItemStack::new(1, &Item::IRON_SWORD))),
+                ItemStack::new(1, &Item::IRON_SWORD),
             );
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
@@ -67,7 +66,11 @@ impl VexEntity {
         let vex_weak = Arc::downgrade(&mob_arc);
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(4, Box::new(VexChargeAttackGoal::new(vex_weak.clone())));
@@ -90,7 +93,11 @@ impl VexEntity {
                 LookAtEntityGoal::with_default_any_mob(mob_weak.clone(), 8.0),
             );
 
-            let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
+            let mut target_selector = mob_arc
+                .mob_entity
+                .target_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             // Vex.java:93: `HurtByTargetGoal(this, Raider.class).setAlertOthers()`.
             target_selector.add_goal(1, Box::new(RevengeGoal::new(true).exclude_raiders()));
             target_selector.add_goal(2, Box::new(VexCopyOwnerTargetGoal::new(vex_weak)));

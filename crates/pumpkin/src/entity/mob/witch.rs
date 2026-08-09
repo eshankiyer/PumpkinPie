@@ -62,8 +62,16 @@ impl WitchEntity {
         let witch_weak = Arc::downgrade(&mob_arc);
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
-            let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut target_selector = mob_arc
+                .mob_entity
+                .target_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(1, Box::new(SwimGoal::default()));
             goal_selector.add_goal(2, Box::new(WitchAttackGoal::new(witch_weak, 60, 10.0)));
@@ -111,16 +119,12 @@ impl WitchEntity {
             .entity_equipment
             .lock()
             .await
-            .get(&EquipmentSlot::MAIN_HAND)
-            .lock()
-            .await
-            .clone();
+            .get(&EquipmentSlot::MAIN_HAND);
         living
             .entity_equipment
             .lock()
             .await
-            .put(&EquipmentSlot::MAIN_HAND, ItemStack::EMPTY.clone())
-            .await;
+            .put(&EquipmentSlot::MAIN_HAND, ItemStack::EMPTY.clone());
         if item.item.registry_key == Item::POTION.registry_key {
             let effects = PotionContents::read_potion_effects(&item);
             PotionContents::apply_effects_to(living, effects, 1.0, PotionApplicationSource::Normal)
@@ -212,8 +216,7 @@ impl WitchEntity {
             .entity_equipment
             .lock()
             .await
-            .put(&EquipmentSlot::MAIN_HAND, stack)
-            .await;
+            .put(&EquipmentSlot::MAIN_HAND, stack);
         self.drink_ticks_remaining.store(use_ticks, Relaxed);
 
         living.entity.world.load().play_sound(

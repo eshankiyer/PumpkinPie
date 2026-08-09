@@ -67,11 +67,8 @@ impl BlockBehaviour for CampfireBlock {
             let Some(campfire) = block_entity.as_any().downcast_ref::<CampfireBlockEntity>() else {
                 return BlockActionResult::Pass;
             };
-            let mut item = args.item_stack.lock().await;
-            if campfire
-                .add_item(&mut item, args.player.is_creative())
-                .await
-            {
+            let item = &mut *args.item_stack;
+            if campfire.add_item(item, args.player.is_creative()).await {
                 args.player
                     .increment_stat(
                         pumpkin_data::statistic::StatisticCategory::Custom,
@@ -100,11 +97,12 @@ impl BlockBehaviour for CampfireBlock {
             {
                 let has_frost_walker_enchantment = {
                     let equipment = living_entity.entity_equipment.lock().await;
-                    let boots = equipment.get(&EquipmentSlot::FEET);
-
-                    let boots_stack = boots.lock().await;
-
-                    boots_stack.get_enchantment_level(&Enchantment::FROST_WALKER) != 0
+                    equipment
+                        .equipment
+                        .get(&EquipmentSlot::FEET)
+                        .is_some_and(|boots| {
+                            boots.get_enchantment_level(&Enchantment::FROST_WALKER) != 0
+                        })
                 };
                 let has_fire_res = living_entity
                     .get_effect(&StatusEffect::FIRE_RESISTANCE)

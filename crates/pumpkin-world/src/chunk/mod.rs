@@ -470,7 +470,7 @@ impl ChunkSections {
         let relative_y = relative_y % BlockPalette::SIZE;
         self.block_sections
             .read()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(section_index)
             .map(|section| section.get(relative_x, relative_y, relative_z))
     }
@@ -506,8 +506,14 @@ impl ChunkSections {
         let relative_y = relative_y % BlockPalette::SIZE;
 
         // Keep lock order consistent to avoid deadlocks: block sections first, then random-tick cache.
-        let mut sections = self.block_sections.write().unwrap();
-        let mut random_tick_sections_guard = self.random_tick_sections.write().unwrap();
+        let mut sections = self
+            .block_sections
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut random_tick_sections_guard = self
+            .random_tick_sections
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         if let Some(section) = sections.get_mut(section_index) {
             let replaced_block_state_id =
@@ -580,7 +586,12 @@ impl ChunkSections {
 
         let section_index = relative_y / BiomePalette::SIZE;
         let relative_y = relative_y % BiomePalette::SIZE;
-        if let Some(section) = self.biome_sections.write().unwrap().get_mut(section_index) {
+        if let Some(section) = self
+            .biome_sections
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_mut(section_index)
+        {
             section.set(relative_x, relative_y, relative_z, biome_id);
         }
     }
@@ -597,7 +608,7 @@ impl ChunkSections {
         debug_assert!(scale_z < BiomePalette::SIZE);
         self.biome_sections
             .read()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(index)
             .map(|section| section.get(scale_x, scale_y, scale_z))
     }
@@ -645,13 +656,25 @@ impl ChunkData {
     /// propagating down - which shows up as black caves that snap to full brightness the
     /// moment a block update forces a relight.
     pub fn pad_sections_to(&self, total_sections: usize, sky_light: u8) {
-        let mut block_sections = self.section.block_sections.write().unwrap();
+        let mut block_sections = self
+            .section
+            .block_sections
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if block_sections.len() >= total_sections {
             return;
         }
 
-        let mut biome_sections = self.section.biome_sections.write().unwrap();
-        let mut unknown_nbt = self.section.unknown_nbt.write().unwrap();
+        let mut biome_sections = self
+            .section
+            .biome_sections
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut unknown_nbt = self
+            .section
+            .unknown_nbt
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let mut blocks = std::mem::take(&mut *block_sections).into_vec();
         let mut biomes = std::mem::take(&mut *biome_sections).into_vec();
@@ -673,7 +696,10 @@ impl ChunkData {
 
         // The light arrays derive their own section count independently during serialization,
         // so they must grow in lockstep or the light block desyncs from the block block.
-        let mut light = self.light_engine.lock().unwrap();
+        let mut light = self
+            .light_engine
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if light.sky_light.len() < total_sections {
             let mut sky = std::mem::take(&mut light.sky_light).into_vec();
             let mut block = std::mem::take(&mut light.block_light).into_vec();
@@ -683,6 +709,31 @@ impl ChunkData {
             light.sky_light = sky.into_boxed_slice();
             light.block_light = block.into_boxed_slice();
         }
+    }
+
+    #[must_use]
+    pub fn empty(x: i32, z: i32) -> Self {
+        Self {
+            section: ChunkSections::new(24, -64),
+            heightmap: std::sync::Mutex::new(ChunkHeightmaps::default()),
+            x,
+            z,
+            block_ticks: ChunkTickScheduler::default(),
+            fluid_ticks: ChunkTickScheduler::default(),
+            pending_block_entities: std::sync::Mutex::new(FxHashMap::default()),
+            light_engine: std::sync::Mutex::new(ChunkLight::default()),
+            light_populated: std::sync::atomic::AtomicBool::new(false),
+            status: ChunkStatus::Full,
+            blending_data: None,
+            unknown_nbt: NbtCompound::new(),
+            dirty: std::sync::atomic::AtomicBool::new(false),
+            inhabited_time: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    #[must_use]
+    pub fn empty_sync(x: i32, z: i32) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self::empty(x, z))
     }
 
     /// Returns the replaced block state ID
@@ -720,7 +771,10 @@ impl ChunkData {
         relative_z: usize,
         block_state: &BlockState,
     ) {
-        let mut heightmap = self.heightmap.lock().unwrap();
+        let mut heightmap = self
+            .heightmap
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let min_y = self.section.min_y;
         let x = relative_x as i32;
         let y = relative_y as i32 + min_y;
@@ -813,7 +867,9 @@ impl ChunkData {
         let mut has_found = [false; ChunkHeightmapType::ALL.len()];
 
         for y in (self.section.min_y..=start_height).rev() {
-            let state_id = self.section.get_block_absolute_y(x, y, z).unwrap();
+            let Some(state_id) = self.section.get_block_absolute_y(x, y, z) else {
+                continue;
+            };
             let block_state = BlockState::from_id(state_id);
 
             for hm_type in ChunkHeightmapType::ALL {
@@ -830,9 +886,9 @@ impl ChunkData {
         }
 
         for (idx, is_set) in has_found.iter().enumerate() {
-            if !(*is_set) {
+            if !(*is_set) && let Ok(hm_type) = idx.try_into() {
                 heightmaps.set(
-                    idx.try_into().unwrap(),
+                    hm_type,
                     x as i32,
                     z as i32,
                     self.section.min_y - 1,
@@ -899,7 +955,7 @@ impl ChunkData {
         self.section
             .block_sections
             .read()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .enumerate()
             .rev()
