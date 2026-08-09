@@ -1,12 +1,10 @@
-use std::sync::atomic::Ordering::Relaxed;
-
 use super::{Controls, Goal, GoalFuture};
 use crate::entity::{ai::pathfinder::NavigatorGoal, mob::Mob};
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
 const RANGE: i32 = 5;
-const RECENT_DAMAGE_TICKS: i32 = 100;
+const LAST_DAMAGE_MEMORY_TICKS: i64 = 40;
 const TARGET_ATTEMPTS: usize = 10;
 
 pub struct EscapeDangerGoal {
@@ -25,19 +23,15 @@ impl EscapeDangerGoal {
         })
     }
 
-    fn is_in_danger(mob: &dyn Mob) -> bool {
+    async fn is_in_danger(mob: &dyn Mob) -> bool {
         let living = &mob.get_mob_entity().living_entity;
 
-        if living.entity.fire_ticks.load(Relaxed) > 0 {
-            return true;
-        }
-
-        let last_attacked = living.last_attacked_time.load(Relaxed);
-        if last_attacked == 0 {
+        let age = living.entity.world.load().get_world_age().await;
+        let damage_state = living.last_damage_state.load();
+        if damage_state.0 == 0 || !damage_state.2 {
             return false;
         }
-        let age = living.entity.age.load(Relaxed);
-        age - last_attacked < RECENT_DAMAGE_TICKS
+        age.saturating_sub(damage_state.1) <= LAST_DAMAGE_MEMORY_TICKS
     }
 
     fn find_escape_target(mob: &dyn Mob) -> Option<Vector3<f64>> {
@@ -64,7 +58,7 @@ impl Goal for EscapeDangerGoal {
 
     fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async move {
-            if !Self::is_in_danger(mob) {
+            if !Self::is_in_danger(mob).await {
                 return false;
             }
             self.target = Self::find_escape_target(mob);

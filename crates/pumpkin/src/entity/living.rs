@@ -15,7 +15,7 @@ use pumpkin_util::math::position::BlockPos;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::atomic::{
-    AtomicBool, AtomicU8,
+    AtomicBool, AtomicU8, AtomicU64,
     Ordering::{Relaxed, SeqCst},
 };
 use std::{collections::HashMap, sync::atomic::AtomicI32};
@@ -177,6 +177,9 @@ pub struct LivingEntity {
     pub last_attacker_id: AtomicI32,
     /// The tick at which this entity was last attacked (entity age).
     pub last_attacked_time: AtomicI32,
+    /// Packed tick and panic-causing flag for vanilla's last damage source.
+    pub last_damage_state: AtomicCell<(u64, i64, bool)>,
+    last_damage_sequence: AtomicU64,
 
     /// The entity ID of the entity this living entity last attacked.
     pub last_attacking_id: AtomicI32,
@@ -302,6 +305,8 @@ impl LivingEntity {
             climbing_pos: AtomicCell::new(None),
             last_attacker_id: AtomicI32::new(0),
             last_attacked_time: AtomicI32::new(0),
+            last_damage_state: AtomicCell::new((0, 0, false)),
+            last_damage_sequence: AtomicU64::new(0),
             last_attacking_id: AtomicI32::new(0),
             last_attack_time: AtomicI32::new(0),
             not_targetable_as_enemy: AtomicBool::new(false),
@@ -2920,6 +2925,8 @@ impl EntityBase for LivingEntity {
                 }
             }
 
+            let damage_sequence = self.last_damage_sequence.fetch_add(1, SeqCst) + 1;
+
             // Check for shield blocking. Vanilla resolves blocking in `applyItemBlocking`
             // (hurtServer:1200) before the freeze multiplier (1203-1205) and the helmet
             // multiplier/hurtHelmet call (1207-1210), so this must run on the raw `amount`
@@ -3361,6 +3368,27 @@ impl EntityBase for LivingEntity {
             let Some(server) = world.server.upgrade() else {
                 return false;
             };
+
+            // Vanilla stores the last damage source for every successful, non-blocked hit,
+            // including environmental damage. Pack its world tick and panic-causing tag
+            // together so EscapeDangerGoal reads one consistent state.
+            let damage_tick = world.get_world_age().await;
+            let damage_state = (
+                damage_sequence,
+                damage_tick,
+                damage_type.has_tag(&tag::DamageType::MINECRAFT_PANIC_CAUSES),
+            );
+            let mut observed = self.last_damage_state.load();
+            while observed.0 < damage_state.0 {
+                match self
+                    .last_damage_state
+                    .compare_exchange(observed, damage_state)
+                {
+                    Ok(_) => break,
+                    Err(actual) => observed = actual,
+                }
+            }
+
             let config = &server.advanced_config.pvp;
 
             if config.hurt_animation {
