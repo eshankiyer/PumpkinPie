@@ -44,14 +44,10 @@ use pumpkin_protocol::{
 use pumpkin_util::{GameMode, Hand, math::position::BlockPos, text::TextComponent};
 
 use pumpkin_world::inventory::Inventory;
-use pumpkin_world::world::BlockFlags;
 
 use crate::{
     block::{BlockHitResult, registry::BlockActionResult},
-    entity::{
-        EntityBase,
-        player::{MINE_BLOCK_EXHAUSTION, Player},
-    },
+    entity::{EntityBase, player::Player},
     net::{DisconnectReason, bedrock::BedrockClient},
     plugin::player::{
         item_held::PlayerItemHeldEvent,
@@ -1096,41 +1092,34 @@ impl BedrockClient {
                 let world = entity.world.load_full();
                 let (block, state) = world.get_block_and_state(&location);
 
-                if player.gamemode.load() == GameMode::Creative {
-                    let new_state = world
-                        .break_block(
-                            &location,
-                            Some(player.clone()),
-                            BlockFlags::NOTIFY_NEIGHBORS | BlockFlags::SKIP_DROPS,
-                        )
+                if matches!(
+                    packet.action,
+                    PlayerAction::StartBreak | PlayerAction::CreativePlayerDestroyBlock
+                ) && !player.can_break_block(server, block).await
+                {
+                    let runtime_id = pumpkin_data::BlockState::to_be_network_id(state.id);
+                    self.enqueue_packet(&CUpdateBlock::new(location, runtime_id as u32))
                         .await;
-                    if new_state.is_some() {
-                        server
-                            .block_registry
-                            .broken(&world, block, player, &location, server, state)
+                    return;
+                }
+
+                if player.gamemode.load() == GameMode::Creative {
+                    let finished = player.finish_block_break(server, &world, location).await;
+                    if !finished {
+                        let runtime_id = pumpkin_data::BlockState::to_be_network_id(state.id);
+                        self.enqueue_packet(&CUpdateBlock::new(location, runtime_id as u32))
                             .await;
                     }
                 } else if !state.is_air() {
                     let speed = crate::block::calc_block_breaking(player, state, block).await;
                     if speed >= 1.0 {
                         let broken_state = world.get_block_state(&location);
-                        let can_harvest = player.can_harvest(broken_state, block).await;
-                        let new_state = world
-                            .break_block(
-                                &location,
-                                Some(player.clone()),
-                                BlockFlags::NOTIFY_NEIGHBORS,
-                            )
-                            .await;
-                        if new_state.is_some() {
-                            server
-                                .block_registry
-                                .broken(&world, block, player, &location, server, broken_state)
+                        let finished = player.finish_block_break(server, &world, location).await;
+                        if !finished {
+                            let runtime_id =
+                                pumpkin_data::BlockState::to_be_network_id(broken_state.id);
+                            self.enqueue_packet(&CUpdateBlock::new(location, runtime_id as u32))
                                 .await;
-                            player.apply_tool_damage_for_block_break(broken_state).await;
-                            if can_harvest {
-                                player.add_exhaustion(MINE_BLOCK_EXHAUSTION).await;
-                            }
                         }
                     } else {
                         let mut mining_pos = player.mining_pos.lock().await;
@@ -1208,25 +1197,11 @@ impl BedrockClient {
                             .set_block_breaking(entity, location, BlockBreakingProgress::Stop)
                             .await;
 
-                        let can_harvest = player.can_harvest(state, block).await;
-                        let flags = if can_harvest {
-                            BlockFlags::NOTIFY_NEIGHBORS
-                        } else {
-                            BlockFlags::SKIP_DROPS | BlockFlags::NOTIFY_NEIGHBORS
-                        };
-                        if world
-                            .break_block(&location, Some(player.clone()), flags)
-                            .await
-                            .is_some()
-                        {
-                            server
-                                .block_registry
-                                .broken(&world, block, player, &location, server, state)
+                        let finished = player.finish_block_break(server, &world, location).await;
+                        if !finished {
+                            let runtime_id = pumpkin_data::BlockState::to_be_network_id(state.id);
+                            self.enqueue_packet(&CUpdateBlock::new(location, runtime_id as u32))
                                 .await;
-                            player.apply_tool_damage_for_block_break(state).await;
-                            if can_harvest {
-                                player.add_exhaustion(MINE_BLOCK_EXHAUSTION).await;
-                            }
                         }
                     } else {
                         let runtime_id = pumpkin_data::BlockState::to_be_network_id(state.id);
