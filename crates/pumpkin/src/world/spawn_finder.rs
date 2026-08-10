@@ -138,7 +138,9 @@ fn get_level_respawn_pos(world: &World, x: i32, z: i32) -> Option<BlockPos> {
     while y >= min_y {
         let pos = BlockPos(Vector3::new(x, y, z));
         let state = world.get_block_state(&pos);
-        if Fluid::from_state_id(state.id).is_some() {
+        // `get_fluid_and_fluid_state` also recognizes waterlogged block states;
+        // checking the raw block state alone misses those fluids.
+        if world.get_fluid_and_fluid_state(&pos).0.id != Fluid::EMPTY.id {
             break;
         }
         if has_full_upward_face(state) {
