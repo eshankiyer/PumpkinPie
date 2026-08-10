@@ -138,7 +138,7 @@ use pumpkin_util::{
 };
 use pumpkin_util::{
     math::{get_section_cord, position::chunk_section_from_pos, vector2::Vector2},
-    random::{RandomImpl, get_seed, xoroshiro128::Xoroshiro},
+    random::{RandomImpl, get_seed, legacy_rand::LegacyRand, xoroshiro128::Xoroshiro},
 };
 use pumpkin_world::inventory::Clearable;
 use pumpkin_world::world::{GetBlockError, WorldPortalExt};
@@ -261,6 +261,8 @@ pub struct World {
     /// How much the sky light is dimmed by the time of day, from `0` at
     /// midday to `11` at night.
     pub sky_darken: AtomicU8,
+    /// Per-world random source, matching vanilla `Level.random`.
+    pub random: std::sync::Mutex<LegacyRand>,
     /// The type of dimension the world is in.
     pub dimension: Dimension,
     pub sea_level: i32,
@@ -407,6 +409,7 @@ impl World {
             worldborder: Mutex::new(Worldborder::new(0.0, 0.0, 5.999_996_8E7, 0, 5, 300)),
             level_time: Mutex::new(level_time),
             sky_darken: AtomicU8::new(0),
+            random: std::sync::Mutex::new(LegacyRand::from_seed(get_seed())),
             dimension,
             weather: Mutex::new(weather),
             block_registry,

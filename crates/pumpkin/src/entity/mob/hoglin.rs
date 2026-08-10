@@ -151,6 +151,19 @@ impl Mob for HoglinEntity {
         Box::pin(async move { hoglin_gore::try_gore_attack(self, target).await })
     }
 
+    /// Vanilla `Hoglin.blockedByItem`: adult hoglins throw a shield defender.
+    fn blocked_by_item<'a>(
+        &'a self,
+        defender: &'a dyn EntityBase,
+        _damage: f32,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            if self.is_adult() {
+                hoglin_gore::throw_target(&self.mob_entity.living_entity, defender);
+            }
+        })
+    }
+
     /// `HoglinSpecificSensor.findNearestRepellent` + `BecomePassiveIfMemoryPresent`:
     /// re-scans for a nearby repellent block every 20 ticks, refreshing the pacify
     /// timer and clearing the current attack target when one is found.

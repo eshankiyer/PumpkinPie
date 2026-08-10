@@ -1,9 +1,9 @@
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::damage::DamageType;
 use pumpkin_util::math::vector3::Vector3;
-use rand::RngExt;
+use pumpkin_util::random::RandomImpl;
 
-use crate::entity::{EntityBase, mob::hoglin::HoglinEntity};
+use crate::entity::{EntityBase, LivingEntity, mob::hoglin::HoglinEntity};
 
 /// `HoglinBase.hurtAndThrowTarget` damage roll: adults deal `base/2 + rand(0..base)`,
 /// babies deal flat `base` damage.
@@ -37,7 +37,7 @@ pub fn gore_knockback_vector(
     }
 
     let len = dx.hypot(dz);
-    let (nx, nz) = if len > 0.0 {
+    let (nx, nz) = if len >= 1.0e-5 {
         (dx / len, dz / len)
     } else {
         (0.0, 0.0)
@@ -55,6 +55,42 @@ pub fn gore_knockback_vector(
     Some((rx * horizontal_scale, vertical_scale, rz * horizontal_scale))
 }
 
+/// Vanilla `HoglinBase.throwTarget`.
+pub fn throw_target(attacker: &LivingEntity, target: &dyn EntityBase) {
+    let Some(target_living) = target.get_living_entity() else {
+        return;
+    };
+
+    let attacker_pos = attacker.entity.pos.load();
+    let target_pos = target.get_entity().pos.load();
+    let attack_knockback = attacker.get_attribute_value(&Attributes::ATTACK_KNOCKBACK);
+    let resistance = target_living.get_attribute_value(&Attributes::KNOCKBACK_RESISTANCE);
+    if attack_knockback - resistance <= 0.0 {
+        return;
+    }
+
+    let world = attacker.entity.world.load();
+    let mut random = world
+        .random
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let horizontal_angle_radians = f64::from(random.next_inbetween_i32(-10, 10));
+    let horizontal_rand01 = f64::from(random.next_f32());
+    let vertical_rand01 = f64::from(random.next_f32());
+
+    if let Some((vx, vy, vz)) = gore_knockback_vector(
+        attack_knockback,
+        resistance,
+        target_pos.x - attacker_pos.x,
+        target_pos.z - attacker_pos.z,
+        horizontal_angle_radians,
+        horizontal_rand01,
+        vertical_rand01,
+    ) {
+        target.get_entity().add_velocity(Vector3::new(vx, vy, vz));
+    }
+}
+
 /// Vanilla `HoglinBase.hurtAndThrowTarget`/`throwTarget`.
 ///
 /// Replaces the generic `MobEntity::try_attack` damage/knockback path with the
@@ -66,8 +102,13 @@ pub async fn try_gore_attack(hoglin: &HoglinEntity, target: &dyn EntityBase) -> 
     let living = &hoglin.mob_entity.living_entity;
 
     let base_attack_damage = living.get_attribute_value(&Attributes::ATTACK_DAMAGE) as f32;
-    let rand_int = if base_attack_damage as i32 > 0 {
-        rand::rng().random_range(0..base_attack_damage as i32)
+    let rand_int = if !is_baby && base_attack_damage as i32 > 0 {
+        let world = living.entity.world.load();
+        let mut random = world
+            .random
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        random.next_bounded_i32(base_attack_damage as i32)
     } else {
         0
     };
@@ -92,34 +133,7 @@ pub async fn try_gore_attack(hoglin: &HoglinEntity, target: &dyn EntityBase) -> 
         .await;
 
     if damaged && !is_baby {
-        let Some(target_living) = target.get_living_entity() else {
-            return damaged;
-        };
-        let attack_knockback = living.get_attribute_value(&Attributes::ATTACK_KNOCKBACK);
-        let resistance = target_living.get_attribute_value(&Attributes::KNOCKBACK_RESISTANCE);
-        let target_pos = target.get_entity().pos.load();
-        let dx = target_pos.x - pos.x;
-        let dz = target_pos.z - pos.z;
-
-        let mut rng = rand::rng();
-        // `random.nextInt(21) - 10` (HoglinBase.java:46), fed directly as radians into
-        // `Vec3.yRot` (verified against Vec3.java:241 -- vanilla passes the raw
-        // -10..=10 value as radians, not degrees).
-        let horizontal_angle_radians = f64::from(rng.random_range(-10..=10));
-        let horizontal_rand01 = f64::from(rng.random_range(0.0f32..1.0));
-        let vertical_rand01 = f64::from(rng.random_range(0.0f32..1.0));
-
-        if let Some((vx, vy, vz)) = gore_knockback_vector(
-            attack_knockback,
-            resistance,
-            dx,
-            dz,
-            horizontal_angle_radians,
-            horizontal_rand01,
-            vertical_rand01,
-        ) {
-            target.get_entity().add_velocity(Vector3::new(vx, vy, vz));
-        }
+        throw_target(living, target);
     }
 
     damaged

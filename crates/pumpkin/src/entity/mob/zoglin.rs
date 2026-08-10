@@ -15,7 +15,7 @@ use crate::entity::{
         look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, swim::SwimGoal,
         wander_around::WanderAroundGoal,
     },
-    mob::{Mob, MobEntity},
+    mob::{Mob, MobEntity, hoglin_gore},
 };
 
 /// `Zoglin#finalizeSpawn`: a fifth of newly spawned zoglins are babies.
@@ -139,6 +139,19 @@ impl Mob for ZoglinEntity {
 
     fn set_baby_from_spawn_egg(&self) {
         self.set_baby(true);
+    }
+
+    /// Vanilla `Zoglin.blockedByItem`: adult zoglins throw a shield defender.
+    fn blocked_by_item<'a>(
+        &'a self,
+        defender: &'a dyn crate::entity::EntityBase,
+        _damage: f32,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            if !self.is_baby() {
+                hoglin_gore::throw_target(&self.mob_entity.living_entity, defender);
+            }
+        })
     }
 
     fn is_baby_from_spawn_egg(&self) -> bool {
