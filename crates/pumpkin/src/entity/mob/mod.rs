@@ -1381,8 +1381,8 @@ pub trait Mob: EntityBase + Send + Sync {
             || entity_type == &EntityType::HUSK
             || entity_type == &EntityType::ZOMBIE_VILLAGER;
 
-        !(rejects_spears && stack.get_item().has_tag(&tag::Item::MINECRAFT_SPEARS))
-            && !(rejects_glow_ink && stack.get_item() == &pumpkin_data::item::Item::GLOW_INK_SAC)
+        !(rejects_spears && stack.get_item().has_tag(&tag::Item::MINECRAFT_SPEARS)
+            || rejects_glow_ink && stack.get_item() == &pumpkin_data::item::Item::GLOW_INK_SAC)
     }
 
     /// Vanilla `Mob.canPickUpLoot`: whether this mob is allowed to pick up dropped items at
