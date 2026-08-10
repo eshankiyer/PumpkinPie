@@ -7,9 +7,13 @@ use std::{
 use pumpkin_data::game_rules::{GameRule, GameRuleRegistry, GameRuleValue};
 use pumpkin_nbt::{compound::NbtCompound, nbt_compress::read_gzip_compound_tag, tag::NbtTag};
 use serde::{Deserialize, Serialize};
+use serde_json::{Number, Value};
 use tracing::warn;
 
-use crate::world_info::{WorldGenSettings, WorldInfoError};
+use crate::world_info::{
+    BiomeSource, Dimension, Dimensions, Generator, GeneratorSettings, WorldGenSettings,
+    WorldInfoError,
+};
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct DataFileRoot<T> {
@@ -179,15 +183,20 @@ pub fn read_world_gen_settings(level_folder: &Path) -> Option<WorldGenSettings> 
     match File::open(&path) {
         Ok(f) => match read_gzip_compound_tag(f) {
             Ok(compound) => {
-                let seed = compound
-                    .get_compound("data")
-                    .and_then(|c| c.get_long("seed"));
-                if seed.is_none() {
+                let data = compound.get_compound("data")?;
+                let Some(seed) = data.get_long("seed") else {
                     warn!("world_gen_settings.dat has no seed");
-                }
-                seed.map(|seed| WorldGenSettings {
+                    return None;
+                };
+                let dimensions = dimensions_from_nbt(data)?;
+                Some(WorldGenSettings {
                     seed,
-                    dimensions: std::collections::HashMap::new(),
+                    generate_structures: data.get_bool("generate_structures").unwrap_or(true),
+                    bonus_chest: data.get_bool("bonus_chest").unwrap_or(false),
+                    legacy_custom_options: data
+                        .get_string("legacy_custom_options")
+                        .map(str::to_string),
+                    dimensions,
                 })
             }
             Err(e) => {
@@ -211,13 +220,191 @@ pub fn write_world_gen_settings(
     let path = dir.join("world_gen_settings.dat");
     let file = File::create(&path)?;
     let mut inner = NbtCompound::new();
-    inner.put_int("DataVersion", data_version);
     inner.put_long("seed", settings.seed);
+    inner.put_bool("generate_structures", settings.generate_structures);
+    inner.put_bool("bonus_chest", settings.bonus_chest);
+    if let Some(options) = &settings.legacy_custom_options {
+        inner.put_string("legacy_custom_options", options.clone());
+    }
+    inner.put_compound("dimensions", dimensions_to_nbt(&settings.dimensions));
 
     let mut root = NbtCompound::new();
     root.put_compound("data", inner);
+    root.put_int("DataVersion", data_version);
     pumpkin_nbt::nbt_compress::write_gzip_compound_tag(root, BufWriter::new(file))
         .map_err(|e| WorldInfoError::SerializationError(e.to_string()))
+}
+
+fn json_to_nbt(value: &Value) -> Option<NbtTag> {
+    match value {
+        Value::Null => None,
+        Value::Bool(value) => Some(NbtTag::Byte(i8::from(*value))),
+        Value::Number(value) => value.as_i64().map_or_else(
+            || value.as_f64().map(NbtTag::Double),
+            |value| {
+                i32::try_from(value).map_or_else(
+                    |_| Some(NbtTag::Long(value)),
+                    |value| Some(NbtTag::Int(value)),
+                )
+            },
+        ),
+        Value::String(value) => Some(NbtTag::String(value.clone().into_boxed_str())),
+        Value::Array(values) => Some(NbtTag::List(
+            values.iter().filter_map(json_to_nbt).collect(),
+        )),
+        Value::Object(values) => Some(NbtTag::Compound(
+            values
+                .iter()
+                .filter_map(|(key, value)| json_to_nbt(value).map(|value| (key.clone(), value)))
+                .collect(),
+        )),
+    }
+}
+
+fn nbt_to_json(tag: &NbtTag) -> Option<Value> {
+    match tag {
+        NbtTag::End => None,
+        NbtTag::Byte(value) => Some(Value::Number(Number::from(*value))),
+        NbtTag::Short(value) => Some(Value::Number(Number::from(*value))),
+        NbtTag::Int(value) => Some(Value::Number(Number::from(*value))),
+        NbtTag::Long(value) => Some(Value::Number(Number::from(*value))),
+        NbtTag::Float(value) => Number::from_f64(f64::from(*value)).map(Value::Number),
+        NbtTag::Double(value) => Number::from_f64(*value).map(Value::Number),
+        NbtTag::ByteArray(values) => Some(Value::Array(
+            values
+                .iter()
+                .map(|value| Value::Number(Number::from(*value)))
+                .collect(),
+        )),
+        NbtTag::String(value) => Some(Value::String(value.to_string())),
+        NbtTag::List(values) => Some(Value::Array(
+            values.iter().filter_map(nbt_to_json).collect(),
+        )),
+        NbtTag::Compound(value) => Some(Value::Object(
+            value
+                .child_tags
+                .iter()
+                .filter_map(|(key, value)| nbt_to_json(value).map(|value| (key.to_string(), value)))
+                .collect(),
+        )),
+        NbtTag::IntArray(values) => Some(Value::Array(
+            values
+                .iter()
+                .map(|value| Value::Number(Number::from(*value)))
+                .collect(),
+        )),
+        NbtTag::LongArray(values) => Some(Value::Array(
+            values
+                .iter()
+                .map(|value| Value::Number(Number::from(*value)))
+                .collect(),
+        )),
+    }
+}
+
+fn dimension_to_nbt(dimension: &Dimension) -> NbtCompound {
+    let mut generator = NbtCompound::new();
+    if let Some(settings) = &dimension.generator.settings {
+        match settings {
+            GeneratorSettings::Reference(value) => {
+                generator.put_string("settings", value.clone());
+            }
+            GeneratorSettings::Compound(value) => {
+                if let Some(tag) = json_to_nbt(value) {
+                    generator.put("settings", tag);
+                }
+            }
+        }
+    }
+    if let Some(biome_source) = &dimension.generator.biome_source {
+        let mut source = NbtCompound::new();
+        match biome_source {
+            BiomeSource::WithPreset { preset, biome_type } => {
+                source.put_string("preset", preset.clone());
+                source.put_string("type", biome_type.clone());
+            }
+            BiomeSource::Simple { biome_type } => source.put_string("type", biome_type.clone()),
+            BiomeSource::Compound(value) => {
+                if let Some(NbtTag::Compound(compound)) = json_to_nbt(value) {
+                    generator.put_compound("biome_source", compound);
+                }
+            }
+        }
+        if !matches!(biome_source, BiomeSource::Compound(_)) {
+            generator.put_compound("biome_source", source);
+        }
+    }
+    generator.put_string("type", dimension.generator.generator_type.clone());
+
+    let mut result = NbtCompound::new();
+    result.put_compound("generator", generator);
+    result.put_string("type", dimension.dimension_type.clone());
+    result
+}
+
+fn dimensions_to_nbt(dimensions: &Dimensions) -> NbtCompound {
+    dimensions
+        .iter()
+        .map(|(name, dimension)| (name.clone(), NbtTag::Compound(dimension_to_nbt(dimension))))
+        .collect()
+}
+
+fn dimension_from_nbt(value: &NbtCompound) -> Option<Dimension> {
+    let generator = value.get_compound("generator")?;
+    let settings = match generator.get("settings") {
+        Some(NbtTag::String(value)) => Some(GeneratorSettings::Reference(value.to_string())),
+        Some(value) => nbt_to_json(value).map(GeneratorSettings::Compound),
+        None => None,
+    };
+    let biome_source = generator.get_compound("biome_source").and_then(|source| {
+        let biome_type = source.get_string("type")?.to_string();
+        if let Some(preset) = source.get_string("preset") {
+            Some(BiomeSource::WithPreset {
+                preset: preset.to_string(),
+                biome_type,
+            })
+        } else if source.child_tags.len() > 1 {
+            nbt_to_json(&NbtTag::Compound(source.clone())).map(BiomeSource::Compound)
+        } else {
+            Some(BiomeSource::Simple { biome_type })
+        }
+    });
+    let generator_type = generator.get_string("type")?.to_string();
+    if generator_type.is_empty()
+        || (generator_type == "minecraft:noise" && (settings.is_none() || biome_source.is_none()))
+    {
+        return None;
+    }
+    let dimension_type = value.get_string("type")?;
+    if dimension_type.is_empty() {
+        return None;
+    }
+    Some(Dimension {
+        generator: Generator {
+            settings,
+            biome_source,
+            generator_type,
+        },
+        dimension_type: dimension_type.to_string(),
+    })
+}
+
+fn dimensions_from_nbt(data: &NbtCompound) -> Option<Dimensions> {
+    let dimensions = data.get_compound("dimensions")?;
+    let dimensions: Option<Dimensions> = dimensions
+        .child_tags
+        .iter()
+        .map(|(name, value)| {
+            value
+                .extract_compound()
+                .and_then(dimension_from_nbt)
+                .map(|dimension| (name.to_string(), dimension))
+        })
+        .collect();
+    let dimensions = dimensions?;
+    dimensions
+        .contains_key("minecraft:overworld")
+        .then_some(dimensions)
 }
 
 #[must_use]

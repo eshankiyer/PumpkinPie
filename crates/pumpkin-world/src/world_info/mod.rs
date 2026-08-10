@@ -114,6 +114,10 @@ pub struct LevelData {
     pub scoreboard_data: data_files::ScoreboardData,
 }
 
+const fn default_generate_structures() -> bool {
+    true
+}
+
 const DEFAULT_BORDER_DAMAGE_PER_BLOCK: f64 = 0.2;
 const DEFAULT_BORDER_SIZE: f64 = 60_000_000.0;
 const DEFAULT_BORDER_SAFE_ZONE: f64 = 5.0;
@@ -175,6 +179,12 @@ fn default_world_version_series() -> String {
 pub struct WorldGenSettings {
     // the numerical seed of the world
     pub seed: i64,
+    #[serde(default = "default_generate_structures")]
+    pub generate_structures: bool,
+    #[serde(default)]
+    pub bonus_chest: bool,
+    #[serde(default)]
+    pub legacy_custom_options: Option<String>,
     #[serde(default)]
     pub dimensions: Dimensions,
 }
@@ -223,6 +233,7 @@ pub enum BiomeSource {
         #[serde(rename = "type")]
         biome_type: String,
     },
+    Compound(serde_json::Value),
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
@@ -288,6 +299,9 @@ impl WorldGenSettings {
         Self {
             dimensions,
             seed: seed.0 as i64,
+            generate_structures: true,
+            bonus_chest: false,
+            legacy_custom_options: None,
         }
     }
 }
