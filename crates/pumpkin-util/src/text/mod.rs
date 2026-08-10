@@ -1384,8 +1384,7 @@ pub enum TextContent {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod test {
-    use crate::text::{TextComponent, color::NamedColor, hover::HoverEvent};
-    use std::borrow::Cow;
+    use crate::text::{TextComponent, color::NamedColor};
 
     #[test]
     fn serialize_text_component() {
@@ -1418,6 +1417,7 @@ mod test {
     /// Per <https://minecraft.wiki/w/Text_component_format>, `id`, `uuid` and `name`
     /// sit directly next to `action` inside `hover_event`.
     #[test]
+    #[allow(deprecated)]
     fn show_entity_hover_fields_are_inline() {
         use crate::text::click::ClickEvent;
         use crate::text::hover::HoverEvent;
