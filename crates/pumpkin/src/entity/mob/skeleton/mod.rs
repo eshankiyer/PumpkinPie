@@ -2,13 +2,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::sync::{Arc, Weak};
 
-use pumpkin_data::{
-    data_component_impl::{EquipmentSlot, StatusEffectInstance},
-    entity::EntityType,
-    item::Item,
-    item_stack::ItemStack,
-};
-
 use crate::entity::{
     Entity, NBTStorage, NbtFuture,
     ai::goal::{
@@ -19,6 +12,12 @@ use crate::entity::{
     },
     mob::{Mob, MobEntity},
 };
+use pumpkin_data::{
+    data_component_impl::{EquipmentSlot, StatusEffectInstance},
+    entity::EntityType,
+    item::Item,
+    item_stack::ItemStack,
+};
 use pumpkin_nbt::compound::NbtCompound;
 
 pub mod bogged;
@@ -28,22 +27,16 @@ pub mod skeleton;
 pub mod stray;
 pub mod wither;
 
-/// `AbstractSkeleton#getHardAttackInterval` (AbstractSkeleton.java). Pumpkin does not re-run
-/// `reassessWeaponGoal`'s difficulty check, so the hard-difficulty value is used unconditionally,
-/// as it already was before Parched existed. `RangedBowAttackGoal::is_holding_bow` does gate the
-/// goal itself on the current main-hand item (see `ranged_bow_attack.rs`), so a stripped bow stops
-/// a skeleton from shooting -- it just does not fall back to `meleeGoal` the way vanilla does,
-/// since there is no equip-change signal to swap goals on (see `equipment.rs`, spawn-time only).
-const SKELETON_ATTACK_INTERVAL: i32 = 20;
-/// `Parched#getHardAttackInterval` (Parched.java).
-const PARCHED_ATTACK_INTERVAL: i32 = 50;
+/// `AbstractSkeleton#getHardAttackInterval` and `getAttackInterval`.
+const SKELETON_HARD_ATTACK_INTERVAL: i32 = 20;
+const SKELETON_ATTACK_INTERVAL: i32 = 40;
+/// `Parched#getHardAttackInterval` and `getAttackInterval` (Parched.java).
+const PARCHED_HARD_ATTACK_INTERVAL: i32 = 50;
+const PARCHED_ATTACK_INTERVAL: i32 = 70;
 
-/// `Bogged#getHardAttackInterval` (Bogged.java).
-///
-/// Same "hard value used unconditionally" simplification as `SKELETON_ATTACK_INTERVAL`/
-/// `PARCHED_ATTACK_INTERVAL` above -- `Bogged#getAttackInterval` (70, the non-hard-difficulty
-/// value) is not modeled since `reassessWeaponGoal` is never re-run here.
-pub const BOGGED_ATTACK_INTERVAL: i32 = 50;
+/// `Bogged#getHardAttackInterval` and `getAttackInterval`.
+pub const BOGGED_HARD_ATTACK_INTERVAL: i32 = 50;
+pub const BOGGED_ATTACK_INTERVAL: i32 = 70;
 
 /// `Parched#getArrow` (Parched.java) attaches `new MobEffectInstance(MobEffects.WEAKNESS, 600)`
 /// to every arrow it fires; that constructor defaults to amplifier 0, non-ambient, with
@@ -77,6 +70,7 @@ impl SkeletonEntityBase {
         let uses_bow = entity.entity_type != &EntityType::WITHER_SKELETON;
         let is_parched = entity.entity_type == &EntityType::PARCHED;
         let is_bogged = entity.entity_type == &EntityType::BOGGED;
+        let difficulty = entity.world.load().level_info.load().difficulty;
         let mob_entity = MobEntity::new(entity);
         let mob = Self { mob_entity };
         let mob_arc = Arc::new(mob);
@@ -115,24 +109,37 @@ impl SkeletonEntityBase {
             goal_selector.add_goal(3, FleeSunGoal::new(1.0));
             if uses_bow {
                 // Vanilla `AbstractSkeleton#reassessWeaponGoal` selects this at priority 4.
-                let (interval, arrow_effects) = if is_parched {
-                    (PARCHED_ATTACK_INTERVAL, PARCHED_ARROW_EFFECTS)
-                } else if is_bogged {
-                    (BOGGED_ATTACK_INTERVAL, BOGGED_ARROW_EFFECTS)
-                } else {
-                    (SKELETON_ATTACK_INTERVAL, &[][..])
-                };
-                goal_selector.add_goal(
-                    4,
-                    Box::new(RangedBowAttackGoal::with_arrow_effects(
-                        interval,
+                let goal = if is_parched {
+                    RangedBowAttackGoal::with_difficulty_intervals(
+                        PARCHED_HARD_ATTACK_INTERVAL,
+                        PARCHED_ATTACK_INTERVAL,
+                        difficulty,
                         15.0,
-                        arrow_effects,
-                    )),
-                );
-            } else {
-                goal_selector.add_goal(4, Box::new(MeleeAttackGoal::new(1.2, false)));
+                        PARCHED_ARROW_EFFECTS,
+                    )
+                } else if is_bogged {
+                    RangedBowAttackGoal::with_difficulty_intervals(
+                        BOGGED_HARD_ATTACK_INTERVAL,
+                        BOGGED_ATTACK_INTERVAL,
+                        difficulty,
+                        15.0,
+                        BOGGED_ARROW_EFFECTS,
+                    )
+                } else {
+                    RangedBowAttackGoal::with_difficulty_intervals(
+                        SKELETON_HARD_ATTACK_INTERVAL,
+                        SKELETON_ATTACK_INTERVAL,
+                        difficulty,
+                        15.0,
+                        &[],
+                    )
+                };
+                goal_selector.add_goal(4, Box::new(goal));
             }
+            // Vanilla keeps the melee goal registered and switches between it and the bow
+            // goal from `reassessWeaponGoal` when the equipped weapon changes.
+            let melee_priority = if uses_bow { 5 } else { 4 };
+            goal_selector.add_goal(melee_priority, Box::new(MeleeAttackGoal::new(1.2, false)));
             goal_selector.add_goal(7, Box::new(WanderAroundGoal::new(1.0)));
             goal_selector.add_goal(
                 8,
@@ -170,8 +177,9 @@ impl Mob for SkeletonEntityBase {
 #[cfg(test)]
 mod tests {
     use super::{
-        BOGGED_ARROW_EFFECTS, BOGGED_ATTACK_INTERVAL, PARCHED_ARROW_EFFECTS,
-        PARCHED_ATTACK_INTERVAL, SKELETON_ATTACK_INTERVAL,
+        BOGGED_ARROW_EFFECTS, BOGGED_ATTACK_INTERVAL, BOGGED_HARD_ATTACK_INTERVAL,
+        PARCHED_ARROW_EFFECTS, PARCHED_ATTACK_INTERVAL, PARCHED_HARD_ATTACK_INTERVAL,
+        SKELETON_ATTACK_INTERVAL, SKELETON_HARD_ATTACK_INTERVAL,
     };
     use crate::item::potion::PotionContents;
     use pumpkin_data::data_component::DataComponent;
@@ -182,8 +190,10 @@ mod tests {
 
     #[test]
     fn parched_shoots_slower_than_a_plain_skeleton() {
-        assert_eq!(SKELETON_ATTACK_INTERVAL, 20);
-        assert_eq!(PARCHED_ATTACK_INTERVAL, 50);
+        assert_eq!(SKELETON_HARD_ATTACK_INTERVAL, 20);
+        assert_eq!(SKELETON_ATTACK_INTERVAL, 40);
+        assert_eq!(PARCHED_HARD_ATTACK_INTERVAL, 50);
+        assert_eq!(PARCHED_ATTACK_INTERVAL, 70);
     }
 
     #[test]
@@ -219,7 +229,8 @@ mod tests {
 
     #[test]
     fn bogged_shoots_at_the_hard_attack_interval() {
-        assert_eq!(BOGGED_ATTACK_INTERVAL, 50);
+        assert_eq!(BOGGED_HARD_ATTACK_INTERVAL, 50);
+        assert_eq!(BOGGED_ATTACK_INTERVAL, 70);
     }
 
     #[test]

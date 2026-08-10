@@ -112,6 +112,10 @@ impl MoveControlTrait for MoveControl {
         // Navigator owns movement input while this controller waits.
     }
 
+    fn strafe(&mut self, forwards: f32, right: f32) {
+        Self::strafe(self, forwards, right);
+    }
+
     fn has_wanted(&self) -> bool {
         Self::has_wanted(self)
     }

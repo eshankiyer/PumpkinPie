@@ -17,7 +17,7 @@ use crate::{
     server::Server,
 };
 use pumpkin_data::damage::DamageType;
-use pumpkin_data::data_component_impl::PotionDurationScaleImpl;
+use pumpkin_data::data_component_impl::{EnchantmentsImpl, PotionDurationScaleImpl};
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
@@ -62,6 +62,9 @@ pub struct ArrowEntity {
     pub entity: Entity,
     pub owner_id: Option<i32>,
     pub item_stack: RwLock<ItemStack>,
+    /// The weapon that created this projectile, matching vanilla `AbstractArrow`'s
+    /// `firedFromWeapon` state used by projectile enchantment hooks.
+    pub fired_from_weapon: std::sync::RwLock<Option<ItemStack>>,
     pub base_damage: AtomicCell<f64>,
     pub pickup: ArrowPickup,
     pub is_critical: AtomicBool,
@@ -99,6 +102,7 @@ impl ArrowEntity {
             entity,
             owner_id,
             item_stack: RwLock::new(item_stack.copy_with_count(1)),
+            fired_from_weapon: std::sync::RwLock::new(None),
             base_damage: AtomicCell::new(Self::ARROW_BASE_DAMAGE),
             pickup,
             is_critical: AtomicBool::new(false),
@@ -130,6 +134,7 @@ impl ArrowEntity {
             entity,
             owner_id: Some(shooter.entity_id),
             item_stack: RwLock::new(item_stack.copy_with_count(1)),
+            fired_from_weapon: std::sync::RwLock::new(None),
             base_damage: AtomicCell::new(Self::ARROW_BASE_DAMAGE),
             pickup,
             is_critical: AtomicBool::new(false),
@@ -143,6 +148,42 @@ impl ArrowEntity {
             has_hit: AtomicBool::new(false),
             last_block_pos: Arc::new(std::sync::RwLock::new(None)),
             pierced_entity_ids: Mutex::new(HashSet::new()),
+        }
+    }
+
+    /// Vanilla `ArrowItem.createArrow(..., firedFromWeapon)` preserves the
+    /// firing weapon on the projectile for post-spawn enchantment behavior.
+    pub fn new_shot_with_weapon(
+        entity: Entity,
+        shooter: &Entity,
+        item_stack: &ItemStack,
+        pickup: ArrowPickup,
+        firing_weapon: &ItemStack,
+    ) -> Self {
+        let arrow = Self::new_shot(entity, shooter, item_stack, pickup);
+        *arrow.fired_from_weapon.write().unwrap() = Some(firing_weapon.copy_with_count(1));
+        arrow.apply_weapon_projectile_state();
+        arrow
+    }
+
+    /// Applies the weapon-derived arrow state that vanilla initializes from
+    /// `AbstractArrow.firedFromWeapon`.
+    fn apply_weapon_projectile_state(&self) {
+        let weapon_guard = self.fired_from_weapon.read().unwrap();
+        let Some(weapon) = weapon_guard.as_ref() else {
+            return;
+        };
+        let Some(enchantments) = weapon.get_data_component::<EnchantmentsImpl>() else {
+            return;
+        };
+        for (enchantment, level) in enchantments.enchantment.iter() {
+            if **enchantment == pumpkin_data::Enchantment::PIERCING {
+                self.set_pierce_level(*level as u8);
+            } else if **enchantment == pumpkin_data::Enchantment::PUNCH {
+                self.punch_level.store(*level as u8, Ordering::Relaxed);
+            } else if **enchantment == pumpkin_data::Enchantment::FLAME {
+                self.is_flame.store(true, Ordering::Relaxed);
+            }
         }
     }
 
@@ -290,6 +331,11 @@ impl NBTStorage for ArrowEntity {
             self.entity.write_nbt(nbt).await;
             let item_stack = self.item_stack.read().await;
             Self::write_item_stack_nbt(&item_stack, nbt);
+            if let Some(weapon) = self.fired_from_weapon.read().unwrap().as_ref() {
+                let mut weapon_nbt = pumpkin_nbt::compound::NbtCompound::new();
+                weapon.write_item_stack(&mut weapon_nbt);
+                nbt.put_compound("weapon", weapon_nbt);
+            }
         })
     }
 
@@ -302,6 +348,11 @@ impl NBTStorage for ArrowEntity {
             if let Some(item_stack) = Self::read_item_stack_nbt(nbt) {
                 *self.item_stack.write().await = item_stack;
             }
+            *self.fired_from_weapon.write().unwrap() = nbt
+                .get_compound("weapon")
+                .and_then(ItemStack::read_item_stack)
+                .map(|weapon| weapon.copy_with_count(1));
+            self.apply_weapon_projectile_state();
         })
     }
 }
@@ -535,7 +586,19 @@ impl EntityBase for ArrowEntity {
                     // Calculate damage
                     let velocity = entity.velocity.load();
                     let power = velocity.length();
-                    let mut damage = calculate_arrow_damage(power, self.base_damage.load());
+                    let mut base_damage = self.base_damage.load();
+                    if let Some(weapon) = self.fired_from_weapon.read().unwrap().as_ref()
+                        && let Some(enchantments) = weapon.get_data_component::<EnchantmentsImpl>()
+                    {
+                        // Vanilla `EnchantmentHelper.modifyDamage` applies Power's
+                        // direct-attacker arrow bonus at hit time.
+                        for (enchantment, level) in enchantments.enchantment.iter() {
+                            if **enchantment == pumpkin_data::Enchantment::POWER {
+                                base_damage += 1.0 + 0.5 * f64::from(*level - 1);
+                            }
+                        }
+                    }
+                    let mut damage = calculate_arrow_damage(power, base_damage);
 
                     // Apply critical hit bonus
                     if self.is_critical.load(Ordering::Relaxed) {
@@ -562,15 +625,20 @@ impl EntityBase for ArrowEntity {
 
                     if let Some(living) = target.get_living_entity() {
                         let punch = self.punch_level.load(Ordering::Relaxed);
-                        if punch > 0
-                            && let Some(owner_id) = self.owner_id
-                            && let Some(owner_entity) = world.get_entity_by_id(owner_id)
-                        {
-                            crate::entity::combat::handle_knockback(
-                                owner_entity.get_entity(),
-                                target.as_ref(),
-                                f64::from(punch) * 0.6,
+                        if damage_succeeded && punch > 0 {
+                            // Vanilla AbstractArrow uses the fired weapon's punch value and
+                            // the arrow's horizontal velocity, not the shooter's yaw.
+                            let resistance = living.get_attribute_value(
+                                &pumpkin_data::attributes::Attributes::KNOCKBACK_RESISTANCE,
                             );
+                            let strength = f64::from(punch) * 0.6 * (1.0 - resistance);
+                            let horizontal = Vector3::new(velocity.x, 0.0, velocity.z);
+                            if strength > 0.0 && horizontal.length_squared() > 1.0e-5 {
+                                let direction = horizontal.normalize();
+                                target
+                                    .get_entity()
+                                    .knockback(strength, -direction.x, -direction.z);
+                            }
                         }
 
                         // Play hit sound
