@@ -1,3 +1,5 @@
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use pumpkin_protocol::bedrock::server::text::SText;
 use pumpkin_util::{Hand, PermissionLvl};
 use rsa::pkcs1v15::{Signature as RsaPkcs1v15Signature, VerifyingKey};

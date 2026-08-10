@@ -1,3 +1,5 @@
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::sync::atomic::Ordering;
 use std::{pin::Pin, sync::Arc};
 

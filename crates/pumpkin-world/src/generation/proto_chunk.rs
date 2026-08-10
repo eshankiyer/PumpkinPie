@@ -1151,6 +1151,7 @@ impl ProtoChunk {
     }
 
     #[must_use]
+    #[allow(clippy::unwrap_used)]
     pub fn get_terrain_gen_biome_in(
         &self,
         neighborhood: Option<&BiomeNeighborhood>,
@@ -1158,8 +1159,7 @@ impl ProtoChunk {
         y: i32,
         z: i32,
     ) -> &'static Biome {
-        Biome::from_id(self.get_terrain_gen_biome_id_in(neighborhood, x, y, z))
-            .unwrap_or(&Biome::PLAINS)
+        Biome::from_id(self.get_terrain_gen_biome_id_in(neighborhood, x, y, z)).unwrap()
     }
 
     #[expect(clippy::too_many_lines)]

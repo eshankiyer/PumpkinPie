@@ -1,4 +1,6 @@
 //! Port of `Slide.java`.
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //!
 //! The lowest-priority fallback in the FIGHT activity, used to reposition around the
 //! target when the breeze can neither shoot (out of range) nor jump (on cooldown or too

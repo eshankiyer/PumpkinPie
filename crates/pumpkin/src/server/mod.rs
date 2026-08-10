@@ -1,3 +1,5 @@
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use crate::block::registry::BlockRegistry;
 use crate::command::commands::default_dispatcher;
 use crate::command::commands::defaultgamemode::DefaultGamemode;

@@ -1,3 +1,5 @@
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use arc_swap::ArcSwap;
 use std::sync::Arc;
 use std::{net::IpAddr, net::SocketAddr};

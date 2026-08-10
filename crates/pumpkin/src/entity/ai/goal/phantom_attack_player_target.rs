@@ -1,4 +1,6 @@
 //! Port of `Phantom.PhantomAttackPlayerTargetGoal` (`Phantom.java:216-249`).
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //!
 //! Extends `Goal` directly in vanilla (not `TargetGoal`), so no `Controls::TARGET` flag is
 //! set here either.

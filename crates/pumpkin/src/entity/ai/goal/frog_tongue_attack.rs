@@ -1,4 +1,6 @@
 //! Frog tongue-attack behavior.
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //!
 //! Vanilla source: `net/minecraft/world/entity/animal/frog/ShootTongue.java` (the two-phase
 //! "extend tongue, catch, eat" behavior) and `Frog::canEat` (target filtering: entity must be

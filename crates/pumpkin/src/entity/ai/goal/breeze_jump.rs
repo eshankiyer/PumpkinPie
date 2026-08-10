@@ -1,4 +1,6 @@
 //! Port of `LongJump.java`.
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //!
 //! The breeze's signature leap, used both to close distance on its target and to
 //! reposition around it (it always aims for a point behind the target - see

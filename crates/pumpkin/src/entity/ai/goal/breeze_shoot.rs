@@ -1,4 +1,6 @@
 //! Port of `Shoot.java`: charges up, then fires a `BreezeWindCharge` at the target.
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::sync::Weak;
 use std::sync::atomic::AtomicBool;

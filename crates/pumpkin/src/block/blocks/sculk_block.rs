@@ -1,4 +1,6 @@
 //! `SculkBlock` port (`net/minecraft/world/level/block/SculkBlock.java`, 107 lines).
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //!
 //! Design doc `designs/sculk-and-block-social.md`, Step 3. Verified against
 //! `Blocks.java`'s `SCULK` registration and the full 107-line `SculkBlock.java`: no

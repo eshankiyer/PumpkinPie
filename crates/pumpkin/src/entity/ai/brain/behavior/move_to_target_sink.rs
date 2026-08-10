@@ -1,4 +1,6 @@
 //! Port of `behavior/MoveToTargetSink.java`.
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //!
 //! This is the load-bearing bridge between brain memory and the movement stack: it is the only
 //! reader of `WALK_TARGET`, and every behavior that wants the mob to go somewhere does it by

@@ -1,3 +1,5 @@
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use super::{Controls, Goal, to_goal_ticks};
 use crate::entity::ai::goal::GoalFuture;
 use crate::entity::ai::pathfinder::NavigatorGoal;

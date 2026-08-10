@@ -1,4 +1,6 @@
 //! Port of `behavior/AnimalPanic.java`.
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //!
 //! This is the behavior that proves the split-lock design: its `HURT_BY` gate is populated from
 //! `LivingEntity::damage_with_context`, i.e. from projectile/block/fluid call sites that run

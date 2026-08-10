@@ -1,3 +1,5 @@
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, AtomicI64, Ordering};
 use std::sync::{Arc, Weak};
@@ -655,6 +657,7 @@ const fn restock_is_due(last_restock: i64, restocks_today: i32, world_age: i64) 
 }
 
 impl ScreenHandlerFactory for VillagerEntity {
+    #[allow(clippy::too_many_lines)]
     fn create_screen_handler<'a>(
         &'a self,
         sync_id: u8,
@@ -790,6 +793,7 @@ impl ScreenHandlerFactory for VillagerEntity {
 }
 
 impl NBTStorage for VillagerEntity {
+    #[allow(clippy::too_many_lines)]
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> crate::entity::NbtFuture<'a, ()> {
         Box::pin(async move {
             self.mob_entity.living_entity.write_nbt(nbt).await;

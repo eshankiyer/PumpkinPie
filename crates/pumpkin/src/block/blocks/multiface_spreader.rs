@@ -1,4 +1,6 @@
 //! Port of vanilla's `MultifaceSpreader`.
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //!
 //! Source: `net/minecraft/world/level/block/MultifaceSpreader.java`, the
 //! spread-candidate-finding algorithm shared by glow lichen and sculk vein. Builds on

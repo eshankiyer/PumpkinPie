@@ -1,4 +1,6 @@
 //! Port of `behavior/CountDownCooldownTicks.java`.
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //!
 //! Generic over the cooldown memory rather than holding a `MemoryModuleType<Integer>` field,
 //! so the memory type stays statically known and no downcast leaks into behavior code.

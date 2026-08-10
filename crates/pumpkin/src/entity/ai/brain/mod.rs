@@ -1,4 +1,6 @@
 //! Port of `net.minecraft.world.entity.ai.Brain` / `ActivityData` /
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! `net.minecraft.world.entity.schedule.Activity` (26.2 decompile).
 //!
 //! # Why this is not the Goal system

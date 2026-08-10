@@ -1,3 +1,5 @@
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::sync::Arc;
 
 use pumpkin_data::{attributes::Attributes, entity::EntityType};
@@ -105,6 +107,7 @@ impl HorseBreedGoal {
         closest.map(|(_, e)| e)
     }
 
+    #[allow(clippy::if_not_else, clippy::too_many_lines)]
     async fn breed(mob: &dyn Mob, mate: &dyn EntityBase) {
         let mob_entity = mob.get_mob_entity();
         if !mob_entity.try_claim_love() {

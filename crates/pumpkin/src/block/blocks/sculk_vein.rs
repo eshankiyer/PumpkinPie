@@ -1,4 +1,6 @@
 //! `SculkVeinBlock` port (`net/minecraft/world/level/block/SculkVeinBlock.java`).
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //!
 //! The simplest real consumer of `abstract_multiface.rs`'s `MultifaceBlockBase` and
 //! `multiface_spreader.rs`'s spread-candidate machinery.

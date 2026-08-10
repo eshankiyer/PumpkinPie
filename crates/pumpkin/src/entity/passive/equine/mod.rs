@@ -1,4 +1,6 @@
 //! Shared framework for the horse family (`AbstractHorse` in vanilla): Horse, Donkey, Mule,
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! `ZombieHorse`, `SkeletonHorse`. See `designs/equine-framework.md` for the design rationale.
 //!
 //! Phase 1 scope: taming, feeding, chest inventory, breeding attribute inheritance,

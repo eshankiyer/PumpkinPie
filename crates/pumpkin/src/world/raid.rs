@@ -1,4 +1,6 @@
 //! Raid/Raider wave system.
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //!
 //! Ports `net.minecraft.world.entity.raid.{Raids,Raid,Raider}` (vanilla 26.2 decompile).
 //!

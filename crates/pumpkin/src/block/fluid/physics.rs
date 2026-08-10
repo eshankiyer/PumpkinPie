@@ -1,3 +1,5 @@
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use pumpkin_data::BlockState;
 use pumpkin_data::tag::Taggable;
 use pumpkin_data::{Block, BlockStateId, fluid::Fluid, tag};

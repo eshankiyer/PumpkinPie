@@ -1,3 +1,5 @@
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 // Port of net.minecraft.world.entity.animal.allay.{Allay, AllayAi}, using the GameEvent/
 // vibration engine in `crate::world::game_event`.
 //

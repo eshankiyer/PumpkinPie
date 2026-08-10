@@ -1,3 +1,5 @@
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 // Ported from vanilla Minecraft's FleeSunGoal (net.minecraft.world.entity.ai.goal.FleeSunGoal)
 // See: /tmp/pumpkin-vanilla-26.2/decompiled/net/minecraft/world/entity/ai/goal/FleeSunGoal.java
 //

@@ -1,4 +1,6 @@
 //! Port of vanilla's `SculkBehaviour` interface.
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //!
 //! Source: `net/minecraft/world/level/block/SculkBehaviour.java` (73 lines), plus the
 //! parts of `SculkSpreader`/`SculkSpreader.ChargeCursor`

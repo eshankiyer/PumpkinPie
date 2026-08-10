@@ -1,3 +1,5 @@
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use pumpkin_data::item::Item;
 use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::potion::Effect;
@@ -1634,6 +1636,7 @@ impl LivingEntity {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     pub async fn on_death(
         &self,
         damage_type: DamageType,

@@ -129,12 +129,11 @@ impl BreedGoal {
 
         mob.on_bred(mate);
 
-        let baby = baby.map(|baby| {
+        let baby = baby.inspect(|baby| {
             if let Some(baby_mob) = baby.get_mob() {
                 baby_mob.set_persistence_required();
             }
             baby.get_entity().set_age(-24000);
-            baby
         });
 
         mob.get_entity().set_age(6000);

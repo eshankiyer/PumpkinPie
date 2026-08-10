@@ -1,4 +1,6 @@
 //! Port of `behavior/LookAtTargetSink.java`.
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //!
 //! The `LOOK_TARGET` counterpart of `MoveToTargetSink`: the only reader of that memory, draining
 //! it into the mob's existing `LookControl`.

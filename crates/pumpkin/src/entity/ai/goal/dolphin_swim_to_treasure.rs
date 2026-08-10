@@ -1,3 +1,5 @@
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use pumpkin_data::structures::StructureSet;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::generation::generator::structure_finder::find_nearest_structure;

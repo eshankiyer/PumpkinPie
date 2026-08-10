@@ -87,9 +87,8 @@ impl ItemBehaviour for FireworkRocketItem {
                 };
                 if source_stack.is_none() {
                     let off_hand = player.inventory.off_hand_item().await;
-                    let stack = off_hand.clone();
-                    if stack.item == &Item::FIREWORK_ROCKET {
-                        source_stack = Some(stack);
+                    if off_hand.item == &Item::FIREWORK_ROCKET {
+                        source_stack = Some(off_hand);
                         used_main_hand = false;
                     }
                 }

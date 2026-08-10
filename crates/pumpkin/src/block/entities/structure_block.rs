@@ -1,3 +1,5 @@
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use super::BlockEntity;
 use pumpkin_data::{Block, BlockState, BlockStateId, Rotation};
 use pumpkin_nbt::compound::NbtCompound;

@@ -1,3 +1,5 @@
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 // Port of net.minecraft.world.entity.monster.warden.{Warden, WardenAi} plus
 // net.minecraft.world.entity.ai.behavior.warden.SonicBoom, using the anger-system port in
 // `warden_anger.rs` and the GameEvent/vibration engine in `crate::world::game_event`.

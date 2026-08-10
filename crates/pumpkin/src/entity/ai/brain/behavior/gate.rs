@@ -1,4 +1,6 @@
 //! Port of `behavior/GateBehavior.java` and its `RunOne` specialization
+// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 //! (`behavior/RunOne.java`), plus the weighted shuffle from `behavior/ShufflingList.java`.
 //!
 //! `GateBehavior` implements `BehaviorControl` directly in vanilla, so it does the same here:

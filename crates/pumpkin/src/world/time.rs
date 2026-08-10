@@ -127,7 +127,7 @@ impl LevelTime {
         self.world_age = world_age;
     }
 
-    pub fn tick(&mut self, advance_time: bool) {
+    pub const fn tick(&mut self, advance_time: bool) {
         self.tick_time(advance_time, false);
     }
 
