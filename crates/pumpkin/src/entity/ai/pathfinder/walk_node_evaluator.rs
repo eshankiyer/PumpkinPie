@@ -276,7 +276,10 @@ impl WalkNodeEvaluator {
         mut node: Option<Node>,
     ) -> Option<Node> {
         let mut y = pos.y - 1;
-        while y > pos.y - 16 {
+        let Some(min_y) = self.base.context.as_ref().map(PathfindingContext::min_y) else {
+            return node;
+        };
+        while y > min_y {
             let path_type = self
                 .get_cached_path_type(Vector3::new(pos.x, y, pos.z))
                 .await;
