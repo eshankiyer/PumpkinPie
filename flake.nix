@@ -54,6 +54,7 @@
 
                 ./assets
                 ./crates
+                ./tools
               ];
             };
           };
