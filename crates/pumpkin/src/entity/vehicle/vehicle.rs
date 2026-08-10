@@ -69,12 +69,14 @@ impl VehicleEntity {
             &[
                 Metadata::new(
                     TrackedData::DAMAGE_WOBBLE_TICKS,
-                    MetaDataType::INT,
+                    // PENDING-INDEX-FIX: this legacy-only field uses INTEGER on 1.21.x and is absent on 26.2.
+                    MetaDataType::INTEGER,
                     VarInt(self.get_hurt_time()),
                 ),
                 Metadata::new(
                     TrackedData::DAMAGE_WOBBLE_SIDE,
-                    MetaDataType::INT,
+                    // PENDING-INDEX-FIX: this legacy-only field uses INTEGER on 1.21.x and is absent on 26.2.
+                    MetaDataType::INTEGER,
                     VarInt(self.get_hurt_dir()),
                 ),
                 Metadata::new(
@@ -181,12 +183,14 @@ mod tests {
         for metadata in [
             Metadata::new(
                 TrackedData::DAMAGE_WOBBLE_TICKS,
-                MetaDataType::INT,
+                // PENDING-INDEX-FIX: this legacy-only field uses INTEGER on 1.21.x and is absent on 26.2.
+                MetaDataType::INTEGER,
                 VarInt(10),
             ),
             Metadata::new(
                 TrackedData::DAMAGE_WOBBLE_SIDE,
-                MetaDataType::INT,
+                // PENDING-INDEX-FIX: this legacy-only field uses INTEGER on 1.21.x and is absent on 26.2.
+                MetaDataType::INTEGER,
                 VarInt(-1),
             ),
             Metadata::new(TrackedData::ID_HURT, MetaDataType::INT, VarInt(10)),
@@ -199,15 +203,13 @@ mod tests {
 
     #[test]
     fn wobble_integers_serialize_for_legacy_and_current_clients() {
-        let expected = vec![8, 1, 10, 9, 1, 0xff, 0xff, 0xff, 0xff, 0x0f];
-
         assert_eq!(
             wobble_integer_metadata(JavaMinecraftVersion::V_1_21_11),
-            expected
+            vec![8, 1, 10, 9, 1, 0xff, 0xff, 0xff, 0xff, 0x0f]
         );
         assert_eq!(
             wobble_integer_metadata(JavaMinecraftVersion::V_26_2),
-            expected
+            vec![8, 1, 10, 9, 1, 0xff, 0xff, 0xff, 0xff, 0x0f]
         );
     }
 }
