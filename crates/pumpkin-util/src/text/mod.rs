@@ -1384,7 +1384,8 @@ pub enum TextContent {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod test {
-    use crate::text::{TextComponent, color::NamedColor};
+    use crate::text::{TextComponent, color::NamedColor, hover::HoverEvent};
+    use std::borrow::Cow;
 
     #[test]
     fn serialize_text_component() {
