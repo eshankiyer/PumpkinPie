@@ -19,7 +19,9 @@ use crate::{entity::r#type::from_type, item::items::spawn_egg::apply_entity_vari
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::damage::DamageType;
-use pumpkin_data::data_component_impl::{CustomDataImpl, CustomNameImpl, EquipmentSlot};
+use pumpkin_data::data_component_impl::{
+    CustomDataImpl, CustomNameImpl, EquipmentSlot, EquippableImpl, IDSet,
+};
 use pumpkin_data::entity::{EntityType, MobCategory, entity_from_egg};
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::meta_data_type::MetaDataType;
@@ -1367,8 +1369,20 @@ pub trait Mob: EntityBase + Send + Sync {
     /// Vanilla `Mob.wantsToPickUp` default: delegates to `canHoldItem`, which defaults to
     /// `true`. Whether picking up is ever attempted at all is gated separately by
     /// `can_pick_up_loot`.
-    fn wants_to_pick_up_item(&self, _world: &World, _stack: &ItemStack) -> bool {
-        true
+    fn wants_to_pick_up_item(&self, _world: &World, stack: &ItemStack) -> bool {
+        let entity_type = self.get_entity().entity_type;
+        let rejects_spears = entity_type == &EntityType::SKELETON
+            || entity_type == &EntityType::STRAY
+            || entity_type == &EntityType::BOGGED
+            || entity_type == &EntityType::PARCHED
+            || entity_type == &EntityType::WITHER_SKELETON
+            || entity_type == &EntityType::DROWNED;
+        let rejects_glow_ink = entity_type == &EntityType::ZOMBIE
+            || entity_type == &EntityType::HUSK
+            || entity_type == &EntityType::ZOMBIE_VILLAGER;
+
+        !(rejects_spears && stack.get_item().has_tag(&tag::Item::MINECRAFT_SPEARS))
+            && !(rejects_glow_ink && stack.get_item() == &pumpkin_data::item::Item::GLOW_INK_SAC)
     }
 
     /// Vanilla `Mob.canPickUpLoot`: whether this mob is allowed to pick up dropped items at
@@ -1378,12 +1392,71 @@ pub trait Mob: EntityBase + Send + Sync {
         self.get_mob_entity().can_pick_up_loot()
     }
 
-    /// Vanilla `Mob.onItemPickup`/`equipItemIfPossible`: called once a candidate item stack
-    /// has passed `wants_to_pick_up_item`, to actually take it. Returns the number of items
-    /// taken from the stack; the caller only shrinks/removes the `ItemEntity` by that count.
-    /// Default takes nothing, so no `ItemEntity` is ever touched unless a mob overrides this.
-    fn on_item_pickup(&self, _stack: &ItemStack) -> u8 {
-        0
+    /// Vanilla `Mob.equipItemIfPossible`: equip a dropped stack when its slot is available.
+    /// The caller shrinks the `ItemEntity` by the returned count.
+    fn on_item_pickup<'a>(&'a self, stack: &'a ItemStack) -> EntityBaseFuture<'a, u8> {
+        Box::pin(async move {
+            let mob = self.get_mob_entity();
+            let living = &mob.living_entity;
+            let entity = &living.entity;
+
+            let slot = stack
+                .get_data_component::<EquippableImpl>()
+                .map_or(&EquipmentSlot::MAIN_HAND, |equippable| equippable.slot);
+
+            if let Some(equippable) = stack.get_data_component::<EquippableImpl>()
+                && let Some(allowed_entities) = &equippable.allowed_entities
+            {
+                let allowed = match allowed_entities {
+                    IDSet::IDs(ids) => ids.contains(&entity.entity_type),
+                    IDSet::Tag(tag) => match tag.as_ref() {
+                        "can_equip_harness" => entity
+                            .entity_type
+                            .has_tag(&tag::EntityType::MINECRAFT_CAN_EQUIP_HARNESS),
+                        "can_equip_saddle" => entity
+                            .entity_type
+                            .has_tag(&tag::EntityType::MINECRAFT_CAN_EQUIP_SADDLE),
+                        "can_wear_horse_armor" => entity
+                            .entity_type
+                            .has_tag(&tag::EntityType::MINECRAFT_CAN_WEAR_HORSE_ARMOR),
+                        "can_wear_nautilus_armor" => entity
+                            .entity_type
+                            .has_tag(&tag::EntityType::MINECRAFT_CAN_WEAR_NAUTILUS_ARMOR),
+                        _ => false,
+                    },
+                };
+                if !allowed {
+                    return 0;
+                }
+            }
+
+            let mut equipment = living.entity_equipment.lock().await;
+            if !equipment.get(slot).is_empty() {
+                return 0;
+            }
+
+            let count = if slot.get_slot_index() == 0 || slot.get_slot_index() == 5 {
+                stack.item_count
+            } else {
+                stack.item_count.min(1)
+            };
+            if count == 0 {
+                return 0;
+            }
+
+            let equipped = stack.copy_with_count(count);
+            equipment.put(slot, equipped.clone());
+            drop(equipment);
+
+            living
+                .equipment_drop_chances
+                .lock()
+                .await
+                .insert(slot.clone(), 1.0);
+
+            living.send_equipment_changes(&[(slot.clone(), equipped)]);
+            count
+        })
     }
 
     /// Vanilla `Mob.aiStep`'s pickup-loot loop: scans nearby dropped items within pickup
@@ -1417,26 +1490,24 @@ pub trait Mob: EntityBase + Send + Sync {
                     continue;
                 }
 
-                let stack_snapshot = { item_entity.get_item_stack().lock().await.clone() };
-                if stack_snapshot.is_empty() || !self.wants_to_pick_up_item(&world, &stack_snapshot)
-                {
+                let mut stack = item_entity.get_item_stack().lock().await;
+                if stack.is_empty() || !self.wants_to_pick_up_item(&world, &stack) {
                     continue;
                 }
 
-                let taken = self
-                    .on_item_pickup(&stack_snapshot)
-                    .min(stack_snapshot.item_count);
+                let taken = self.on_item_pickup(&stack).await.min(stack.item_count);
                 if taken == 0 {
                     continue;
                 }
 
                 self.set_persistence_required();
+                mob_entity
+                    .living_entity
+                    .pickup(item_entity.get_entity(), u32::from(taken));
 
-                let is_empty = {
-                    let mut stack = item_entity.get_item_stack().lock().await;
-                    stack.decrement(taken);
-                    stack.is_empty()
-                };
+                stack.decrement(taken);
+                let is_empty = stack.is_empty();
+                drop(stack);
 
                 if is_empty {
                     item_entity.get_entity().remove().await;
