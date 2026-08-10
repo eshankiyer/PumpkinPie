@@ -737,10 +737,7 @@ impl ToTokens for Block {
             quote! { None }
         };
         // Generate state tokens
-        let states = self
-            .states
-            .iter()
-            .map(|state| state.to_tokens(&self.name));
+        let states = self.states.iter().map(|state| state.to_tokens(&self.name));
         let loot_table = if let Some(table) = &self.loot_table {
             let table_tokens = table.to_token_stream();
             quote! { Some(#table_tokens) }

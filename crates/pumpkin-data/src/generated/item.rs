@@ -64309,6 +64309,7 @@ impl Item {
                 }
             })
             .unwrap_or(self.registry_key);
+        #[allow(deprecated)]
         TextComponent::translate(name, &[])
     }
     #[doc = "Try to parse an item from a resource location string."]

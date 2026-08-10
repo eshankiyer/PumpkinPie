@@ -1,5 +1,5 @@
 // Not warn event sending macros
-#![allow(unused_labels)]
+#![allow(unused_labels, deprecated)]
 
 #[macro_use]
 extern crate pumpkin_macros;

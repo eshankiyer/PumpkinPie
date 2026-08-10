@@ -14,8 +14,8 @@ members = [
     "crates/pumpkin-util",
     "crates/pumpkin-world",
     "crates/pumpkin-registry",
+    "tools/pumpkin-codegen",
 ]
-exclude = ["tools/pumpkin-codegen"]
 
 # [workspace.lints.rust]
 # missing_docs = "warn"

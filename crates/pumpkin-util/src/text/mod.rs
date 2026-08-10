@@ -764,6 +764,10 @@ impl TextComponent {
     ///
     /// # Returns
     /// A new `TextComponent` that will be translated on the client.
+    #[deprecated(
+        since = "0.1.0",
+        note = "Use the `pumpkin_macros::translate_java!` macro instead for compile-time translation key and parameter checking."
+    )]
     #[must_use]
     pub fn translate<K: Into<Cow<'static, str>>, W: Into<Vec<Self>>>(key: K, with: W) -> Self {
         Self(TextComponentBase {
@@ -786,6 +790,10 @@ impl TextComponent {
     ///
     /// # Returns
     /// A new `TextComponent` that will be translated natively on both clients.
+    #[deprecated(
+        since = "0.1.0",
+        note = "Use the `pumpkin_macros::translate_cross!` macro instead for compile-time translation key and parameter checking."
+    )]
     #[must_use]
     pub fn translate_cross<
         K1: Into<Cow<'static, str>>,
@@ -1124,6 +1132,7 @@ impl TextComponent {
     ///
     /// # Returns
     /// The new component.
+    #[allow(deprecated)]
     #[must_use]
     pub fn wrap_in_square_brackets(self) -> Self {
         Self::translate("chat.square_brackets", [self])
@@ -1379,6 +1388,7 @@ mod test {
 
     #[test]
     fn serialize_text_component() {
+        #[allow(deprecated)]
         let msg_comp = TextComponent::translate(
             "multiplayer.player.joined",
             [TextComponent::text("NAME".to_string())],
