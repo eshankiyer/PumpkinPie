@@ -53,7 +53,7 @@ impl CowEntity {
             goal_selector.add_goal(2, BreedGoal::new(1.0));
             goal_selector.add_goal(3, Box::new(TemptGoal::new(1.25, TEMPT_ITEMS, false)));
             goal_selector.add_goal(4, Box::new(FollowParentGoal::new(1.25)));
-            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
+            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new_water_avoiding(1.0)));
             goal_selector.add_goal(
                 6,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
@@ -98,6 +98,10 @@ impl super::animal::Animal for CowEntity {
 impl Mob for CowEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    fn get_walk_target_value(&self, pos: &pumpkin_util::math::position::BlockPos) -> f64 {
+        super::animal::Animal::get_walk_target_value(self, pos)
     }
 
     fn mob_interact<'a>(

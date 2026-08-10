@@ -703,6 +703,24 @@ impl MobEntity {
 }
 
 pub trait Mob: EntityBase + Send + Sync {
+    /// Vanilla `Mob.hasControllingPassenger` and `Mob.getControllingPassenger`.
+    fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
+        Box::pin(async move {
+            if self.get_mob_entity().is_no_ai() {
+                return false;
+            }
+            let Some(passenger) = self.get_entity().passengers.lock().await.first().cloned() else {
+                return false;
+            };
+            let Some(mob) = passenger.get_mob() else {
+                return false;
+            };
+            !mob.get_entity()
+                .entity_type
+                .has_tag(&tag::EntityType::MINECRAFT_NON_CONTROLLING_RIDER)
+        })
+    }
+
     /// Vanilla `Drowned.wantsToSwim`; ordinary mobs do not have a swimming controller state.
     fn wants_to_swim(&self) -> bool {
         false

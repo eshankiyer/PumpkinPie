@@ -128,6 +128,41 @@ impl Navigator {
         self.path_type_overrides.insert(path_type, malus);
     }
 
+    /// Vanilla `PathNavigation.isStableDestination` for ground navigation.
+    #[must_use]
+    pub fn is_stable_destination(&self, world: &crate::world::World, pos: &BlockPos) -> bool {
+        if self.evaluator.is_amphibious() {
+            !world.get_block_state(&pos.down()).is_air()
+        } else if self.evaluator.is_flying() {
+            world.get_block_state(pos).is_full_cube()
+        } else {
+            world.get_block_state(&pos.down()).is_full_cube()
+        }
+    }
+
+    /// Vanilla `GoalUtils.hasMalus`, using the same defaults installed by
+    /// `Navigator::compute_path` and any per-mob overrides.
+    #[must_use]
+    pub fn has_pathfinding_malus(
+        &self,
+        world: &std::sync::Arc<crate::world::World>,
+        pos: &BlockPos,
+    ) -> bool {
+        let mut context = PathfindingContext::new(pos.0, world.clone());
+        let path_type = context.get_land_node_type(pos.0);
+        let default_malus = match path_type {
+            PathType::DangerFire => 16.0,
+            PathType::DamageFire | PathType::Lava => -1.0,
+            PathType::Water | PathType::DangerOther => 8.0,
+            _ => path_type.get_malus(),
+        };
+        self.path_type_overrides
+            .get(&path_type)
+            .copied()
+            .unwrap_or(default_malus)
+            != 0.0
+    }
+
     /// Vanilla `PathNavigation::setCanOpenDoors` (`GroundPathNavigation.java`'s inherited base),
     /// which just forwards to `NodeEvaluator::setCanOpenDoors`.
     pub fn set_can_open_doors(&mut self, can_open_doors: bool) {

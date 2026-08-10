@@ -1,7 +1,9 @@
 use super::{Controls, Goal, GoalFuture, to_goal_ticks};
 use crate::entity::{ai::pathfinder::NavigatorGoal, mob::Mob};
-use pumpkin_util::math::vector3::Vector3;
+use pumpkin_data::tag::{self, Taggable};
+use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
 use rand::RngExt;
+use std::sync::atomic::Ordering::Relaxed;
 
 pub struct WanderAroundGoal {
     goal_control: Controls,
@@ -62,63 +64,192 @@ impl WanderAroundGoal {
         self.avoid_water
     }
 
-    fn find_wander_target(mob: &dyn Mob) -> Vector3<f64> {
+    fn find_default_wander_target(mob: &dyn Mob) -> Option<Vector3<f64>> {
         let entity = &mob.get_mob_entity().living_entity.entity;
         let pos = entity.pos.load();
+        let world = entity.world.load();
         let mut rng = mob.get_random();
+        let origin = BlockPos::new(
+            pos.x.floor() as i32,
+            pos.y.floor() as i32,
+            pos.z.floor() as i32,
+        );
+        let horizontal_dist = 10;
+        let min_y = world.dimension.min_y;
+        let max_y = min_y + world.dimension.height - 1;
+        let mut best: Option<(f64, BlockPos)> = None;
 
-        let horizontal_range = 10.0;
-        let vertical_range = 7.0;
+        for _ in 0..10 {
+            let candidate = BlockPos::new(
+                origin.0.x + rng.random_range(-horizontal_dist..=horizontal_dist),
+                origin.0.y + rng.random_range(-7..=7),
+                origin.0.z + rng.random_range(-horizontal_dist..=horizontal_dist),
+            );
+            if candidate.0.y < min_y
+                || candidate.0.y > max_y
+                || !Self::is_within_restriction(mob, &candidate, horizontal_dist)
+            {
+                continue;
+            }
 
-        let dx = rng.random_range(-horizontal_range..=horizontal_range);
-        let dy = rng.random_range(-vertical_range..=vertical_range);
-        let dz = rng.random_range(-horizontal_range..=horizontal_range);
+            let navigator = mob
+                .get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !navigator.is_stable_destination(&world, &candidate)
+                || navigator.has_pathfinding_malus(&world, &candidate)
+            {
+                continue;
+            }
 
-        Vector3::new(pos.x + dx, pos.y + dy, pos.z + dz)
+            let weight = mob.get_walk_target_value(&candidate);
+            if best.is_none_or(|(best_weight, _)| weight > best_weight) {
+                best = Some((weight, candidate));
+            }
+        }
+
+        best.map(|(_, candidate)| {
+            Vector3::new(
+                candidate.0.x as f64 + 0.5,
+                candidate.0.y as f64,
+                candidate.0.z as f64 + 0.5,
+            )
+        })
+    }
+
+    fn is_within_restriction(mob: &dyn Mob, candidate: &BlockPos, horizontal_dist: i32) -> bool {
+        let Some(home) = mob.get_home() else {
+            return true;
+        };
+        let entity = mob.get_entity();
+        let pos = entity.pos.load();
+        let range = mob.get_mob_entity().position_target_range.load(Relaxed);
+        if range < 0 {
+            return true;
+        }
+        let dy = pos.y - (f64::from(home.0.y) + 0.5);
+        let dx = pos.x - (f64::from(home.0.x) + 0.5);
+        let dz = pos.z - (f64::from(home.0.z) + 0.5);
+        let max_distance = f64::from(range + horizontal_dist + 1);
+        if dx * dx + dy * dy + dz * dz >= max_distance * max_distance {
+            return true;
+        }
+        let candidate_dy = f64::from(candidate.0.y - home.0.y);
+        let candidate_dx = f64::from(candidate.0.x - home.0.x);
+        let candidate_dz = f64::from(candidate.0.z - home.0.z);
+        candidate_dx * candidate_dx + candidate_dy * candidate_dy + candidate_dz * candidate_dz
+            < f64::from(range) * f64::from(range)
+    }
+
+    /// Vanilla `LandRandomPos.getPos(mob, horizontalDist, 7)`.
+    fn find_land_wander_target(mob: &dyn Mob, horizontal_dist: i32) -> Option<Vector3<f64>> {
+        let entity = &mob.get_mob_entity().living_entity.entity;
+        let pos = entity.pos.load();
+        let world = entity.world.load();
+        let origin = BlockPos::new(
+            pos.x.floor() as i32,
+            pos.y.floor() as i32,
+            pos.z.floor() as i32,
+        );
+        let min_y = world.dimension.min_y;
+        let max_y = min_y + world.dimension.height - 1;
+        let mut rng = mob.get_random();
+        let mut best: Option<(f64, BlockPos)> = None;
+
+        for _ in 0..10 {
+            let mut candidate = BlockPos::new(
+                origin.0.x + rng.random_range(-horizontal_dist..=horizontal_dist),
+                origin.0.y + rng.random_range(-7..=7),
+                origin.0.z + rng.random_range(-horizontal_dist..=horizontal_dist),
+            );
+
+            if candidate.0.y < min_y
+                || candidate.0.y > max_y
+                || !Self::is_within_restriction(mob, &candidate, horizontal_dist)
+                || !mob
+                    .get_mob_entity()
+                    .navigator
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .is_stable_destination(&world, &candidate)
+            {
+                continue;
+            }
+
+            while candidate.0.y <= max_y && world.get_block_state(&candidate).is_solid() {
+                candidate = candidate.up();
+            }
+
+            if candidate.0.y > max_y
+                || world
+                    .get_fluid(&candidate)
+                    .has_tag(&tag::Fluid::MINECRAFT_WATER)
+            {
+                continue;
+            }
+
+            let navigator = mob
+                .get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if navigator.has_pathfinding_malus(&world, &candidate) {
+                continue;
+            }
+
+            let weight = mob.get_walk_target_value(&candidate);
+            if best.is_none_or(|(best_weight, _)| weight > best_weight) {
+                best = Some((weight, candidate));
+            }
+        }
+
+        best.map(|(_, pos)| {
+            Vector3::new(pos.0.x as f64 + 0.5, pos.0.y as f64, pos.0.z as f64 + 0.5)
+        })
     }
 }
 
 impl Goal for WanderAroundGoal {
     fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async move {
+            if mob.get_mob_entity().no_action_time.load(Relaxed) >= 100
+                || mob.has_controlling_passenger().await
+            {
+                return false;
+            }
+
             if mob.get_random().random_range(0..self.chance) != 0 {
                 return false;
             }
 
             if self.avoid_water {
-                let world = mob.get_entity().world.load();
-                // Reroll a bounded number of times looking for a non-liquid landing spot,
-                // falling back to the last roll (matching vanilla's "give up" behavior) rather
-                // than not moving at all.
-                let mut candidate = Self::find_wander_target(mob);
-                for _ in 0..10 {
-                    let block_pos = pumpkin_util::math::position::BlockPos::new(
-                        candidate.x.floor() as i32,
-                        candidate.y.floor() as i32,
-                        candidate.z.floor() as i32,
-                    );
-                    if !world.get_block_state(&block_pos).is_liquid() {
-                        break;
-                    }
-                    candidate = Self::find_wander_target(mob);
-                }
-                self.target = Some(candidate);
-                return true;
+                let in_water = mob.get_entity().touching_water.load(Relaxed);
+                self.target = if in_water {
+                    Self::find_land_wander_target(mob, 15)
+                        .or_else(|| Self::find_default_wander_target(mob))
+                } else if mob.get_random().random::<f32>() >= 0.001 {
+                    Self::find_land_wander_target(mob, 10)
+                } else {
+                    Self::find_default_wander_target(mob)
+                };
+                return self.target.is_some();
             }
 
-            self.target = Some(Self::find_wander_target(mob));
-            true
+            self.target = Self::find_default_wander_target(mob);
+            self.target.is_some()
         })
     }
 
     fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async move {
-            let navigator = mob
+            let navigator_idle = mob
                 .get_mob_entity()
                 .navigator
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            !navigator.is_idle()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_idle();
+            !navigator_idle && !mob.has_controlling_passenger().await
         })
     }
 
@@ -136,9 +267,14 @@ impl Goal for WanderAroundGoal {
         })
     }
 
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
             self.target = None;
+            mob.get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .stop();
         })
     }
 

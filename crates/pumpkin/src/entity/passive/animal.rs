@@ -1,15 +1,30 @@
 use std::sync::Arc;
 
-use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::particle::Particle;
 use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::{Block, item_stack::ItemStack};
 
 use crate::entity::{EntityBaseFuture, mob::Mob, player::Player};
 use pumpkin_protocol::bedrock::server::actor_event::ActorEventType;
-use pumpkin_util::math::vector3::Vector3;
+use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
 
 pub trait Animal: Mob {
     fn is_food(&self, item_stack: &ItemStack) -> bool;
+
+    /// Vanilla `Animal.getWalkTargetValue`: grass is preferred, otherwise the
+    /// position's light-dependent pathfinding cost is used.
+    fn get_walk_target_value(&self, pos: &BlockPos) -> f64 {
+        let world = self.get_entity().world.load();
+        if world.get_block(&pos.down()).id == Block::GRASS_BLOCK.id {
+            return 10.0;
+        }
+
+        let brightness = f32::from(world.get_max_local_raw_brightness(pos)) / 15.0;
+        let curved_brightness = brightness / (4.0 - 3.0 * brightness);
+        f64::from(
+            curved_brightness + world.dimension.ambient_light * (1.0 - curved_brightness) - 0.5,
+        )
+    }
 
     /// `ZombieHorse.canAgeUp` overrides this to `false` so babies never grow up from food.
     /// Every other current `Animal` implementor keeps the default (vanilla's own default is
