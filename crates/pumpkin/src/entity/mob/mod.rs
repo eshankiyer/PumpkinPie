@@ -1471,7 +1471,10 @@ pub trait Mob: EntityBase + Send + Sync {
 
             let mob_entity = self.get_mob_entity();
             let entity = &mob_entity.living_entity.entity;
-            if !entity.is_alive() {
+            if !entity.is_alive()
+                || mob_entity.living_entity.dead.load(Relaxed)
+                || mob_entity.living_entity.health.load() <= 0.0
+            {
                 return;
             }
 
