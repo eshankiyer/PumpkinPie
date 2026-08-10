@@ -91,7 +91,6 @@ impl ItemBehaviour for MinecartItem {
             );
             let minecart_entity = Arc::new(MinecartEntity::new(entity));
             world.spawn_entity(minecart_entity).await;
-
             // Vanilla: `serverLevel.gameEvent(GameEvent.ENTITY_PLACE, pos, Context.of(player,
             // blockState below))`. Pumpkin's `GameEventContext` has no block-state-carrying
             // variant yet, so only the entity source is passed.
@@ -105,7 +104,6 @@ impl ItemBehaviour for MinecartItem {
                 .await;
             }
 
-            // Vanilla `MinecartItem#useOn` ends with `itemStack.shrink(1)`.
             item.decrement_unless_creative(player.gamemode.load(), 1);
         })
     }

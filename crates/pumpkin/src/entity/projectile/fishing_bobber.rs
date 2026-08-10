@@ -245,7 +245,6 @@ impl FishingBobberEntity {
                     ),
                 ))
                 .await;
-
             return 1;
         }
 

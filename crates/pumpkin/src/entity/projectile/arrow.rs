@@ -546,8 +546,19 @@ impl EntityBase for ArrowEntity {
                         target.get_entity().set_on_fire_for_ticks(100);
                     }
 
-                    let damage_succeeded =
-                        target.damage(self, damage as f32, DamageType::ARROW).await;
+                    let source = self
+                        .owner_id
+                        .and_then(|owner_id| world.get_entity_by_id(owner_id));
+                    let damage_succeeded = target
+                        .damage_with_context(
+                            &*target,
+                            damage as f32,
+                            DamageType::ARROW,
+                            Some(hit_pos),
+                            source.as_deref(),
+                            Some(self),
+                        )
+                        .await;
 
                     if let Some(living) = target.get_living_entity() {
                         let punch = self.punch_level.load(Ordering::Relaxed);

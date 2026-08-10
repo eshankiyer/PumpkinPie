@@ -27,6 +27,7 @@ pub struct Explosion {
     fixed_radius: Option<f64>,
     knockback_multiplier: f32,
     deals_damage: bool,
+    preserve_rails: bool,
 }
 
 impl Explosion {
@@ -40,6 +41,7 @@ impl Explosion {
             fixed_radius: None,
             knockback_multiplier: 1.0,
             deals_damage: true,
+            preserve_rails: false,
         }
     }
 
@@ -53,6 +55,7 @@ impl Explosion {
             fixed_radius: None,
             knockback_multiplier: 1.0,
             deals_damage: true,
+            preserve_rails: false,
         }
     }
 
@@ -66,6 +69,7 @@ impl Explosion {
             fixed_radius: None,
             knockback_multiplier: 1.0,
             deals_damage: true,
+            preserve_rails: false,
         }
     }
 
@@ -88,7 +92,25 @@ impl Explosion {
             fixed_radius: Some(radius),
             knockback_multiplier,
             deals_damage: false,
+            preserve_rails: false,
         }
+    }
+
+    #[must_use]
+    pub const fn preserving_rails(mut self) -> Self {
+        self.preserve_rails = true;
+        self
+    }
+
+    fn protects_rail(&self, world: &World, pos: &BlockPos, block: &Block) -> bool {
+        self.preserve_rails && (Self::is_rail(block) || Self::is_rail(world.get_block(&pos.up())))
+    }
+
+    fn is_rail(block: &Block) -> bool {
+        block.id == Block::RAIL.id
+            || block.id == Block::POWERED_RAIL.id
+            || block.id == Block::DETECTOR_RAIL.id
+            || block.id == Block::ACTIVATOR_RAIL.id
     }
 
     fn get_blocks_to_destroy(
@@ -178,12 +200,16 @@ impl Explosion {
                         );
 
                         if !state.is_air() || !fluid_state.is_empty {
-                            let resistance =
-                                fluid_state.blast_resistance.max(block.blast_resistance);
+                            let protects_rail = self.protects_rail(world, &block_pos, block);
+                            let resistance = if protects_rail {
+                                0.0
+                            } else {
+                                fluid_state.blast_resistance.max(block.blast_resistance)
+                            };
 
                             h -= (resistance + 0.3) * 0.3;
 
-                            if h > 0.0 {
+                            if h > 0.0 && !protects_rail {
                                 map.insert(block_pos, (block, state));
                             }
                         }
@@ -413,6 +439,7 @@ impl Explosion {
 #[cfg(test)]
 mod tests {
     use super::Explosion;
+    use pumpkin_data::Block;
     use pumpkin_util::math::vector3::Vector3;
 
     #[test]
@@ -421,5 +448,18 @@ mod tests {
 
         assert!(explosion.destroys_blocks);
         assert!(explosion.creates_fire);
+    }
+
+    #[test]
+    fn tnt_minecart_rail_protection_covers_every_rail_type() {
+        for rail in [
+            &Block::RAIL,
+            &Block::POWERED_RAIL,
+            &Block::DETECTOR_RAIL,
+            &Block::ACTIVATOR_RAIL,
+        ] {
+            assert!(Explosion::is_rail(rail));
+        }
+        assert!(!Explosion::is_rail(&Block::STONE));
     }
 }

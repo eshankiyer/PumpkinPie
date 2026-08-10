@@ -297,6 +297,11 @@ impl Hand {
             _ => Err(InvalidHand),
         }
     }
+
+    /// Converts the `hand` field of a play packet, where `0` is the main hand.
+    pub const fn from_packet_id(value: i32) -> Result<Self, InvalidHand> {
+        Self::from_interaction_id(value)
+    }
 }
 
 /// Error type for invalid hand conversion.

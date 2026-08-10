@@ -38,7 +38,7 @@ use crate::{
         {OnNeighborUpdateArgs, OnScheduledTickArgs},
     },
     command::client_suggestions,
-    entity::{Entity, EntityBase, NBTStorage, player::Player, r#type::from_type},
+    entity::{Entity, EntityBase, NBTStorage, RemovalReason, player::Player, r#type::from_type},
     error::PumpkinError,
     net::{ClientPlatform, java::JavaClient},
     plugin::{
@@ -564,7 +564,11 @@ impl World {
         if !entity.should_be_saved() {
             return;
         }
-        let current_chunk = entity.get_entity().block_pos.load().chunk_position();
+        let base_entity = entity.get_entity();
+        if base_entity.is_removed() {
+            return;
+        }
+        let current_chunk = base_entity.block_pos.load().chunk_position();
         let mut nbt = NbtCompound::new();
         // Vanilla always writes the base `Entity`/`LivingEntity` data (`saveWithoutId`)
         // before the type specific `addAdditionalSaveData`. Most Pumpkin entity types
@@ -3795,6 +3799,15 @@ impl World {
         self.explode_with_blocks(position, power, true, false).await;
     }
 
+    pub async fn explode_tnt_minecart(self: &Arc<Self>, position: Vector3<f64>, power: f32) {
+        self.run_explosion(
+            Explosion::new(power, position).preserving_rails(),
+            position,
+            power,
+        )
+        .await;
+    }
+
     pub async fn explode_without_blocks(self: &Arc<Self>, position: Vector3<f64>, power: f32) {
         self.explode_with_blocks(position, power, false, false)
             .await;
@@ -3831,6 +3844,15 @@ impl World {
         } else {
             Explosion::new_without_blocks(power, position)
         };
+        self.run_explosion(explosion, position, power).await;
+    }
+
+    async fn run_explosion(
+        self: &Arc<Self>,
+        explosion: Explosion,
+        position: Vector3<f64>,
+        power: f32,
+    ) {
         let block_count = explosion.explode(self).await;
         let particle = if power < 2.0 {
             Particle::Explosion
@@ -4261,6 +4283,7 @@ impl World {
                         // without it the client keeps its defaults for every field.
                         // Only this player is targeted, never the other viewers.
                         base_entity.send_tracked_data_to(&player.client);
+                        player.try_restore_vehicle(&entity).await;
                         entities_to_add.push(entity);
                     }
 
@@ -4281,8 +4304,9 @@ impl World {
                             player
                                 .client
                                 .enqueue_packet(&base_entity.create_spawn_packet())
-                                .await;
+                            .await;
                             base_entity.send_tracked_data_to(&player.client);
+                            player.try_restore_vehicle(entity).await;
                         }
                     }
                 }
@@ -4847,6 +4871,14 @@ impl World {
         let base_entity = entity.get_entity();
         self.unregister_game_event_listener_for_entity(base_entity.entity_uuid)
             .await;
+        if base_entity
+            .removal_reason
+            .swap(Some(RemovalReason::Discarded))
+            .is_some()
+        {
+            return;
+        }
+        base_entity.removed.store(true, Ordering::Release);
         self.spawn_state.load().remove_entity(self, entity);
         self.entities.rcu(|current_entities| {
             let mut new_entities = (**current_entities).clone();
