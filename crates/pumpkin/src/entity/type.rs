@@ -467,6 +467,17 @@ pub fn check_spawn_rules(
             && world.get_raw_brightness(pos, 0) > 8;
     }
 
+    // `Wolf.checkWolfSpawnRules`: wolves use their own ground tag rather than
+    // `Animal.checkAnimalSpawnRules`'s grass-only tag.
+    if id == EntityType::WOLF.id {
+        return wolf_spawn_rules(
+            world
+                .get_block(&pos.down())
+                .has_tag(&tag::Block::MINECRAFT_WOLVES_SPAWNABLE_ON),
+            world.get_raw_brightness(pos, 0),
+        );
+    }
+
     if uses_animal_spawn_rules(id) {
         return world
             .get_block(&pos.down())
@@ -532,6 +543,10 @@ const fn uses_animal_spawn_rules(id: u16) -> bool {
         || id == EntityType::TRADER_LLAMA.id
 }
 
+const fn wolf_spawn_rules(block_is_tagged: bool, brightness: u8) -> bool {
+    block_is_tagged && brightness > 8
+}
+
 /// `MobCategory::MONSTER` members whose registered `SpawnPlacements` predicate is not
 /// `Monster.checkMonsterSpawnRules`. Slime registers `Slime.checkSlimeSpawnRules`
 /// (`Slime.java`, 1.21.4), which applies the swamp-band and slime-chunk gates instead of
@@ -573,7 +588,9 @@ const fn is_below_glow_squid_y_threshold(y: i32, sea_level: i32) -> bool {
 
 #[cfg(test)]
 mod animal_spawn_dispatch_tests {
-    use super::{EntityType, uses_animal_spawn_rules, uses_any_light_monster_spawn_rules};
+    use super::{
+        EntityType, uses_animal_spawn_rules, uses_any_light_monster_spawn_rules, wolf_spawn_rules,
+    };
 
     #[test]
     fn vanilla_animal_placements_use_the_animal_predicate() {
@@ -608,6 +625,15 @@ mod animal_spawn_dispatch_tests {
         assert!(!uses_animal_spawn_rules(EntityType::ZOMBIE.id));
         assert!(!uses_animal_spawn_rules(EntityType::BAT.id));
         assert!(!uses_animal_spawn_rules(EntityType::SLIME.id));
+        assert!(!uses_animal_spawn_rules(EntityType::WOLF.id));
+    }
+
+    #[test]
+    fn wolf_spawn_requires_its_ground_tag_and_vanilla_light_threshold() {
+        assert!(wolf_spawn_rules(true, 9));
+        assert!(wolf_spawn_rules(true, 15));
+        assert!(!wolf_spawn_rules(true, 8));
+        assert!(!wolf_spawn_rules(false, 15));
     }
 }
 
