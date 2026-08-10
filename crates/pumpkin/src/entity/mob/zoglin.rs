@@ -137,6 +137,14 @@ impl Mob for ZoglinEntity {
         &self.mob_entity
     }
 
+    fn set_baby_from_spawn_egg(&self) {
+        self.set_baby(true);
+    }
+
+    fn is_baby_from_spawn_egg(&self) -> bool {
+        self.is_baby()
+    }
+
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             if self.is_baby() {

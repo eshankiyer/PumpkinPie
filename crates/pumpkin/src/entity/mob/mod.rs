@@ -14,11 +14,13 @@ use crate::entity::ai::goal::goal_selector::GoalSelector;
 use crate::entity::player::Player;
 use crate::server::Server;
 use crate::world::World;
+use crate::world::game_event::{GameEventContext, emit_game_event};
+use crate::{entity::r#type::from_type, item::items::spawn_egg::apply_entity_variant};
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::damage::DamageType;
-use pumpkin_data::data_component_impl::EquipmentSlot;
-use pumpkin_data::entity::{EntityType, MobCategory};
+use pumpkin_data::data_component_impl::{CustomDataImpl, CustomNameImpl, EquipmentSlot};
+use pumpkin_data::entity::{EntityType, MobCategory, entity_from_egg};
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::tag::{self, Taggable};
@@ -702,6 +704,67 @@ impl MobEntity {
     }
 }
 
+const fn is_spawn_egg_ageable(entity_type: &EntityType) -> bool {
+    matches!(
+        entity_type.id,
+        id if id == EntityType::CHICKEN.id
+            || id == EntityType::COW.id
+            || id == EntityType::AXOLOTL.id
+            || id == EntityType::ARMADILLO.id
+            || id == EntityType::BEE.id
+            || id == EntityType::CAMEL.id
+            || id == EntityType::CAT.id
+            || id == EntityType::DOLPHIN.id
+            || id == EntityType::DONKEY.id
+            || id == EntityType::FOX.id
+            || id == EntityType::GLOW_SQUID.id
+            || id == EntityType::GOAT.id
+            || id == EntityType::HAPPY_GHAST.id
+            || id == EntityType::HOGLIN.id
+            || id == EntityType::HORSE.id
+            || id == EntityType::LLAMA.id
+            || id == EntityType::MOOSHROOM.id
+            || id == EntityType::MULE.id
+            || id == EntityType::NAUTILUS.id
+            || id == EntityType::OCELOT.id
+            || id == EntityType::PANDA.id
+            || id == EntityType::PIGLIN.id
+            || id == EntityType::POLAR_BEAR.id
+            || id == EntityType::PIG.id
+            || id == EntityType::RABBIT.id
+            || id == EntityType::SHEEP.id
+            || id == EntityType::SNIFFER.id
+            || id == EntityType::SKELETON_HORSE.id
+            || id == EntityType::SQUID.id
+            || id == EntityType::STRIDER.id
+            || id == EntityType::SULFUR_CUBE.id
+            || id == EntityType::TRADER_LLAMA.id
+            || id == EntityType::TURTLE.id
+            || id == EntityType::WOLF.id
+            || id == EntityType::ZOGLIN.id
+            || id == EntityType::ZOMBIE.id
+            || id == EntityType::DROWNED.id
+            || id == EntityType::HUSK.id
+            || id == EntityType::ZOMBIE_HORSE.id
+            || id == EntityType::ZOMBIE_VILLAGER.id
+            || id == EntityType::ZOMBIFIED_PIGLIN.id
+    )
+}
+
+const fn spawn_egg_uses_breed_offspring(entity_type: &EntityType) -> bool {
+    !matches!(
+        entity_type.id,
+        id if id == EntityType::DROWNED.id
+            || id == EntityType::HOGLIN.id
+            || id == EntityType::HUSK.id
+            || id == EntityType::PIGLIN.id
+            || id == EntityType::ZOGLIN.id
+            || id == EntityType::ZOMBIE.id
+            || id == EntityType::ZOMBIE_VILLAGER.id
+            || id == EntityType::ZOMBIFIED_PIGLIN.id
+    )
+}
+
 pub trait Mob: EntityBase + Send + Sync {
     /// Vanilla `Mob.hasControllingPassenger` and `Mob.getControllingPassenger`.
     fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
@@ -1207,6 +1270,90 @@ pub trait Mob: EntityBase + Send + Sync {
         })
     }
 
+    /// Vanilla `Mob.checkAndHandleImportantInteractions` handles matching spawn eggs before
+    /// dispatching to each mob's regular interaction method.
+    fn spawn_egg_interact<'a>(
+        &'a self,
+        player: &'a Arc<Player>,
+        item_stack: &'a mut ItemStack,
+    ) -> EntityBaseFuture<'a, bool>
+    where
+        Self: Sized,
+    {
+        Box::pin(async move {
+            let Some(egg_type) = entity_from_egg(item_stack.item.id) else {
+                return false;
+            };
+            let entity = self.get_entity();
+            if !entity.is_alive()
+                || egg_type.id != entity.entity_type.id
+                || !is_spawn_egg_ageable(egg_type)
+            {
+                return false;
+            }
+
+            let world = entity.world.load();
+            let offspring = self.create_spawn_egg_offspring(&world).await;
+            // Sniffer's normal breeding path intentionally returns an egg item, but vanilla's
+            // spawn-egg path calls Sniffer.getBreedOffspring and creates a live baby.
+            let offspring = offspring.or_else(|| {
+                (egg_type.id == EntityType::SNIFFER.id || egg_type.id == EntityType::TURTLE.id)
+                    .then(|| from_type(egg_type, entity.pos.load(), &world, Uuid::new_v4()))
+            });
+            let Some(offspring) = offspring else {
+                return false;
+            };
+
+            let Some(offspring_mob) = offspring.get_mob() else {
+                return false;
+            };
+            offspring_mob.set_baby_from_spawn_egg();
+            if !offspring_mob.is_baby_from_spawn_egg() {
+                return false;
+            }
+            apply_entity_variant(item_stack, offspring.as_ref());
+            if let Some(name) = item_stack.get_data_component::<CustomNameImpl>() {
+                offspring.get_entity().set_custom_name(name.name.clone());
+            }
+            if let Some(data) = item_stack.get_data_component::<CustomDataImpl>() {
+                offspring.get_entity().set_custom_data(data.data.clone());
+            }
+            world.spawn_entity(offspring.clone()).await;
+            self.on_offspring_spawned_from_egg(player, offspring.as_ref());
+            item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+            emit_game_event(
+                &world,
+                pumpkin_data::game_event::GameEvent::EntityInteract,
+                entity.pos.load(),
+                GameEventContext::of_entity(player.clone() as Arc<dyn EntityBase>),
+            )
+            .await;
+            true
+        })
+    }
+
+    /// Vanilla `Mob.onOffspringSpawnedFromEgg` hook.
+    fn on_offspring_spawned_from_egg(&self, _player: &Arc<Player>, _offspring: &dyn EntityBase) {}
+
+    /// Vanilla `Mob.setBaby(true)` for the spawn-egg path. Most Pumpkin ageable entities use the
+    /// shared age field; entities with their own baby state override this hook.
+    fn set_baby_from_spawn_egg(&self) {
+        self.get_entity().set_age(-24000);
+        self.get_entity().send_meta_data(
+            &[Metadata::new(
+                TrackedData::BABY_ID,
+                MetaDataType::BOOLEAN,
+                true,
+            )],
+            None,
+        );
+    }
+
+    /// Vanilla `Mob.isBaby()` after the spawn-egg setter has run.
+    fn is_baby_from_spawn_egg(&self) -> bool {
+        self.get_entity().age.load(Relaxed) < 0
+    }
+
     /// Vanilla `Mob.canBeLeashed`: whether a lead can be attached to this mob at all.
     /// Defaults to `true`; species that are never leashable (e.g. Turtle) override this.
     fn can_be_leashed(&self) -> bool {
@@ -1358,6 +1505,30 @@ pub trait Mob: EntityBase + Send + Sync {
                 world,
                 Uuid::new_v4(),
             ))
+        })
+    }
+
+    /// Vanilla spawn eggs use the breed-offspring factory, but species-specific breeding state
+    /// such as fox trust must not be copied into the egg-created entity.
+    fn create_spawn_egg_offspring<'a>(
+        &'a self,
+        world: &'a Arc<World>,
+    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>>
+    where
+        Self: Sized,
+    {
+        Box::pin(async move {
+            let entity_type = self.get_entity().entity_type;
+            if spawn_egg_uses_breed_offspring(entity_type) {
+                self.create_offspring(self, world).await
+            } else {
+                Some(from_type(
+                    entity_type,
+                    self.get_entity().pos.load(),
+                    world,
+                    Uuid::new_v4(),
+                ))
+            }
         })
     }
 
@@ -1680,7 +1851,15 @@ impl<T: Mob + Send + 'static> EntityBase for T {
         player: &'a Arc<Player>,
         item_stack: &'a mut ItemStack,
     ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move { self.mob_interact(player, item_stack).await })
+        Box::pin(async move {
+            if !self.get_entity().is_alive() {
+                return false;
+            }
+            if self.spawn_egg_interact(player, item_stack).await {
+                return true;
+            }
+            self.mob_interact(player, item_stack).await
+        })
     }
 
     fn on_player_collision<'a>(&'a self, player: &'a Arc<Player>) -> EntityBaseFuture<'a, ()> {

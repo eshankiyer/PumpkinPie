@@ -630,6 +630,12 @@ impl Mob for FoxEntity {
         self.animal_interact(player, item_stack, Sound::EntityFoxAmbient)
     }
 
+    fn on_offspring_spawned_from_egg(&self, player: &Arc<Player>, offspring: &dyn EntityBase) {
+        if let Some(fox) = offspring.cast_any().downcast_ref::<Self>() {
+            fox.add_trusted_entity(player.gameprofile.id);
+        }
+    }
+
     /// `Fox.getBreedOffspring` + `FoxBreedGoal.breed`'s trust-inheritance: the kit's variant is a
     /// coin flip between the two parents', and it trusts whichever parent(s) have a recorded
     /// love-cause player (the player(s) that fed them to start breeding).
@@ -671,6 +677,25 @@ impl Mob for FoxEntity {
                 }
             }
 
+            Some(baby)
+        })
+    }
+
+    fn create_spawn_egg_offspring<'a>(
+        &'a self,
+        world: &'a Arc<World>,
+    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
+        Box::pin(async move {
+            let entity = self.get_entity();
+            let baby = crate::entity::r#type::from_type(
+                entity.entity_type,
+                entity.pos.load(),
+                world,
+                Uuid::new_v4(),
+            );
+            if let Some(fox) = baby.cast_any().downcast_ref::<Self>() {
+                fox.set_variant(self.variant());
+            }
             Some(baby)
         })
     }

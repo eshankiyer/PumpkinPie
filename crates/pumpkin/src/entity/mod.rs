@@ -980,6 +980,8 @@ pub struct Entity {
     pub portal_manager: Mutex<Option<Mutex<PortalProcessor>>>,
     /// Custom name for the entity
     pub custom_name: ArcSwap<Option<TextComponent>>,
+    /// Vanilla `Entity.customData`, copied from item components such as spawn eggs.
+    pub custom_data: ArcSwap<Option<NbtCompound>>,
     /// Indicates whether the entity's custom name is visible
     pub custom_name_visible: AtomicBool,
     pub silent: AtomicBool,
@@ -1238,6 +1240,7 @@ impl Entity {
             portal_cooldown: AtomicU32::new(0),
             portal_manager: Mutex::new(None),
             custom_name: ArcSwap::new(Arc::new(None)),
+            custom_data: ArcSwap::new(Arc::new(None)),
             custom_name_visible: AtomicBool::new(false),
             silent: AtomicBool::new(false),
             has_no_gravity: AtomicBool::new(false),
@@ -1370,6 +1373,10 @@ impl Entity {
             )],
             Some(&bedrock_meta),
         );
+    }
+
+    pub fn set_custom_data(&self, data: NbtCompound) {
+        self.custom_data.store(Arc::new(Some(data)));
     }
 
     pub fn set_custom_name_visible(&self, visible: bool) {
@@ -3999,6 +4006,9 @@ impl NBTStorage for Entity {
             {
                 nbt.put_string("CustomName", name_json);
             }
+            if let Some(custom_data) = &**self.custom_data.load() {
+                nbt.put("data", NbtTag::Compound(custom_data.clone()));
+            }
             nbt.put_bool("CustomNameVisible", self.custom_name_visible.load(Relaxed));
             if self.entity_type.mob {
                 nbt.put_bool(
@@ -4075,6 +4085,9 @@ impl NBTStorage for Entity {
                 && let Ok(component) = pumpkin_util::serde_json::from_str(name_json)
             {
                 self.custom_name.store(Arc::new(Some(component)));
+            }
+            if let Some(custom_data) = nbt.get_compound("data") {
+                self.custom_data.store(Arc::new(Some(custom_data.clone())));
             }
             self.custom_name_visible
                 .store(nbt.get_bool("CustomNameVisible").unwrap_or(false), Relaxed);
