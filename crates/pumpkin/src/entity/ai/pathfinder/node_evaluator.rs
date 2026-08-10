@@ -1,3 +1,4 @@
+use pumpkin_util::math::boundingbox::BoundingBox;
 use rustc_hash::FxHashMap;
 
 use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
@@ -41,6 +42,7 @@ pub trait NodeEvaluator {
 #[derive(Debug, Clone, Copy)]
 pub struct MobData {
     pub position: Vector3<f64>,
+    pub bounding_box: BoundingBox,
     pub width: f32,
     pub height: f32,
     pub max_step_height: f32,
@@ -51,6 +53,9 @@ pub struct MobData {
     pub avoids_water: bool,
     pub on_ground: bool,
     pub in_water: bool,
+    pub can_walk_on_powder_snow: bool,
+    pub fall_distance: f32,
+    pub is_descending: bool,
     pub path_type_malus: [Option<f32>; PATH_TYPE_COUNT],
 }
 
@@ -59,6 +64,10 @@ impl MobData {
     pub const fn new_zombie(position: Vector3<f64>, on_ground: bool) -> Self {
         let mut data = Self {
             position,
+            bounding_box: BoundingBox::new(
+                Vector3::new(position.x - 0.3, position.y, position.z - 0.3),
+                Vector3::new(position.x + 0.3, position.y + 1.95, position.z + 0.3),
+            ),
             width: 0.6,
             height: 1.95,
             max_step_height: 1.0,
@@ -69,6 +78,9 @@ impl MobData {
             avoids_water: false,
             on_ground,
             in_water: false,
+            can_walk_on_powder_snow: false,
+            fall_distance: 0.0,
+            is_descending: false,
             path_type_malus: [None; PATH_TYPE_COUNT],
         };
 
@@ -90,6 +102,18 @@ impl MobData {
     ) -> Self {
         Self {
             position,
+            bounding_box: BoundingBox::new(
+                Vector3::new(
+                    position.x - width as f64 / 2.0,
+                    position.y,
+                    position.z - width as f64 / 2.0,
+                ),
+                Vector3::new(
+                    position.x + width as f64 / 2.0,
+                    position.y + height as f64,
+                    position.z + width as f64 / 2.0,
+                ),
+            ),
             width,
             height,
             max_step_height,
@@ -100,6 +124,9 @@ impl MobData {
             avoids_water: false,
             on_ground: true,
             in_water: false,
+            can_walk_on_powder_snow: false,
+            fall_distance: 0.0,
+            is_descending: false,
             path_type_malus: [None; PATH_TYPE_COUNT],
         }
     }

@@ -4,7 +4,7 @@ use pumpkin_data::{
     fluid::Fluid,
     tag::{self, Taggable},
 };
-use pumpkin_util::math::vector3::Vector3;
+use pumpkin_util::math::{boundingbox::BoundingBox, position::BlockPos, vector3::Vector3};
 
 use crate::{
     entity::ai::pathfinder::{
@@ -256,6 +256,63 @@ impl PathfindingContext {
 
         self.collision_cache.insert(pos, has_collision);
         has_collision
+    }
+
+    #[must_use]
+    pub async fn has_collisions_box(
+        &self,
+        bounding_box: BoundingBox,
+        source_position: Vector3<f64>,
+        can_walk_on_powder_snow: bool,
+        fall_distance: f32,
+        is_descending: bool,
+    ) -> bool {
+        let min = bounding_box.min_block_pos();
+        let max = bounding_box.max_block_pos();
+        for pos in BlockPos::iterate(min, max) {
+            let state = self.world.get_block_state(&pos);
+            let block = Block::from_state_id(state.id);
+            let collided = if block == &Block::POWDER_SNOW {
+                let shape = if fall_distance > 2.5 {
+                    Some(BoundingBox::new_array([0.0, 0.0, 0.0], [1.0, 0.9, 1.0]))
+                } else if can_walk_on_powder_snow
+                    && source_position.y >= f64::from(pos.0.y) + 1.0 - 1.0e-5
+                    && !is_descending
+                {
+                    Some(BoundingBox::full_block())
+                } else {
+                    None
+                };
+                shape.is_some_and(|shape| shape.at_pos(pos).intersects(&bounding_box))
+            } else {
+                state
+                    .get_block_collision_shapes()
+                    .any(|shape| shape.at_pos(pos).intersects(&bounding_box))
+            };
+            if collided {
+                return true;
+            }
+        }
+
+        let border = self.world.worldborder.lock().await;
+        let max_size = (bounding_box.max.x - bounding_box.min.x)
+            .abs()
+            .max((bounding_box.max.z - bounding_box.min.z).abs())
+            .max(1.0);
+        if border.distance_to_border(source_position.x, source_position.z) >= max_size * 2.0 {
+            return false;
+        }
+
+        let max_x = bounding_box.max.x - 1.0e-9;
+        let max_z = bounding_box.max.z - 1.0e-9;
+        [
+            (bounding_box.min.x, bounding_box.min.z),
+            (bounding_box.min.x, max_z),
+            (max_x, bounding_box.min.z),
+            (max_x, max_z),
+        ]
+        .into_iter()
+        .any(|(x, z)| !border.contains(x, z))
     }
 
     #[must_use]

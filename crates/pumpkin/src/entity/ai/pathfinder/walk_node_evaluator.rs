@@ -1,6 +1,6 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
+use pumpkin_util::math::{boundingbox::BoundingBox, position::BlockPos, vector3::Vector3};
 use rustc_hash::FxHashMap;
 
 use crate::entity::ai::pathfinder::{
@@ -138,7 +138,13 @@ impl WalkNodeEvaluator {
             n
         });
 
-        // TODO: Add ray-march collision check for blocked types (fence/door)
+        if Self::has_partial_collision(current_path_type)
+            && let Some(candidate) = node.as_ref()
+            && candidate.cost_malus >= 0.0
+            && !self.can_reach_without_collision(candidate).await
+        {
+            node = None;
+        }
 
         if path_type != PathType::Walkable
             && !(self.is_amphibious() && path_type == PathType::Water)
@@ -312,6 +318,57 @@ impl WalkNodeEvaluator {
         )
     }
 
+    const fn has_partial_collision(path_type: PathType) -> bool {
+        matches!(
+            path_type,
+            PathType::Fence | PathType::DoorWoodClosed | PathType::DoorIronClosed
+        )
+    }
+
+    async fn can_reach_without_collision(&self, target: &Node) -> bool {
+        let Some(mob_data) = self.base.mob_data else {
+            return false;
+        };
+
+        let mut bounding_box = mob_data.bounding_box;
+        let mut delta = Vector3::new(
+            f64::from(target.pos.0.x) - mob_data.position.x
+                + (bounding_box.max.x - bounding_box.min.x) / 2.0,
+            f64::from(target.pos.0.y) - mob_data.position.y
+                + (bounding_box.max.y - bounding_box.min.y) / 2.0,
+            f64::from(target.pos.0.z) - mob_data.position.z
+                + (bounding_box.max.z - bounding_box.min.z) / 2.0,
+        );
+        let steps = (delta.length() / bounding_box.get_average_side_length()).ceil() as usize;
+        if steps == 0 {
+            return true;
+        }
+        let step_count = steps as f64;
+        delta = Vector3::new(
+            delta.x / step_count,
+            delta.y / step_count,
+            delta.z / step_count,
+        );
+
+        for _ in 0..steps {
+            bounding_box = bounding_box.shift(delta);
+            if self
+                .has_collisions_box(
+                    bounding_box,
+                    mob_data.position,
+                    mob_data.can_walk_on_powder_snow,
+                    mob_data.fall_distance,
+                    mob_data.is_descending,
+                )
+                .await
+            {
+                return false;
+            }
+        }
+
+        true
+    }
+
     async fn get_cached_path_type(&mut self, pos: Vector3<i32>) -> PathType {
         if let Some(&cached) = self.path_types_cache.get(&pos) {
             return cached;
@@ -338,6 +395,27 @@ impl WalkNodeEvaluator {
             .context
             .as_mut()
             .is_some_and(|ctx| ctx.has_collisions(center))
+    }
+
+    async fn has_collisions_box(
+        &self,
+        bounding_box: BoundingBox,
+        source_position: Vector3<f64>,
+        can_walk_on_powder_snow: bool,
+        fall_distance: f32,
+        is_descending: bool,
+    ) -> bool {
+        let Some(ctx) = self.base.context.as_ref() else {
+            return false;
+        };
+        ctx.has_collisions_box(
+            bounding_box,
+            source_position,
+            can_walk_on_powder_snow,
+            fall_distance,
+            is_descending,
+        )
+        .await
     }
 
     async fn can_start_at(&mut self, pos: Vector3<i32>) -> bool {

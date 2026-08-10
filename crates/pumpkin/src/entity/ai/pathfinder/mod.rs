@@ -12,7 +12,12 @@ use crate::entity::ai::pathfinder::node_evaluator::{MobData, NodeEvaluator};
 use crate::entity::ai::pathfinder::path::Path;
 use crate::entity::ai::pathfinder::pathfinding_context::PathfindingContext;
 use crate::entity::ai::pathfinder::walk_node_evaluator::WalkNodeEvaluator;
-use pumpkin_data::attributes::Attributes;
+use pumpkin_data::{
+    attributes::Attributes,
+    data_component_impl::EquipmentSlot,
+    item::Item,
+    tag::{self, Taggable},
+};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::wrap_degrees;
 use std::collections::HashMap;
@@ -263,6 +268,20 @@ impl Navigator {
 
         let context = PathfindingContext::new(mob_position, entity.entity.world.load_full());
         let mut mob_data = MobData::new(start_pos_f, self.mob_width, self.mob_height, 1.0);
+        mob_data.bounding_box = entity.entity.bounding_box.load();
+        mob_data.fall_distance = entity.fall_distance.load();
+        mob_data.is_descending = entity.entity.sneaking.load(Ordering::Relaxed);
+        mob_data.can_walk_on_powder_snow = entity
+            .entity
+            .entity_type
+            .has_tag(&tag::EntityType::MINECRAFT_POWDER_SNOW_WALKABLE_MOBS)
+            || entity
+                .entity_equipment
+                .lock()
+                .await
+                .equipment
+                .get(&EquipmentSlot::FEET)
+                .is_some_and(|boots| boots.item == &Item::LEATHER_BOOTS);
         mob_data.on_ground = entity.entity.on_ground.load(Ordering::Relaxed);
         mob_data.in_water = entity.entity.touching_water.load(Ordering::Relaxed);
         mob_data.set_pathfinding_malus(PathType::DangerFire, 16.0);
