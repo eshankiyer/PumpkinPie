@@ -107,6 +107,17 @@ impl Navigator {
         self.current_path = None;
     }
 
+    pub fn set_progress_with_path(&mut self, goal: NavigatorGoal, path: Path) {
+        let current_progress = goal.current_progress;
+        self.is_idle.store(false, Ordering::Relaxed);
+        self.current_goal = Some(goal);
+        self.current_path = Some(path);
+        self.ticks_on_current_node = 0;
+        self.last_node_index = 0;
+        self.total_ticks = 0;
+        self.path_start_pos = Some(current_progress);
+    }
+
     /// Speed modifier of the active navigation goal, or `None` when idle. Stands in for
     /// vanilla's `MoveControl.getSpeedModifier()`, which `Rabbit.setLandingDelay` reads.
     #[must_use]
@@ -172,6 +183,10 @@ impl Navigator {
     /// which just forwards to `NodeEvaluator::setCanOpenDoors`.
     pub fn set_can_open_doors(&mut self, can_open_doors: bool) {
         self.evaluator.set_can_open_doors(can_open_doors);
+    }
+
+    pub fn can_open_doors(&self) -> bool {
+        self.evaluator.can_open_doors()
     }
 
     /// Selects the `FlyNodeEvaluator` behavior used by vanilla `FlyingPathNavigation`.

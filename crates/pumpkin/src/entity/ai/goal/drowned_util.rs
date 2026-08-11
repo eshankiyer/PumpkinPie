@@ -10,5 +10,6 @@ use crate::world::World;
 const BRIGHT_OUTSIDE_THRESHOLD: u8 = 4;
 
 pub fn is_bright_outside(world: &World) -> bool {
-    world.dimension.has_skylight && world.sky_darken.load(Relaxed) < BRIGHT_OUTSIDE_THRESHOLD
+    world.dimension.fixed_time.is_none()
+        && world.sky_darken.load(Relaxed) < BRIGHT_OUTSIDE_THRESHOLD
 }

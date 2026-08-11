@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::Ordering;
 
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::EntityType;
@@ -8,7 +8,9 @@ use pumpkin_data::world::WorldEvent;
 use pumpkin_nbt::compound::NbtCompound;
 
 use crate::entity::mob::equipment::RegionalDifficulty;
-use crate::entity::mob::zombie::{ZombieEntityBase, zombie::ZombieEntity};
+use crate::entity::mob::zombie::{
+    ZombieEntityBase, transfer_conversion_team, transfer_conversion_topology, zombie::ZombieEntity,
+};
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     mob::{Mob, MobEntity},
@@ -30,24 +32,12 @@ const fn husk_hunger_duration(effective_difficulty: f32) -> i32 {
 
 pub struct HuskEntity {
     entity: Arc<ZombieEntityBase>,
-    /// Vanilla `Zombie::inWaterTime`. `Entity::touching_water` stands in for
-    /// `isEyeInFluid(FluidTags.WATER)` -- Pumpkin has no per-fluid eye-submersion check, so this
-    /// starts counting slightly earlier than vanilla (as soon as any part of the husk is in
-    /// water, not just its eyes).
-    in_water_time: AtomicI32,
-    /// Vanilla `Zombie::conversionTime`. `-1` while not converting, matching the
-    /// `DrownedConversionTime` NBT sentinel `Zombie::readAdditionalSaveData` uses.
-    conversion_time: AtomicI32,
 }
 
 impl HuskEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
         let entity = ZombieEntityBase::new(entity);
-        let husk = Self {
-            entity,
-            in_water_time: AtomicI32::new(0),
-            conversion_time: AtomicI32::new(-1),
-        };
+        let husk = Self { entity };
         Arc::new(husk)
     }
 
@@ -63,6 +53,7 @@ impl HuskEntity {
 
         let new_entity = Entity::new(world.clone(), pos, &EntityType::ZOMBIE);
         let zombie = ZombieEntity::new(new_entity);
+        self.entity.copy_conversion_state_to(&zombie.entity).await;
 
         let new_entity = zombie.get_entity();
         new_entity.velocity.store(old_entity.velocity.load());
@@ -81,11 +72,11 @@ impl HuskEntity {
         );
         if let Some(name) = &**old_entity.custom_name.load() {
             new_entity.set_custom_name(name.clone());
-            new_entity.custom_name_visible.store(
-                old_entity.custom_name_visible.load(Ordering::Relaxed),
-                Ordering::Relaxed,
-            );
         }
+        new_entity.custom_name_visible.store(
+            old_entity.custom_name_visible.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
 
         let effects: Vec<_> = self
             .entity
@@ -102,6 +93,14 @@ impl HuskEntity {
             new_living.add_effect(effect).await;
         }
 
+        transfer_conversion_topology(
+            old_entity,
+            new_entity,
+            zombie.clone() as Arc<dyn EntityBase>,
+        )
+        .await;
+        transfer_conversion_team(world.as_ref(), self, zombie.as_ref()).await;
+
         world.spawn_entity(zombie).await;
         // Zombie.java:243 gates this on `!isSilent()`, which has no equivalent field here.
         world.sync_world_event(
@@ -117,23 +116,13 @@ impl HuskEntity {
 impl NBTStorage for HuskEntity {
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async {
-            self.entity.mob_entity.living_entity.write_nbt(nbt).await;
-            nbt.put_int(
-                "DrownedConversionTime",
-                self.conversion_time.load(Ordering::Relaxed),
-            );
+            self.entity.write_nbt(nbt).await;
         })
     }
 
     fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async {
-            self.entity
-                .mob_entity
-                .living_entity
-                .read_nbt_non_mut(nbt)
-                .await;
-            let time = nbt.get_int("DrownedConversionTime").unwrap_or(-1);
-            self.conversion_time.store(time, Ordering::Relaxed);
+            self.entity.read_nbt_non_mut(nbt).await;
         })
     }
 }
@@ -141,6 +130,17 @@ impl NBTStorage for HuskEntity {
 impl Mob for HuskEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.entity.mob_entity
+    }
+
+    fn can_break_doors(&self) -> bool {
+        self.entity.can_break_doors()
+    }
+
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            self.entity.mob_init_data_tracker().await;
+            self.entity.initialize_can_break_doors().await;
+        })
     }
 
     /// Vanilla `Husk::doHurtTarget`: an unarmed husk hit applies Hunger for
@@ -188,10 +188,12 @@ impl Mob for HuskEntity {
                 return;
             }
 
-            let converting_time = self.conversion_time.load(Ordering::Relaxed);
+            let converting_time = self.entity.conversion_time.load(Ordering::Relaxed);
             if converting_time >= 0 {
                 let new_time = converting_time - 1;
-                self.conversion_time.store(new_time, Ordering::Relaxed);
+                self.entity
+                    .conversion_time
+                    .store(new_time, Ordering::Relaxed);
                 if new_time < 0 {
                     self.finish_conversion().await;
                 }
@@ -203,14 +205,15 @@ impl Mob for HuskEntity {
                 .touching_water
                 .load(Ordering::Relaxed)
             {
-                let new_time = self.in_water_time.fetch_add(1, Ordering::Relaxed) + 1;
+                let new_time = self.entity.in_water_time.fetch_add(1, Ordering::Relaxed) + 1;
                 if new_time >= WATER_TICKS_TO_START_CONVERSION {
-                    self.in_water_time.store(0, Ordering::Relaxed);
-                    self.conversion_time
+                    self.entity.in_water_time.store(0, Ordering::Relaxed);
+                    self.entity
+                        .conversion_time
                         .store(CONVERSION_TICKS, Ordering::Relaxed);
                 }
             } else {
-                self.in_water_time.store(-1, Ordering::Relaxed);
+                self.entity.in_water_time.store(-1, Ordering::Relaxed);
             }
         })
     }

@@ -1,10 +1,11 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
+use std::sync::atomic::{AtomicBool, AtomicI8};
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::entity::EntityType;
+use pumpkin_nbt::compound::NbtCompound;
 
 use crate::entity::ai::control::drowned_move_control::DrownedMoveControl;
 use crate::entity::ai::goal::drowned_attack::DrownedAttackGoal;
@@ -13,7 +14,7 @@ use crate::entity::ai::goal::drowned_go_to_water::DrownedGoToWaterGoal;
 use crate::entity::ai::goal::drowned_swim_up::DrownedSwimUpGoal;
 use crate::entity::ai::goal::drowned_util::is_bright_outside;
 use crate::entity::ai::goal::ranged_trident_attack::DrownedTridentAttackGoal;
-use crate::entity::mob::zombie::ZombieEntityBase;
+use crate::entity::mob::zombie::{CAN_BREAK_DOORS_UNDECIDED, ZombieEntityBase};
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage,
     ai::goal::{
@@ -26,7 +27,7 @@ use crate::entity::{
 use crate::world::World;
 
 pub struct DrownedEntity {
-    entity: Arc<ZombieEntityBase>,
+    pub(crate) entity: Arc<ZombieEntityBase>,
     searching_for_land: AtomicBool,
     target_in_water: AtomicBool,
     target_is_above: AtomicBool,
@@ -52,7 +53,12 @@ impl DrownedEntity {
         // `Drowned`'s own goal set avoids double-registering (this is the fix the file's old
         // "Fix duplicated" TODO was pointing at).
         let mob_entity = MobEntity::new(entity);
-        let base = Arc::new(ZombieEntityBase { mob_entity });
+        let base = Arc::new(ZombieEntityBase {
+            mob_entity,
+            can_break_doors: AtomicI8::new(CAN_BREAK_DOORS_UNDECIDED),
+            in_water_time: std::sync::atomic::AtomicI32::new(0),
+            conversion_time: std::sync::atomic::AtomicI32::new(-1),
+        });
         let drowned = Self {
             entity: base,
             searching_for_land: AtomicBool::new(false),
@@ -197,11 +203,34 @@ impl DrownedEntity {
     }
 }
 
-impl NBTStorage for DrownedEntity {}
+impl NBTStorage for DrownedEntity {
+    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> crate::entity::NbtFuture<'a, ()> {
+        Box::pin(async move {
+            self.entity.write_nbt(nbt).await;
+        })
+    }
+
+    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> crate::entity::NbtFuture<'a, ()> {
+        Box::pin(async move {
+            self.entity.read_nbt_non_mut(nbt).await;
+        })
+    }
+}
 
 impl Mob for DrownedEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.entity.mob_entity
+    }
+
+    fn can_break_doors(&self) -> bool {
+        self.entity.can_break_doors()
+    }
+
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            self.entity.mob_init_data_tracker().await;
+            self.entity.initialize_can_break_doors().await;
+        })
     }
 
     fn wants_to_swim(&self) -> bool {

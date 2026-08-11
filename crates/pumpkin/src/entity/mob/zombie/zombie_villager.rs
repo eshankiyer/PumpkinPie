@@ -321,6 +321,17 @@ impl Mob for ZombieVillagerEntity {
         &self.mob_entity.mob_entity
     }
 
+    fn can_break_doors(&self) -> bool {
+        self.mob_entity.can_break_doors()
+    }
+
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            self.mob_entity.mob_init_data_tracker().await;
+            self.mob_entity.initialize_can_break_doors().await;
+        })
+    }
+
     /// ZombieVillager.java:150-161 (`tick`): runs every tick while converting and alive.
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {

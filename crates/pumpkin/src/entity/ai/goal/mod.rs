@@ -62,6 +62,7 @@ pub mod llama_hurt_by_target;
 pub mod look_around;
 pub mod look_at_entity;
 pub mod melee_attack;
+pub mod move_through_village;
 pub mod move_to_target_pos;
 pub mod move_towards_restriction;
 pub mod nearest_attackable_witch_target;

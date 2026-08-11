@@ -768,6 +768,11 @@ const fn spawn_egg_uses_breed_offspring(entity_type: &EntityType) -> bool {
 }
 
 pub trait Mob: EntityBase + Send + Sync {
+    /// Vanilla `Zombie.canBreakDoors`; ordinary mobs do not have this capability.
+    fn can_break_doors(&self) -> bool {
+        false
+    }
+
     /// Vanilla `Mob.hasControllingPassenger` and `Mob.getControllingPassenger`.
     fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
         Box::pin(async move {
