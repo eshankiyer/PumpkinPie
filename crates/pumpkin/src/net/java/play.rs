@@ -2179,44 +2179,6 @@ impl JavaClient {
                         }
                     }
 
-                    if block == &pumpkin_data::Block::NOTE_BLOCK {
-                        let props =
-                            pumpkin_data::block_properties::NoteBlockLikeProperties::from_state_id(
-                                state.id, block,
-                            );
-                        crate::block::blocks::note::NoteBlock::play_note(
-                            &props,
-                            &world,
-                            &position,
-                            crate::world::game_event::GameEventContext::of_entity(
-                                player.clone() as Arc<dyn EntityBase>
-                            ),
-                        )
-                        .await;
-                        player
-                            .increment_stat(
-                                StatisticCategory::Custom,
-                                CustomStatistic::PlayNoteblock as i32,
-                                1,
-                            )
-                            .await;
-                    }
-
-                    let inventory = player.inventory();
-                    let held = inventory.held_item();
-                    if !server
-                        .item_registry
-                        .can_mine(held.lock().await.item, player)
-                    {
-                        self.enqueue_packet(&CBlockUpdate::new(
-                            position,
-                            VarInt(i32::from(state.id.as_u16())),
-                        ))
-                        .await;
-                        self.update_sequence(player, player_action.sequence.0);
-                        return;
-                    }
-
                     // TODO: do validation
                     // TODO: Config
                     if player.gamemode.load() == GameMode::Creative {
@@ -2242,6 +2204,28 @@ impl JavaClient {
                         player.tick_counter.load(Ordering::Relaxed),
                         Ordering::Relaxed,
                     );
+                    if !state.is_air() {
+                        server
+                            .block_registry
+                            .attack(&world, block, state, &position, player)
+                            .await;
+                    }
+
+                    let inventory = player.inventory();
+                    let held = inventory.held_item();
+                    if !server
+                        .item_registry
+                        .can_mine(held.lock().await.item, player)
+                    {
+                        self.enqueue_packet(&CBlockUpdate::new(
+                            position,
+                            VarInt(i32::from(state.id.as_u16())),
+                        ))
+                        .await;
+                        self.update_sequence(player, player_action.sequence.0);
+                        return;
+                    }
+
                     if !state.is_air() {
                         let speed = block::calc_block_breaking(player, state, block).await;
                         // Instant break
