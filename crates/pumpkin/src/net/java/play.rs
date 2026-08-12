@@ -2308,13 +2308,19 @@ impl JavaClient {
                     self.update_sequence(player, player_action.sequence.0);
                 }
                 Status::FinishedDigging => {
-                    // TODO: do validation
                     let location = player_action.position;
                     if !player.can_interact_with_block_at(&location, 1.0) {
                         warn!(
                             "Player {0} tried to interact with block out of reach at {1}",
                             player.gameprofile.name, player_action.position
                         );
+                        self.update_sequence(player, player_action.sequence.0);
+                        return;
+                    }
+
+                    if !player.mining.load(Ordering::Relaxed)
+                        || *player.mining_pos.lock().await != location
+                    {
                         self.update_sequence(player, player_action.sequence.0);
                         return;
                     }
