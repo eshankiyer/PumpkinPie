@@ -3613,6 +3613,8 @@ impl EntityBase for LivingEntity {
                 player.breath_manager.tick(player).await;
             }
             self.tick_air_supply(caller, was_alive_before_air).await;
+            // Vanilla runs LivingEntity.tickEffects at the end of baseTick, before aiStep.
+            self.tick_effects().await;
 
             // Only tick movement if the entity is alive. This prevents a dead "corpse"
             // from continuing to be simulated (accumulating fall_distance/velocity).
@@ -3680,8 +3682,6 @@ impl EntityBase for LivingEntity {
                         .await;
                 }
             }
-
-            self.tick_effects().await;
 
             // Current active item
             {
