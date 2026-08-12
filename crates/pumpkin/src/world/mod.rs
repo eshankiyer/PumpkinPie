@@ -321,6 +321,21 @@ fn extend_active_chunks(
 }
 
 impl World {
+    /// Vanilla `ServerLevel.canSpawnEntitiesInChunk`: entity ticking must be
+    /// enabled for the chunk and the complete chunk must remain inside the
+    /// world border. `active_chunks` is Pumpkin's entity-ticking set: it is
+    /// rebuilt from simulation tickets and forced tickets before each world
+    /// tick, and forced tickets use the vanilla entity-ticking level.
+    pub async fn can_spawn_entities_in_chunk(&self, chunk_pos: Vector2<i32>) -> bool {
+        self.active_chunks.load().contains(&chunk_pos)
+            && self.level.is_chunk_loaded(&chunk_pos)
+            && self
+                .worldborder
+                .lock()
+                .await
+                .contains_chunk(chunk_pos.x, chunk_pos.y)
+    }
+
     pub async fn get_block_state_id_async(&self, position: &BlockPos) -> BlockStateId {
         if !self.is_in_build_limit(*position) {
             return Block::AIR.default_state.id;
@@ -2112,7 +2127,6 @@ impl World {
         if spawn_list.is_empty() {
             return;
         }
-        // TODO this.level.canSpawnEntitiesInChunk(chunkPos)
         let entities = spawn_for_chunk(
             self,
             chunk_pos,
@@ -2120,7 +2134,8 @@ impl World {
             spawn_state,
             spawn_list,
             is_thundering,
-        );
+        )
+        .await;
         for entity in entities {
             self.spawn_entity(entity).await;
         }

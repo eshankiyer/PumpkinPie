@@ -23,6 +23,7 @@ use pumpkin_world::chunk::{ChunkData, ChunkHeightmapType};
 use pumpkin_world::generation::proto_chunk::GenerationCache;
 use rand::seq::IndexedRandom;
 use rand::{RngExt, rng};
+use rustc_hash::FxHashSet;
 use std::fmt;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -472,7 +473,7 @@ pub fn get_filtered_spawning_categories(
     ret
 }
 
-pub fn spawn_for_chunk(
+pub async fn spawn_for_chunk(
     world: &Arc<World>,
     chunk_pos: Vector2<i32>,
     chunk: &Arc<ChunkData>,
@@ -480,20 +481,32 @@ pub fn spawn_for_chunk(
     spawn_list: &Vec<&'static MobCategory>,
     is_thundering: bool,
 ) -> Vec<Arc<dyn EntityBase>> {
+    if !world.can_spawn_entities_in_chunk(chunk_pos).await {
+        return Vec::new();
+    }
+
+    let active_chunks = world.active_chunks.load_full();
+    let worldborder = world.worldborder.lock().await.clone();
+
     // debug!("spawn for chunk {:?}", chunk_pos);
     let mut entities = Vec::new();
     for category in spawn_list {
         if spawn_state.can_spawn_for_category_local(world, category, chunk_pos) {
             let random_pos = get_random_pos_within(world.min_y, &chunk_pos, chunk);
             if random_pos.0.y > world.min_y {
-                entities.extend(spawn_category_for_position(
-                    category,
-                    world,
-                    random_pos,
-                    &chunk_pos,
-                    spawn_state,
-                    is_thundering,
-                ));
+                entities.extend(
+                    spawn_category_for_position(
+                        category,
+                        world,
+                        random_pos,
+                        &chunk_pos,
+                        spawn_state,
+                        is_thundering,
+                        &active_chunks,
+                        &worldborder,
+                    )
+                    .await,
+                );
             }
         }
     }
@@ -642,13 +655,15 @@ pub fn get_top_non_colliding_pos(
     adjust_spawn_position_cache(cache, pos, entity_type)
 }
 
-pub fn spawn_category_for_position(
+pub async fn spawn_category_for_position(
     category: &'static MobCategory,
     world: &Arc<World>,
     pos: BlockPos,
     chunk_pos: &Vector2<i32>,
     spawn_state: &SpawnState,
     is_thundering: bool,
+    active_chunks: &FxHashSet<Vector2<i32>>,
+    worldborder: &crate::world::border::Worldborder,
 ) -> Vec<Arc<dyn EntityBase>> {
     if world.get_block_state(&pos).is_solid_block() {
         return Vec::new();
@@ -694,11 +709,20 @@ pub fn spawn_category_for_position(
             );
 
             let player_distance = get_nearest_player(&spawn_pos_f64, &player_positions);
+            let candidate_chunk =
+                Vector2::new(get_section_cord(new_pos.0.x), get_section_cord(new_pos.0.z));
+            let can_spawn_entities_in_chunk = if candidate_chunk == *chunk_pos {
+                true
+            } else {
+                active_chunks.contains(&candidate_chunk)
+                    && world.level.is_chunk_loaded(&candidate_chunk)
+                    && worldborder.contains_chunk(candidate_chunk.x, candidate_chunk.y)
+            };
             if !is_right_distance_to_player_and_spawn_point(
                 &new_pos,
                 player_distance,
-                chunk_pos,
                 &spawn_position,
+                can_spawn_entities_in_chunk,
             ) {
                 inc += 1;
                 continue;
@@ -755,8 +779,8 @@ pub fn get_nearest_player(pos: &Vector3<f64>, player_positions: &[Vector3<f64>])
 pub fn is_right_distance_to_player_and_spawn_point(
     pos: &BlockPos,
     distance: f64,
-    chunk_pos: &Vector2<i32>,
     spawn_position: &Vector3<i32>,
+    can_spawn_entities_in_chunk: bool,
 ) -> bool {
     if distance <= 24. * 24. {
         return false;
@@ -769,10 +793,7 @@ pub fn is_right_distance_to_player_and_spawn_point(
     {
         return false;
     }
-    #[expect(clippy::nonminimal_bool)]
-    {
-        chunk_pos == &Vector2::new(get_section_cord(pos.0.x), get_section_cord(pos.0.z)) || false // TODO canSpawnEntitiesInChunk(ChunkPos chunkPos)
-    }
+    can_spawn_entities_in_chunk
 }
 
 #[must_use]
@@ -1016,7 +1037,6 @@ mod tests {
     use pumpkin_data::biome::{Biome, Spawner};
     use pumpkin_data::entity::EntityType;
     use pumpkin_util::math::position::BlockPos;
-    use pumpkin_util::math::vector2::Vector2;
     use pumpkin_util::math::vector3::Vector3;
 
     /// Vanilla `WeightedList` picks entries proportionally to `weight` (e.g. `warm_ocean`'s
@@ -1166,19 +1186,36 @@ mod tests {
     #[test]
     fn spawn_distance_uses_world_spawn_coordinates() {
         let pos = BlockPos::new(100, 64, 100);
-        let chunk = Vector2::new(6, 6);
 
         assert!(!is_right_distance_to_player_and_spawn_point(
             &pos,
             25. * 25.,
-            &chunk,
             &Vector3::new(100, 64, 100),
+            true,
         ));
         assert!(is_right_distance_to_player_and_spawn_point(
             &pos,
             25. * 25.,
-            &chunk,
             &Vector3::new(0, 64, 0),
+            true,
+        ));
+    }
+
+    #[test]
+    fn spawn_distance_accepts_entity_ticking_neighbor_chunks() {
+        let pos = BlockPos::new(100, 64, 100);
+
+        assert!(is_right_distance_to_player_and_spawn_point(
+            &pos,
+            25. * 25.,
+            &Vector3::new(0, 64, 0),
+            true,
+        ));
+        assert!(!is_right_distance_to_player_and_spawn_point(
+            &pos,
+            25. * 25.,
+            &Vector3::new(0, 64, 0),
+            false,
         ));
     }
 }

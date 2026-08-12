@@ -7,6 +7,7 @@ use crate::net::java::JavaClient;
 
 use super::World;
 
+#[derive(Clone)]
 pub struct Worldborder {
     pub center_x: f64,
     pub center_z: f64,
@@ -179,6 +180,15 @@ impl Worldborder {
     #[must_use]
     pub fn contains_block(&self, x: i32, z: i32) -> bool {
         self.contains(f64::from(x), f64::from(z))
+    }
+
+    /// Vanilla `WorldBorder.isWithinBounds(ChunkPos)`, checking both corners
+    /// of the chunk rather than only the candidate block.
+    #[must_use]
+    pub fn contains_chunk(&self, chunk_x: i32, chunk_z: i32) -> bool {
+        let min_x = chunk_x << 4;
+        let min_z = chunk_z << 4;
+        self.contains_block(min_x, min_z) && self.contains_block(min_x + 15, min_z + 15)
     }
 
     /// Signed distance from `(x, z)` to the nearest border edge; negative when outside.
