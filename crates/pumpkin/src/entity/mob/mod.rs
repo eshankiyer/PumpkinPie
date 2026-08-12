@@ -947,7 +947,7 @@ pub trait Mob: EntityBase + Send + Sync {
             let world = entity.world.load();
 
             if world.level_info.load().difficulty == Difficulty::Peaceful
-                && !entity.entity_type.category.is_friendly
+                && is_not_allowed_in_peaceful(entity.entity_type)
             {
                 entity.remove().await;
                 return;
@@ -1790,6 +1790,53 @@ fn uses_monster_no_action_time(entity_type: &EntityType) -> bool {
         && entity_type.id != EntityType::CAMEL_HUSK.id
         && entity_type.id != EntityType::ZOMBIE_HORSE.id
         && entity_type.id != EntityType::ZOMBIE_NAUTILUS.id
+}
+
+/// Vanilla `EntityType.Builder.notInPeaceful` marks only these entity types as
+/// disallowed in Peaceful. Mob category is not the same predicate: several
+/// monster-category types retain the vanilla default and are allowed there.
+fn is_not_allowed_in_peaceful(entity_type: &EntityType) -> bool {
+    matches!(
+        entity_type.id,
+        id if id == EntityType::BLAZE.id
+            || id == EntityType::BOGGED.id
+            || id == EntityType::BREEZE.id
+            || id == EntityType::CAVE_SPIDER.id
+            || id == EntityType::CREAKING.id
+            || id == EntityType::CREEPER.id
+            || id == EntityType::DROWNED.id
+            || id == EntityType::ELDER_GUARDIAN.id
+            || id == EntityType::ENDERMAN.id
+            || id == EntityType::ENDERMITE.id
+            || id == EntityType::EVOKER.id
+            || id == EntityType::GHAST.id
+            || id == EntityType::GIANT.id
+            || id == EntityType::GUARDIAN.id
+            || id == EntityType::HOGLIN.id
+            || id == EntityType::HUSK.id
+            || id == EntityType::ILLUSIONER.id
+            || id == EntityType::MAGMA_CUBE.id
+            || id == EntityType::PARCHED.id
+            || id == EntityType::PHANTOM.id
+            || id == EntityType::PIGLIN_BRUTE.id
+            || id == EntityType::PILLAGER.id
+            || id == EntityType::RAVAGER.id
+            || id == EntityType::SILVERFISH.id
+            || id == EntityType::SKELETON.id
+            || id == EntityType::SLIME.id
+            || id == EntityType::SPIDER.id
+            || id == EntityType::STRAY.id
+            || id == EntityType::VEX.id
+            || id == EntityType::VINDICATOR.id
+            || id == EntityType::WARDEN.id
+            || id == EntityType::WITCH.id
+            || id == EntityType::WITHER.id
+            || id == EntityType::WITHER_SKELETON.id
+            || id == EntityType::ZOGLIN.id
+            || id == EntityType::ZOMBIE.id
+            || id == EntityType::ZOMBIE_VILLAGER.id
+            || id == EntityType::ZOMBIFIED_PIGLIN.id
+    )
 }
 
 #[expect(dead_code)]
