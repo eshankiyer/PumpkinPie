@@ -32,11 +32,7 @@ impl Default for EntityMetadata {
 impl EntityMetadata {
     #[must_use]
     pub fn new() -> Self {
-        let mut map = HashMap::new();
-        map.insert(entity_data_key::FLAGS, MetadataValue::Long(0));
-        map.insert(entity_data_key::FLAGS_TWO, MetadataValue::Long(0));
-        map.insert(entity_data_key::PLAYER_FLAGS, MetadataValue::Byte(0));
-        Self(map)
+        Self(HashMap::new())
     }
 }
 
@@ -467,5 +463,14 @@ mod tests {
             0,
             "USING_ITEM was not set"
         );
+    }
+
+    #[test]
+    fn partial_metadata_does_not_reset_flags() {
+        let metadata = EntityMetadata::new();
+
+        assert!(!metadata.0.contains_key(&entity_data_key::FLAGS));
+        assert!(!metadata.0.contains_key(&entity_data_key::FLAGS_TWO));
+        assert!(!metadata.0.contains_key(&entity_data_key::PLAYER_FLAGS));
     }
 }

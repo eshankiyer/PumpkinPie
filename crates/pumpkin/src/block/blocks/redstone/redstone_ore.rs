@@ -52,6 +52,7 @@ impl BlockBehaviour for RedstoneOreBlock {
         Box::pin(async move {
             let state = args.world.get_block_state(args.position);
             let mut props = RedstoneOreLikeProperties::from_state_id(state.id, args.block);
+
             if props.lit {
                 props.lit = false;
                 args.world
