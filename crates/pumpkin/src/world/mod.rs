@@ -4483,13 +4483,16 @@ impl World {
             .load()
             .iter()
             .filter_map(|player| {
+                if !Arc::ptr_eq(&self.level, &player.get_entity().world.load().level) {
+                    return None;
+                }
                 let block_pos = player.get_entity().block_pos.load().0;
                 let player_center = Vector3::new(
                     f64::from(block_pos.x) + 0.5,
                     f64::from(block_pos.y) + 0.5,
                     f64::from(block_pos.z) + 0.5,
                 );
-                (player_center.squared_distance_to_vec(&pos) <= radius_squared)
+                (player_center.squared_distance_to_vec(&pos) < radius_squared)
                     .then(|| player.clone())
             })
             .collect()
