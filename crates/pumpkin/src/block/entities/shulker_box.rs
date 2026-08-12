@@ -6,7 +6,7 @@ use pumpkin_util::math::position::BlockPos;
 use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::{array::from_fn, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -21,6 +21,8 @@ pub struct ShulkerBoxBlockEntity {
     pub position: BlockPos,
     pub items: RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
     pub dirty: AtomicBool,
+    pub closed: AtomicBool,
+    pub closing_ticks: AtomicU8,
 
     // Viewer
     pub viewers: ViewerCountTracker,
@@ -43,6 +45,8 @@ impl BlockEntity for ShulkerBoxBlockEntity {
             position,
             items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             dirty: AtomicBool::new(false),
+            closed: AtomicBool::new(true),
+            closing_ticks: AtomicU8::new(0),
             viewers: ViewerCountTracker::new(),
         };
 
@@ -60,6 +64,15 @@ impl BlockEntity for ShulkerBoxBlockEntity {
 
     fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
+            let closing_ticks = self.closing_ticks.load(Ordering::Relaxed);
+            if closing_ticks != 0 {
+                if closing_ticks == 1 {
+                    self.closing_ticks.store(0, Ordering::Relaxed);
+                    self.closed.store(true, Ordering::Relaxed);
+                } else {
+                    self.closing_ticks.fetch_sub(1, Ordering::Relaxed);
+                }
+            }
             self.viewers
                 .update_viewer_count::<Self>(self, world, &self.position)
                 .await;
@@ -134,6 +147,13 @@ impl ViewerCountListener for ShulkerBoxBlockEntity {
         new: u16,
     ) -> ViewerFuture<'a, ()> {
         Box::pin(async move {
+            if new > 0 {
+                self.closed.store(false, Ordering::Relaxed);
+                self.closing_ticks.store(0, Ordering::Relaxed);
+            } else {
+                self.closed.store(false, Ordering::Relaxed);
+                self.closing_ticks.store(10, Ordering::Relaxed);
+            }
             world
                 .add_synced_block_event(*position, Self::OPEN_ANIMATION_EVENT_TYPE, new as u8)
                 .await;
@@ -152,6 +172,8 @@ impl ShulkerBoxBlockEntity {
             position,
             items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             dirty: AtomicBool::new(false),
+            closed: AtomicBool::new(true),
+            closing_ticks: AtomicU8::new(0),
             viewers: ViewerCountTracker::new(),
         }
     }
@@ -159,6 +181,11 @@ impl ShulkerBoxBlockEntity {
     pub fn update_viewers(&self, world: &Arc<World>) {
         let viewer_count = self.viewers.current.load(Ordering::Relaxed);
         Self::play_sound(world, &self.position, i32::from(viewer_count));
+    }
+
+    #[must_use]
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(Ordering::Relaxed)
     }
 
     fn play_sound(world: &World, position: &BlockPos, viewer_count: i32) {

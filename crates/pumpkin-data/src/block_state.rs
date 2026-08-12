@@ -1,7 +1,9 @@
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::vector3::{Axis as MathAxis, Vector3};
 
-use crate::block_properties::{COLLISION_SHAPES, NoteblockInstrument};
+use crate::block_properties::{
+    BlockProperties, COLLISION_SHAPES, NoteblockInstrument, StickyPistonLikeProperties,
+};
 use crate::{Block, BlockDirection, BlockId};
 
 /// Represents a specific state of a block, including its properties and physical behaviors.
@@ -114,6 +116,74 @@ impl BlockState {
     #[must_use]
     pub const fn is_full_cube(&self) -> bool {
         self.state_flags & IS_FULL_CUBE != 0
+    }
+
+    /// Vanilla `BlockState.isSuffocating` for the generated block data.
+    #[must_use]
+    pub const fn is_suffocating(&self, block: BlockId) -> bool {
+        if matches!(
+            block,
+            BlockId::MANGROVE_ROOTS
+                | BlockId::OAK_LEAVES
+                | BlockId::SPRUCE_LEAVES
+                | BlockId::BIRCH_LEAVES
+                | BlockId::JUNGLE_LEAVES
+                | BlockId::ACACIA_LEAVES
+                | BlockId::CHERRY_LEAVES
+                | BlockId::DARK_OAK_LEAVES
+                | BlockId::PALE_OAK_LEAVES
+                | BlockId::MANGROVE_LEAVES
+                | BlockId::AZALEA_LEAVES
+                | BlockId::FLOWERING_AZALEA_LEAVES
+                | BlockId::GLASS
+                | BlockId::MOVING_PISTON
+                | BlockId::REPEATER
+                | BlockId::TINTED_GLASS
+                | BlockId::FIREFLY_BUSH
+                | BlockId::WHITE_STAINED_GLASS
+                | BlockId::ORANGE_STAINED_GLASS
+                | BlockId::MAGENTA_STAINED_GLASS
+                | BlockId::LIGHT_BLUE_STAINED_GLASS
+                | BlockId::YELLOW_STAINED_GLASS
+                | BlockId::LIME_STAINED_GLASS
+                | BlockId::PINK_STAINED_GLASS
+                | BlockId::GRAY_STAINED_GLASS
+                | BlockId::LIGHT_GRAY_STAINED_GLASS
+                | BlockId::CYAN_STAINED_GLASS
+                | BlockId::PURPLE_STAINED_GLASS
+                | BlockId::BLUE_STAINED_GLASS
+                | BlockId::BROWN_STAINED_GLASS
+                | BlockId::GREEN_STAINED_GLASS
+                | BlockId::RED_STAINED_GLASS
+                | BlockId::BLACK_STAINED_GLASS
+                | BlockId::COPPER_GRATE
+                | BlockId::EXPOSED_COPPER_GRATE
+                | BlockId::WEATHERED_COPPER_GRATE
+                | BlockId::OXIDIZED_COPPER_GRATE
+                | BlockId::WAXED_COPPER_GRATE
+                | BlockId::WAXED_EXPOSED_COPPER_GRATE
+                | BlockId::WAXED_WEATHERED_COPPER_GRATE
+                | BlockId::WAXED_OXIDIZED_COPPER_GRATE
+        ) {
+            return false;
+        }
+
+        matches!(
+            block,
+            BlockId::FARMLAND | BlockId::SOUL_SAND | BlockId::DIRT_PATH | BlockId::MUD
+        ) || (self.is_solid() && self.is_full_cube())
+    }
+
+    /// Vanilla's piston exception is state-dependent: an extended piston does
+    /// not suffocate, while its retracted state uses the default predicate.
+    #[must_use]
+    pub fn is_extended_piston(&self, block: BlockId) -> bool {
+        if !matches!(block, BlockId::PISTON | BlockId::STICKY_PISTON) {
+            return false;
+        }
+
+        StickyPistonLikeProperties::from_state_id(self.id, Block::from_state_id(self.id))
+            .r#extended
     }
 
     /// Returns whether the block is solid.

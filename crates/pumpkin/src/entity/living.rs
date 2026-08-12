@@ -31,6 +31,7 @@ use crate::entity::combat::{breach_armor_fraction, knockback_after_resistance};
 use crate::entity::mob::equipment::DEFAULT_EQUIPMENT_DROP_CHANCE;
 use crate::entity::mob::slime::SlimeEntity;
 use crate::entity::mob::sulfur_cube::SulfurCubeEntity;
+use crate::entity::passive::fox::FoxEntity;
 use crate::entity::passive::happy_ghast::HappyGhastEntity;
 use crate::entity::player::Player;
 use crate::entity::player::statistics::{CustomStatistic, StatisticCategory};
@@ -1156,11 +1157,7 @@ impl LivingEntity {
         // TODO: Apply Soul Speed boot durability when tick_block_underneath is implemented.
         //self.entity.tick_block_underneath(&caller);
 
-        let suffocating = self.entity.tick_block_collisions(caller, server).await;
-
-        if suffocating {
-            self.damage(&**caller, 1.0, DamageType::IN_WALL).await;
-        }
+        self.entity.tick_block_collisions(caller, server).await;
     }
 
     async fn travel_in_air<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) {
@@ -3602,6 +3599,23 @@ impl EntityBase for LivingEntity {
     ) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             self.entity.tick(caller, server).await;
+
+            // Vanilla LivingEntity.baseTick applies in-wall damage immediately after
+            // Entity.baseTick, before air handling or aiStep movement.
+            let is_sleeping = self.entity.pose.load() == EntityPose::Sleeping
+                || caller
+                    .cast_any()
+                    .downcast_ref::<FoxEntity>()
+                    .is_some_and(FoxEntity::is_sleeping);
+            if !self.entity.is_removed()
+                && !is_sleeping
+                && !self.dead.load(Relaxed)
+                && self.health.load() > 0.0
+                && self.entity.is_in_wall()
+            {
+                self.damage(&**caller, 1.0, DamageType::IN_WALL).await;
+            }
+
             if let Some(mob) = caller.get_mob()
                 && mob.get_entity().entity_id == self.entity.entity_id
             {

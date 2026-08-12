@@ -1,4 +1,5 @@
 use crate::{
+    block::entities::shulker_box::ShulkerBoxBlockEntity,
     entity::item::ItemEntity,
     net::{ClientPlatform, bedrock::BedrockClient, java::JavaClient},
     server::Server,
@@ -1463,6 +1464,66 @@ impl Entity {
 
     pub fn get_eye_height(&self) -> f64 {
         f64::from(Self::get_entity_dimensions(self.pose.load()).eye_height)
+    }
+
+    /// Matches vanilla `Entity.isInWall`: only the entity's eye-height slice is
+    /// tested, rather than its whole collision box.
+    #[must_use]
+    pub fn is_in_wall(&self) -> bool {
+        if self.no_clip.load(Relaxed) {
+            return false;
+        }
+
+        let dimensions = self.entity_dimension.load();
+        let check_width = f64::from(dimensions.width) * 0.8;
+        let eye = self.get_eye_pos();
+        let eye_box = BoundingBox::new(
+            Vector3::new(
+                eye.x - check_width / 2.0,
+                eye.y - 0.5e-6,
+                eye.z - check_width / 2.0,
+            ),
+            Vector3::new(
+                eye.x + check_width / 2.0,
+                eye.y + 0.5e-6,
+                eye.z + check_width / 2.0,
+            ),
+        );
+        let world = self.world.load();
+
+        for pos in BlockPos::iterate(eye_box.min_block_pos(), eye_box.max_block_pos()) {
+            let (block, state) = world.get_block_and_state(&pos);
+            if state.is_air()
+                || !state.is_suffocating(block.id)
+                || state.is_extended_piston(block.id)
+            {
+                continue;
+            }
+
+            if block.name.ends_with("shulker_box")
+                && world
+                    .get_block_entity(&pos)
+                    .and_then(|entity| {
+                        entity
+                            .as_any()
+                            .downcast_ref::<ShulkerBoxBlockEntity>()
+                            .map(|shulker| !shulker.is_closed())
+                    })
+                    .unwrap_or(false)
+            {
+                continue;
+            }
+
+            if state
+                .get_block_collision_shapes()
+                .map(|shape| shape.at_pos(pos))
+                .any(|shape| shape.intersects(&eye_box))
+            {
+                return true;
+            }
+        }
+
+        false
     }
 
     /// Updates the entity's position, block position, and chunk position.
