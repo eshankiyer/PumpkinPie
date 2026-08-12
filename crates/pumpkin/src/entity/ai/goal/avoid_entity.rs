@@ -1,7 +1,12 @@
 use std::sync::Arc;
 
 use super::{Controls, Goal, GoalFuture};
-use crate::entity::{EntityBase, ai::pathfinder::NavigatorGoal, living::LivingEntity, mob::Mob};
+use crate::entity::{
+    EntityBase,
+    ai::pathfinder::{NavigatorGoal, path::Path},
+    living::LivingEntity,
+    mob::Mob,
+};
 use pumpkin_data::entity::{EntityType, MobCategory};
 use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
 use rand::RngExt;
@@ -39,6 +44,7 @@ pub struct AvoidEntityGoal {
     extra_predicate: Option<AvoidEntityPredicate>,
     target: Option<Arc<dyn EntityBase>>,
     flee_pos: Option<Vector3<f64>>,
+    path: Option<Path>,
 }
 
 impl AvoidEntityGoal {
@@ -89,6 +95,7 @@ impl AvoidEntityGoal {
             extra_predicate: None,
             target: None,
             flee_pos: None,
+            path: None,
         }
     }
 
@@ -233,8 +240,44 @@ impl Goal for AvoidEntityGoal {
                 return false;
             };
 
+            let entity = &mob.get_mob_entity().living_entity;
+            let is_passenger = entity.entity.has_vehicle().await;
+            let is_in_liquid = entity.is_in_water()
+                || entity
+                    .entity
+                    .touching_lava
+                    .load(std::sync::atomic::Ordering::Relaxed);
+            let (can_update_path, mut probe) = {
+                let navigator = mob
+                    .get_mob_entity()
+                    .navigator
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let can_update_path = if navigator.is_amphibious() {
+                    true
+                } else if navigator.is_flying() {
+                    (navigator.can_float() && is_in_liquid) || !is_passenger
+                } else {
+                    entity
+                        .entity
+                        .on_ground
+                        .load(std::sync::atomic::Ordering::Relaxed)
+                        || is_in_liquid
+                        || is_passenger
+                };
+                (can_update_path, navigator.path_probe())
+            };
+            if !can_update_path {
+                return false;
+            }
+            let path = probe.compute_path(entity, pos).await;
+            let Some(path) = path else {
+                return false;
+            };
+
             self.target = Some(target);
             self.flee_pos = Some(pos);
+            self.path = Some(path);
             true
         })
     }
@@ -252,14 +295,19 @@ impl Goal for AvoidEntityGoal {
 
     fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
-            if let Some(flee_pos) = self.flee_pos {
+            if let (Some(flee_pos), Some(path)) = (self.flee_pos, self.path.take()) {
                 let mob_pos = mob.get_mob_entity().living_entity.entity.pos.load();
+                let world = mob.get_mob_entity().living_entity.entity.world.load_full();
                 let mut navigator = mob
                     .get_mob_entity()
                     .navigator
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
-                navigator.set_progress(NavigatorGoal::new(mob_pos, flee_pos, self.slow_speed));
+                navigator.set_progress_with_path(
+                    NavigatorGoal::new(mob_pos, flee_pos, self.slow_speed),
+                    path,
+                    &world,
+                );
             }
         })
     }
@@ -293,6 +341,7 @@ impl Goal for AvoidEntityGoal {
         Box::pin(async move {
             self.target = None;
             self.flee_pos = None;
+            self.path = None;
         })
     }
 

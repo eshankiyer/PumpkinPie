@@ -10,7 +10,9 @@ use crate::entity::ai::pathfinder::node_evaluator::{MobData, NodeEvaluator};
 use crate::entity::ai::pathfinder::path::Path;
 use crate::entity::ai::pathfinder::pathfinding_context::PathfindingContext;
 use crate::entity::ai::pathfinder::walk_node_evaluator::WalkNodeEvaluator;
+use crate::world::World;
 use pumpkin_data::attributes::Attributes;
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::wrap_degrees;
 use std::collections::HashMap;
@@ -100,6 +102,41 @@ impl Navigator {
         self.current_path = None;
     }
 
+    pub(crate) fn set_progress_with_path(
+        &mut self,
+        goal: NavigatorGoal,
+        mut path: Path,
+        world: &World,
+    ) {
+        // PathNavigation.moveTo trims cauldrons before accepting a path.
+        for index in 0..path.get_node_count() {
+            let Some(node) = path.get_node(index).copied() else {
+                continue;
+            };
+            if !world.get_block(&node.pos).has_tag(&tag::Block::MINECRAFT_CAULDRONS) {
+                continue;
+            }
+
+            path.replace_node(index, node.clone_and_move(node.pos.up()));
+            if let Some(next) = path.get_node(index + 1).copied()
+                && node.pos.0.y >= next.pos.0.y
+            {
+                path.replace_node(index + 1, node.clone_and_move(next.pos.up_height(
+                    node.pos.0.y + 1 - next.pos.0.y,
+                )));
+            }
+        }
+
+        self.is_idle.store(false, Ordering::Relaxed);
+        self.current_goal = Some(goal);
+        self.current_path = Some(path);
+        self.ticks_on_current_node = 0;
+        self.last_node_index = 0;
+        self.total_ticks = 0;
+        self.path_start_pos = None;
+        self.repath_cooldown = 0;
+    }
+
     /// Speed modifier of the active navigation goal, or `None` when idle. Stands in for
     /// vanilla's `MoveControl.getSpeedModifier()`, which `Rabbit.setLandingDelay` reads.
     #[must_use]
@@ -137,12 +174,24 @@ impl Navigator {
         self.evaluator.set_flying(flying);
     }
 
+    pub(crate) const fn is_flying(&self) -> bool {
+        self.evaluator.is_flying()
+    }
+
     pub fn set_can_float(&mut self, can_float: bool) {
         self.evaluator.set_can_float(can_float);
     }
 
+    pub(crate) fn can_float(&self) -> bool {
+        self.evaluator.can_float()
+    }
+
     pub const fn set_amphibious(&mut self, amphibious: bool) {
         self.evaluator.set_amphibious(amphibious);
+    }
+
+    pub(crate) const fn is_amphibious(&self) -> bool {
+        self.evaluator.is_amphibious()
     }
 
     pub const fn set_mob_dimensions(&mut self, width: f32, height: f32) {
@@ -166,6 +215,7 @@ impl Navigator {
                 evaluator.set_can_pass_doors(self.evaluator.can_pass_doors());
                 evaluator.set_can_open_doors(self.evaluator.can_open_doors());
                 evaluator.set_can_float(self.evaluator.can_float());
+                evaluator.set_can_walk_over_fences(self.evaluator.can_walk_over_fences());
                 evaluator.set_amphibious(self.evaluator.is_amphibious());
                 evaluator.set_flying(self.evaluator.is_flying());
                 evaluator
