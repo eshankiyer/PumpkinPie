@@ -2629,9 +2629,13 @@ impl LivingEntity {
             .await;
     }
 
-    async fn tick_air_supply(&self, caller: &Arc<dyn EntityBase>, was_alive_before_air: bool) {
+    async fn tick_air_supply(
+        &self,
+        caller: &Arc<dyn EntityBase>,
+        was_alive_before_air: bool,
+    ) -> Option<i32> {
         if self.entity.is_removed() {
-            return;
+            return None;
         }
         if self.entity.entity_type != &EntityType::PLAYER
             && !self.air_metadata_initialized.swap(true, Relaxed)
@@ -2648,11 +2652,11 @@ impl LivingEntity {
         // LivingEntity underwater vehicle rule.
         if self.entity.entity_type == &EntityType::PLAYER {
             if !was_alive_before_air {
-                return;
+                return None;
             }
             self.dismount_underwater_vehicle(eye_in_water && !in_bubble_column)
                 .await;
-            return;
+            return None;
         }
 
         let custom_water_air = self.is_water_animal()
@@ -2666,13 +2670,12 @@ impl LivingEntity {
             // before the subclass-specific reset/dry-out logic.
             self.tick_generic_air_supply(caller, &world, eye_in_water, in_bubble_column)
                 .await;
-            self.tick_water_animal_air_supply(caller, pre_tick_air_supply)
-                .await;
-            return;
+            return Some(pre_tick_air_supply);
         }
 
         self.tick_generic_air_supply(caller, &world, eye_in_water, in_bubble_column)
             .await;
+        None
     }
 
     async fn can_breathe_underwater(&self, caller: &Arc<dyn EntityBase>) -> bool {
@@ -3612,9 +3615,13 @@ impl EntityBase for LivingEntity {
             {
                 player.breath_manager.tick(player).await;
             }
-            self.tick_air_supply(caller, was_alive_before_air).await;
+            let water_animal_air = self.tick_air_supply(caller, was_alive_before_air).await;
             // Vanilla runs LivingEntity.tickEffects at the end of baseTick, before aiStep.
             self.tick_effects().await;
+            if let Some(pre_tick_air_supply) = water_animal_air {
+                self.tick_water_animal_air_supply(caller, pre_tick_air_supply)
+                    .await;
+            }
 
             // Only tick movement if the entity is alive. This prevents a dead "corpse"
             // from continuing to be simulated (accumulating fall_distance/velocity).
