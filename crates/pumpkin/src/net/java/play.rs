@@ -14,7 +14,7 @@ use crate::block::BlockHitResult;
 use crate::block::registry::BlockActionResult;
 use crate::block::{self};
 use crate::entity::EntityBase;
-use crate::entity::player::statistics::{CustomStatistic, StatisticCategory};
+use crate::entity::player::statistics::StatisticCategory;
 use crate::entity::player::{ChatMode, ChatSession, Player};
 use crate::error::PumpkinError;
 use crate::log_at_level;
@@ -2219,34 +2219,17 @@ impl JavaClient {
                         }
                     }
 
-                    if block == &pumpkin_data::Block::NOTE_BLOCK {
-                        let props =
-                            pumpkin_data::block_properties::NoteBlockLikeProperties::from_state_id(
-                                state.id, block,
-                            );
-                        crate::block::blocks::note::NoteBlock::play_note(
-                            &props,
-                            &world,
-                            &position,
-                            crate::world::game_event::GameEventContext::of_entity(
-                                player.clone() as Arc<dyn EntityBase>
-                            ),
-                        )
-                        .await;
-                        player
-                            .increment_stat(
-                                StatisticCategory::Custom,
-                                CustomStatistic::PlayNoteblock as i32,
-                                1,
-                            )
-                            .await;
-                    }
-
                     if player.gamemode.load() == GameMode::Creative {
                         player.finish_block_break(server, &world, position).await;
                         self.sync_block_state_to_client(&world, position).await;
                         self.update_sequence(player, player_action.sequence.0);
                         return;
+                    }
+                    if !state.is_air() {
+                        server
+                            .block_registry
+                            .attack(block, state, player, &position, server, &world)
+                            .await;
                     }
                     player.start_mining_time.store(
                         player.tick_counter.load(Ordering::Relaxed),

@@ -66,6 +66,11 @@ pub(crate) fn bounce_entity_after_fall(entity: &dyn EntityBase, bounce_multiplie
 }
 
 pub trait BlockBehaviour: Send + Sync {
+    /// Called when a player starts attacking this block without using an item.
+    fn attack<'a>(&'a self, _args: AttackArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async {})
+    }
+
     fn normal_use<'a>(&'a self, _args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move { BlockActionResult::Pass })
     }
@@ -252,6 +257,15 @@ pub struct NormalUseArgs<'a> {
     pub position: &'a BlockPos,
     pub player: &'a Arc<Player>,
     pub hit: &'a BlockHitResult<'a>,
+}
+
+pub struct AttackArgs<'a> {
+    pub server: &'a Server,
+    pub world: &'a Arc<World>,
+    pub block: &'a Block,
+    pub state: &'a BlockState,
+    pub position: &'a BlockPos,
+    pub player: &'a Arc<Player>,
 }
 
 pub struct UseWithItemArgs<'a> {

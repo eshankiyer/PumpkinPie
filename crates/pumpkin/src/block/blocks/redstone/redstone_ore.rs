@@ -1,12 +1,16 @@
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, NormalUseArgs, OnEntityStepArgs, RandomTickArgs,
+    AttackArgs, BlockBehaviour, BlockFuture, BlockMetadata, NormalUseArgs, OnEntityStepArgs,
+    RandomTickArgs,
     registry::BlockActionResult,
 };
 use crate::world::World;
+use bytes::BufMut;
 use pumpkin_data::block_properties::{BlockProperties, RedstoneOreLikeProperties};
-use pumpkin_data::{Block, BlockId, BlockState};
+use pumpkin_data::{Block, BlockDirection, BlockId, BlockState, particle::Particle};
 use pumpkin_util::math::position::BlockPos;
+use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::world::BlockFlags;
+use rand::RngExt;
 use std::sync::Arc;
 
 pub struct RedstoneOreBlock;
@@ -18,6 +22,54 @@ impl BlockMetadata for RedstoneOreBlock {
 }
 
 impl RedstoneOreBlock {
+    fn spawn_particles(world: &Arc<World>, pos: &BlockPos) {
+        let mut random = rand::rng();
+        for direction in BlockDirection::all() {
+            let relative = BlockPos::new(
+                pos.0.x + direction.to_offset().x,
+                pos.0.y + direction.to_offset().y,
+                pos.0.z + direction.to_offset().z,
+            );
+            if world.get_block_state(&relative).is_solid() {
+                continue;
+            }
+
+            let axis = direction.to_offset();
+            let x = if axis.x != 0 {
+                0.5 + 0.5625 * f64::from(axis.x)
+            } else {
+                f64::from(random.random::<f32>())
+            };
+            let y = if axis.y != 0 {
+                0.5 + 0.5625 * f64::from(axis.y)
+            } else {
+                f64::from(random.random::<f32>())
+            };
+            let z = if axis.z != 0 {
+                0.5 + 0.5625 * f64::from(axis.z)
+            } else {
+                f64::from(random.random::<f32>())
+            };
+            let mut data = Vec::with_capacity(16);
+            data.put_f32(1.0);
+            data.put_f32(0.0);
+            data.put_f32(0.0);
+            data.put_f32(1.0);
+            world.spawn_particle_with_data(
+                Vector3::new(
+                    f64::from(pos.0.x) + x,
+                    f64::from(pos.0.y) + y,
+                    f64::from(pos.0.z) + z,
+                ),
+                Vector3::new(0.0, 0.0, 0.0),
+                0.0,
+                1,
+                Particle::Dust,
+                &data,
+            );
+        }
+    }
+
     async fn light_up(world: &Arc<World>, pos: &BlockPos, block: &Block, state: &BlockState) {
         let mut props = RedstoneOreLikeProperties::from_state_id(state.id, block);
         if !props.lit {
@@ -30,6 +82,13 @@ impl RedstoneOreBlock {
 }
 
 impl BlockBehaviour for RedstoneOreBlock {
+    fn attack<'a>(&'a self, args: AttackArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            Self::spawn_particles(args.world, args.position);
+            Self::light_up(args.world, args.position, args.block, args.state).await;
+        })
+    }
+
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
             let state = args.world.get_block_state(args.position);

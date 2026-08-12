@@ -184,7 +184,7 @@ use super::blocks::plant::crop::gourds::attached_stem::AttachedStemBlock;
 use super::blocks::plant::crop::gourds::stem::StemBlock;
 use super::fluid::FluidBehaviour;
 use super::{
-    BrokenArgs, CanPlaceAtArgs, CanUpdateAtArgs, EmitsRedstonePowerArgs, ExplodeArgs,
+    AttackArgs, BrokenArgs, CanPlaceAtArgs, CanUpdateAtArgs, EmitsRedstonePowerArgs, ExplodeArgs,
     GetRedstonePowerArgs, GetStateForNeighborUpdateArgs, NormalUseArgs, OnNeighborUpdateArgs,
     OnPlaceArgs, OnStateReplacedArgs, OnSyncedBlockEventArgs, PlacedArgs, PlayerPlacedArgs,
     PrepareArgs, UseWithItemArgs,
@@ -858,6 +858,29 @@ impl BlockRegistry {
                 .await;
         }
         BlockActionResult::Pass
+    }
+
+    pub async fn attack(
+        &self,
+        block: &Block,
+        state: &BlockState,
+        player: &Arc<Player>,
+        position: &BlockPos,
+        server: &Server,
+        world: &Arc<World>,
+    ) {
+        if let Some(pumpkin_block) = self.get_pumpkin_block(block.id) {
+            pumpkin_block
+                .attack(AttackArgs {
+                    server,
+                    world,
+                    block,
+                    state,
+                    position,
+                    player,
+                })
+                .await;
+        }
     }
 
     pub async fn explode(&self, block: &Block, world: &Arc<World>, position: &BlockPos) {

@@ -1,6 +1,6 @@
 use crate::block::blocks::falling::FallingBlock;
 use crate::block::registry::BlockActionResult;
-use crate::block::{BlockBehaviour, BlockFuture, BrokenArgs, NormalUseArgs, PlacedArgs};
+use crate::block::{AttackArgs, BlockBehaviour, BlockFuture, NormalUseArgs, PlacedArgs};
 use crate::world::World;
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
@@ -58,6 +58,12 @@ impl DragonEggBlock {
 }
 
 impl BlockBehaviour for DragonEggBlock {
+    fn attack<'a>(&'a self, args: AttackArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            self.teleport(args.world, args.position).await;
+        })
+    }
+
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             args.world
@@ -69,13 +75,6 @@ impl BlockBehaviour for DragonEggBlock {
         Box::pin(async move {
             self.teleport(args.world, args.position).await;
             BlockActionResult::Success
-        })
-    }
-
-    // Dragon egg is typically teleported when attacked
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            self.teleport(args.world, args.position).await;
         })
     }
 
