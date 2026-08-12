@@ -2036,14 +2036,36 @@ impl JavaClient {
             .or_else(|| world.get_entity_by_id(entity_id.0));
 
         if let Some(target) = target {
-            if player.gamemode.load() == GameMode::Spectator {
-                player.camera_target_id.store(Some(entity_id.0));
-                player
-                    .client
-                    .send_packet_now(&CSetCamera::new(entity_id))
-                    .await;
+            // Vanilla ServerGamePacketListenerImpl.handleInteract rejects entity
+            // interactions outside entityInteractionRange() + 3.0 before dispatch.
+            let target_pos = target.get_entity().pos.load();
+            if !world
+                .worldborder
+                .lock()
+                .await
+                .contains_block(target_pos.x.floor() as i32, target_pos.z.floor() as i32)
+            {
                 return;
             }
+
+            let max_range = player.entity_interaction_range() + 3.0;
+            if target
+                .get_entity()
+                .bounding_box
+                .load()
+                .squared_magnitude(player.eye_position())
+                >= max_range * max_range
+            {
+                return;
+            }
+
+            // Vanilla only opens a menu here for entities implementing MenuProvider.
+            // Pumpkin has no MenuProvider entity implementation yet, so spectators
+            // must not enter the normal item-interaction path.
+            if player.gamemode.load() == GameMode::Spectator {
+                return;
+            }
+
             send_cancellable! {{
                 server;
                 PlayerInteractEntityEvent::new(
