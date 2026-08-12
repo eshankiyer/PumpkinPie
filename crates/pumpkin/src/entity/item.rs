@@ -407,6 +407,7 @@ impl ItemEntity {
     ) {
         let entity = &self.entity;
 
+        entity.first_tick.store(false, Ordering::Relaxed);
         entity.update_fluid_state(caller).await;
 
         let velocity_dirty = entity.velocity_dirty.swap(false, Ordering::SeqCst)

@@ -867,6 +867,8 @@ static CURRENT_ID: AtomicI32 = AtomicI32::new(1);
 
 /// Represents a non-living Entity (e.g. Item, Egg, Snowball...)
 pub struct Entity {
+    /// Vanilla `Entity.firstTick`; suppresses first-tick fluid transition effects.
+    pub first_tick: AtomicBool,
     /// A unique identifier for the entity
     pub entity_id: i32,
     /// A persistent, unique identifier for the entity
@@ -1168,6 +1170,7 @@ impl Entity {
         };
 
         Self {
+            first_tick: AtomicBool::new(true),
             entity_id,
             entity_uuid,
             entity_type,
@@ -2275,7 +2278,9 @@ impl Entity {
                 living.fall_distance.store(0.0);
             }
 
-            if !self.touching_water.load(Ordering::SeqCst) {
+            if !self.touching_water.load(Ordering::SeqCst)
+                && !self.first_tick.load(Ordering::Relaxed)
+            {
                 self.do_water_splash_effect().await;
             }
         }
@@ -2302,7 +2307,7 @@ impl Entity {
     }
 
     /// Port of vanilla's `Entity::doWaterSplashEffect`. Simplified: no controlling-passenger
-    /// volume modifier, no firstTick guard, and `play_sound` has no volume/pitch parameters.
+    /// volume modifier and `play_sound` has no volume/pitch parameters.
     async fn do_water_splash_effect(&self) {
         let pos = self.pos.load();
         let width = self.entity_dimension.load().width;
@@ -4142,6 +4147,7 @@ impl EntityBase for Entity {
             self.was_eye_in_water
                 .store(self.eye_in_water.load(Relaxed), Relaxed);
             self.update_fluid_state(caller).await;
+            self.first_tick.store(false, Relaxed);
             let world = self.world.load();
             let eye_y = self.get_eye_y();
             let eye_pos = self.pos.load();
