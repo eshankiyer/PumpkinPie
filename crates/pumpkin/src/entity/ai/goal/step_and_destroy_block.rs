@@ -180,7 +180,11 @@ impl<S: Stepping + Send + Sync, M: MoveToTargetPos + Send + Sync> Goal
                     .set_block_state(&tweak_pos, replacement_state, BlockFlags::NOTIFY_ALL)
                     .await;
                 // TODO: spawn particles
-                self.on_destroy_block(world.clone(), tweak_pos).await;
+                if let Some(stepping) = self.stepping.get() {
+                    stepping.on_destroy_block(world.clone(), tweak_pos).await;
+                } else {
+                    self.on_destroy_block(world.clone(), tweak_pos).await;
+                }
             }
 
             self.counter += 1;
