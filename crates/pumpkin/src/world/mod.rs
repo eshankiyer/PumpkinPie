@@ -977,7 +977,7 @@ impl World {
         particle_count: i32,
         particle: Particle,
     ) {
-        for player in self.get_nearby_players(position, 32.0) {
+        for player in self.get_nearby_players_by_block_center(position, 32.0) {
             player.spawn_particle(position, offset, max_speed, particle_count, particle);
         }
     }
@@ -991,7 +991,7 @@ impl World {
         particle: Particle,
         data: &[u8],
     ) {
-        for player in self.get_nearby_players(position, 32.0) {
+        for player in self.get_nearby_players_by_block_center(position, 32.0) {
             player.spawn_particle_with_data(
                 position,
                 offset,
@@ -4468,6 +4468,29 @@ impl World {
             .filter_map(|player| {
                 let player_pos = player.get_entity().pos.load();
                 (player_pos.squared_distance_to_vec(&pos) <= radius_squared).then(|| player.clone())
+            })
+            .collect()
+    }
+
+    fn get_nearby_players_by_block_center(
+        &self,
+        pos: Vector3<f64>,
+        radius: f64,
+    ) -> Vec<Arc<Player>> {
+        let radius_squared = radius.powi(2);
+
+        self.players
+            .load()
+            .iter()
+            .filter_map(|player| {
+                let block_pos = player.get_entity().block_pos.load().0;
+                let player_center = Vector3::new(
+                    f64::from(block_pos.x) + 0.5,
+                    f64::from(block_pos.y) + 0.5,
+                    f64::from(block_pos.z) + 0.5,
+                );
+                (player_center.squared_distance_to_vec(&pos) <= radius_squared)
+                    .then(|| player.clone())
             })
             .collect()
     }
