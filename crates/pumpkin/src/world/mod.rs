@@ -977,7 +977,7 @@ impl World {
         particle_count: i32,
         particle: Particle,
     ) {
-        for player in self.players.load().iter() {
+        for player in self.get_nearby_players(position, 32.0) {
             player.spawn_particle(position, offset, max_speed, particle_count, particle);
         }
     }
@@ -991,7 +991,7 @@ impl World {
         particle: Particle,
         data: &[u8],
     ) {
-        for player in self.players.load().iter() {
+        for player in self.get_nearby_players(position, 32.0) {
             player.spawn_particle_with_data(
                 position,
                 offset,

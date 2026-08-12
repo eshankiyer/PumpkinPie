@@ -30,7 +30,7 @@ impl RedstoneOreBlock {
                 pos.0.y + direction.to_offset().y,
                 pos.0.z + direction.to_offset().z,
             );
-            if world.get_block_state(&relative).is_solid() {
+            if world.get_block_state(&relative).is_solid_render() {
                 continue;
             }
 

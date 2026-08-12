@@ -118,6 +118,12 @@ impl BlockState {
         self.state_flags & IS_FULL_CUBE != 0
     }
 
+    /// Vanilla `BlockState.isSolidRender` for the generated block data.
+    #[must_use]
+    pub const fn is_solid_render(&self) -> bool {
+        self.is_solid() && self.is_full_cube() && !self.sided_transparency()
+    }
+
     /// Vanilla `BlockState.isSuffocating` for the generated block data.
     #[must_use]
     pub const fn is_suffocating(&self, block: BlockId) -> bool {

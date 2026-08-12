@@ -1755,8 +1755,10 @@ impl Player {
         let above_state = world.get_block_state(&pos.up());
 
         // Check if blocks are passable (non-solid or air)
-        let block_safe = block_state.is_air() || !block_state.is_solid();
-        let above_safe = above_state.is_air() || !above_state.is_solid();
+        let block_safe = (block_state.is_air() || !block_state.is_solid())
+            && !block_state.is_liquid();
+        let above_safe = (above_state.is_air() || !above_state.is_solid())
+            && !above_state.is_liquid();
 
         if block_safe && above_safe {
             let position = Vector3::new(
