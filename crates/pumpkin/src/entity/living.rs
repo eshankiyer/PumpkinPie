@@ -1047,6 +1047,14 @@ impl LivingEntity {
                 .store(self.get_attribute_value(&Attributes::MOVEMENT_SPEED));
         }
 
+        // `Monster.aiStep` updates bright-light no-action time before entering
+        // `LivingEntity.aiStep`, including before input damping and the effective-AI gate.
+        if let Some(mob) = caller.get_mob()
+            && mob.get_entity().entity_id == self.entity.entity_id
+        {
+            mob.update_monster_no_action_time();
+        }
+
         let mut movement_input = self.movement_input.load();
 
         movement_input.x *= 0.98;
@@ -1058,12 +1066,12 @@ impl LivingEntity {
         // Vanilla runs Mob.serverAiStep from LivingEntity.aiStep after applyInput has damped
         // the current movement input, but before jump handling and travel.
         let is_alive = !self.dead.load(Relaxed) && self.health.load() > 0.0;
-        if is_alive
-            && !no_ai
-            && let Some(mob) = caller.get_mob()
+        if let Some(mob) = caller.get_mob()
             && mob.get_entity().entity_id == self.entity.entity_id
         {
-            crate::entity::mob::tick_mob_ai(mob, caller).await;
+            if is_alive && !no_ai {
+                crate::entity::mob::tick_mob_ai(mob, caller).await;
+            }
         }
 
         // `LivingEntity.aiStep` clears input and jumping for dead/dying entities through

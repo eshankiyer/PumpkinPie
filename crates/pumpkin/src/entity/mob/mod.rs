@@ -752,6 +752,24 @@ pub trait Mob: EntityBase + Send + Sync {
         curved_brightness + world.dimension.ambient_light * (1.0 - curved_brightness)
     }
 
+    /// Vanilla `Monster.aiStep`'s bright-light `noActionTime` update.
+    fn update_monster_no_action_time(&self) {
+        let entity = self.get_entity();
+        if entity.is_removed()
+            || self.get_mob_entity().living_entity.death_time.load(Relaxed) >= 19
+            || !uses_monster_no_action_time(entity.entity_type)
+        {
+            return;
+        }
+
+        let world = entity.world.load();
+        if self.light_level_dependent_magic_value(&world) > 0.5 {
+            self.get_mob_entity()
+                .no_action_time
+                .fetch_add(2, Relaxed);
+        }
+    }
+
     fn get_max_look_yaw_change(&self) -> f32 {
         10.0
     }
@@ -1418,6 +1436,8 @@ pub(crate) fn tick_mob_ai<'a>(
             return;
         }
 
+        mob_entity.no_action_time.fetch_add(1, Relaxed);
+
         mob_entity.sensing.lock().unwrap().tick();
 
         let mut target_selector = MutexTakeGuard::new(&mob_entity.target_selector);
@@ -1536,20 +1556,6 @@ impl<T: Mob + Send + 'static> EntityBase for T {
             let mob_entity = self.get_mob_entity();
             mob_entity.sync_no_ai_flag();
             mob_entity.tick_count.fetch_add(1, Relaxed);
-            if !mob_entity.is_no_ai()
-                && !mob_entity.living_entity.dead.load(Relaxed)
-                && mob_entity.living_entity.health.load() > 0.0
-                && !mob_entity.living_entity.entity.is_removed()
-            {
-                mob_entity.no_action_time.fetch_add(1, Relaxed);
-                if uses_monster_no_action_time(mob_entity.living_entity.entity.entity_type) {
-                    let world = mob_entity.living_entity.entity.world.load();
-                    if self.light_level_dependent_magic_value(&world) > 0.5 {
-                        // `Monster.updateNoActionTime` adds two more ticks in bright light.
-                        mob_entity.no_action_time.fetch_add(2, Relaxed);
-                    }
-                }
-            }
             mob_entity.living_entity.entity.tick_leash().await;
 
             if mob_entity.breeding_cooldown.load(Relaxed) > 0 {
