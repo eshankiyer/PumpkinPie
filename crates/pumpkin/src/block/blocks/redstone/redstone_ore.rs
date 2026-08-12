@@ -50,10 +50,8 @@ impl RedstoneOreBlock {
             } else {
                 f64::from(random.random::<f32>())
             };
-            let mut data = Vec::with_capacity(16);
-            data.put_f32(1.0);
-            data.put_f32(0.0);
-            data.put_f32(0.0);
+            let mut data = Vec::with_capacity(8);
+            data.put_i32(0xFF0000);
             data.put_f32(1.0);
             world.spawn_particle_with_data(
                 Vector3::new(
