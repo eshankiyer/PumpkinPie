@@ -2742,6 +2742,12 @@ impl JavaClient {
         };
         self.update_sequence(player, use_item.sequence.0);
 
+        // Vanilla ServerPlayerGameMode.useItem returns PASS for spectators and does not
+        // dispatch the held item.
+        if player.gamemode.load() == GameMode::Spectator {
+            return;
+        }
+
         let item_in_hand = if uses_main_hand(hand) {
             inventory.held_item()
         } else {
