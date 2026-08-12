@@ -5760,6 +5760,12 @@ impl World {
             return (&Fluid::EMPTY, state);
         };
 
+        // Air is represented by the EMPTY fluid registry entry. It has no
+        // fluid properties, so asking it for an indexed state would panic.
+        if raw_fluid == &Fluid::EMPTY {
+            return (&Fluid::EMPTY, &Fluid::EMPTY.states[0]);
+        }
+
         // Keep the state variant selected by the block state.  Converting source water/lava
         // to its flowing registry entry and then taking states[0] loses the level/height of
         // partial fluid blocks, which is observable by entity eye-fluid checks.
