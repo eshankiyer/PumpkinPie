@@ -6,6 +6,7 @@ use crate::world::World;
 use pumpkin_data::Block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
+use pumpkin_world::world::BlockFlags;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -167,7 +168,17 @@ impl<S: Stepping + Send + Sync, M: MoveToTargetPos + Send + Sync> Goal
             }
 
             if counter > 60 {
-                // TODO: world.removeBlock HOW?
+                let target_block_id = self.target_block.id;
+                if world.get_block(&tweak_pos).id != target_block_id {
+                    return;
+                }
+                let replacement_state = world
+                    .get_fluid_and_fluid_state(&tweak_pos)
+                    .1
+                    .block_state_id;
+                world
+                    .set_block_state(&tweak_pos, replacement_state, BlockFlags::NOTIFY_ALL)
+                    .await;
                 // TODO: spawn particles
                 self.on_destroy_block(world.clone(), tweak_pos).await;
             }
