@@ -95,10 +95,13 @@ impl WalkNodeEvaluator {
         if adj_x.pos.0.y > current.pos.0.y || adj_z.pos.0.y > current.pos.0.y {
             return false;
         }
+        let mob_width = self.base.mob_data.as_ref().map_or(0.6, |d| d.width);
+        if mob_width > 1.0 && (adj_x.cost_malus > 0.0 || adj_z.cost_malus > 0.0) {
+            return false;
+        }
         if adj_z.path_type == PathType::WalkableDoor || adj_x.path_type == PathType::WalkableDoor {
             return false;
         }
-        let mob_width = self.base.mob_data.as_ref().map_or(0.6, |d| d.width);
         let both_fence = adj_x.path_type == PathType::Fence && adj_z.path_type == PathType::Fence;
         let fence_exception = both_fence && mob_width < 0.5;
 
