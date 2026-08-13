@@ -4094,6 +4094,11 @@ impl EntityBase for Entity {
                 && f64::from(eye_block.0.y) + world.get_fluid_height(&eye_block, fluid, state)
                     >= eye_y;
             self.eye_in_water.store(eye_in_water, Relaxed);
+            if let Some(player) = caller.get_player()
+                && player.get_entity().entity_id == self.entity_id
+            {
+                player.update_swimming().await;
+            }
             self.check_out_of_world(&**caller).await;
             let fire_ticks = self.fire_ticks.load(Ordering::Relaxed);
 

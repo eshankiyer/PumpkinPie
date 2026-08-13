@@ -1778,23 +1778,43 @@ impl Player {
         abilities.flying
     }
 
+    /// Mirrors `Player.updateSwimming`, including the virtual `isSwimming`
+    /// check that hides the shared flag from spectators.
+    pub async fn update_swimming(&self) {
+        let entity = self.get_entity();
+        let flying = self.is_flying().await;
+        if flying {
+            entity.set_swimming(false).await;
+            return;
+        }
+
+        let has_vehicle = entity.has_vehicle().await;
+        let in_water = entity.touching_water.load(Ordering::Relaxed);
+        let swimming = entity.swimming.load(Ordering::Relaxed) && !self.is_spectator();
+        let should_swim = if swimming {
+            entity.is_sprinting() && in_water && !has_vehicle
+        } else {
+            let feet_pos = entity.block_pos.load();
+            let world = entity.world.load();
+            let (feet_fluid, _) = world.get_fluid_and_fluid_state(&feet_pos);
+            entity.is_sprinting()
+                && entity.was_eye_in_water.load(Ordering::Relaxed)
+                && in_water
+                && !has_vehicle
+                && feet_fluid.has_tag(&tag::Fluid::MINECRAFT_WATER)
+        };
+        entity.set_swimming(should_swim).await;
+    }
+
     fn is_sleeping(&self) -> bool {
         // TODO: Track sleeping position state explicitly (vanilla checks sleepingPosition.isPresent()).
         self.sleeping_since.load().is_some()
     }
 
-    async fn is_swimming(&self, flying: bool) -> bool {
-        let entity = self.get_entity();
-        let swim_height = self.living_entity.get_swim_height();
-
-        // TODO: Replace this inferred check with vanilla-equivalent swimming state tracking
-        // (LivingEntity#updateSwimming + entity swimming flag).
-        entity.touching_water.load(Ordering::Relaxed)
-            && entity.water_height.load() > swim_height
-            && entity.is_sprinting()
-            && !entity.on_ground.load(Ordering::Relaxed)
-            && !flying
-            && !entity.has_vehicle().await
+    async fn is_swimming(&self) -> bool {
+        !self.is_spectator()
+            && !self.is_flying().await
+            && self.get_entity().swimming.load(Ordering::Relaxed)
     }
 
     const fn is_auto_spin_attack() -> bool {
@@ -1822,7 +1842,7 @@ impl Player {
         let flying = self.is_flying().await;
         let desired_pose = if self.is_sleeping() {
             EntityPose::Sleeping
-        } else if self.is_swimming(flying).await {
+        } else if self.is_swimming().await {
             EntityPose::Swimming
         } else if entity.is_fall_flying() {
             EntityPose::FallFlying
@@ -2257,10 +2277,8 @@ impl Player {
         }
 
         let entity = &self.living_entity.entity;
-        let flying = self.abilities.lock().await.flying;
-
         // Priority 1: swimming (full 3D distance).
-        if self.is_swimming(flying).await {
+        if self.is_swimming().await {
             let distance = (delta_pos.length() * 100.0).round() as f32;
             if distance > 0.0 {
                 self.add_exhaustion(0.01 * distance * 0.01).await;
