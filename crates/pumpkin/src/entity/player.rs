@@ -940,6 +940,7 @@ impl Player {
 
     /// Removes the [`Player`] out of the current [`World`].
     pub async fn remove(self: &Arc<Self>) {
+        self.living_entity.clear_auto_spin_attack().await;
         self.stats
             .lock()
             .await
@@ -988,6 +989,10 @@ impl Player {
 
     #[expect(clippy::too_many_lines)]
     pub async fn attack(&self, victim: Arc<dyn EntityBase>) {
+        if !victim.is_pickable() {
+            return;
+        }
+
         let world = self.world();
         let server = world.server.upgrade().unwrap();
         let victim_entity = victim.get_entity();
@@ -995,11 +1000,24 @@ impl Player {
         let config = &server.advanced_config.pvp;
 
         let inventory = self.inventory();
-        let item_stack = inventory.held_item();
-
-        let base_damage = self
-            .living_entity
-            .get_attribute_value(&Attributes::ATTACK_DAMAGE);
+        let auto_spin_attack = self.living_entity.is_auto_spin_attack();
+        let item_stack = if auto_spin_attack {
+            self.living_entity
+                .auto_spin_attack_item_stack()
+                .await
+                .map_or_else(
+                    || inventory.held_item(),
+                    |stack| Arc::new(Mutex::new(stack)),
+                )
+        } else {
+            inventory.held_item()
+        };
+        let base_damage = if auto_spin_attack {
+            f64::from(self.living_entity.auto_spin_attack_damage())
+        } else {
+            self.living_entity
+                .get_attribute_value(&Attributes::ATTACK_DAMAGE)
+        };
         let base_attack_speed = 4.0;
 
         let mut damage_multiplier = 1.0;
@@ -1010,7 +1028,10 @@ impl Player {
 
         {
             let stack = item_stack.lock().await;
-            if stack.is_empty() {
+            if auto_spin_attack {
+                // Vanilla's riptide attack stores its fixed damage separately from the
+                // trident's normal attack attribute.
+            } else if stack.is_empty() {
                 // Vanilla fist: base_attack_damage = -1.0, base_attack_speed = -2.4
                 add_damage = -1.0;
                 add_speed = -2.4;
@@ -1393,6 +1414,38 @@ impl Player {
     pub async fn damage_held_item(&self, amount: i32) -> bool {
         self.damage_item_in_slot(&EquipmentSlot::MAIN_HAND, amount)
             .await
+    }
+
+    pub async fn damage_item_stack_without_breaking(&self, captured: &ItemStack) -> bool {
+        if matches!(
+            self.gamemode.load(),
+            GameMode::Creative | GameMode::Spectator
+        ) {
+            return false;
+        }
+
+        let candidates = [
+            self.inventory.get_selected_slot() as usize,
+            PlayerInventory::OFF_HAND_SLOT,
+        ];
+        for slot_index in candidates {
+            let stack_arc = self.inventory.get_stack(slot_index).await;
+            let updated = {
+                let mut stack = stack_arc.lock().await;
+                if stack.are_items_and_components_equal(captured) {
+                    let result = stack.damage_item(1);
+                    (result != pumpkin_data::item_stack::DamageResult::Untouched)
+                        .then_some(stack.clone())
+                } else {
+                    None
+                }
+            };
+            if let Some(updated) = updated {
+                self.sync_hand_slot(slot_index, updated).await;
+                return true;
+            }
+        }
+        false
     }
 
     pub async fn apply_tool_damage_for_block_break(&self, state: &BlockState) {
@@ -1778,6 +1831,22 @@ impl Player {
         abilities.flying
     }
 
+    pub async fn is_in_water_or_rain(&self) -> bool {
+        let entity = self.get_entity();
+        if entity.touching_water.load(Ordering::Relaxed) {
+            return true;
+        }
+
+        let world = self.world();
+        let block_pos = entity.block_pos.load();
+        let rain_pos = BlockPos::floored(
+            f64::from(block_pos.0.x),
+            entity.bounding_box.load().max.y,
+            f64::from(block_pos.0.z),
+        );
+        world.is_raining_at(&block_pos).await || world.is_raining_at(&rain_pos).await
+    }
+
     fn is_sleeping(&self) -> bool {
         // TODO: Track sleeping position state explicitly (vanilla checks sleepingPosition.isPresent()).
         self.sleeping_since.load().is_some()
@@ -1797,9 +1866,8 @@ impl Player {
             && !entity.has_vehicle().await
     }
 
-    const fn is_auto_spin_attack() -> bool {
-        // TODO: Track active auto-spin/riptide state and return true while it is active.
-        false
+    fn is_auto_spin_attack(&self) -> bool {
+        self.living_entity.is_auto_spin_attack()
     }
 
     fn can_fit_pose(&self, pose: EntityPose) -> bool {
@@ -1826,7 +1894,7 @@ impl Player {
             EntityPose::Swimming
         } else if entity.is_fall_flying() {
             EntityPose::FallFlying
-        } else if Self::is_auto_spin_attack() {
+        } else if self.is_auto_spin_attack() {
             EntityPose::SpinAttack
         } else if entity.is_sneaking() && !flying {
             EntityPose::Crouching
