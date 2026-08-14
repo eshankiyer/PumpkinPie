@@ -93,11 +93,67 @@ const NODE_REACH_XZ: f64 = 0.5;
 const NODE_REACH_Y: f64 = 1.0;
 const MAX_YAW_TURN_PER_TICK: f32 = 90.0;
 
+/// Mirrors `GroundPathNavigation.findSurfacePosition` for targets supplied as an
+/// entity position. Ground navigation searches for the walkable surface in the
+/// target column instead of treating the entity's raw block as the node.
+fn find_surface_position(world: &crate::world::World, mut pos: BlockPos) -> BlockPos {
+    let min_y = world.get_bottom_y();
+    let max_y = world.get_top_y();
+
+    if world.get_block_state(&pos).is_air() {
+        let mut column = BlockPos::new(pos.0.x, pos.0.y - 1, pos.0.z);
+        while column.0.y >= min_y && world.get_block_state(&column).is_air() {
+            column.0.y -= 1;
+        }
+        if column.0.y >= min_y {
+            return BlockPos::new(pos.0.x, column.0.y + 1, pos.0.z);
+        }
+
+        column = BlockPos::new(pos.0.x, pos.0.y + 1, pos.0.z);
+        while column.0.y <= max_y && world.get_block_state(&column).is_air() {
+            column.0.y += 1;
+        }
+        pos = column;
+    }
+
+    if !world.get_block_state(&pos).is_solid() {
+        return pos;
+    }
+
+    let mut column = BlockPos::new(pos.0.x, pos.0.y + 1, pos.0.z);
+    while column.0.y <= max_y && world.get_block_state(&column).is_solid() {
+        column.0.y += 1;
+    }
+    column
+}
+
 impl Navigator {
     pub fn set_progress(&mut self, goal: NavigatorGoal) {
         self.is_idle.store(false, Ordering::Relaxed);
         self.current_goal = Some(goal);
         self.current_path = None;
+    }
+
+    /// Starts navigation with a path that was already computed by a goal.
+    ///
+    /// Vanilla goals such as `MeleeAttackGoal` and `AvoidEntityGoal` retain the path produced by
+    /// `createPath` and hand that exact path to `PathNavigation.moveTo` in `start`. Keeping the
+    /// path here avoids throwing away that result and immediately replacing it with a direct
+    /// destination goal.
+    pub fn set_path(&mut self, goal: NavigatorGoal, path: Path) {
+        if !path.is_valid() || path.is_done() {
+            self.set_progress(goal);
+            return;
+        }
+        let path_start_pos = goal.current_progress;
+        self.is_idle.store(false, Ordering::Relaxed);
+        self.current_goal = Some(goal);
+        self.current_path = Some(path);
+        self.ticks_on_current_node = 0;
+        self.last_node_index = 0;
+        self.total_ticks = 0;
+        self.path_start_pos = Some(path_start_pos);
+        self.repath_cooldown = 0;
     }
 
     /// Speed modifier of the active navigation goal, or `None` when idle. Stands in for
@@ -214,9 +270,34 @@ impl Navigator {
         entity: &LivingEntity,
         destination: Vector3<f64>,
     ) -> Option<Path> {
+        self.compute_path_with_reach(entity, destination, 0).await
+    }
+
+    /// Finds a path using the same target reach allowance as vanilla's
+    /// `PathNavigation.createPath(target, reachRange)`.
+    #[allow(clippy::too_many_lines)]
+    pub(crate) async fn compute_path_with_reach(
+        &mut self,
+        entity: &LivingEntity,
+        destination: Vector3<f64>,
+        reach_range: i32,
+    ) -> Option<Path> {
+        // GroundPathNavigation.canUpdatePath: airborne ground mobs do not create a new path
+        // until they land or enter liquid. Flying and amphibious navigators are exempt.
+        if !self.evaluator.is_flying()
+            && !self.evaluator.is_amphibious()
+            && !entity.entity.on_ground.load(Ordering::Relaxed)
+            && !entity.entity.touching_water.load(Ordering::Relaxed)
+            && !entity.entity.touching_lava.load(Ordering::Relaxed)
+            && !entity.entity.has_vehicle().await
+        {
+            return None;
+        }
         let start_pos_f = entity.entity.pos.load();
         let start_block_vec = start_pos_f.floor_to_i32();
         let mob_position = Vector3::new(start_block_vec.x, start_block_vec.y, start_block_vec.z);
+
+        let world = entity.entity.world.load_full();
 
         // PathNavigation.getMaxPathLength() is at least the required path length (16 blocks),
         // even when FOLLOW_RANGE is smaller. PathFinder visits floor(maxPathLength * 16) nodes.
@@ -224,7 +305,7 @@ impl Navigator {
             (entity.get_attribute_value(&Attributes::FOLLOW_RANGE) as f32).max(16.0);
         let max_iterations = (max_path_length * 16.0).floor() as usize;
 
-        let context = PathfindingContext::new(mob_position, entity.entity.world.load_full());
+        let context = PathfindingContext::new(mob_position, world.clone());
         let mut mob_data = MobData::new(start_pos_f, self.mob_width, self.mob_height, 1.0);
         mob_data.on_ground = entity.entity.on_ground.load(Ordering::Relaxed);
         mob_data.in_water = entity.entity.touching_water.load(Ordering::Relaxed);
@@ -244,11 +325,14 @@ impl Navigator {
         let mut start_node = self.evaluator.get_start().await?;
 
         // Vanilla NodeEvaluator floors navigation coordinates before resolving the target node.
-        let target_pos = if self.evaluator.is_amphibious() {
+        let mut target_pos = if self.evaluator.is_amphibious() {
             BlockPos::floored(destination.x, destination.y + 0.5, destination.z)
         } else {
             BlockPos(destination.floor_to_i32())
         };
+        if !self.evaluator.is_amphibious() && !self.evaluator.is_flying() {
+            target_pos = find_surface_position(world.as_ref(), target_pos);
+        }
         let mut target = self.evaluator.get_target(target_pos);
 
         start_node.g = 0.0;
@@ -281,10 +365,9 @@ impl Navigator {
             let Some(current) = self.open_set.pop() else {
                 break;
             };
-            if current.distance_manhattan(&target) < 1.0 {
+            if current.distance_manhattan(&target) <= reach_range as f32 {
                 target.reached = true;
                 reached = true;
-                target.update_best(0.0, &current);
                 closed_set.insert(current.pos.0, current);
                 break;
             }
