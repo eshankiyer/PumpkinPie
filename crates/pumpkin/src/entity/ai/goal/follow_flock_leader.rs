@@ -117,6 +117,7 @@ impl Goal for FollowFlockLeaderGoal {
             };
 
             *self.leader.lock().await = Some(Arc::downgrade(&leader));
+            mob.get_mob_entity().set_schooling_follower(true);
             true
         })
     }
@@ -145,9 +146,10 @@ impl Goal for FollowFlockLeaderGoal {
         })
     }
 
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
             *self.leader.lock().await = None;
+            mob.get_mob_entity().set_schooling_follower(false);
         })
     }
 
