@@ -656,7 +656,19 @@ pub fn spawn_category_for_position(
 
     let mut batch_buffer = vec![];
     let mut spawn_cluster_size = 0;
-    let player_positions: Vec<_> = world.players.load().iter().map(|p| p.position()).collect();
+    let player_positions: Vec<_> = world
+        .players
+        .load()
+        .iter()
+        .filter(|player| counts_for_natural_spawning(player.gamemode.load()))
+        .map(|p| p.position())
+        .collect();
+    // Vanilla's getNearestPlayer(..., false) returns null when only spectators are
+    // online, and NaturalSpawner skips the attempt in that case. Do not let the
+    // f64::MAX sentinel in get_nearest_player turn that into an eligible spawn.
+    if player_positions.is_empty() {
+        return batch_buffer;
+    }
     let level_info = world.level_info.load();
     let spawn_position = Vector3::new(level_info.spawn_x, level_info.spawn_y, level_info.spawn_z);
 
@@ -749,6 +761,11 @@ pub fn get_nearest_player(pos: &Vector3<f64>, player_positions: &[Vector3<f64>])
         }
     }
     min_dst_sq
+}
+
+#[inline]
+const fn counts_for_natural_spawning(gamemode: GameMode) -> bool {
+    !matches!(gamemode, GameMode::Spectator)
 }
 
 #[must_use]
@@ -1009,15 +1026,24 @@ pub fn is_valid_empty_spawn_block(
 #[cfg(test)]
 mod tests {
     use super::{
-        IndexedRandom, can_spawn_in_water, is_right_distance_to_player_and_spawn_point,
-        is_valid_empty_spawn_block,
+        IndexedRandom, can_spawn_in_water, counts_for_natural_spawning,
+        is_right_distance_to_player_and_spawn_point, is_valid_empty_spawn_block,
     };
     use pumpkin_data::Block;
     use pumpkin_data::biome::{Biome, Spawner};
     use pumpkin_data::entity::EntityType;
+    use pumpkin_util::GameMode;
     use pumpkin_util::math::position::BlockPos;
     use pumpkin_util::math::vector2::Vector2;
     use pumpkin_util::math::vector3::Vector3;
+
+    #[test]
+    fn spectators_do_not_count_as_nearby_players_for_spawning() {
+        assert!(!counts_for_natural_spawning(GameMode::Spectator));
+        assert!(counts_for_natural_spawning(GameMode::Survival));
+        assert!(counts_for_natural_spawning(GameMode::Adventure));
+        assert!(counts_for_natural_spawning(GameMode::Creative));
+    }
 
     /// Vanilla `WeightedList` picks entries proportionally to `weight` (e.g. `warm_ocean`'s
     /// `water_creature` list: nautilus weight 5, squid weight 10, dolphin weight 2 - see
