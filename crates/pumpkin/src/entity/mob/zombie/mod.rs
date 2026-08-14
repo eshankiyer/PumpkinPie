@@ -43,7 +43,7 @@ impl ZombieEntityBase {
             goal_selector.add_goal(2, SpearUseGoal::new(1.0, 1.0, 10.0, 2.0));
             goal_selector.add_goal(3, ZombieAttackGoal::new(1.0, false));
             goal_selector.add_goal(4, DestroyEggGoal::new(1.0, 3));
-            goal_selector.add_goal(7, Box::new(WanderAroundGoal::new(1.0)));
+            goal_selector.add_goal(7, Box::new(WanderAroundGoal::new_water_avoiding(1.0)));
             goal_selector.add_goal(
                 8,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 8.0),
