@@ -569,13 +569,19 @@ pub fn spawn_mobs_for_chunk_generation(
                 }
 
                 let pos = get_top_non_colliding_pos(world, cache, entity_type, x, z);
+                let width = f64::from(entity_type.dimension[0]);
+                let spawn_x = f64::from(x).clamp(f64::from(xo) + width, f64::from(xo + 16) - width);
+                let spawn_z = f64::from(z).clamp(f64::from(zo) + width, f64::from(zo + 16) - width);
+                let spawn_rule_pos =
+                    BlockPos::new(spawn_x.floor() as i32, pos.0.y, spawn_z.floor() as i32);
 
-                if is_spawn_position_ok_cache(cache, &pos, entity_type) {
-                    let spawn_pos_f64 = Vector3::new(
-                        f64::from(pos.0.x) + 0.5,
-                        f64::from(pos.0.y),
-                        f64::from(pos.0.z) + 0.5,
-                    );
+                if entity_type.summonable
+                    && is_spawn_position_ok_cache(cache, &pos, entity_type)
+                    // Vanilla applies the entity-specific CHUNK_GENERATION predicate here,
+                    // after placement validation and after clamping the spawn coordinates.
+                    && check_spawn_rules(entity_type, world, &spawn_rule_pos, false)
+                {
+                    let spawn_pos_f64 = Vector3::new(spawn_x, f64::from(pos.0.y), spawn_z);
 
                     let entity = from_type(entity_type, spawn_pos_f64, world, Uuid::new_v4());
                     entity
