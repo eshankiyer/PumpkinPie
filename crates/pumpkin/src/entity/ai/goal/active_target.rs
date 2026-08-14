@@ -63,7 +63,18 @@ impl ActiveTargetGoal {
         target_type: &'static EntityType,
         check_visibility: bool,
     ) -> Box<Self> {
+        Self::with_default_and_memory(mob, target_type, check_visibility, 60)
+    }
+
+    #[must_use]
+    pub fn with_default_and_memory(
+        mob: &MobEntity,
+        target_type: &'static EntityType,
+        check_visibility: bool,
+        unseen_memory_ticks: i32,
+    ) -> Box<Self> {
         let track_target_goal = TrackTargetGoal::with_default(check_visibility);
+        let track_target_goal = track_target_goal.set_unseen_memory_ticks(unseen_memory_ticks);
         let mut target_predicate = TargetPredicate::create_attackable();
         target_predicate.base_max_distance = mob
             .living_entity
@@ -85,7 +96,18 @@ impl ActiveTargetGoal {
         target_types: &'static [&'static EntityType],
         check_visibility: bool,
     ) -> Box<Self> {
+        Self::with_default_types_and_memory(mob, target_types, check_visibility, 60)
+    }
+
+    #[must_use]
+    pub fn with_default_types_and_memory(
+        mob: &MobEntity,
+        target_types: &'static [&'static EntityType],
+        check_visibility: bool,
+        unseen_memory_ticks: i32,
+    ) -> Box<Self> {
         let track_target_goal = TrackTargetGoal::with_default(check_visibility);
+        let track_target_goal = track_target_goal.set_unseen_memory_ticks(unseen_memory_ticks);
         let mut target_predicate = TargetPredicate::create_attackable();
         target_predicate.base_max_distance = mob
             .living_entity
