@@ -37,7 +37,9 @@ use pumpkin_data::attributes::Attributes;
 use pumpkin_data::block_properties::{BlockProperties, HorizontalFacing};
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::data_component_impl::{AttributeModifiersImpl, EnchantmentsImpl, Operation};
-use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, ToolImpl, WeaponImpl};
+use pumpkin_data::data_component_impl::{
+    CanBreakImpl, EquipmentSlot, EquippableImpl, ToolImpl, WeaponImpl,
+};
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::{EntityPose, EntityStatus, EntityType};
 use pumpkin_data::item_stack::ItemStack;
@@ -60,18 +62,19 @@ use pumpkin_nbt::tag::NbtTag;
 use pumpkin_protocol::IdOr;
 use pumpkin_protocol::SoundEvent;
 use pumpkin_protocol::bedrock::client::container_open::CContainerOpen;
+use pumpkin_protocol::bedrock::client::update_block::CUpdateBlock;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::codec::var_long::VarLong;
 use pumpkin_protocol::java::client::play::{
-    Animation, CActionBar, CAwardStats, CChangeDifficulty, CCloseContainer, CCombatDeath,
-    CCustomPayload, CDisguisedChatMessage, CEntityAnimation, CEntityPositionSync, CGameEvent,
-    CItemCooldown, CMapItemData, COpenScreen, CParticle, CPlayerAbilities, CPlayerInfoUpdate,
-    CPlayerPosition, CPlayerSpawnPosition, CRespawn, CSetCamera, CSetContainerContent,
-    CSetContainerProperty, CSetContainerSlot, CSetCursorItem, CSetEquipment, CSetExperience,
-    CSetHealth, CSetPlayerInventory, CSetSelectedSlot, CSoundEffect, CStopSound, CSubtitle,
-    CSystemChatMessage, CTabList, CTitleAnimation, CTitleText, CUnloadChunk, CUpdateMobEffect,
-    CUpdateTime, GameEvent, MapIcon, MapPatch, Metadata, PlayerAction, PlayerInfoFlags,
-    PlayerSpawnData, PreviousMessage, Statistic,
+    Animation, CActionBar, CAwardStats, CBlockUpdate, CChangeDifficulty, CCloseContainer,
+    CCombatDeath, CCustomPayload, CDisguisedChatMessage, CEntityAnimation, CEntityPositionSync,
+    CGameEvent, CItemCooldown, CMapItemData, COpenScreen, CParticle, CPlayerAbilities,
+    CPlayerInfoUpdate, CPlayerPosition, CPlayerSpawnPosition, CRespawn, CSetCamera,
+    CSetContainerContent, CSetContainerProperty, CSetContainerSlot, CSetCursorItem, CSetEquipment,
+    CSetExperience, CSetHealth, CSetPlayerInventory, CSetSelectedSlot, CSoundEffect, CStopSound,
+    CSubtitle, CSystemChatMessage, CTabList, CTitleAnimation, CTitleText, CUnloadChunk,
+    CUpdateMobEffect, CUpdateTime, GameEvent, MapIcon, MapPatch, Metadata, PlayerAction,
+    PlayerInfoFlags, PlayerSpawnData, PreviousMessage, Statistic,
 };
 use pumpkin_protocol::java::server::play::{
     SClickSlot, SContainerButtonClick, SRenameItem, SSetBeacon, SlotActionType,
@@ -129,6 +132,113 @@ pub const DATA_VERSION: i32 = 4903; // 26.2
 /// non-creative players holding a tool that can harvest the block, so callers
 /// must apply the same gating.
 pub const MINE_BLOCK_EXHAUSTION: f32 = 0.005; // Vanilla: 0.005F
+
+fn block_name_matches_predicate(name: &str, block: &'static Block) -> bool {
+    if let Some(tag) = name.strip_prefix('#') {
+        return block.is_tagged_with(tag).unwrap_or(false);
+    }
+    name.strip_prefix("minecraft:").unwrap_or(name) == block.name
+}
+
+fn adventure_predicate_matches_block(
+    predicate: &NbtTag,
+    block: &'static Block,
+    state: &'static BlockState,
+) -> bool {
+    let predicates: Vec<&NbtTag> = match predicate {
+        NbtTag::Compound(_) => vec![predicate],
+        NbtTag::List(predicates) => predicates.iter().collect(),
+        NbtTag::String(name) => return block_name_matches_predicate(name, block),
+        _ => return false,
+    };
+
+    predicates.iter().any(|predicate| {
+        let Some(predicate) = predicate.extract_compound() else {
+            return false;
+        };
+        // NBT predicates require serializing the block entity, which is not
+        // available from this state-only helper. Keep that predicate
+        // conservative until the block-entity matcher is wired in.
+        if predicate.has("nbt") {
+            return false;
+        }
+        if predicate.has("components") {
+            // Component matchers need block-entity component snapshots, just
+            // like NBT matchers. Do not treat an unknown matcher as a match.
+            return false;
+        }
+        if predicate.has("state") && predicate.get_compound("state").is_none() {
+            return false;
+        }
+        if let Some(properties) = predicate.get_compound("state") {
+            let Some(actual_properties) = block.properties(state.id) else {
+                return false;
+            };
+            let actual_properties = actual_properties.to_props();
+            if properties.child_tags.iter().any(|(name, required)| {
+                let Some((_, actual_value)) = actual_properties
+                    .iter()
+                    .find(|(actual_name, _)| *actual_name == name.as_ref())
+                else {
+                    return true;
+                };
+                match required {
+                    NbtTag::String(required) => *actual_value != required.as_ref(),
+                    NbtTag::Compound(range) => {
+                        let min = range.get_string("min");
+                        let max = range.get_string("max");
+                        if min.is_none() && max.is_none() {
+                            return true;
+                        }
+                        let numeric_actual = actual_value.parse::<i32>().ok();
+                        let numeric_min = min.and_then(|value| value.parse::<i32>().ok());
+                        let numeric_max = max.and_then(|value| value.parse::<i32>().ok());
+                        if min.is_some() && numeric_min.is_none() && numeric_actual.is_none() {
+                            return true;
+                        }
+                        if max.is_some() && numeric_max.is_none() && numeric_actual.is_none() {
+                            return true;
+                        }
+                        if let Some(actual) = numeric_actual {
+                            numeric_min.is_some_and(|min| actual < min)
+                                || numeric_max.is_some_and(|max| actual > max)
+                        } else {
+                            min.is_some_and(|min| *actual_value < min)
+                                || max.is_some_and(|max| *actual_value > max)
+                        }
+                    }
+                    _ => true,
+                }
+            }) {
+                return false;
+            }
+        }
+        let Some(blocks) = predicate.get("blocks") else {
+            return true;
+        };
+        match blocks {
+            NbtTag::String(name) => block_name_matches_predicate(name, block),
+            NbtTag::List(names) => names.iter().any(|name| {
+                name.extract_string()
+                    .is_some_and(|name| block_name_matches_predicate(name, block))
+            }),
+            _ => false,
+        }
+    })
+}
+
+fn is_game_master_block(block: &'static Block) -> bool {
+    matches!(
+        block.name,
+        "command_block"
+            | "chain_command_block"
+            | "repeating_command_block"
+            | "structure_block"
+            | "jigsaw"
+            | "test_block"
+            | "test_instance_block"
+    )
+}
 
 struct HeapNode(i32, Vector2<i32>, Weak<ChunkData>);
 
@@ -472,9 +582,17 @@ pub struct Player {
     pub current_block_destroy_stage: AtomicI32,
     /// Indicates if the player is currently mining a block.
     pub mining: AtomicBool,
+    /// Vanilla `ServerPlayerGameMode.hasDelayedDestroy`.
+    pub delayed_mining: AtomicBool,
+    /// Vanilla `ServerPlayerGameMode.delayedDestroyPos`.
+    pub delayed_mining_pos: Mutex<BlockPos>,
+    /// Vanilla `ServerPlayerGameMode.delayedTickStart`.
+    pub delayed_mining_start_time: AtomicI32,
     pub start_mining_time: AtomicI32,
     pub tick_counter: AtomicI32,
     pub mining_pos: Mutex<BlockPos>,
+    /// Serializes protocol mining actions that can arrive on separate tasks.
+    pub mining_action_lock: Mutex<()>,
     pub last_input: AtomicI8,
     /// A counter for teleport IDs used to track pending teleports.
     pub teleport_id_count: AtomicI32,
@@ -707,7 +825,11 @@ impl Player {
             experience_pick_up_delay: Mutex::new(0),
             teleport_id_count: AtomicI32::new(0),
             mining: AtomicBool::new(false),
+            delayed_mining: AtomicBool::new(false),
+            delayed_mining_pos: Mutex::new(BlockPos::ZERO),
+            delayed_mining_start_time: AtomicI32::new(0),
             mining_pos: Mutex::new(BlockPos::ZERO),
+            mining_action_lock: Mutex::new(()),
             abilities: Mutex::new(abilities),
             stats: Mutex::new(statistics::Statistics::default()),
             gamemode: AtomicCell::new(gamemode),
@@ -1393,6 +1515,161 @@ impl Player {
     pub async fn damage_held_item(&self, amount: i32) -> bool {
         self.damage_item_in_slot(&EquipmentSlot::MAIN_HAND, amount)
             .await
+    }
+
+    /// Mirrors `Player.blockActionRestricted` for the start of a block break.
+    /// Vanilla checks the held item's destruction rules only when the block is
+    /// actually destroyed, not when the crack animation starts.
+    pub async fn can_start_block_break(
+        &self,
+        block: &'static Block,
+        state: &'static BlockState,
+    ) -> bool {
+        let gamemode = self.gamemode.load();
+        if gamemode == GameMode::Spectator {
+            return false;
+        }
+
+        let held = self.inventory().held_item().lock().await.clone();
+        let abilities = self.abilities.lock().await;
+        if gamemode == GameMode::Adventure
+            && !abilities.allow_modify_world
+            && !held
+                .get_data_component::<CanBreakImpl>()
+                .is_some_and(|predicate| {
+                    adventure_predicate_matches_block(&predicate.predicate, block, state)
+                })
+        {
+            return false;
+        }
+
+        true
+    }
+
+    /// Matches DedicatedServer.isUnderSpawnProtection for the overworld.
+    pub async fn is_under_spawn_protection(
+        &self,
+        server: &Server,
+        world: &World,
+        position: &BlockPos,
+    ) -> bool {
+        let radius = server.basic_config.spawn_protection_radius;
+        if world.dimension != Dimension::OVERWORLD || radius <= 0 {
+            return false;
+        }
+
+        let operators = server.data.operator_config.read().await;
+        if operators.ops.is_empty() || operators.get_entry(&self.gameprofile.id).is_some() {
+            return false;
+        }
+        drop(operators);
+
+        let level_info = world.level_info.load();
+        let dx = (position.0.x - level_info.spawn_x).abs();
+        let dz = (position.0.z - level_info.spawn_z).abs();
+        dx.max(dz) <= radius
+    }
+
+    /// Mirrors `Item.canDestroyBlock`, game-master block checks, and
+    /// `Player.blockActionRestricted` when a block break is finalized.
+    pub async fn can_break_block(&self, block: &'static Block, state: &'static BlockState) -> bool {
+        if !self.can_start_block_break(block, state).await {
+            return false;
+        }
+
+        let gamemode = self.gamemode.load();
+        let held = self.inventory().held_item().lock().await.clone();
+
+        let abilities = self.abilities.lock().await;
+        let instabuild = abilities.creative;
+        drop(abilities);
+
+        if is_game_master_block(block)
+            && (!instabuild || self.permission_lvl.load() < PermissionLvl::Two)
+        {
+            return false;
+        }
+
+        if gamemode == GameMode::Creative
+            && held
+                .get_data_component::<ToolImpl>()
+                .is_some_and(|tool| !tool.can_destroy_blocks_in_creative)
+        {
+            return false;
+        }
+
+        true
+    }
+
+    /// Applies the common vanilla destroy path and bookkeeping for Java's
+    /// delayed destroy state and Bedrock's server-side completion path.
+    pub async fn finish_block_break(
+        self: &Arc<Self>,
+        server: &Server,
+        world: &Arc<World>,
+        position: BlockPos,
+    ) -> bool {
+        let (block, state) = world.get_block_and_state(&position);
+        if state.is_air() || !self.can_break_block(block, state).await {
+            self.client
+                .send_packet_now_editioned(
+                    &CBlockUpdate::new(position, VarInt(i32::from(state.id.as_u16()))),
+                    &CUpdateBlock::new(
+                        position,
+                        pumpkin_data::BlockState::to_be_network_id(state.id) as u32,
+                    ),
+                )
+                .await;
+            return false;
+        }
+
+        let block_drop =
+            self.gamemode.load() != GameMode::Creative && self.can_harvest(state, block).await;
+        let held = self.inventory().held_item().lock().await.clone();
+        let has_tool = held.get_data_component::<ToolImpl>().is_some();
+        let flags = if block_drop {
+            pumpkin_world::world::BlockFlags::NOTIFY_NEIGHBORS
+        } else {
+            pumpkin_world::world::BlockFlags::SKIP_DROPS
+                | pumpkin_world::world::BlockFlags::NOTIFY_NEIGHBORS
+        };
+        if world
+            .break_block(&position, Some(self.clone()), flags)
+            .await
+            .is_none()
+        {
+            let (_, current_state) = world.get_block_and_state(&position);
+            self.client
+                .send_packet_now_editioned(
+                    &CBlockUpdate::new(position, VarInt(i32::from(current_state.id.as_u16()))),
+                    &CUpdateBlock::new(
+                        position,
+                        pumpkin_data::BlockState::to_be_network_id(current_state.id) as u32,
+                    ),
+                )
+                .await;
+            return false;
+        }
+
+        server
+            .block_registry
+            .broken(world, block, self, &position, server, state)
+            .await;
+        self.apply_tool_damage_for_block_break(state).await;
+        if block_drop {
+            self.add_exhaustion(MINE_BLOCK_EXHAUSTION).await;
+        }
+        if self.gamemode.load() != GameMode::Creative {
+            if has_tool {
+                self.increment_stat(StatisticCategory::Used, held.item.id as i32, 1)
+                    .await;
+            }
+            if block_drop {
+                self.increment_stat(StatisticCategory::Mined, state.id.as_u16() as i32, 1)
+                    .await;
+            }
+        }
+        true
     }
 
     pub async fn apply_tool_damage_for_block_break(&self, state: &BlockState) {
@@ -2157,7 +2434,9 @@ impl Player {
             self.sleeping_since.store(Some(sleeping_since + 1));
         }
 
-        if self.mining.load(Ordering::Relaxed) {
+        if self.delayed_mining.load(Ordering::Relaxed) {
+            self.continue_delayed_mining(server).await;
+        } else if self.mining.load(Ordering::Relaxed) {
             let pos = self.mining_pos.lock().await;
             let world = self.world();
             let state = world.get_block_state(&pos);
@@ -2236,6 +2515,47 @@ impl Player {
             self.current_block_destroy_stage
                 .store(progress, Ordering::Relaxed);
         }
+    }
+
+    /// Advances vanilla's delayed destroy state after a STOP packet arrived
+    /// before the normal 0.7 destroy threshold.
+    async fn continue_delayed_mining(self: &Arc<Self>, server: &Server) {
+        let _mining_action = self.mining_action_lock.lock().await;
+        if !self.delayed_mining.load(Ordering::Relaxed) {
+            return;
+        }
+        let location = *self.delayed_mining_pos.lock().await;
+        let world = self.world();
+        let (block, state) = world.get_block_and_state(&location);
+
+        if state.is_air() {
+            self.delayed_mining.store(false, Ordering::Relaxed);
+            return;
+        }
+
+        let time = self
+            .tick_counter
+            .load(Ordering::Relaxed)
+            .saturating_sub(self.delayed_mining_start_time.load(Ordering::Relaxed));
+        let destroy_progress =
+            block::calc_block_breaking(self, state, block).await * (time + 1) as f32;
+        let progress = (destroy_progress * 10.0) as i32;
+        if progress != self.current_block_destroy_stage.load(Ordering::Relaxed) {
+            world
+                .set_block_breaking(&self.living_entity.entity, location, progress)
+                .await;
+            self.current_block_destroy_stage
+                .store(progress, Ordering::Relaxed);
+        }
+
+        if destroy_progress < 1.0 {
+            return;
+        }
+
+        self.delayed_mining.store(false, Ordering::Relaxed);
+        self.current_block_destroy_stage
+            .store(-1, Ordering::Relaxed);
+        self.finish_block_break(server, &world, location).await;
     }
 
     pub async fn jump(&self) {

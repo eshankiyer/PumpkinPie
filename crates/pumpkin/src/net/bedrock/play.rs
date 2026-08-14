@@ -44,14 +44,10 @@ use pumpkin_protocol::{
 use pumpkin_util::{GameMode, Hand, math::position::BlockPos, text::TextComponent};
 
 use pumpkin_world::inventory::Inventory;
-use pumpkin_world::world::BlockFlags;
 
 use crate::{
     block::{BlockHitResult, registry::BlockActionResult},
-    entity::{
-        EntityBase,
-        player::{MINE_BLOCK_EXHAUSTION, Player},
-    },
+    entity::{EntityBase, player::Player},
     net::{DisconnectReason, bedrock::BedrockClient},
     plugin::player::{
         item_held::PlayerItemHeldEvent,
@@ -650,6 +646,19 @@ impl BedrockClient {
 
                 if data.action_type.0 == 0 {
                     // Click block
+                    if data.block_position.0.y > world.get_top_y()
+                        || player
+                            .is_under_spawn_protection(&server, &world, &data.block_position)
+                            .await
+                        || !world
+                            .worldborder
+                            .lock()
+                            .await
+                            .contains_block(data.block_position.0.x, data.block_position.0.z)
+                    {
+                        return;
+                    }
+
                     let is_creative = player.gamemode.load() == GameMode::Creative;
                     let client_stack = descriptor_to_stack(&data.item_in_hand, is_creative);
 
@@ -1074,6 +1083,7 @@ impl BedrockClient {
             PlayerAction::StartBreak
             | PlayerAction::CreativePlayerDestroyBlock
             | PlayerAction::ContinueDestroyBlock => {
+                let _mining_action = player.mining_action_lock.lock().await;
                 let location = packet.block_pos;
                 if !player.can_interact_with_block_at(&location, 1.0) {
                     return;
@@ -1083,45 +1093,62 @@ impl BedrockClient {
                 let world = entity.world.load_full();
                 let (block, state) = world.get_block_and_state(&location);
 
+                if location.0.y > world.get_top_y()
+                    || (matches!(packet.action, PlayerAction::StartBreak)
+                        && (player
+                            .is_under_spawn_protection(server, &world, &location)
+                            .await
+                            || !world
+                                .worldborder
+                                .lock()
+                                .await
+                                .contains_block(location.0.x, location.0.z)))
+                {
+                    let runtime_id = pumpkin_data::BlockState::to_be_network_id(state.id);
+                    self.enqueue_packet(
+                        &pumpkin_protocol::bedrock::client::update_block::CUpdateBlock::new(
+                            location,
+                            runtime_id as u32,
+                        ),
+                    )
+                    .await;
+                    return;
+                }
+
+                if !player.can_start_block_break(block, state).await {
+                    let runtime_id = pumpkin_data::BlockState::to_be_network_id(state.id);
+                    self.enqueue_packet(
+                        &pumpkin_protocol::bedrock::client::update_block::CUpdateBlock::new(
+                            location,
+                            runtime_id as u32,
+                        ),
+                    )
+                    .await;
+                    return;
+                }
+
                 if player.gamemode.load() == GameMode::Creative {
-                    let new_state = world
-                        .break_block(
-                            &location,
-                            Some(player.clone()),
-                            BlockFlags::NOTIFY_NEIGHBORS | BlockFlags::SKIP_DROPS,
-                        )
-                        .await;
-                    if new_state.is_some() {
-                        server
-                            .block_registry
-                            .broken(&world, block, player, &location, server, state)
-                            .await;
-                    }
+                    player.finish_block_break(server, &world, location).await;
                 } else if !state.is_air() {
                     let speed = crate::block::calc_block_breaking(player, state, block).await;
                     if speed >= 1.0 {
-                        let broken_state = world.get_block_state(&location);
-                        let can_harvest = player.can_harvest(broken_state, block).await;
-                        let new_state = world
-                            .break_block(
-                                &location,
-                                Some(player.clone()),
-                                BlockFlags::NOTIFY_NEIGHBORS,
-                            )
-                            .await;
-                        if new_state.is_some() {
-                            server
-                                .block_registry
-                                .broken(&world, block, player, &location, server, broken_state)
-                                .await;
-                            player.apply_tool_damage_for_block_break(broken_state).await;
-                            if can_harvest {
-                                player.add_exhaustion(MINE_BLOCK_EXHAUSTION).await;
-                            }
-                        }
+                        player.finish_block_break(server, &world, location).await;
                     } else {
+                        let old_position = *player.mining_pos.lock().await;
+                        let starts_new_target =
+                            !player.mining.load(Ordering::Relaxed) || old_position != location;
+                        if player.mining.load(Ordering::Relaxed) && old_position != location {
+                            world.set_block_breaking(entity, old_position, -1).await;
+                            player.mining.store(false, Ordering::Relaxed);
+                        }
                         player.mining.store(true, Ordering::Relaxed);
                         *player.mining_pos.lock().await = location;
+                        if starts_new_target || matches!(packet.action, PlayerAction::StartBreak) {
+                            player.start_mining_time.store(
+                                player.tick_counter.load(Ordering::Relaxed),
+                                Ordering::Relaxed,
+                            );
+                        }
                         let progress = (speed * 10.0) as i32;
                         world.set_block_breaking(entity, location, progress).await;
                         player
@@ -1131,6 +1158,7 @@ impl BedrockClient {
                 }
             }
             PlayerAction::PredictDestroyBlock | PlayerAction::StopBreak => {
+                let _mining_action = player.mining_action_lock.lock().await;
                 let location = packet.block_pos;
                 if !player.can_interact_with_block_at(&location, 1.0) {
                     return;
@@ -1139,46 +1167,63 @@ impl BedrockClient {
                 let entity = &player.get_entity();
                 let world = entity.world.load_full();
 
-                player.mining.store(false, Ordering::Relaxed);
-                world.set_block_breaking(entity, location, -1).await;
+                if location.0.y > world.get_top_y() {
+                    let (_, state) = world.get_block_and_state(&location);
+                    let runtime_id = pumpkin_data::BlockState::to_be_network_id(state.id);
+                    self.enqueue_packet(
+                        &pumpkin_protocol::bedrock::client::update_block::CUpdateBlock::new(
+                            location,
+                            runtime_id as u32,
+                        ),
+                    )
+                    .await;
+                    return;
+                }
 
                 let (block, state) = world.get_block_and_state(&location);
-                if player.gamemode.load() != GameMode::Creative {
-                    let block_drop = player.can_harvest(state, block).await;
-
-                    let new_state = world
-                        .break_block(
-                            &location,
-                            Some(player.clone()),
-                            if block_drop {
-                                BlockFlags::NOTIFY_NEIGHBORS
-                            } else {
-                                BlockFlags::SKIP_DROPS | BlockFlags::NOTIFY_NEIGHBORS
-                            },
-                        )
-                        .await;
-                    if new_state.is_some() {
-                        server
-                            .block_registry
-                            .broken(&world, block, player, &location, server, state)
-                            .await;
-                        player.apply_tool_damage_for_block_break(state).await;
-                        if block_drop {
-                            player.add_exhaustion(MINE_BLOCK_EXHAUSTION).await;
+                let mining_position = *player.mining_pos.lock().await;
+                if !player.mining.load(Ordering::Relaxed) || mining_position != location {
+                    return;
+                }
+                if player.gamemode.load() != GameMode::Creative && !state.is_air() {
+                    let speed = crate::block::calc_block_breaking(player, state, block).await;
+                    let elapsed = player
+                        .tick_counter
+                        .load(Ordering::Relaxed)
+                        .saturating_sub(player.start_mining_time.load(Ordering::Relaxed));
+                    if speed * ((elapsed + 1) as f32) < 0.7 {
+                        if !player.delayed_mining.load(Ordering::Relaxed) {
+                            *player.delayed_mining_pos.lock().await = location;
+                            player.delayed_mining_start_time.store(
+                                player.start_mining_time.load(Ordering::Relaxed),
+                                Ordering::Relaxed,
+                            );
+                            player.delayed_mining.store(true, Ordering::Relaxed);
                         }
+                        player.mining.store(false, Ordering::Relaxed);
+                        return;
                     }
                 }
+                player.mining.store(false, Ordering::Relaxed);
+                world.set_block_breaking(entity, location, -1).await;
+                player.finish_block_break(server, &world, location).await;
             }
             PlayerAction::CrackBreak => {
                 // Don't do anything for this action. It is no longer used. Block
                 // cracking is done fully server-side.
             }
             PlayerAction::AbortBreak => {
+                let _mining_action = player.mining_action_lock.lock().await;
                 let location = packet.block_pos;
                 let entity = &player.get_entity();
                 let world = entity.world.load();
 
+                let active_position = *player.mining_pos.lock().await;
                 player.mining.store(false, Ordering::Relaxed);
+                player.delayed_mining.store(false, Ordering::Relaxed);
+                if active_position != location {
+                    world.set_block_breaking(entity, active_position, -1).await;
+                }
                 world.set_block_breaking(entity, location, -1).await;
             }
             PlayerAction::DropItem => {
