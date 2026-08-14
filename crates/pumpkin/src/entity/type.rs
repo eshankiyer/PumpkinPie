@@ -539,6 +539,26 @@ pub fn check_spawn_rules(
             && check_bright_ground_spawn_rules(world, pos, &tag::Block::MINECRAFT_SAND);
     }
 
+    // `PolarBear.checkPolarBearSpawnRules`: alternate biomes use their own ground tag;
+    // all other biomes use the ordinary animal predicate.
+    if id == EntityType::POLAR_BEAR.id {
+        let Some(biome) = world.get_biome(pos) else {
+            return false;
+        };
+        if biome.has_tag(&tag::WorldgenBiome::MINECRAFT_POLAR_BEARS_SPAWN_ON_ALTERNATE_BLOCKS) {
+            return check_bright_ground_spawn_rules(
+                world,
+                pos,
+                &tag::Block::MINECRAFT_POLAR_BEARS_SPAWNABLE_ON_ALTERNATE,
+            );
+        }
+
+        return world
+            .get_block(&pos.down())
+            .has_tag(&tag::Block::MINECRAFT_ANIMALS_SPAWNABLE_ON)
+            && world.get_raw_brightness(pos, 0) > 8;
+    }
+
     if uses_animal_spawn_rules(id) {
         return world
             .get_block(&pos.down())
