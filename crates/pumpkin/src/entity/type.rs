@@ -533,6 +533,12 @@ pub fn check_spawn_rules(
         );
     }
 
+    // `Turtle.checkTurtleSpawnRules`: turtles spawn below sea level + 4 on sand in daylight.
+    if id == EntityType::TURTLE.id {
+        return pos.0.y < world.sea_level + 4
+            && check_bright_ground_spawn_rules(world, pos, &tag::Block::MINECRAFT_SAND);
+    }
+
     if uses_animal_spawn_rules(id) {
         return world
             .get_block(&pos.down())
