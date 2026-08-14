@@ -483,6 +483,11 @@ pub fn check_spawn_rules(
             && world.get_block(pos) == &Block::WATER;
     }
 
+    // `Hoglin.checkHoglinSpawnRules`: the block below must not be a Nether Wart Block.
+    if id == EntityType::HOGLIN.id {
+        return world.get_block(&pos.down()) != &Block::NETHER_WART_BLOCK;
+    }
+
     if uses_animal_spawn_rules(id) {
         return world
             .get_block(&pos.down())
@@ -549,11 +554,12 @@ const fn uses_animal_spawn_rules(id: u16) -> bool {
 }
 
 /// `MobCategory::MONSTER` members whose registered `SpawnPlacements` predicate is not
-/// `Monster.checkMonsterSpawnRules`. Slime registers `Slime.checkSlimeSpawnRules`
-/// (`Slime.java`, 1.21.4), which applies the swamp-band and slime-chunk gates instead of
-/// the generic darkness gate, so the category-wide branch must not answer for it.
+/// `Monster.checkMonsterSpawnRules`. Slime and hoglin each have a dedicated predicate,
+/// so the category-wide branch must not answer for them.
 const fn uses_generic_monster_spawn_rules(id: u16) -> bool {
-    id != EntityType::SLIME.id && !uses_any_light_monster_spawn_rules(id)
+    id != EntityType::SLIME.id
+        && id != EntityType::HOGLIN.id
+        && !uses_any_light_monster_spawn_rules(id)
 }
 
 /// Monster types registered with `Monster.checkAnyLightMonsterSpawnRules` in
@@ -653,6 +659,11 @@ mod slime_spawn_dispatch_tests {
         assert!(uses_generic_monster_spawn_rules(EntityType::ZOMBIE.id));
         assert!(uses_generic_monster_spawn_rules(EntityType::CREEPER.id));
         assert!(uses_generic_monster_spawn_rules(EntityType::MAGMA_CUBE.id));
+    }
+
+    #[test]
+    fn dedicated_monster_placements_skip_the_generic_branch() {
+        assert!(!uses_generic_monster_spawn_rules(EntityType::HOGLIN.id));
     }
 
     /// The reported Nether sighting cannot come from the biome spawn tables: no biome the
