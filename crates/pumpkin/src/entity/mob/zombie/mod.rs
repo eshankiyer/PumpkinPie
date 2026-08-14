@@ -57,7 +57,14 @@ impl ZombieEntityBase {
             );
             target_selector.add_goal(
                 3,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::VILLAGER, true),
+                // `Zombie#addBehaviourGoals` targets `AbstractVillager` with visibility
+                // disabled. The concrete implementations in this version are villagers and
+                // wandering traders.
+                ActiveTargetGoal::with_default_types(
+                    &mob_arc.mob_entity,
+                    &[&EntityType::VILLAGER, &EntityType::WANDERING_TRADER],
+                    false,
+                ),
             );
             target_selector.add_goal(
                 3,
