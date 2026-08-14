@@ -1,6 +1,7 @@
 use super::{Mob, MobEntity};
 use crate::entity::ai::goal::destroy_egg::DestroyEggGoal;
 use crate::entity::ai::goal::look_around::RandomLookAroundGoal;
+use crate::entity::ai::goal::non_tame_random_target::baby_turtle_on_land;
 use crate::entity::ai::goal::revenge::RevengeGoal;
 use crate::entity::ai::goal::spear_use::SpearUseGoal;
 use crate::entity::ai::goal::swim::SwimGoal;
@@ -64,7 +65,14 @@ impl ZombieEntityBase {
             );
             target_selector.add_goal(
                 5,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::TURTLE, true),
+                Box::new(ActiveTargetGoal::new(
+                    &mob_arc.mob_entity,
+                    &EntityType::TURTLE,
+                    10,
+                    true,
+                    false,
+                    Some(baby_turtle_on_land),
+                )),
             );
         };
 
