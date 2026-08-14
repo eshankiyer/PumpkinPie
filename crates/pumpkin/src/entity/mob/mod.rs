@@ -1049,6 +1049,11 @@ pub trait Mob: EntityBase + Send + Sync {
         Box::pin(async {})
     }
 
+    /// Runs immediately before the vanilla mob goal selectors.
+    fn pre_ai_tick(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async {})
+    }
+
     /// Vanilla `LivingEntity.updateSwimming`, called from the base tick before mob AI runs.
     fn update_swimming(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async {})
@@ -1321,7 +1326,7 @@ pub trait Mob: EntityBase + Send + Sync {
     fn on_bred(&self, _mate: &dyn EntityBase) {}
 }
 
-struct MutexTakeGuard<'a, T> {
+pub(crate) struct MutexTakeGuard<'a, T> {
     mutex: &'a std::sync::Mutex<T>,
     value: Option<T>,
 }
@@ -1374,6 +1379,8 @@ pub(crate) fn tick_mob_ai<'a>(
             mob_entity.jump_requested.store(false, Relaxed);
             return;
         }
+
+        mob.pre_ai_tick().await;
 
         mob_entity.sensing.lock().unwrap().tick();
 

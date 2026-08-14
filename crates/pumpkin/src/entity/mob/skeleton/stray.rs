@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::entity::{
-    Entity, NBTStorage,
+    Entity, EntityBaseFuture, NBTStorage,
     mob::{Mob, MobEntity, skeleton::SkeletonEntityBase},
 };
 
@@ -22,5 +22,9 @@ impl NBTStorage for StraySkeletonEntity {}
 impl Mob for StraySkeletonEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.entity.mob_entity
+    }
+
+    fn pre_ai_tick(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move { self.entity.reassess_weapon_goal(self).await })
     }
 }

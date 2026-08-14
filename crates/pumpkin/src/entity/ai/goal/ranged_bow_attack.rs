@@ -59,15 +59,20 @@ impl RangedBowAttackGoal {
 
     /// `RangedBowAttackGoal#isHoldingBow` (RangedBowAttackGoal.java:40-42): `mob.isHolding(Items.BOW)`.
     async fn is_holding_bow(mob: &dyn Mob) -> bool {
-        let stack = mob
-            .get_mob_entity()
-            .living_entity
-            .entity_equipment
-            .lock()
-            .await
-            .get(&EquipmentSlot::MAIN_HAND);
-        let item = stack.lock().await.item;
-        item.registry_key == Item::BOW.registry_key
+        let (main_hand, off_hand) = {
+            let equipment = mob
+                .get_mob_entity()
+                .living_entity
+                .entity_equipment
+                .lock()
+                .await;
+            (
+                equipment.get(&EquipmentSlot::MAIN_HAND),
+                equipment.get(&EquipmentSlot::OFF_HAND),
+            )
+        };
+        main_hand.lock().await.item.registry_key == Item::BOW.registry_key
+            || off_hand.lock().await.item.registry_key == Item::BOW.registry_key
     }
 
     async fn has_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
