@@ -488,6 +488,15 @@ pub fn check_spawn_rules(
         return world.get_block(&pos.down()) != &Block::NETHER_WART_BLOCK;
     }
 
+    // `Goat.checkGoatSpawnRules`: goats require their dedicated ground tag and daylight.
+    if id == EntityType::GOAT.id {
+        return check_bright_ground_spawn_rules(
+            world,
+            pos,
+            &tag::Block::MINECRAFT_GOATS_SPAWNABLE_ON,
+        );
+    }
+
     if uses_animal_spawn_rules(id) {
         return world
             .get_block(&pos.down())
