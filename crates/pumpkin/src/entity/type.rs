@@ -468,6 +468,13 @@ pub fn check_spawn_rules(
             &tag::Block::MINECRAFT_CAMELS_SPAWNABLE_ON,
         );
     }
+    if id == EntityType::WOLF.id {
+        return check_bright_ground_spawn_rules(
+            world,
+            pos,
+            &tag::Block::MINECRAFT_WOLVES_SPAWNABLE_ON,
+        );
+    }
 
     // `GlowSquid.checkGlowSquidSpawnRules`: only deep below sea level, in complete darkness.
     if id == EntityType::GLOW_SQUID.id {
