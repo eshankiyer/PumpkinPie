@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use rand::{RngExt, rng};
+use rand::RngExt;
 
 use crate::entity::{
     EntityBase, ai::pathfinder::NavigatorGoal, experience_orb::ExperienceOrbEntity, mob::Mob,
@@ -103,19 +103,22 @@ impl BreedGoal {
         mate.set_breeding_cooldown(6000);
         mob.on_bred(mate);
 
+        let baby = mob.create_offspring(mate, &world).await;
         let parent_pos = entity.pos.load();
-        if let Some(baby) = mob.create_offspring(mate, &world).await {
-            if let Some(baby_mob) = baby.get_mob() {
-                baby_mob.set_persistence_required();
-            }
+
+        if let Some(baby) = &baby {
+            baby.get_entity().set_pos(parent_pos);
             baby.get_entity().set_age(-24000);
-            world.spawn_entity(baby).await;
         }
 
-        // Vanilla Animal.java#finalizeSpawnChildFromBreeding: every successful breed spawns an
-        // experience orb worth 1-7 xp.
-        let xp = rng().random_range(1u32..=7);
-        ExperienceOrbEntity::spawn(&world, parent_pos, xp).await;
+        // Vanilla Animal.java#finalizeSpawnChildFromBreeding only drops breeding XP when
+        // the mob-drops gamerule is enabled.
+        if world.level_info.load().game_rules.mob_drops {
+            let xp = mob.get_random().random_range(1u32..=7);
+            ExperienceOrbEntity::spawn(&world, parent_pos, xp).await;
+        }
+
+        mob.spawn_breeding_result(baby, &world, parent_pos).await;
     }
 }
 

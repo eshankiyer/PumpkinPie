@@ -1319,6 +1319,22 @@ pub trait Mob: EntityBase + Send + Sync {
         })
     }
 
+    /// Spawns the prepared vanilla breeding result after `Animal.finalizeSpawnChildFromBreeding`
+    /// awards experience. Concrete animals can override this when breeding produces a non-mob
+    /// result, such as Sniffer's egg item.
+    fn spawn_breeding_result<'a>(
+        &'a self,
+        offspring: Option<Arc<dyn EntityBase>>,
+        world: &'a Arc<World>,
+        _parent_pos: Vector3<f64>,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            if let Some(baby) = offspring {
+                world.spawn_entity(baby).await;
+            }
+        })
+    }
+
     /// Called once a breed has been claimed (both parents' love ticks reset) and offspring is
     /// about to be created. Override for side effects vanilla ties to a specific `BreedGoal`
     /// subclass rather than the generic breed path, e.g. `Turtle.TurtleBreedGoal.breed` setting

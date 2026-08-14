@@ -8,6 +8,7 @@ use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{entity::EntityType, item::Item};
 use pumpkin_nbt::compound::NbtCompound;
+use rand::RngExt;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -181,10 +182,8 @@ impl Mob for SnifferEntity {
     }
 
     /// Vanilla `Sniffer.spawnChildFromBreeding`: drops a `SNIFFER_EGG` item instead of spawning
-    /// a live baby. `BreedGoal::breed` spawns the experience orb *outside* the
-    /// `if let Some(baby)` branch, so returning `None` here still preserves the shared
-    /// cooldown/stat/advancement/XP-orb bookkeeping vanilla's
-    /// `finalizeSpawnChildFromBreeding(level, partner, null)` call also does on this path.
+    /// a live baby. The item is emitted by `spawn_breeding_result` after the shared breeding XP
+    /// path, matching vanilla's `finalizeSpawnChildFromBreeding` ordering.
     ///
     /// Deferred (documented simplification): vanilla's `canMate` additionally gates breeding on
     /// both sniffers being in `{IDLING, SCENTING, FEELING_HAPPY}`. `BreedGoal`/`Mob` has no
@@ -193,21 +192,32 @@ impl Mob for SnifferEntity {
     fn create_offspring<'a>(
         &'a self,
         _mate: &'a dyn EntityBase,
-        world: &'a Arc<World>,
+        _world: &'a Arc<World>,
     ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
-        Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
-            let pos = entity.pos.load();
+        Box::pin(async { None })
+    }
 
+    fn spawn_breeding_result<'a>(
+        &'a self,
+        _offspring: Option<Arc<dyn EntityBase>>,
+        world: &'a Arc<World>,
+        parent_pos: pumpkin_util::math::vector3::Vector3<f64>,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
             let item_entity = Arc::new(ItemEntity::new(
-                Entity::new(world.clone(), pos, &EntityType::ITEM),
+                Entity::new(world.clone(), parent_pos, &EntityType::ITEM),
                 ItemStack::new(1, &Item::SNIFFER_EGG),
             ));
+            let pitch =
+                (self.get_random().random::<f32>() - self.get_random().random::<f32>()) * 0.2 + 0.5;
+            world.play_sound_fine(
+                Sound::BlockSnifferEggPlop,
+                SoundCategory::Neutral,
+                &parent_pos,
+                1.0,
+                pitch,
+            );
             world.spawn_entity(item_entity).await;
-
-            world.play_sound(Sound::BlockSnifferEggPlop, SoundCategory::Neutral, &pos);
-
-            None
         })
     }
 }
