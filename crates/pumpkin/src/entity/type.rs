@@ -497,6 +497,15 @@ pub fn check_spawn_rules(
         );
     }
 
+    // `Frog.checkFrogSpawnRules`: frogs require their dedicated ground tag and daylight.
+    if id == EntityType::FROG.id {
+        return check_bright_ground_spawn_rules(
+            world,
+            pos,
+            &tag::Block::MINECRAFT_FROGS_SPAWNABLE_ON,
+        );
+    }
+
     if uses_animal_spawn_rules(id) {
         return world
             .get_block(&pos.down())
