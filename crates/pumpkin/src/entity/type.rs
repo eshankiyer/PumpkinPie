@@ -515,6 +515,15 @@ pub fn check_spawn_rules(
         );
     }
 
+    // `MushroomCow.checkMushroomSpawnRules`: mooshrooms require mycelium and daylight.
+    if id == EntityType::MOOSHROOM.id {
+        return check_bright_ground_spawn_rules(
+            world,
+            pos,
+            &tag::Block::MINECRAFT_MOOSHROOMS_SPAWNABLE_ON,
+        );
+    }
+
     if uses_animal_spawn_rules(id) {
         return world
             .get_block(&pos.down())
