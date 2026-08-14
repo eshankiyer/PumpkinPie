@@ -451,6 +451,24 @@ pub fn check_spawn_rules(
             .has_tag(&tag::Block::MINECRAFT_AXOLOTLS_SPAWNABLE_ON);
     }
 
+    // `Armadillo.checkArmadilloSpawnRules` and `Camel.checkCamelSpawnRules` both
+    // require their species-specific ground tag and daylight, rather than the
+    // generic animal tag used by cattle, sheep, and similar mobs.
+    if id == EntityType::ARMADILLO.id {
+        return check_bright_ground_spawn_rules(
+            world,
+            pos,
+            &tag::Block::MINECRAFT_ARMADILLO_SPAWNABLE_ON,
+        );
+    }
+    if id == EntityType::CAMEL.id {
+        return check_bright_ground_spawn_rules(
+            world,
+            pos,
+            &tag::Block::MINECRAFT_CAMELS_SPAWNABLE_ON,
+        );
+    }
+
     // `GlowSquid.checkGlowSquidSpawnRules`: only deep below sea level, in complete darkness.
     if id == EntityType::GLOW_SQUID.id {
         return is_below_glow_squid_y_threshold(pos.0.y, world.sea_level)
@@ -549,6 +567,14 @@ fn check_surface_water_creature_spawn_rules(world: &World, pos: &BlockPos) -> bo
             .get_fluid(&pos.down())
             .has_tag(&tag::Fluid::MINECRAFT_WATER)
         && world.get_block(&pos.up()) == &Block::WATER
+}
+
+fn check_bright_ground_spawn_rules(
+    world: &World,
+    pos: &BlockPos,
+    spawnable_on: &'static tag::Tag,
+) -> bool {
+    world.get_block(&pos.down()).has_tag(spawnable_on) && world.get_raw_brightness(pos, 0) > 8
 }
 
 /// `AbstractNautilus.checkNautilusSpawnRules`'s Y-range gate:
