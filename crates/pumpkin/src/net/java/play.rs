@@ -2545,10 +2545,37 @@ impl JavaClient {
 
         let entity = &player.get_entity();
         let world = entity.world.load_full();
-        if position.0.y > world.get_top_y()
-            || player
-                .is_under_spawn_protection(server, &world, &position)
-                .await
+        if position.0.y > world.get_top_y() {
+            player
+                .send_system_message_raw(
+                    &TextComponent::translate_cross(
+                        translation::java::BUILD_TOOHIGH,
+                        translation::bedrock::BUILD_TOOHIGH,
+                        vec![TextComponent::text(world.get_top_y().to_string())],
+                    )
+                    .color_named(pumpkin_util::text::color::NamedColor::Red),
+                    true,
+                )
+                .await;
+            return Ok(());
+        }
+        if position.0.y < world.get_bottom_y() {
+            player
+                .send_system_message_raw(
+                    &TextComponent::translate_cross(
+                        translation::java::BUILD_TOOLOW,
+                        translation::bedrock::BUILD_TOOLOW,
+                        vec![TextComponent::text(world.get_bottom_y().to_string())],
+                    )
+                    .color_named(pumpkin_util::text::color::NamedColor::Red),
+                    true,
+                )
+                .await;
+            return Ok(());
+        }
+        if player
+            .is_under_spawn_protection(server, &world, &position)
+            .await
             || !world
                 .worldborder
                 .lock()
