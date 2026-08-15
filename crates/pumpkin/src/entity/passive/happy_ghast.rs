@@ -232,6 +232,10 @@ impl Mob for HappyGhastEntity {
         &self.mob_entity
     }
 
+    fn should_follow_leash(&self) -> bool {
+        false
+    }
+
     fn can_be_collided_with(&self) -> bool {
         true
     }

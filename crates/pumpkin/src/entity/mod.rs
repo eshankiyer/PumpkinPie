@@ -3520,7 +3520,7 @@ impl Entity {
         );
     }
 
-    pub async fn tick_leash(&self) {
+    pub async fn tick_leash(&self) -> Option<(Vector3<f64>, f64)> {
         let holder = {
             let guard = self.leashed_to.lock().await;
             guard.clone()
@@ -3532,7 +3532,11 @@ impl Entity {
             // Drop leash if entity or holder is removed or dead
             if !self.is_alive() || !holder_entity.is_alive() {
                 self.unleash().await;
-                return;
+                return None;
+            }
+
+            if !Arc::ptr_eq(&self.world.load_full(), &holder_entity.world.load_full()) {
+                return None;
             }
 
             let self_pos = self.pos.load();
@@ -3549,14 +3553,55 @@ impl Entity {
                     .load()
                     .drop_stack(&self.block_pos.load(), lead_item)
                     .await;
-            } else if distance > Self::LEASH_ELASTIC_DISTANCE {
-                // Elastic pull force towards leash holder
-                let dir = (holder_pos - self_pos).normalize();
-                let pull_strength = (distance - Self::LEASH_ELASTIC_DISTANCE) * 0.11;
-                let current_vel = self.velocity.load();
-                self.velocity.store(current_vel + dir * pull_strength);
-                self.velocity_dirty.store(true, Relaxed);
+                None
+            } else if distance
+                > Self::LEASH_ELASTIC_DISTANCE
+                    - f64::from(holder_entity.width())
+                    - f64::from(self.width())
+                && {
+                    let yaw = -f64::from(self.yaw.load()).to_radians();
+                    let entity_offset_z = f64::from(self.width()) * 0.5;
+                    let entity_attachment = self_pos
+                        + Vector3::new(
+                            entity_offset_z * yaw.sin(),
+                            f64::from(self.height()) * 0.5,
+                            entity_offset_z * yaw.cos(),
+                        );
+                    let holder_attachment = holder_pos
+                        + Vector3::new(0.0, f64::from(holder_entity.height()) * 0.5, 0.0);
+                    let attachment_delta = holder_attachment - entity_attachment;
+                    let attachment_distance = attachment_delta.length();
+                    if attachment_distance < Self::LEASH_ELASTIC_DISTANCE {
+                        false
+                    } else {
+                        let displacement = attachment_delta.normalize()
+                            * (attachment_distance - Self::LEASH_ELASTIC_DISTANCE);
+                        let holder_velocity = if holder
+                            .get_mob()
+                            .is_some_and(|mob| mob.get_mob_entity().is_no_ai())
+                        {
+                            Vector3::new(0.0, 0.0, 0.0)
+                        } else {
+                            holder_entity.velocity.load()
+                        };
+                        let relative_velocity = (holder_velocity - self.velocity.load()) * 0.11;
+                        let force = Vector3::new(
+                            displacement.x * 0.8,
+                            displacement.y * 0.2,
+                            displacement.z * 0.8,
+                        ) + relative_velocity;
+                        self.velocity.store(self.velocity.load() + force);
+                        self.velocity_dirty.store(true, Relaxed);
+                        true
+                    }
+                }
+            {
+                None
+            } else {
+                Some((holder_pos, distance))
             }
+        } else {
+            None
         }
     }
 

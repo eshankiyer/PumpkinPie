@@ -134,6 +134,20 @@ impl Navigator {
         self.current_path = None;
     }
 
+    /// Updates a direct navigation goal without discarding an unchanged path.
+    pub fn set_progress_if_changed(&mut self, goal: NavigatorGoal) {
+        let changed = self.current_goal.as_ref().is_none_or(|current| {
+            current
+                .destination
+                .squared_distance_to_vec(&goal.destination)
+                > 0.25
+                || (current.speed - goal.speed).abs() > f64::EPSILON
+        });
+        if changed {
+            self.set_progress(goal);
+        }
+    }
+
     /// Starts navigation with a path that was already computed by a goal.
     ///
     /// Vanilla goals such as `MeleeAttackGoal` and `AvoidEntityGoal` retain the path produced by

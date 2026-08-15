@@ -194,6 +194,10 @@ impl Mob for TraderLlamaEntity {
         &self.mob_entity
     }
 
+    fn get_follow_leash_speed(&self) -> f32 {
+        2.0
+    }
+
     fn mob_interact<'a>(
         &'a self,
         player: &'a Arc<Player>,

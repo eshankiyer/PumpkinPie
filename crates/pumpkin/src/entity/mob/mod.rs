@@ -1,5 +1,7 @@
 use super::{
-    Entity, EntityBase, NBTStorage, ai::pathfinder::Navigator, equipment_break_status,
+    Entity, EntityBase, NBTStorage,
+    ai::pathfinder::{Navigator, NavigatorGoal},
+    equipment_break_status,
     living::LivingEntity,
 };
 use crate::entity::EntityBaseFuture;
@@ -1058,6 +1060,43 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
+    /// Vanilla `PathfinderMob.closeRangeLeashBehaviour`: keep a non-panicking mob
+    /// navigating toward its leash holder while preserving a two-block gap.
+    fn close_range_leash_behavior(&self, holder_pos: Vector3<f64>, distance: f64) {
+        if !self.should_follow_leash() || self.is_panicking() {
+            return;
+        }
+
+        self.get_mob_entity()
+            .goals_selector
+            .lock()
+            .unwrap()
+            .enable_control(Controls::MOVE);
+
+        let mob_pos = self.get_mob_entity().living_entity.entity.pos.load();
+        let delta = (holder_pos - mob_pos).normalize() * (distance - 2.0).max(0.0);
+        let target = mob_pos + delta;
+        self.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap()
+            .set_progress_if_changed(NavigatorGoal::new(
+                mob_pos,
+                target,
+                f64::from(self.get_follow_leash_speed()),
+            ));
+    }
+
+    /// Vanilla `PathfinderMob.shouldStayCloseToLeashHolder`.
+    fn should_follow_leash(&self) -> bool {
+        true
+    }
+
+    /// Vanilla `PathfinderMob.followLeashSpeed`.
+    fn get_follow_leash_speed(&self) -> f32 {
+        1.0
+    }
+
     /// Per-mob tick hook called after selectors and navigation, before movement controls.
     /// This is vanilla `Mob.customServerAiStep`'s position in `Mob.serverAiStep`.
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
@@ -1541,7 +1580,10 @@ impl<T: Mob + Send + 'static> EntityBase for T {
                     }
                 }
             }
-            mob_entity.living_entity.entity.tick_leash().await;
+            let entity = &mob_entity.living_entity.entity;
+            if let Some((holder_pos, distance)) = entity.tick_leash().await {
+                self.close_range_leash_behavior(holder_pos, distance);
+            }
 
             if mob_entity.breeding_cooldown.load(Relaxed) > 0 {
                 mob_entity.breeding_cooldown.fetch_sub(1, Relaxed);
