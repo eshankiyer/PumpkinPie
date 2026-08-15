@@ -52,18 +52,24 @@ impl AttributeInstance {
         let mut value = self.base_value;
 
         let mut add_sum = 0.0;
-        let mut mul_base = 0.0;
         let mut mul_total = 1.0;
         for m in &self.modifiers {
             match m.operation {
                 ModifierOperation::Add => add_sum += m.amount,
-                ModifierOperation::MultiplyBase => mul_base += m.amount,
+                ModifierOperation::MultiplyBase => {}
                 ModifierOperation::MultiplyTotal => mul_total *= 1.0 + m.amount,
             }
         }
 
         value += add_sum;
-        value *= 1.0 + mul_base;
+        let base = value;
+        for modifier in self
+            .modifiers
+            .iter()
+            .filter(|modifier| matches!(modifier.operation, ModifierOperation::MultiplyBase))
+        {
+            value += base * modifier.amount;
+        }
         value *= mul_total;
 
         value = sanitize_value(value, self.min_value, self.max_value);
@@ -221,6 +227,14 @@ mod tests {
 
         let negative = AttributeInstance::new(-1.0, -2.0, 1.0);
         assert_eq!(negative.value(), -1.0);
+
+        let mut non_finite = AttributeInstance::new(f64::INFINITY, 0.0, 30.0);
+        non_finite.add_or_replace_modifier(Modifier {
+            id: "zero-multiplier".to_string(),
+            amount: 0.0,
+            operation: ModifierOperation::MultiplyBase,
+        });
+        assert_eq!(non_finite.value(), 0.0);
     }
 }
 
