@@ -1,7 +1,8 @@
 use crate::block::blocks::falling::FallingBlock;
 use crate::block::registry::BlockActionResult;
-use crate::block::{BlockBehaviour, BlockFuture, BrokenArgs, NormalUseArgs, PlacedArgs};
+use crate::block::{AttackArgs, BlockBehaviour, BlockFuture, NormalUseArgs, PlacedArgs};
 use crate::world::World;
+use pumpkin_data::BlockStateId;
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::tick::TickPriority;
@@ -12,7 +13,7 @@ use std::sync::Arc;
 pub struct DragonEggBlock;
 
 impl DragonEggBlock {
-    async fn teleport(&self, world: &Arc<World>, pos: &BlockPos) {
+    async fn teleport(&self, world: &Arc<World>, pos: &BlockPos, state_id: BlockStateId) {
         let min_y = world.dimension.min_y;
         let max_y = min_y + world.dimension.height;
         for _ in 0..1000 {
@@ -36,14 +37,18 @@ impl DragonEggBlock {
                 && !below_state.is_air()
                 && world.worldborder.lock().await.contains_block(x, z)
             {
-                let current_state = world.get_block_state(pos);
                 world
                     .set_block_state(
                         &test_pos,
-                        current_state.id,
+                        state_id,
                         pumpkin_world::world::BlockFlags::NOTIFY_LISTENERS,
                     )
                     .await;
+                // The destination write yields to the async world pipeline. Do not erase a
+                // replacement that arrived at the source while that write was in flight.
+                if world.get_block_state(pos).id != state_id {
+                    return;
+                }
                 world
                     .set_block_state(
                         pos,
@@ -58,6 +63,13 @@ impl DragonEggBlock {
 }
 
 impl BlockBehaviour for DragonEggBlock {
+    fn attack<'a>(&'a self, args: AttackArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            self.teleport(args.world, args.position, args.state.id)
+                .await;
+        })
+    }
+
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             args.world
@@ -67,15 +79,9 @@ impl BlockBehaviour for DragonEggBlock {
 
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
-            self.teleport(args.world, args.position).await;
+            let state_id = args.world.get_block_state(args.position).id;
+            self.teleport(args.world, args.position, state_id).await;
             BlockActionResult::Success
-        })
-    }
-
-    // Dragon egg is typically teleported when attacked
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            self.teleport(args.world, args.position).await;
         })
     }
 
