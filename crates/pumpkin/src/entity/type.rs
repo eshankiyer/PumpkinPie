@@ -483,9 +483,31 @@ pub fn check_spawn_rules(
             && world.get_block(pos) == &Block::WATER;
     }
 
+    // `Fox.checkFoxSpawnRules`: foxes use the dedicated ground tag and daylight,
+    // even though their placement type is `NO_RESTRICTIONS`.
+    if id == EntityType::FOX.id {
+        return check_bright_ground_spawn_rules(
+            world,
+            pos,
+            &tag::Block::MINECRAFT_FOXES_SPAWNABLE_ON,
+        );
+    }
+
     // `Hoglin.checkHoglinSpawnRules`: the block below must not be a Nether Wart Block.
     if id == EntityType::HOGLIN.id {
         return world.get_block(&pos.down()) != &Block::NETHER_WART_BLOCK;
+    }
+
+    // `Piglin.checkPiglinSpawnRules`: piglins cannot spawn on Nether Wart Blocks.
+    if id == EntityType::PIGLIN.id {
+        return world.level_info.load().difficulty != pumpkin_util::Difficulty::Peaceful
+            && world.get_block(&pos.down()) != &Block::NETHER_WART_BLOCK;
+    }
+
+    // `Strider.checkStriderSpawnRules`: after the lava placement check, walk
+    // upward through lava and require the first non-lava block to be air.
+    if id == EntityType::STRIDER.id {
+        return check_strider_spawn_rules(world, pos);
     }
 
     // `Goat.checkGoatSpawnRules`: goats require their dedicated ground tag and daylight.
@@ -651,6 +673,18 @@ fn check_surface_water_creature_spawn_rules(world: &World, pos: &BlockPos) -> bo
             .get_fluid(&pos.down())
             .has_tag(&tag::Fluid::MINECRAFT_WATER)
         && world.get_block(&pos.up()) == &Block::WATER
+}
+
+fn check_strider_spawn_rules(world: &World, pos: &BlockPos) -> bool {
+    let mut check_pos = pos.up();
+    while world
+        .get_fluid(&check_pos)
+        .has_tag(&tag::Fluid::MINECRAFT_LAVA)
+    {
+        check_pos = check_pos.up();
+    }
+
+    world.get_block_state(&check_pos).is_air()
 }
 
 fn check_bright_ground_spawn_rules(
