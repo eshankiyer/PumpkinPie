@@ -1120,11 +1120,19 @@ impl Player {
         let config = &server.advanced_config.pvp;
 
         let inventory = self.inventory();
-        let item_stack = inventory.held_item();
+        let auto_spin_attack = self.is_auto_spin_attack();
+        let item_stack = if auto_spin_attack {
+            Arc::new(Mutex::new(self.living_entity.auto_spin_attack_item().await))
+        } else {
+            inventory.held_item()
+        };
 
-        let base_damage = self
-            .living_entity
-            .get_attribute_value(&Attributes::ATTACK_DAMAGE);
+        let base_damage = if auto_spin_attack {
+            f64::from(self.living_entity.auto_spin_attack_damage.load())
+        } else {
+            self.living_entity
+                .get_attribute_value(&Attributes::ATTACK_DAMAGE)
+        };
         let base_attack_speed = 4.0;
 
         let mut damage_multiplier = 1.0;
@@ -2077,9 +2085,8 @@ impl Player {
             && !entity.has_vehicle().await
     }
 
-    const fn is_auto_spin_attack() -> bool {
-        // TODO: Track active auto-spin/riptide state and return true while it is active.
-        false
+    fn is_auto_spin_attack(&self) -> bool {
+        self.living_entity.is_auto_spin_attack()
     }
 
     fn can_fit_pose(&self, pose: EntityPose) -> bool {
@@ -2106,7 +2113,7 @@ impl Player {
             EntityPose::Swimming
         } else if entity.is_fall_flying() {
             EntityPose::FallFlying
-        } else if Self::is_auto_spin_attack() {
+        } else if self.is_auto_spin_attack() {
             EntityPose::SpinAttack
         } else if entity.is_sneaking() && !flying {
             EntityPose::Crouching

@@ -150,6 +150,12 @@ pub struct LivingEntity {
     pub item_use_time: AtomicI32,
     pub item_in_use: Mutex<Option<ItemStack>>,
     pub active_hand: Mutex<Option<Hand>>,
+    /// Vanilla `LivingEntity.autoSpinAttackTicks`.
+    pub auto_spin_attack_ticks: AtomicI32,
+    pub auto_spin_attack_state: Mutex<()>,
+    /// Vanilla `LivingEntity.autoSpinAttackDmg` and `autoSpinAttackItemStack`.
+    pub auto_spin_attack_damage: AtomicCell<f32>,
+    pub auto_spin_attack_item_stack: Mutex<Option<ItemStack>>,
     pub death_time: AtomicU8,
     /// Indicates whether the entity is dead. (`on_death` called)
     pub dead: AtomicBool,
@@ -217,7 +223,6 @@ impl LivingEntity {
 
     const USING_ITEM_FLAG: u8 = 1;
     const OFF_HAND_ACTIVE_FLAG: u8 = 2;
-    #[expect(dead_code)]
     const USING_RIPTIDE_FLAG: u8 = 4;
 
     const PREVENT_AREA_FALL_DAMAGE_BLOCKS: [&'static Block; 4] = [
@@ -296,6 +301,10 @@ impl LivingEntity {
             item_use_time: AtomicI32::new(0),
             item_in_use: Mutex::new(None),
             active_hand: Mutex::new(None),
+            auto_spin_attack_ticks: AtomicI32::new(0),
+            auto_spin_attack_state: Mutex::new(()),
+            auto_spin_attack_damage: AtomicCell::new(0.0),
+            auto_spin_attack_item_stack: Mutex::new(None),
             livings_flags: AtomicU8::new(0),
             active_effects: Mutex::new(HashMap::new()),
             entity_equipment: Arc::new(Mutex::new(EntityEquipment::new())),
@@ -415,6 +424,95 @@ impl LivingEntity {
         self.item_use_time.store(0, Ordering::Relaxed);
 
         self.set_living_flag(Self::USING_ITEM_FLAG, false);
+    }
+
+    /// Starts vanilla's temporary auto-spin attack state.
+    pub async fn start_auto_spin_attack(
+        &self,
+        activation_ticks: i32,
+        damage: f32,
+        item_stack: ItemStack,
+    ) {
+        let _state = self.auto_spin_attack_state.lock().await;
+        self.auto_spin_attack_ticks
+            .store(activation_ticks, Ordering::Relaxed);
+        self.auto_spin_attack_damage.store(damage);
+        *self.auto_spin_attack_item_stack.lock().await = Some(item_stack);
+        self.set_living_flag(Self::USING_RIPTIDE_FLAG, true);
+    }
+
+    pub fn is_auto_spin_attack(&self) -> bool {
+        self.livings_flags.load(Ordering::Relaxed) & Self::USING_RIPTIDE_FLAG != 0
+    }
+
+    pub async fn auto_spin_attack_item(&self) -> ItemStack {
+        self.auto_spin_attack_item_stack
+            .lock()
+            .await
+            .clone()
+            .unwrap_or_else(|| ItemStack::EMPTY.clone())
+    }
+
+    async fn tick_auto_spin_attack(
+        &self,
+        caller: &Arc<dyn EntityBase>,
+        previous_bounding_box: BoundingBox,
+    ) {
+        let _state = self.auto_spin_attack_state.lock().await;
+        let ticks = self.auto_spin_attack_ticks.load(Ordering::Relaxed);
+        if ticks <= 0 {
+            return;
+        }
+
+        let remaining = ticks - 1;
+        self.auto_spin_attack_ticks
+            .store(remaining, Ordering::Relaxed);
+
+        let current_bounding_box = self.entity.bounding_box.load();
+        let search_box = BoundingBox::new(
+            Vector3::new(
+                previous_bounding_box.min.x.min(current_bounding_box.min.x),
+                previous_bounding_box.min.y.min(current_bounding_box.min.y),
+                previous_bounding_box.min.z.min(current_bounding_box.min.z),
+            ),
+            Vector3::new(
+                previous_bounding_box.max.x.max(current_bounding_box.max.x),
+                previous_bounding_box.max.y.max(current_bounding_box.max.y),
+                previous_bounding_box.max.z.max(current_bounding_box.max.z),
+            ),
+        );
+        let world = self.entity.world.load();
+        let candidates: Vec<_> = world
+            .get_all_at_box(&search_box)
+            .into_iter()
+            .filter(|candidate| candidate.get_entity().entity_id != self.entity.entity_id)
+            .collect();
+        if let Some(player) = caller.get_player() {
+            for candidate in &candidates {
+                let candidate_entity = candidate.get_entity();
+                if candidate_entity.entity_id == self.entity.entity_id
+                    || candidate.get_living_entity().is_none()
+                {
+                    continue;
+                }
+
+                player.attack(candidate.clone()).await;
+                self.auto_spin_attack_ticks.store(0, Ordering::Relaxed);
+                self.entity
+                    .set_velocity(self.entity.velocity.load().multiply(-0.2, -0.2, -0.2));
+                break;
+            }
+        }
+
+        if candidates.is_empty() && self.entity.horizontal_collision.load(SeqCst) {
+            self.auto_spin_attack_ticks.store(0, Ordering::Relaxed);
+        }
+
+        if self.auto_spin_attack_ticks.load(Ordering::Relaxed) <= 0 {
+            self.auto_spin_attack_damage.store(0.0);
+            *self.auto_spin_attack_item_stack.lock().await = None;
+            self.set_living_flag(Self::USING_RIPTIDE_FLAG, false);
+        }
     }
 
     /// Vanilla: `Raider::hasActiveRaid` (`getCurrentRaid() != null && raid.isActive()`).
@@ -3440,9 +3538,12 @@ impl EntityBase for LivingEntity {
                 && (is_alive
                     || (in_death_animation && self.entity.entity_type != &EntityType::PLAYER))
             {
+                let previous_bounding_box = self.entity.bounding_box.load();
                 self.tick_movement(server, caller).await;
                 // Vanilla-like order: freeze logic runs after movement/collisions.
                 self.entity.tick_frozen(caller.as_ref()).await;
+                self.tick_auto_spin_attack(caller, previous_bounding_box)
+                    .await;
                 self.push_entities(caller).await;
             }
 

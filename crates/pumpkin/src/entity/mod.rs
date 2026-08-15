@@ -2441,6 +2441,19 @@ impl Entity {
         self.set_pos(self.pos.load() + delta);
     }
 
+    /// Applies a small self movement through the normal block collision solver.
+    /// Player movement is handled by the player packet path, so `move_entity`
+    /// deliberately skips players; vanilla uses this path for Riptide's lift.
+    pub async fn move_self_with_collisions(&self, caller: &dyn EntityBase, motion: Vector3<f64>) {
+        if self.no_clip.load(Ordering::Relaxed) {
+            self.move_pos(motion);
+            return;
+        }
+
+        let final_move = self.adjust_movement_for_collisions(motion, caller).await;
+        self.move_pos(final_move);
+    }
+
     // Move by a delta, adjust for collisions, and send
 
     // Does not send movement. That must be done separately
