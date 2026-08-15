@@ -41,7 +41,11 @@ use pumpkin_protocol::{
     codec::{var_int::VarInt, var_long::VarLong, var_uint::VarUInt, var_ulong::VarULong},
     java::client::play::{Animation, CEntityAnimation, CSetSelectedSlot, CSystemChatMessage},
 };
-use pumpkin_util::{GameMode, Hand, math::position::BlockPos, text::TextComponent};
+use pumpkin_util::{
+    GameMode, Hand,
+    math::{position::BlockPos, vector3::Vector3},
+    text::TextComponent,
+};
 
 use pumpkin_world::inventory::Inventory;
 
@@ -639,14 +643,19 @@ impl BedrockClient {
                 let block = world.get_block(&data.block_position);
                 let server = world.server.upgrade().expect("Server is gone");
 
-                if player.gamemode.load() == GameMode::Spectator {
-                    // TODO: openMenu ?
-                    return;
-                }
-
                 if data.action_type.0 == 0 {
                     // Click block
+                    let click_offset = data.click_position
+                        - Vector3 {
+                            x: 0.5,
+                            y: 0.5,
+                            z: 0.5,
+                        };
                     if data.block_position.0.y > world.get_top_y()
+                        || !player.can_interact_with_block_at(&data.block_position, 1.0)
+                        || !(click_offset.x.abs() < 1.0000001
+                            && click_offset.y.abs() < 1.0000001
+                            && click_offset.z.abs() < 1.0000001)
                         || player
                             .is_under_spawn_protection(&server, &world, &data.block_position)
                             .await
@@ -656,6 +665,24 @@ impl BedrockClient {
                             .await
                             .contains_block(data.block_position.0.x, data.block_position.0.z)
                     {
+                        return;
+                    }
+
+                    if player.gamemode.load() == GameMode::Spectator {
+                        server
+                            .block_registry
+                            .on_use_for_spectator(
+                                block,
+                                player,
+                                &data.block_position,
+                                &BlockHitResult {
+                                    face: &face,
+                                    cursor_pos: &data.click_position,
+                                },
+                                &server,
+                                &world,
+                            )
+                            .await;
                         return;
                     }
 
@@ -755,6 +782,10 @@ impl BedrockClient {
                         }
                     }
                 } else if data.action_type.0 == 1 {
+                    if player.gamemode.load() == GameMode::Spectator {
+                        return;
+                    }
+
                     // Click air / Use item
                     let is_creative = player.gamemode.load() == GameMode::Creative;
                     let client_stack = descriptor_to_stack(&data.item_in_hand, is_creative);
