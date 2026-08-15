@@ -2604,6 +2604,7 @@ impl JavaClient {
             let result = self
                 .call_use_item_on(
                     player,
+                    hand,
                     &position,
                     &cursor_pos,
                     &face,
@@ -2684,6 +2685,7 @@ impl JavaClient {
     async fn call_use_item_on(
         &self,
         player: &Arc<Player>,
+        hand: Hand,
         position: &BlockPos,
         cursor_pos: &Vector3<f32>,
         face: &BlockDirection,
@@ -2712,7 +2714,9 @@ impl JavaClient {
             return result;
         }
 
-        if matches!(result, BlockActionResult::PassToDefaultBlockAction) {
+        if matches!(hand, Hand::Right)
+            && matches!(result, BlockActionResult::PassToDefaultBlockAction)
+        {
             let result = server
                 .block_registry
                 .on_use(
