@@ -226,7 +226,13 @@ impl WitchEntity {
         let mut attributes = living.attributes.write().unwrap();
         let speed = attributes
             .entry(Attributes::MOVEMENT_SPEED.id)
-            .or_insert_with(|| AttributeInstance::new(base));
+            .or_insert_with(|| {
+                AttributeInstance::new(
+                    base,
+                    Attributes::MOVEMENT_SPEED.min_value,
+                    Attributes::MOVEMENT_SPEED.max_value,
+                )
+            });
         speed.remove_modifier(SPEED_MODIFIER_DRINKING_ID);
         speed.add_or_replace_modifier(Modifier {
             id: SPEED_MODIFIER_DRINKING_ID.to_string(),
