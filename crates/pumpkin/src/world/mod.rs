@@ -4920,7 +4920,6 @@ impl World {
     }
 
     /// Sets a block and returns the old block id
-    #[expect(clippy::too_many_lines)]
     pub async fn set_block_state(
         self: &Arc<Self>,
         position: &BlockPos,
@@ -5000,12 +4999,14 @@ impl World {
             return Some(block_state_id);
         }
 
-        let mutation_version = self
-            .block_mutation_versions
-            .entry(*position)
-            .and_modify(|version| *version = version.saturating_add(1))
-            .or_insert(1)
-            .clone();
+        let mutation_version = {
+            let mutation_version = self
+                .block_mutation_versions
+                .entry(*position)
+                .and_modify(|version| *version = version.saturating_add(1))
+                .or_insert(1);
+            *mutation_version
+        };
         unsent_block_changes.insert(*position, block_state_id);
         drop(unsent_block_changes);
 

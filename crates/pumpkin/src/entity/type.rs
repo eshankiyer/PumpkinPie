@@ -726,6 +726,7 @@ pub fn check_spawn_obstruction(
     )
 }
 
+#[must_use]
 pub fn check_spawn_obstruction_state(
     y: i32,
     sea_level: i32,
@@ -825,6 +826,7 @@ const fn ocelot_spawn_roll_allowed(roll: u8) -> bool {
     roll != 0
 }
 
+#[allow(clippy::fn_params_excessive_bools)]
 const fn ocelot_spawn_obstruction_allowed(
     y: i32,
     sea_level: i32,

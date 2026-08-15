@@ -2230,17 +2230,31 @@ impl JavaClient {
                         self.update_sequence(player, player_action.sequence.0);
                         return;
                     }
-                    if !state.is_air() {
-                        server
-                            .block_registry
-                            .attack(&world, block, state, &position, player)
-                            .await;
-                    }
                     player.start_mining_time.store(
                         player.tick_counter.load(Ordering::Relaxed),
                         Ordering::Relaxed,
                     );
-                    if !state.is_air() {
+                    if state.is_air() {
+                        // Vanilla tracks an air target as an active destroy target so a
+                        // subsequent STOP for another position cannot complete it.
+                        let old_position = *player.mining_pos.lock().await;
+                        if player.mining.load(Ordering::Relaxed) && old_position != position {
+                            self.sync_block_state_to_client(&world, old_position).await;
+                            world.set_block_breaking(entity, old_position, -1).await;
+                        }
+                        player.mining.store(true, Ordering::Relaxed);
+                        *player.mining_pos.lock().await = position;
+                        // Vanilla starts an air target with progress 1.0 and
+                        // publishes crack stage 10, without destroying it.
+                        world.set_block_breaking(entity, position, 10).await;
+                        player
+                            .current_block_destroy_stage
+                            .store(10, Ordering::Relaxed);
+                    } else {
+                        server
+                            .block_registry
+                            .attack(&world, block, state, &position, player)
+                            .await;
                         let speed = block::calc_block_breaking(player, state, block).await;
                         // Instant break
                         if speed >= 1.0 {
@@ -2260,22 +2274,6 @@ impl JavaClient {
                                 .current_block_destroy_stage
                                 .store(progress, Ordering::Relaxed);
                         }
-                    } else {
-                        // Vanilla tracks an air target as an active destroy target so a
-                        // subsequent STOP for another position cannot complete it.
-                        let old_position = *player.mining_pos.lock().await;
-                        if player.mining.load(Ordering::Relaxed) && old_position != position {
-                            self.sync_block_state_to_client(&world, old_position).await;
-                            world.set_block_breaking(entity, old_position, -1).await;
-                        }
-                        player.mining.store(true, Ordering::Relaxed);
-                        *player.mining_pos.lock().await = position;
-                        // Vanilla starts an air target with progress 1.0 and
-                        // publishes crack stage 10, without destroying it.
-                        world.set_block_breaking(entity, position, 10).await;
-                        player
-                            .current_block_destroy_stage
-                            .store(10, Ordering::Relaxed);
                     }
                     self.update_sequence(player, player_action.sequence.0);
                 }

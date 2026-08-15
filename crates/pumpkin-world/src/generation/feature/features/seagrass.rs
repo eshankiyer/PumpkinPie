@@ -62,26 +62,6 @@ fn can_survive_on<T: GenerationCache>(chunk: &T, pos: &BlockPos) -> bool {
     can_survive_on_state(support_state)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{can_survive_on_state, is_full_water_state};
-    use pumpkin_data::{Block, BlockStateId};
-
-    #[test]
-    fn seagrass_support_matches_vanilla_tag_and_shape_rules() {
-        assert!(can_survive_on_state(&Block::SAND.default_state));
-        assert!(!can_survive_on_state(&Block::MAGMA_BLOCK.default_state));
-        assert!(!can_survive_on_state(&Block::WATER.default_state));
-    }
-
-    #[test]
-    fn seagrass_requires_full_water_for_tall_variant() {
-        assert!(is_full_water_state(Block::WATER.default_state.id));
-        assert!(is_full_water_state(BlockStateId::new(94).unwrap()));
-        assert!(!is_full_water_state(BlockStateId::new(87).unwrap()));
-    }
-}
-
 fn is_full_water_state(state_id: pumpkin_data::BlockStateId) -> bool {
     Fluid::from_state_id(state_id).is_some_and(|fluid| {
         fluid.name == "water"
@@ -97,4 +77,24 @@ fn can_survive_on_state(state: &'static BlockState) -> bool {
     let support_block = Block::from_state_id(state.id);
     state.is_side_solid(BlockDirection::Up)
         && !support_block.has_tag(&BlockTag::MINECRAFT_CANNOT_SUPPORT_SEAGRASS)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{can_survive_on_state, is_full_water_state};
+    use pumpkin_data::{Block, BlockStateId};
+
+    #[test]
+    fn seagrass_support_matches_vanilla_tag_and_shape_rules() {
+        assert!(can_survive_on_state(Block::SAND.default_state));
+        assert!(!can_survive_on_state(Block::MAGMA_BLOCK.default_state));
+        assert!(!can_survive_on_state(Block::WATER.default_state));
+    }
+
+    #[test]
+    fn seagrass_requires_full_water_for_tall_variant() {
+        assert!(is_full_water_state(Block::WATER.default_state.id));
+        assert!(is_full_water_state(BlockStateId::new(94).unwrap()));
+        assert!(!is_full_water_state(BlockStateId::new(87).unwrap()));
+    }
 }

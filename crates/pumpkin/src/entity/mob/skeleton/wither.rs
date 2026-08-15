@@ -28,7 +28,7 @@ impl WitherSkeletonEntity {
                     true,
                 ),
             );
-        }
+        };
         let skeleton = Self { entity };
         Arc::new(skeleton)
     }

@@ -199,13 +199,16 @@ fn adventure_predicate_matches_block(
                         if max.is_some() && numeric_max.is_none() && numeric_actual.is_none() {
                             return true;
                         }
-                        if let Some(actual) = numeric_actual {
-                            numeric_min.is_some_and(|min| actual < min)
-                                || numeric_max.is_some_and(|max| actual > max)
-                        } else {
-                            min.is_some_and(|min| *actual_value < min)
-                                || max.is_some_and(|max| *actual_value > max)
-                        }
+                        numeric_actual.map_or_else(
+                            || {
+                                min.is_some_and(|min| *actual_value < min)
+                                    || max.is_some_and(|max| *actual_value > max)
+                            },
+                            |actual| {
+                                numeric_min.is_some_and(|min| actual < min)
+                                    || numeric_max.is_some_and(|max| actual > max)
+                            },
+                        )
                     }
                     _ => true,
                 }
