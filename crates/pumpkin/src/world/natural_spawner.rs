@@ -1,5 +1,7 @@
 use crate::entity::EntityBase;
-use crate::entity::r#type::{check_spawn_rules, from_type};
+use crate::entity::r#type::{
+    check_spawn_obstruction, check_spawn_obstruction_state, check_spawn_rules, from_type,
+};
 use crate::world::World;
 use arc_swap::ArcSwap;
 use pumpkin_data::biome::Spawner;
@@ -623,9 +625,32 @@ pub fn spawn_mobs_for_chunk_generation(
 
                 if entity_type.summonable
                     && is_spawn_position_ok_cache(cache, &pos, entity_type)
-                    // Vanilla applies the entity-specific CHUNK_GENERATION predicate here,
-                    // after placement validation and after clamping the spawn coordinates.
+                    // Vanilla checks the exact clamped spawn AABB before calling the
+                    // random CHUNK_GENERATION predicate. Keep this order so rejected
+                    // candidates do not consume the ocelot predicate's random draw.
+                    && is_space_empty_cache(
+                        cache,
+                        world,
+                        spawn_x,
+                        f64::from(pos.0.y),
+                        spawn_z,
+                        entity_type,
+                    )
                     && check_spawn_rules(entity_type, world, &spawn_rule_pos, false)
+                    && check_spawn_obstruction_state(
+                        spawn_rule_pos.0.y,
+                        world.sea_level,
+                        GenerationCache::get_block_state(cache, &spawn_rule_pos.down().0).to_state(),
+                        contains_any_liquid_cache(
+                            cache,
+                            spawn_x,
+                            f64::from(pos.0.y),
+                            spawn_z,
+                            entity_type,
+                        ),
+                        false,
+                        entity_type,
+                    )
                 {
                     let spawn_pos_f64 = Vector3::new(spawn_x, f64::from(pos.0.y), spawn_z);
 
@@ -909,6 +934,9 @@ pub fn is_valid_spawn_position_for_type(
     if !check_spawn_rules(entity_type, world, block_pos, is_thundering) {
         return false;
     }
+    if !check_spawn_obstruction(world, block_pos, entity_type) {
+        return false;
+    }
     // TODO: we should use getSpawnBox, but this is only modified for slimes and magma slimes
     if !world.is_space_empty(BoundingBox::new_from_pos(
         f64::from(block_pos.0.x) + 0.5,
@@ -1006,6 +1034,82 @@ pub fn is_spawn_position_ok_cache(
         }
         SpawnLocation::Unrestricted => true,
     }
+}
+
+/// Cache equivalent of the natural spawner's `noCollision` check. Generation
+/// runs before the staged chunk is installed in the live world, so this must
+/// inspect the generation cache rather than `World`.
+fn is_space_empty_cache(
+    cache: &dyn GenerationCache,
+    world: &World,
+    x: f64,
+    y: f64,
+    z: f64,
+    entity_type: &'static EntityType,
+) -> bool {
+    let bounding_box = BoundingBox::new_from_pos(
+        x,
+        y,
+        z,
+        &EntityDimensions {
+            width: entity_type.dimension[0],
+            height: entity_type.dimension[1],
+            eye_height: entity_type.eye_height,
+        },
+    );
+
+    if world
+        .get_all_at_box(&bounding_box.expand_all(1.0e-7))
+        .iter()
+        .any(|entity| !entity.is_spectator() && entity.can_be_collided_with())
+    {
+        return false;
+    }
+
+    for block_pos in BlockPos::iterate(bounding_box.min_block_pos(), bounding_box.max_block_pos()) {
+        let state = GenerationCache::get_block_state(cache, &block_pos.0).to_state();
+        if state
+            .get_block_collision_shapes()
+            .map(|shape| shape.at_pos(block_pos))
+            .any(|shape| shape.intersects(&bounding_box))
+        {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn contains_any_liquid_cache(
+    cache: &dyn GenerationCache,
+    x: f64,
+    y: f64,
+    z: f64,
+    entity_type: &'static EntityType,
+) -> bool {
+    let bounding_box = BoundingBox::new_from_pos(
+        x,
+        y,
+        z,
+        &EntityDimensions {
+            width: entity_type.dimension[0],
+            height: entity_type.dimension[1],
+            eye_height: entity_type.eye_height,
+        },
+    );
+
+    for block_x in bounding_box.min.x.floor() as i32..bounding_box.max.x.ceil() as i32 {
+        for block_y in bounding_box.min.y.floor() as i32..bounding_box.max.y.ceil() as i32 {
+            for block_z in bounding_box.min.z.floor() as i32..bounding_box.max.z.ceil() as i32 {
+                let block_pos = BlockPos::new(block_x, block_y, block_z);
+                if !cache.get_fluid_and_fluid_state(&block_pos.0).1.is_empty {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 /// Cache-based version of `adjust_spawn_position` used during world generation.

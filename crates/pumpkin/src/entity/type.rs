@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
+use pumpkin_data::BlockState;
 use pumpkin_data::entity::{EntityType, MobCategory};
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use uuid::Uuid;
@@ -483,6 +485,13 @@ pub fn check_spawn_rules(
             && world.get_block(pos) == &Block::WATER;
     }
 
+    // `Ocelot.checkOcelotSpawnRules`: natural attempts succeed on two of
+    // three calls. Its obstruction predicate is applied by the natural
+    // spawner after this common predicate.
+    if id == EntityType::OCELOT.id {
+        return ocelot_spawn_roll_allowed(rand::random_range(0u8..3));
+    }
+
     // `Fox.checkFoxSpawnRules`: foxes use the dedicated ground tag and daylight,
     // even though their placement type is `NO_RESTRICTIONS`.
     if id == EntityType::FOX.id {
@@ -695,6 +704,111 @@ fn check_bright_ground_spawn_rules(
     world.get_block(&pos.down()).has_tag(spawnable_on) && world.get_raw_brightness(pos, 0) > 8
 }
 
+/// `Ocelot.checkSpawnObstruction`'s species-specific condition.
+///
+/// The common spawn-position checks already cover collision and fluids.
+pub fn check_spawn_obstruction(
+    world: &World,
+    pos: &BlockPos,
+    entity_type: &'static EntityType,
+) -> bool {
+    if entity_type.id != EntityType::OCELOT.id {
+        return true;
+    }
+
+    check_spawn_obstruction_state(
+        pos.0.y,
+        world.sea_level,
+        world.get_block_state(&pos.down()),
+        ocelot_contains_any_liquid(world, pos, entity_type),
+        ocelot_has_entity_collision(world, pos, entity_type),
+        entity_type,
+    )
+}
+
+pub fn check_spawn_obstruction_state(
+    y: i32,
+    sea_level: i32,
+    below: &'static BlockState,
+    contains_any_liquid: bool,
+    has_entity_collision: bool,
+    entity_type: &'static EntityType,
+) -> bool {
+    if entity_type.id != EntityType::OCELOT.id {
+        return true;
+    }
+
+    let below_block = Block::from_state_id(below.id);
+    ocelot_spawn_obstruction_allowed(
+        y,
+        sea_level,
+        below_block == &Block::GRASS_BLOCK,
+        below_block.has_tag(&tag::Block::MINECRAFT_LEAVES),
+        contains_any_liquid,
+        has_entity_collision,
+    )
+}
+
+fn ocelot_contains_any_liquid(
+    world: &World,
+    pos: &BlockPos,
+    entity_type: &'static EntityType,
+) -> bool {
+    if entity_type.id != EntityType::OCELOT.id {
+        return false;
+    }
+
+    let bounding_box = BoundingBox::new_from_pos(
+        f64::from(pos.0.x) + 0.5,
+        f64::from(pos.0.y),
+        f64::from(pos.0.z) + 0.5,
+        &EntityDimensions {
+            width: entity_type.dimension[0],
+            height: entity_type.dimension[1],
+            eye_height: entity_type.eye_height,
+        },
+    );
+
+    for x in bounding_box.min.x.floor() as i32..bounding_box.max.x.ceil() as i32 {
+        for y in bounding_box.min.y.floor() as i32..bounding_box.max.y.ceil() as i32 {
+            for z in bounding_box.min.z.floor() as i32..bounding_box.max.z.ceil() as i32 {
+                let block_pos = BlockPos::new(x, y, z);
+                if !world.get_fluid_and_fluid_state(&block_pos).1.is_empty {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+fn ocelot_has_entity_collision(
+    world: &World,
+    pos: &BlockPos,
+    entity_type: &'static EntityType,
+) -> bool {
+    if entity_type.id != EntityType::OCELOT.id {
+        return false;
+    }
+
+    let bounding_box = BoundingBox::new_from_pos(
+        f64::from(pos.0.x) + 0.5,
+        f64::from(pos.0.y),
+        f64::from(pos.0.z) + 0.5,
+        &EntityDimensions {
+            width: entity_type.dimension[0],
+            height: entity_type.dimension[1],
+            eye_height: entity_type.eye_height,
+        },
+    );
+
+    world
+        .get_all_at_box(&bounding_box.expand_all(1.0e-7))
+        .iter()
+        .any(|entity| !entity.is_spectator() && entity.can_be_collided_with())
+}
+
 /// `AbstractNautilus.checkNautilusSpawnRules`'s Y-range gate:
 /// `pos.getY() >= seaLevel - 25 && pos.getY() <= seaLevel - 5`.
 const fn is_in_nautilus_y_range(y: i32, sea_level: i32) -> bool {
@@ -706,9 +820,31 @@ const fn is_below_glow_squid_y_threshold(y: i32, sea_level: i32) -> bool {
     y <= sea_level - 33
 }
 
+/// `Ocelot.checkOcelotSpawnRules`: `random.nextInt(3) != 0`.
+const fn ocelot_spawn_roll_allowed(roll: u8) -> bool {
+    roll != 0
+}
+
+const fn ocelot_spawn_obstruction_allowed(
+    y: i32,
+    sea_level: i32,
+    below_is_grass: bool,
+    below_is_leaves: bool,
+    contains_any_liquid: bool,
+    has_entity_collision: bool,
+) -> bool {
+    !contains_any_liquid
+        && !has_entity_collision
+        && y >= sea_level
+        && (below_is_grass || below_is_leaves)
+}
+
 #[cfg(test)]
 mod animal_spawn_dispatch_tests {
-    use super::{EntityType, uses_animal_spawn_rules, uses_any_light_monster_spawn_rules};
+    use super::{
+        EntityType, ocelot_spawn_obstruction_allowed, ocelot_spawn_roll_allowed,
+        uses_animal_spawn_rules, uses_any_light_monster_spawn_rules,
+    };
 
     #[test]
     fn vanilla_animal_placements_use_the_animal_predicate() {
@@ -743,6 +879,35 @@ mod animal_spawn_dispatch_tests {
         assert!(!uses_animal_spawn_rules(EntityType::ZOMBIE.id));
         assert!(!uses_animal_spawn_rules(EntityType::BAT.id));
         assert!(!uses_animal_spawn_rules(EntityType::SLIME.id));
+    }
+
+    #[test]
+    fn ocelot_spawn_roll_matches_vanilla() {
+        assert!(!ocelot_spawn_roll_allowed(0));
+        assert!(ocelot_spawn_roll_allowed(1));
+        assert!(ocelot_spawn_roll_allowed(2));
+    }
+
+    #[test]
+    fn ocelot_obstruction_matches_vanilla() {
+        assert!(ocelot_spawn_obstruction_allowed(
+            64, 63, true, false, false, false
+        ));
+        assert!(ocelot_spawn_obstruction_allowed(
+            64, 63, false, true, false, false
+        ));
+        assert!(!ocelot_spawn_obstruction_allowed(
+            62, 63, true, false, false, false
+        ));
+        assert!(!ocelot_spawn_obstruction_allowed(
+            64, 63, false, false, false, false
+        ));
+        assert!(!ocelot_spawn_obstruction_allowed(
+            64, 63, true, false, true, false
+        ));
+        assert!(!ocelot_spawn_obstruction_allowed(
+            64, 63, true, false, false, true
+        ));
     }
 }
 
