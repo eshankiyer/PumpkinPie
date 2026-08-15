@@ -945,6 +945,11 @@ pub struct Entity {
     /// Vanilla `Mob.persistenceRequired`. Kept on the shared entity because
     /// every mob's NBT path already delegates its base data here.
     pub persistence_required: AtomicBool,
+    /// Cached vanilla `Mob.requiresCustomPersistence` state for passenger and
+    /// leash relationships. Keeping the two sources separate avoids clearing
+    /// one relationship when the other ends.
+    pub vehicle_persistence_required: AtomicBool,
+    pub leash_persistence_required: AtomicBool,
     /// Vanilla `Mob.isNoAi`, shared with `LivingEntity` for subclass tick behavior.
     pub no_ai: AtomicBool,
     /// Cooldown before entity can mount again after dismounting
@@ -1207,6 +1212,8 @@ impl Entity {
             vehicle: Mutex::new(None),
             leashed_to: Mutex::new(None),
             persistence_required: AtomicBool::new(false),
+            vehicle_persistence_required: AtomicBool::new(false),
+            leash_persistence_required: AtomicBool::new(false),
             no_ai: AtomicBool::new(false),
 
             riding_cooldown: AtomicI32::new(0),
@@ -3447,6 +3454,7 @@ impl Entity {
     pub async fn leash_to(&self, holder: Arc<dyn EntityBase>) {
         let holder_entity = holder.get_entity();
         *self.leashed_to.lock().await = Some(holder.clone());
+        self.leash_persistence_required.store(true, Relaxed);
 
         let je_packet = pumpkin_protocol::java::client::play::CSetEntityLink::new(
             self.entity_id,
@@ -3477,6 +3485,7 @@ impl Entity {
         if old_holder.is_none() {
             return;
         }
+        self.leash_persistence_required.store(false, Relaxed);
 
         let je_packet =
             pumpkin_protocol::java::client::play::CSetEntityLink::new(self.entity_id, -1);
@@ -3553,6 +3562,9 @@ impl Entity {
         passenger: Arc<dyn EntityBase>,
     ) {
         let passenger_entity = passenger.get_entity();
+        passenger_entity
+            .vehicle_persistence_required
+            .store(true, Relaxed);
         *passenger_entity.vehicle.lock().await = Some(vehicle);
 
         let mut passengers = self.passengers.lock().await;
@@ -3579,7 +3591,11 @@ impl Entity {
             .position(|p| p.get_entity().entity_id == passenger_id)
         {
             let passenger = passengers.remove(idx);
-            *passenger.get_entity().vehicle.lock().await = None;
+            let passenger_entity = passenger.get_entity();
+            *passenger_entity.vehicle.lock().await = None;
+            passenger_entity
+                .vehicle_persistence_required
+                .store(false, Relaxed);
             Some(passenger)
         } else {
             None
