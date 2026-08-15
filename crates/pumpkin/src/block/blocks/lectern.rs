@@ -194,7 +194,7 @@ impl BlockBehaviour for LecternBlock {
             };
 
             args.player
-                .increment_stat(
+                .increment_interaction_stat(
                     pumpkin_data::statistic::StatisticCategory::Custom,
                     pumpkin_data::statistic::CustomStatistic::InteractWithLectern as i32,
                     1,

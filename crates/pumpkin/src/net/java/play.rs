@@ -2526,11 +2526,6 @@ impl JavaClient {
             return Err(BlockPlacingError::InvalidHand);
         };
 
-        if player.gamemode.load() == GameMode::Spectator {
-            // TODO: openMenu
-            return Ok(());
-        }
-
         let inventory = player.inventory();
         let held_item = inventory.held_item();
         let off_hand_item = inventory.off_hand_item().await;
@@ -2563,12 +2558,23 @@ impl JavaClient {
             return Ok(());
         }
 
+        let block = world.get_block(&position);
+        if player.gamemode.load() == GameMode::Spectator {
+            let hit = BlockHitResult {
+                face: &face,
+                cursor_pos: &cursor_pos,
+            };
+            server
+                .block_registry
+                .on_use_for_spectator(block, player, &position, &hit, server, &world)
+                .await;
+            return Ok(());
+        }
+
         let item_id = item.lock().await.item.id;
         player
             .increment_stat(StatisticCategory::Used, item_id as i32, 1)
             .await;
-
-        let block = world.get_block(&position);
 
         let event = PlayerInteractEvent::new(
             player,

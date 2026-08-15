@@ -66,7 +66,7 @@ impl BlockBehaviour for BeaconBlock {
             };
 
             args.player
-                .increment_stat(
+                .increment_interaction_stat(
                     pumpkin_data::statistic::StatisticCategory::Custom,
                     pumpkin_data::statistic::CustomStatistic::InteractWithBeacon as i32,
                     1,

@@ -2841,6 +2841,17 @@ impl Player {
         self.stats.lock().await.increment(category, stat, amount);
     }
 
+    pub async fn increment_interaction_stat(
+        &self,
+        category: statistics::StatisticCategory,
+        stat: i32,
+        amount: i32,
+    ) {
+        if self.gamemode.load() != GameMode::Spectator {
+            self.increment_stat(category, stat, amount).await;
+        }
+    }
+
     pub async fn set_stat(&self, category: statistics::StatisticCategory, stat: i32, value: i32) {
         self.stats.lock().await.set(category, stat, value);
     }

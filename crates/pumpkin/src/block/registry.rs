@@ -855,6 +855,62 @@ impl BlockRegistry {
         BlockActionResult::Pass
     }
 
+    /// Opens the menu provider exposed by a block to a spectator.
+    ///
+    /// Vanilla's spectator path asks the block for a menu provider and never
+    /// calls the normal block-use callback. Keep the allowlist explicit so a
+    /// spectator cannot toggle redstone, consume items, or otherwise mutate a
+    /// block while opening a container screen.
+    pub async fn on_use_for_spectator(
+        &self,
+        block: &Block,
+        player: &Arc<Player>,
+        position: &BlockPos,
+        hit: &BlockHitResult<'_>,
+        server: &Server,
+        world: &Arc<World>,
+    ) -> BlockActionResult {
+        let has_menu_provider = matches!(
+            block.name,
+            "anvil"
+                | "barrel"
+                | "beacon"
+                | "blast_furnace"
+                | "brewing_stand"
+                | "chest"
+                | "copper_chest"
+                | "crafting_table"
+                | "crafter"
+                | "dispenser"
+                | "dropper"
+                | "enchanting_table"
+                | "furnace"
+                | "grindstone"
+                | "hopper"
+                | "lectern"
+                | "loom"
+                | "shulker_box"
+                | "smithing_table"
+                | "smoker"
+                | "stonecutter"
+                | "trapped_chest"
+                | "exposed_copper_chest"
+                | "weathered_copper_chest"
+                | "oxidized_copper_chest"
+                | "waxed_copper_chest"
+                | "waxed_exposed_copper_chest"
+                | "waxed_weathered_copper_chest"
+                | "waxed_oxidized_copper_chest"
+        );
+
+        if has_menu_provider {
+            self.on_use(block, player, position, hit, server, world)
+                .await
+        } else {
+            BlockActionResult::Pass
+        }
+    }
+
     pub async fn attack(
         &self,
         world: &Arc<World>,
