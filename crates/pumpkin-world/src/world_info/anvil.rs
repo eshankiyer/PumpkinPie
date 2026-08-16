@@ -258,6 +258,7 @@ impl WorldInfoReader for AnvilLevelInfo {
             if let Ok(nbt) = pumpkin_nbt::Nbt::read(&mut reader)
                 && let Some(data) = nbt.root_tag.get_compound("Data")
             {
+                level_data.initialized = data.get_bool("initialized").unwrap_or(true);
                 if let Some(v) = data.get_bool("allowCommands") {
                     level_data.allow_commands = v;
                 }
@@ -341,6 +342,7 @@ impl WorldInfoWriter for AnvilLevelInfo {
         data_comp.put_int("version", MAXIMUM_SUPPORTED_LEVEL_VERSION);
         data_comp.put_long("LastPlayed", level_data.last_played);
         data_comp.put_bool("allowCommands", level_data.allow_commands);
+        data_comp.put_bool("initialized", level_data.initialized);
         data_comp.put_string("LevelName", level_data.level_name.clone());
         data_comp.put_compound("difficulty_settings", write_difficulty(&level_data));
         data_comp.put_compound("spawn", write_spawn(&level_data));
@@ -491,6 +493,7 @@ mod test {
             day_time: 1727,
             difficulty: Difficulty::Normal,
             difficulty_locked: false,
+            initialized: true,
             game_rules: GameRuleRegistry {
                 block_explosion_drop_decay: true,
                 command_block_output: true,
@@ -589,5 +592,19 @@ mod test {
         assert_eq!(loaded.raining, data.raining);
         assert_eq!(loaded.thundering, data.thundering);
         assert_eq!(loaded.thunder_time, data.thunder_time);
+    }
+
+    #[test]
+    fn preserves_uninitialized_world_flag() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut data = LevelData::default(Seed(42));
+        data.initialized = false;
+
+        AnvilLevelInfo
+            .write_world_info(&data, temp_dir.path())
+            .unwrap();
+
+        let loaded = AnvilLevelInfo.read_world_info(temp_dir.path()).unwrap();
+        assert!(!loaded.initialized);
     }
 }

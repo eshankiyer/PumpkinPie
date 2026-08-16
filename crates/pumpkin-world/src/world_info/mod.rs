@@ -56,6 +56,8 @@ pub struct LevelData {
     pub difficulty: Difficulty,
     #[serde(default)]
     pub difficulty_locked: bool,
+    #[serde(default = "default_initialized")]
+    pub initialized: bool,
     #[serde(default)]
     pub last_played: i64,
     #[serde(default = "default_level_name")]
@@ -146,6 +148,9 @@ fn default_data_packs() -> DataPacks {
 }
 const fn default_difficulty() -> Difficulty {
     DEFAULT_DIFFICULTY
+}
+const fn default_initialized() -> bool {
+    true
 }
 fn default_level_name() -> String {
     DEFAULT_LEVEL_NAME.to_string()
@@ -317,6 +322,7 @@ impl LevelData {
             data_version: MAXIMUM_SUPPORTED_WORLD_DATA_VERSION,
             difficulty: DEFAULT_DIFFICULTY,
             difficulty_locked: false,
+            initialized: false,
             last_played: -1,
             level_name: DEFAULT_LEVEL_NAME.to_string(),
             spawn_x: 0,

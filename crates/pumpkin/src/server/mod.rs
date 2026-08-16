@@ -175,7 +175,6 @@ impl Server {
         let block_registry = super::block::registry::default_registry();
 
         let level_info = AnvilLevelInfo.read_world_info(&world_path);
-        let is_new_world = matches!(&level_info, Err(WorldInfoError::InfoNotFound));
         if let Err(error) = &level_info {
             match error {
                 // If it doesn't exist, just make a new one
@@ -205,6 +204,7 @@ impl Server {
             }
             default_data
         });
+        let needs_initial_spawn = !level_info.initialized;
 
         let seed = level_info.world_gen_settings.seed;
         let level_info = Arc::new(ArcSwap::new(Arc::new(level_info)));
@@ -392,7 +392,7 @@ impl Server {
             server.mojang_public_keys.store(Arc::new(k));
         }
 
-        if is_new_world
+        if needs_initial_spawn
             && let Some(overworld) = server
                 .worlds
                 .load()
@@ -406,6 +406,7 @@ impl Server {
             level_data.spawn_z = spawn.0.z;
             level_data.spawn_yaw = 0.0;
             level_data.spawn_pitch = 0.0;
+            level_data.initialized = true;
             server.level_info.store(Arc::new(level_data.clone()));
             if let Err(err) = server
                 .world_info_writer
