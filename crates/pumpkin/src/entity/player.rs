@@ -6352,7 +6352,16 @@ impl InventoryPlayer for Player {
 
 #[inline]
 fn is_valid_for_forced_respawn(state: &BlockState) -> bool {
-    !state.is_solid() && !state.is_liquid()
+    if state.is_liquid() {
+        return false;
+    }
+
+    let block_name = pumpkin_data::Block::from_state_id(state.id).name;
+    let vanilla_exception = block_name.ends_with("_pressure_plate")
+        || block_name.ends_with("_sign")
+        || block_name.ends_with("_banner");
+
+    vanilla_exception || !state.is_solid()
 }
 
 #[cfg(test)]
