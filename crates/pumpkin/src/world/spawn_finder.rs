@@ -7,6 +7,10 @@ use pumpkin_util::math::{
     vector3::Vector3,
 };
 use pumpkin_world::chunk::ChunkHeightmapType;
+use pumpkin_world::generation::generator::WorldGenerator;
+use pumpkin_world::generation::noise::router::multi_noise_sampler::{
+    MultiNoiseSampler, MultiNoiseSamplerBuilderOptions,
+};
 use rand::RngExt;
 
 use crate::world::World;
@@ -16,6 +20,192 @@ const PLAYER_DIMENSIONS: EntityDimensions = EntityDimensions::new(0.6, 1.8, 1.62
 
 /// Vanilla `PlayerSpawnFinder.ABSOLUTE_MAX_ATTEMPTS`.
 const ABSOLUTE_MAX_ATTEMPTS: i64 = 1024;
+
+/// Quantized climate ranges from `OverworldBiomeBuilder.spawnTarget`.
+///
+/// These are the two parameter points used by the overworld generator. The
+/// values are quantized with vanilla's `Climate.quantizeCoord` scale of
+/// 10,000, and the final slot is the zero offset parameter.
+#[derive(Clone, Copy)]
+struct SpawnParameterRange {
+    min: i64,
+    max: i64,
+}
+
+const fn spawn_range(min: i64, max: i64) -> SpawnParameterRange {
+    SpawnParameterRange { min, max }
+}
+
+const OVERWORLD_SPAWN_TARGETS: [[SpawnParameterRange; 7]; 2] = [
+    [
+        spawn_range(-10_000, 10_000),
+        spawn_range(-10_000, 10_000),
+        spawn_range(-1_100, 10_000),
+        spawn_range(-10_000, 10_000),
+        spawn_range(0, 0),
+        spawn_range(-10_000, -1_600),
+        spawn_range(0, 0),
+    ],
+    [
+        spawn_range(-10_000, 10_000),
+        spawn_range(-10_000, 10_000),
+        spawn_range(-1_100, 10_000),
+        spawn_range(-10_000, 10_000),
+        spawn_range(0, 0),
+        spawn_range(1_600, 10_000),
+        spawn_range(0, 0),
+    ],
+];
+
+/// Selects the initial overworld spawn using `MinecraftServer.setInitialSpawn`.
+///
+/// This deliberately runs only for a fresh world. Existing level data, player
+/// respawns, and explicit `/setworldspawn` positions use their existing paths.
+pub async fn find_initial_world_spawn(world: &World) -> BlockPos {
+    let spawn_position = find_initial_spawn_position(world);
+    let spawn_chunk = Vector2::new(spawn_position.0.x >> 4, spawn_position.0.z >> 4);
+    let mut height = initial_spawn_height(world);
+    if height < world.dimension.min_y {
+        world.level.get_or_fetch_chunk(spawn_chunk, |_| ()).await;
+        height = world.get_heightmap_height(
+            ChunkHeightmapType::WorldSurface,
+            spawn_chunk.x * 16 + 8,
+            spawn_chunk.y * 16 + 8,
+        );
+    }
+
+    let mut spawn = BlockPos(Vector3::new(
+        spawn_chunk.x * 16 + 8,
+        height,
+        spawn_chunk.y * 16 + 8,
+    ));
+    let mut x_offset = 0;
+    let mut z_offset = 0;
+    let mut delta_x = 0;
+    let mut delta_z = -1;
+
+    // Minecraft uses Mth.square(11), with the inclusive -5..5 bounds below.
+    for _ in 0..121 {
+        if (-5..=5).contains(&x_offset) && (-5..=5).contains(&z_offset) {
+            let chunk = Vector2::new(spawn_chunk.x + x_offset, spawn_chunk.y + z_offset);
+            world.level.get_or_fetch_chunk(chunk, |_| ()).await;
+            if let Some(candidate) = get_spawn_pos_in_chunk(world, chunk) {
+                spawn = candidate;
+                break;
+            }
+        }
+
+        if x_offset == z_offset
+            || (x_offset < 0 && x_offset == -z_offset)
+            || (x_offset > 0 && x_offset == 1 - z_offset)
+        {
+            let old_delta_x = delta_x;
+            delta_x = -delta_z;
+            delta_z = old_delta_x;
+        }
+        x_offset += delta_x;
+        z_offset += delta_z;
+    }
+
+    spawn
+}
+
+fn find_initial_spawn_position(world: &World) -> BlockPos {
+    let (x, z) = match world.level.world_gen.as_ref() {
+        WorldGenerator::Noise(generator) => {
+            let options = MultiNoiseSamplerBuilderOptions::new(0, 0, 0);
+            let mut sampler =
+                MultiNoiseSampler::generate(&generator.base_router.multi_noise, &options);
+            let mut best = initial_spawn_result(&mut sampler, 0, 0);
+            find_initial_spawn_candidates(&mut sampler, &mut best, 2048.0, 512.0);
+            find_initial_spawn_candidates(&mut sampler, &mut best, 512.0, 32.0);
+            (best.0, best.1)
+        }
+        WorldGenerator::Flat(_) => (0, 0),
+    };
+
+    BlockPos(Vector3::new(x, 0, z))
+}
+
+fn find_initial_spawn_candidates(
+    sampler: &mut MultiNoiseSampler<'_>,
+    best: &mut (i32, i32, i64),
+    max_distance: f32,
+    step: f32,
+) {
+    let mut angle = 0.0f32;
+    let mut distance = step;
+    let center = (best.0, best.1);
+
+    while distance <= max_distance {
+        let x = center.0 + (angle.sin() * distance) as i32;
+        let z = center.1 + (angle.cos() * distance) as i32;
+        let fitness = initial_spawn_fitness(sampler, x, z);
+        if fitness < best.2 {
+            *best = (x, z, fitness);
+        }
+
+        angle += step / distance;
+        if angle > std::f32::consts::TAU {
+            angle = 0.0;
+            distance += step;
+        }
+    }
+}
+
+fn initial_spawn_result(sampler: &mut MultiNoiseSampler<'_>, x: i32, z: i32) -> (i32, i32, i64) {
+    (x, z, initial_spawn_fitness(sampler, x, z))
+}
+
+fn initial_spawn_fitness(sampler: &mut MultiNoiseSampler<'_>, x: i32, z: i32) -> i64 {
+    // Climate.Sampler.sample receives quart coordinates in vanilla.
+    let point = sampler.sample(x >> 2, 0, z >> 2).convert_to_list();
+    let climate_distance = initial_spawn_climate_distance(point);
+
+    climate_distance * 2048 * 2048 + i64::from(x) * i64::from(x) + i64::from(z) * i64::from(z)
+}
+
+fn initial_spawn_climate_distance(point: [i64; 7]) -> i64 {
+    // Minecraft's initial-spawn search deliberately replaces sampled depth
+    // with zero before evaluating the target points.
+    let mut point = point;
+    point[4] = 0;
+    OVERWORLD_SPAWN_TARGETS
+        .iter()
+        .map(|target| {
+            target
+                .iter()
+                .zip(point)
+                .map(|(range, value)| {
+                    let distance = if value < range.min {
+                        range.min - value
+                    } else if value > range.max {
+                        value - range.max
+                    } else {
+                        0
+                    };
+                    distance * distance
+                })
+                .sum::<i64>()
+        })
+        .min()
+        .unwrap_or(i64::MAX)
+}
+
+fn initial_spawn_height(world: &World) -> i32 {
+    match world.level.world_gen.as_ref() {
+        // ChunkGenerator.getSpawnHeight returns 64 for noise generators.
+        WorldGenerator::Noise(_) => 64,
+        WorldGenerator::Flat(generator) => {
+            world.dimension.min_y
+                + generator
+                    .layers
+                    .iter()
+                    .map(|layer| layer.height)
+                    .sum::<i32>()
+        }
+    }
+}
 
 /// Port of vanilla's `PlayerSpawnFinder.findSpawn`.
 ///
@@ -150,6 +340,17 @@ fn get_level_respawn_pos(world: &World, x: i32, z: i32) -> Option<BlockPos> {
     None
 }
 
+fn get_spawn_pos_in_chunk(world: &World, chunk: Vector2<i32>) -> Option<BlockPos> {
+    for x in (chunk.x * 16)..=(chunk.x * 16 + 15) {
+        for z in (chunk.y * 16)..=(chunk.y * 16 + 15) {
+            if let Some(position) = get_level_respawn_pos(world, x, z) {
+                return Some(position);
+            }
+        }
+    }
+    None
+}
+
 /// Port of vanilla's `fixupSpawnHeight`: walks up from `spawn_pos` until clear
 /// of any collision/liquid, then back down until landing just above a solid
 /// floor.
@@ -272,7 +473,24 @@ const fn is_ocean_covered_column(surface: i32, top_y: i32, ocean_floor: i32) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::is_ocean_covered_column;
+    use super::{initial_spawn_climate_distance, is_ocean_covered_column};
+
+    #[test]
+    fn initial_spawn_climate_targets_match_overworld_weirdness_bands() {
+        assert_eq!(
+            initial_spawn_climate_distance([0, 0, 0, 0, 0, -2_000, 0]),
+            0
+        );
+        assert_eq!(initial_spawn_climate_distance([0, 0, 0, 0, 0, 2_000, 0]), 0);
+    }
+
+    #[test]
+    fn initial_spawn_climate_zeros_depth_before_fitness() {
+        let zero_depth = initial_spawn_climate_distance([0, 0, 0, 0, 0, 0, 0]);
+        let sampled_depth = initial_spawn_climate_distance([0, 0, 0, 0, 10_000, 0, 0]);
+        assert_eq!(sampled_depth, zero_depth);
+        assert_eq!(zero_depth, 2_560_000);
+    }
 
     #[test]
     fn rejects_water_over_dry_terrain() {
