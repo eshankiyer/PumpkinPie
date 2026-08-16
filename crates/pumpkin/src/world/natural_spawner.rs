@@ -973,8 +973,7 @@ pub fn is_spawn_position_ok(
             let up = world.get_block_state(&block_pos.up());
             let cur = world.get_block_state(block_pos);
             // TODO: blockState.allowsSpawning
-            let is_valid_spawn_below =
-                down.is_side_solid(BlockDirection::Up) && down.luminance < 14;
+            let is_valid_spawn_below = is_valid_spawn_support(down, entity_type);
 
             if is_valid_spawn_below {
                 is_valid_empty_spawn_block(cur, entity_type)
@@ -1023,8 +1022,7 @@ pub fn is_spawn_position_ok_cache(
             let up = GenerationCache::get_block_state(cache, &up_pos).to_state();
 
             // Logic: solid surface below and low enough light level (if applicable in generation)
-            let is_valid_spawn_below =
-                down.is_side_solid(BlockDirection::Up) && down.luminance < 14;
+            let is_valid_spawn_below = is_valid_spawn_support(down, entity_type);
 
             if is_valid_spawn_below {
                 is_valid_empty_spawn_block(state, entity_type)
@@ -1181,11 +1179,21 @@ pub fn is_valid_empty_spawn_block(
     entity_type.fire_immune || !block.has_tag(&MINECRAFT_FIRE)
 }
 
+/// Matches the support-block portion of vanilla `Mob.checkMobSpawnRules`.
+/// Magma blocks override `Block.isValidSpawn` and only permit fire-immune
+/// entities; a generic sturdy top-face check is not sufficient here.
+fn is_valid_spawn_support(state: &'static BlockState, entity_type: &'static EntityType) -> bool {
+    state.is_side_solid(BlockDirection::Up)
+        && state.luminance < 14
+        && (entity_type.fire_immune || Block::from_state_id(state.id) != &Block::MAGMA_BLOCK)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         IndexedRandom, can_spawn_in_water, counts_for_natural_spawning,
         is_right_distance_to_player_and_spawn_point, is_valid_empty_spawn_block,
+        is_valid_spawn_support,
     };
     use pumpkin_data::Block;
     use pumpkin_data::biome::{Biome, Spawner};
@@ -1201,6 +1209,14 @@ mod tests {
         assert!(counts_for_natural_spawning(GameMode::Survival));
         assert!(counts_for_natural_spawning(GameMode::Adventure));
         assert!(counts_for_natural_spawning(GameMode::Creative));
+    }
+
+    #[test]
+    fn magma_support_requires_fire_immunity() {
+        let magma = &Block::MAGMA_BLOCK.default_state;
+
+        assert!(!is_valid_spawn_support(magma, &EntityType::ZOMBIE));
+        assert!(is_valid_spawn_support(magma, &EntityType::BLAZE));
     }
 
     /// Vanilla `WeightedList` picks entries proportionally to `weight` (e.g. `warm_ocean`'s
