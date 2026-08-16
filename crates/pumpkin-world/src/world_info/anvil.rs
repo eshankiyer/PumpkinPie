@@ -1,5 +1,5 @@
 use std::{
-    fs::File,
+    fs::{self, File, OpenOptions},
     io::{Cursor, Read},
     path::Path,
     time::{SystemTime, UNIX_EPOCH},
@@ -335,7 +335,15 @@ impl WorldInfoWriter for AnvilLevelInfo {
 
         // ── Write level.dat ───────────────────────────────────────────────────
         let path = level_folder.join(LEVEL_DAT_FILE_NAME);
-        let world_info_file = File::create(path)?;
+        let temp_path = level_folder.join(format!(
+            "level-{}-{}.dat",
+            std::process::id(),
+            since_the_epoch.as_nanos()
+        ));
+        let world_info_file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)?;
 
         let mut data_comp = pumpkin_nbt::compound::NbtCompound::new();
         data_comp.put_int("DataVersion", level_data.data_version);
@@ -354,8 +362,28 @@ impl WorldInfoWriter for AnvilLevelInfo {
         let mut root = pumpkin_nbt::compound::NbtCompound::new();
         root.put_compound("Data", data_comp);
 
-        pumpkin_nbt::nbt_compress::write_gzip_compound_tag(root, world_info_file)
-            .map_err(|e| WorldInfoError::SerializationError(e.to_string()))?;
+        if let Err(error) =
+            pumpkin_nbt::nbt_compress::write_gzip_compound_tag(root, world_info_file)
+        {
+            let _ = fs::remove_file(&temp_path);
+            return Err(WorldInfoError::SerializationError(error.to_string()));
+        }
+
+        let backup_path = level_folder.join(LEVEL_DAT_BACKUP_FILE_NAME);
+        let had_current = path.exists();
+        if had_current {
+            if backup_path.exists() {
+                fs::remove_file(&backup_path)?;
+            }
+            fs::rename(&path, &backup_path)?;
+        }
+
+        if let Err(error) = fs::rename(&temp_path, &path) {
+            if had_current && let Err(rollback_error) = fs::rename(&backup_path, &path) {
+                error!("Failed to restore level.dat after replacement failure: {rollback_error}");
+            }
+            return Err(error.into());
+        }
 
         let data_version = info.data_version;
 
@@ -439,12 +467,14 @@ mod test {
 
     use pumpkin_data::game_rules::GameRuleRegistry;
     use pumpkin_util::{Difficulty, world_seed::Seed};
-    use std::sync::LazyLock;
+    use std::{fs::File, sync::LazyLock};
     use tempfile::TempDir;
 
     use crate::world_info::{DataPacks, LevelData, WorldGenSettings, WorldVersion};
 
-    use super::{AnvilLevelInfo, LevelDat, WorldInfoReader, WorldInfoWriter};
+    use super::{
+        AnvilLevelInfo, LEVEL_DAT_BACKUP_FILE_NAME, LevelDat, WorldInfoReader, WorldInfoWriter,
+    };
     use crate::world_info::data_files::ScoreboardData;
 
     #[test]
@@ -606,5 +636,36 @@ mod test {
 
         let loaded = AnvilLevelInfo.read_world_info(temp_dir.path()).unwrap();
         assert!(!loaded.initialized);
+    }
+
+    #[test]
+    fn replaces_level_dat_and_preserves_previous_backup() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut first = LevelData::default(Seed(42));
+        first.initialized = false;
+        AnvilLevelInfo
+            .write_world_info(&first, temp_dir.path())
+            .unwrap();
+
+        let mut second = first.clone();
+        second.initialized = true;
+        AnvilLevelInfo
+            .write_world_info(&second, temp_dir.path())
+            .unwrap();
+
+        let backup = File::open(temp_dir.path().join(LEVEL_DAT_BACKUP_FILE_NAME)).unwrap();
+        let backup_root = pumpkin_nbt::nbt_compress::read_gzip_compound_tag(backup).unwrap();
+        assert_eq!(
+            backup_root
+                .get_compound("Data")
+                .and_then(|data| data.get_bool("initialized")),
+            Some(false)
+        );
+        assert!(
+            AnvilLevelInfo
+                .read_world_info(temp_dir.path())
+                .unwrap()
+                .initialized
+        );
     }
 }
