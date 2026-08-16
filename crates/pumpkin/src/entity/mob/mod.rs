@@ -906,17 +906,18 @@ pub trait Mob: EntityBase + Send + Sync {
             // CREATURE category.
             id if id == pumpkin_data::entity::EntityType::TADPOLE.id => true,
             // AbstractFish and Axolotl override Animal's non-despawning default.
-            // Bucketed/named variants are made persistent by their interaction/NBT paths.
+            // Vanilla also keeps custom-named fish, even when they were named by NBT
+            // rather than through an interaction that sets PersistenceRequired.
             id if id == pumpkin_data::entity::EntityType::AXOLOTL.id
                 || id == pumpkin_data::entity::EntityType::COD.id
                 || id == pumpkin_data::entity::EntityType::NAUTILUS.id
                 || id == pumpkin_data::entity::EntityType::PUFFERFISH.id
                 || id == pumpkin_data::entity::EntityType::SALMON.id
-                || id == pumpkin_data::entity::EntityType::TROPICAL_FISH.id
-                || id == pumpkin_data::entity::EntityType::ZOMBIE_HORSE.id =>
+                || id == pumpkin_data::entity::EntityType::TROPICAL_FISH.id =>
             {
-                true
+                (**mob_entity.living_entity.entity.custom_name.load()).is_none()
             }
+            id if id == pumpkin_data::entity::EntityType::ZOMBIE_HORSE.id => true,
             // Animal and non-despawning MISC mob implementations in the
             // generated registry use the persistent far-away behavior.
             _ if category == &MobCategory::CREATURE || category == &MobCategory::MISC => false,

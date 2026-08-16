@@ -469,6 +469,12 @@ async fn spawn_mob_bucket_entity(
         f64::from(pos.0.z) + 0.5,
     );
     let entity = from_type(entity_type, spawn_pos, world, Uuid::new_v4());
+    // `AbstractFish.removeWhenFarAway` keeps entities released from a mob bucket.
+    // Pumpkin models that state with the shared persistence flag.
+    entity
+        .get_entity()
+        .persistence_required
+        .store(true, std::sync::atomic::Ordering::Relaxed);
     // `TropicalFish.saveToBucketTag`/`applyImplicitComponents`: restore the exact caught
     // variant instead of leaving the fresh (random-rolled) one from construction.
     if let Some((pattern, base_color, pattern_color)) = tropical_fish_variant
