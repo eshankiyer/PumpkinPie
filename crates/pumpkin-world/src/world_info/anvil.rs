@@ -296,7 +296,8 @@ impl WorldInfoReader for AnvilLevelInfo {
                         }
                         buf
                     }
-                    Err(_backup_error) => return Err(primary_error),
+                    Err(WorldInfoError::InfoNotFound) => return Err(primary_error),
+                    Err(backup_error) => return Err(backup_error),
                 }
             }
         };
@@ -775,5 +776,32 @@ mod test {
         assert_eq!(loaded.world_gen_settings.seed, 42);
         assert!(current.is_file());
         assert!(backup.is_file());
+    }
+
+    #[test]
+    fn returns_backup_validation_error_when_current_is_missing() {
+        let temp_dir = TempDir::new().unwrap();
+        let data = LevelData::default(Seed(42));
+        AnvilLevelInfo
+            .write_world_info(&data, temp_dir.path())
+            .unwrap();
+
+        let current = temp_dir.path().join(super::LEVEL_DAT_FILE_NAME);
+        let backup = temp_dir.path().join(LEVEL_DAT_BACKUP_FILE_NAME);
+        std::fs::rename(&current, &backup).unwrap();
+
+        let mut data_tag = pumpkin_nbt::compound::NbtCompound::new();
+        data_tag.put_int("DataVersion", 1);
+        data_tag.put_int("version", 1);
+        let mut root = pumpkin_nbt::compound::NbtCompound::new();
+        root.put_compound("Data", data_tag);
+        let file = File::create(&backup).unwrap();
+        pumpkin_nbt::nbt_compress::write_gzip_compound_tag(root, file).unwrap();
+
+        let error = AnvilLevelInfo.read_world_info(temp_dir.path()).unwrap_err();
+        assert!(matches!(
+            error,
+            super::WorldInfoError::UnsupportedDataVersion(1)
+        ));
     }
 }
