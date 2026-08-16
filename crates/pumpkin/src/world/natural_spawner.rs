@@ -775,6 +775,11 @@ pub fn spawn_category_for_position(
             let entity_type =
                 &EntityType::from_name(spawner.r#type.strip_prefix("minecraft:").unwrap()).unwrap();
 
+            if !is_spawner_allowed_at(world, category, &new_pos, spawner) {
+                inc += 1;
+                continue;
+            }
+
             new_pos = adjust_spawn_position(world, new_pos, entity_type);
 
             let spawn_pos_f64 = Vector3::new(
@@ -889,22 +894,60 @@ pub fn get_random_spawn_mob_at(
     } else {
         // TODO isInNetherFortressBounds(pos, level, cetagory, structureManager) then NetherFortressStructure.FORTRESS_ENEMIES
         // TODO structureManager.getAllStructuresAt(pos); ChunkGenerator::getMobsAt
-        match category.id {
-            id if id == MobCategory::MONSTER.id => biome.spawners.monster,
-            id if id == MobCategory::CREATURE.id => biome.spawners.creature,
-            id if id == MobCategory::AMBIENT.id => biome.spawners.ambient,
-            id if id == MobCategory::AXOLOTLS.id => biome.spawners.axolotls,
-            id if id == MobCategory::UNDERGROUND_WATER_CREATURE.id => {
-                biome.spawners.underground_water_creature
-            }
-            id if id == MobCategory::WATER_CREATURE.id => biome.spawners.water_creature,
-            id if id == MobCategory::WATER_AMBIENT.id => biome.spawners.water_ambient,
-            id if id == MobCategory::MISC.id => biome.spawners.misc,
-            _ => panic!(),
-        }
-        .choose_weighted(&mut rng(), |s| s.weight)
-        .ok()
+        spawners_for_category(biome, category)
+            .choose_weighted(&mut rng(), |s| s.weight)
+            .ok()
     }
+}
+
+fn spawners_for_category(
+    biome: &'static Biome,
+    category: &'static MobCategory,
+) -> &'static [Spawner] {
+    match category.id {
+        id if id == MobCategory::MONSTER.id => biome.spawners.monster,
+        id if id == MobCategory::CREATURE.id => biome.spawners.creature,
+        id if id == MobCategory::AMBIENT.id => biome.spawners.ambient,
+        id if id == MobCategory::AXOLOTLS.id => biome.spawners.axolotls,
+        id if id == MobCategory::UNDERGROUND_WATER_CREATURE.id => {
+            biome.spawners.underground_water_creature
+        }
+        id if id == MobCategory::WATER_CREATURE.id => biome.spawners.water_creature,
+        id if id == MobCategory::WATER_AMBIENT.id => biome.spawners.water_ambient,
+        id if id == MobCategory::MISC.id => biome.spawners.misc,
+        _ => panic!(),
+    }
+}
+
+fn same_spawner(left: &Spawner, right: &Spawner) -> bool {
+    left.r#type == right.r#type
+        && left.min_count == right.min_count
+        && left.max_count == right.max_count
+        && left.weight == right.weight
+}
+
+/// Mirrors NaturalSpawner.canSpawnMobAt: the selected biome entry must still
+/// be present at every jittered candidate position.
+fn is_spawner_allowed_at(
+    world: &Arc<World>,
+    category: &'static MobCategory,
+    block_pos: &BlockPos,
+    expected: &Spawner,
+) -> bool {
+    world
+        .level
+        .get_rough_biome(block_pos)
+        .is_some_and(|biome| is_spawner_allowed_in_biome(biome, category, expected))
+}
+
+fn is_spawner_allowed_in_biome(
+    biome: &'static Biome,
+    category: &'static MobCategory,
+    expected: &Spawner,
+) -> bool {
+    spawners_for_category(biome, category)
+        .iter()
+        .any(|candidate| same_spawner(candidate, expected))
 }
 
 pub fn is_valid_spawn_position_for_type(
@@ -1192,8 +1235,8 @@ fn is_valid_spawn_support(state: &'static BlockState, entity_type: &'static Enti
 mod tests {
     use super::{
         IndexedRandom, can_spawn_in_water, counts_for_natural_spawning,
-        is_right_distance_to_player_and_spawn_point, is_valid_empty_spawn_block,
-        is_valid_spawn_support,
+        is_right_distance_to_player_and_spawn_point, is_spawner_allowed_in_biome,
+        is_valid_empty_spawn_block, is_valid_spawn_support,
     };
     use pumpkin_data::Block;
     use pumpkin_data::biome::{Biome, Spawner};
@@ -1361,6 +1404,22 @@ mod tests {
         assert!(!can_spawn_in_water(true, Block::STONE.default_state));
         assert!(can_spawn_in_water(true, Block::AIR.default_state));
         assert!(!can_spawn_in_water(false, Block::AIR.default_state));
+    }
+
+    #[test]
+    fn jittered_spawn_candidate_must_keep_the_selected_biome_entry() {
+        let glow_squid = &Biome::BAMBOO_JUNGLE.spawners.underground_water_creature[0];
+
+        assert!(is_spawner_allowed_in_biome(
+            &Biome::BAMBOO_JUNGLE,
+            &EntityType::GLOW_SQUID.category,
+            glow_squid,
+        ));
+        assert!(!is_spawner_allowed_in_biome(
+            &Biome::DEEP_DARK,
+            &EntityType::GLOW_SQUID.category,
+            glow_squid,
+        ));
     }
 
     #[test]
