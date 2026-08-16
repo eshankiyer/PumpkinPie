@@ -84,6 +84,53 @@ fn check_file_level_version(raw_nbt: &[u8]) -> Result<(), WorldInfoError> {
     }
 }
 
+fn read_level_dat(path: &Path) -> Result<Vec<u8>, WorldInfoError> {
+    let world_info_file = File::open(path)?;
+    let mut buf = Vec::new();
+    GzDecoder::new(world_info_file).read_to_end(&mut buf)?;
+    Ok(buf)
+}
+
+/// Restores a successfully read `level.dat_old` without exposing a partially
+/// copied level.dat to the next startup. An unreadable current file is kept
+/// under a unique name for diagnosis, matching vanilla's corrupted-file move.
+fn restore_level_dat_from_backup(level_folder: &Path) -> Result<(), WorldInfoError> {
+    let path = level_folder.join(LEVEL_DAT_FILE_NAME);
+    let backup_path = level_folder.join(LEVEL_DAT_BACKUP_FILE_NAME);
+    let restore_path = level_folder.join(format!(
+        "level-restore-{}-{}.dat",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_nanos()
+    ));
+    fs::copy(&backup_path, &restore_path)?;
+
+    let corrupt_path = level_folder.join(format!(
+        "level.dat_corrupt_{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_nanos()
+    ));
+    let had_current = path.exists();
+    if had_current && let Err(error) = fs::rename(&path, &corrupt_path) {
+        let _ = fs::remove_file(&restore_path);
+        return Err(error.into());
+    }
+
+    if let Err(error) = fs::rename(&restore_path, &path) {
+        if had_current && let Err(rollback_error) = fs::rename(&corrupt_path, &path) {
+            error!("Failed to restore the unreadable level.dat: {rollback_error}");
+        }
+        let _ = fs::remove_file(&restore_path);
+        return Err(error.into());
+    }
+
+    Ok(())
+}
+
 /// Reads the nested `spawn` compound (`LevelData.RespawnData.CODEC`, see
 /// `net/minecraft/world/level/storage/PrimaryLevelData.java:126,139` and the record at
 /// `net/minecraft/world/level/storage/LevelData.java:33-43`): a `GlobalPos` (`dimension`
@@ -231,9 +278,22 @@ impl WorldInfoReader for AnvilLevelInfo {
     fn read_world_info(&self, level_folder: &Path) -> Result<LevelData, WorldInfoError> {
         let path = level_folder.join(LEVEL_DAT_FILE_NAME);
 
-        let world_info_file = File::open(path)?;
-        let mut buf = Vec::new();
-        GzDecoder::new(world_info_file).read_to_end(&mut buf)?;
+        let buf = match read_level_dat(&path) {
+            Ok(buf) => buf,
+            Err(primary_error) => {
+                let backup_path = level_folder.join(LEVEL_DAT_BACKUP_FILE_NAME);
+                match read_level_dat(&backup_path) {
+                    Ok(buf) => {
+                        if let Err(error) = restore_level_dat_from_backup(level_folder) {
+                            error!("Failed to restore level.dat from level.dat_old: {error}");
+                        }
+                        buf
+                    }
+                    Err(WorldInfoError::InfoNotFound) => return Err(primary_error),
+                    Err(backup_error) => return Err(backup_error),
+                }
+            }
+        };
 
         check_file_data_version(&buf)?;
         check_file_level_version(&buf)?;
@@ -667,5 +727,24 @@ mod test {
                 .unwrap()
                 .initialized
         );
+    }
+
+    #[test]
+    fn restores_level_dat_from_backup_when_current_is_missing() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut data = LevelData::default(Seed(42));
+        data.initialized = false;
+        AnvilLevelInfo
+            .write_world_info(&data, temp_dir.path())
+            .unwrap();
+
+        let current = temp_dir.path().join(super::LEVEL_DAT_FILE_NAME);
+        let backup = temp_dir.path().join(LEVEL_DAT_BACKUP_FILE_NAME);
+        std::fs::rename(&current, &backup).unwrap();
+
+        let loaded = AnvilLevelInfo.read_world_info(temp_dir.path()).unwrap();
+        assert!(!loaded.initialized);
+        assert!(current.is_file());
+        assert!(backup.is_file());
     }
 }
