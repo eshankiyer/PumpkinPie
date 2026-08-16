@@ -91,6 +91,13 @@ fn read_level_dat(path: &Path) -> Result<Vec<u8>, WorldInfoError> {
     Ok(buf)
 }
 
+fn read_validated_level_dat(path: &Path) -> Result<Vec<u8>, WorldInfoError> {
+    let buf = read_level_dat(path)?;
+    check_file_data_version(&buf)?;
+    check_file_level_version(&buf)?;
+    Ok(buf)
+}
+
 /// Restores a successfully read `level.dat_old` without exposing a partially
 /// copied level.dat to the next startup. An unreadable current file is kept
 /// under a unique name for diagnosis, matching vanilla's corrupted-file move.
@@ -278,25 +285,21 @@ impl WorldInfoReader for AnvilLevelInfo {
     fn read_world_info(&self, level_folder: &Path) -> Result<LevelData, WorldInfoError> {
         let path = level_folder.join(LEVEL_DAT_FILE_NAME);
 
-        let buf = match read_level_dat(&path) {
+        let buf = match read_validated_level_dat(&path) {
             Ok(buf) => buf,
             Err(primary_error) => {
                 let backup_path = level_folder.join(LEVEL_DAT_BACKUP_FILE_NAME);
-                match read_level_dat(&backup_path) {
+                match read_validated_level_dat(&backup_path) {
                     Ok(buf) => {
                         if let Err(error) = restore_level_dat_from_backup(level_folder) {
                             error!("Failed to restore level.dat from level.dat_old: {error}");
                         }
                         buf
                     }
-                    Err(WorldInfoError::InfoNotFound) => return Err(primary_error),
-                    Err(backup_error) => return Err(backup_error),
+                    Err(_backup_error) => return Err(primary_error),
                 }
             }
         };
-
-        check_file_data_version(&buf)?;
-        check_file_level_version(&buf)?;
 
         // For now, construct a default LevelData or parse manually
         let mut level_data = LevelData::default(pumpkin_util::world_seed::Seed(0));
@@ -744,6 +747,32 @@ mod test {
 
         let loaded = AnvilLevelInfo.read_world_info(temp_dir.path()).unwrap();
         assert!(!loaded.initialized);
+        assert!(current.is_file());
+        assert!(backup.is_file());
+    }
+
+    #[test]
+    fn restores_backup_when_current_level_data_version_is_invalid() {
+        let temp_dir = TempDir::new().unwrap();
+        let data = LevelData::default(Seed(42));
+        AnvilLevelInfo
+            .write_world_info(&data, temp_dir.path())
+            .unwrap();
+
+        let current = temp_dir.path().join(super::LEVEL_DAT_FILE_NAME);
+        let backup = temp_dir.path().join(LEVEL_DAT_BACKUP_FILE_NAME);
+        std::fs::copy(&current, &backup).unwrap();
+
+        let mut data_tag = pumpkin_nbt::compound::NbtCompound::new();
+        data_tag.put_int("DataVersion", 1);
+        data_tag.put_int("version", 1);
+        let mut root = pumpkin_nbt::compound::NbtCompound::new();
+        root.put_compound("Data", data_tag);
+        let file = File::create(&current).unwrap();
+        pumpkin_nbt::nbt_compress::write_gzip_compound_tag(root, file).unwrap();
+
+        let loaded = AnvilLevelInfo.read_world_info(temp_dir.path()).unwrap();
+        assert_eq!(loaded.world_gen_settings.seed, 42);
         assert!(current.is_file());
         assert!(backup.is_file());
     }
