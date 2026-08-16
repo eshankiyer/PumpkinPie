@@ -408,6 +408,10 @@ impl MobEntity {
         self.owner.store(Some(owner));
     }
 
+    pub fn clear_owner(&self) {
+        self.owner.store(None);
+    }
+
     pub fn is_ordered_to_sit(&self) -> bool {
         self.ordered_to_sit.load(Relaxed)
     }

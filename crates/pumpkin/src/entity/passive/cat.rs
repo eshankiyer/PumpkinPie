@@ -229,6 +229,10 @@ impl NBTStorage for CatEntity {
                 "CollarColor",
                 self.collar_color.load(Ordering::Relaxed) as i8,
             );
+            if let Some(owner) = self.mob_entity.owner.load() {
+                nbt.put_uuid("Owner", owner);
+            }
+            nbt.put_bool("Sitting", self.mob_entity.is_ordered_to_sit());
         })
     }
 
@@ -257,13 +261,39 @@ impl NBTStorage for CatEntity {
             if let Some(color) = nbt.get_byte("CollarColor") {
                 self.collar_color.store(color as u8, Ordering::Relaxed);
             }
-            // Vanilla calls `reassessTameGoals` from both the constructor and `setTame` (which
-            // fires on load); `CatEntity::new` only covers the always-untamed spawn case, so a
-            // cat that loads already tamed needs the flee-from-players goal removed here too.
-            // (Pumpkin does not currently persist/restore mob ownership at all across a
-            // save/load cycle -- this is a pre-existing, unrelated gap -- so this branch is
-            // presently unreachable in practice; it's wired now so it's already correct once
-            // owner persistence lands.)
+            // `EntityReference.readWithOldOwnerConversion` accepts both the current UUID
+            // representation and the legacy owner name. Resolve the latter through the
+            // server user cache, just as vanilla resolves old owner names to profiles.
+            let owner = if let Some(owner) = nbt.get_uuid("Owner") {
+                Some(owner)
+            } else if let Some(owner_name) = nbt.get_string("Owner") {
+                let owner_name = owner_name.to_owned();
+                let world = self.mob_entity.living_entity.entity.world.load();
+                if let Some(server) = world.server.upgrade() {
+                    server
+                        .data
+                        .user_cache
+                        .write()
+                        .await
+                        .get_by_name(&owner_name)
+                        .map(|profile| profile.uuid)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            if let Some(owner) = owner {
+                self.mob_entity.set_owner(owner);
+            } else {
+                self.mob_entity.clear_owner();
+            }
+            self.mob_entity
+                .set_ordered_to_sit(nbt.get_bool("Sitting").unwrap_or(false));
+
+            // Vanilla calls `reassessTameGoals` from `setTame` during load, so a restored
+            // tamed cat must lose its untamed player-avoidance goal before it starts ticking.
             if self.mob_entity.is_tamed() {
                 self.reassess_tame_goals().await;
             }
