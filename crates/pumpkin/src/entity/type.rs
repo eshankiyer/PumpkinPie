@@ -652,6 +652,7 @@ const fn uses_animal_spawn_rules(id: u16) -> bool {
         || id == EntityType::PANDA.id
         || id == EntityType::PIG.id
         || id == EntityType::SHEEP.id
+        || id == EntityType::SKELETON_HORSE.id
         || id == EntityType::TRADER_LLAMA.id
 }
 
@@ -862,6 +863,7 @@ mod animal_spawn_dispatch_tests {
             EntityType::PANDA,
             EntityType::PIG,
             EntityType::SHEEP,
+            EntityType::SKELETON_HORSE,
             EntityType::TRADER_LLAMA,
         ] {
             assert!(uses_animal_spawn_rules(entity_type.id));
