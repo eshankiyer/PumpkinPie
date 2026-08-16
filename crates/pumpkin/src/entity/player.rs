@@ -1842,9 +1842,8 @@ impl Player {
         let block_state = world.get_block_state(pos);
         let above_state = world.get_block_state(&pos.up());
 
-        // Check if blocks are passable (non-solid or air)
-        let block_safe = block_state.is_air() || !block_state.is_solid();
-        let above_safe = above_state.is_air() || !above_state.is_solid();
+        let block_safe = is_valid_for_forced_respawn(block_state);
+        let above_safe = is_valid_for_forced_respawn(above_state);
 
         if block_safe && above_safe {
             let position = Vector3::new(
@@ -6351,9 +6350,15 @@ impl InventoryPlayer for Player {
     }
 }
 
+#[inline]
+fn is_valid_for_forced_respawn(state: &BlockState) -> bool {
+    !state.is_solid() && !state.is_liquid()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Player, ability_invulnerability_blocks};
+    use super::{Player, ability_invulnerability_blocks, is_valid_for_forced_respawn};
+    use pumpkin_data::Block;
     use pumpkin_data::damage::DamageType;
 
     #[test]
@@ -6367,5 +6372,23 @@ mod tests {
     fn invulnerability_allows_bypass_tagged_damage() {
         assert!(ability_invulnerability_blocks(&DamageType::MOB_ATTACK));
         assert!(!ability_invulnerability_blocks(&DamageType::OUT_OF_WORLD));
+    }
+
+    #[test]
+    fn forced_respawn_rejects_liquid_blocks() {
+        assert!(is_valid_for_forced_respawn(Block::AIR.default_state));
+        assert!(!is_valid_for_forced_respawn(Block::WATER.default_state));
+        assert!(!is_valid_for_forced_respawn(Block::LAVA.default_state));
+    }
+
+    #[test]
+    fn forced_respawn_keeps_non_solid_vanilla_exceptions() {
+        assert!(is_valid_for_forced_respawn(
+            Block::STONE_PRESSURE_PLATE.default_state
+        ));
+        assert!(is_valid_for_forced_respawn(Block::OAK_SIGN.default_state));
+        assert!(is_valid_for_forced_respawn(
+            Block::WHITE_BANNER.default_state
+        ));
     }
 }
