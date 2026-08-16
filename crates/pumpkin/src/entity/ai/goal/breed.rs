@@ -8,10 +8,13 @@ use crate::entity::{
 
 use super::{Controls, Goal, GoalFuture};
 
+pub type MatePredicate = fn(&dyn Mob, &dyn EntityBase) -> bool;
+
 pub struct BreedGoal {
     speed: f64,
     mate: Option<Arc<dyn EntityBase>>,
     timer: i32,
+    mate_predicate: Option<MatePredicate>,
 }
 
 impl BreedGoal {
@@ -21,10 +24,24 @@ impl BreedGoal {
             speed,
             mate: None,
             timer: 0,
+            mate_predicate: None,
         })
     }
 
-    fn find_mate(mob: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
+    #[must_use]
+    pub fn with_mate_predicate(speed: f64, mate_predicate: MatePredicate) -> Box<Self> {
+        Box::new(Self {
+            speed,
+            mate: None,
+            timer: 0,
+            mate_predicate: Some(mate_predicate),
+        })
+    }
+
+    fn find_mate(
+        mob: &dyn Mob,
+        mate_predicate: Option<MatePredicate>,
+    ) -> Option<Arc<dyn EntityBase>> {
         let mob_entity = mob.get_mob_entity();
         if !mob_entity.is_in_love() {
             return None;
@@ -49,6 +66,9 @@ impl BreedGoal {
             }
             if !candidate.is_in_love() || !candidate.is_breeding_ready() || candidate.is_panicking()
             {
+                continue;
+            }
+            if mate_predicate.is_some_and(|predicate| !predicate(mob, candidate.as_ref())) {
                 continue;
             }
 
@@ -130,7 +150,7 @@ impl Goal for BreedGoal {
                 return false;
             }
 
-            self.mate = Self::find_mate(mob);
+            self.mate = Self::find_mate(mob, self.mate_predicate);
             self.mate.is_some()
         })
     }

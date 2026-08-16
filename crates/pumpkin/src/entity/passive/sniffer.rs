@@ -86,7 +86,7 @@ impl SnifferEntity {
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, SnifferDigGoal::new(1.0));
-            goal_selector.add_goal(2, BreedGoal::new(1.0));
+            goal_selector.add_goal(2, BreedGoal::with_mate_predicate(1.0, sniffer_can_mate));
             goal_selector.add_goal(3, Box::new(TemptGoal::new(1.0, TEMPT_ITEMS, false)));
             goal_selector.add_goal(4, Box::new(FollowParentGoal::new(1.0)));
             goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
@@ -129,6 +129,24 @@ impl SnifferEntity {
             world.play_sound(sound, SoundCategory::Neutral, &pos);
         }
     }
+}
+
+fn sniffer_can_mate(mob: &dyn Mob, partner: &dyn EntityBase) -> bool {
+    let Some(sniffer) = mob.cast_any().downcast_ref::<SnifferEntity>() else {
+        return false;
+    };
+    let Some(partner) = partner.cast_any().downcast_ref::<SnifferEntity>() else {
+        return false;
+    };
+
+    sniffer_state_can_mate(sniffer.get_state()) && sniffer_state_can_mate(partner.get_state())
+}
+
+const fn sniffer_state_can_mate(state: SnifferState) -> bool {
+    matches!(
+        state,
+        SnifferState::Idling | SnifferState::Scenting | SnifferState::FeelingHappy
+    )
 }
 
 impl AgeableMob for SnifferEntity {
@@ -185,10 +203,9 @@ impl Mob for SnifferEntity {
     /// a live baby. The item is emitted by `spawn_breeding_result` after the shared breeding XP
     /// path, matching vanilla's `finalizeSpawnChildFromBreeding` ordering.
     ///
-    /// Deferred (documented simplification): vanilla's `canMate` additionally gates breeding on
-    /// both sniffers being in `{IDLING, SCENTING, FEELING_HAPPY}`. `BreedGoal`/`Mob` has no
-    /// `can_mate` hook today (adding one would mean changing `find_mate` for every breedable
-    /// mob), so any two grown, in-love sniffers can currently mate regardless of state.
+    /// Vanilla `Sniffer.canMate` gates breeding on both sniffers being in
+    /// `{IDLING, SCENTING, FEELING_HAPPY}`; the predicate supplied to this sniffer's
+    /// `BreedGoal` enforces that state check before selecting a partner.
     fn create_offspring<'a>(
         &'a self,
         _mate: &'a dyn EntityBase,
@@ -219,5 +236,30 @@ impl Mob for SnifferEntity {
             );
             world.spawn_entity(item_entity).await;
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SnifferState, sniffer_state_can_mate};
+
+    #[test]
+    fn sniffer_can_mate_matches_vanilla_state_allowlist() {
+        for state in [
+            SnifferState::Idling,
+            SnifferState::Scenting,
+            SnifferState::FeelingHappy,
+        ] {
+            assert!(sniffer_state_can_mate(state));
+        }
+
+        for state in [
+            SnifferState::Sniffing,
+            SnifferState::Searching,
+            SnifferState::Digging,
+            SnifferState::Rising,
+        ] {
+            assert!(!sniffer_state_can_mate(state));
+        }
     }
 }
