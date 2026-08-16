@@ -1412,12 +1412,12 @@ mod tests {
 
         assert!(is_spawner_allowed_in_biome(
             &Biome::BAMBOO_JUNGLE,
-            &EntityType::GLOW_SQUID.category,
+            EntityType::GLOW_SQUID.category,
             glow_squid,
         ));
         assert!(!is_spawner_allowed_in_biome(
             &Biome::DEEP_DARK,
-            &EntityType::GLOW_SQUID.category,
+            EntityType::GLOW_SQUID.category,
             glow_squid,
         ));
     }
