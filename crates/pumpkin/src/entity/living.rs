@@ -20,7 +20,10 @@ use std::sync::atomic::{
     AtomicBool, AtomicU8,
     Ordering::{Relaxed, SeqCst},
 };
-use std::{collections::HashMap, sync::atomic::AtomicI32};
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicI32, AtomicI64, AtomicU64},
+};
 use tracing::warn;
 
 use super::experience_orb::ExperienceOrbEntity;
@@ -137,6 +140,14 @@ pub struct LivingEntity {
     pub hurt_cooldown: AtomicI32,
     /// Stores the amount of damage the entity last received.
     pub last_damage_taken: AtomicCell<f32>,
+    /// Packed `(game_time * 2) + panic_causing` state for the most recent accepted damage.
+    ///
+    /// This mirrors `LivingEntity.lastDamageSource` as consumed by `PanicGoal` while keeping
+    /// the source flag and timestamp atomic to readers in the goal selector.
+    pub last_damage_state: AtomicI64,
+    /// Monotonic order for accepted damage calls, preventing an older async call from
+    /// publishing its source after a newer call has completed.
+    last_damage_sequence: AtomicU64,
     /// The current health level of the entity.
     pub health: AtomicCell<f32>,
     /// The remaining air supply used by vanilla `LivingEntity.baseTick`.
@@ -294,6 +305,8 @@ impl LivingEntity {
             entity,
             hurt_cooldown: AtomicI32::new(0),
             last_damage_taken: AtomicCell::new(0.0),
+            last_damage_state: AtomicI64::new(-1),
+            last_damage_sequence: AtomicU64::new(0),
             absorption: AtomicCell::new(0.0),
             fall_distance: AtomicCell::new(0.0),
             death_time: AtomicU8::new(0),
@@ -3119,6 +3132,7 @@ impl EntityBase for LivingEntity {
                     self.hurt_cooldown.store(20, Relaxed);
                     (amount, true)
                 };
+            let damage_sequence = self.last_damage_sequence.fetch_add(1, Relaxed) + 1;
             self.last_damage_taken.store(amount);
 
             // Armor, enchantment protection and resistance reduce only the incremental
@@ -3387,7 +3401,22 @@ impl EntityBase for LivingEntity {
             let clamped_health = new_health.max(0.0).min(max_h);
             if remaining > 0.0 {
                 self.set_health(clamped_health);
+            }
 
+            // `PanicGoal.shouldPanic` checks the most recent accepted damage source against
+            // `DamageTypeTags.PANIC_CAUSES`. Publish it immediately after the health change,
+            // matching `LivingEntity.hurtServer` before later statistics and thorns work.
+            if self.last_damage_sequence.load(Relaxed) == damage_sequence {
+                let game_time = world.level_time.lock().await.world_age;
+                if self.last_damage_sequence.load(Relaxed) == damage_sequence {
+                    self.last_damage_state.store(
+                        pack_panic_damage_state(game_time, damage_causes_panic(damage_type)),
+                        Relaxed,
+                    );
+                }
+            }
+
+            if remaining > 0.0 {
                 // Statistics updates
                 if let Some(player) = caller.get_player() {
                     player
@@ -4266,6 +4295,16 @@ fn friction_influenced_speed(speed: f64, slipperiness: f64) -> f64 {
     speed * 0.216_000_02 / (slipperiness * slipperiness * slipperiness)
 }
 
+fn damage_causes_panic(damage_type: DamageType) -> bool {
+    damage_type.has_tag(&tag::DamageType::MINECRAFT_PANIC_CAUSES)
+}
+
+fn pack_panic_damage_state(game_time: i64, causes_panic: bool) -> i64 {
+    game_time
+        .saturating_mul(2)
+        .saturating_add(i64::from(causes_panic))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4318,6 +4357,30 @@ mod tests {
             &netherite_boots,
             &DamageType::PLAYER_ATTACK
         ));
+    }
+
+    #[test]
+    fn panic_goal_uses_the_vanilla_damage_tag() {
+        for damage_type in [
+            DamageType::CACTUS,
+            DamageType::LAVA,
+            DamageType::ON_FIRE,
+            DamageType::MOB_ATTACK,
+            DamageType::PLAYER_ATTACK,
+        ] {
+            assert!(
+                damage_causes_panic(damage_type),
+                "{}",
+                damage_type.message_id
+            );
+        }
+        for damage_type in [DamageType::FALL, DamageType::DROWN, DamageType::IN_WALL] {
+            assert!(
+                !damage_causes_panic(damage_type),
+                "{}",
+                damage_type.message_id
+            );
+        }
     }
 
     #[test]
