@@ -196,15 +196,23 @@ fn initial_spawn_height(world: &World) -> i32 {
     match world.level.world_gen.as_ref() {
         // ChunkGenerator.getSpawnHeight returns 64 for noise generators.
         WorldGenerator::Noise(_) => 64,
-        WorldGenerator::Flat(generator) => {
-            world.dimension.min_y
-                + generator
-                    .layers
-                    .iter()
-                    .map(|layer| layer.height)
-                    .sum::<i32>()
-        }
+        WorldGenerator::Flat(generator) => flat_spawn_height(
+            world.dimension.min_y,
+            world.dimension.height,
+            generator.layers.iter().map(|layer| layer.height).sum(),
+        ),
     }
+}
+
+/// Vanilla `FlatLevelSource.getSpawnHeight` clamps configured layers to the
+/// dimension height before adding the minimum build height.
+const fn flat_spawn_height(min_y: i32, dimension_height: i32, layer_count: i32) -> i32 {
+    min_y
+        + if layer_count < dimension_height {
+            layer_count
+        } else {
+            dimension_height
+        }
 }
 
 /// Port of vanilla's `PlayerSpawnFinder.findSpawn`.
@@ -300,12 +308,11 @@ fn get_level_respawn_pos(world: &World, x: i32, z: i32) -> Option<BlockPos> {
         match world.level.world_gen.as_ref() {
             pumpkin_world::generation::generator::WorldGenerator::Noise(_) => 64,
             pumpkin_world::generation::generator::WorldGenerator::Flat(generator) => {
-                min_y
-                    + generator
-                        .layers
-                        .iter()
-                        .map(|layer| layer.height)
-                        .sum::<i32>()
+                flat_spawn_height(
+                    min_y,
+                    world.dimension.height,
+                    generator.layers.iter().map(|layer| layer.height).sum(),
+                )
             }
         }
     } else {
@@ -327,10 +334,11 @@ fn get_level_respawn_pos(world: &World, x: i32, z: i32) -> Option<BlockPos> {
     let mut y = top_y + 1;
     while y >= min_y {
         let pos = BlockPos(Vector3::new(x, y, z));
-        let state = world.get_block_state(&pos);
-        if Fluid::from_state_id(state.id).is_some() {
+        let (fluid, _) = world.get_fluid_and_fluid_state(&pos);
+        if fluid.id != Fluid::EMPTY.id {
             break;
         }
+        let state = world.get_block_state(&pos);
         if has_full_upward_face(state) {
             return Some(pos.up());
         }
@@ -473,7 +481,17 @@ const fn is_ocean_covered_column(surface: i32, top_y: i32, ocean_floor: i32) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{initial_spawn_climate_distance, is_ocean_covered_column};
+    use super::{flat_spawn_height, initial_spawn_climate_distance, is_ocean_covered_column};
+
+    #[test]
+    fn flat_spawn_height_is_limited_by_dimension_height() {
+        assert_eq!(flat_spawn_height(-64, 384, 512), 320);
+    }
+
+    #[test]
+    fn flat_spawn_height_preserves_layers_inside_dimension() {
+        assert_eq!(flat_spawn_height(-64, 384, 128), 64);
+    }
 
     #[test]
     fn initial_spawn_climate_targets_match_overworld_weirdness_bands() {
