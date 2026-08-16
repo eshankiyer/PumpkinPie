@@ -146,6 +146,21 @@ impl ChunkSections {
             .collect()
     }
 
+    #[must_use]
+    pub fn unique_biomes(&self) -> Vec<u8> {
+        self.biome_sections
+            .read()
+            .unwrap()
+            .iter()
+            .flat_map(|section| section.iter())
+            .fold(Vec::new(), |mut biomes, biome| {
+                if !biomes.contains(&biome) {
+                    biomes.push(biome);
+                }
+                biomes
+            })
+    }
+
     #[cfg(test)]
     #[must_use]
     pub fn dump_biomes(&self) -> Vec<u8> {

@@ -1,10 +1,12 @@
 use crate::generation::structure::placement::GlobalStructureCache;
-use std::sync::Arc;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, LazyLock};
 
 use pumpkin_data::block_properties::is_air;
 use pumpkin_data::chunk::DoublePerlinNoiseParameters;
 use pumpkin_data::dimension::Dimension;
 use pumpkin_data::fluid::{Fluid, FluidState};
+use pumpkin_data::placed_feature::PlacedFeature;
 use pumpkin_data::structures::{
     Structure, StructureKeys, StructurePlacementType, StructureSet, WeightedEntry,
 };
@@ -73,6 +75,7 @@ pub trait GenerationCache: HeightLimitView + BlockAccessor {
 
     fn get_chunk_mut(&mut self, chunk_x: i32, chunk_z: i32) -> Option<&mut ProtoChunk>;
     fn get_chunk(&self, chunk_x: i32, chunk_z: i32) -> Option<&ProtoChunk>;
+    fn get_chunk_biomes(&self, chunk_x: i32, chunk_z: i32) -> Option<Vec<u8>>;
 
     fn try_get_proto_chunk(&self, chunk_x: i32, chunk_z: i32) -> Option<&ProtoChunk>;
 
@@ -229,6 +232,239 @@ pub struct TerrainCache {
     pub terrain_builder: SurfaceTerrainBuilder,
     pub surface_noise: DoublePerlinNoiseSampler,
     pub secondary_noise: DoublePerlinNoiseSampler,
+}
+
+/// Returns the biome ids present in the center chunk and its eight neighbours.
+///
+/// `ChunkGenerator.applyBiomeDecoration` collects every biome holder from
+/// `ChunkPos.rangeClosed(center, 1)`, rather than only the center chunk. The
+/// generated data model stores biome ids directly, so this is the equivalent
+/// set operation available here.
+fn collect_possible_biomes_3x3<F>(center_x: i32, center_z: i32, mut chunk_biomes: F) -> Vec<u8>
+where
+    F: FnMut(i32, i32) -> Option<Vec<u8>>,
+{
+    let mut possible_biomes = Vec::new();
+    for chunk_x in (center_x - 1)..=(center_x + 1) {
+        for chunk_z in (center_z - 1)..=(center_z + 1) {
+            if let Some(biomes) = chunk_biomes(chunk_x, chunk_z) {
+                for biome_id in biomes {
+                    if !possible_biomes.contains(&biome_id) {
+                        possible_biomes.push(biome_id);
+                    }
+                }
+            }
+        }
+    }
+    possible_biomes
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct FeatureData {
+    step: usize,
+    feature_index: usize,
+    feature: PlacedFeature,
+}
+
+fn visit_feature(
+    feature: FeatureData,
+    edges: &BTreeMap<FeatureData, BTreeSet<FeatureData>>,
+    discovered: &mut BTreeSet<FeatureData>,
+    visiting: &mut BTreeSet<FeatureData>,
+    sorted: &mut Vec<FeatureData>,
+) {
+    if discovered.contains(&feature) {
+        return;
+    }
+    assert!(visiting.insert(feature), "feature order cycle found");
+    for &successor in edges.get(&feature).into_iter().flatten() {
+        visit_feature(successor, edges, discovered, visiting, sorted);
+    }
+    visiting.remove(&feature);
+    discovered.insert(feature);
+    sorted.push(feature);
+}
+
+fn possible_biomes_for_dimension(dimension: &Dimension) -> Vec<u8> {
+    if dimension == &Dimension::OVERWORLD {
+        // This is the first-occurrence order from
+        // MultiNoiseBiomeSourceParameterList.Preset.OVERWORLD. The generated
+        // climate tree is spatially reordered for lookup and cannot be used
+        // for FeatureSorter indices.
+        return vec![
+            Biome::MUSHROOM_FIELDS.id,
+            Biome::DEEP_FROZEN_OCEAN.id,
+            Biome::DEEP_COLD_OCEAN.id,
+            Biome::DEEP_OCEAN.id,
+            Biome::DEEP_LUKEWARM_OCEAN.id,
+            Biome::WARM_OCEAN.id,
+            Biome::FROZEN_OCEAN.id,
+            Biome::COLD_OCEAN.id,
+            Biome::OCEAN.id,
+            Biome::LUKEWARM_OCEAN.id,
+            Biome::STONY_SHORE.id,
+            Biome::SWAMP.id,
+            Biome::MANGROVE_SWAMP.id,
+            Biome::SNOWY_SLOPES.id,
+            Biome::SNOWY_PLAINS.id,
+            Biome::SNOWY_BEACH.id,
+            Biome::WINDSWEPT_GRAVELLY_HILLS.id,
+            Biome::GROVE.id,
+            Biome::WINDSWEPT_HILLS.id,
+            Biome::SNOWY_TAIGA.id,
+            Biome::WINDSWEPT_FOREST.id,
+            Biome::TAIGA.id,
+            Biome::PLAINS.id,
+            Biome::MEADOW.id,
+            Biome::BEACH.id,
+            Biome::FOREST.id,
+            Biome::OLD_GROWTH_SPRUCE_TAIGA.id,
+            Biome::FLOWER_FOREST.id,
+            Biome::BIRCH_FOREST.id,
+            Biome::DARK_FOREST.id,
+            Biome::PALE_GARDEN.id,
+            Biome::SAVANNA_PLATEAU.id,
+            Biome::SAVANNA.id,
+            Biome::JUNGLE.id,
+            Biome::BADLANDS.id,
+            Biome::DESERT.id,
+            Biome::WOODED_BADLANDS.id,
+            Biome::JAGGED_PEAKS.id,
+            Biome::STONY_PEAKS.id,
+            Biome::FROZEN_RIVER.id,
+            Biome::RIVER.id,
+            Biome::ICE_SPIKES.id,
+            Biome::OLD_GROWTH_PINE_TAIGA.id,
+            Biome::SUNFLOWER_PLAINS.id,
+            Biome::WINDSWEPT_SAVANNA.id,
+            Biome::OLD_GROWTH_BIRCH_FOREST.id,
+            Biome::SPARSE_JUNGLE.id,
+            Biome::BAMBOO_JUNGLE.id,
+            Biome::ERODED_BADLANDS.id,
+            Biome::CHERRY_GROVE.id,
+            Biome::FROZEN_PEAKS.id,
+            Biome::DRIPSTONE_CAVES.id,
+            Biome::LUSH_CAVES.id,
+            Biome::SULFUR_CAVES.id,
+            Biome::DEEP_DARK.id,
+        ];
+    } else if dimension == &Dimension::THE_NETHER {
+        return vec![
+            Biome::NETHER_WASTES.id,
+            Biome::SOUL_SAND_VALLEY.id,
+            Biome::CRIMSON_FOREST.id,
+            Biome::WARPED_FOREST.id,
+            Biome::BASALT_DELTAS.id,
+        ];
+    } else if dimension == &Dimension::THE_END {
+        return vec![
+            Biome::THE_END.id,
+            Biome::END_HIGHLANDS.id,
+            Biome::END_MIDLANDS.id,
+            Biome::SMALL_END_ISLANDS.id,
+            Biome::END_BARRENS.id,
+        ];
+    }
+
+    possible_biomes_for_dimension(&Dimension::OVERWORLD)
+}
+
+fn build_features_per_step(possible_biomes: &[u8]) -> Vec<Vec<PlacedFeature>> {
+    let mut feature_indices = FxHashMap::default();
+    let mut next_feature_index = 0usize;
+    let mut edges: BTreeMap<FeatureData, BTreeSet<FeatureData>> = BTreeMap::new();
+    let mut max_step = 0usize;
+
+    for &biome_id in possible_biomes {
+        let Some(biome) = Biome::from_id(biome_id) else {
+            continue;
+        };
+        let mut feature_list = Vec::new();
+        max_step = max_step.max(biome.features.len());
+
+        for (step, features) in biome.features.iter().enumerate() {
+            for &feature in *features {
+                let feature_index = *feature_indices.entry(feature).or_insert_with(|| {
+                    let index = next_feature_index;
+                    next_feature_index += 1;
+                    index
+                });
+                feature_list.push(FeatureData {
+                    step,
+                    feature_index,
+                    feature,
+                });
+            }
+        }
+
+        for pair in feature_list.windows(2) {
+            edges.entry(pair[0]).or_default().insert(pair[1]);
+        }
+        for feature in feature_list {
+            edges.entry(feature).or_default();
+        }
+    }
+
+    let mut discovered = BTreeSet::new();
+    let mut visiting = BTreeSet::new();
+    let mut sorted = Vec::with_capacity(edges.len());
+    for &feature in edges.keys() {
+        visit_feature(feature, &edges, &mut discovered, &mut visiting, &mut sorted);
+    }
+    sorted.reverse();
+
+    let mut features_per_step = vec![Vec::new(); max_step];
+    for feature in sorted {
+        features_per_step[feature.step].push(feature.feature);
+    }
+    features_per_step
+}
+
+static OVERWORLD_FEATURES_PER_STEP: LazyLock<Vec<Vec<PlacedFeature>>> = LazyLock::new(|| {
+    build_features_per_step(&possible_biomes_for_dimension(&Dimension::OVERWORLD))
+});
+static NETHER_FEATURES_PER_STEP: LazyLock<Vec<Vec<PlacedFeature>>> = LazyLock::new(|| {
+    build_features_per_step(&possible_biomes_for_dimension(&Dimension::THE_NETHER))
+});
+static END_FEATURES_PER_STEP: LazyLock<Vec<Vec<PlacedFeature>>> =
+    LazyLock::new(|| build_features_per_step(&possible_biomes_for_dimension(&Dimension::THE_END)));
+
+fn features_per_step_for_dimension(dimension: &Dimension) -> &'static [Vec<PlacedFeature>] {
+    if dimension == &Dimension::THE_NETHER {
+        &NETHER_FEATURES_PER_STEP
+    } else if dimension == &Dimension::THE_END {
+        &END_FEATURES_PER_STEP
+    } else {
+        &OVERWORLD_FEATURES_PER_STEP
+    }
+}
+
+fn features_for_biomes_at_step(
+    biome_ids: &[u8],
+    step: usize,
+    features_per_step: &[Vec<PlacedFeature>],
+) -> Vec<usize> {
+    let Some(features_in_step) = features_per_step.get(step) else {
+        return Vec::new();
+    };
+    let mut feature_indices = Vec::new();
+    for &biome_id in biome_ids {
+        if let Some(biome) = Biome::from_id(biome_id)
+            && let Some(features_at_step) = biome.features.get(step)
+        {
+            for &feature in *features_at_step {
+                if let Some(global_index) = features_in_step
+                    .iter()
+                    .position(|candidate| *candidate == feature)
+                {
+                    feature_indices.push(global_index);
+                }
+            }
+        }
+    }
+    feature_indices.sort_unstable();
+    feature_indices.dedup();
+    feature_indices
 }
 
 impl TerrainCache {
@@ -1251,23 +1487,26 @@ impl ProtoChunk {
         cache: &mut T,
         block_registry: &dyn WorldPortalExt,
         random_config: &GlobalRandomConfig,
+        dimension: &Dimension,
     ) {
-        let (center_x, center_z, min_y, height, biomes_in_chunk) = {
+        let (center_x, center_z, min_y, height) = {
             let chunk = cache.get_center_chunk();
-            let mut unique_biomes = Vec::with_capacity(4);
-            for &biome_id in &chunk.flat_biome_map {
-                if !unique_biomes.contains(&biome_id) {
-                    unique_biomes.push(biome_id);
-                }
-            }
             (
                 chunk.x,
                 chunk.z,
                 chunk.bottom_y() as i32,
                 chunk.height() as i32,
-                unique_biomes,
             )
         };
+
+        let source_biomes = possible_biomes_for_dimension(dimension);
+        let mut possible_biomes =
+            collect_possible_biomes_3x3(center_x, center_z, |chunk_x, chunk_z| {
+                cache.get_chunk_biomes(chunk_x, chunk_z)
+            });
+        // Java retains only biomes belonging to this generator's
+        // BiomeSource.possibleBiomes() after collecting the 3x3 neighborhood.
+        possible_biomes.retain(|biome| source_biomes.contains(biome));
 
         let start_block_x = chunk_pos::start_block_x(center_x);
         let start_block_z = chunk_pos::start_block_z(center_z);
@@ -1276,7 +1515,8 @@ impl ProtoChunk {
         let population_seed =
             Xoroshiro::get_population_seed(random_config.seed, start_block_x, start_block_z);
 
-        for step in 0..11 {
+        let features_per_step = features_per_step_for_dimension(dimension);
+        for step in 0..11.max(features_per_step.len()) {
             Self::generate_structure_step(
                 cache,
                 block_registry,
@@ -1285,23 +1525,20 @@ impl ProtoChunk {
                 random_config.seed as i64,
             );
 
-            let mut features_to_run = Vec::new();
-            for biome_id in &biomes_in_chunk {
-                if let Some(biome) = Biome::from_id(*biome_id)
-                    && let Some(features_at_step) = biome.features.get(step)
-                {
-                    for &feature_id in *features_at_step {
-                        features_to_run.push(feature_id);
-                    }
-                }
-            }
+            let Some(features_in_step) = features_per_step.get(step) else {
+                continue;
+            };
+            let feature_indices_to_run =
+                features_for_biomes_at_step(&possible_biomes, step, features_per_step);
 
-            features_to_run.sort_unstable();
-            features_to_run.dedup();
-
-            for (p, feature_enum) in features_to_run.into_iter().enumerate() {
+            for global_index_of_feature in feature_indices_to_run {
+                let feature_enum = features_in_step[global_index_of_feature];
                 if let Some(feature) = PLACED_FEATURES.get(&feature_enum) {
-                    let decorator_seed = get_decorator_seed(population_seed, p as u64, step as u64);
+                    let decorator_seed = get_decorator_seed(
+                        population_seed,
+                        global_index_of_feature as u64,
+                        step as u64,
+                    );
                     let mut random =
                         RandomGenerator::Xoroshiro(Xoroshiro::from_seed(decorator_seed));
 
@@ -1763,6 +2000,19 @@ impl GenerationCache for ProtoChunk {
     fn get_chunk(&self, cx: i32, cz: i32) -> Option<&ProtoChunk> {
         (cx == self.x && cz == self.z).then_some(self)
     }
+    fn get_chunk_biomes(&self, cx: i32, cz: i32) -> Option<Vec<u8>> {
+        (cx == self.x && cz == self.z).then(|| {
+            self.flat_biome_map
+                .iter()
+                .copied()
+                .fold(Vec::new(), |mut biomes, biome| {
+                    if !biomes.contains(&biome) {
+                        biomes.push(biome);
+                    }
+                    biomes
+                })
+        })
+    }
     fn try_get_proto_chunk(&self, cx: i32, cz: i32) -> Option<&ProtoChunk> {
         self.get_chunk(cx, cz)
     }
@@ -1817,5 +2067,152 @@ impl GenerationCache for ProtoChunk {
         _cz: i32,
     ) -> Option<&crate::generation::blender::blending_data::BlendingData> {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        Biome, Dimension, build_features_per_step, collect_possible_biomes_3x3,
+        features_for_biomes_at_step, possible_biomes_for_dimension,
+    };
+
+    #[test]
+    fn decoration_collects_biomes_from_the_surrounding_three_by_three_chunks() {
+        let west = [Biome::PLAINS.id];
+        let center = [Biome::DESERT.id, Biome::PLAINS.id];
+        let east = [Biome::BADLANDS.id];
+        let grid = [
+            [Some(&west[..]), None, Some(&east[..])],
+            [None, Some(&center[..]), None],
+            [Some(&east[..]), None, Some(&west[..])],
+        ];
+
+        let biomes = collect_possible_biomes_3x3(10, -4, |chunk_x, chunk_z| {
+            grid[(chunk_x - 10 + 1) as usize][(chunk_z + 4 + 1) as usize].map(<[u8]>::to_vec)
+        });
+
+        assert_eq!(
+            biomes,
+            vec![Biome::PLAINS.id, Biome::BADLANDS.id, Biome::DESERT.id]
+        );
+    }
+
+    #[test]
+    fn feature_mapping_uses_the_global_step_index() {
+        let (step, feature) = Biome::BADLANDS
+            .features
+            .iter()
+            .enumerate()
+            .find_map(|(step, features)| features.first().copied().map(|feature| (step, feature)))
+            .expect("generated biomes contain at least one placed feature");
+        let features_per_step =
+            build_features_per_step(&possible_biomes_for_dimension(&Dimension::OVERWORLD));
+        let global_index = features_per_step[step]
+            .iter()
+            .position(|candidate| *candidate == feature)
+            .expect("FeatureSorter schedule contains the biome feature");
+        let expected_indices = Biome::BADLANDS.features[step]
+            .iter()
+            .map(|feature| {
+                features_per_step[step]
+                    .iter()
+                    .position(|candidate| candidate == feature)
+                    .expect("FeatureSorter schedule contains the biome feature")
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            features_for_biomes_at_step(&[Biome::BADLANDS.id], step, &features_per_step,),
+            expected_indices
+        );
+        assert_eq!(features_per_step[step][global_index], feature);
+    }
+
+    #[test]
+    fn feature_sort_sources_are_scoped_to_the_active_dimension() {
+        let nether = possible_biomes_for_dimension(&Dimension::THE_NETHER);
+        assert_eq!(
+            nether,
+            vec![
+                Biome::NETHER_WASTES.id,
+                Biome::SOUL_SAND_VALLEY.id,
+                Biome::CRIMSON_FOREST.id,
+                Biome::WARPED_FOREST.id,
+                Biome::BASALT_DELTAS.id,
+            ]
+        );
+
+        assert_eq!(
+            possible_biomes_for_dimension(&Dimension::THE_END),
+            vec![
+                Biome::THE_END.id,
+                Biome::END_HIGHLANDS.id,
+                Biome::END_MIDLANDS.id,
+                Biome::SMALL_END_ISLANDS.id,
+                Biome::END_BARRENS.id,
+            ]
+        );
+
+        assert_eq!(
+            possible_biomes_for_dimension(&Dimension::OVERWORLD),
+            vec![
+                Biome::MUSHROOM_FIELDS.id,
+                Biome::DEEP_FROZEN_OCEAN.id,
+                Biome::DEEP_COLD_OCEAN.id,
+                Biome::DEEP_OCEAN.id,
+                Biome::DEEP_LUKEWARM_OCEAN.id,
+                Biome::WARM_OCEAN.id,
+                Biome::FROZEN_OCEAN.id,
+                Biome::COLD_OCEAN.id,
+                Biome::OCEAN.id,
+                Biome::LUKEWARM_OCEAN.id,
+                Biome::STONY_SHORE.id,
+                Biome::SWAMP.id,
+                Biome::MANGROVE_SWAMP.id,
+                Biome::SNOWY_SLOPES.id,
+                Biome::SNOWY_PLAINS.id,
+                Biome::SNOWY_BEACH.id,
+                Biome::WINDSWEPT_GRAVELLY_HILLS.id,
+                Biome::GROVE.id,
+                Biome::WINDSWEPT_HILLS.id,
+                Biome::SNOWY_TAIGA.id,
+                Biome::WINDSWEPT_FOREST.id,
+                Biome::TAIGA.id,
+                Biome::PLAINS.id,
+                Biome::MEADOW.id,
+                Biome::BEACH.id,
+                Biome::FOREST.id,
+                Biome::OLD_GROWTH_SPRUCE_TAIGA.id,
+                Biome::FLOWER_FOREST.id,
+                Biome::BIRCH_FOREST.id,
+                Biome::DARK_FOREST.id,
+                Biome::PALE_GARDEN.id,
+                Biome::SAVANNA_PLATEAU.id,
+                Biome::SAVANNA.id,
+                Biome::JUNGLE.id,
+                Biome::BADLANDS.id,
+                Biome::DESERT.id,
+                Biome::WOODED_BADLANDS.id,
+                Biome::JAGGED_PEAKS.id,
+                Biome::STONY_PEAKS.id,
+                Biome::FROZEN_RIVER.id,
+                Biome::RIVER.id,
+                Biome::ICE_SPIKES.id,
+                Biome::OLD_GROWTH_PINE_TAIGA.id,
+                Biome::SUNFLOWER_PLAINS.id,
+                Biome::WINDSWEPT_SAVANNA.id,
+                Biome::OLD_GROWTH_BIRCH_FOREST.id,
+                Biome::SPARSE_JUNGLE.id,
+                Biome::BAMBOO_JUNGLE.id,
+                Biome::ERODED_BADLANDS.id,
+                Biome::CHERRY_GROVE.id,
+                Biome::FROZEN_PEAKS.id,
+                Biome::DRIPSTONE_CAVES.id,
+                Biome::LUSH_CAVES.id,
+                Biome::SULFUR_CAVES.id,
+                Biome::DEEP_DARK.id,
+            ]
+        );
     }
 }
