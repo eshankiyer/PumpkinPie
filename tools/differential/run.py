@@ -98,6 +98,26 @@ PROBES = (
         ),
     ),
     Probe(
+        "time_and_gamerule_queries",
+        (
+            "time query gametime",
+            "gamerule spawn_mobs true",
+            "gamerule spawn_mobs",
+        ),
+        "command_outcome",
+        (
+            "net/minecraft/server/commands/TimeCommand.java",
+            "net/minecraft/server/commands/GameRuleCommand.java",
+            "net/minecraft/world/level/gamerules/GameRules.java",
+            "assets/minecraft/lang/en_us.json",
+        ),
+        (
+            "gametime:ok",
+            "spawn_mobs:set:true",
+            "spawn_mobs:true",
+        ),
+    ),
+    Probe(
         "execute_unloaded_block_predicate",
         (
             "forceload remove all",
@@ -297,6 +317,8 @@ def _cleanup_succeeded(command: str, value: str) -> bool:
             f"the difficulty has been set to {difficulty}" in lower
             or f"the difficulty did not change; it is already set to {difficulty}" in lower
         )
+    if command == "gamerule spawn_mobs true":
+        return "now set to: true" in lower
     if command == "forceload remove all":
         return "unmarked all force loaded chunks" in lower
     if command.startswith("forceload add "):
@@ -322,6 +344,8 @@ def _cleanup_noop_is_safe(rcon: Rcon, command: str, value: str) -> bool:
 def _cleanup_commands(probe_name: str) -> tuple[str, ...]:
     if probe_name == "command_semantics":
         return ("weather clear", "difficulty normal")
+    if probe_name == "time_and_gamerule_queries":
+        return ("gamerule spawn_mobs true",)
     if probe_name in {"forceload_block_mutation", "exact_rcon_command_text"}:
         return ("forceload remove all",)
     if probe_name == "execute_unloaded_block_predicate":
@@ -393,6 +417,9 @@ def _normalize(value: str, kind: str, command: str) -> str:
     if command == "gamerule spawn_mobs":
         match = re.search(r"currently set to:\s*(true|false)", value, flags=re.IGNORECASE)
         return "spawn_mobs:" + (match.group(1).lower() if match else "error")
+    if command == "gamerule spawn_mobs true":
+        lower = value.lower()
+        return "spawn_mobs:set:true" if "now set to: true" in lower else "spawn_mobs:error"
     if kind == "unloaded_predicate" and command == "forceload remove all":
         return "forceload:ok" if "unmarked all force loaded chunks" in value.lower() else "forceload:error"
     if kind in {"exact_output", "unloaded_predicate"}:
