@@ -606,6 +606,15 @@ impl Raid {
             if self.group_leaders.get(&s.wave) == Some(&s.uuid) {
                 self.group_leaders.remove(&s.wave);
             }
+            if let Some(entity) = world.get_entity_by_uuid(s.uuid)
+                && let Some(living) = entity.get_living_entity()
+                && living
+                    .raid_membership
+                    .load()
+                    .is_some_and(|membership| membership.raid_id == self.id)
+            {
+                living.raid_membership.store(None);
+            }
         }
     }
 

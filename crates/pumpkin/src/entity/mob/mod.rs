@@ -931,6 +931,10 @@ pub trait Mob: EntityBase + Send + Sync {
         let entity = self.get_entity();
         entity.vehicle_persistence_required.load(Relaxed)
             || entity.leash_persistence_required.load(Relaxed)
+            || (entity
+                .entity_type
+                .has_tag(&tag::EntityType::MINECRAFT_RAIDERS)
+                && self.get_mob_entity().living_entity.has_active_raid())
     }
 
     fn requires_custom_persistence(&self) -> EntityBaseFuture<'_, bool> {
