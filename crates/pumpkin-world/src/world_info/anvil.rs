@@ -711,7 +711,7 @@ mod test {
             .write_world_info(&first, temp_dir.path())
             .unwrap();
 
-        let mut second = first.clone();
+        let mut second = first;
         second.initialized = true;
         AnvilLevelInfo
             .write_world_info(&second, temp_dir.path())
