@@ -943,7 +943,7 @@ pub trait Mob: EntityBase + Send + Sync {
             let world = entity.world.load();
 
             if world.level_info.load().difficulty == Difficulty::Peaceful
-                && !entity.entity_type.category.is_friendly
+                && !entity.entity_type.allowed_in_peaceful
             {
                 entity.remove().await;
                 return;
@@ -1917,5 +1917,14 @@ mod tests {
             assert!(!uses_monster_no_action_time(&entity_type));
         }
         assert!(uses_monster_no_action_time(&EntityType::ZOMBIE));
+    }
+
+    #[test]
+    fn peaceful_despawn_uses_the_entity_type_flag() {
+        const {
+            assert!(!EntityType::ZOMBIE.allowed_in_peaceful);
+            assert!(EntityType::PIGLIN.allowed_in_peaceful);
+            assert!(EntityType::SHULKER.allowed_in_peaceful);
+        }
     }
 }
