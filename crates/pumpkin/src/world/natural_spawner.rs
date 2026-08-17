@@ -981,20 +981,45 @@ pub fn is_valid_spawn_position_for_type(
     if !check_spawn_obstruction(world, block_pos, entity_type) {
         return false;
     }
-    // TODO: we should use getSpawnBox, but this is only modified for slimes and magma slimes
-    if !world.is_space_empty(BoundingBox::new_from_pos(
+    // NaturalSpawner checks the complete spawn AABB against both blocks and
+    // collidable entities before creating the mob. The block-only check used
+    // to allow mobs to spawn inside boats, minecarts, and other mobs.
+    let spawn_box = BoundingBox::new_from_pos(
         f64::from(block_pos.0.x) + 0.5,
         f64::from(block_pos.0.y),
         f64::from(block_pos.0.z) + 0.5,
-        &EntityDimensions {
-            width: entity_type.dimension[0],
-            height: entity_type.dimension[1],
-            eye_height: entity_type.eye_height,
-        },
-    )) {
+        &spawn_dimensions(entity_type),
+    );
+    if !world.is_space_empty(spawn_box)
+        || world
+            .get_all_at_box(&spawn_box.expand_all(1.0e-7))
+            .iter()
+            .any(|entity| !entity.is_spectator() && entity.can_be_collided_with())
+    {
         return false;
     }
     true
+}
+
+/// Returns the dimensions used by vanilla `EntityType.getSpawnAABB`.
+///
+/// The entity registry stores base dimensions, while the Java entity type
+/// applies `spawnDimensionsScale` only when checking a natural-spawn box.
+/// Slimes and magma cubes use 4.0, and sulfur cubes use 2.0 in 26.2.
+fn spawn_dimensions(entity_type: &'static EntityType) -> EntityDimensions {
+    let scale = match entity_type.resource_name {
+        "magma_cube" | "slime" => 4.0,
+        "sulfur_cube" => 2.0,
+        _ => 1.0,
+    };
+
+    EntityDimensions {
+        width: entity_type.dimension[0] * scale,
+        height: entity_type.dimension[1] * scale,
+        // `getSpawnAABB` does not use eye height, but preserving it keeps this
+        // value suitable for callers that carry the complete dimensions.
+        eye_height: entity_type.eye_height,
+    }
 }
 
 pub fn is_spawn_position_ok(
@@ -1089,16 +1114,7 @@ fn is_space_empty_cache(
     z: f64,
     entity_type: &'static EntityType,
 ) -> bool {
-    let bounding_box = BoundingBox::new_from_pos(
-        x,
-        y,
-        z,
-        &EntityDimensions {
-            width: entity_type.dimension[0],
-            height: entity_type.dimension[1],
-            eye_height: entity_type.eye_height,
-        },
-    );
+    let bounding_box = BoundingBox::new_from_pos(x, y, z, &spawn_dimensions(entity_type));
 
     if world
         .get_all_at_box(&bounding_box.expand_all(1.0e-7))
@@ -1129,16 +1145,7 @@ fn contains_any_liquid_cache(
     z: f64,
     entity_type: &'static EntityType,
 ) -> bool {
-    let bounding_box = BoundingBox::new_from_pos(
-        x,
-        y,
-        z,
-        &EntityDimensions {
-            width: entity_type.dimension[0],
-            height: entity_type.dimension[1],
-            eye_height: entity_type.eye_height,
-        },
-    );
+    let bounding_box = BoundingBox::new_from_pos(x, y, z, &spawn_dimensions(entity_type));
 
     for block_x in bounding_box.min.x.floor() as i32..bounding_box.max.x.ceil() as i32 {
         for block_y in bounding_box.min.y.floor() as i32..bounding_box.max.y.ceil() as i32 {
@@ -1236,7 +1243,7 @@ mod tests {
     use super::{
         IndexedRandom, can_spawn_in_water, counts_for_natural_spawning,
         is_right_distance_to_player_and_spawn_point, is_spawner_allowed_in_biome,
-        is_valid_empty_spawn_block, is_valid_spawn_support,
+        is_valid_empty_spawn_block, is_valid_spawn_support, spawn_dimensions,
     };
     use pumpkin_data::Block;
     use pumpkin_data::biome::{Biome, Spawner};
@@ -1439,5 +1446,13 @@ mod tests {
             &chunk,
             &Vector3::new(0, 64, 0),
         ));
+    }
+
+    #[test]
+    fn spawn_aabb_uses_vanilla_special_entity_scales() {
+        assert_eq!(spawn_dimensions(&EntityType::ZOMBIE).width, 0.6);
+        assert_eq!(spawn_dimensions(&EntityType::SLIME).width, 2.08);
+        assert_eq!(spawn_dimensions(&EntityType::MAGMA_CUBE).height, 2.08);
+        assert_eq!(spawn_dimensions(&EntityType::SULFUR_CUBE).width, 0.98);
     }
 }
