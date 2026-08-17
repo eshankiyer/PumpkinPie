@@ -3,6 +3,7 @@ use std::sync::Arc;
 use pumpkin_data::BlockState;
 use pumpkin_data::entity::{EntityType, MobCategory};
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_util::GameMode;
 use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
@@ -359,6 +360,55 @@ pub fn check_spawn_rules(
 ) -> bool {
     let id = entity_type.id;
 
+    // NaturalSpawner filters hostile categories in peaceful, but keep the
+    // entity-level allowed-in-peaceful rule here as well. Camel husks and
+    // other peaceful-capable mobs remain eligible through their registry flag.
+    if world.level_info.load().difficulty == pumpkin_util::Difficulty::Peaceful
+        && !entity_type.allowed_in_peaceful
+    {
+        return false;
+    }
+
+    // `Ghast.checkGhastSpawnRules`: natural attempts use a one-in-twenty roll
+    // and are still blocked by peaceful difficulty.  Ghasts are registered
+    // with an on-ground placement type, so the shared placement check handles
+    // the remaining block predicate.
+    if id == EntityType::GHAST.id {
+        return world.level_info.load().difficulty != pumpkin_util::Difficulty::Peaceful
+            && rand::random_range(0u8..20) == 0;
+    }
+
+    // `Endermite.checkEndermiteSpawnRules` and
+    // `Silverfish.checkSilverfishSpawnRules`: the vanilla natural predicate
+    // rejects a candidate when a survival or adventure player is within five blocks.
+    if id == EntityType::ENDERMITE.id || id == EntityType::SILVERFISH.id {
+        return !has_nearby_non_spectator_player(world, pos, 5.0);
+    }
+
+    // `PatrollingMonster.checkPatrollingMonsterSpawnRules`: patrol mobs use
+    // the any-light monster predicate, with only a block-light <= 8 gate.
+    if id == EntityType::PILLAGER.id {
+        return world.get_block_light_level(pos).unwrap_or(0) <= 8;
+    }
+
+    // `ZombifiedPiglin.checkZombifiedPiglinSpawnRules` does not use the normal
+    // monster light test and rejects Nether Wart Blocks below the candidate.
+    if id == EntityType::ZOMBIFIED_PIGLIN.id {
+        return world.level_info.load().difficulty != pumpkin_util::Difficulty::Peaceful
+            && world.get_block(&pos.down()) != &Block::NETHER_WART_BLOCK;
+    }
+
+    // Surface monsters require an unobstructed sky path in natural spawning.
+    // Strays skip powder snow while looking for that path; camel husks do not.
+    if id == EntityType::STRAY.id {
+        return mob::MobEntity::check_monster_spawn_rules(world, pos, is_thundering)
+            && stray_can_see_sky(world, pos);
+    }
+    if id == EntityType::CAMEL_HUSK.id {
+        return mob::MobEntity::check_monster_spawn_rules(world, pos, is_thundering)
+            && world.can_see_sky(pos);
+    }
+
     if id == EntityType::GUARDIAN.id || id == EntityType::ELDER_GUARDIAN.id {
         if world.level_info.load().difficulty == pumpkin_util::Difficulty::Peaceful {
             return false;
@@ -703,6 +753,31 @@ fn check_bright_ground_spawn_rules(
     spawnable_on: &'static tag::Tag,
 ) -> bool {
     world.get_block(&pos.down()).has_tag(spawnable_on) && world.get_raw_brightness(pos, 0) > 8
+}
+
+fn has_nearby_non_spectator_player(world: &World, pos: &BlockPos, distance: f64) -> bool {
+    let center = Vector3::new(
+        f64::from(pos.0.x) + 0.5,
+        f64::from(pos.0.y) + 0.5,
+        f64::from(pos.0.z) + 0.5,
+    );
+    let distance_squared = distance * distance;
+
+    world
+        .players
+        .load()
+        .iter()
+        .filter(|player| !player.is_spectator() && player.gamemode.load() != GameMode::Creative)
+        .any(|player| player.position().squared_distance_to_vec(&center) < distance_squared)
+}
+
+fn stray_can_see_sky(world: &World, pos: &BlockPos) -> bool {
+    let mut check_pos = pos.up();
+    while world.get_block(&check_pos) == &Block::POWDER_SNOW {
+        check_pos = check_pos.up();
+    }
+
+    world.can_see_sky(&check_pos.down())
 }
 
 /// `Ocelot.checkSpawnObstruction`'s species-specific condition.

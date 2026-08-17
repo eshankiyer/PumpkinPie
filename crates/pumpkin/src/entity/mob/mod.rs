@@ -538,10 +538,6 @@ impl MobEntity {
     }
 
     pub fn check_monster_spawn_rules(world: &World, pos: &BlockPos, is_thundering: bool) -> bool {
-        if world.level_info.load().difficulty == Difficulty::Peaceful {
-            return false;
-        }
-
         if !Self::is_dark_enough_to_spawn(world, pos, is_thundering) {
             return false;
         }
