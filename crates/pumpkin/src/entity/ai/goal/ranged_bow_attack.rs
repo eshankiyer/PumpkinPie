@@ -9,7 +9,10 @@ use pumpkin_data::item::Item;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_protocol::IdOr;
 use pumpkin_protocol::java::client::play::CSoundEffect;
+use pumpkin_util::Hand;
 use pumpkin_util::math::vector3::Vector3;
+use rand::RngExt;
+use std::sync::atomic::Ordering;
 
 use crate::entity::{
     Entity, EntityBase,
@@ -20,14 +23,16 @@ use crate::entity::{
 
 /// The common bow attack loop used by skeleton-family mobs.
 ///
-/// This follows vanilla's `RangedBowAttackGoal` timing while Pumpkin does not
-/// yet model item-use state.  A shot is still created by the same projectile
-/// path as player bows, with the vanilla skeleton trajectory adjustment from
-/// `AbstractSkeleton#performRangedAttack`.
+/// This mirrors `RangedBowAttackGoal` and `AbstractSkeleton#performRangedAttack`.
 pub struct RangedBowAttackGoal {
+    speed_modifier: f64,
     attack_interval: i32,
-    attack_cooldown: i32,
-    range: f64,
+    attack_time: i32,
+    attack_radius_sqr: f64,
+    see_time: i32,
+    strafing_clockwise: bool,
+    strafing_backwards: bool,
+    strafing_time: i32,
     /// Effects an `AbstractSkeleton#getArrow` override attaches to every arrow it fires
     /// (`Parched#getArrow`).
     arrow_effects: &'static [StatusEffectInstance],
@@ -46,19 +51,24 @@ impl RangedBowAttackGoal {
         arrow_effects: &'static [StatusEffectInstance],
     ) -> Self {
         Self {
+            speed_modifier: 1.0,
             attack_interval,
-            attack_cooldown: 0,
-            range,
+            attack_time: -1,
+            attack_radius_sqr: range * range,
+            see_time: 0,
+            strafing_clockwise: false,
+            strafing_backwards: false,
+            strafing_time: -1,
             arrow_effects,
         }
     }
 
-    const fn reset_attack_cooldown(&mut self) {
-        self.attack_cooldown = self.attack_interval;
+    const fn reset_attack_time(&mut self) {
+        self.attack_time = self.attack_interval;
     }
 
-    /// `RangedBowAttackGoal#isHoldingBow` (RangedBowAttackGoal.java:40-42): `mob.isHolding(Items.BOW)`.
-    async fn is_holding_bow(mob: &dyn Mob) -> bool {
+    /// `RangedBowAttackGoal#isHoldingBow`: `mob.isHolding(Items.BOW)`.
+    async fn held_bow(mob: &dyn Mob) -> Option<(Hand, pumpkin_data::item_stack::ItemStack)> {
         let (main_hand, off_hand) = {
             let equipment = mob
                 .get_mob_entity()
@@ -71,8 +81,38 @@ impl RangedBowAttackGoal {
                 equipment.get(&EquipmentSlot::OFF_HAND),
             )
         };
-        main_hand.lock().await.item.registry_key == Item::BOW.registry_key
-            || off_hand.lock().await.item.registry_key == Item::BOW.registry_key
+        let main_hand = main_hand.lock().await;
+        if main_hand.item.registry_key == Item::BOW.registry_key {
+            return Some((Hand::Right, main_hand.clone()));
+        }
+        let off_hand = off_hand.lock().await;
+        (off_hand.item.registry_key == Item::BOW.registry_key)
+            .then(|| (Hand::Left, off_hand.clone()))
+    }
+
+    async fn is_holding_bow(mob: &dyn Mob) -> bool {
+        Self::held_bow(mob).await.is_some()
+    }
+
+    async fn item_use_ticks(mob: &dyn Mob) -> Option<i32> {
+        let item = mob.get_mob_entity().living_entity.item_in_use.lock().await;
+        item.as_ref().map(|stack| {
+            stack.get_max_use_time()
+                - mob
+                    .get_mob_entity()
+                    .living_entity
+                    .item_use_time
+                    .load(Ordering::Relaxed)
+        })
+    }
+
+    async fn start_using_bow(mob: &dyn Mob) {
+        if let Some((hand, stack)) = Self::held_bow(mob).await {
+            mob.get_mob_entity()
+                .living_entity
+                .set_active_hand(hand, stack, 72_000)
+                .await;
+        }
     }
 
     async fn has_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
@@ -102,7 +142,7 @@ impl RangedBowAttackGoal {
         )
     }
 
-    async fn shoot(&self, mob: &dyn Mob, target: &dyn EntityBase) {
+    async fn shoot(&self, mob: &dyn Mob, target: &dyn EntityBase, power: f32) {
         let shooter = mob.get_entity();
         let world = shooter.world.load_full();
         let arrow_entity = Entity::new(world.clone(), shooter.pos.load(), &EntityType::ARROW);
@@ -124,11 +164,16 @@ impl RangedBowAttackGoal {
         }
         let arrow =
             ArrowEntity::new_shot(arrow_entity, shooter, &arrow_item, ArrowPickup::Disallowed);
+        // `ProjectileUtil#setBaseDamageFromMob`: power * 2 + the difficulty
+        // triangle.  The projectile's velocity is still set below by the
+        // skeleton's fixed 1.6 speed.
+        let difficulty = world.level_info.load().difficulty as i32;
+        let triangle = (rand::random::<f64>() - rand::random::<f64>()) * 0.57425;
+        arrow.set_base_damage(f64::from(power) * 2.0 + f64::from(difficulty) * 0.11 + triangle);
         let direction = Self::target_vector(shooter, target);
 
         // `AbstractSkeleton#performRangedAttack`: power 1.6, inaccuracy
         // `14 - level.getDifficulty().getId() * 4`.
-        let difficulty = world.level_info.load().difficulty as i32;
         let inaccuracy = f64::from(14 - difficulty * 4);
         arrow.set_velocity(direction.x, direction.y, direction.z, 1.6, inaccuracy);
         world.spawn_entity(Arc::new(arrow)).await;
@@ -168,13 +213,15 @@ impl Goal for RangedBowAttackGoal {
                 .await
                 .as_ref()
                 .is_some_and(|target| target.get_entity().is_alive());
-            has_target && Self::is_holding_bow(mob).await
+            let navigation_active = !mob.get_mob_entity().navigator.lock().unwrap().is_idle();
+            (has_target || navigation_active) && Self::is_holding_bow(mob).await
         })
     }
 
     fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
-            self.reset_attack_cooldown();
+            self.attack_time = -1;
+            self.see_time = 0;
             mob.get_mob_entity().set_attacking(true);
         })
     }
@@ -183,6 +230,9 @@ impl Goal for RangedBowAttackGoal {
         Box::pin(async move {
             mob.get_mob_entity().navigator.lock().unwrap().stop();
             mob.get_mob_entity().set_attacking(false);
+            self.see_time = 0;
+            self.attack_time = -1;
+            mob.get_mob_entity().living_entity.clear_active_hand().await;
         })
     }
 
@@ -194,29 +244,75 @@ impl Goal for RangedBowAttackGoal {
             let shooter = mob.get_entity();
             let target_pos = target.get_entity().pos.load();
             let distance_squared = shooter.pos.load().squared_distance_to_vec(&target_pos);
+            let has_line_of_sight = Self::has_line_of_sight(mob, target.as_ref()).await;
+            let had_line_of_sight = self.see_time > 0;
+            if has_line_of_sight != had_line_of_sight {
+                self.see_time = 0;
+            }
+            if has_line_of_sight {
+                self.see_time += 1;
+            } else {
+                self.see_time -= 1;
+            }
 
+            if distance_squared <= self.attack_radius_sqr && self.see_time >= 20 {
+                mob.get_mob_entity().navigator.lock().unwrap().stop();
+                self.strafing_time += 1;
+            } else {
+                mob.get_mob_entity().navigator.lock().unwrap().set_progress(
+                    crate::entity::ai::pathfinder::NavigatorGoal {
+                        current_progress: shooter.pos.load(),
+                        destination: target_pos,
+                        speed: self.speed_modifier,
+                    },
+                );
+                self.strafing_time = -1;
+            }
+
+            if self.strafing_time >= 20 {
+                if mob.get_random().random::<f32>() < 0.3 {
+                    self.strafing_clockwise = !self.strafing_clockwise;
+                }
+                if mob.get_random().random::<f32>() < 0.3 {
+                    self.strafing_backwards = !self.strafing_backwards;
+                }
+                self.strafing_time = 0;
+            }
+
+            if self.strafing_time > -1 {
+                if distance_squared > self.attack_radius_sqr * 0.75 {
+                    self.strafing_backwards = false;
+                } else if distance_squared < self.attack_radius_sqr * 0.25 {
+                    self.strafing_backwards = true;
+                }
+                mob.get_mob_entity().move_control.lock().unwrap().strafe(
+                    if self.strafing_backwards { -0.5 } else { 0.5 },
+                    if self.strafing_clockwise { 0.5 } else { -0.5 },
+                );
+            }
             mob.get_mob_entity()
                 .look_control
                 .lock()
                 .unwrap()
                 .look_at_entity_with_range(&target, 30.0, 30.0);
-            self.attack_cooldown = (self.attack_cooldown - 1).max(0);
 
-            if distance_squared > self.range * self.range {
-                mob.get_mob_entity().navigator.lock().unwrap().set_progress(
-                    crate::entity::ai::pathfinder::NavigatorGoal {
-                        current_progress: shooter.pos.load(),
-                        destination: target_pos,
-                        speed: 1.0,
-                    },
-                );
-                return;
-            }
-
-            mob.get_mob_entity().navigator.lock().unwrap().stop();
-            if self.attack_cooldown == 0 && Self::has_line_of_sight(mob, target.as_ref()).await {
-                self.shoot(mob, target.as_ref()).await;
-                self.attack_cooldown = self.attack_interval;
+            if Self::item_use_ticks(mob).await.is_some() {
+                if !has_line_of_sight && self.see_time < -60 {
+                    mob.get_mob_entity().living_entity.clear_active_hand().await;
+                } else if has_line_of_sight
+                    && let Some(pull_time) = Self::item_use_ticks(mob).await
+                    && pull_time >= 20
+                {
+                    mob.get_mob_entity().living_entity.clear_active_hand().await;
+                    self.shoot(mob, target.as_ref(), bow_power_for_time(pull_time))
+                        .await;
+                    self.reset_attack_time();
+                }
+            } else {
+                self.attack_time -= 1;
+                if self.attack_time <= 0 && self.see_time >= -60 {
+                    Self::start_using_bow(mob).await;
+                }
             }
         })
     }
@@ -230,23 +326,30 @@ impl Goal for RangedBowAttackGoal {
     }
 }
 
+/// `BowItem.getPowerForTime`, copied from the 26.2 decompile.
+fn bow_power_for_time(time_held: i32) -> f32 {
+    let mut power = time_held as f32 / 20.0;
+    power = (power * power + power * 2.0) / 3.0;
+    power.min(1.0)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::RangedBowAttackGoal;
+    use super::{RangedBowAttackGoal, bow_power_for_time};
     use pumpkin_util::math::vector3::Vector3;
 
     #[test]
     fn preserves_vanilla_skeleton_bow_interval() {
         let goal = RangedBowAttackGoal::new(20, 15.0);
         assert_eq!(goal.attack_interval, 20);
-        assert_eq!(goal.range, 15.0);
+        assert_eq!(goal.attack_radius_sqr, 225.0);
     }
 
     #[test]
     fn waits_for_the_initial_bow_draw_interval() {
         let mut goal = RangedBowAttackGoal::new(20, 15.0);
-        goal.reset_attack_cooldown();
-        assert_eq!(goal.attack_cooldown, 20);
+        goal.reset_attack_time();
+        assert_eq!(goal.attack_time, 20);
     }
 
     #[test]
@@ -261,5 +364,15 @@ mod tests {
         assert_eq!(direction.z, 4.0);
         // target Y + targetEyeHeight / 3 - arrow Y + horizontalDistance * 0.2
         assert!((direction.y - 0.08).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn uses_vanilla_bow_draw_curve() {
+        assert_eq!(bow_power_for_time(0), 0.0);
+        assert!((bow_power_for_time(10) - (5.0 / 12.0)).abs() < 1.0e-6);
+        assert_eq!(bow_power_for_time(20), 1.0);
+        assert_eq!(bow_power_for_time(40), 1.0);
+        assert_eq!(bow_power_for_time(60), 1.0);
+        assert_eq!(bow_power_for_time(120), 1.0);
     }
 }

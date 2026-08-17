@@ -41,6 +41,10 @@ impl Default for MoveControl {
 impl Control for MoveControl {}
 
 impl MoveControlTrait for MoveControl {
+    fn strafe(&mut self, forwards: f32, right: f32) {
+        Self::strafe(self, forwards, right);
+    }
+
     fn tick(&mut self, mob: &dyn Mob) {
         let mob_entity = mob.get_mob_entity();
         let living_entity = &mob_entity.living_entity;

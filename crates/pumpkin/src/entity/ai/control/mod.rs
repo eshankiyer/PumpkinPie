@@ -20,6 +20,10 @@ pub trait Control: Send + Sync {
 pub trait MoveControlTrait: Control {
     fn tick(&mut self, mob: &dyn Mob);
 
+    /// Vanilla `MoveControl.strafe`. Controllers that do not support direct
+    /// strafe input intentionally keep the no-op default.
+    fn strafe(&mut self, _forwards: f32, _right: f32) {}
+
     /// Vanilla `MoveControl.hasWanted`: whether a movement destination is currently set.
     /// Defaults to `false` for move controls that don't model a "wanted position" (e.g. the
     /// slime/sulfur-cube hop controllers).
