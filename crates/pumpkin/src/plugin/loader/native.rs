@@ -19,27 +19,9 @@ const MAX_METADATA_TEXT_LEN: usize = 4096;
 /// Upper bound for plausible metadata list lengths, in entries.
 const MAX_METADATA_LIST_LEN: usize = 1024;
 
-/// Best-effort check that metadata read from a plugin binary is plausible.
-///
-/// `METADATA` is plain Rust data whose layout is not stable across
-/// toolchains. If the plugin was built with a different Rust version or
-/// against a different Pumpkin build, the field lengths read here can be
-/// garbage even when the API version check passes, and cloning or logging
-/// such metadata aborts the server with an enormous allocation (see issue
-/// #2434).
-///
-/// This is a mitigation, not a sound fix: reading a `#[repr(Rust)]` struct
-/// written by a different toolchain is already undefined behaviour, and
-/// checking the strings inside the lists follows the lists' data pointers.
-/// It does not dereference anything that the `metadata.clone()` below would
-/// not dereference anyway, and it bails out earlier: the scalar fields are
-/// checked first and short-circuit, so mismatched metadata is almost always
-/// rejected before any pointer is followed.
-///
-/// The sound fix is to give the metadata a stable representation across the
-/// boundary (C strings or serialized bytes) and to export a build
-/// fingerprint alongside `PUMPKIN_API_VERSION` so a toolchain mismatch is
-/// rejected deterministically.
+/// Best-effort guard against implausible metadata from an ABI-incompatible
+/// native plugin. Native plugins still need to be built against this Pumpkin
+/// build because `PluginMetadata` is not a stable ABI representation.
 fn is_metadata_plausible(metadata: &PluginMetadata) -> bool {
     let text_plausible =
         |text: &String| text.len() <= MAX_METADATA_TEXT_LEN && text.len() <= text.capacity();
@@ -93,12 +75,12 @@ impl PluginLoader for NativePluginLoader {
                 let metadata = library
                     .get::<*const LazyLock<PluginMetadata>>(b"METADATA")
                     .map_err(|_| LoaderError::MetadataMissing)?;
-                (**metadata).clone()
+                let metadata: &PluginMetadata = &**metadata;
+                if !is_metadata_plausible(metadata) {
+                    return Err(LoaderError::MetadataCorrupt);
+                }
+                metadata.clone()
             };
-
-            if !is_metadata_plausible(metadata) {
-                return Err(LoaderError::MetadataCorrupt);
-            }
 
             // 3. Extract Plugin Factory (plugin)
             // SAFETY: `plugin` is an exported constructor function symbol with signature `fn() -> Box<dyn Plugin>` created by `#[plugin_impl]`.
