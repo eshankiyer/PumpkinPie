@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use pumpkin_data::BlockState;
 use pumpkin_data::entity::{EntityType, MobCategory};
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_data::{Block, BlockDirection, BlockState};
 use pumpkin_util::GameMode;
 use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
 use pumpkin_util::math::position::BlockPos;
@@ -127,7 +127,6 @@ use crate::entity::vehicle::boat::BoatEntity;
 use crate::entity::vehicle::minecart::MinecartEntity;
 use crate::entity::{Entity, EntityBase, mob};
 use crate::world::World;
-use pumpkin_data::Block;
 use std::sync::atomic::AtomicBool;
 
 #[expect(clippy::too_many_lines)]
@@ -417,6 +416,41 @@ pub fn check_spawn_rules(
         || id == EntityType::WANDERING_TRADER.id
     {
         return true;
+    }
+
+    // Phantom and shulker use Mob.checkMobSpawnRules with NO_RESTRICTIONS.
+    // Their support block is not checked by is_spawn_position_ok, so retain
+    // the vanilla BlockState.isValidSpawn check here without adding monster lighting.
+    if id == EntityType::PHANTOM.id || id == EntityType::SHULKER.id {
+        let below = world.get_block_state(&pos.down());
+        let below_block = Block::from_state_id(below.id);
+        if below_block == &Block::BEDROCK
+            || below_block == &Block::ICE
+            || below_block == &Block::FROSTED_ICE
+        {
+            return false;
+        }
+        if below_block == &Block::JACK_O_LANTERN || below_block == &Block::REDSTONE_LAMP {
+            return true;
+        }
+        if matches!(
+            below_block.name,
+            "bedrock"
+                | "moving_piston"
+                | "repeater"
+                | "chorus_flower"
+                | "glass"
+                | "tinted_glass"
+                | "barrier"
+                | "scaffolding"
+        ) || below_block.name.ends_with("_trapdoor")
+        {
+            return false;
+        }
+
+        return below.is_side_solid(BlockDirection::Up)
+            && below.luminance < 14
+            && (entity_type.fire_immune || below_block != &Block::MAGMA_BLOCK);
     }
 
     // `SulfurCube.checkSulfurCubeSpawnRules` always accepts the candidate.
