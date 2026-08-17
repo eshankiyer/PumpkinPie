@@ -409,6 +409,21 @@ pub fn check_spawn_rules(
             && world.can_see_sky(pos);
     }
 
+    // These registrations use `Mob.checkMobSpawnRules`, not the monster light
+    // predicate. The natural caller already checked their placement support.
+    if id == EntityType::ENDER_DRAGON.id
+        || id == EntityType::IRON_GOLEM.id
+        || id == EntityType::SNOW_GOLEM.id
+        || id == EntityType::WANDERING_TRADER.id
+    {
+        return true;
+    }
+
+    // `SulfurCube.checkSulfurCubeSpawnRules` always accepts the candidate.
+    if id == EntityType::SULFUR_CUBE.id {
+        return true;
+    }
+
     if id == EntityType::GUARDIAN.id || id == EntityType::ELDER_GUARDIAN.id {
         if world.level_info.load().difficulty == pumpkin_util::Difficulty::Peaceful {
             return false;
