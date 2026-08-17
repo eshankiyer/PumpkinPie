@@ -71,7 +71,7 @@ pub struct Navigator {
 }
 
 #[derive(Clone, Copy, Default)]
-enum NavigationKind {
+pub(crate) enum NavigationKind {
     #[default]
     Ground,
     Water,
@@ -142,6 +142,10 @@ fn find_surface_position(world: &crate::world::World, mut pos: BlockPos) -> Bloc
 }
 
 impl Navigator {
+    pub(crate) const fn navigation_kind(&self) -> NavigationKind {
+        self.navigation_kind
+    }
+
     pub fn set_progress(&mut self, goal: NavigatorGoal) {
         self.is_idle.store(false, Ordering::Relaxed);
         self.current_goal = Some(goal);
@@ -244,6 +248,28 @@ impl Navigator {
             .copied()
             .unwrap_or_else(|| path_type.get_malus());
         malus != 0.0
+    }
+
+    /// Matches `MoveControl.isWalkable` for the active navigation evaluator. Vanilla asks
+    /// for the path type at the next strafe block and falls back to forward movement unless it
+    /// is exactly WALKABLE.
+    pub(crate) fn is_strafe_walkable_with_kind(
+        world: &std::sync::Arc<crate::world::World>,
+        pos: &BlockPos,
+        navigation_kind: NavigationKind,
+    ) -> bool {
+        let mut context = PathfindingContext::new(pos.0, world.clone());
+        match navigation_kind {
+            NavigationKind::Ground => context.get_land_node_type(pos.0) == PathType::Walkable,
+            NavigationKind::Flying => context.get_fly_node_type(pos.0) == PathType::Walkable,
+            // SwimNodeEvaluator returns WATER, BREACH, or BLOCKED, never
+            // WALKABLE, so vanilla's exact check falls back to forwards.
+            NavigationKind::Water => false,
+            NavigationKind::Amphibious => {
+                context.get_path_type_from_state(pos.0) != PathType::Water
+                    && context.get_land_node_type(pos.0) == PathType::Walkable
+            }
+        }
     }
 
     /// Vanilla `PathNavigation::setCanOpenDoors` (`GroundPathNavigation.java`'s inherited base),

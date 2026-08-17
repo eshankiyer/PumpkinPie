@@ -228,6 +228,36 @@ impl PathfindingContext {
         raw_type
     }
 
+    /// Matches `FlyNodeEvaluator.getPathType`, including its different
+    /// treatment of fences below open air and its neighbor hazard scan.
+    pub fn get_fly_node_type(&mut self, pos: Vector3<i32>) -> PathType {
+        let mut path_type = self.get_path_type_from_state(pos);
+        if path_type == PathType::Open && pos.y > self.world.get_bottom_y() {
+            let below_pos = Vector3::new(pos.x, pos.y - 1, pos.z);
+            let below_type = self.get_path_type_from_state(below_pos);
+            path_type = match below_type {
+                PathType::DamageFire | PathType::Lava => PathType::DamageFire,
+                PathType::DamageOther => PathType::DamageOther,
+                PathType::Cocoa => PathType::Cocoa,
+                PathType::Fence => {
+                    if below_pos == self.mob_position {
+                        PathType::Open
+                    } else {
+                        PathType::Fence
+                    }
+                }
+                PathType::Walkable | PathType::Open | PathType::Water => PathType::Open,
+                _ => PathType::Walkable,
+            };
+        }
+
+        if matches!(path_type, PathType::Walkable | PathType::Open) {
+            self.get_node_type_from_neighbors(pos, path_type)
+        } else {
+            path_type
+        }
+    }
+
     /// Scans a 3x3x3 neighborhood for danger blocks and returns the appropriate danger type.
     pub fn get_node_type_from_neighbors(
         &mut self,

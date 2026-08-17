@@ -1,6 +1,6 @@
 use super::{
     Entity, EntityBase, NBTStorage,
-    ai::pathfinder::{Navigator, NavigatorGoal},
+    ai::pathfinder::{NavigationKind, Navigator, NavigatorGoal},
     equipment_break_status,
     living::LivingEntity,
 };
@@ -94,6 +94,7 @@ pub struct MobEntity {
     pub goals_selector: std::sync::Mutex<GoalSelector>,
     pub target_selector: std::sync::Mutex<GoalSelector>,
     pub navigator: std::sync::Mutex<Navigator>,
+    strafe_navigation_kind: AtomicU8,
     pub target: tokio::sync::Mutex<Option<Arc<dyn EntityBase>>>,
     pub look_control: std::sync::Mutex<LookControl>,
     pub move_control: std::sync::Mutex<Box<dyn MoveControlTrait>>,
@@ -188,6 +189,7 @@ impl MobEntity {
             goals_selector: std::sync::Mutex::new(GoalSelector::default()),
             target_selector: std::sync::Mutex::new(GoalSelector::default()),
             navigator: std::sync::Mutex::new(navigator),
+            strafe_navigation_kind: AtomicU8::new(0),
             target: tokio::sync::Mutex::new(None),
             look_control: std::sync::Mutex::new(LookControl::default()),
             move_control: std::sync::Mutex::new(Box::new(MoveControl::default())),
@@ -246,6 +248,25 @@ impl MobEntity {
             sensing.unseen.insert(target_id);
         }
         has_line_of_sight
+    }
+
+    pub(crate) fn set_strafe_navigation_kind(&self, kind: NavigationKind) {
+        let encoded = match kind {
+            NavigationKind::Ground => 0,
+            NavigationKind::Water => 1,
+            NavigationKind::Flying => 2,
+            NavigationKind::Amphibious => 3,
+        };
+        self.strafe_navigation_kind.store(encoded, Relaxed);
+    }
+
+    pub(crate) fn strafe_navigation_kind(&self) -> NavigationKind {
+        match self.strafe_navigation_kind.load(Relaxed) {
+            1 => NavigationKind::Water,
+            2 => NavigationKind::Flying,
+            3 => NavigationKind::Amphibious,
+            _ => NavigationKind::Ground,
+        }
     }
 
     pub fn is_in_position_target_range(&self) -> bool {
@@ -1511,6 +1532,38 @@ pub(crate) fn tick_mob_ai<'a>(
             mob_entity.jump_requested.store(false, Relaxed);
             return;
         }
+
+        // Mob.getNavigation delegates to a controlled Mob vehicle. Resolve that once at the
+        // async AI boundary so the synchronous MoveControl tick can use the same evaluator.
+        let mut strafe_navigation_kind = mob_entity.navigator.lock().unwrap().navigation_kind();
+        let vehicle = mob_entity.living_entity.entity.vehicle.lock().await.clone();
+        if let Some(vehicle) = vehicle
+            && let Some(vehicle_mob) = vehicle.get_mob()
+            && !vehicle_mob.get_mob_entity().is_no_ai()
+        {
+            let first_passenger = vehicle
+                .get_entity()
+                .passengers
+                .lock()
+                .await
+                .first()
+                .cloned();
+            if first_passenger.is_some_and(|passenger| {
+                passenger.get_entity().entity_id == mob_entity.living_entity.entity.entity_id
+                    && !passenger
+                        .get_entity()
+                        .entity_type
+                        .has_tag(&tag::EntityType::MINECRAFT_NON_CONTROLLING_RIDER)
+            }) {
+                strafe_navigation_kind = vehicle_mob
+                    .get_mob_entity()
+                    .navigator
+                    .lock()
+                    .unwrap()
+                    .navigation_kind();
+            }
+        }
+        mob_entity.set_strafe_navigation_kind(strafe_navigation_kind);
 
         mob.pre_ai_tick().await;
 
