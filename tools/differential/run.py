@@ -188,6 +188,57 @@ PROBES = (
             "forceload:ok",
         ),
     ),
+    Probe(
+        "creeper_hidden_target_fuse",
+        (
+            "forceload add 16200 16200",
+            "tick freeze",
+            "kill @e[tag=differential_creeper]",
+            "fill 16198 63 16198 16202 66 air",
+            "fill 16198 63 16198 16202 63 stone",
+            "summon minecraft:creeper 16200 64 16200 {Tags:[differential_creeper]}",
+            "tp @p 16200 64 16202",
+            "damage @e[tag=differential_creeper,limit=1] 1 minecraft:player_attack by @p",
+            "tick step 1",
+            "fill 16200 63 16201 16200 66 stone",
+            "tick step 35",
+            "execute if entity @e[tag=differential_creeper,limit=1] run say probe_wall_survived",
+            "fill 16200 63 16201 16200 66 air",
+            "tick step 35",
+            "execute unless entity @e[tag=differential_creeper,limit=1] run say probe_clear_exploded",
+        ),
+        "creeper_probe",
+        (
+            "net/minecraft/server/commands/DamageCommand.java",
+            "net/minecraft/server/commands/ExecuteCommand.java",
+            "net/minecraft/server/commands/FillCommand.java",
+            "net/minecraft/server/commands/SayCommand.java",
+            "net/minecraft/server/commands/SummonCommand.java",
+            "net/minecraft/server/commands/TeleportCommand.java",
+            "net/minecraft/server/commands/TickCommand.java",
+            "net/minecraft/world/entity/Mob.java",
+            "net/minecraft/world/entity/ai/goal/SwellGoal.java",
+            "net/minecraft/world/entity/ai/goal/target/HurtByTargetGoal.java",
+            "net/minecraft/world/entity/monster/Creeper.java",
+        ),
+        (
+            "forceload:ok",
+            "tick:ok",
+            "kill:ok",
+            "fill:ok",
+            "fill:ok",
+            "summon:ok",
+            "teleport:ok",
+            "damage:ok",
+            "tick:ok",
+            "fill:ok",
+            "tick:ok",
+            "creeper:alive",
+            "fill:ok",
+            "tick:ok",
+            "creeper:exploded",
+        ),
+    ),
 )
 
 
@@ -361,6 +412,13 @@ def _cleanup_commands(probe_name: str) -> tuple[str, ...]:
             "setblock 16101 63 16100 air",
             "forceload remove all",
         )
+    if probe_name == "creeper_hidden_target_fuse":
+        return (
+            "tick unfreeze",
+            "kill @e[tag=differential_creeper]",
+            "fill 16198 63 16198 16202 66 air",
+            "forceload remove 16200 16200",
+        )
     return ()
 
 
@@ -424,6 +482,35 @@ def _normalize(value: str, kind: str, command: str) -> str:
         return "forceload:ok" if "unmarked all force loaded chunks" in value.lower() else "forceload:error"
     if kind in {"exact_output", "unloaded_predicate"}:
         return value
+    if kind == "creeper_probe":
+        lower = value.lower()
+        if command == "execute if entity @e[tag=differential_creeper,limit=1] run say probe_wall_survived":
+            return "creeper:alive" if "probe_wall_survived" in lower else "creeper:missing"
+        if command == "execute unless entity @e[tag=differential_creeper,limit=1] run say probe_clear_exploded":
+            return "creeper:exploded" if "probe_clear_exploded" in lower else "creeper:still_alive"
+        if command == "tick freeze":
+            return "tick:ok" if "frozen" in lower else "tick:error"
+        if command.startswith("tick step "):
+            return "tick:ok" if "stepping" in lower else "tick:error"
+        if command.startswith("fill "):
+            # FillCommand reports a failure when the requested state is already
+            # present. The following entity assertions still validate the setup.
+            return "fill:ok" if "filled" in lower or "failed" in lower else "fill:error"
+        if command.startswith("kill "):
+            return "kill:ok" if "killed" in lower or "no entity was found" in lower else "kill:error"
+        if command.startswith("summon "):
+            return "summon:ok" if "summon" in lower else "summon:error"
+        if command.startswith("tp "):
+            return "teleport:ok" if "teleport" in lower else "teleport:error"
+        if command.startswith("damage "):
+            return "damage:ok" if "applied" in lower else "damage:error"
+        if command.startswith("forceload add "):
+            return (
+                "forceload:ok"
+                if "marked" in lower and expected_chunk in value and "no chunks" not in lower
+                else "forceload:error"
+            )
+        return "command:error"
     if command == "weather rain":
         lower = value.lower()
         return "weather:rain" if lower.strip() == "set the weather to rain" else "weather:error"
