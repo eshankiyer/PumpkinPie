@@ -239,6 +239,62 @@ PROBES = (
             "creeper:exploded",
         ),
     ),
+    Probe(
+        "fox_player_sleep_alert",
+        (
+            "forceload add 16300 16300",
+            "time set day",
+            "gamemode survival @p",
+            "tick freeze",
+            "kill @e[type=minecraft:fox]",
+            "fill 16298 63 16298 16302 66 air",
+            "fill 16298 63 16298 16302 63 stone",
+            "fill 16298 66 16298 16302 66 stone",
+            "summon minecraft:fox 16300 64 16300",
+            "tp @p 16320 64 16320",
+            "tick step 200",
+            "data get entity @e[type=minecraft:fox,limit=1]",
+            "kill @e[type=minecraft:fox]",
+            "summon minecraft:fox 16300 64 16300",
+            "tp @p 16300 64 16302",
+            "tick step 200",
+            "data get entity @e[type=minecraft:fox,limit=1]",
+        ),
+        "fox_sleep_probe",
+        (
+            "net/minecraft/server/commands/data/DataCommands.java",
+            "net/minecraft/server/commands/data/EntityDataAccessor.java",
+            "net/minecraft/server/commands/ForceLoadCommand.java",
+            "net/minecraft/server/commands/GameModeCommand.java",
+            "net/minecraft/server/commands/KillCommand.java",
+            "net/minecraft/server/commands/FillCommand.java",
+            "net/minecraft/server/commands/SummonCommand.java",
+            "net/minecraft/server/commands/TeleportCommand.java",
+            "net/minecraft/server/commands/TickCommand.java",
+            "net/minecraft/server/commands/TimeCommand.java",
+            "net/minecraft/world/entity/animal/fox/Fox.java",
+            "assets/minecraft/lang/en_us.json",
+        ),
+        (
+            "forceload:ok",
+            "time:day",
+            "gamemode:survival",
+            "tick:ok",
+            "kill:ok",
+            "fill:ok",
+            "fill:ok",
+            "fill:ok",
+            "summon:ok",
+            "teleport:ok",
+            "tick:ok",
+            "fox:sleeping",
+            "kill:ok",
+            "summon:ok",
+            "teleport:ok",
+            "tick:ok",
+            "fox:awake",
+        ),
+    ),
 )
 
 
@@ -419,6 +475,13 @@ def _cleanup_commands(probe_name: str) -> tuple[str, ...]:
             "fill 16198 63 16198 16202 66 air",
             "forceload remove 16200 16200",
         )
+    if probe_name == "fox_player_sleep_alert":
+        return (
+            "tick unfreeze",
+            "kill @e[type=minecraft:fox]",
+            "fill 16298 63 16298 16302 66 air",
+            "forceload remove 16300 16300",
+        )
     return ()
 
 
@@ -495,15 +558,56 @@ def _normalize(value: str, kind: str, command: str) -> str:
         if command.startswith("fill "):
             # FillCommand reports a failure when the requested state is already
             # present. The following entity assertions still validate the setup.
-            return "fill:ok" if "filled" in lower or "failed" in lower else "fill:error"
+            return (
+                "fill:ok"
+                if ("successfully filled" in lower or "no blocks were filled" in lower)
+                and not _has_error_marker(lower)
+                else "fill:error"
+            )
         if command.startswith("kill "):
             return "kill:ok" if "killed" in lower or "no entity was found" in lower else "kill:error"
         if command.startswith("summon "):
-            return "summon:ok" if "summon" in lower else "summon:error"
+            return "summon:ok" if "summoned" in lower and not _has_error_marker(lower) else "summon:error"
         if command.startswith("tp "):
-            return "teleport:ok" if "teleport" in lower else "teleport:error"
+            return "teleport:ok" if "teleported" in lower and not _has_error_marker(lower) else "teleport:error"
         if command.startswith("damage "):
             return "damage:ok" if "applied" in lower else "damage:error"
+        if command.startswith("forceload add "):
+            return (
+                "forceload:ok"
+                if "marked" in lower and expected_chunk in value and "no chunks" not in lower
+                else "forceload:error"
+            )
+        return "command:error"
+    if kind == "fox_sleep_probe":
+        lower = value.lower()
+        if command == "time set day":
+            return "time:day" if "1000" in lower and not _has_error_marker(lower) else "time:error"
+        if command == "gamemode survival @p":
+            return "gamemode:survival" if "survival" in lower and not _has_error_marker(lower) else "gamemode:error"
+        if command == "tick freeze":
+            return "tick:ok" if "frozen" in lower else "tick:error"
+        if command.startswith("tick step "):
+            return "tick:ok" if "stepping" in lower else "tick:error"
+        if command.startswith("data get entity "):
+            if re.search(r"sleeping\s*:\s*1b", lower) or re.search(r"sleeping.*is\s+1", lower):
+                return "fox:sleeping"
+            if re.search(r"sleeping\s*:\s*0b", lower) or re.search(r"sleeping.*is\s+0", lower):
+                return "fox:awake"
+            return "fox:error"
+        if command.startswith("fill "):
+            return (
+                "fill:ok"
+                if ("successfully filled" in lower or "no blocks were filled" in lower)
+                and not _has_error_marker(lower)
+                else "fill:error"
+            )
+        if command.startswith("kill "):
+            return "kill:ok" if "killed" in lower or "no entity was found" in lower else "kill:error"
+        if command.startswith("summon "):
+            return "summon:ok" if "summoned" in lower and not _has_error_marker(lower) else "summon:error"
+        if command.startswith("tp "):
+            return "teleport:ok" if "teleported" in lower and not _has_error_marker(lower) else "teleport:error"
         if command.startswith("forceload add "):
             return (
                 "forceload:ok"
