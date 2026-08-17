@@ -13,12 +13,13 @@ use uuid::Uuid;
 const MAX_ATTACK_TIME: i64 = 20;
 
 const fn should_continue_melee_goal(
-    pause_when_mob_idle: bool,
+    following_target_even_if_not_seen: bool,
     navigation_idle: bool,
     target_in_range: bool,
+    target_valid: bool,
 ) -> bool {
-    if pause_when_mob_idle {
-        target_in_range
+    if following_target_even_if_not_seen {
+        target_valid && target_in_range
     } else {
         !navigation_idle
     }
@@ -149,24 +150,24 @@ impl Goal for MeleeAttackGoal {
                 return false;
             }
 
-            let is_valid_target = !target
-                .get_player()
-                .is_some_and(|p| p.is_spectator() || p.is_creative());
-
             let in_range = mob
                 .get_mob_entity()
                 .is_in_position_target_range_pos(&target.get_entity().block_pos.load());
 
-            if !is_valid_target {
-                return false;
-            }
-
+            let is_valid_target = !target
+                .get_player()
+                .is_some_and(|p| p.is_spectator() || p.is_creative());
             let navigation_idle = mob
                 .get_mob_entity()
                 .navigator
                 .try_lock()
                 .is_ok_and(|navigator| navigator.is_idle());
-            should_continue_melee_goal(self.pause_when_mob_idle, navigation_idle, in_range)
+            should_continue_melee_goal(
+                self.pause_when_mob_idle,
+                navigation_idle,
+                in_range,
+                is_valid_target,
+            )
         })
     }
 
@@ -357,10 +358,12 @@ mod tests {
 
     #[test]
     fn in_range_targets_continue_when_navigation_is_idle() {
-        assert!(!should_continue_melee_goal(false, true, true));
-        assert!(!should_continue_melee_goal(false, true, false));
-        assert!(!should_continue_melee_goal(true, true, false));
-        assert!(should_continue_melee_goal(true, false, true));
+        assert!(!should_continue_melee_goal(false, true, true, false));
+        assert!(!should_continue_melee_goal(false, true, false, false));
+        assert!(!should_continue_melee_goal(true, true, false, true));
+        assert!(!should_continue_melee_goal(true, false, true, false));
+        assert!(should_continue_melee_goal(false, false, false, false));
+        assert!(should_continue_melee_goal(true, false, true, true));
     }
 
     #[test]
