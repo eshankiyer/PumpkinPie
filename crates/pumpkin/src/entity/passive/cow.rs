@@ -3,6 +3,7 @@ use std::sync::{Arc, Weak};
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::Sound;
 use pumpkin_data::{entity::EntityType, item::Item};
+use pumpkin_util::math::boundingbox::EntityDimensions;
 
 use crate::entity::{
     Entity, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -64,6 +65,10 @@ impl CowEntity {
 impl crate::entity::ageable::AgeableMob for CowEntity {
     fn get_ageable_data(&self) -> &crate::entity::ageable::AgeableData {
         &self.ageable_data
+    }
+
+    fn baby_dimensions(&self) -> Option<EntityDimensions> {
+        Some(EntityDimensions::new(0.45, 0.7, 0.69))
     }
 }
 

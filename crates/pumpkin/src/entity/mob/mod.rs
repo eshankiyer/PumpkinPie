@@ -148,6 +148,38 @@ impl MobEntity {
 
     #[must_use]
     pub fn new(entity: Entity) -> Self {
+        let mut navigator = Navigator::default();
+        navigator.set_mob_dimensions(
+            entity.entity_type.dimension[0],
+            entity.entity_type.dimension[1],
+        );
+        let id = entity.entity_type.id;
+        if id == pumpkin_data::entity::EntityType::AXOLOTL.id
+            || id == pumpkin_data::entity::EntityType::TURTLE.id
+            || id == pumpkin_data::entity::EntityType::DROWNED.id
+        {
+            navigator.set_amphibious(true);
+        } else if id == pumpkin_data::entity::EntityType::FROG.id {
+            navigator.set_amphibious(true);
+            navigator.set_frog(true);
+        } else if id == pumpkin_data::entity::EntityType::COD.id
+            || id == pumpkin_data::entity::EntityType::DOLPHIN.id
+            || id == pumpkin_data::entity::EntityType::ELDER_GUARDIAN.id
+            || id == pumpkin_data::entity::EntityType::GLOW_SQUID.id
+            || id == pumpkin_data::entity::EntityType::GUARDIAN.id
+            || id == pumpkin_data::entity::EntityType::NAUTILUS.id
+            || id == pumpkin_data::entity::EntityType::ZOMBIE_NAUTILUS.id
+            || id == pumpkin_data::entity::EntityType::PUFFERFISH.id
+            || id == pumpkin_data::entity::EntityType::SALMON.id
+            || id == pumpkin_data::entity::EntityType::SQUID.id
+            || id == pumpkin_data::entity::EntityType::TADPOLE.id
+            || id == pumpkin_data::entity::EntityType::TROPICAL_FISH.id
+        {
+            navigator.set_water_bound(true);
+            if id == pumpkin_data::entity::EntityType::DOLPHIN.id {
+                navigator.set_allow_breaching(true);
+            }
+        }
         Self {
             living_entity: LivingEntity::new(entity),
             sensing: std::sync::Mutex::new(Sensing::default()),
@@ -155,7 +187,7 @@ impl MobEntity {
             brain: None,
             goals_selector: std::sync::Mutex::new(GoalSelector::default()),
             target_selector: std::sync::Mutex::new(GoalSelector::default()),
-            navigator: std::sync::Mutex::new(Navigator::default()),
+            navigator: std::sync::Mutex::new(navigator),
             target: tokio::sync::Mutex::new(None),
             look_control: std::sync::Mutex::new(LookControl::default()),
             move_control: std::sync::Mutex::new(Box::new(MoveControl::default())),
@@ -777,6 +809,27 @@ pub trait Mob: EntityBase + Send + Sync {
     }
 
     fn get_mob_entity(&self) -> &MobEntity;
+
+    /// Vanilla `Mob.getControllingPassenger` for the base mob implementation.
+    /// Rideable mobs with player-specific controls override this (for example, Pig).
+    fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
+        Box::pin(async move {
+            if self.get_mob_entity().is_no_ai() {
+                return false;
+            }
+
+            let passengers = self.get_entity().passengers.lock().await;
+            passengers
+                .first()
+                .and_then(|passenger| passenger.get_mob())
+                .is_some_and(|passenger| {
+                    !passenger
+                        .get_entity()
+                        .entity_type
+                        .has_tag(&tag::EntityType::MINECRAFT_NON_CONTROLLING_RIDER)
+                })
+        })
+    }
 
     /// Vanilla `Mob.sunProtectionSlot`; zombie horses use their body slot.
     fn sun_protection_slot(&self) -> EquipmentSlot {

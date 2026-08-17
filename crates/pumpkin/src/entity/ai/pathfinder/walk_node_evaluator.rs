@@ -1,3 +1,5 @@
+use pumpkin_data::tag;
+use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
 use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
 use rustc_hash::FxHashMap;
 
@@ -18,6 +20,10 @@ pub struct WalkNodeEvaluator {
     reusable_neighbors: [Option<Node>; 4],
     flying: bool,
     amphibious: bool,
+    water_bound: bool,
+    allow_breaching: bool,
+    frog: bool,
+    prefers_shallow_swimming: bool,
 }
 
 impl WalkNodeEvaluator {
@@ -29,6 +35,10 @@ impl WalkNodeEvaluator {
             reusable_neighbors: [None, None, None, None],
             flying: false,
             amphibious: false,
+            water_bound: false,
+            allow_breaching: false,
+            frog: false,
+            prefers_shallow_swimming: false,
         }
     }
 
@@ -47,6 +57,35 @@ impl WalkNodeEvaluator {
 
     pub const fn set_amphibious(&mut self, amphibious: bool) {
         self.amphibious = amphibious;
+    }
+
+    /// Selects the water-only node rules used by `SwimNodeEvaluator`.
+    pub const fn set_water_bound(&mut self, water_bound: bool) {
+        self.water_bound = water_bound;
+    }
+
+    #[must_use]
+    pub const fn is_water_bound(&self) -> bool {
+        self.water_bound
+    }
+
+    pub const fn set_allow_breaching(&mut self, allow_breaching: bool) {
+        self.allow_breaching = allow_breaching;
+    }
+
+    pub const fn set_frog(&mut self, frog: bool) {
+        self.frog = frog;
+        self.prefers_shallow_swimming = frog;
+    }
+
+    #[must_use]
+    pub const fn is_frog(&self) -> bool {
+        self.frog
+    }
+
+    #[must_use]
+    pub const fn allows_breaching(&self) -> bool {
+        self.allow_breaching
     }
 
     fn get_floor_level(&self, pos: Vector3<i32>) -> f64 {
@@ -121,6 +160,25 @@ impl WalkNodeEvaluator {
         facing: (i32, i32),
         current_path_type: PathType,
     ) -> Option<Node> {
+        if self.water_bound {
+            let path_type = self.get_cached_path_type(pos).await;
+            if path_type == PathType::Water
+                || (self.allow_breaching && path_type == PathType::Breach)
+            {
+                let penalty = self.get_mob_penalty(path_type);
+                if penalty >= 0.0 {
+                    let mut node = self.base.get_node(pos.as_blockpos());
+                    node.path_type = path_type;
+                    node.cost_malus = penalty.max(node.cost_malus);
+                    if path_type == PathType::Breach {
+                        node.cost_malus += 8.0;
+                    }
+                    return Some(node);
+                }
+            }
+            return None;
+        }
+
         let feet_y = self.get_floor_level(pos);
         if feet_y - last_feet_y > self.get_mob_jump_height() {
             return None;
@@ -136,7 +194,12 @@ impl WalkNodeEvaluator {
             n
         });
 
-        // TODO: Add ray-march collision check for blocked types (fence/door)
+        if Self::has_partial_collision(current_path_type)
+            && node.as_ref().is_some_and(|n| n.cost_malus >= 0.0)
+            && !self.can_reach_without_collision(pos).await
+        {
+            node = None;
+        }
 
         if path_type != PathType::Walkable
             && !(self.is_amphibious() && path_type == PathType::Water)
@@ -307,6 +370,53 @@ impl WalkNodeEvaluator {
         )
     }
 
+    const fn has_partial_collision(path_type: PathType) -> bool {
+        matches!(
+            path_type,
+            PathType::Fence | PathType::DoorWoodClosed | PathType::DoorIronClosed
+        )
+    }
+
+    async fn can_reach_without_collision(&self, target: Vector3<i32>) -> bool {
+        let Some(mob_data) = self.base.mob_data else {
+            return true;
+        };
+
+        let dimensions =
+            EntityDimensions::new(mob_data.width, mob_data.height, mob_data.height * 0.85);
+        let mut bounding_box = BoundingBox::new_from_pos(
+            mob_data.position.x,
+            mob_data.position.y,
+            mob_data.position.z,
+            &dimensions,
+        );
+        let delta = Vector3::new(
+            f64::from(target.x) - mob_data.position.x + f64::from(mob_data.width) * 0.5,
+            f64::from(target.y) - mob_data.position.y + f64::from(mob_data.height) * 0.5,
+            f64::from(target.z) - mob_data.position.z + f64::from(mob_data.width) * 0.5,
+        );
+        let length = delta.length();
+        // Vanilla AABB#getSize is the mean of the three axis lengths, not the largest axis.
+        let step_size = ((f64::from(mob_data.width) * 2.0 + f64::from(mob_data.height)) / 3.0)
+            .max(f64::EPSILON);
+        let steps = (length / step_size).ceil().max(1.0) as usize;
+        let step = delta * (1.0 / steps as f64);
+
+        for _ in 0..steps {
+            bounding_box = bounding_box.offset(BoundingBox::new(step, step));
+            let collided = if let Some(context) = self.base.context.as_ref() {
+                context.has_collision_box(bounding_box).await
+            } else {
+                false
+            };
+            if collided {
+                return false;
+            }
+        }
+
+        true
+    }
+
     async fn get_cached_path_type(&mut self, pos: Vector3<i32>) -> PathType {
         if let Some(&cached) = self.path_types_cache.get(&pos) {
             return cached;
@@ -328,16 +438,9 @@ impl WalkNodeEvaluator {
         path_type
     }
 
-    fn has_collisions(&mut self, center: Vector3<i32>) -> bool {
-        self.base
-            .context
-            .as_mut()
-            .is_some_and(|ctx| ctx.has_collisions(center))
-    }
-
     async fn can_start_at(&mut self, pos: Vector3<i32>) -> bool {
         let path_type = self.get_cached_path_type(pos).await;
-        path_type.is_passable() && !self.has_collisions(pos)
+        path_type != PathType::Open && self.get_mob_penalty(path_type) >= 0.0
     }
 
     async fn get_start_node(&mut self, pos: Vector3<i32>) -> Option<Node> {
@@ -350,6 +453,23 @@ impl WalkNodeEvaluator {
         node.path_type = path_type;
         node.cost_malus = self.get_mob_penalty(path_type);
 
+        Some(node)
+    }
+
+    async fn get_water_start(&mut self) -> Option<Node> {
+        let mob_data = *self.base.mob_data.as_ref()?;
+        let start = Vector3::new(
+            (mob_data.position.x - f64::from(mob_data.width) * 0.5).floor() as i32,
+            (mob_data.position.y + 0.5).floor() as i32,
+            (mob_data.position.z - f64::from(mob_data.width) * 0.5).floor() as i32,
+        );
+        // `SwimNodeEvaluator.getStart` directly returns the node at the lower corner of the
+        // mob's bounding box. It does not apply the land evaluator's passability or collision
+        // gate first; that gate would reject a perfectly valid water start.
+        let path_type = self.get_cached_path_type(start).await;
+        let mut node = self.base.get_node(start.as_blockpos());
+        node.path_type = path_type;
+        node.cost_malus = self.get_mob_penalty(path_type);
         Some(node)
     }
 
@@ -575,6 +695,50 @@ impl WalkNodeEvaluator {
             out.push(south_west_down.unwrap());
         }
     }
+
+    async fn get_water_neighbors(&mut self, current: &Node, out_neighbors: &mut Vec<Node>) {
+        let directions = [
+            (1, 0, 0),
+            (-1, 0, 0),
+            (0, 0, 1),
+            (0, 0, -1),
+            (0, 1, 0),
+            (0, -1, 0),
+        ];
+        let mut horizontal = [None; 4];
+
+        for (index, &(dx, dy, dz)) in directions.iter().enumerate() {
+            let pos = current.pos.0.add_raw(dx, dy, dz);
+            let node = self
+                .find_accepted_node(pos, 0, 0.0, (dx, dz), current.path_type)
+                .await;
+            if index < 4 {
+                horizontal[index] = node;
+            }
+            if node.is_some_and(|node| !node.closed) {
+                out_neighbors.push(node.unwrap());
+            }
+        }
+
+        for &(dx, dz, first, second) in &[
+            (1, 1, 0usize, 2usize),
+            (1, -1, 0usize, 3usize),
+            (-1, 1, 1usize, 2usize),
+            (-1, -1, 1usize, 3usize),
+        ] {
+            if horizontal[first].is_some_and(|node| node.cost_malus >= 0.0)
+                && horizontal[second].is_some_and(|node| node.cost_malus >= 0.0)
+            {
+                let pos = current.pos.0.add_raw(dx, 0, dz);
+                let node = self
+                    .find_accepted_node(pos, 0, 0.0, (dx, dz), current.path_type)
+                    .await;
+                if node.is_some_and(|node| !node.closed) {
+                    out_neighbors.push(node.unwrap());
+                }
+            }
+        }
+    }
 }
 
 #[allow(clippy::ref_option)]
@@ -616,6 +780,10 @@ impl NodeEvaluator for WalkNodeEvaluator {
     }
 
     async fn get_start(&mut self) -> Option<Node> {
+        if self.water_bound {
+            return self.get_water_start().await;
+        }
+
         if self.flying {
             return self.get_flying_start().await;
         }
@@ -625,6 +793,15 @@ impl NodeEvaluator for WalkNodeEvaluator {
         let mob_y_f64 = mob_data.position.y;
         let mob_z = mob_data.position.z;
         let on_ground = mob_data.on_ground;
+
+        if self.frog && mob_data.in_water {
+            let start = Vector3::new(
+                (mob_x - f64::from(mob_data.width) * 0.5).floor() as i32,
+                mob_y_f64.floor() as i32,
+                (mob_z - f64::from(mob_data.width) * 0.5).floor() as i32,
+            );
+            return self.get_start_node(start).await;
+        }
 
         let y = if (self.is_amphibious() && mob_data.in_water) || on_ground {
             (mob_y_f64 + 0.5).floor() as i32
@@ -682,6 +859,11 @@ impl NodeEvaluator for WalkNodeEvaluator {
 
     #[allow(clippy::too_many_lines)]
     async fn get_neighbors(&mut self, current: &Node, out_neighbors: &mut Vec<Node>) {
+        if self.water_bound {
+            self.get_water_neighbors(current, out_neighbors).await;
+            return;
+        }
+
         if self.flying {
             self.get_flying_neighbors(current, out_neighbors).await;
             return;
@@ -795,14 +977,61 @@ impl NodeEvaluator for WalkNodeEvaluator {
                 }
             }
         }
+
+        if self.prefers_shallow_swimming
+            && let Some(context) = self.base.context.as_ref()
+        {
+            let shallow_water_y = context.sea_level() - 10;
+            for neighbor in out_neighbors.iter_mut() {
+                if neighbor.path_type == PathType::Water && neighbor.pos.0.y < shallow_water_y {
+                    neighbor.cost_malus += 1.0;
+                }
+            }
+        }
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn get_path_type_of_mob(
         &mut self,
         context: &mut PathfindingContext,
         pos: Vector3<i32>,
         mob_data: &MobData,
     ) -> PathType {
+        if self.frog
+            && context.block_has_tag(
+                pos.add_raw(0, -1, 0),
+                &tag::Block::MINECRAFT_FROG_PREFER_JUMP_TO,
+            )
+        {
+            return PathType::Open;
+        }
+
+        if self.water_bound {
+            let mut last_cell = pos;
+            for dy in 0..mob_data.get_bb_height() {
+                for dx in 0..mob_data.get_bb_width() {
+                    for dz in 0..mob_data.get_bb_width() {
+                        let cell = pos.add_raw(dx, dy, dz);
+                        last_cell = cell;
+                        if self.allow_breaching
+                            && context.is_fluid_empty(cell)
+                            && context.is_air(cell)
+                            && context.is_pathfindable_for_water(cell.add_raw(0, -1, 0))
+                        {
+                            return PathType::Breach;
+                        }
+                        if !context.is_water(cell) {
+                            return PathType::Blocked;
+                        }
+                    }
+                }
+            }
+            if context.is_pathfindable_for_water(last_cell) {
+                return PathType::Water;
+            }
+            return PathType::Blocked;
+        }
+
         let mut path_types = Vec::new();
         let mob_block_pos = mob_data.block_position();
 

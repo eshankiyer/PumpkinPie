@@ -11,6 +11,7 @@ use crate::entity::ai::pathfinder::path::Path;
 use crate::entity::ai::pathfinder::pathfinding_context::PathfindingContext;
 use crate::entity::ai::pathfinder::walk_node_evaluator::WalkNodeEvaluator;
 use pumpkin_data::attributes::Attributes;
+use pumpkin_data::{Block, BlockDirection};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::wrap_degrees;
 use std::collections::HashMap;
@@ -65,6 +66,17 @@ pub struct Navigator {
     /// Thread-safe status check to avoid deadlocks when components (like `LookControl`) need to
     /// check navigation status.
     pub is_idle: AtomicBool,
+    navigation_kind: NavigationKind,
+    turtle_travel: bool,
+}
+
+#[derive(Clone, Copy, Default)]
+enum NavigationKind {
+    #[default]
+    Ground,
+    Water,
+    Flying,
+    Amphibious,
 }
 
 impl Default for Navigator {
@@ -84,6 +96,8 @@ impl Default for Navigator {
             open_set: BinaryHeap::new(),
             neighbors_buf: Vec::new(),
             is_idle: AtomicBool::new(true),
+            navigation_kind: NavigationKind::Ground,
+            turtle_travel: false,
         }
     }
 }
@@ -196,6 +210,42 @@ impl Navigator {
         self.path_type_overrides.insert(path_type, malus);
     }
 
+    pub(crate) fn is_stable_destination(
+        &self,
+        world: &crate::world::World,
+        pos: &BlockPos,
+    ) -> bool {
+        match self.navigation_kind {
+            NavigationKind::Ground => world.get_block_state(&pos.down()).is_solid_render(),
+            NavigationKind::Water => !world.get_block_state(pos).is_solid_render(),
+            NavigationKind::Flying => world.get_block_state(pos).is_side_solid(BlockDirection::Up),
+            NavigationKind::Amphibious => {
+                if self.turtle_travel {
+                    Block::from_state_id(world.get_block_state(pos).id).id == Block::WATER.id
+                } else {
+                    !world.get_block_state(&pos.down()).is_air()
+                }
+            }
+        }
+    }
+
+    pub(crate) fn has_pathfinding_malus(
+        &self,
+        world: &std::sync::Arc<crate::world::World>,
+        pos: &BlockPos,
+    ) -> bool {
+        let mut context = PathfindingContext::new(pos.0, world.clone());
+        // `GoalUtils.hasMalus` uses the static walk evaluator. The active amphibious
+        // evaluator's temporary WATER/WATER_BORDER costs must not leak into this test.
+        let path_type = context.get_land_node_type(pos.0);
+        let malus = self
+            .path_type_overrides
+            .get(&path_type)
+            .copied()
+            .unwrap_or_else(|| path_type.get_malus());
+        malus != 0.0
+    }
+
     /// Vanilla `PathNavigation::setCanOpenDoors` (`GroundPathNavigation.java`'s inherited base),
     /// which just forwards to `NodeEvaluator::setCanOpenDoors`.
     pub fn set_can_open_doors(&mut self, can_open_doors: bool) {
@@ -205,6 +255,9 @@ impl Navigator {
     /// Selects the `FlyNodeEvaluator` behavior used by vanilla `FlyingPathNavigation`.
     pub const fn set_flying(&mut self, flying: bool) {
         self.evaluator.set_flying(flying);
+        if flying {
+            self.navigation_kind = NavigationKind::Flying;
+        }
     }
 
     pub fn set_can_float(&mut self, can_float: bool) {
@@ -213,6 +266,29 @@ impl Navigator {
 
     pub const fn set_amphibious(&mut self, amphibious: bool) {
         self.evaluator.set_amphibious(amphibious);
+        if amphibious {
+            self.navigation_kind = NavigationKind::Amphibious;
+        }
+    }
+
+    /// Selects vanilla `WaterBoundPathNavigation` stability semantics for aquatic mobs.
+    pub const fn set_water_bound(&mut self, water_bound: bool) {
+        if water_bound {
+            self.evaluator.set_water_bound(true);
+            self.navigation_kind = NavigationKind::Water;
+        }
+    }
+
+    pub const fn set_allow_breaching(&mut self, allow_breaching: bool) {
+        self.evaluator.set_allow_breaching(allow_breaching);
+    }
+
+    pub const fn set_frog(&mut self, frog: bool) {
+        self.evaluator.set_frog(frog);
+    }
+
+    pub const fn set_turtle_travel(&mut self, traveling: bool) {
+        self.turtle_travel = traveling;
     }
 
     pub const fn set_mob_dimensions(&mut self, width: f32, height: f32) {
@@ -238,6 +314,9 @@ impl Navigator {
                 evaluator.set_can_float(self.evaluator.can_float());
                 evaluator.set_amphibious(self.evaluator.is_amphibious());
                 evaluator.set_flying(self.evaluator.is_flying());
+                evaluator.set_water_bound(self.evaluator.is_water_bound());
+                evaluator.set_allow_breaching(self.evaluator.allows_breaching());
+                evaluator.set_frog(self.evaluator.is_frog());
                 evaluator
             },
             current_path: None,
@@ -252,6 +331,8 @@ impl Navigator {
             open_set: BinaryHeap::new(),
             neighbors_buf: Vec::new(),
             is_idle: AtomicBool::new(true),
+            navigation_kind: self.navigation_kind,
+            turtle_travel: self.turtle_travel,
         }
     }
 
@@ -296,14 +377,26 @@ impl Navigator {
         destination: Vector3<f64>,
         reach_range: i32,
     ) -> Option<Path> {
+        let dimensions = entity.entity.entity_dimension.load();
+        self.mob_width = dimensions.width;
+        self.mob_height = dimensions.height;
+
         // GroundPathNavigation.canUpdatePath: airborne ground mobs do not create a new path
         // until they land or enter liquid. Flying and amphibious navigators are exempt.
         if !self.evaluator.is_flying()
             && !self.evaluator.is_amphibious()
+            && !self.evaluator.is_water_bound()
             && !entity.entity.on_ground.load(Ordering::Relaxed)
             && !entity.entity.touching_water.load(Ordering::Relaxed)
             && !entity.entity.touching_lava.load(Ordering::Relaxed)
             && !entity.entity.has_vehicle().await
+        {
+            return None;
+        }
+        if self.evaluator.is_water_bound()
+            && !self.evaluator.allows_breaching()
+            && !entity.entity.touching_water.load(Ordering::Relaxed)
+            && !entity.entity.touching_lava.load(Ordering::Relaxed)
         {
             return None;
         }
@@ -319,13 +412,32 @@ impl Navigator {
             (entity.get_attribute_value(&Attributes::FOLLOW_RANGE) as f32).max(16.0);
         let max_iterations = (max_path_length * 16.0).floor() as usize;
 
-        let context = PathfindingContext::new(mob_position, world.clone());
+        let root_vehicle_id = entity.entity.root_vehicle_id().await;
+        let context = PathfindingContext::for_entity(
+            mob_position,
+            world.clone(),
+            entity.entity.entity_id,
+            root_vehicle_id,
+        );
         let mut mob_data = MobData::new(start_pos_f, self.mob_width, self.mob_height, 1.0);
         mob_data.on_ground = entity.entity.on_ground.load(Ordering::Relaxed);
         mob_data.in_water = entity.entity.touching_water.load(Ordering::Relaxed);
         mob_data.set_pathfinding_malus(PathType::DangerFire, 16.0);
         mob_data.set_pathfinding_malus(PathType::DamageFire, -1.0);
-        mob_data.set_pathfinding_malus(PathType::Water, 8.0);
+        // SwimNodeEvaluator and AmphibiousNodeEvaluator both use the vanilla
+        // water cost of 0.0. Ground mobs retain the normal water penalty.
+        mob_data.set_pathfinding_malus(
+            PathType::Water,
+            if self.evaluator.is_water_bound() || self.evaluator.is_amphibious() {
+                0.0
+            } else {
+                8.0
+            },
+        );
+        if self.evaluator.is_amphibious() {
+            mob_data.set_pathfinding_malus(PathType::Walkable, 6.0);
+            mob_data.set_pathfinding_malus(PathType::WaterBorder, 4.0);
+        }
         mob_data.set_pathfinding_malus(PathType::Lava, -1.0);
         mob_data.set_pathfinding_malus(PathType::DangerOther, 8.0);
 
@@ -344,7 +456,10 @@ impl Navigator {
         } else {
             BlockPos(destination.floor_to_i32())
         };
-        if !self.evaluator.is_amphibious() && !self.evaluator.is_flying() {
+        if !self.evaluator.is_amphibious()
+            && !self.evaluator.is_flying()
+            && !self.evaluator.is_water_bound()
+        {
             target_pos = find_surface_position(world.as_ref(), target_pos);
         }
         let mut target = self.evaluator.get_target(target_pos);
@@ -584,8 +699,9 @@ impl Navigator {
             }
 
             let on_ground = entity.entity.on_ground.load(Ordering::Relaxed);
+            let frog_navigation = self.evaluator.is_frog();
 
-            if self.evaluator.is_amphibious()
+            if (self.evaluator.is_amphibious() || self.evaluator.is_water_bound())
                 && path.get_next_node_index() + 1 < path.get_node_count()
                 && let Some(next) = path.get_next_entity_pos(self.mob_width)
             {
@@ -601,27 +717,29 @@ impl Navigator {
                 let dy = mob_position.y - f64::from(current.y);
                 let dz = mob_position.z - (f64::from(current.z) + 0.5);
                 let close_to_current = dx.mul_add(dx, dy.mul_add(dy, dz * dz)) < 4.0;
-                let can_move_directly =
-                    if close_to_current && entity.entity.touching_water.load(Ordering::Relaxed) {
-                        Self::can_move_directly(
-                            &world,
-                            mob_position,
-                            Vector3::new(
-                                f64::from(next.0),
-                                f64::from(next.1) + f64::from(entity.entity.height()) * 0.5,
-                                f64::from(next.2),
-                            ),
-                        )
-                        .await
-                    } else {
-                        false
-                    };
+                let can_move_directly = if close_to_current
+                    && (self.evaluator.is_water_bound()
+                        || entity.entity.touching_water.load(Ordering::Relaxed))
+                {
+                    Self::can_move_directly(
+                        &world,
+                        mob_position,
+                        Vector3::new(
+                            f64::from(next.0),
+                            f64::from(next.1) + f64::from(entity.entity.height()) * 0.5,
+                            f64::from(next.2),
+                        ),
+                    )
+                    .await
+                } else {
+                    false
+                };
                 if can_move_directly {
                     path.advance();
                 } else if close_to_current
                     && path
                         .get_next_node()
-                        .is_some_and(|node| Self::can_cut_corner(node.path_type))
+                        .is_some_and(|node| Self::can_cut_corner(node.path_type, frog_navigation))
                 {
                     let current_node = Vector3::new(
                         f64::from(current.x) + 0.5,
@@ -682,7 +800,12 @@ impl Navigator {
                     return;
                 }
 
-                if horizontal_dist < NODE_REACH_XZ && dy.abs() < NODE_REACH_Y {
+                let node_reach_y = if self.evaluator.is_water_bound() {
+                    0.5
+                } else {
+                    NODE_REACH_Y
+                };
+                if horizontal_dist < NODE_REACH_XZ && dy.abs() < node_reach_y {
                     path.advance();
                     if path.is_done() {
                         self.is_idle.store(true, Ordering::Relaxed);
@@ -729,11 +852,11 @@ impl Navigator {
             .is_none()
     }
 
-    const fn can_cut_corner(path_type: PathType) -> bool {
-        !matches!(
+    fn can_cut_corner(path_type: PathType, frog: bool) -> bool {
+        !(matches!(
             path_type,
             PathType::DangerFire | PathType::DangerOther | PathType::WalkableDoor
-        )
+        ) || frog && path_type == PathType::WaterBorder)
     }
 
     #[must_use]

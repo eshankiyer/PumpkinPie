@@ -533,6 +533,8 @@ pub struct BlockState {
     pub opacity: Option<u8>,
     /// Associated block-entity type ID, if any.
     pub block_entity_type: Option<u16>,
+    /// Whether vanilla's cached `BlockState.isSolidRender()` is true for this state.
+    pub solid_render: bool,
 }
 
 /// Describes how a piston interacts with a block.
@@ -608,6 +610,7 @@ impl BlockState {
         } else {
             quote! { u16::MAX }
         };
+        let solid_render = self.solid_render;
 
         let collision_shapes = self
             .collision_shapes
@@ -633,6 +636,7 @@ impl BlockState {
                 opacity: #opacity,
                 use_shape_for_light_occlusion: #use_shape_for_light_occlusion,
                 block_entity_type: #block_entity_type,
+                solid_render: #solid_render,
             }
         });
         tokens

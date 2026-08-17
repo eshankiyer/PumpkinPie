@@ -178,6 +178,10 @@ impl Mob for ZombieHorseEntity {
         &self.mob_entity
     }
 
+    fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
+        AbstractHorse::has_saddled_player_passenger(self)
+    }
+
     fn mob_interact<'a>(
         &'a self,
         player: &'a Arc<Player>,

@@ -33,7 +33,12 @@ impl SnowGolemEntity {
             // `SnowGolem.java`'s `registerGoals`: priorities 1 (attack), 2 (wander), 3 (look at
             // player), 4 (random look around).
             goal_selector.add_goal(1, Box::new(RangedSnowballAttackGoal::new(20, 10.0)));
-            goal_selector.add_goal(2, Box::new(WanderAroundGoal::new_water_avoiding(1.0)));
+            goal_selector.add_goal(
+                2,
+                Box::new(WanderAroundGoal::new_water_avoiding_with_probability(
+                    1.0, 0.00001,
+                )),
+            );
             goal_selector.add_goal(
                 3,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),

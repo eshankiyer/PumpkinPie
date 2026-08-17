@@ -9,6 +9,7 @@ use pumpkin_data::sound::Sound;
 use pumpkin_data::tracked_data::TrackedData;
 use pumpkin_data::{entity::EntityType, item::Item};
 use pumpkin_protocol::codec::var_int::VarInt;
+use pumpkin_util::math::boundingbox::EntityDimensions;
 use rand::RngExt;
 
 use crate::entity::{
@@ -83,6 +84,10 @@ impl ChickenEntity {
 impl crate::entity::ageable::AgeableMob for ChickenEntity {
     fn get_ageable_data(&self) -> &crate::entity::ageable::AgeableData {
         &self.ageable_data
+    }
+
+    fn baby_dimensions(&self) -> Option<EntityDimensions> {
+        Some(EntityDimensions::new(0.3, 0.4, 0.28125))
     }
 }
 

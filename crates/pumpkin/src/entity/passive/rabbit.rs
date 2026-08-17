@@ -14,6 +14,7 @@ use pumpkin_data::{
     item::Item,
 };
 use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::math::boundingbox::EntityDimensions;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -306,6 +307,10 @@ impl RabbitEntity {
 impl AgeableMob for RabbitEntity {
     fn get_ageable_data(&self) -> &AgeableData {
         &self.ageable_data
+    }
+
+    fn baby_dimensions(&self) -> Option<EntityDimensions> {
+        Some(EntityDimensions::new(0.24, 0.4, 0.39))
     }
 }
 

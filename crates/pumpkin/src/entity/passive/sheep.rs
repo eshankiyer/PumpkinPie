@@ -10,6 +10,7 @@ use pumpkin_data::{
 };
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::math::boundingbox::EntityDimensions;
 use pumpkin_util::math::vector3::Vector3;
 use rand::{RngExt, rng};
 
@@ -342,6 +343,10 @@ impl super::animal::Animal for SheepEntity {
 impl AgeableMob for SheepEntity {
     fn get_ageable_data(&self) -> &AgeableData {
         &self.ageable_data
+    }
+
+    fn baby_dimensions(&self) -> Option<EntityDimensions> {
+        Some(EntityDimensions::new(0.45, 0.65, 0.65625))
     }
 }
 

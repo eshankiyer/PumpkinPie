@@ -11,6 +11,7 @@ use pumpkin_data::{
 };
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::math::boundingbox::EntityDimensions;
 use rand::{RngExt, rng};
 use uuid::Uuid;
 
@@ -478,6 +479,10 @@ impl FoxEntity {
 impl AgeableMob for FoxEntity {
     fn get_ageable_data(&self) -> &AgeableData {
         &self.ageable_data
+    }
+
+    fn baby_dimensions(&self) -> Option<EntityDimensions> {
+        Some(EntityDimensions::new(0.36, 0.42, 0.34375))
     }
 }
 

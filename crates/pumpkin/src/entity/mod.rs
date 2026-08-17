@@ -895,6 +895,7 @@ pub struct Entity {
     pub on_ground: AtomicBool,
     /// Indicates whether the entity is touching water
     pub touching_water: AtomicBool,
+    pub was_touching_water: AtomicBool,
     /// Indicates whether the entity's eyes were in water at the start of the current tick.
     /// This is the server-side equivalent of vanilla's `wasEyeInWater` field.
     pub was_eye_in_water: AtomicBool,
@@ -1160,6 +1161,7 @@ impl Entity {
             entity_type,
             on_ground: AtomicBool::new(false),
             touching_water: AtomicBool::new(false),
+            was_touching_water: AtomicBool::new(false),
             was_eye_in_water: AtomicBool::new(false),
             eye_in_water: AtomicBool::new(false),
             water_height: AtomicCell::new(0.0),
@@ -1446,7 +1448,7 @@ impl Entity {
     }
 
     pub fn get_eye_height(&self) -> f64 {
-        f64::from(Self::get_entity_dimensions(self.pose.load()).eye_height)
+        f64::from(self.entity_dimension.load().eye_height)
     }
 
     /// Updates the entity's position, block position, and chunk position.
@@ -2221,6 +2223,8 @@ impl Entity {
         let water_height = fluid_height[0];
 
         let in_water = in_fluid[0];
+
+        self.was_touching_water.store(in_water, Ordering::SeqCst);
 
         if in_water {
             if let Some(living) = caller.get_living_entity() {
@@ -3612,6 +3616,18 @@ impl Entity {
     pub async fn has_vehicle(&self) -> bool {
         let vehicle = self.vehicle.lock().await;
         vehicle.is_some()
+    }
+
+    /// Returns the root vehicle id used by vanilla's `isPassengerOfSameVehicle`.
+    pub async fn root_vehicle_id(&self) -> i32 {
+        let mut root_id = self.entity_id;
+        let mut vehicle = self.vehicle.lock().await.clone();
+        while let Some(next) = vehicle.clone() {
+            let next_entity = next.get_entity();
+            root_id = next_entity.entity_id;
+            vehicle.clone_from(&*next_entity.vehicle.lock().await);
+        }
+        root_id
     }
 
     pub async fn add_passenger(

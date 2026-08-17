@@ -145,7 +145,12 @@ impl CatEntity {
             goal_selector.add_goal(6, FollowOwnerGoal::new(1.0, 10.0, 5.0));
             goal_selector.add_goal(9, Box::new(OcelotAttackGoal::new()));
             goal_selector.add_goal(9, Box::new(FollowParentGoal::new(0.8)));
-            goal_selector.add_goal(11, Box::new(WanderAroundGoal::new(0.8)));
+            goal_selector.add_goal(
+                11,
+                Box::new(WanderAroundGoal::new_water_avoiding_with_probability(
+                    0.8, 0.00001,
+                )),
+            );
             goal_selector.add_goal(
                 12,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 10.0),
