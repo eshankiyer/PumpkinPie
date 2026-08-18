@@ -805,7 +805,7 @@ pub fn spawn_category_for_position(
         'spawn_loop: while inc < random_group_size {
             new_x += rng().random_range(0..6) - rng().random_range(0..6);
             new_z += rng().random_range(0..6) - rng().random_range(0..6);
-            let mut new_pos = BlockPos::new(new_x, pos.0.y, new_z);
+            let new_pos = BlockPos::new(new_x, pos.0.y, new_z);
 
             if current_spawner.is_none() {
                 let Some(spawner) = get_random_spawn_mob_at(world, category, &new_pos) else {
@@ -823,8 +823,6 @@ pub fn spawn_category_for_position(
                 inc += 1;
                 continue;
             }
-
-            new_pos = adjust_spawn_position(world, new_pos, entity_type);
 
             let spawn_pos_f64 = Vector3::new(
                 f64::from(new_pos.0.x) + 0.5,
@@ -1225,25 +1223,6 @@ pub fn adjust_spawn_position_cache(
         let below = pos.down();
         let state = GenerationCache::get_block_state(cache, &below.0).to_state();
 
-        if !state.is_full_cube() && !state.is_liquid() {
-            return below;
-        }
-    }
-    pos
-}
-
-pub fn adjust_spawn_position(
-    world: &World,
-    pos: BlockPos,
-    entity_type: &'static EntityType,
-) -> BlockPos {
-    if matches!(
-        entity_type.spawn_restriction.location,
-        SpawnLocation::OnGround
-    ) {
-        let below = pos.down();
-        let state = world.get_block_state(&below);
-        // Approximation of isPathfindable(LAND)
         if !state.is_full_cube() && !state.is_liquid() {
             return below;
         }
