@@ -379,6 +379,15 @@ pub fn check_spawn_rules(
             && mob::MobEntity::check_monster_spawn_rules(world, pos, is_thundering);
     }
 
+    // `SpawnPlacements` registers Parched with
+    // `Monster.checkSurfaceMonstersSpawnRules`, unlike an ordinary skeleton.
+    if id == EntityType::PARCHED.id {
+        return natural_surface_monster_spawn_allowed(
+            world.can_see_sky(pos),
+            mob::MobEntity::check_monster_spawn_rules(world, pos, is_thundering),
+        );
+    }
+
     if id == EntityType::MAGMA_CUBE.id {
         return world.level_info.load().difficulty != pumpkin_util::Difficulty::Peaceful;
     }
@@ -671,6 +680,14 @@ const fn uses_any_light_monster_spawn_rules(id: u16) -> bool {
     id == EntityType::BLAZE.id || id == EntityType::BREEZE.id || id == EntityType::ZOGLIN.id
 }
 
+/// `Monster.checkSurfaceMonstersSpawnRules` for a natural spawn.
+const fn natural_surface_monster_spawn_allowed(
+    can_see_sky: bool,
+    monster_rules_allowed: bool,
+) -> bool {
+    monster_rules_allowed && can_see_sky
+}
+
 /// `AgeableWaterCreature.checkSurfaceAgeableWaterCreatureSpawnRules`'s Y-range gate:
 /// `pos.getY() >= seaLevel - 13 && pos.getY() <= seaLevel`.
 const fn is_in_surface_water_y_range(y: i32, sea_level: i32) -> bool {
@@ -845,8 +862,8 @@ const fn ocelot_spawn_obstruction_allowed(
 #[cfg(test)]
 mod animal_spawn_dispatch_tests {
     use super::{
-        EntityType, ocelot_spawn_obstruction_allowed, ocelot_spawn_roll_allowed,
-        uses_animal_spawn_rules, uses_any_light_monster_spawn_rules,
+        EntityType, natural_surface_monster_spawn_allowed, ocelot_spawn_obstruction_allowed,
+        ocelot_spawn_roll_allowed, uses_animal_spawn_rules, uses_any_light_monster_spawn_rules,
     };
 
     #[test]
@@ -876,6 +893,13 @@ mod animal_spawn_dispatch_tests {
         assert!(uses_any_light_monster_spawn_rules(EntityType::BREEZE.id));
         assert!(uses_any_light_monster_spawn_rules(EntityType::ZOGLIN.id));
         assert!(!uses_any_light_monster_spawn_rules(EntityType::CREEPER.id));
+    }
+
+    #[test]
+    fn parched_natural_spawns_require_open_sky() {
+        assert!(natural_surface_monster_spawn_allowed(true, true));
+        assert!(!natural_surface_monster_spawn_allowed(false, true));
+        assert!(!natural_surface_monster_spawn_allowed(true, false));
     }
 
     #[test]
