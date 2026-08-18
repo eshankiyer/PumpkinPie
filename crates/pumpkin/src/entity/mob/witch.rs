@@ -52,7 +52,9 @@ impl WitchEntity {
             mob_entity,
             heal_cooldown: AtomicI32::new(0),
             can_attack_players: AtomicBool::new(false),
-            drink_ticks_remaining: AtomicI32::new(0),
+            // -1 is idle; zero is a valid active value because Java finishes
+            // on the tick where `usingTime--` observes zero.
+            drink_ticks_remaining: AtomicI32::new(-1),
         };
         let mob_arc = Arc::new(witch);
         let mob_weak: Weak<dyn Mob> = {
@@ -88,14 +90,16 @@ impl WitchEntity {
 
     #[must_use]
     pub fn is_drinking_potion(&self) -> bool {
-        self.drink_ticks_remaining.load(Relaxed) > 0
+        self.drink_ticks_remaining.load(Relaxed) >= 0
     }
 
     /// Vanilla `Witch.aiStep`'s potion-drinking state machine (non-client only).
     async fn tick_drinking(&self) {
         if self.is_drinking_potion() {
-            if self.drink_ticks_remaining.fetch_sub(1, Relaxed) - 1 <= 0 {
-                self.drink_ticks_remaining.store(0, Relaxed);
+            // This is Java's `usingTime-- <= 0`: test the value before
+            // decrementing so the zero-count tick reaches the finish path.
+            if self.drink_ticks_remaining.fetch_sub(1, Relaxed) <= 0 {
+                self.drink_ticks_remaining.store(-1, Relaxed);
                 self.finish_drinking().await;
             }
             return;
