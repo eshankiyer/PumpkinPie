@@ -4926,7 +4926,7 @@ impl World {
         block_state_id: BlockStateId,
         flags: BlockFlags,
     ) -> BlockStateId {
-        self.set_block_state_internal(position, None, block_state_id, flags)
+        self.set_block_state_internal(position, None, block_state_id, flags, None)
             .await
             .unwrap_or(Block::AIR.default_state.id)
     }
@@ -4943,9 +4943,28 @@ impl World {
         block_state_id: BlockStateId,
         flags: BlockFlags,
     ) -> bool {
-        self.set_block_state_internal(position, Some(expected_state), block_state_id, flags)
+        self.set_block_state_internal(position, Some(expected_state), block_state_id, flags, None)
             .await
             .is_some()
+    }
+
+    pub async fn set_block_state_if_validated(
+        self: &Arc<Self>,
+        position: &BlockPos,
+        expected_state: BlockStateId,
+        block_state_id: BlockStateId,
+        flags: BlockFlags,
+        validator: Arc<dyn Fn(&Self) -> bool + Send + Sync>,
+    ) -> bool {
+        self.set_block_state_internal(
+            position,
+            Some(expected_state),
+            block_state_id,
+            flags,
+            Some(validator),
+        )
+        .await
+        .is_some()
     }
 
     #[expect(clippy::too_many_lines)]
@@ -4955,11 +4974,17 @@ impl World {
         expected_state: Option<BlockStateId>,
         block_state_id: BlockStateId,
         flags: BlockFlags,
+        validator: Option<Arc<dyn Fn(&Self) -> bool + Send + Sync>>,
     ) -> Option<BlockStateId> {
         let (chunk_coordinate, relative) = position.chunk_and_chunk_relative_position();
         // Serialize the chunk mutation with its broadcast queue insertion. Without
         // this guard, two async callers can mutate in order A/B but enqueue B/A.
         let mut unsent_block_changes = self.unsent_block_changes.lock().await;
+        if let Some(validator) = validator
+            && !validator(self)
+        {
+            return None;
+        }
         let replaced_block_state_id = self
             .level
             .read_chunk_sync(&chunk_coordinate, |chunk| {
@@ -6034,6 +6059,41 @@ impl World {
         for direction in BlockDirection::all() {
             let neighbor_pos = pos.offset(direction.to_offset());
             let neighbor_state_id = self.get_block_state_id(&neighbor_pos);
+            current_state_id = self
+                .block_registry
+                .get_state_for_neighbor_update(
+                    self,
+                    block,
+                    current_state_id,
+                    pos,
+                    direction,
+                    &neighbor_pos,
+                    neighbor_state_id,
+                )
+                .await;
+        }
+        current_state_id
+    }
+
+    pub async fn update_from_neighbor_shapes_vanilla(
+        self: &Arc<Self>,
+        state_id: BlockStateId,
+        pos: &BlockPos,
+    ) -> BlockStateId {
+        let mut current_state_id = state_id;
+        let directions = [
+            BlockDirection::West,
+            BlockDirection::East,
+            BlockDirection::North,
+            BlockDirection::South,
+            BlockDirection::Down,
+            BlockDirection::Up,
+        ];
+
+        for direction in directions {
+            let neighbor_pos = pos.offset(direction.to_offset());
+            let neighbor_state_id = self.get_block_state_id(&neighbor_pos);
+            let block = Block::from_state_id(current_state_id);
             current_state_id = self
                 .block_registry
                 .get_state_for_neighbor_update(
