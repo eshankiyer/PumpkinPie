@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use pumpkin_data::entity::{EntityType, MobCategory};
+use pumpkin_data::entity::{EntityType, MobCategory, SpawnLocation};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{Block, BlockDirection, BlockState};
 use pumpkin_util::GameMode;
@@ -871,21 +871,16 @@ fn stray_can_see_sky(world: &World, pos: &BlockPos) -> bool {
     world.can_see_sky(&check_pos.down())
 }
 
-/// `Ocelot.checkSpawnObstruction`'s species-specific condition.
+/// Mirrors `Mob.checkSpawnObstruction` and the species-specific overrides.
 ///
-/// The common spawn-position checks already cover collision and fluids.
+/// The common spawn-position check handles the placement block. This check handles the
+/// entity AABB's fluid test; water and lava placement types are the exceptions because their
+/// vanilla mob classes are intended to occupy that fluid.
 pub fn check_spawn_obstruction(
     world: &World,
     pos: &BlockPos,
     entity_type: &'static EntityType,
 ) -> bool {
-    if entity_type.id != EntityType::OCELOT.id
-        && entity_type.id != EntityType::RAVAGER.id
-        && entity_type.id != EntityType::WARDEN.id
-    {
-        return true;
-    }
-
     check_spawn_obstruction_state(
         pos.0.y,
         world.sea_level,
@@ -921,7 +916,12 @@ pub fn check_spawn_obstruction_state(
         return !contains_any_liquid;
     }
 
-    true
+    // `Mob.checkSpawnObstruction` rejects fluids for all ordinary mobs. Fluid placement types
+    // use subclasses whose spawn obstruction intentionally permits their required medium.
+    matches!(
+        entity_type.spawn_restriction.location,
+        SpawnLocation::InWater | SpawnLocation::InLava
+    ) || !contains_any_liquid
 }
 
 fn contains_any_liquid(world: &World, pos: &BlockPos, entity_type: &'static EntityType) -> bool {
@@ -1010,8 +1010,8 @@ const fn ocelot_spawn_obstruction_allowed(
 #[cfg(test)]
 mod animal_spawn_dispatch_tests {
     use super::{
-        EntityType, ocelot_spawn_obstruction_allowed, ocelot_spawn_roll_allowed,
-        uses_animal_spawn_rules, uses_any_light_monster_spawn_rules,
+        Block, EntityType, check_spawn_obstruction_state, ocelot_spawn_obstruction_allowed,
+        ocelot_spawn_roll_allowed, uses_animal_spawn_rules, uses_any_light_monster_spawn_rules,
     };
 
     #[test]
@@ -1077,6 +1077,39 @@ mod animal_spawn_dispatch_tests {
         assert!(!ocelot_spawn_obstruction_allowed(
             64, 63, true, false, false, true
         ));
+    }
+
+    #[test]
+    fn default_obstruction_rejects_liquids_but_fluid_spawns_allow_them() {
+        for entity_type in [
+            &EntityType::FOX,
+            &EntityType::PANDA,
+            &EntityType::TRADER_LLAMA,
+        ] {
+            assert!(!check_spawn_obstruction_state(
+                64,
+                63,
+                Block::AIR.default_state,
+                true,
+                false,
+                entity_type,
+            ));
+        }
+
+        for entity_type in [&EntityType::COD, &EntityType::SQUID, &EntityType::STRIDER] {
+            assert!(
+                check_spawn_obstruction_state(
+                    64,
+                    63,
+                    Block::AIR.default_state,
+                    true,
+                    false,
+                    entity_type,
+                ),
+                "{}",
+                entity_type.resource_name
+            );
+        }
     }
 }
 

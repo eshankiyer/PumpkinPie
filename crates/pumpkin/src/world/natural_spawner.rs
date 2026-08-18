@@ -1146,7 +1146,18 @@ fn contains_any_liquid_cache(
     z: f64,
     entity_type: &'static EntityType,
 ) -> bool {
-    let bounding_box = BoundingBox::new_from_pos(x, y, z, &spawn_dimensions(entity_type));
+    // This mirrors Mob.checkSpawnObstruction, which uses the created mob's actual
+    // bounding box. The enlarged getSpawnAABB is only for NaturalSpawner.noCollision.
+    let bounding_box = BoundingBox::new_from_pos(
+        x,
+        y,
+        z,
+        &EntityDimensions {
+            width: entity_type.dimension[0],
+            height: entity_type.dimension[1],
+            eye_height: entity_type.eye_height,
+        },
+    );
 
     for block_x in bounding_box.min.x.floor() as i32..bounding_box.max.x.ceil() as i32 {
         for block_y in bounding_box.min.y.floor() as i32..bounding_box.max.y.ceil() as i32 {
