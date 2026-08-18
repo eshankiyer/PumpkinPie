@@ -509,6 +509,11 @@ impl Mob for WardenEntity {
         &self.mob_entity
     }
 
+    /// Vanilla `Warden.removeWhenFarAway` always returns false.
+    fn remove_when_far_away(&self, _distance_squared: f64) -> bool {
+        false
+    }
+
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             self.register_listener_once().await;
