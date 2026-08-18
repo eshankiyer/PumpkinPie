@@ -107,7 +107,7 @@ pub struct MobEntity {
     /// The reference is kept on the mob rather than on the follow goal so that the
     /// follower state is shared by `FollowFlockLeaderGoal`, random swimming, and
     /// future spawn/lifecycle hooks.
-    schooling_leader: tokio::sync::Mutex<Option<Arc<dyn EntityBase>>>,
+    schooling_leader: std::sync::Mutex<Option<Arc<dyn EntityBase>>>,
     /// Vanilla `AbstractSchoolingFish.schoolSize`, including the leader itself.
     schooling_size: AtomicI32,
     /// Vanilla `Mob.noActionTime`, used by the random despawn check.
@@ -202,7 +202,7 @@ impl MobEntity {
             position_target_range: AtomicI32::new(-1),
             love_ticks: AtomicI32::new(0),
             breeding_cooldown: AtomicI32::new(0),
-            schooling_leader: tokio::sync::Mutex::new(None),
+            schooling_leader: std::sync::Mutex::new(None),
             schooling_size: AtomicI32::new(1),
             no_action_time: AtomicI32::new(0),
             tick_count: AtomicI32::new(0),
@@ -436,16 +436,19 @@ impl MobEntity {
         self.love_ticks.load(Relaxed) > 0
     }
 
-    pub async fn is_schooling_follower(&self) -> bool {
+    pub fn is_schooling_follower(&self) -> bool {
         self.schooling_leader
             .lock()
-            .await
+            .expect("schooling leader mutex poisoned")
             .as_ref()
             .is_some_and(|leader| leader.get_entity().is_alive())
     }
 
-    pub async fn schooling_leader(&self) -> Option<Arc<dyn EntityBase>> {
-        self.schooling_leader.lock().await.clone()
+    pub fn schooling_leader(&self) -> Option<Arc<dyn EntityBase>> {
+        self.schooling_leader
+            .lock()
+            .expect("schooling leader mutex poisoned")
+            .clone()
     }
 
     #[must_use]
@@ -505,7 +508,7 @@ impl MobEntity {
 
     /// Vanilla `AbstractSchoolingFish.startFollowing` plus the leader's follower count update.
     /// Callers must only pass a different, currently non-following fish.
-    pub async fn start_schooling_following(&self, leader: Arc<dyn EntityBase>) -> bool {
+    pub fn start_schooling_following(&self, leader: Arc<dyn EntityBase>) -> bool {
         if leader.get_entity().entity_id == self.living_entity.entity.entity_id {
             return false;
         }
@@ -515,7 +518,10 @@ impl MobEntity {
         };
 
         let previous_leader = {
-            let mut current = self.schooling_leader.lock().await;
+            let mut current = self
+                .schooling_leader
+                .lock()
+                .expect("schooling leader mutex poisoned");
             if current.as_ref().is_some_and(|current| {
                 current.get_entity().entity_id == leader.get_entity().entity_id
             }) {
@@ -541,8 +547,11 @@ impl MobEntity {
     }
 
     /// Vanilla `AbstractSchoolingFish.stopFollowing`.
-    pub async fn stop_schooling_following(&self) {
-        let mut current = self.schooling_leader.lock().await;
+    pub fn stop_schooling_following(&self) {
+        let mut current = self
+            .schooling_leader
+            .lock()
+            .expect("schooling leader mutex poisoned");
         if let Some(leader) = current.take()
             && let Some(leader_mob) = leader.get_mob()
         {
@@ -557,8 +566,11 @@ impl MobEntity {
     /// Stop only if the leader is still the one observed by the goal being stopped.
     /// Entity goals stop asynchronously, so an unconditional clear could erase a newer
     /// assignment made by another fish between the goal stop and this lock acquisition.
-    pub async fn stop_schooling_following_if(&self, expected: &Arc<dyn EntityBase>) {
-        let mut current = self.schooling_leader.lock().await;
+    pub fn stop_schooling_following_if(&self, expected: &Arc<dyn EntityBase>) {
+        let mut current = self
+            .schooling_leader
+            .lock()
+            .expect("schooling leader mutex poisoned");
         if current
             .as_ref()
             .is_none_or(|leader| leader.get_entity().entity_id != expected.get_entity().entity_id)
@@ -948,6 +960,11 @@ pub trait Mob: EntityBase + Send + Sync {
 
     fn get_random(&self) -> rand::rngs::ThreadRng {
         rand::rng()
+    }
+
+    /// Vanilla `Mob.isMaxGroupSizeReached`; most mobs accept the configured group size.
+    fn is_max_group_size_reached(&self, _group_size: i32) -> bool {
+        false
     }
 
     /// Vanilla `Entity.getLightLevelDependentMagicValue` used by

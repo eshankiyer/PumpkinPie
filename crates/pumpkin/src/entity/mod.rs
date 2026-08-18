@@ -3206,6 +3206,13 @@ impl Entity {
         record_tracked_data_into(&mut snapshot, meta);
     }
 
+    /// Records initial tracked data for an entity that has not been announced yet.
+    /// Spawn code uses this to finalize state before the spawn packet without sending an
+    /// out-of-order metadata update.
+    pub(crate) fn record_tracked_data_only<T: MetadataSerializer>(&self, meta: &[Metadata<T>]) {
+        self.record_tracked_data(meta);
+    }
+
     /// Sends every tracked-data value published so far for this entity to a
     /// single player, without touching any other viewer.
     ///

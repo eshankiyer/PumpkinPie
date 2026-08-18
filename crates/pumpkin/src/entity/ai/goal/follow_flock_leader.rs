@@ -69,7 +69,7 @@ impl FollowFlockLeaderGoal {
             if candidate_mob
                 .get_mob_entity()
                 .can_be_followed_by_schooling_fish()
-                || !candidate_mob.get_mob_entity().is_schooling_follower().await
+                || !candidate_mob.get_mob_entity().is_schooling_follower()
             {
                 candidates.push(candidate);
             }
@@ -103,7 +103,7 @@ impl Goal for FollowFlockLeaderGoal {
             if mob.get_mob_entity().has_schooling_followers() {
                 return false;
             }
-            if mob.get_mob_entity().is_schooling_follower().await {
+            if mob.get_mob_entity().is_schooling_follower() {
                 return true;
             }
 
@@ -138,25 +138,24 @@ impl Goal for FollowFlockLeaderGoal {
                 let Some(candidate_mob) = candidate.get_mob() else {
                     continue;
                 };
-                if candidate_mob.get_mob_entity().is_schooling_follower().await {
+                if candidate_mob.get_mob_entity().is_schooling_follower() {
                     continue;
                 }
                 let _ = candidate_mob
                     .get_mob_entity()
-                    .start_schooling_following(leader.clone())
-                    .await;
+                    .start_schooling_following(leader.clone());
             }
 
-            mob.get_mob_entity().is_schooling_follower().await
+            mob.get_mob_entity().is_schooling_follower()
         })
     }
 
     fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async move {
-            if !mob.get_mob_entity().is_schooling_follower().await {
+            if !mob.get_mob_entity().is_schooling_follower() {
                 return false;
             }
-            let Some(leader) = mob.get_mob_entity().schooling_leader().await else {
+            let Some(leader) = mob.get_mob_entity().schooling_leader() else {
                 return false;
             };
 
@@ -177,12 +176,10 @@ impl Goal for FollowFlockLeaderGoal {
 
     fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
-            let Some(leader) = mob.get_mob_entity().schooling_leader().await else {
+            let Some(leader) = mob.get_mob_entity().schooling_leader() else {
                 return;
             };
-            mob.get_mob_entity()
-                .stop_schooling_following_if(&leader)
-                .await;
+            mob.get_mob_entity().stop_schooling_following_if(&leader);
         })
     }
 
@@ -195,7 +192,7 @@ impl Goal for FollowFlockLeaderGoal {
             self.time_to_recalc_path
                 .store(to_goal_ticks(10), Ordering::Relaxed);
 
-            let Some(leader) = mob.get_mob_entity().schooling_leader().await else {
+            let Some(leader) = mob.get_mob_entity().schooling_leader() else {
                 return;
             };
 

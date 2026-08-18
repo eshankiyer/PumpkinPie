@@ -1,4 +1,5 @@
 use crate::entity::EntityBase;
+use crate::entity::passive::tropical_fish::TropicalFishEntity;
 use crate::entity::r#type::{
     check_spawn_obstruction, check_spawn_obstruction_state, check_spawn_rules, from_type,
 };
@@ -30,6 +31,43 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 const MAGIC_NUMBER: i32 = 17 * 17;
+
+fn initialize_schooling_spawn(
+    entity: &Arc<dyn EntityBase>,
+    leader: &mut Option<Arc<dyn EntityBase>>,
+    group_size: i32,
+    record_tracker: bool,
+) -> bool {
+    let Some(mob) = entity.get_mob() else {
+        return false;
+    };
+    if mob.get_mob_entity().max_school_size() == 0 {
+        return false;
+    }
+
+    if let Some(leader_entity) = leader.clone() {
+        if let (Some(fish), Some(leader_fish)) = (
+            entity.cast_any().downcast_ref::<TropicalFishEntity>(),
+            leader_entity
+                .cast_any()
+                .downcast_ref::<TropicalFishEntity>(),
+        ) {
+            fish.copy_spawn_group_state(leader_fish, record_tracker);
+        }
+        mob.get_mob_entity()
+            .start_schooling_following(leader_entity);
+    } else {
+        if record_tracker && let Some(fish) = entity.cast_any().downcast_ref::<TropicalFishEntity>()
+        {
+            fish.record_spawn_group_state();
+        }
+        if !mob.is_max_group_size_reached(group_size) {
+            *leader = Some(entity.clone());
+        }
+    }
+
+    mob.is_max_group_size_reached(group_size)
+}
 
 /// Matches the base `NaturalSpawner.createState` persistence predicate.
 ///
@@ -607,6 +645,8 @@ pub fn spawn_mobs_for_chunk_generation(
         let mut z = zo + rand::random_range(0..16);
         let start_x = x;
         let start_z = z;
+        let mut schooling_leader: Option<Arc<dyn EntityBase>> = None;
+        let mut group_size = 0;
 
         for _ in 0..count {
             let mut success = false;
@@ -659,6 +699,8 @@ pub fn spawn_mobs_for_chunk_generation(
                     entity
                         .get_entity()
                         .set_rotation(rand::random::<f32>() * 360., 0.);
+                    group_size += 1;
+                    initialize_schooling_spawn(&entity, &mut schooling_leader, group_size, true);
                     world.spawn_entity_non_save(&entity);
                     success = true;
                 }
@@ -757,6 +799,8 @@ pub fn spawn_category_for_position(
         let mut random_group_size = (rng().random::<f32>() * 4.).ceil() as i32;
         let mut inc = 0;
         let mut current_spawner = None;
+        let mut schooling_leader: Option<Arc<dyn EntityBase>> = None;
+        let mut group_size = 0;
 
         'spawn_loop: while inc < random_group_size {
             new_x += rng().random_range(0..6) - rng().random_range(0..6);
@@ -822,10 +866,17 @@ pub fn spawn_category_for_position(
             let entity_uuid = entity.get_entity().entity_uuid;
 
             spawn_cluster_size += 1;
+            group_size += 1;
+            let group_ended =
+                initialize_schooling_spawn(&entity, &mut schooling_leader, group_size, false);
             batch_buffer.push(entity);
             spawn_state.after_spawn(entity_type, &new_pos, entity_uuid, world);
             if spawn_cluster_size >= entity_type.limit_per_chunk {
                 break 'group_loop;
+            }
+
+            if group_ended {
+                break 'spawn_loop;
             }
 
             inc += 1;
