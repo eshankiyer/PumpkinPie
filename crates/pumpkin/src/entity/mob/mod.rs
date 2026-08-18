@@ -1166,12 +1166,18 @@ pub trait Mob: EntityBase + Send + Sync {
     /// must not be removed by the normal despawn checks.
     fn requires_custom_persistence_cached(&self) -> bool {
         let entity = self.get_entity();
-        entity.vehicle_persistence_required.load(Relaxed)
+        self.has_custom_persistence_state()
+            || entity.vehicle_persistence_required.load(Relaxed)
             || entity.leash_persistence_required.load(Relaxed)
             || (entity
                 .entity_type
                 .has_tag(&tag::EntityType::MINECRAFT_RAIDERS)
                 && self.get_mob_entity().living_entity.has_active_raid())
+    }
+
+    /// Species-specific state that keeps a mob persistent, such as an Enderman's carried block.
+    fn has_custom_persistence_state(&self) -> bool {
+        false
     }
 
     fn requires_custom_persistence(&self) -> EntityBaseFuture<'_, bool> {

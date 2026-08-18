@@ -60,6 +60,48 @@ fn is_projectile_damage(dt: DamageType) -> bool {
     names.contains(&dt.message_id)
 }
 
+fn decode_carried_block_state(compound: &NbtCompound) -> Option<BlockStateId> {
+    let name = compound.get_string("Name")?;
+    let block = Block::from_name(name)?;
+
+    let properties = compound
+        .get_compound("Properties")
+        .map_or_else(Vec::new, |properties| {
+            properties
+                .child_tags
+                .iter()
+                .filter_map(|(key, value)| {
+                    let value = match value {
+                        pumpkin_nbt::tag::NbtTag::String(value) => value.to_string(),
+                        _ => return None,
+                    };
+                    let key = key.to_string();
+                    let valid = block.states.iter().any(|state| {
+                        block.properties(state.id).is_some_and(|state_properties| {
+                            state_properties
+                                .to_props()
+                                .iter()
+                                .any(|(known_key, known_value)| {
+                                    *known_key == key && *known_value == value
+                                })
+                        })
+                    });
+                    valid.then_some((key, value))
+                })
+                .collect()
+        });
+
+    if properties.is_empty() {
+        return Some(block.default_state.id);
+    }
+
+    let properties = properties
+        .iter()
+        .map(|(key, value)| (key.as_str(), value.as_str()))
+        .collect::<Vec<_>>();
+    Some(block.from_properties(&properties).to_state_id(block))
+}
+
 pub struct EndermanEntity {
     pub mob_entity: MobEntity,
     carried_block: AtomicCell<Option<BlockStateId>>,
@@ -441,7 +483,22 @@ impl NBTStorage for EndermanEntity {
         Box::pin(async {
             self.mob_entity.living_entity.write_nbt(nbt).await;
             if let Some(block_state) = self.carried_block.load() {
-                nbt.put_int("carriedBlockState", block_state.as_u16() as i32);
+                let block = Block::from_state_id(block_state);
+                let mut block_state_compound = NbtCompound::new();
+                block_state_compound.put_string("Name", format!("minecraft:{}", block.name));
+
+                if let Some(properties) = block.properties(block_state) {
+                    let props = properties.to_props();
+                    if !props.is_empty() {
+                        let mut properties_compound = NbtCompound::new();
+                        for (key, value) in props {
+                            properties_compound.put_string(key, value.to_string());
+                        }
+                        block_state_compound.put_compound("Properties", properties_compound);
+                    }
+                }
+
+                nbt.put_compound("carriedBlockState", block_state_compound);
             }
         })
     }
@@ -449,9 +506,11 @@ impl NBTStorage for EndermanEntity {
     fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            if let Some(block_state) = nbt.get_int("carriedBlockState") {
-                self.set_carried_block(BlockStateId::new(block_state as u16));
-            }
+            let carried_block = nbt
+                .get_compound("carriedBlockState")
+                .and_then(decode_carried_block_state)
+                .filter(|block_state| !BlockState::from_id(*block_state).is_air());
+            self.set_carried_block(carried_block);
         })
     }
 }
@@ -459,6 +518,10 @@ impl NBTStorage for EndermanEntity {
 impl Mob for EndermanEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    fn has_custom_persistence_state(&self) -> bool {
+        self.get_carried_block().is_some()
     }
 
     fn set_mob_target(&self, target: Option<Arc<dyn EntityBase>>) -> GoalFuture<'_, ()> {
@@ -574,5 +637,64 @@ impl Mob for EndermanEntity {
                 self.teleport_randomly();
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pumpkin_nbt::tag::NbtTag;
+
+    fn block_state_nbt(name: &str, properties: &[(&str, &str)]) -> NbtCompound {
+        let mut state = NbtCompound::new();
+        state.put_string("Name", name.to_string());
+        if !properties.is_empty() {
+            let mut property_compound = NbtCompound::new();
+            for (key, value) in properties {
+                property_compound.put_string(key, (*value).to_string());
+            }
+            state.put_compound("Properties", property_compound);
+        }
+        state
+    }
+
+    #[test]
+    fn decodes_a_vanilla_property_state() {
+        let block = Block::from_name("minecraft:oak_stairs").unwrap();
+        let expected = block.states.first().unwrap();
+        let properties = block.properties(expected.id).unwrap().to_props();
+        let state = block_state_nbt("minecraft:oak_stairs", &properties);
+
+        assert_eq!(decode_carried_block_state(&state), Some(expected.id));
+    }
+
+    #[test]
+    fn defaults_invalid_property_values() {
+        let state = block_state_nbt("minecraft:oak_log", &[("axis", "invalid")]);
+
+        assert_eq!(
+            decode_carried_block_state(&state),
+            Some(Block::OAK_LOG.default_state.id)
+        );
+    }
+
+    #[test]
+    fn defaults_unknown_and_non_string_properties() {
+        let unknown = block_state_nbt("minecraft:oak_log", &[("unknown", "value")]);
+        assert_eq!(
+            decode_carried_block_state(&unknown),
+            Some(Block::OAK_LOG.default_state.id)
+        );
+
+        let mut non_string = NbtCompound::new();
+        non_string.put_string("Name", "minecraft:oak_log".to_string());
+        let mut properties = NbtCompound::new();
+        properties.child_tags.insert("axis".into(), NbtTag::Int(1));
+        non_string.put_compound("Properties", properties);
+
+        assert_eq!(
+            decode_carried_block_state(&non_string),
+            Some(Block::OAK_LOG.default_state.id)
+        );
     }
 }
