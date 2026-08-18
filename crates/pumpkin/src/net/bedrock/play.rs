@@ -896,12 +896,22 @@ impl BedrockClient {
                         if let Some(target) = world.get_entity_by_id(target_runtime_id) {
                             let held = player.inventory.held_item();
                             let mut stack = held.lock().await;
-                            if !target.interact(player, &mut stack).await {
+                            if !target
+                                .interact_with_hand(player, &mut stack, Hand::Right, None)
+                                .await
+                            {
                                 let server = world.server.upgrade().expect("Server is gone");
-                                server
+                                let extra_stack = server
                                     .item_registry
                                     .use_on_entity(&mut stack, player, target)
                                     .await;
+                                drop(stack);
+                                if let Some(extra_stack) = extra_stack {
+                                    player
+                                        .inventory
+                                        .offer_or_drop_stack(extra_stack, player.as_ref())
+                                        .await;
+                                }
                             }
                         }
                     }

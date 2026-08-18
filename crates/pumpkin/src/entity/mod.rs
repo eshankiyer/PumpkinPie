@@ -58,6 +58,7 @@ use pumpkin_protocol::{
         RawMetadataValue,
     },
 };
+use pumpkin_util::Hand;
 use pumpkin_util::math::vector3::Axis;
 use pumpkin_util::math::{
     boundingbox::{BoundingBox, EntityDimensions},
@@ -410,6 +411,18 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         _item_stack: &'a mut ItemStack,
     ) -> EntityBaseFuture<'a, bool> {
         Box::pin(async { false })
+    }
+
+    /// Called when a player right-clicks this entity with a specific interaction hand.
+    /// The default preserves the legacy item-only interaction hook.
+    fn interact_with_hand<'a>(
+        &'a self,
+        player: &'a Arc<Player>,
+        item_stack: &'a mut ItemStack,
+        _hand: Hand,
+        _location: Option<Vector3<f64>>,
+    ) -> EntityBaseFuture<'a, bool> {
+        self.interact(player, item_stack)
     }
 
     fn set_on_fire_for(&self, seconds: f32) {
@@ -849,6 +862,33 @@ impl RemovalReason {
     }
 }
 
+/// An in-flight bucket capture. Dropping an uncommitted claim releases the reservation, so task
+/// cancellation cannot leave a living entity permanently unbucketable.
+#[must_use]
+pub struct BucketCaptureClaim<'a> {
+    entity: &'a Entity,
+    committed: bool,
+}
+
+impl BucketCaptureClaim<'_> {
+    pub fn commit(&mut self) {
+        self.entity
+            .removal_reason
+            .store(Some(RemovalReason::Discarded));
+        self.committed = true;
+    }
+}
+
+impl Drop for BucketCaptureClaim<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            self.entity
+                .bucket_capture_claimed
+                .store(false, Ordering::Release);
+        }
+    }
+}
+
 // IMPORTANT: have that 1 and not 0 because fetch_add returns previous value and 0 would be invalid
 static CURRENT_ID: AtomicI32 = AtomicI32::new(1);
 
@@ -937,6 +977,8 @@ pub struct Entity {
     /// True if the entity was in powder snow during the previous tick.
     pub was_in_powder_snow: AtomicBool,
     pub removal_reason: AtomicCell<Option<RemovalReason>>,
+    /// Serializes asynchronous bucket captures until the winning interaction commits removal.
+    bucket_capture_claimed: AtomicBool,
     // The passengers that entity has
     pub passengers: Mutex<Vec<Arc<dyn EntityBase>>>,
     /// The vehicle that entity is in
@@ -1210,6 +1252,7 @@ impl Entity {
             is_in_powder_snow: AtomicBool::new(false),
             was_in_powder_snow: AtomicBool::new(false),
             removal_reason: AtomicCell::new(None),
+            bucket_capture_claimed: AtomicBool::new(false),
             passengers: Mutex::new(Vec::new()),
             vehicle: Mutex::new(None),
             leashed_to: Mutex::new(None),
@@ -3472,6 +3515,21 @@ impl Entity {
         !self.is_removed()
     }
 
+    /// Reserves this live entity for a bucket capture without removing it yet.
+    pub fn try_claim_bucket_capture(&self) -> Option<BucketCaptureClaim<'_>> {
+        if !self.is_alive() {
+            return None;
+        }
+
+        self.bucket_capture_claimed
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+            .then_some(BucketCaptureClaim {
+                entity: self,
+                committed: false,
+            })
+    }
+
     pub const LEASH_SNAP_DISTANCE: f64 = 12.0;
     pub const LEASH_ELASTIC_DISTANCE: f64 = 6.0;
 
@@ -3504,10 +3562,10 @@ impl Entity {
         );
     }
 
-    pub async fn unleash(&self) {
+    pub async fn unleash(&self) -> bool {
         let old_holder = self.leashed_to.lock().await.take();
         if old_holder.is_none() {
-            return;
+            return false;
         }
         self.leash_persistence_required.store(false, Relaxed);
 
@@ -3529,6 +3587,7 @@ impl Entity {
             &je_packet,
             &be_packet,
         );
+        true
     }
 
     pub async fn tick_leash(&self) -> Option<(Vector3<f64>, f64)> {

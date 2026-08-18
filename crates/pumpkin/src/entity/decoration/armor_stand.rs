@@ -8,6 +8,7 @@ use crossbeam::atomic::AtomicCell;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{
+    attributes::Attributes,
     damage::DamageType,
     data_component_impl::{EquipmentSlot, EquipmentType},
     entity::EntityStatus,
@@ -16,7 +17,10 @@ use pumpkin_data::{
     sound::{Sound, SoundCategory},
 };
 use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
-use pumpkin_util::math::{euler_angle::EulerAngle, vector3::Vector3};
+use pumpkin_util::{
+    Hand,
+    math::{euler_angle::EulerAngle, vector3::Vector3},
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct PackedRotation {
@@ -177,6 +181,91 @@ impl ArmorStandEntity {
         self.disabled_slots.store(new_val, Ordering::Relaxed);
     }
 
+    fn is_slot_locked(&self, slot: &EquipmentSlot, offset: i32) -> bool {
+        let disabled_slots = self.disabled_slots.load(Ordering::Relaxed);
+        let slot_bit = 1 << slot.get_offset_entity_slot_id(offset);
+        (disabled_slots & slot_bit) != 0
+    }
+
+    fn equipment_slot_for_item(&self, item_stack: &ItemStack) -> &'static EquipmentSlot {
+        item_stack
+            .get_data_component::<pumpkin_data::data_component_impl::EquippableImpl>()
+            .map_or(&EquipmentSlot::MAIN_HAND, |equippable| {
+                if self.can_use_slot(equippable.slot) {
+                    equippable.slot
+                } else {
+                    &EquipmentSlot::MAIN_HAND
+                }
+            })
+    }
+
+    async fn has_item_in_slot(&self, slot: &EquipmentSlot) -> bool {
+        let item = self.living_entity.entity_equipment.lock().await.get(slot);
+        !item.lock().await.is_empty()
+    }
+
+    async fn clicked_slot(&self, location: Option<Vector3<f64>>) -> EquipmentSlot {
+        let Some(location) = location else {
+            return EquipmentSlot::MAIN_HAND;
+        };
+        let small = self.is_small();
+        let scale = self.living_entity.get_attribute_value(&Attributes::SCALE);
+        let click_y = armor_stand_click_y(location.y, scale, small);
+
+        if click_y >= 0.1
+            && click_y < 0.1 + if small { 0.8 } else { 0.45 }
+            && self.has_item_in_slot(&EquipmentSlot::FEET).await
+        {
+            EquipmentSlot::FEET
+        } else if click_y >= 0.9 + if small { 0.3 } else { 0.0 }
+            && click_y < 0.9 + if small { 1.0 } else { 0.7 }
+            && self.has_item_in_slot(&EquipmentSlot::CHEST).await
+        {
+            EquipmentSlot::CHEST
+        } else if click_y >= 0.4
+            && click_y < 0.4 + if small { 1.0 } else { 0.8 }
+            && self.has_item_in_slot(&EquipmentSlot::LEGS).await
+        {
+            EquipmentSlot::LEGS
+        } else if click_y >= 1.6 && self.has_item_in_slot(&EquipmentSlot::HEAD).await {
+            EquipmentSlot::HEAD
+        } else if !self.has_item_in_slot(&EquipmentSlot::MAIN_HAND).await
+            && self.has_item_in_slot(&EquipmentSlot::OFF_HAND).await
+        {
+            EquipmentSlot::OFF_HAND
+        } else {
+            EquipmentSlot::MAIN_HAND
+        }
+    }
+
+    async fn swap_item(
+        &self,
+        player: &crate::entity::player::Player,
+        slot: &EquipmentSlot,
+        item_stack: &mut ItemStack,
+    ) -> bool {
+        let mut equipment = self.living_entity.entity_equipment.lock().await;
+        let equipped = equipment.get(slot).lock().await.clone();
+        if (!equipped.is_empty() && self.is_slot_locked(slot, 8))
+            || (equipped.is_empty() && self.is_slot_locked(slot, 16))
+        {
+            return false;
+        }
+
+        let Some((new_equipped, new_hand)) =
+            armor_stand_swap(player.is_creative(), item_stack, &equipped)
+        else {
+            return false;
+        };
+        equipment.put(slot, new_equipped.clone()).await;
+        drop(equipment);
+
+        *item_stack = new_hand;
+        self.living_entity
+            .send_equipment_changes(&[(slot.clone(), new_equipped)]);
+        true
+    }
+
     pub fn is_invisible(&self) -> bool {
         self.get_entity().invisible.load(Ordering::Relaxed)
     }
@@ -332,6 +421,40 @@ impl EntityBase for ArmorStandEntity {
         Some(&self.living_entity)
     }
 
+    fn interact_with_hand<'a>(
+        &'a self,
+        player: &'a std::sync::Arc<crate::entity::player::Player>,
+        item_stack: &'a mut ItemStack,
+        _hand: Hand,
+        location: Option<Vector3<f64>>,
+    ) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async move {
+            if self.is_marker() || item_stack.item.id == Item::NAME_TAG.id {
+                return false;
+            }
+            if player.gamemode.load() == pumpkin_util::GameMode::Spectator {
+                return true;
+            }
+
+            let item_slot = self.equipment_slot_for_item(item_stack);
+            if item_stack.is_empty() {
+                let clicked_slot = self.clicked_slot(location).await;
+                let target_slot = if self.is_slot_disabled(&clicked_slot) {
+                    item_slot
+                } else {
+                    &clicked_slot
+                };
+                return self.has_item_in_slot(target_slot).await
+                    && self.swap_item(player, target_slot, item_stack).await;
+            }
+
+            if self.is_slot_disabled(item_slot) {
+                return false;
+            }
+            self.swap_item(player, item_slot, item_stack).await
+        })
+    }
+
     fn is_pickable(&self) -> bool {
         self.get_entity().is_alive() && !self.is_marker()
     }
@@ -478,6 +601,83 @@ impl EntityBase for ArmorStandEntity {
 
     fn cast_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+/// `ArmorStand.swapItem`: returns the stack to store in the stand and the stack
+/// that remains in the player's interacting hand.
+fn armor_stand_swap(
+    player_is_creative: bool,
+    held: &ItemStack,
+    equipped: &ItemStack,
+) -> Option<(ItemStack, ItemStack)> {
+    if player_is_creative && equipped.is_empty() && !held.is_empty() {
+        return Some((held.copy_with_count(1), held.clone()));
+    }
+    if held.is_empty() || held.item_count <= 1 {
+        return Some((held.clone(), equipped.clone()));
+    }
+    if !equipped.is_empty() {
+        return None;
+    }
+
+    let mut remaining = held.clone();
+    let inserted = remaining.split(1);
+    Some((inserted, remaining))
+}
+
+const fn armor_stand_click_y(location_y: f64, scale: f64, small: bool) -> f64 {
+    location_y / (scale * if small { 0.5 } else { 1.0 })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{armor_stand_click_y, armor_stand_swap};
+    use pumpkin_data::{item::Item, item_stack::ItemStack};
+
+    #[test]
+    fn survival_inserts_one_item_from_a_larger_stack() {
+        let held = ItemStack::new(3, &Item::IRON_HELMET);
+        let (equipped, remaining) = armor_stand_swap(false, &held, ItemStack::EMPTY).unwrap();
+
+        assert_eq!(equipped.item.id, Item::IRON_HELMET.id);
+        assert_eq!(equipped.item_count, 1);
+        assert_eq!(remaining.item.id, Item::IRON_HELMET.id);
+        assert_eq!(remaining.item_count, 2);
+    }
+
+    #[test]
+    fn single_item_swaps_with_the_existing_equipment() {
+        let held = ItemStack::new(1, &Item::IRON_HELMET);
+        let equipped = ItemStack::new(1, &Item::CARVED_PUMPKIN);
+        let (new_equipped, new_hand) = armor_stand_swap(false, &held, &equipped).unwrap();
+
+        assert_eq!(new_equipped.item.id, Item::IRON_HELMET.id);
+        assert_eq!(new_hand.item.id, Item::CARVED_PUMPKIN.id);
+    }
+
+    #[test]
+    fn creative_copies_one_item_into_an_empty_slot() {
+        let held = ItemStack::new(3, &Item::IRON_HELMET);
+        let (equipped, remaining) = armor_stand_swap(true, &held, ItemStack::EMPTY).unwrap();
+
+        assert_eq!(equipped.item_count, 1);
+        assert_eq!(remaining.item_count, 3);
+    }
+
+    #[test]
+    fn larger_stack_cannot_replace_existing_equipment() {
+        let held = ItemStack::new(2, &Item::IRON_HELMET);
+        let equipped = ItemStack::new(1, &Item::CARVED_PUMPKIN);
+
+        assert!(armor_stand_swap(false, &held, &equipped).is_none());
+    }
+
+    #[test]
+    fn click_height_uses_entity_and_baby_scale() {
+        assert_eq!(armor_stand_click_y(0.4, 1.0, false), 0.4);
+        assert_eq!(armor_stand_click_y(0.4, 1.0, true), 0.8);
+        assert_eq!(armor_stand_click_y(0.8, 2.0, false), 0.4);
     }
 }
 

@@ -2095,20 +2095,53 @@ impl JavaClient {
                             player.attack(event.target).await;
                         }
                         ActionType::Interact | ActionType::InteractAt => {
-                            let held = player.inventory.held_item();
-                            let mut stack = held.lock().await.clone();
+                            let Some(hand_id) = interact.hand else {
+                                self.kick(TextComponent::text("InvalidHand")).await;
+                                return;
+                            };
+                            let Ok(hand) = Hand::from_interaction_id(hand_id.0) else {
+                                self.kick(TextComponent::text("InvalidHand")).await;
+                                return;
+                            };
+                            let (slot_index, held) = if uses_main_hand(hand) {
+                                (
+                                    player.inventory.get_selected_slot() as usize,
+                                    player.inventory.held_item(),
+                                )
+                            } else {
+                                (
+                                    PlayerInventory::OFF_HAND_SLOT,
+                                    player.inventory.off_hand_item().await,
+                                )
+                            };
+                            let mut stack = held.lock().await;
+                            let before = stack.clone();
                             // CuredZombieVillager fires when conversion actually completes
                             // (ZombieVillagerEntity::finish_conversion), gated on the zombie
                             // villager having Weakness -- not immediately on this click,
                             // regardless of whether curing even started.
-                            let interacted = event.target.interact(player, &mut stack).await;
-                            if !interacted {
+                            let interacted = event
+                                .target
+                                .interact_with_hand(player, &mut stack, hand, interact.target_position)
+                                .await;
+                            let extra_stack = if !interacted {
                                 server
                                     .item_registry
                                     .use_on_entity(&mut stack, player, event.target)
+                                    .await
+                            } else {
+                                None
+                            };
+                            if !stack.are_equal(&before) {
+                                player.sync_hand_slot(slot_index, stack.clone()).await;
+                            }
+                            drop(stack);
+                            if let Some(extra_stack) = extra_stack {
+                                player
+                                    .inventory
+                                    .offer_or_drop_stack(extra_stack, player.as_ref())
                                     .await;
                             }
-                            *held.lock().await = stack;
                         }
                     }
                 }

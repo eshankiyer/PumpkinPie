@@ -38,20 +38,20 @@ impl ItemBehaviour for DyeItem {
         item: &'a mut ItemStack,
         player: &'a Player,
         entity: Arc<dyn EntityBase>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Option<ItemStack>> + Send + 'a>> {
         Box::pin(async move {
             let Some(sheep) = entity.cast_any().downcast_ref::<SheepEntity>() else {
-                return;
+                return None;
             };
             if sheep.is_sheared() {
-                return;
+                return None;
             }
             let Some(color_name) = item.item.registry_key.strip_suffix("_dye") else {
-                return;
+                return None;
             };
             let new_color = DyeColor::from(color_name) as u8;
             if new_color == sheep.get_color() {
-                return;
+                return None;
             }
 
             let world = entity.get_entity().world.load();
@@ -62,6 +62,7 @@ impl ItemBehaviour for DyeItem {
             );
             sheep.set_color(new_color);
             item.decrement_unless_creative(player.gamemode.load(), 1);
+            None
         })
     }
 

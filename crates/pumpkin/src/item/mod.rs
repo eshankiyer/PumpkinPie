@@ -48,8 +48,8 @@ pub trait ItemBehaviour: Send + Sync {
         _item: &'a mut ItemStack,
         _player: &'a Player,
         _entity: Arc<dyn EntityBase>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {})
+    ) -> Pin<Box<dyn Future<Output = Option<ItemStack>> + Send + 'a>> {
+        Box::pin(async { None })
     }
 
     fn on_stopped_using<'a>(

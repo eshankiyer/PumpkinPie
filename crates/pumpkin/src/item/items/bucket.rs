@@ -160,6 +160,29 @@ async fn give_player_bucket_item(
     }
 }
 
+/// Updates the already-locked interacting hand. A creative or artificially stacked water bucket
+/// returns the extra mob bucket for the caller to offer only after releasing that hand lock.
+fn give_player_bucket_item_in_hand(
+    player: &Player,
+    held_stack: &mut ItemStack,
+    item_stack: ItemStack,
+) -> Option<ItemStack> {
+    let is_creative = player.gamemode.load() == GameMode::Creative;
+    if is_creative {
+        Some(item_stack)
+    } else if held_stack.item_count == 1 {
+        *held_stack = item_stack;
+        None
+    } else {
+        held_stack.decrement(1);
+        Some(item_stack)
+    }
+}
+
+const fn can_capture_aquatic_entity(item: &Item) -> bool {
+    item.id == Item::WATER_BUCKET.id
+}
+
 /// Returns the bucket item obtained and the position of the block actually acted on
 /// (needed for `GameEvent::FluidPickup`, which vanilla emits at that exact position --
 /// `BucketItem.java:77` -- not always `block_pos` itself, since the waterlogged-neighbor
@@ -593,76 +616,6 @@ impl ItemBehaviour for EmptyBucketItem {
         })
     }
 
-    fn use_on_entity<'a>(
-        &'a self,
-        _item: &'a mut ItemStack,
-        player: &'a Player,
-        entity: Arc<dyn EntityBase>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let entity_type = entity.get_entity().entity_type;
-            let Some(bucket_item) = bucket_item_for_entity_type(entity_type) else {
-                return;
-            };
-            let is_alive = entity
-                .get_living_entity()
-                .is_some_and(|living| living.health.load() > 0.0);
-            if !is_alive {
-                return;
-            }
-
-            if let Some(sound) = pickup_sound_for_entity_type(entity_type) {
-                player.world().play_sound(
-                    sound,
-                    SoundCategory::Neutral,
-                    &entity.get_entity().pos.load(),
-                );
-            }
-
-            // `TropicalFish.saveToBucketTag` (TropicalFish.java:200-206): copies the pattern
-            // and both colors onto the bucket item as data components so re-emptying it
-            // restores the exact same variant instead of a fresh random roll.
-            let components = entity
-                .cast_any()
-                .downcast_ref::<TropicalFishEntity>()
-                .map_or_else(Vec::new, |fish| {
-                    vec![
-                        (
-                            DataComponent::TropicalFishPattern,
-                            Some(
-                                TropicalFishPatternImpl {
-                                    value: fish.pattern().name().into(),
-                                }
-                                .to_dyn(),
-                            ),
-                        ),
-                        (
-                            DataComponent::TropicalFishBaseColor,
-                            Some(
-                                TropicalFishBaseColorImpl {
-                                    value: String::from(fish.base_color()).into(),
-                                }
-                                .to_dyn(),
-                            ),
-                        ),
-                        (
-                            DataComponent::TropicalFishPatternColor,
-                            Some(
-                                TropicalFishPatternColorImpl {
-                                    value: String::from(fish.pattern_color()).into(),
-                                }
-                                .to_dyn(),
-                            ),
-                        ),
-                    ]
-                });
-            let bucket_stack = ItemStack::new_with_component(1, bucket_item, components);
-
-            give_player_bucket_item(player, bucket_stack, false).await;
-            player.world().remove_entity(entity.as_ref()).await;
-        })
-    }
-
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -785,6 +738,98 @@ impl ItemBehaviour for FilledBucketItem {
         })
     }
 
+    fn use_on_entity<'a>(
+        &'a self,
+        item: &'a mut ItemStack,
+        player: &'a Player,
+        entity: Arc<dyn EntityBase>,
+    ) -> Pin<Box<dyn Future<Output = Option<ItemStack>> + Send + 'a>> {
+        Box::pin(async move {
+            // `Bucketable.canBePickedUpWithBucket` accepts only a water bucket by default.
+            if !can_capture_aquatic_entity(item.item) {
+                return None;
+            }
+
+            let entity_type = entity.get_entity().entity_type;
+            let Some(bucket_item) = bucket_item_for_entity_type(entity_type) else {
+                return None;
+            };
+
+            let Some(living) = entity.get_living_entity() else {
+                return None;
+            };
+            if living.health.load() <= 0.0 {
+                return None;
+            }
+            let base_entity = entity.get_entity();
+            let Some(mut capture_claim) = base_entity.try_claim_bucket_capture() else {
+                return None;
+            };
+            if living.health.load() <= 0.0 || !base_entity.is_alive() {
+                return None;
+            }
+
+            // `TropicalFish.saveToBucketTag` (TropicalFish.java:200-206): copies the pattern
+            // and both colors onto the bucket item as data components so re-emptying it
+            // restores the exact same variant instead of a fresh random roll.
+            let components = entity
+                .cast_any()
+                .downcast_ref::<TropicalFishEntity>()
+                .map_or_else(Vec::new, |fish| {
+                    vec![
+                        (
+                            DataComponent::TropicalFishPattern,
+                            Some(
+                                TropicalFishPatternImpl {
+                                    value: fish.pattern().name().into(),
+                                }
+                                .to_dyn(),
+                            ),
+                        ),
+                        (
+                            DataComponent::TropicalFishBaseColor,
+                            Some(
+                                TropicalFishBaseColorImpl {
+                                    value: String::from(fish.base_color()).into(),
+                                }
+                                .to_dyn(),
+                            ),
+                        ),
+                        (
+                            DataComponent::TropicalFishPatternColor,
+                            Some(
+                                TropicalFishPatternColorImpl {
+                                    value: String::from(fish.pattern_color()).into(),
+                                }
+                                .to_dyn(),
+                            ),
+                        ),
+                    ]
+                });
+            let bucket_stack = ItemStack::new_with_component(1, bucket_item, components);
+
+            let extra_stack = give_player_bucket_item_in_hand(player, item, bucket_stack);
+            capture_claim.commit();
+
+            if let Some(sound) = pickup_sound_for_entity_type(entity_type) {
+                player
+                    .world()
+                    .play_sound(sound, SoundCategory::Neutral, &base_entity.pos.load());
+            }
+            if base_entity.unleash().await {
+                player
+                    .world()
+                    .drop_stack(
+                        &base_entity.block_pos.load(),
+                        ItemStack::new(1, &Item::LEAD),
+                    )
+                    .await;
+            }
+            player.world().remove_entity(entity.as_ref()).await;
+            extra_stack
+        })
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -833,5 +878,12 @@ mod tests {
             Some(Sound::ItemBucketEmptyFish)
         );
         assert_eq!(mob_bucket_empty_sound(&Item::WATER_BUCKET), None);
+    }
+
+    #[test]
+    fn aquatic_entities_require_a_water_bucket() {
+        assert!(can_capture_aquatic_entity(&Item::WATER_BUCKET));
+        assert!(!can_capture_aquatic_entity(&Item::BUCKET));
+        assert!(!can_capture_aquatic_entity(&Item::LAVA_BUCKET));
     }
 }

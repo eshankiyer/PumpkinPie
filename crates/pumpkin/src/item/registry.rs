@@ -112,7 +112,7 @@ impl ItemRegistry {
         stack: &mut ItemStack,
         player: &Player,
         entity: Arc<dyn EntityBase>,
-    ) {
+    ) -> Option<ItemStack> {
         let cooldown = stack.get_use_cooldown().cloned();
         let cooldown_group = cooldown
             .as_ref()
@@ -120,12 +120,13 @@ impl ItemRegistry {
             .unwrap_or_else(|| stack.item.registry_key.to_string());
 
         if player.is_on_cooldown(&cooldown_group).await {
-            return;
+            return None;
         }
 
+        let mut extra_stack = None;
         let pumpkin_item = self.get_pumpkin_item(stack.item.id);
         if let Some(pumpkin_item) = pumpkin_item {
-            pumpkin_item.use_on_entity(stack, player, entity).await;
+            extra_stack = pumpkin_item.use_on_entity(stack, player, entity).await;
         }
 
         if let Some(cooldown) = cooldown {
@@ -133,6 +134,8 @@ impl ItemRegistry {
                 .start_cooldown(cooldown_group, (cooldown.seconds * 20.0) as i32)
                 .await;
         }
+
+        extra_stack
     }
 
     pub fn can_mine(&self, item: &Item, player: &Player) -> bool {

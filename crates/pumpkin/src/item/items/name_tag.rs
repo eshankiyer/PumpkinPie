@@ -22,7 +22,7 @@ impl ItemBehaviour for NameTagItem {
         item: &'a mut ItemStack,
         player: &'a Player,
         entity: Arc<dyn EntityBase>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Option<ItemStack>> + Send + 'a>> {
         Box::pin(async move {
             let entity = entity.get_entity();
             if entity.entity_type.saveable
@@ -36,6 +36,7 @@ impl ItemBehaviour for NameTagItem {
                 }
                 item.decrement_unless_creative(player.gamemode.load(), 1);
             }
+            None
         })
     }
     fn as_any(&self) -> &dyn std::any::Any {
