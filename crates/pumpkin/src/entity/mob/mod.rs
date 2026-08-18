@@ -102,9 +102,14 @@ pub struct MobEntity {
     pub position_target_range: AtomicI32,
     pub love_ticks: AtomicI32,
     pub breeding_cooldown: AtomicI32,
-    /// Vanilla `AbstractSchoolingFish.leader != null && leader.isAlive()` state.
-    /// Only schooling-fish goals mutate this flag; other mobs leave it false.
-    pub schooling_follower: AtomicBool,
+    /// Vanilla `AbstractSchoolingFish.leader` reference.
+    ///
+    /// The reference is kept on the mob rather than on the follow goal so that the
+    /// follower state is shared by `FollowFlockLeaderGoal`, random swimming, and
+    /// future spawn/lifecycle hooks.
+    schooling_leader: tokio::sync::Mutex<Option<Arc<dyn EntityBase>>>,
+    /// Vanilla `AbstractSchoolingFish.schoolSize`, including the leader itself.
+    schooling_size: AtomicI32,
     /// Vanilla `Mob.noActionTime`, used by the random despawn check.
     pub no_action_time: AtomicI32,
     /// Vanilla `Entity.tickCount`, used by species-specific despawn rules.
@@ -197,7 +202,8 @@ impl MobEntity {
             position_target_range: AtomicI32::new(-1),
             love_ticks: AtomicI32::new(0),
             breeding_cooldown: AtomicI32::new(0),
-            schooling_follower: AtomicBool::new(false),
+            schooling_leader: tokio::sync::Mutex::new(None),
+            schooling_size: AtomicI32::new(1),
             no_action_time: AtomicI32::new(0),
             tick_count: AtomicI32::new(0),
             breeder: AtomicCell::new(None),
@@ -430,12 +436,152 @@ impl MobEntity {
         self.love_ticks.load(Relaxed) > 0
     }
 
-    pub fn is_schooling_follower(&self) -> bool {
-        self.schooling_follower.load(Relaxed)
+    pub async fn is_schooling_follower(&self) -> bool {
+        self.schooling_leader
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|leader| leader.get_entity().is_alive())
     }
 
-    pub fn set_schooling_follower(&self, value: bool) {
-        self.schooling_follower.store(value, Relaxed);
+    pub async fn schooling_leader(&self) -> Option<Arc<dyn EntityBase>> {
+        self.schooling_leader.lock().await.clone()
+    }
+
+    #[must_use]
+    pub fn has_schooling_followers(&self) -> bool {
+        self.schooling_size.load(Relaxed) > 1
+    }
+
+    #[must_use]
+    pub fn max_school_size(&self) -> i32 {
+        let entity_type = self.living_entity.entity.entity_type;
+        if entity_type.id == EntityType::SALMON.id {
+            5
+        } else if entity_type.id == EntityType::COD.id
+            || entity_type.id == EntityType::TROPICAL_FISH.id
+        {
+            8
+        } else {
+            0
+        }
+    }
+
+    #[must_use]
+    pub fn can_be_followed_by_schooling_fish(&self) -> bool {
+        self.has_schooling_followers() && self.schooling_size.load(Relaxed) < self.max_school_size()
+    }
+
+    #[must_use]
+    pub fn schooling_followers_remaining(&self) -> usize {
+        self.max_school_size()
+            .saturating_sub(self.schooling_size.load(Relaxed)) as usize
+    }
+
+    /// Vanilla `AbstractSchoolingFish.tick`: occasionally release a stale leader cap after the
+    /// school has become isolated. The world query includes this fish, so one nearby fish means
+    /// there are no remaining school members to account for.
+    fn reset_schooling_if_isolated(&self, isolation_roll: u32) {
+        if !self.has_schooling_followers() || isolation_roll != 1 {
+            return;
+        }
+
+        let entity = &self.living_entity.entity;
+        let world = entity.world.load();
+        let search_box = entity.bounding_box.load().expand(8.0, 8.0, 8.0);
+        let entity_type = entity.entity_type;
+        let nearby = world
+            .get_entities_at_box(&search_box)
+            .into_iter()
+            .filter(|candidate| {
+                candidate.get_entity().entity_type == entity_type
+                    && candidate.get_entity().is_alive()
+            })
+            .count();
+        if nearby <= 1 {
+            self.schooling_size.store(1, Relaxed);
+        }
+    }
+
+    /// Vanilla `AbstractSchoolingFish.startFollowing` plus the leader's follower count update.
+    /// Callers must only pass a different, currently non-following fish.
+    pub async fn start_schooling_following(&self, leader: Arc<dyn EntityBase>) -> bool {
+        if leader.get_entity().entity_id == self.living_entity.entity.entity_id {
+            return false;
+        }
+
+        let Some(leader_mob) = leader.get_mob() else {
+            return false;
+        };
+
+        let previous_leader = {
+            let mut current = self.schooling_leader.lock().await;
+            if current.as_ref().is_some_and(|current| {
+                current.get_entity().entity_id == leader.get_entity().entity_id
+            }) {
+                return false;
+            }
+            if !leader_mob.get_mob_entity().try_add_schooling_follower() {
+                return false;
+            }
+            current.replace(leader.clone())
+        };
+
+        if let Some(previous_leader) = previous_leader
+            && let Some(previous_mob) = previous_leader.get_mob()
+        {
+            previous_mob
+                .get_mob_entity()
+                .schooling_size
+                .fetch_update(Relaxed, Relaxed, |size| Some(size.saturating_sub(1)))
+                .ok();
+        }
+
+        true
+    }
+
+    /// Vanilla `AbstractSchoolingFish.stopFollowing`.
+    pub async fn stop_schooling_following(&self) {
+        let mut current = self.schooling_leader.lock().await;
+        if let Some(leader) = current.take()
+            && let Some(leader_mob) = leader.get_mob()
+        {
+            leader_mob
+                .get_mob_entity()
+                .schooling_size
+                .fetch_update(Relaxed, Relaxed, |size| Some(size.saturating_sub(1)))
+                .ok();
+        }
+    }
+
+    /// Stop only if the leader is still the one observed by the goal being stopped.
+    /// Entity goals stop asynchronously, so an unconditional clear could erase a newer
+    /// assignment made by another fish between the goal stop and this lock acquisition.
+    pub async fn stop_schooling_following_if(&self, expected: &Arc<dyn EntityBase>) {
+        let mut current = self.schooling_leader.lock().await;
+        if current
+            .as_ref()
+            .is_none_or(|leader| leader.get_entity().entity_id != expected.get_entity().entity_id)
+        {
+            return;
+        }
+        if let Some(leader) = current.take()
+            && let Some(leader_mob) = leader.get_mob()
+        {
+            leader_mob
+                .get_mob_entity()
+                .schooling_size
+                .fetch_update(Relaxed, Relaxed, |size| Some(size.saturating_sub(1)))
+                .ok();
+        }
+    }
+
+    fn try_add_schooling_follower(&self) -> bool {
+        self.schooling_size
+            .fetch_update(Relaxed, Relaxed, |size| {
+                (size < self.max_school_size()).then_some(size + 1)
+            })
+            .is_ok()
     }
 
     pub fn set_love_ticks(&self, ticks: i32, breeder: Option<Uuid>) {
@@ -1723,6 +1869,7 @@ impl<T: Mob + Send + 'static> EntityBase for T {
             mob_entity.living_entity.tick(caller, server).await;
             self.tick_sun_burn().await;
             self.mob_try_pick_up_items().await;
+            mob_entity.reset_schooling_if_isolated(self.get_random().random_range(0..200));
             self.post_tick().await;
 
             if mob_entity.tick_count.load(Relaxed) % 5 == 0 {

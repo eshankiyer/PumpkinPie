@@ -215,7 +215,7 @@ impl Goal for WanderAroundGoal {
                 return false;
             }
 
-            if mob.get_mob_entity().is_schooling_follower() {
+            if mob.get_mob_entity().is_schooling_follower().await {
                 return false;
             }
 
