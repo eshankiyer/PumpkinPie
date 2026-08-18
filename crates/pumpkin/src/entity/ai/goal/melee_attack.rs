@@ -177,6 +177,11 @@ impl Goal for MeleeAttackGoal {
 
             let target = mob.get_mob_entity().target.lock().await.clone();
             if let Some(target) = target {
+                let pathless_in_attack_range = self.path.is_none()
+                    && mob
+                        .get_mob_entity()
+                        .is_in_attack_range(target.as_ref())
+                        .await;
                 let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
                 let target_pos = target.get_entity().pos.load();
                 let goal = NavigatorGoal {
@@ -192,7 +197,7 @@ impl Goal for MeleeAttackGoal {
                 if let Some(mut path) = path {
                     trim_cauldron_path(&mut path, &mob.get_entity().world.load());
                     navigator.set_path(goal, path);
-                } else {
+                } else if !pathless_in_attack_range {
                     navigator.set_progress(goal);
                 }
                 self.last_target_position = Some(target_pos);
@@ -264,7 +269,7 @@ impl Goal for MeleeAttackGoal {
                     .compute_path_with_reach(
                         &mob.get_mob_entity().living_entity,
                         current_target_pos,
-                        1,
+                        0,
                     )
                     .await;
                 let path_found = path.is_some();

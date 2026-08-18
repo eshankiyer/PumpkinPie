@@ -68,6 +68,9 @@ pub struct Navigator {
     pub is_idle: AtomicBool,
     navigation_kind: NavigationKind,
     turtle_travel: bool,
+    wall_climber: bool,
+    wall_climber_target: Option<BlockPos>,
+    wall_climber_direct: bool,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -98,6 +101,9 @@ impl Default for Navigator {
             is_idle: AtomicBool::new(true),
             navigation_kind: NavigationKind::Ground,
             turtle_travel: false,
+            wall_climber: false,
+            wall_climber_target: None,
+            wall_climber_direct: false,
         }
     }
 }
@@ -148,6 +154,10 @@ impl Navigator {
 
     pub fn set_progress(&mut self, goal: NavigatorGoal) {
         self.is_idle.store(false, Ordering::Relaxed);
+        if self.wall_climber {
+            self.wall_climber_target = Some(BlockPos(goal.destination.floor_to_i32()));
+            self.wall_climber_direct = false;
+        }
         self.current_goal = Some(goal);
         self.current_path = None;
     }
@@ -179,6 +189,10 @@ impl Navigator {
         }
         let path_start_pos = goal.current_progress;
         self.is_idle.store(false, Ordering::Relaxed);
+        if self.wall_climber {
+            self.wall_climber_target = Some(BlockPos(goal.destination.floor_to_i32()));
+            self.wall_climber_direct = false;
+        }
         self.current_goal = Some(goal);
         self.current_path = Some(path);
         self.ticks_on_current_node = 0;
@@ -205,6 +219,8 @@ impl Navigator {
         self.is_idle.store(true, Ordering::Relaxed);
         self.current_goal = None;
         self.current_path = None;
+        self.wall_climber_target = None;
+        self.wall_climber_direct = false;
         self.ticks_on_current_node = 0;
         self.total_ticks = 0;
         self.path_start_pos = None;
@@ -317,6 +333,11 @@ impl Navigator {
         self.turtle_travel = traveling;
     }
 
+    /// Selects vanilla `WallClimberNavigation` fallback behavior used by spiders.
+    pub const fn set_wall_climber(&mut self, wall_climber: bool) {
+        self.wall_climber = wall_climber;
+    }
+
     pub const fn set_mob_dimensions(&mut self, width: f32, height: f32) {
         self.mob_width = width;
         self.mob_height = height;
@@ -359,6 +380,9 @@ impl Navigator {
             is_idle: AtomicBool::new(true),
             navigation_kind: self.navigation_kind,
             turtle_travel: self.turtle_travel,
+            wall_climber: self.wall_climber,
+            wall_climber_target: None,
+            wall_climber_direct: false,
         }
     }
 
@@ -644,7 +668,28 @@ impl Navigator {
         if goal.current_progress == goal.destination {
             self.is_idle.store(true, Ordering::Relaxed);
             self.current_path = None;
+            self.wall_climber_target = None;
+            self.wall_climber_direct = false;
             entity.movement_input.store(Vector3::new(0.0, 0.0, 0.0));
+            return;
+        }
+
+        if self.wall_climber_direct {
+            if self
+                .wall_climber_target
+                .is_some_and(|target| self.wall_climber_target_reached(entity, target))
+            {
+                self.wall_climber_target = None;
+                self.wall_climber_direct = false;
+                self.is_idle.store(true, Ordering::Relaxed);
+                entity.movement_input.store(Vector3::new(0.0, 0.0, 0.0));
+                self.current_goal = None;
+                return;
+            }
+
+            self.is_idle.store(false, Ordering::Relaxed);
+            entity.movement_input.store(Vector3::new(0.0, 0.0, 0.0));
+            self.current_goal = Some(goal);
             return;
         }
 
@@ -653,7 +698,7 @@ impl Navigator {
             self.repath_cooldown -= 1;
         }
 
-        if self.needs_new_path(&goal) {
+        if !self.wall_climber_direct && self.needs_new_path(&goal) {
             self.current_path = self.compute_path(entity, goal.destination).await;
             self.ticks_on_current_node = 0;
             self.last_node_index = 0;
@@ -670,7 +715,12 @@ impl Navigator {
             // goal's `should_continue` (`!navigator.is_idle()`) never returns false, and the
             // mob is stuck retrying this tick forever instead of the goal ending and a new
             // one starting.
-            self.is_idle.store(true, Ordering::Relaxed);
+            if self.wall_climber {
+                self.wall_climber_direct = true;
+                self.is_idle.store(false, Ordering::Relaxed);
+            } else {
+                self.is_idle.store(true, Ordering::Relaxed);
+            }
             entity.movement_input.store(Vector3::new(0.0, 0.0, 0.0));
             self.current_goal = Some(goal);
             return;
@@ -682,7 +732,13 @@ impl Navigator {
                 // above (vanilla `PathNavigation.isDone()`'s `path.isDone()` half). This is
                 // the case that fires every tick after a path completes normally, so without
                 // it a mob freezes in place permanently after reaching its very first target.
-                self.is_idle.store(true, Ordering::Relaxed);
+                if self.wall_climber {
+                    self.current_path = None;
+                    self.wall_climber_direct = true;
+                    self.is_idle.store(false, Ordering::Relaxed);
+                } else {
+                    self.is_idle.store(true, Ordering::Relaxed);
+                }
                 entity.movement_input.store(Vector3::new(0.0, 0.0, 0.0));
                 self.current_goal = Some(goal);
                 return;
@@ -699,7 +755,12 @@ impl Navigator {
             if self.ticks_on_current_node > 100 {
                 self.current_path = None;
                 self.ticks_on_current_node = 0;
-                self.is_idle.store(true, Ordering::Relaxed);
+                if self.wall_climber {
+                    self.wall_climber_direct = true;
+                    self.is_idle.store(false, Ordering::Relaxed);
+                } else {
+                    self.is_idle.store(true, Ordering::Relaxed);
+                }
                 entity.movement_input.store(Vector3::new(0.0, 0.0, 0.0));
                 self.current_goal = Some(goal);
                 return;
@@ -715,7 +776,12 @@ impl Navigator {
                     if dist_sq < 2.0 * 2.0 {
                         self.current_path = None;
                         self.ticks_on_current_node = 0;
-                        self.is_idle.store(true, Ordering::Relaxed);
+                        if self.wall_climber {
+                            self.wall_climber_direct = true;
+                            self.is_idle.store(false, Ordering::Relaxed);
+                        } else {
+                            self.is_idle.store(true, Ordering::Relaxed);
+                        }
                         entity.movement_input.store(Vector3::new(0.0, 0.0, 0.0));
                         self.current_goal = Some(goal);
                         return;
@@ -820,7 +886,13 @@ impl Navigator {
                 if !on_ground && horizontal_dist < NODE_REACH_XZ && dy < -0.5 {
                     path.advance();
                     if path.is_done() {
-                        self.is_idle.store(true, Ordering::Relaxed);
+                        if self.wall_climber {
+                            self.current_path = None;
+                            self.wall_climber_direct = true;
+                            self.is_idle.store(false, Ordering::Relaxed);
+                        } else {
+                            self.is_idle.store(true, Ordering::Relaxed);
+                        }
                     }
                     self.current_goal = Some(goal);
                     return;
@@ -834,7 +906,13 @@ impl Navigator {
                 if horizontal_dist < NODE_REACH_XZ && dy.abs() < node_reach_y {
                     path.advance();
                     if path.is_done() {
-                        self.is_idle.store(true, Ordering::Relaxed);
+                        if self.wall_climber {
+                            self.current_path = None;
+                            self.wall_climber_direct = true;
+                            self.is_idle.store(false, Ordering::Relaxed);
+                        } else {
+                            self.is_idle.store(true, Ordering::Relaxed);
+                        }
                     }
                     self.current_goal = Some(goal);
                     return;
@@ -858,13 +936,32 @@ impl Navigator {
                     entity.set_speed(speed);
                 }
             } else {
-                self.is_idle.store(true, Ordering::Relaxed);
+                if self.wall_climber {
+                    self.wall_climber_direct = true;
+                    self.is_idle.store(false, Ordering::Relaxed);
+                } else {
+                    self.is_idle.store(true, Ordering::Relaxed);
+                }
                 self.current_path = None;
                 entity.movement_input.store(Vector3::new(0.0, 0.0, 0.0));
             }
         }
 
         self.current_goal = Some(goal);
+    }
+
+    fn wall_climber_target_reached(&self, entity: &LivingEntity, target: BlockPos) -> bool {
+        let position = entity.entity.pos.load();
+        let width_sq = f64::from(self.mob_width) * f64::from(self.mob_width);
+        let center_distance = |y: i32| {
+            let dx = position.x - (f64::from(target.0.x) + 0.5);
+            let dy = position.y - (f64::from(y) + 0.5);
+            let dz = position.z - (f64::from(target.0.z) + 0.5);
+            dx.mul_add(dx, dy.mul_add(dy, dz * dz)) < width_sq
+        };
+
+        center_distance(target.0.y)
+            || (position.y > f64::from(target.0.y) && center_distance(position.y.floor() as i32))
     }
 
     async fn can_move_directly(
@@ -911,6 +1008,17 @@ impl Navigator {
     #[must_use]
     pub fn next_movement_target(&self) -> Option<(Vector3<f64>, f64)> {
         let goal = self.current_goal.as_ref()?;
+        if self.wall_climber_direct {
+            let target = self.wall_climber_target?;
+            return Some((
+                Vector3::new(
+                    f64::from(target.0.x),
+                    f64::from(target.0.y),
+                    f64::from(target.0.z),
+                ),
+                goal.speed,
+            ));
+        }
         let path = self.current_path.as_ref()?;
         let (x, y, z) = path.get_next_entity_pos(self.mob_width)?;
         Some((
