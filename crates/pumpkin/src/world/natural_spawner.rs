@@ -1,6 +1,7 @@
 use crate::entity::EntityBase;
 use crate::entity::r#type::{
     check_spawn_obstruction, check_spawn_obstruction_state, check_spawn_rules, from_type,
+    is_valid_spawn_support,
 };
 use crate::world::World;
 use arc_swap::ArcSwap;
@@ -12,7 +13,7 @@ use pumpkin_data::tag::Block::MINECRAFT_PREVENT_MOB_SPAWNING_INSIDE;
 use pumpkin_data::tag::Fluid::{MINECRAFT_LAVA, MINECRAFT_WATER};
 use pumpkin_data::tag::Taggable;
 use pumpkin_data::tag::WorldgenBiome::MINECRAFT_REDUCE_WATER_AMBIENT_SPAWNS;
-use pumpkin_data::{Block, BlockDirection, BlockState};
+use pumpkin_data::{Block, BlockState};
 use pumpkin_util::GameMode;
 use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
 use pumpkin_util::math::get_section_cord;
@@ -1227,15 +1228,6 @@ pub fn is_valid_empty_spawn_block(
     }
 
     entity_type.fire_immune || !block.has_tag(&MINECRAFT_FIRE)
-}
-
-/// Matches the support-block portion of vanilla `Mob.checkMobSpawnRules`.
-/// Magma blocks override `Block.isValidSpawn` and only permit fire-immune
-/// entities; a generic sturdy top-face check is not sufficient here.
-fn is_valid_spawn_support(state: &'static BlockState, entity_type: &'static EntityType) -> bool {
-    state.is_side_solid(BlockDirection::Up)
-        && state.luminance < 14
-        && (entity_type.fire_immune || Block::from_state_id(state.id) != &Block::MAGMA_BLOCK)
 }
 
 #[cfg(test)]

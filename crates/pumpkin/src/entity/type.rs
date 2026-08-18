@@ -407,6 +407,10 @@ pub fn check_spawn_rules(
         return mob::MobEntity::check_monster_spawn_rules(world, pos, is_thundering)
             && world.can_see_sky(pos);
     }
+    if id == EntityType::PARCHED.id {
+        return mob::MobEntity::check_monster_spawn_rules(world, pos, is_thundering)
+            && world.can_see_sky(pos);
+    }
 
     // These registrations use `Mob.checkMobSpawnRules`, not the monster light
     // predicate. The natural caller already checked their placement support.
@@ -422,35 +426,17 @@ pub fn check_spawn_rules(
     // Their support block is not checked by is_spawn_position_ok, so retain
     // the vanilla BlockState.isValidSpawn check here without adding monster lighting.
     if id == EntityType::PHANTOM.id || id == EntityType::SHULKER.id {
-        let below = world.get_block_state(&pos.down());
-        let below_block = Block::from_state_id(below.id);
-        if below_block == &Block::BEDROCK
-            || below_block == &Block::ICE
-            || below_block == &Block::FROSTED_ICE
-        {
-            return false;
-        }
-        if below_block == &Block::JACK_O_LANTERN || below_block == &Block::REDSTONE_LAMP {
-            return true;
-        }
-        if matches!(
-            below_block.name,
-            "bedrock"
-                | "moving_piston"
-                | "repeater"
-                | "chorus_flower"
-                | "glass"
-                | "tinted_glass"
-                | "barrier"
-                | "scaffolding"
-        ) || below_block.name.ends_with("_trapdoor")
-        {
-            return false;
-        }
+        return is_valid_spawn_support(world.get_block_state(&pos.down()), entity_type);
+    }
 
-        return below.is_side_solid(BlockDirection::Up)
-            && below.luminance < 14
-            && (entity_type.fire_immune || below_block != &Block::MAGMA_BLOCK);
+    // Evoker, illusioner, vex, vindicator, and warden are registered with
+    // NO_RESTRICTIONS, but their predicate is still Monster.checkMonsterSpawnRules.
+    // That predicate calls Mob.checkMobSpawnRules, so the support block must be
+    // checked here because the placement check intentionally does nothing.
+    if entity_type.category == &MobCategory::MONSTER && uses_no_restrictions_monster_spawn_rules(id)
+    {
+        return mob::MobEntity::check_monster_spawn_rules(world, pos, is_thundering)
+            && is_valid_spawn_support(world.get_block_state(&pos.down()), entity_type);
     }
 
     // `SulfurCube.checkSulfurCubeSpawnRules` always accepts the candidate.
@@ -762,6 +748,62 @@ const fn uses_generic_monster_spawn_rules(id: u16) -> bool {
     id != EntityType::SLIME.id
         && id != EntityType::HOGLIN.id
         && !uses_any_light_monster_spawn_rules(id)
+        && !uses_no_restrictions_monster_spawn_rules(id)
+}
+
+const fn uses_no_restrictions_monster_spawn_rules(id: u16) -> bool {
+    id == EntityType::EVOKER.id
+        || id == EntityType::ILLUSIONER.id
+        || id == EntityType::VEX.id
+        || id == EntityType::VINDICATOR.id
+        || id == EntityType::WARDEN.id
+}
+
+/// Matches the block-specific `BlockState.isValidSpawn` predicates used by
+/// vanilla's `Mob.checkMobSpawnRules`.
+pub(crate) fn is_valid_spawn_support(
+    state: &'static BlockState,
+    entity_type: &'static EntityType,
+) -> bool {
+    let block = Block::from_state_id(state.id);
+
+    if matches!(
+        block.name,
+        "bedrock"
+            | "glass"
+            | "moving_piston"
+            | "barrier"
+            | "chorus_flower"
+            | "scaffolding"
+            | "tinted_glass"
+    ) || block.name.ends_with("_stained_glass")
+        || block.name.ends_with("_trapdoor")
+        || block.name == "copper_grate"
+        || block.name.ends_with("_copper_grate")
+    {
+        return false;
+    }
+
+    if block == &Block::ICE || block == &Block::FROSTED_ICE {
+        return entity_type.id == EntityType::POLAR_BEAR.id;
+    }
+
+    if block.has_tag(&tag::Block::MINECRAFT_LEAVES) {
+        return entity_type.id == EntityType::OCELOT.id || entity_type.id == EntityType::PARROT.id;
+    }
+
+    if block == &Block::SOUL_SAND
+        || block == &Block::CARVED_PUMPKIN
+        || block == &Block::JACK_O_LANTERN
+        || block == &Block::REDSTONE_LAMP
+        || block == &Block::MUD
+    {
+        return true;
+    }
+
+    state.is_side_solid(BlockDirection::Up)
+        && state.luminance < 14
+        && (entity_type.fire_immune || block != &Block::MAGMA_BLOCK)
 }
 
 /// Monster types registered with `Monster.checkAnyLightMonsterSpawnRules` in
