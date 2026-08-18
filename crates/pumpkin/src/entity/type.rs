@@ -375,7 +375,30 @@ pub fn check_spawn_rules(
     if id == EntityType::SLIME.id {
         return SlimeEntity::check_slime_spawn_rules(world, pos);
     }
+    if id == EntityType::GLOW_SQUID.id {
+        return is_below_glow_squid_y_threshold(pos.0.y, world.sea_level)
+            && world.get_max_local_raw_brightness(pos) == 0
+            && world.get_block(pos) == &Block::WATER;
+    }
 
     // TODO
     true
+}
+
+/// `GlowSquid.checkGlowSquidSpawnRules`'s Y gate.
+const fn is_below_glow_squid_y_threshold(y: i32, sea_level: i32) -> bool {
+    y <= sea_level - 33
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_below_glow_squid_y_threshold;
+
+    #[test]
+    fn glow_squid_threshold_matches_vanilla_bound() {
+        let sea_level = 63;
+        assert!(!is_below_glow_squid_y_threshold(sea_level - 32, sea_level));
+        assert!(is_below_glow_squid_y_threshold(sea_level - 33, sea_level));
+        assert!(is_below_glow_squid_y_threshold(sea_level - 100, sea_level));
+    }
 }

@@ -1,6 +1,14 @@
 #[allow(clippy::wildcard_imports)]
 use super::*;
 
+fn valid_block_hit_cursor(cursor_pos: &Vector3<f32>) -> bool {
+    const LIMIT: f64 = 1.0000001;
+
+    (f64::from(cursor_pos.x) - 0.5).abs() < LIMIT
+        && (f64::from(cursor_pos.y) - 0.5).abs() < LIMIT
+        && (f64::from(cursor_pos.z) - 0.5).abs() < LIMIT
+}
+
 impl JavaClient {
     #[allow(clippy::too_many_lines)]
     pub async fn handle_use_item_on(
@@ -12,7 +20,6 @@ impl JavaClient {
         if !player.has_client_loaded() {
             return Ok(());
         }
-        player.update_last_action_time();
         self.update_sequence(player, use_item_on.sequence.0);
 
         let position = use_item_on.position;
@@ -24,6 +31,11 @@ impl JavaClient {
             // TODO: maybe log?
             return Err(BlockPlacingError::BlockOutOfReach);
         }
+
+        if !valid_block_hit_cursor(&cursor_pos) {
+            return Ok(());
+        }
+        player.update_last_action_time();
 
         let Ok(face) = BlockDirection::try_from(use_item_on.face.0) else {
             return Err(BlockPlacingError::InvalidBlockFace);
@@ -258,5 +270,20 @@ impl JavaClient {
     pub async fn send_sign_packet(&self, block_position: BlockPos, is_front_text: bool) {
         self.enqueue_packet(&COpenSignEditor::new(block_position, is_front_text))
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_block_hit_cursor;
+    use pumpkin_util::math::vector3::Vector3;
+
+    #[test]
+    fn block_hit_cursor_matches_vanilla_bounds() {
+        assert!(valid_block_hit_cursor(&Vector3::new(0.5, 0.5, 0.5)));
+        assert!(valid_block_hit_cursor(&Vector3::new(-0.5, 1.5, 0.5)));
+        assert!(!valid_block_hit_cursor(&Vector3::new(-0.500001, 0.5, 0.5)));
+        assert!(!valid_block_hit_cursor(&Vector3::new(0.5, 1.500001, 0.5)));
+        assert!(!valid_block_hit_cursor(&Vector3::new(f32::NAN, 0.5, 0.5)));
     }
 }
