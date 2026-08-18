@@ -879,7 +879,10 @@ pub fn check_spawn_obstruction(
     pos: &BlockPos,
     entity_type: &'static EntityType,
 ) -> bool {
-    if entity_type.id != EntityType::OCELOT.id {
+    if entity_type.id != EntityType::OCELOT.id
+        && entity_type.id != EntityType::RAVAGER.id
+        && entity_type.id != EntityType::WARDEN.id
+    {
         return true;
     }
 
@@ -887,7 +890,7 @@ pub fn check_spawn_obstruction(
         pos.0.y,
         world.sea_level,
         world.get_block_state(&pos.down()),
-        ocelot_contains_any_liquid(world, pos, entity_type),
+        contains_any_liquid(world, pos, entity_type),
         ocelot_has_entity_collision(world, pos, entity_type),
         entity_type,
     )
@@ -902,30 +905,26 @@ pub fn check_spawn_obstruction_state(
     has_entity_collision: bool,
     entity_type: &'static EntityType,
 ) -> bool {
-    if entity_type.id != EntityType::OCELOT.id {
-        return true;
+    if entity_type.id == EntityType::OCELOT.id {
+        let below_block = Block::from_state_id(below.id);
+        return ocelot_spawn_obstruction_allowed(
+            y,
+            sea_level,
+            below_block == &Block::GRASS_BLOCK,
+            below_block.has_tag(&tag::Block::MINECRAFT_LEAVES),
+            contains_any_liquid,
+            has_entity_collision,
+        );
     }
 
-    let below_block = Block::from_state_id(below.id);
-    ocelot_spawn_obstruction_allowed(
-        y,
-        sea_level,
-        below_block == &Block::GRASS_BLOCK,
-        below_block.has_tag(&tag::Block::MINECRAFT_LEAVES),
-        contains_any_liquid,
-        has_entity_collision,
-    )
+    if entity_type.id == EntityType::RAVAGER.id || entity_type.id == EntityType::WARDEN.id {
+        return !contains_any_liquid;
+    }
+
+    true
 }
 
-fn ocelot_contains_any_liquid(
-    world: &World,
-    pos: &BlockPos,
-    entity_type: &'static EntityType,
-) -> bool {
-    if entity_type.id != EntityType::OCELOT.id {
-        return false;
-    }
-
+fn contains_any_liquid(world: &World, pos: &BlockPos, entity_type: &'static EntityType) -> bool {
     let bounding_box = BoundingBox::new_from_pos(
         f64::from(pos.0.x) + 0.5,
         f64::from(pos.0.y),
