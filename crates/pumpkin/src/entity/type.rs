@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
+use pumpkin_data::Block;
 use pumpkin_data::entity::{EntityType, MobCategory};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
+use pumpkin_world::generation::proto_chunk::GenerationCache;
 use uuid::Uuid;
 
 use crate::entity::boss::ender_dragon::EnderDragonEntity;
@@ -124,7 +126,6 @@ use crate::entity::vehicle::boat::BoatEntity;
 use crate::entity::vehicle::minecart::MinecartEntity;
 use crate::entity::{Entity, EntityBase, mob};
 use crate::world::World;
-use pumpkin_data::Block;
 use std::sync::atomic::AtomicBool;
 
 #[expect(clippy::too_many_lines)]
@@ -512,6 +513,13 @@ pub fn check_spawn_rules(
         return SlimeEntity::check_slime_spawn_rules(world, pos);
     }
 
+    if uses_animal_spawn_rules(id) {
+        let valid_support = world
+            .get_block(&pos.down())
+            .has_tag(&tag::Block::MINECRAFT_ANIMALS_SPAWNABLE_ON);
+        return animal_spawn_rules_allow(valid_support, world.get_raw_brightness(pos, 0));
+    }
+
     // TODO
     true
 }
@@ -532,6 +540,26 @@ const fn uses_animal_spawn_rules(id: u16) -> bool {
         || id == EntityType::TRADER_LLAMA.id
 }
 
+/// Cache-compatible subset of Java's `SpawnPlacements.checkSpawnRules` during chunk generation.
+///
+/// `Animal.checkAnimalSpawnRules` requires both its support-block tag and raw brightness above 8.
+/// Java only bypasses that light check for `TRIAL_SPAWNER`, which Pumpkin does not use here.
+pub fn check_spawn_rules_cache(
+    entity_type: &'static EntityType,
+    cache: &dyn GenerationCache,
+    pos: &BlockPos,
+    raw_brightness: u8,
+) -> bool {
+    if !uses_animal_spawn_rules(entity_type.id) {
+        return true;
+    }
+
+    let support_state = GenerationCache::get_block_state(cache, &pos.down().0).to_state();
+    let valid_support =
+        Block::from_state_id(support_state.id).has_tag(&tag::Block::MINECRAFT_ANIMALS_SPAWNABLE_ON);
+    animal_spawn_rules_allow(valid_support, raw_brightness)
+}
+
 /// `MobCategory::MONSTER` members whose registered `SpawnPlacements` predicate is not
 /// `Monster.checkMonsterSpawnRules`. Slime registers `Slime.checkSlimeSpawnRules`
 /// (`Slime.java`, 1.21.4), which applies the swamp-band and slime-chunk gates instead of
@@ -544,6 +572,11 @@ const fn uses_generic_monster_spawn_rules(id: u16) -> bool {
 /// vanilla's `SpawnPlacements`.
 const fn uses_any_light_monster_spawn_rules(id: u16) -> bool {
     id == EntityType::BLAZE.id || id == EntityType::BREEZE.id || id == EntityType::ZOGLIN.id
+}
+
+/// `Animal.checkAnimalSpawnRules`: an approved support block and raw brightness strictly above 8.
+const fn animal_spawn_rules_allow(valid_support: bool, raw_brightness: u8) -> bool {
+    valid_support && raw_brightness > 8
 }
 
 /// `AgeableWaterCreature.checkSurfaceAgeableWaterCreatureSpawnRules`'s Y-range gate:
@@ -613,7 +646,10 @@ mod animal_spawn_dispatch_tests {
 
 #[cfg(test)]
 mod slime_spawn_dispatch_tests {
-    use super::{EntityType, uses_generic_monster_spawn_rules};
+    use super::{
+        EntityType, animal_spawn_rules_allow, uses_animal_spawn_rules,
+        uses_generic_monster_spawn_rules,
+    };
     use pumpkin_data::chunk::{Biome, NETHER_BIOME_SOURCE};
 
     /// Slime is `MobCategory::MONSTER`, so the category-wide branch in `check_spawn_rules`
@@ -629,6 +665,37 @@ mod slime_spawn_dispatch_tests {
         assert!(uses_generic_monster_spawn_rules(EntityType::ZOMBIE.id));
         assert!(uses_generic_monster_spawn_rules(EntityType::CREEPER.id));
         assert!(uses_generic_monster_spawn_rules(EntityType::MAGMA_CUBE.id));
+    }
+
+    #[test]
+    fn animal_spawn_rule_dispatch_matches_java_registrations() {
+        for entity_type in [
+            EntityType::CHICKEN,
+            EntityType::COW,
+            EntityType::DONKEY,
+            EntityType::HAPPY_GHAST,
+            EntityType::HORSE,
+            EntityType::LLAMA,
+            EntityType::MULE,
+            EntityType::PIG,
+            EntityType::SHEEP,
+            EntityType::CAT,
+            EntityType::PANDA,
+            EntityType::TRADER_LLAMA,
+        ] {
+            assert!(uses_animal_spawn_rules(entity_type.id), "{entity_type:?}");
+        }
+
+        assert!(!uses_animal_spawn_rules(EntityType::GOAT.id));
+        assert!(!uses_animal_spawn_rules(EntityType::MOOSHROOM.id));
+        assert!(!uses_animal_spawn_rules(EntityType::WOLF.id));
+    }
+
+    #[test]
+    fn animal_spawn_light_and_support_match_vanilla_boundaries() {
+        assert!(!animal_spawn_rules_allow(false, 15));
+        assert!(!animal_spawn_rules_allow(true, 8));
+        assert!(animal_spawn_rules_allow(true, 9));
     }
 
     /// The reported Nether sighting cannot come from the biome spawn tables: no biome the

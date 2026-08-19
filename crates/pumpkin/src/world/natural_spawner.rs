@@ -1,5 +1,5 @@
 use crate::entity::EntityBase;
-use crate::entity::r#type::{check_spawn_rules, from_type};
+use crate::entity::r#type::{check_spawn_rules, check_spawn_rules_cache, from_type};
 use crate::world::World;
 use arc_swap::ArcSwap;
 use pumpkin_data::biome::Spawner;
@@ -598,7 +598,14 @@ pub fn spawn_mobs_for_chunk_generation(
 
                 let pos = get_top_non_colliding_pos(world, cache, entity_type, x, z);
 
-                if is_spawn_position_ok_cache(cache, &pos, entity_type) {
+                if is_spawn_position_ok_cache(cache, &pos, entity_type)
+                    && check_spawn_rules_cache(
+                        entity_type,
+                        cache,
+                        &pos,
+                        get_raw_brightness_cache(cache, &pos),
+                    )
+                {
                     let spawn_pos_f64 = Vector3::new(
                         f64::from(pos.0.x) + 0.5,
                         f64::from(pos.0.y),
@@ -890,6 +897,41 @@ pub fn is_valid_spawn_position_for_type(
     true
 }
 
+/// Java's `Level.getRawBrightness(pos, 0)` for a generated chunk whose lighting stage is done.
+/// Chunk-generation spawning only probes positions in the center chunk, so its section light is
+/// available directly from the generation cache.
+fn get_raw_brightness_cache(cache: &dyn GenerationCache, pos: &BlockPos) -> u8 {
+    let section_index = cache.section_index(pos.0.y);
+    let local_x = pos.0.x.rem_euclid(16) as usize;
+    let local_y = light_local_y(pos.0.y);
+    let local_z = pos.0.z.rem_euclid(16) as usize;
+    let light = &cache.get_center_chunk().light;
+
+    let sky_light = light
+        .sky_light
+        .get(section_index)
+        .map_or(0, |section| section.get(local_x, local_y, local_z));
+    let block_light = light
+        .block_light
+        .get(section_index)
+        .map_or(0, |section| section.get(local_x, local_y, local_z));
+    raw_brightness_from_levels(sky_light, block_light)
+}
+
+/// The `ambientDarkness = 0` form of Java's `Level.getRawBrightness`.
+const fn raw_brightness_from_levels(sky_light: u8, block_light: u8) -> u8 {
+    if sky_light > block_light {
+        sky_light
+    } else {
+        block_light
+    }
+}
+
+/// Light containers are indexed by the world Y coordinate's low four bits.
+const fn light_local_y(y: i32) -> usize {
+    (y as usize) & 15
+}
+
 pub fn is_spawn_position_ok(
     world: &Arc<World>,
     block_pos: &BlockPos,
@@ -1045,7 +1087,7 @@ pub fn is_valid_empty_spawn_block(
 mod tests {
     use super::{
         IndexedRandom, can_spawn_in_water, is_right_distance_to_player_and_spawn_point,
-        is_valid_empty_spawn_block,
+        is_valid_empty_spawn_block, light_local_y, raw_brightness_from_levels,
     };
     use pumpkin_data::Block;
     use pumpkin_data::biome::{Biome, Spawner};
@@ -1215,5 +1257,16 @@ mod tests {
             &chunk,
             &Vector3::new(0, 64, 0),
         ));
+    }
+
+    #[test]
+    fn cached_light_coordinates_and_raw_brightness_match_vanilla() {
+        assert_eq!(light_local_y(-64), 0);
+        assert_eq!(light_local_y(-63), 1);
+        assert_eq!(light_local_y(15), 15);
+        assert_eq!(light_local_y(16), 0);
+
+        assert_eq!(raw_brightness_from_levels(9, 2), 9);
+        assert_eq!(raw_brightness_from_levels(0, 11), 11);
     }
 }
