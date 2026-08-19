@@ -2025,6 +2025,21 @@ impl JavaClient {
             self.kick(TextComponent::text("Invalid action type")).await;
             return;
         };
+        let interaction_hand = if action == ActionType::Attack {
+            None
+        } else {
+            let Some(hand) = interact.hand else {
+                self.kick(TextComponent::text("Missing interaction hand"))
+                    .await;
+                return;
+            };
+            let Ok(hand) = Hand::from_interaction_id(hand.0) else {
+                self.kick(TextComponent::text("Invalid interaction hand"))
+                    .await;
+                return;
+            };
+            Some(hand)
+        };
 
         // Resolve the target entity for the event
         let world = player_entity.world.load_full();
@@ -2095,20 +2110,31 @@ impl JavaClient {
                             player.attack(event.target).await;
                         }
                         ActionType::Interact | ActionType::InteractAt => {
-                            let held = player.inventory.held_item();
-                            let mut stack = held.lock().await.clone();
+                            let hand = interaction_hand.expect("interaction hand checked above");
+                            let held = player.inventory.get_stack_in_hand(hand).await;
+                            let mut stack = held.lock().await;
                             // CuredZombieVillager fires when conversion actually completes
                             // (ZombieVillagerEntity::finish_conversion), gated on the zombie
                             // villager having Weakness -- not immediately on this click,
                             // regardless of whether curing even started.
-                            let interacted = event.target.interact(player, &mut stack).await;
+                            let interacted = event
+                                .target
+                                .interact_at(player, &mut stack, interact.target_position)
+                                .await;
                             if !interacted {
                                 server
                                     .item_registry
                                     .use_on_entity(&mut stack, player, event.target)
                                     .await;
                             }
-                            *held.lock().await = stack;
+                            let updated = stack.clone();
+                            drop(stack);
+                            let slot = if matches!(hand, Hand::Right) {
+                                player.inventory.get_selected_slot() as usize
+                            } else {
+                                PlayerInventory::OFF_HAND_SLOT
+                            };
+                            player.sync_hand_slot(slot, updated).await;
                         }
                     }
                 }

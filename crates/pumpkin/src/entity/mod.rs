@@ -412,6 +412,16 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         Box::pin(async { false })
     }
 
+    /// Called when a player right-clicks a precise point on this entity.
+    fn interact_at<'a>(
+        &'a self,
+        player: &'a Arc<Player>,
+        item_stack: &'a mut ItemStack,
+        _target_position: Option<Vector3<f64>>,
+    ) -> EntityBaseFuture<'a, bool> {
+        self.interact(player, item_stack)
+    }
+
     fn set_on_fire_for(&self, seconds: f32) {
         let entity = self.get_entity();
         // Exclude fire-immune entities (ex. certain items) from burn damage
