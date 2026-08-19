@@ -10,7 +10,8 @@ use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data::TrackedData;
 use pumpkin_protocol::codec::var_int::VarInt;
-use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_protocol::java::client::play::{CGameEvent, GameEvent, Metadata};
+use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -91,7 +92,11 @@ fn sting_poison_duration(puff_state: u8) -> i32 {
 /// Pufferfish.java `SCARY_MOB` selector: a creative player is never scary; otherwise anything
 /// not tagged `minecraft:not_scary_for_pufferfish` is.
 fn is_scary(candidate: &dyn EntityBase) -> bool {
-    if candidate.get_player().is_some_and(Player::is_creative) {
+    if !candidate
+        .get_living_entity()
+        .is_some_and(crate::entity::living::LivingEntity::is_part_of_game)
+        || candidate.get_player().is_some_and(Player::is_creative)
+    {
         return false;
     }
     !candidate
@@ -120,6 +125,7 @@ impl PufferfishEntity {
             deflate_timer: AtomicI32::new(0),
         };
         let mob_arc = Arc::new(pufferfish);
+        mob_arc.refresh_dimensions(0);
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
             Arc::downgrade(&mob_arc)
@@ -158,21 +164,51 @@ impl PufferfishEntity {
         );
     }
 
-    /// Pufferfish.java `PufferfishPuffGoal.canUse`: any non-scary-immune living entity within the
-    /// bounding box inflated by 2.0. Approximated here with a spherical distance check, matching
-    /// this codebase's other proximity goals (e.g. `BreedGoal`).
+    const fn puff_scale(state: u8) -> f32 {
+        match state {
+            0 => 0.5,
+            1 => 0.7,
+            _ => 1.0,
+        }
+    }
+
+    fn refresh_dimensions(&self, state: u8) {
+        let entity = &self.mob_entity.living_entity.entity;
+        let scale = Self::puff_scale(state);
+        let dimensions = EntityDimensions {
+            width: entity.entity_type.dimension[0] * scale,
+            height: entity.entity_type.dimension[1] * scale,
+            eye_height: entity.entity_type.eye_height * scale,
+        };
+        entity.entity_dimension.store(dimensions);
+        let pos = entity.pos.load();
+        entity
+            .bounding_box
+            .store(BoundingBox::new_from_pos(pos.x, pos.y, pos.z, &dimensions));
+    }
+
+    fn set_puff_state(&self, state: u8) {
+        self.puff_state.store(state, Relaxed);
+        self.send_puff_state(state);
+        self.refresh_dimensions(state);
+    }
+
+    /// Pufferfish.java `PufferfishPuffGoal.canUse`: any scary living entity within the
+    /// bounding box inflated by 2.0, including players.
     fn threat_nearby(&self) -> bool {
         let entity = &self.mob_entity.living_entity.entity;
-        let pos = entity.pos.load();
         let world = entity.world.load();
         let my_uuid = entity.entity_uuid;
+        let search_box = entity.bounding_box.load().expand_all(2.0);
 
-        world.get_nearby_entities(pos, 2.0).values().any(|e| {
+        world.get_entities_at_box(&search_box).iter().any(|e| {
             e.get_entity().entity_uuid != my_uuid
                 && e.get_living_entity().is_some()
-                && e.get_entity().is_alive()
                 && is_scary(e.as_ref())
-        })
+        }) || world
+            .get_players_at_box(&search_box)
+            .iter()
+            .any(|player| player.get_entity().entity_uuid != my_uuid && is_scary(player.as_ref()))
     }
 
     async fn sting(&self, target: &dyn EntityBase) {
@@ -197,6 +233,15 @@ impl PufferfishEntity {
             .await;
 
         if damaged {
+            if let Some(player) = target.get_player()
+                && !entity.is_silent()
+            {
+                player.client.try_enqueue_packet(&CGameEvent::new(
+                    GameEvent::PlayPufferfishStringSound,
+                    0.0,
+                ));
+            }
+
             if let Some(living) = target.get_living_entity() {
                 living
                     .add_effect(Effect {
@@ -210,7 +255,9 @@ impl PufferfishEntity {
                     })
                     .await;
             }
-            world.play_sound(Sound::EntityPufferFishSting, SoundCategory::Neutral, &pos);
+            if target.get_player().is_none() && !entity.is_silent() {
+                world.play_sound(Sound::EntityPufferFishSting, SoundCategory::Neutral, &pos);
+            }
         }
     }
 
@@ -223,18 +270,19 @@ impl PufferfishEntity {
         }
 
         let entity = &self.mob_entity.living_entity.entity;
-        let pos = entity.pos.load();
         let world = entity.world.load();
         let my_uuid = entity.entity_uuid;
+        let search_box = entity.bounding_box.load().expand_all(0.3);
 
         let nearby: Vec<_> = world
-            .get_nearby_entities(pos, 1.0)
-            .values()
+            .get_entities_at_box(&search_box)
+            .iter()
             .filter(|e| {
                 e.get_entity().entity_uuid != my_uuid
-                    && e.get_living_entity().is_some()
-                    && e.get_entity().is_alive()
-                    && e.get_player().is_none()
+                    && e.get_mob().is_some()
+                    && e.get_living_entity()
+                        .is_some_and(crate::entity::living::LivingEntity::is_part_of_game)
+                    && is_scary(e.as_ref())
             })
             .cloned()
             .collect();
@@ -263,7 +311,7 @@ impl NBTStorage for PufferfishEntity {
         Box::pin(async {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
             let state = nbt.get_int("PuffState").unwrap_or(0).clamp(0, 2) as u8;
-            self.puff_state.store(state, Relaxed);
+            self.set_puff_state(state);
         })
     }
 }
@@ -297,8 +345,7 @@ impl Mob for PufferfishEntity {
             self.deflate_timer.store(new_deflate, Relaxed);
 
             if new_state != self.puff_state.load(Relaxed) {
-                self.puff_state.store(new_state, Relaxed);
-                self.send_puff_state(new_state);
+                self.set_puff_state(new_state);
             }
 
             if blow_up || blow_out {
@@ -393,5 +440,12 @@ mod tests {
         assert_eq!(sting_damage(2), 3.0);
         assert_eq!(sting_poison_duration(1), 60);
         assert_eq!(sting_poison_duration(2), 120);
+    }
+
+    #[test]
+    fn puff_state_uses_vanilla_size_scales() {
+        assert_eq!(PufferfishEntity::puff_scale(0), 0.5);
+        assert_eq!(PufferfishEntity::puff_scale(1), 0.7);
+        assert_eq!(PufferfishEntity::puff_scale(2), 1.0);
     }
 }
