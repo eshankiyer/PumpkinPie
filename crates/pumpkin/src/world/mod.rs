@@ -5817,12 +5817,14 @@ impl World {
 
         // Keep the state variant selected by the block state.  Converting source water/lava
         // to its flowing registry entry and then taking states[0] loses the level/height of
-        // partial fluid blocks, which is observable by entity eye-fluid checks.
-        let state = if raw_fluid == &Fluid::WATER || raw_fluid == &Fluid::LAVA {
-            &raw_fluid.states[0]
-        } else {
+        // partial fluid blocks, which is observable by entity eye-fluid checks. Only the
+        // flowing fluids carry a level property; `Fluid::properties` panics for the others,
+        // and air maps to `Fluid::EMPTY`, which every entity tick asks about.
+        let state = if raw_fluid == &Fluid::FLOWING_WATER || raw_fluid == &Fluid::FLOWING_LAVA {
             let index = raw_fluid.properties(id).to_index() as usize;
             &raw_fluid.states[index]
+        } else {
+            &raw_fluid.states[0]
         };
 
         (raw_fluid, state)
