@@ -59,8 +59,10 @@ impl HungerManager {
         if natural_regen && saturation > 0.0 && can_heal && level >= 20 {
             timer += 1;
             if timer >= 10 {
+                // `FoodData.tick`: the saturation spent is charged as exhaustion, which the
+                // branch above turns into saturation loss at four exhaustion per point.
+                // Subtracting it here as well spent it about five times too fast.
                 let cost = saturation.min(6.0);
-                saturation -= cost;
                 exhaustion += cost;
                 heal_amount = cost / 6.0;
                 timer = 0;
