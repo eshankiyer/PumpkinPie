@@ -4275,6 +4275,18 @@ impl EntityBase for Entity {
                     >= eye_y;
             self.eye_in_water.store(eye_in_water, Relaxed);
             self.check_out_of_world(&**caller).await;
+
+            // `Entity.baseTick`: rain puts a burning entity out. `isInRain` tests the block the
+            // entity stands in and the one at the top of its bounding box.
+            if self.fire_ticks.load(Ordering::Relaxed) > 0 {
+                let block_pos = self.block_pos.load();
+                let head_pos =
+                    BlockPos::floored(eye_pos.x, self.bounding_box.load().max.y, eye_pos.z);
+                if world.is_raining_at(&block_pos).await || world.is_raining_at(&head_pos).await {
+                    self.extinguish();
+                }
+            }
+
             let fire_ticks = self.fire_ticks.load(Ordering::Relaxed);
 
             // Check for fire immunity (or if the specific entity is)
