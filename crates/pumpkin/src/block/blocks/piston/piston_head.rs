@@ -1,9 +1,8 @@
-use pumpkin_data::block_properties::{BlockProperties, Facing};
+use pumpkin_data::block_properties::BlockProperties;
 use pumpkin_data::{Block, FacingExt};
 use pumpkin_macros::pumpkin_block;
 use pumpkin_world::world::BlockFlags;
 
-use crate::block::blocks::piston::piston::try_move;
 use crate::block::{BlockBehaviour, BlockFuture};
 use crate::block::{BrokenArgs, OnNeighborUpdateArgs};
 
@@ -34,12 +33,14 @@ impl BlockBehaviour for PistonHeadBlock {
     }
     fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
+            // `PistonHeadBlock.neighborChanged` relays EVERY update the head receives to the base
+            // behind it, which is the only way a change two blocks from the base — the classic
+            // quasi-connectivity position beside the head — ever reaches `checkIfExtend`. Pumpkin
+            // relayed only for an upward head whose neighbour above had stopped being a redstone
+            // block, so a horizontal piston powered that way stayed stuck.
             let head_state_id = args.world.get_block_state_id(args.position);
             let head_props =
                 PistonHeadProperties::from_state_id(head_state_id, &Block::PISTON_HEAD);
-            if head_props.facing != Facing::Up {
-                return;
-            }
             let piston_pos = args.position.offset(
                 head_props
                     .facing
@@ -47,16 +48,28 @@ impl BlockBehaviour for PistonHeadBlock {
                     .to_block_direction()
                     .to_offset(),
             );
-            let piston_block = args.world.get_block(&piston_pos);
-            if &Block::PISTON == piston_block || &Block::STICKY_PISTON == piston_block {
-                let up_pos = args
-                    .position
-                    .offset(head_props.facing.to_block_direction().to_offset());
-                let upper_block = args.world.get_block(&up_pos);
-                if upper_block != &Block::REDSTONE_BLOCK {
-                    //Then somebody probably broke the redstone block, try to check if piston should still be extended.
-                    try_move(args.world, piston_block, &piston_pos).await;
-                }
+
+            // `PistonHeadBlock.canSurvive`: the head only counts while its base is still an
+            // extended piston facing it, or a moving piston mid-animation.
+            let base_block = args.world.get_block(&piston_pos);
+            let base_survives =
+                if base_block == &Block::PISTON || base_block == &Block::STICKY_PISTON {
+                    let base_state_id = args.world.get_block_state_id(&piston_pos);
+                    let base_props = PistonProps::from_state_id(base_state_id, base_block);
+                    base_props.extended && base_props.facing == head_props.facing
+                } else if base_block == &Block::MOVING_PISTON {
+                    let base_state_id = args.world.get_block_state_id(&piston_pos);
+                    let base_props =
+                        PistonHeadProperties::from_state_id(base_state_id, &Block::MOVING_PISTON);
+                    base_props.facing == head_props.facing
+                } else {
+                    false
+                };
+
+            if base_survives {
+                args.world
+                    .update_neighbor(&piston_pos, args.source_block)
+                    .await;
             }
         })
     }
