@@ -27,5 +27,7 @@ syn = { version = "3.0", features = ["full", "extra-traits"] }
 pumpkin-util = { path = "../../crates/pumpkin-util", features = ["codegen"] }
 pumpkin-nbt = { path = "../../crates/pumpkin-nbt" }
 
-[lints]
-workspace = true
+[workspace]
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
