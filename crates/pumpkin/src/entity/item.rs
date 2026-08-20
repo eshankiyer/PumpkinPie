@@ -352,8 +352,10 @@ impl ItemEntity {
 
         velo = velo.multiply(friction, 0.98, friction);
 
+        // `ItemEntity.tick`: a landing item bounces at half its downward speed rather than
+        // stopping dead.
         if on_ground && velo.y < 0.0 {
-            velo.y = 0.0;
+            velo.y *= -0.5;
         }
 
         entity.velocity.store(velo);
