@@ -1,10 +1,12 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+use pumpkin_data::BlockDirection;
 use pumpkin_data::item::Item;
 use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::potion::Effect;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data::{TrackedData, TrackedId};
+use pumpkin_data::world::WorldEvent;
 use pumpkin_inventory::build_equipment_slots;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::InventoryPlayer;
@@ -14,6 +16,7 @@ use pumpkin_protocol::codec::var_ulong::VarULong;
 use pumpkin_util::GameMode;
 use pumpkin_util::Hand;
 use pumpkin_util::math::position::BlockPos;
+use pumpkin_world::world::BlockFlags;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::atomic::{
@@ -1957,6 +1960,8 @@ impl LivingEntity {
         for effect_type in effects {
             if effect_type == &StatusEffect::OOZING {
                 self.spawn_oozing_slimes(world).await;
+            } else if effect_type == &StatusEffect::WEAVING {
+                self.spawn_weaving_cobwebs(world).await;
             } else if effect_type == &StatusEffect::WIND_CHARGED {
                 let pos = self.entity.pos.load();
                 let height = f64::from(self.entity.entity_dimension.load().height);
@@ -1969,6 +1974,58 @@ impl LivingEntity {
                     )
                     .await;
             }
+        }
+    }
+
+    /// Vanilla `WeavingMobEffect.onMobRemoved`: two or three cobwebs scattered over the blocks
+    /// around the carrier, taking any replaceable spot that has a sturdy top face beneath it. Only
+    /// players ignore the `mob_griefing` game rule.
+    async fn spawn_weaving_cobwebs(&self, world: &Arc<World>) {
+        const PLACEMENT_ATTEMPTS: usize = 15;
+        const SCAN_RADIUS: i32 = 1;
+
+        let is_player = self.entity.entity_type.id == EntityType::PLAYER.id;
+        if !is_player && !world.level_info.load().game_rules.mob_griefing {
+            return;
+        }
+
+        let cobweb_count = rand::random_range(2..=3);
+        let center = self.entity.block_pos.load();
+        let mut positions: Vec<BlockPos> = Vec::with_capacity(cobweb_count);
+
+        for _ in 0..PLACEMENT_ATTEMPTS {
+            let position = BlockPos::new(
+                center.0.x + rand::random_range(-SCAN_RADIUS..=SCAN_RADIUS),
+                center.0.y + rand::random_range(-SCAN_RADIUS..=SCAN_RADIUS),
+                center.0.z + rand::random_range(-SCAN_RADIUS..=SCAN_RADIUS),
+            );
+            if positions.contains(&position) {
+                continue;
+            }
+
+            let below = position.down();
+            if world.get_block_state_async(&position).await.replaceable()
+                && world
+                    .get_block_state_async(&below)
+                    .await
+                    .is_side_solid(BlockDirection::Up)
+            {
+                positions.push(position);
+                if positions.len() >= cobweb_count {
+                    break;
+                }
+            }
+        }
+
+        for position in positions {
+            world
+                .set_block_state(
+                    &position,
+                    Block::COBWEB.default_state.id,
+                    BlockFlags::NOTIFY_ALL,
+                )
+                .await;
+            world.sync_world_event(WorldEvent::AnimationSpawnCobweb, position, 0);
         }
     }
 
