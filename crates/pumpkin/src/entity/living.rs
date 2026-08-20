@@ -3796,8 +3796,17 @@ impl EntityBase for LivingEntity {
                         } else {
                             equipment_lock.put(&slot, stack);
                         }
+                        // `DamageEntity.apply`: the thorns hit is dealt BY the wearer, so a
+                        // kill is credited to them and the attacker can retaliate.
                         attacker
-                            .damage(attacker, thorns_damage, DamageType::THORNS)
+                            .damage_with_context(
+                                attacker,
+                                thorns_damage,
+                                DamageType::THORNS,
+                                Some(self.entity.pos.load()),
+                                Some(caller),
+                                Some(caller),
+                            )
                             .await;
                     }
                 }
