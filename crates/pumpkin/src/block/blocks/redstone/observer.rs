@@ -108,15 +108,17 @@ impl BlockBehaviour for ObserverBlock {
 
     fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            if !args.moved {
-                let props = ObserverLikeProperties::from_state_id(args.old_state_id, args.block);
-                if props.powered
-                    && args
-                        .world
-                        .is_block_tick_scheduled(args.position, &Block::OBSERVER)
-                {
-                    Self::update_neighbors(args.world, args.block, args.position, &props).await;
-                }
+            // `ObserverBlock.affectNeighborsAfterRemoval` ignores whether a piston moved the
+            // block, unlike `DiodeBlock`'s: an observer removed mid-pulse still has to clear the
+            // neighbour in front, or that neighbour keeps a stale powered reading.
+            let mut props = ObserverLikeProperties::from_state_id(args.old_state_id, args.block);
+            if props.powered
+                && args
+                    .world
+                    .is_block_tick_scheduled(args.position, &Block::OBSERVER)
+            {
+                props.powered = false;
+                Self::update_neighbors(args.world, args.block, args.position, &props).await;
             }
         })
     }
