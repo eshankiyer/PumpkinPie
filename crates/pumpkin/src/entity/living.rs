@@ -3129,10 +3129,9 @@ impl EntityBase for LivingEntity {
             }
 
             let world = self.entity.world.load();
-            let is_fire_damage = damage_type == DamageType::IN_FIRE
-                || damage_type == DamageType::ON_FIRE
-                || damage_type == DamageType::LAVA
-                || damage_type == DamageType::HOT_FLOOR;
+            // `LivingEntity.hurtServer:1185` and `Player.hurtServer:671` both key on the whole
+            // `is_fire` tag, which also covers campfires and the two fireball sources.
+            let is_fire_damage = damage_type.has_tag(&tag::DamageType::MINECRAFT_IS_FIRE);
 
             // Like fire and drowning damage, these are gated for players only;
             // mobs still take them.
@@ -3172,16 +3171,6 @@ impl EntityBase for LivingEntity {
                     .or(cause)
                     .map(|entity| entity.get_entity().pos.load())
             });
-
-            // Vanilla parity: entities in FREEZE_HURTS_EXTRA_TYPES take 5x freezing damage.
-            if damage_type == DamageType::FREEZE
-                && self
-                    .entity
-                    .entity_type
-                    .has_tag(&tag::EntityType::MINECRAFT_FREEZE_HURTS_EXTRA_TYPES)
-            {
-                amount *= 5.0;
-            }
 
             // These damage types bypass the hurt cooldown and death protection
             let bypasses_cooldown_protection =
