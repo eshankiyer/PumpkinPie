@@ -312,11 +312,11 @@ impl BlockBehaviour for BedBlock {
             if !args
                 .player
                 .position()
-                .is_within_bounds(bed_head_pos.to_f64(), 3.0, 3.0, 3.0)
+                .is_within_bounds(bed_head_pos.to_f64(), 3.0, 2.0, 3.0)
                 && !args
                     .player
                     .position()
-                    .is_within_bounds(bed_foot_pos.to_f64(), 3.0, 3.0, 3.0)
+                    .is_within_bounds(bed_foot_pos.to_f64(), 3.0, 2.0, 3.0)
             {
                 args.player
                     .send_system_message_raw(
