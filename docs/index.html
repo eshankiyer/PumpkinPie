@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PumpkinPie</title>
+<meta name="description" content="PumpkinPie is a Minecraft 26.2 server written in Rust, built for vanilla behavioural parity.">
 <style>
   :root {
     color-scheme: light dark;
@@ -11,6 +12,7 @@
     --fg: #1a1a1a;
     --muted: #666666;
     --border: #e0e0e0;
+    --card: #fafafa;
     --accent: #d9730d;
   }
   @media (prefers-color-scheme: dark) {
@@ -19,6 +21,7 @@
       --fg: #f0ece6;
       --muted: #a89f94;
       --border: #33291f;
+      --card: #1b1611;
       --accent: #f0932b;
     }
   }
@@ -30,53 +33,67 @@
     color: var(--fg);
     line-height: 1.6;
   }
-  main {
-    max-width: 720px;
-    margin: 0 auto;
-    padding: 4rem 1.5rem 5rem;
-  }
-  h1 {
-    font-size: 2.25rem;
-    margin: 0 0 0.25rem;
-  }
-  .tagline {
-    color: var(--muted);
-    margin: 0 0 2.5rem;
-    font-size: 1.05rem;
-  }
+  main { max-width: 46rem; margin: 0 auto; padding: 3.5rem 1.5rem 5rem; }
+  h1 { font-size: 2.25rem; margin: 0 0 .25rem; }
+  h3 { font-size: 1rem; margin: 1.5rem 0 .5rem; }
+  .tagline { color: var(--muted); margin: 0 0 1.5rem; font-size: 1.05rem; }
   h2 {
     font-size: 1.15rem;
-    margin: 2.5rem 0 0.75rem;
+    margin: 2.5rem 0 .75rem;
     border-bottom: 1px solid var(--border);
-    padding-bottom: 0.4rem;
+    padding-bottom: .4rem;
   }
-  a {
-    color: var(--accent);
-    text-decoration: none;
-  }
+  a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
   ul { padding-left: 1.25rem; }
-  li { margin: 0.4rem 0; }
+  li { margin: .4rem 0; }
   code {
     background: color-mix(in srgb, var(--border) 50%, transparent);
-    padding: 0.15em 0.4em;
+    padding: .15em .4em;
     border-radius: 4px;
-    font-size: 0.9em;
+    font-size: .9em;
   }
-  .badges { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+  pre {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: .5rem;
+    padding: .8rem 1rem;
+    overflow-x: auto;
+  }
+  pre code { background: none; padding: 0; }
+  .badges { display: flex; gap: .5rem; flex-wrap: wrap; margin: .5rem 0 0; }
+  .cta { display: flex; gap: .6rem; flex-wrap: wrap; margin: 1.25rem 0 0; }
+  .cta a {
+    border: 1px solid var(--border);
+    border-radius: .5rem;
+    padding: .5rem .9rem;
+    background: var(--card);
+  }
+  .cta a.primary { border-color: var(--accent); color: var(--accent); }
+  table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; }
+  .note {
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: .4rem;
+    padding: .75rem 1rem;
+    background: var(--card);
+    margin: 1rem 0;
+  }
   footer {
     margin-top: 3.5rem;
     padding-top: 1.5rem;
     border-top: 1px solid var(--border);
     color: var(--muted);
-    font-size: 0.85rem;
+    font-size: .85rem;
   }
 </style>
 </head>
 <body>
 <main>
   <h1>PumpkinPie</h1>
-  <p class="tagline">A bleeding-edge personal fork of <a href="https://github.com/Pumpkin-MC/Pumpkin">Pumpkin</a>, a Minecraft server written in Rust.</p>
+  <p class="tagline">A Minecraft 26.2 server written in Rust, built for vanilla behavioural parity.</p>
 
   <div class="badges">
     <a href="https://github.com/eshankiyer/PumpkinPie/actions/workflows/rust.yml">
@@ -84,29 +101,87 @@
     </a>
   </div>
 
+  <div class="cta">
+    <a class="primary" href="https://github.com/eshankiyer/PumpkinPie/releases/latest">Download</a>
+    <a href="tracker/">Implementation tracker</a>
+    <a href="https://github.com/eshankiyer/PumpkinPie">Source</a>
+  </div>
+
   <h2>What this is</h2>
   <p>
-    PumpkinPie tracks <code>master</code> on the upstream
-    <a href="https://github.com/Pumpkin-MC/Pumpkin">Pumpkin-MC/Pumpkin</a> repository and layers
-    in vanilla-parity fixes and features ahead of when they land upstream. It stays merged
-    forward against upstream regularly rather than drifting into a permanent divergence.
+    PumpkinPie is a Minecraft: Java Edition server for 26.2. It began as a fork of
+    <a href="https://github.com/Pumpkin-MC/Pumpkin">Pumpkin</a> and has grown into its own project
+    with its own priority: matching what vanilla actually does. Every change is checked against a
+    decompiled 26.2 server, and where it can be, confirmed against a running server with a real
+    client attached rather than by reading code alone.
+  </p>
+  <p>
+    That is the difference in practice. Recent work fixed freezing damage applied five times over,
+    fire resistance that ignored fireballs, hoppers running eleven percent slow, comparators reading
+    the wrong signal from their side inputs, and a registry encoding that made strict clients refuse
+    to join. Each fix cites the vanilla source it was checked against in the
+    <a href="https://github.com/eshankiyer/PumpkinPie/commits/master">commit history</a>.
   </p>
 
-  <h2>Links</h2>
-  <ul>
-    <li><a href="https://github.com/eshankiyer/PumpkinPie">Source (GitHub)</a></li>
-    <li><a href="https://github.com/Pumpkin-MC/Pumpkin">Upstream project</a></li>
-    <li><a href="https://pumpkinmc.org/">Upstream documentation</a></li>
-  </ul>
-
-  <h2>License</h2>
+  <h2>Download</h2>
   <p>
-    Distributed under the GNU General Public License v3.0, same as upstream. See
-    <a href="https://github.com/eshankiyer/PumpkinPie/blob/master/LICENSE">LICENSE</a>.
+    Builds are published on the
+    <a href="https://github.com/eshankiyer/PumpkinPie/releases">releases page</a>. Each release
+    carries binaries for the platforms below, a <code>SHA256SUMS</code> file, and a link to a
+    VirusTotal scan of the archives.
+  </p>
+  <table>
+    <thead><tr><th>Platform</th><th>Archive</th></tr></thead>
+    <tbody>
+      <tr><td>Linux x86-64</td><td><code>pumpkinpie-x86_64-unknown-linux-gnu.tar.gz</code></td></tr>
+      <tr><td>Linux ARM64</td><td><code>pumpkinpie-aarch64-unknown-linux-gnu.tar.gz</code></td></tr>
+      <tr><td>Windows x86-64</td><td><code>pumpkinpie-x86_64-pc-windows-msvc.zip</code></td></tr>
+      <tr><td>macOS ARM64</td><td><code>pumpkinpie-aarch64-apple-darwin.tar.gz</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3>Verify what you downloaded</h3>
+  <p>Check the archive against the published checksum before running it:</p>
+  <pre><code>sha256sum -c SHA256SUMS --ignore-missing</code></pre>
+  <div class="note">
+    <strong>On virus scanners.</strong> These binaries are unsigned, so Windows SmartScreen and some
+    antivirus products will warn about them — that is what an unsigned executable from a small
+    project looks like, not evidence of anything in particular. Every release links a VirusTotal
+    report for its archives so you can read the scan results yourself, and building from source is
+    always available if you would rather not take a binary on trust.
+  </div>
+
+  <h2>Running it</h2>
+  <pre><code>tar xzf pumpkinpie-x86_64-unknown-linux-gnu.tar.gz
+cd pumpkinpie
+./pumpkin</code></pre>
+  <p>
+    The server writes <code>pumpkin.toml</code> on first start. It speaks the 26.2 protocol; older
+    clients are not supported.
+  </p>
+
+  <h2>Parity</h2>
+  <p>
+    The <a href="tracker/">implementation tracker</a> shows which vanilla classes have an analogue
+    here and how much of each one's surface is covered, measured against the decompile. It counts
+    surface, not behaviour — a matched method can still behave differently, which is what the
+    ongoing verification work is for.
+  </p>
+
+  <h2>Relationship to Pumpkin</h2>
+  <p>
+    PumpkinPie is an independent fork. It is not affiliated with, endorsed by, or supported by the
+    Pumpkin project, so problems seen here belong in
+    <a href="https://github.com/eshankiyer/PumpkinPie/issues">this repository's issue tracker</a>,
+    not upstream's. The project stays GPL-3.0-licensed, as Pumpkin is, and upstream's work is
+    gratefully carried forward.
   </p>
 
   <footer>
-    Not affiliated with Mojang or Microsoft. Minecraft is a trademark of Mojang Synergies AB.
+    <p>
+      GPL-3.0. Not affiliated with Mojang Studios or Microsoft. Minecraft is a trademark of Mojang
+      Synergies AB.
+    </p>
   </footer>
 </main>
 </body>

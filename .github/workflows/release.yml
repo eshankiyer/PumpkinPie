@@ -1,0 +1,133 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (must already exist)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Install the toolchain
+        run: rustup update stable && rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release -p pumpkin --bin pumpkin
+
+      # The archive carries the binary plus the licence and readme, so a download stands on its own.
+      - name: Package (unix)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          staging="pumpkinpie"
+          mkdir -p "$staging"
+          cp target/release/pumpkin "$staging/"
+          cp LICENSE README.md "$staging/"
+          tar czf "pumpkinpie-${{ matrix.target }}.tar.gz" "$staging"
+
+      - name: Package (windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $staging = "pumpkinpie"
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          Copy-Item target/release/pumpkin.exe $staging/
+          Copy-Item LICENSE, README.md $staging/
+          Compress-Archive -Path $staging -DestinationPath "pumpkinpie-${{ matrix.target }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pumpkinpie-${{ matrix.target }}
+          path: pumpkinpie-${{ matrix.target }}.*
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # One checksum file for every archive, so a download can be verified with
+      # `sha256sum -c SHA256SUMS --ignore-missing`.
+      - name: Checksums
+        working-directory: artifacts
+        run: |
+          sha256sum pumpkinpie-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          gh release create "$TAG" --title "$TAG" --generate-notes --verify-tag || true
+          gh release upload "$TAG" artifacts/pumpkinpie-* artifacts/SHA256SUMS --clobber
+
+      # The binaries are unsigned, so the release notes point at an independent scan rather than
+      # asking anyone to take them on trust. VirusTotal accepts the released archives by URL.
+      - name: Note how to scan the archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            echo
+            echo "### Verifying this download"
+            echo
+            echo 'Check the archive against `SHA256SUMS`:'
+            echo
+            echo '```'
+            echo 'sha256sum -c SHA256SUMS --ignore-missing'
+            echo '```'
+            echo
+            echo "These binaries are unsigned, so SmartScreen and some antivirus products will warn"
+            echo "about them. To scan one yourself, paste its download URL into"
+            echo "<https://www.virustotal.com/gui/home/url>:"
+            echo
+            for archive in artifacts/pumpkinpie-*; do
+              name=$(basename "$archive")
+              echo "- https://github.com/$REPO/releases/download/$TAG/$name"
+            done
+          } > notes-append.md
+          gh release view "$TAG" --json body --jq .body > notes-current.md
+          cat notes-current.md notes-append.md > notes.md
+          gh release edit "$TAG" --notes-file notes.md

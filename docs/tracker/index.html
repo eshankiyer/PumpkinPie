@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PumpkinPie — Implementation Tracker</title>
+<meta name="description" content="Which vanilla Minecraft classes PumpkinPie implements, measured against a 26.2 decompile.">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #666666;
+    --border: #e0e0e0;
+    --card: #fafafa;
+    --accent: #d9730d;
+    --complete: #1a7f37;
+    --partial: #bf8700;
+    --todo: #8b949e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14100d;
+      --fg: #f0ece6;
+      --muted: #a89f94;
+      --border: #33291f;
+      --card: #1b1611;
+      --accent: #f0932b;
+      --complete: #3fb950;
+      --partial: #d29922;
+      --todo: #6e7681;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.5;
+  }
+  main { max-width: 62rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+  a { color: var(--accent); }
+  h1 { font-size: 2rem; margin: 0 0 .35rem; }
+  .lede { color: var(--muted); margin: 0 0 2rem; max-width: 46rem; }
+  nav { font-size: .9rem; margin-bottom: 1.5rem; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .75rem; }
+  .card {
+    border: 1px solid var(--border);
+    border-radius: .6rem;
+    padding: .85rem 1rem;
+    background: var(--card);
+  }
+  .card .label { color: var(--muted); font-size: .8rem; }
+  .card .value { font-size: 1.6rem; font-variant-numeric: tabular-nums; }
+  .value.complete { color: var(--complete); }
+  .value.partial { color: var(--partial); }
+  .value.todo { color: var(--todo); }
+  .bar-wrap { border: 1px solid var(--border); border-radius: .6rem; padding: 1rem; margin: 1.25rem 0 2rem; background: var(--card); }
+  .bar-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; margin-bottom: .6rem; }
+  .bar { height: .65rem; border-radius: 999px; background: var(--border); overflow: hidden; display: flex; }
+  .bar span { display: block; height: 100%; }
+  .bar .seg-complete { background: var(--complete); }
+  .bar .seg-partial { background: var(--partial); }
+  .controls { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
+  button, input[type="search"] {
+    font: inherit;
+    color: inherit;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: .45rem;
+    padding: .4rem .7rem;
+  }
+  button { cursor: pointer; }
+  button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  input[type="search"] { flex: 1 1 14rem; min-width: 10rem; }
+  .count { color: var(--muted); font-size: .85rem; margin-bottom: .75rem; }
+  ul.rows { list-style: none; margin: 0; padding: 0; }
+  ul.rows li { border: 1px solid var(--border); border-radius: .5rem; margin-bottom: .4rem; background: var(--card); }
+  details summary {
+    cursor: pointer;
+    padding: .6rem .85rem;
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    flex-wrap: wrap;
+  }
+  .dot { width: .55rem; height: .55rem; border-radius: 999px; flex: none; }
+  .dot.complete { background: var(--complete); }
+  .dot.partial { background: var(--partial); }
+  .dot.todo { background: var(--todo); }
+  .cls { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .pill { font-size: .75rem; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: .05rem .5rem; }
+  .body { padding: 0 .85rem .8rem; font-size: .88rem; color: var(--muted); }
+  .body code { font-size: .85rem; word-break: break-all; }
+  footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--border); color: var(--muted); font-size: .85rem; }
+</style>
+</head>
+<body>
+<main>
+  <nav><a href="../">&larr; PumpkinPie</a></nav>
+
+  <h1>Implementation Tracker</h1>
+  <p class="lede">
+    Which vanilla classes PumpkinPie declares an analogue of, and how much of each one's
+    surface is covered — measured mechanically against a decompiled Minecraft 26.2 server.
+  </p>
+
+  <div class="cards">
+    <div class="card"><div class="label">Classes tracked</div><div class="value" id="t-classes">—</div></div>
+    <div class="card"><div class="label">Complete</div><div class="value complete" id="t-complete">—</div></div>
+    <div class="card"><div class="label">Partial</div><div class="value partial" id="t-partial">—</div></div>
+    <div class="card"><div class="label">Not started</div><div class="value todo" id="t-todo">—</div></div>
+  </div>
+
+  <div class="bar-wrap">
+    <div class="bar-head">
+      <div>
+        <strong>Method coverage</strong>
+        <div style="color:var(--muted);font-size:.85rem">Across every tracked class.</div>
+      </div>
+      <div id="bar-legend" style="color:var(--muted);font-size:.85rem"></div>
+    </div>
+    <div class="bar"><span class="seg-complete" id="seg-complete"></span></div>
+  </div>
+
+  <div class="controls" role="group" aria-label="Filter by kind">
+    <button data-group="all" aria-pressed="true">All</button>
+    <button data-group="blocks" aria-pressed="false">Blocks</button>
+    <button data-group="items" aria-pressed="false">Items</button>
+    <button data-group="entities" aria-pressed="false">Entities</button>
+    <button data-group="other" aria-pressed="false">Other</button>
+    <input type="search" id="q" placeholder="Search classes…" aria-label="Search classes">
+  </div>
+  <div class="controls" role="group" aria-label="Filter by status">
+    <button data-status="all" aria-pressed="true">Any status</button>
+    <button data-status="complete" aria-pressed="false">Complete</button>
+    <button data-status="partial" aria-pressed="false">Partial</button>
+    <button data-status="todo" aria-pressed="false">Not started</button>
+  </div>
+
+  <p class="count" id="count">Loading…</p>
+  <ul class="rows" id="rows"></ul>
+
+  <footer>
+    <p>
+      <strong>How to read this.</strong> A class counts as <em>complete</em> when every method the
+      decompile lists has a plausibly-named counterpart somewhere in the workspace. Matching is by
+      name, so a method counted as missing may in fact be implemented under a different name or
+      inlined into its caller — treat the missing counts as leads to check, not as a defect list.
+      Coverage here is also about surface, not behaviour: a matched method can still behave
+      differently from vanilla.
+    </p>
+    <p id="method-note"></p>
+  </footer>
+</main>
+
+<script>
+const state = { group: "all", status: "all", q: "", rows: [] };
+
+function render() {
+  const q = state.q.trim().toLowerCase();
+  const rows = state.rows.filter(r =>
+    (state.group === "all" || r.group === state.group) &&
+    (state.status === "all" || r.status === state.status) &&
+    (q === "" || (r.name || "").toLowerCase().includes(q))
+  );
+
+  document.getElementById("count").textContent =
+    `Showing ${rows.length.toLocaleString()} of ${state.rows.length.toLocaleString()} classes`;
+
+  const list = document.getElementById("rows");
+  list.textContent = "";
+  const label = { complete: "Complete", partial: "Partial", todo: "Not started" };
+
+  for (const row of rows.slice(0, 400)) {
+    const li = document.createElement("li");
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+
+    const dot = document.createElement("span");
+    dot.className = `dot ${row.status}`;
+    const name = document.createElement("span");
+    name.className = "cls";
+    name.textContent = row.name;
+    const counts = document.createElement("span");
+    counts.className = "pill";
+    counts.textContent = `${row.present}/${row.total} methods`;
+    const status = document.createElement("span");
+    status.className = "pill";
+    status.textContent = label[row.status];
+
+    summary.append(dot, name, counts, status);
+
+    const body = document.createElement("div");
+    body.className = "body";
+    const vanilla = document.createElement("div");
+    vanilla.textContent = "vanilla: ";
+    const vcode = document.createElement("code");
+    vcode.textContent = row.vanilla_path || "—";
+    vanilla.append(vcode);
+    const rust = document.createElement("div");
+    rust.textContent = "pumpkinpie: ";
+    const rcode = document.createElement("code");
+    rcode.textContent = row.rust_file || "—";
+    rust.append(rcode);
+    const missing = document.createElement("div");
+    missing.textContent = `${row.absent} of ${row.total} methods have no name match (${row.subsystem}).`;
+    body.append(vanilla, rust, missing);
+
+    details.append(summary, body);
+    li.append(details);
+    list.append(li);
+  }
+
+  if (rows.length > 400) {
+    const li = document.createElement("li");
+    li.style.padding = ".6rem .85rem";
+    li.style.color = "var(--muted)";
+    li.textContent = `…and ${rows.length - 400} more. Narrow the search to see them.`;
+    list.append(li);
+  }
+}
+
+for (const button of document.querySelectorAll("[data-group]")) {
+  button.addEventListener("click", () => {
+    state.group = button.dataset.group;
+    for (const other of document.querySelectorAll("[data-group]")) {
+      other.setAttribute("aria-pressed", String(other === button));
+    }
+    render();
+  });
+}
+
+for (const button of document.querySelectorAll("[data-status]")) {
+  button.addEventListener("click", () => {
+    state.status = button.dataset.status;
+    for (const other of document.querySelectorAll("[data-status]")) {
+      other.setAttribute("aria-pressed", String(other === button));
+    }
+    render();
+  });
+}
+
+document.getElementById("q").addEventListener("input", event => {
+  state.q = event.target.value;
+  render();
+});
+
+fetch("data.json")
+  .then(response => response.json())
+  .then(data => {
+    state.rows = data.rows;
+    const t = data.totals;
+    document.getElementById("t-classes").textContent = t.classes.toLocaleString();
+    document.getElementById("t-complete").textContent = t.complete.toLocaleString();
+    document.getElementById("t-partial").textContent = t.partial.toLocaleString();
+    document.getElementById("t-todo").textContent = t.todo.toLocaleString();
+
+    const pct = t.methods_total ? (t.methods_present / t.methods_total) * 100 : 0;
+    document.getElementById("seg-complete").style.width = `${pct.toFixed(1)}%`;
+    document.getElementById("bar-legend").textContent =
+      `${t.methods_present.toLocaleString()} of ${t.methods_total.toLocaleString()} methods matched (${pct.toFixed(1)}%)`;
+    if (data.method) {
+      document.getElementById("method-note").textContent = `Method: ${data.method}.`;
+    }
+    render();
+  })
+  .catch(() => {
+    document.getElementById("count").textContent =
+      "Could not load the tracker dataset.";
+  });
+</script>
+</body>
+</html>
