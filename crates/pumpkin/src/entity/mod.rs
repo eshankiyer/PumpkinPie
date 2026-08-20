@@ -905,8 +905,8 @@ fn velocity_needs_resend(current: Vector3<f64>, last_sent: Vector3<f64>) -> bool
 const MAX_TICKS_BEFORE_POSITION_SYNC: i32 = 400;
 
 /// Vanilla `ServerEntity.sendChanges`: a move-entity packet carries the delta as a short in
-/// 4096ths of a block, so anything further than about eight blocks since the last update has to
-/// go out as an absolute position instead.
+/// units of 1/4096 of a block, so anything further than about eight blocks since the last
+/// update has to go out as an absolute position instead.
 const fn delta_needs_position_sync(encoded: Vector3<i64>) -> bool {
     encoded.x < i16::MIN as i64
         || encoded.x > i16::MAX as i64
@@ -1954,9 +1954,9 @@ impl Entity {
         let new = self.pos.load();
         let chunk_pos = self.chunk_pos.load();
 
-        // `ServerEntity.sendChanges` encodes the delta in 4096ths of a block and falls back to an
-        // absolute position sync when it no longer fits in a short. Casting an out-of-range value
-        // to i16 wraps, which would put the entity somewhere else entirely on the client.
+        // `ServerEntity.sendChanges` encodes the delta in units of 1/4096 of a block and falls
+        // back to an absolute position sync when it no longer fits in a short. Casting an
+        // out-of-range value to i16 wraps, putting the entity somewhere else on the client.
         let encoded = Vector3::new(
             new.x.mul_add(4096.0, -(old.x * 4096.0)) as i64,
             new.y.mul_add(4096.0, -(old.y * 4096.0)) as i64,
@@ -2214,9 +2214,9 @@ impl Entity {
         let new = self.pos.load();
         let chunk_pos = self.chunk_pos.load();
 
-        // `ServerEntity.sendChanges` encodes the delta in 4096ths of a block and falls back to an
-        // absolute position sync when it no longer fits in a short. Casting an out-of-range value
-        // to i16 wraps, which would put the entity somewhere else entirely on the client.
+        // `ServerEntity.sendChanges` encodes the delta in units of 1/4096 of a block and falls
+        // back to an absolute position sync when it no longer fits in a short. Casting an
+        // out-of-range value to i16 wraps, putting the entity somewhere else on the client.
         let encoded = Vector3::new(
             new.x.mul_add(4096.0, -(old.x * 4096.0)) as i64,
             new.y.mul_add(4096.0, -(old.y * 4096.0)) as i64,
