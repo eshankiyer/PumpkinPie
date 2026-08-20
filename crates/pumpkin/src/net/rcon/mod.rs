@@ -61,6 +61,9 @@ impl RCONServer {
     }
 }
 
+/// `RconClient.sendCmdResponse` splits a command's output into chunks of this many characters.
+const RESPONSE_CHUNK_CHARACTERS: usize = 4096;
+
 pub struct RCONClient {
     connection: tokio::net::TcpStream,
     address: SocketAddr,
@@ -147,12 +150,34 @@ impl RCONClient {
                     .await;
 
                     let output = output.lock().await;
-                    for line in output.iter() {
-                        if config.logging.commands {
+                    if config.logging.commands {
+                        for line in output.iter() {
                             info!("RCON ({}): {}", self.address, line);
                         }
-                        self.send(ClientboundPacket::Output, packet.get_id(), line)
-                            .await?;
+                    }
+
+                    // `RconClient.sendCmdResponse`: one response per command, split into 4096
+                    // character chunks, and always at least one packet even when the command
+                    // printed nothing. Sending one packet per line, or none at all, leaves
+                    // clients waiting for a reply that never comes or reading the next
+                    // command's reply.
+                    let response = output.join("\n");
+                    let id = packet.get_id();
+                    drop(output);
+
+                    let characters: Vec<char> = response.chars().collect();
+                    let mut sent_any = false;
+                    for chunk in characters.chunks(RESPONSE_CHUNK_CHARACTERS) {
+                        self.send(
+                            ClientboundPacket::Output,
+                            id,
+                            &chunk.iter().collect::<String>(),
+                        )
+                        .await?;
+                        sent_any = true;
+                    }
+                    if !sent_any {
+                        self.send(ClientboundPacket::Output, id, "").await?;
                     }
                 }
             }
