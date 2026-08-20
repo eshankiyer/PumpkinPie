@@ -221,7 +221,9 @@ impl Explosion {
         let entities = world.get_all_at_box(&search_box);
 
         for entity_base in entities {
-            if entity_base.is_immune_to_explosion() {
+            // `ServerExplosion.java:183`: `shouldAffectBlocklikeEntities` is set by the block
+            // interaction, so only a destroying explosion reaches block-like entities.
+            if entity_base.ignores_explosion(self.destroys_blocks) {
                 continue;
             }
 

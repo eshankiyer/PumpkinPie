@@ -298,7 +298,32 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
     }
 
     /// Whether the entity is immune from explosion knockback and damage
-    fn is_immune_to_explosion(&self) -> bool {
+    /// Vanilla `Entity.ignoreExplosion`. `affects_blocklike_entities` is the explosion's
+    /// `shouldAffectBlocklikeEntities`, which only the block-destroying interactions set: a
+    /// block-preserving blast leaves armour stands, dropped items, paintings, item frames and
+    /// leash knots alone entirely, and a destroying one still passes over an invisible armour
+    /// stand.
+    fn ignores_explosion(&self, affects_blocklike_entities: bool) -> bool {
+        let entity = self.get_entity();
+        let id = entity.entity_type.id;
+
+        if id == EntityType::ARMOR_STAND.id {
+            return if affects_blocklike_entities {
+                entity.invisible.load(Ordering::Relaxed)
+            } else {
+                true
+            };
+        }
+
+        if id == EntityType::ITEM.id
+            || id == EntityType::PAINTING.id
+            || id == EntityType::ITEM_FRAME.id
+            || id == EntityType::GLOW_ITEM_FRAME.id
+            || id == EntityType::LEASH_KNOT.id
+        {
+            return !affects_blocklike_entities;
+        }
+
         false
     }
 
