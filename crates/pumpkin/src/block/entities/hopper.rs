@@ -1,5 +1,4 @@
 use crate::block::entities::BlockEntity;
-use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::world::World;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BlockProperties, FacingHopper, HopperLikeProperties};
@@ -218,18 +217,10 @@ impl HopperBlockEntity {
                         .await
                     {
                         container.set_stack(i, item).await;
-                        // If extracting from furnace output slot (index 2), drop XP as orbs
-                        let furnace_output_slot: usize = 2;
-                        if i == furnace_output_slot
-                            && let Some(experience_container) =
-                                entity.clone().to_experience_container()
-                        {
-                            let xp = experience_container.extract_experience();
-                            if xp > 0 {
-                                let pos = self.position.to_f64();
-                                ExperienceOrbEntity::spawn(world, pos, xp as u32).await;
-                            }
-                        }
+                        // A hopper pulls through the raw container, so it never runs the result
+                        // slot's take hook: vanilla banks the furnace's experience until a player
+                        // takes the output or breaks the block. Popping orbs at the hopper turned
+                        // every auto-smelter into an orb fountain.
                         return true;
                     }
                 }
