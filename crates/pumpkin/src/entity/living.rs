@@ -676,15 +676,12 @@ impl LivingEntity {
         self.entity.entity_id
     }
 
-    /// `LivingEntity#canBeAffected`. Only `Parched#canBeAffected` (Parched.java), which makes
-    /// Parched immune to the Weakness its own arrows apply, is modelled here. The base
-    /// class's `IMMUNE_TO_INFESTED` / `IMMUNE_TO_OOZING` / `IGNORES_POISON_AND_REGEN`
-    /// entity-type-tag checks and the `Spider`, `WitherSkeleton`, `WitherBoss` and
-    /// `AbstractNautilus` overrides are still unported.
+    /// `LivingEntity.canBeAffected` plus the species overrides that sit in front of it:
+    /// `Parched` (immune to the Weakness its own arrows apply), `Spider` and `AbstractNautilus`
+    /// (poison) and `WitherBoss` / `WitherSkeleton` (wither).
     #[must_use]
     pub fn can_be_affected(&self, effect_type: &StatusEffect) -> bool {
-        !(self.entity.entity_type == &EntityType::PARCHED
-            && effect_type.id == StatusEffect::WEAKNESS.id)
+        effect_applies_to(self.entity.entity_type, effect_type)
     }
 
     #[expect(
@@ -4382,6 +4379,40 @@ fn consumable_remainder(item: &ItemStack) -> Option<&'static Item> {
     }
 }
 
+/// `LivingEntity.canBeAffected` and the species overrides in front of it.
+///
+/// The tag branches are checked in vanilla's order, and the overrides run first because vanilla
+/// resolves them before delegating to the base class.
+#[must_use]
+pub fn effect_applies_to(entity_type: &'static EntityType, effect_type: &StatusEffect) -> bool {
+    if entity_type == &EntityType::PARCHED && effect_type.id == StatusEffect::WEAKNESS.id {
+        return false;
+    }
+    if (entity_type == &EntityType::WITHER || entity_type == &EntityType::WITHER_SKELETON)
+        && effect_type.id == StatusEffect::WITHER.id
+    {
+        return false;
+    }
+    if (entity_type == &EntityType::SPIDER
+        || entity_type == &EntityType::CAVE_SPIDER
+        || entity_type == &EntityType::NAUTILUS
+        || entity_type == &EntityType::ZOMBIE_NAUTILUS)
+        && effect_type.id == StatusEffect::POISON.id
+    {
+        return false;
+    }
+
+    if entity_type.has_tag(&tag::EntityType::MINECRAFT_IMMUNE_TO_INFESTED) {
+        effect_type.id != StatusEffect::INFESTED.id
+    } else if entity_type.has_tag(&tag::EntityType::MINECRAFT_IMMUNE_TO_OOZING) {
+        effect_type.id != StatusEffect::OOZING.id
+    } else if entity_type.has_tag(&tag::EntityType::MINECRAFT_IGNORES_POISON_AND_REGEN) {
+        effect_type.id != StatusEffect::REGENERATION.id && effect_type.id != StatusEffect::POISON.id
+    } else {
+        true
+    }
+}
+
 /// Vanilla `OozingMobEffect.numberOfSlimesToSpawn`: the cramming limit minus the slimes already
 /// nearby, never below zero and never above what the effect asks for. A `maxEntityCramming` of
 /// zero or less disables the check entirely.
@@ -4448,6 +4479,117 @@ fn update_effect_chain(chain: &mut Vec<Effect>, index: usize, take_over: &Effect
     }
 
     changed
+}
+
+#[cfg(test)]
+mod can_be_affected_tests {
+    use super::effect_applies_to;
+    use pumpkin_data::effect::StatusEffect;
+    use pumpkin_data::entity::EntityType;
+
+    #[test]
+    fn silverfish_shrug_off_infested_but_take_everything_else() {
+        assert!(!effect_applies_to(
+            &EntityType::SILVERFISH,
+            &StatusEffect::INFESTED
+        ));
+        assert!(effect_applies_to(
+            &EntityType::SILVERFISH,
+            &StatusEffect::OOZING
+        ));
+        assert!(effect_applies_to(
+            &EntityType::SILVERFISH,
+            &StatusEffect::SPEED
+        ));
+    }
+
+    #[test]
+    fn slimes_shrug_off_oozing() {
+        assert!(!effect_applies_to(
+            &EntityType::SLIME,
+            &StatusEffect::OOZING
+        ));
+        assert!(effect_applies_to(
+            &EntityType::SLIME,
+            &StatusEffect::INFESTED
+        ));
+    }
+
+    #[test]
+    fn the_undead_ignore_poison_and_regeneration() {
+        assert!(!effect_applies_to(
+            &EntityType::SKELETON,
+            &StatusEffect::POISON
+        ));
+        assert!(!effect_applies_to(
+            &EntityType::SKELETON,
+            &StatusEffect::REGENERATION
+        ));
+        assert!(effect_applies_to(
+            &EntityType::SKELETON,
+            &StatusEffect::SPEED
+        ));
+    }
+
+    #[test]
+    fn spiders_and_nautiluses_ignore_poison_only() {
+        for entity_type in [
+            &EntityType::SPIDER,
+            &EntityType::CAVE_SPIDER,
+            &EntityType::NAUTILUS,
+        ] {
+            assert!(!effect_applies_to(entity_type, &StatusEffect::POISON));
+            assert!(effect_applies_to(entity_type, &StatusEffect::REGENERATION));
+        }
+
+        // The zombie nautilus takes the same poison override, but it is also undead and so
+        // carries `ignores_poison_and_regen`, which takes regeneration away as well.
+        assert!(!effect_applies_to(
+            &EntityType::ZOMBIE_NAUTILUS,
+            &StatusEffect::POISON
+        ));
+        assert!(!effect_applies_to(
+            &EntityType::ZOMBIE_NAUTILUS,
+            &StatusEffect::REGENERATION
+        ));
+    }
+
+    #[test]
+    fn withers_and_wither_skeletons_ignore_wither() {
+        assert!(!effect_applies_to(
+            &EntityType::WITHER,
+            &StatusEffect::WITHER
+        ));
+        assert!(!effect_applies_to(
+            &EntityType::WITHER_SKELETON,
+            &StatusEffect::WITHER
+        ));
+        assert!(effect_applies_to(
+            &EntityType::ZOMBIE,
+            &StatusEffect::WITHER
+        ));
+    }
+
+    #[test]
+    fn parched_stay_immune_to_their_own_weakness_arrows() {
+        assert!(!effect_applies_to(
+            &EntityType::PARCHED,
+            &StatusEffect::WEAKNESS
+        ));
+        assert!(effect_applies_to(
+            &EntityType::PARCHED,
+            &StatusEffect::SLOWNESS
+        ));
+    }
+
+    #[test]
+    fn ordinary_mobs_take_everything() {
+        assert!(effect_applies_to(&EntityType::COW, &StatusEffect::POISON));
+        assert!(effect_applies_to(
+            &EntityType::PLAYER,
+            &StatusEffect::REGENERATION
+        ));
+    }
 }
 
 #[cfg(test)]
