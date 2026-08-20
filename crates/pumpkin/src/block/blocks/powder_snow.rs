@@ -1,3 +1,4 @@
+use pumpkin_data::Block;
 use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
@@ -105,9 +106,16 @@ impl BlockBehaviour for PowderSnowBlock {
     fn on_entity_collision<'a>(&'a self, args: OnEntityCollisionArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             let entity = args.entity.get_entity();
-            entity
-                .slow_movement(args.state, Vector3::new(0.9, 1.5, 0.9))
-                .await;
+            // `PowderSnowBlock.entityInside`: a living entity is only slowed by the powder snow it
+            // is actually standing in, not by every powder snow block its hitbox touches. Without
+            // the check, snow at head height slowed a player standing on solid ground.
+            let stuck_in_snow = args.entity.get_living_entity().is_none()
+                || args.world.get_block(&entity.block_pos.load()) == &Block::POWDER_SNOW;
+            if stuck_in_snow {
+                entity
+                    .slow_movement(args.state, Vector3::new(0.9, 1.5, 0.9))
+                    .await;
+            }
 
             if entity.fire_ticks.load(std::sync::atomic::Ordering::Relaxed) > 0 {
                 let can_destroy = args.entity.get_player().is_some()
