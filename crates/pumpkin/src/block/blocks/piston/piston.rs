@@ -379,8 +379,13 @@ pub async fn try_move(world: &Arc<World>, block: &Block, block_pos: &BlockPos) {
                 let Some(piston) = entity.as_any().downcast_ref::<PistonBlockEntity>() else {
                     return;
                 };
-                if piston.extending && piston.current_progress.load() < 0.5
-                // TODO: more stuff...
+                // `PistonBaseBlock.triggerEvent` reads `getProgress(0.0)`, which lerps at zero and
+                // so returns the PREVIOUS tick's progress. Reading the current one misjudged the
+                // tick right after a sticky piston starts extending, where the old value is 0 and
+                // the new one is already 0.5.
+                if piston.extending && piston.last_progress.load() < 0.5
+                // TODO: vanilla also fires this when the entity was ticked this tick or the
+                // server is inside its block-tick loop.
                 {
                     // Piston reduced too quickly, if its a stick piston no blocks will be dragged
                     r#type = 2;
