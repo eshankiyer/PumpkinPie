@@ -12,12 +12,16 @@ use crate::entity::ai::control::move_control::MoveControl;
 use crate::entity::ai::goal::Controls;
 use crate::entity::ai::goal::goal_selector::GoalSelector;
 use crate::entity::player::Player;
+use crate::entity::r#type::from_type;
+use crate::item::items::spawn_egg::apply_entity_variant;
 use crate::server::Server;
 use crate::world::World;
+use crate::world::game_event::{GameEventContext, emit_game_event};
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::data_component_impl::EquipmentSlot;
+use pumpkin_data::entity::entity_from_egg;
 use pumpkin_data::entity::{EntityType, MobCategory};
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::meta_data_type::MetaDataType;
@@ -702,6 +706,51 @@ impl MobEntity {
     }
 }
 
+/// Vanilla `SpawnEggItem.spawnOffspringFromSpawnEgg` only produces a baby when the clicked mob
+/// is an `AgeableMob` whose `getBreedOffspring` returns an entity. These are the registered
+/// types that satisfy both. Parrots, wandering traders, camel husks, zombie nautiluses, slimes
+/// and magma cubes are ageable but always breed to null, so a matching egg used on them falls
+/// through to the mob's regular interaction instead.
+const fn spawns_offspring_from_egg(entity_type: &EntityType) -> bool {
+    let id = entity_type.id;
+    id == EntityType::ARMADILLO.id
+        || id == EntityType::AXOLOTL.id
+        || id == EntityType::BEE.id
+        || id == EntityType::CAMEL.id
+        || id == EntityType::CAT.id
+        || id == EntityType::CHICKEN.id
+        || id == EntityType::COW.id
+        || id == EntityType::DOLPHIN.id
+        || id == EntityType::DONKEY.id
+        || id == EntityType::FOX.id
+        || id == EntityType::FROG.id
+        || id == EntityType::GLOW_SQUID.id
+        || id == EntityType::GOAT.id
+        || id == EntityType::HAPPY_GHAST.id
+        || id == EntityType::HOGLIN.id
+        || id == EntityType::HORSE.id
+        || id == EntityType::LLAMA.id
+        || id == EntityType::MOOSHROOM.id
+        || id == EntityType::MULE.id
+        || id == EntityType::NAUTILUS.id
+        || id == EntityType::OCELOT.id
+        || id == EntityType::PANDA.id
+        || id == EntityType::PIG.id
+        || id == EntityType::POLAR_BEAR.id
+        || id == EntityType::RABBIT.id
+        || id == EntityType::SHEEP.id
+        || id == EntityType::SKELETON_HORSE.id
+        || id == EntityType::SNIFFER.id
+        || id == EntityType::SQUID.id
+        || id == EntityType::STRIDER.id
+        || id == EntityType::SULFUR_CUBE.id
+        || id == EntityType::TRADER_LLAMA.id
+        || id == EntityType::TURTLE.id
+        || id == EntityType::VILLAGER.id
+        || id == EntityType::WOLF.id
+        || id == EntityType::ZOMBIE_HORSE.id
+}
+
 pub trait Mob: EntityBase + Send + Sync {
     /// Vanilla `Mob.hasControllingPassenger` and `Mob.getControllingPassenger`.
     fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
@@ -1207,6 +1256,61 @@ pub trait Mob: EntityBase + Send + Sync {
         })
     }
 
+    /// Vanilla `Mob.checkAndHandleImportantInteractions` handles matching spawn eggs before
+    /// dispatching to each mob's regular interaction method.
+    fn spawn_egg_interact<'a>(
+        &'a self,
+        player: &'a Arc<Player>,
+        item_stack: &'a mut ItemStack,
+    ) -> EntityBaseFuture<'a, bool>
+    where
+        Self: Sized,
+    {
+        Box::pin(async move {
+            let Some(egg_type) = entity_from_egg(item_stack.item.id) else {
+                return false;
+            };
+            let entity = self.get_entity();
+            if egg_type.id != entity.entity_type.id || !spawns_offspring_from_egg(egg_type) {
+                return false;
+            }
+
+            let world = entity.world.load();
+            // Vanilla passes the clicked mob as its own breeding partner. `create_offspring`
+            // returns `None` for species whose breeding drops an item instead of a baby (the
+            // sniffer), but `Sniffer.getBreedOffspring` still returns a sniffer, so an egg used
+            // on one spawns a baby the same as every other ageable mob.
+            let offspring = self.create_offspring(self, &world).await.or_else(|| {
+                Some(from_type(
+                    egg_type,
+                    entity.pos.load(),
+                    &world,
+                    Uuid::new_v4(),
+                ))
+            });
+            let Some(offspring) = offspring else {
+                return false;
+            };
+
+            offspring.get_entity().set_age(-24000);
+            apply_entity_variant(item_stack, offspring.as_ref());
+            world.spawn_entity(offspring.clone()).await;
+            self.on_offspring_spawned_from_egg(player, offspring.as_ref());
+            item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+            emit_game_event(
+                &world,
+                pumpkin_data::game_event::GameEvent::EntityInteract,
+                entity.pos.load(),
+                GameEventContext::of_entity(player.clone() as Arc<dyn EntityBase>),
+            )
+            .await;
+            true
+        })
+    }
+
+    /// Vanilla `Mob.onOffspringSpawnedFromEgg` hook.
+    fn on_offspring_spawned_from_egg(&self, _player: &Arc<Player>, _offspring: &dyn EntityBase) {}
+
     /// Vanilla `Mob.canBeLeashed`: whether a lead can be attached to this mob at all.
     /// Defaults to `true`; species that are never leashable (e.g. Turtle) override this.
     fn can_be_leashed(&self) -> bool {
@@ -1680,7 +1784,12 @@ impl<T: Mob + Send + 'static> EntityBase for T {
         player: &'a Arc<Player>,
         item_stack: &'a mut ItemStack,
     ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move { self.mob_interact(player, item_stack).await })
+        Box::pin(async move {
+            if self.spawn_egg_interact(player, item_stack).await {
+                return true;
+            }
+            self.mob_interact(player, item_stack).await
+        })
     }
 
     fn on_player_collision<'a>(&'a self, player: &'a Arc<Player>) -> EntityBaseFuture<'a, ()> {

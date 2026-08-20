@@ -630,6 +630,12 @@ impl Mob for FoxEntity {
         self.animal_interact(player, item_stack, Sound::EntityFoxAmbient)
     }
 
+    fn on_offspring_spawned_from_egg(&self, player: &Arc<Player>, offspring: &dyn EntityBase) {
+        if let Some(fox) = offspring.cast_any().downcast_ref::<Self>() {
+            fox.add_trusted_entity(player.gameprofile.id);
+        }
+    }
+
     /// `Fox.getBreedOffspring` + `FoxBreedGoal.breed`'s trust-inheritance: the kit's variant is a
     /// coin flip between the two parents', and it trusts whichever parent(s) have a recorded
     /// love-cause player (the player(s) that fed them to start breeding).
