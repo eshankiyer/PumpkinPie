@@ -1681,6 +1681,8 @@ impl LivingEntity {
 
             Self::release_claimed_pois(&world, &*dyn_self).await;
 
+            self.apply_killed_effects(&world).await;
+
             // Statistics updates
             self.update_death_stats(&*dyn_self, cause).await;
 
@@ -1946,6 +1948,75 @@ impl LivingEntity {
             for stack in loot_table.get_loot(params) {
                 self.entity.world.load().drop_stack(&pos, stack).await;
             }
+        }
+    }
+
+    /// Vanilla `MobEffect.onMobRemoved` with `RemovalReason.KILLED`: `OozingMobEffect` leaves
+    /// slimes behind and `WindChargedMobEffect` sets off a wind burst when the carrier dies.
+    async fn apply_killed_effects(&self, world: &Arc<World>) {
+        let effects: Vec<&'static StatusEffect> =
+            self.active_effects.lock().await.keys().copied().collect();
+
+        for effect_type in effects {
+            if effect_type == &StatusEffect::OOZING {
+                self.spawn_oozing_slimes(world).await;
+            } else if effect_type == &StatusEffect::WIND_CHARGED {
+                let pos = self.entity.pos.load();
+                let height = f64::from(self.entity.entity_dimension.load().height);
+                let gust_strength = f64::from(3.0 + rand::random::<f32>() * 2.0);
+                world
+                    .explode_knockback_only(
+                        Vector3::new(pos.x, pos.y + height / 2.0, pos.z),
+                        gust_strength,
+                        1.0,
+                    )
+                    .await;
+            }
+        }
+    }
+
+    /// Vanilla `OozingMobEffect.onMobRemoved`: two size-2 slimes at the carrier's feet, capped by
+    /// the room the `maxEntityCramming` game rule leaves once the slimes already within two blocks
+    /// are counted.
+    async fn spawn_oozing_slimes(&self, world: &Arc<World>) {
+        const SLIME_SIZE: i32 = 2;
+        const REQUESTED_SLIMES: i64 = 2;
+        const RADIUS_TO_CHECK_SLIMES: f64 = 2.0;
+
+        let max_entity_cramming = world.level_info.load().game_rules.max_entity_cramming;
+        let nearby_slimes = if max_entity_cramming < 1 {
+            0
+        } else {
+            let mut slimes = Vec::new();
+            let own_id = self.entity.entity_id;
+            world.extend_entities_in_box_where(
+                &mut slimes,
+                usize::try_from(max_entity_cramming).unwrap_or(usize::MAX),
+                self.entity
+                    .bounding_box
+                    .load()
+                    .expand_all(RADIUS_TO_CHECK_SLIMES),
+                |entity| {
+                    entity.get_entity().entity_type.id == EntityType::SLIME.id
+                        && entity.get_entity().entity_id != own_id
+                },
+            );
+            slimes.len()
+        };
+
+        let to_spawn = oozing_slimes_to_spawn(max_entity_cramming, nearby_slimes, REQUESTED_SLIMES);
+        let pos = self.entity.pos.load();
+
+        for _ in 0..to_spawn {
+            let entity = Entity::new(
+                world.clone(),
+                Vector3::new(pos.x, pos.y + 0.5, pos.z),
+                &EntityType::SLIME,
+            );
+            let slime = SlimeEntity::new(entity);
+            slime.set_size(SLIME_SIZE, true);
+            slime.get_entity().yaw.store(rand::random_range(0.0..360.0));
+            world.spawn_entity(slime).await;
         }
     }
 
@@ -4311,6 +4382,18 @@ fn consumable_remainder(item: &ItemStack) -> Option<&'static Item> {
     }
 }
 
+/// Vanilla `OozingMobEffect.numberOfSlimesToSpawn`: the cramming limit minus the slimes already
+/// nearby, never below zero and never above what the effect asks for. A `maxEntityCramming` of
+/// zero or less disables the check entirely.
+fn oozing_slimes_to_spawn(max_entity_cramming: i64, nearby_slimes: usize, requested: i64) -> i64 {
+    if max_entity_cramming < 1 {
+        return requested;
+    }
+
+    let room = max_entity_cramming.saturating_sub(nearby_slimes as i64);
+    room.clamp(0, requested)
+}
+
 /// Vanilla `AbsorptionMobEffect.onEffectStarted` combined with the clamp in
 /// `LivingEntity.setAbsorptionAmount`.
 fn absorption_after_application(current: f32, amplifier: u8, max_absorption: f32) -> f32 {
@@ -4365,6 +4448,30 @@ fn update_effect_chain(chain: &mut Vec<Effect>, index: usize, take_over: &Effect
     }
 
     changed
+}
+
+#[cfg(test)]
+mod oozing_tests {
+    use super::oozing_slimes_to_spawn;
+
+    #[test]
+    fn the_effect_spawns_two_slimes_with_room_to_spare() {
+        assert_eq!(oozing_slimes_to_spawn(24, 0, 2), 2);
+        assert_eq!(oozing_slimes_to_spawn(24, 21, 2), 2);
+    }
+
+    #[test]
+    fn cramming_limits_the_count() {
+        assert_eq!(oozing_slimes_to_spawn(24, 23, 2), 1);
+        assert_eq!(oozing_slimes_to_spawn(24, 24, 2), 0);
+        assert_eq!(oozing_slimes_to_spawn(24, 30, 2), 0);
+    }
+
+    #[test]
+    fn a_disabled_cramming_rule_skips_the_check() {
+        assert_eq!(oozing_slimes_to_spawn(0, 100, 2), 2);
+        assert_eq!(oozing_slimes_to_spawn(-1, 100, 2), 2);
+    }
 }
 
 #[cfg(test)]
