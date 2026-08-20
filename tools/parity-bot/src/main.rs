@@ -82,10 +82,18 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn handle(_client: Client, event: Event, state: State) -> Result<()> {
+async fn handle(client: Client, event: Event, state: State) -> Result<()> {
     match event {
         Event::Login => emit(serde_json::json!({ "event": "login" })),
-        Event::Spawn => emit(serde_json::json!({ "event": "spawn" })),
+        Event::Spawn => {
+            let position = client.position().ok();
+            emit(serde_json::json!({
+                "event": "spawn",
+                "x": position.map(|p| p.x),
+                "y": position.map(|p| p.y),
+                "z": position.map(|p| p.z),
+            }));
+        }
         Event::Death(_) => emit(serde_json::json!({ "event": "death" })),
         Event::Chat(message) => emit(serde_json::json!({
             "event": "chat",
