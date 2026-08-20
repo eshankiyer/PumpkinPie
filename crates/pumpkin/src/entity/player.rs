@@ -3910,6 +3910,22 @@ impl Player {
     }
 
     pub async fn drop_item(&self, item_stack: ItemStack) {
+        self.drop_item_with(item_stack, 40, None).await;
+    }
+
+    /// `GiveCommand`: an overflow drop is handed straight back to the player, with no pickup
+    /// delay and reserved for them so nobody else can take it.
+    pub async fn drop_item_for_self(&self, item_stack: ItemStack) {
+        self.drop_item_with(item_stack, 0, Some(self.gameprofile.id))
+            .await;
+    }
+
+    async fn drop_item_with(
+        &self,
+        item_stack: ItemStack,
+        pickup_delay: u8,
+        target: Option<uuid::Uuid>,
+    ) {
         self.increment_stat(
             statistics::StatisticCategory::Dropped,
             item_stack.item.id as i32,
@@ -3944,8 +3960,12 @@ impl Player {
 
         // TODO: Merge stacks together
         let item_entity = Arc::new(ItemEntity::new_with_velocity(
-            entity, item_stack, velocity, 40,
+            entity,
+            item_stack,
+            velocity,
+            pickup_delay,
         ));
+        item_entity.set_target(target);
         self.world().spawn_entity(item_entity).await;
     }
 

@@ -1,6 +1,7 @@
 use crate::entity::player::statistics::StatisticCategory;
 use crate::{entity::EntityBaseFuture, server::Server};
 use core::f32;
+use crossbeam::atomic::AtomicCell;
 use pumpkin_data::data_component_impl::DamageResistantImpl;
 use pumpkin_data::data_component_impl::DamageResistantType;
 use pumpkin_data::item_stack::ItemStack;
@@ -46,6 +47,9 @@ pub struct ItemEntity {
     pickup_delay: AtomicU8,
     health: AtomicF32,
     never_pickup: AtomicBool,
+    /// Vanilla `ItemEntity.target` (NBT `Owner`): when set, only that player may pick the stack
+    /// up, and it only merges with another drop reserved for the same player.
+    target: AtomicCell<Option<uuid::Uuid>>,
 }
 
 const ITEM_UPDATE_INTERVAL: u32 = 20;
@@ -66,6 +70,7 @@ impl ItemEntity {
             item_stack: Mutex::new(item_stack),
             item_age: AtomicI32::new(0),
             merge_tick: AtomicU32::new(0),
+            target: AtomicCell::new(None),
             pickup_delay: AtomicU8::new(10), // Vanilla pickup delay is 10 ticks
             health: AtomicF32::new(5.0),
             never_pickup: AtomicBool::new(false),
@@ -88,6 +93,7 @@ impl ItemEntity {
             item_stack: Mutex::new(item_stack),
             item_age: AtomicI32::new(0),
             merge_tick: AtomicU32::new(0),
+            target: AtomicCell::new(None),
             pickup_delay: AtomicU8::new(pickup_delay), // Vanilla pickup delay is 10 ticks
             health: AtomicF32::new(5.0),
             never_pickup: AtomicBool::new(false),
@@ -102,10 +108,16 @@ impl ItemEntity {
             item_stack: Mutex::new(ItemStack::new(1, &pumpkin_data::item::Item::AIR)),
             item_age: AtomicI32::new(0),
             merge_tick: AtomicU32::new(0),
+            target: AtomicCell::new(None),
             pickup_delay: AtomicU8::new(10),
             health: AtomicF32::new(5.0),
             never_pickup: AtomicBool::new(false),
         }
+    }
+
+    /// Vanilla `ItemEntity.setTarget`: reserve this drop for one player.
+    pub fn set_target(&self, target: Option<uuid::Uuid>) {
+        self.target.store(target);
     }
 
     /// Vanilla derives fire immunity from the held stack on every query
@@ -189,7 +201,11 @@ impl ItemEntity {
             (high_stack, low_stack)
         };
 
-        if !Self::are_mergeable_stacks(&self_stack, &other_stack) {
+        // `ItemEntity.tryToMerge` also requires the two drops to be reserved for the same
+        // player, so one player's reserved drop never absorbs a free one.
+        if self.target.load() != other.target.load()
+            || !Self::are_mergeable_stacks(&self_stack, &other_stack)
+        {
             return;
         }
 
@@ -452,6 +468,9 @@ impl NBTStorage for ItemEntity {
             };
             nbt.put_short("PickupDelay", pickup_delay);
             nbt.put_short("Health", self.health.load(Relaxed) as i16);
+            if let Some(target) = self.target.load() {
+                nbt.put_uuid("Owner", target);
+            }
         })
     }
 
@@ -466,6 +485,8 @@ impl NBTStorage for ItemEntity {
                 Self::update_fire_immunity(&self.entity, &stack);
                 *self.item_stack.lock().await = stack;
             }
+
+            self.target.store(nbt.get_uuid("Owner"));
 
             // Vanilla: `this.age = input.getShortOr("Age", (short)0)`. Negative
             // values are legitimate active states (-32768 never despawns, -6000
@@ -588,7 +609,12 @@ impl EntityBase for ItemEntity {
 
     fn on_player_collision<'a>(&'a self, player: &'a Arc<Player>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async {
+            // `ItemEntity.playerTouch`: a reserved drop is only pickable by its owner.
             if self.pickup_delay.load(Ordering::Relaxed) > 0
+                || self
+                    .target
+                    .load()
+                    .is_some_and(|target| target != player.gameprofile.id)
                 || player.living_entity.health.load() <= 0.0
                 || player.is_spectator()
             {

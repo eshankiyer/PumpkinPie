@@ -63,7 +63,7 @@ impl CommandExecutor for Executor {
                     stack.item_count = take as u8;
                     target.inventory().insert_stack_anywhere(&mut stack).await;
                     if !stack.is_empty() {
-                        target.drop_item(stack).await;
+                        target.drop_item_for_self(stack).await;
                     }
                     remaining -= take;
                 }
