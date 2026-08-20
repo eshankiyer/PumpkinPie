@@ -868,6 +868,13 @@ impl RemovalReason {
 static CURRENT_ID: AtomicI32 = AtomicI32::new(1);
 
 /// Represents a non-living Entity (e.g. Item, Egg, Snowball...)
+/// Vanilla `ServerEntity.sendChanges`: the motion packet goes out only when the velocity moved
+/// more than 1e-7 from the one the client was last given, or when it has just become exactly
+/// zero. Without this an idle world resends every entity's unchanged velocity every tick.
+fn velocity_needs_resend(current: Vector3<f64>, last_sent: Vector3<f64>) -> bool {
+    let difference = current.squared_distance_to_vec(&last_sent);
+    difference > 1.0e-7 || (difference > 0.0 && current.length_squared() == 0.0)
+}
 pub struct Entity {
     /// A unique identifier for the entity
     pub entity_id: i32,
@@ -1009,6 +1016,9 @@ pub struct Entity {
     pub last_sent_pitch: AtomicU8,
     /// Cache for the last sent position to optimize Entity Pos update packets
     pub last_sent_pos: AtomicCell<Vector3<f64>>,
+    /// Vanilla `ServerEntity.lastSentMovement`: the velocity the tracking players were last
+    /// given, so an unchanged one is not resent every tick.
+    pub last_sent_velocity: AtomicCell<Vector3<f64>>,
     /// Cache for the last sent head yaw byte
     pub last_sent_head_yaw: AtomicU8,
     /// Every tracked-data value ever published for this entity through
@@ -1250,6 +1260,7 @@ impl Entity {
             last_sent_pitch: AtomicU8::new(0),
             last_sent_head_yaw: AtomicU8::new(0),
             last_sent_pos: AtomicCell::new(position),
+            last_sent_velocity: AtomicCell::new(Vector3::new(0.0, 0.0, 0.0)),
             tracked_data_snapshot: std::sync::Mutex::new(Vec::new()),
         }
     }
@@ -1435,6 +1446,10 @@ impl Entity {
 
     pub fn send_velocity(&self) {
         let velocity = self.velocity.load();
+        if !velocity_needs_resend(velocity, self.last_sent_velocity.load()) {
+            return;
+        }
+        self.last_sent_velocity.store(velocity);
         let chunk_pos = self.chunk_pos.load();
         self.world.load().broadcast_to_chunk_editioned_sync(
             chunk_pos,
@@ -4286,6 +4301,44 @@ impl Flag {
             Self::FallFlying => Some(entity_data_flag::GLIDING),
             Self::Glowing => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod velocity_resend_tests {
+    use super::velocity_needs_resend;
+    use pumpkin_util::math::vector3::Vector3;
+
+    #[test]
+    fn an_unchanged_velocity_is_not_resent() {
+        let velocity = Vector3::new(0.1, -0.2, 0.3);
+        assert!(!velocity_needs_resend(velocity, velocity));
+    }
+
+    #[test]
+    fn a_knockback_sized_change_is_sent() {
+        assert!(velocity_needs_resend(
+            Vector3::new(0.4, 0.4, 0.0),
+            Vector3::new(0.0, 0.0, 0.0)
+        ));
+    }
+
+    #[test]
+    fn a_change_below_the_threshold_is_dropped() {
+        assert!(!velocity_needs_resend(
+            Vector3::new(1.0e-5, 0.0, 0.0),
+            Vector3::new(0.0, 0.0, 0.0)
+        ));
+    }
+
+    #[test]
+    fn coming_to_a_stop_is_always_sent() {
+        // Vanilla sends the stop even when the change is under the threshold, so the client
+        // does not keep dead-reckoning a moving entity.
+        assert!(velocity_needs_resend(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(1.0e-5, 0.0, 0.0)
+        ));
     }
 }
 
