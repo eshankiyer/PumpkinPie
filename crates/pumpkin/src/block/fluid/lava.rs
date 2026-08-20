@@ -4,6 +4,7 @@ use crate::{
     entity::EntityBase,
     world::World,
 };
+use pumpkin_data::fluid::EnumVariants;
 use pumpkin_data::{
     Block, BlockDirection, BlockState, BlockStateId,
     block_properties::blocks_movement,
@@ -296,6 +297,25 @@ impl FlowingFluid for FlowingLava {
         } else {
             2
         }
+    }
+
+    fn get_spread_delay(
+        &self,
+        world: &World,
+        old: &FlowingFluidProperties,
+        new: &FlowingFluidProperties,
+    ) -> u8 {
+        let delay = self.get_flow_speed(world);
+        // `LavaFluid.getSpreadDelay`: a rising, non-falling lava level usually waits four times
+        // as long, so a pool fills in fits and starts rather than smoothly.
+        if old.falling == Falling::False
+            && new.falling == Falling::False
+            && new.level.to_index() > old.level.to_index()
+            && rand::random_range(0..4) != 0
+        {
+            return delay.saturating_mul(4);
+        }
+        delay
     }
 
     fn get_flow_speed(&self, world: &World) -> u8 {

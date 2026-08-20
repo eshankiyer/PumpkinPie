@@ -14,6 +14,17 @@ pub trait FlowingFluid: Send + Sync {
     fn get_level_decrease_per_block(&self, world: &World) -> i32;
     fn get_flow_speed(&self, world: &World) -> u8;
 
+    /// Vanilla `FlowingFluid.getSpreadDelay`, which only `LavaFluid` overrides: lava that is
+    /// rising rather than falling usually waits four times as long before spreading again.
+    fn get_spread_delay(
+        &self,
+        world: &World,
+        _old: &FlowingFluidProperties,
+        _new: &FlowingFluidProperties,
+    ) -> u8 {
+        self.get_flow_speed(world)
+    }
+
     fn get_source(&self, fluid: &Fluid, falling: bool) -> FlowingFluidProperties {
         let mut source_props = FlowingFluidProperties::default(fluid);
         source_props.level = Level::L8;
@@ -109,7 +120,9 @@ pub trait FlowingFluid: Send + Sync {
                             .await;
 
                         // Schedule next tick for this position
-                        let tick_delay = self.get_flow_speed(world);
+                        let old_state =
+                            FlowingFluidProperties::from_state_id(current_block_state_id, fluid);
+                        let tick_delay = self.get_spread_delay(world, &old_state, &new_state);
                         world.schedule_fluid_tick(
                             fluid,
                             *block_pos,
