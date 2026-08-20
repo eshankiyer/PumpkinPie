@@ -4360,7 +4360,9 @@ impl Player {
             .set_stack(slot_index, updated_stack.clone())
             .await;
 
-        let xp_used = (repaired + 1) / 2;
+        // `ExperienceOrb.repairPlayerItems` charges `repair * amount / toRepairFromXpAmount`,
+        // an integer division, so a repair of an odd number of points is charged down, not up.
+        let xp_used = repaired / 2;
         xp = xp.saturating_sub(xp_used);
 
         self.enqueue_slot_set_packet(&CSetPlayerInventory::new(
