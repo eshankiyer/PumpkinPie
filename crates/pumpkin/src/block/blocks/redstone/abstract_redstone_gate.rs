@@ -294,21 +294,29 @@ async fn get_power_on_side(
 ) -> u8 {
     let side_pos = pos.offset(side.to_block_direction().to_offset());
     let (side_block, side_state) = world.get_block_and_state(&side_pos);
-    if !only_gate && side_block == &Block::REDSTONE_WIRE {
+
+    // `SignalGetter.getControlInputSignal`: a redstone block reads as 15 and wire as its power,
+    // and everything else contributes its DIRECT signal, not its weak one. A redstone torch beside
+    // a comparator emits weak 15 sideways but direct 0, so reading the weak signal here let it
+    // feed the side input when vanilla ignores it.
+    if only_gate {
+        if !is_diode(side_block) {
+            return 0;
+        }
+    } else if side_block == &Block::REDSTONE_BLOCK {
+        return 15;
+    } else if side_block == &Block::REDSTONE_WIRE {
         return RedstoneWireLikeProperties::from_state_id(side_state.id, side_block).power;
     }
-    if !only_gate || is_diode(side_block) {
-        world
-            .block_registry
-            .get_weak_redstone_power(
-                side_block,
-                world,
-                &side_pos,
-                side_state,
-                side.to_block_direction(),
-            )
-            .await
-    } else {
-        0
-    }
+
+    world
+        .block_registry
+        .get_strong_redstone_power(
+            side_block,
+            world,
+            &side_pos,
+            side_state,
+            side.to_block_direction(),
+        )
+        .await
 }
