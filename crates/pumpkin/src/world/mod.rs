@@ -1458,14 +1458,20 @@ impl World {
         drop(worldborder);
 
         if self.should_skip_night() && is_night {
-            let mut level_time = self.level_time.lock().await;
-            let time = time_of_day + 24000;
-            level_time.set_time(time - time % 24000);
-            level_time.send_time(self).await;
-            drop(level_time);
+            // `ServerLevel.tick`: the clock only moves when the advance_time rule allows it,
+            // and `wakeUpAllPlayers` wakes the players who are actually asleep.
+            if self.level_info.load().game_rules.advance_time {
+                let mut level_time = self.level_time.lock().await;
+                let time = time_of_day + 24000;
+                level_time.set_time(time - time % 24000);
+                level_time.send_time(self).await;
+                drop(level_time);
+            }
 
             for player in self.players.load().iter() {
-                player.wake_up().await;
+                if player.sleeping_since.load().is_some() {
+                    player.wake_up().await;
+                }
             }
 
             if weather.weather_cycle_enabled && (weather.raining || weather.thundering) {
