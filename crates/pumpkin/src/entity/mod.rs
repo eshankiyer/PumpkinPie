@@ -900,6 +900,10 @@ fn velocity_needs_resend(current: Vector3<f64>, last_sent: Vector3<f64>) -> bool
     let difference = current.squared_distance_to_vec(&last_sent);
     difference > 1.0e-7 || (difference > 0.0 && current.length_squared() == 0.0)
 }
+/// Vanilla `ServerEntity.teleportDelay`: an absolute position sync is forced once this many ticks
+/// have passed without one, so a client that drifted is put right.
+const MAX_TICKS_BEFORE_POSITION_SYNC: i32 = 400;
+
 /// Vanilla `ServerEntity.sendChanges`: a move-entity packet carries the delta as a short in
 /// 4096ths of a block, so anything further than about eight blocks since the last update has to
 /// go out as an absolute position instead.
@@ -1055,6 +1059,10 @@ pub struct Entity {
     /// Vanilla `ServerEntity.lastSentMovement`: the velocity the tracking players were last
     /// given, so an unchanged one is not resent every tick.
     pub last_sent_velocity: AtomicCell<Vector3<f64>>,
+    /// Vanilla `ServerEntity.teleportDelay`: ticks since the last absolute position sync.
+    pub teleport_delay: AtomicI32,
+    /// Vanilla `ServerEntity.wasOnGround`: the ground flag the client was last told about.
+    pub last_sent_on_ground: AtomicBool,
     /// Cache for the last sent head yaw byte
     pub last_sent_head_yaw: AtomicU8,
     /// Every tracked-data value ever published for this entity through
@@ -1297,6 +1305,8 @@ impl Entity {
             last_sent_head_yaw: AtomicU8::new(0),
             last_sent_pos: AtomicCell::new(position),
             last_sent_velocity: AtomicCell::new(Vector3::new(0.0, 0.0, 0.0)),
+            teleport_delay: AtomicI32::new(0),
+            last_sent_on_ground: AtomicBool::new(false),
             tracked_data_snapshot: std::sync::Mutex::new(Vec::new()),
         }
     }
@@ -1952,7 +1962,14 @@ impl Entity {
             new.y.mul_add(4096.0, -(old.y * 4096.0)) as i64,
             new.z.mul_add(4096.0, -(old.z * 4096.0)) as i64,
         );
-        if delta_needs_position_sync(encoded) {
+        // `ServerEntity.sendChanges`: an absolute sync also goes out every 400 ticks and whenever
+        // the ground flag flips, not only when the delta overflows.
+        let teleport_delay = self.teleport_delay.fetch_add(1, Relaxed) + 1;
+        let on_ground = self.on_ground.load(Relaxed);
+        if delta_needs_position_sync(encoded)
+            || teleport_delay > MAX_TICKS_BEFORE_POSITION_SYNC
+            || on_ground != self.last_sent_on_ground.load(Relaxed)
+        {
             self.send_position_sync(chunk_pos, new);
             return;
         }
@@ -2171,6 +2188,9 @@ impl Entity {
         let yaw = self.yaw.load();
         let pitch = self.pitch.load();
         self.last_sent_pos.store(position);
+        self.teleport_delay.store(0, Relaxed);
+        self.last_sent_on_ground
+            .store(self.on_ground.load(Relaxed), Relaxed);
         self.last_sent_yaw
             .store((yaw * 256.0 / 360.0).rem_euclid(256.0) as u8, Relaxed);
         self.last_sent_pitch
@@ -2202,7 +2222,14 @@ impl Entity {
             new.y.mul_add(4096.0, -(old.y * 4096.0)) as i64,
             new.z.mul_add(4096.0, -(old.z * 4096.0)) as i64,
         );
-        if delta_needs_position_sync(encoded) {
+        // `ServerEntity.sendChanges`: an absolute sync also goes out every 400 ticks and whenever
+        // the ground flag flips, not only when the delta overflows.
+        let teleport_delay = self.teleport_delay.fetch_add(1, Relaxed) + 1;
+        let on_ground = self.on_ground.load(Relaxed);
+        if delta_needs_position_sync(encoded)
+            || teleport_delay > MAX_TICKS_BEFORE_POSITION_SYNC
+            || on_ground != self.last_sent_on_ground.load(Relaxed)
+        {
             self.send_position_sync(chunk_pos, new);
             return;
         }
