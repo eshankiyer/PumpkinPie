@@ -347,16 +347,29 @@ impl VillagerEntity {
         use pumpkin_protocol::codec::var_int::VarInt;
         use pumpkin_protocol::java::client::play::CMerchantOffers;
 
-        // Open the merchant screen and then send the current offers packet
-        if let Some(sync_id) = player.open_handled_screen(self, None).await {
-            let mut offers = self.offers.lock().await.clone();
-            let reputation = self
-                .gossips
-                .lock()
-                .await
-                .get_reputation(player.get_entity().entity_uuid, |_| true);
+        // `Villager::startTrading` calls `updateSpecialPrices` BEFORE opening the screen, and it
+        // mutates the villager's own offers, so the screen handler charges the discounted price
+        // the client was shown. Discounting a copy sent to the client left the server charging
+        // full price, and the result slot stayed empty at the displayed cost.
+        let reputation = self
+            .gossips
+            .lock()
+            .await
+            .get_reputation(player.get_entity().entity_uuid, |_| true);
+        let hero_of_the_village = player
+            .living_entity
+            .get_effect(&pumpkin_data::effect::StatusEffect::HERO_OF_THE_VILLAGE)
+            .await;
+
+        {
+            let mut offers = self.offers.lock().await;
+            // Vanilla clears these in `stopTrading`; clearing them as the screen opens keeps
+            // repeated visits from stacking the same discount over and over.
+            for offer in offers.iter_mut() {
+                offer.special_price = 0;
+            }
             if reputation != 0 {
-                for offer in &mut offers {
+                for offer in offers.iter_mut() {
                     offer.special_price +=
                         gossip::reputation_price_discount(reputation, offer.price_multiplier);
                 }
@@ -364,19 +377,20 @@ impl VillagerEntity {
             // `Villager::updateSpecialPrices` (`Villager.java:450-458`): Hero of the Village
             // stacks an additional discount on top of the reputation one above, proportional
             // to the offer's un-modified `cost_a` count and the effect's amplifier.
-            if let Some(effect) = player
-                .living_entity
-                .get_effect(&pumpkin_data::effect::StatusEffect::HERO_OF_THE_VILLAGE)
-                .await
-            {
+            if let Some(effect) = hero_of_the_village {
                 let modifier = 0.3 + 0.0625 * f64::from(effect.amplifier);
-                for offer in &mut offers {
+                for offer in offers.iter_mut() {
                     let base_count = f64::from(offer.base_cost_a.0.item_count);
                     #[allow(clippy::cast_possible_truncation)]
                     let cost_reduction = (modifier * base_count).floor() as i32;
                     offer.special_price -= cost_reduction.max(1);
                 }
             }
+        }
+
+        // Open the merchant screen and then send the current offers packet
+        if let Some(sync_id) = player.open_handled_screen(self, None).await {
+            let offers = self.offers.lock().await.clone();
             let villager_data = self.villager_data.lock().await;
 
             player
