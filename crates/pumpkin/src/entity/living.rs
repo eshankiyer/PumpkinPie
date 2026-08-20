@@ -156,6 +156,9 @@ pub struct LivingEntity {
     /// The distance the entity has been falling.
     pub fall_distance: AtomicCell<f32>,
     pub active_effects: Mutex<HashMap<&'static StatusEffect, Effect>>,
+    /// Vanilla `MobEffectInstance.hiddenEffect`: instances of an active effect that were taken
+    /// over by a stronger or longer one and are restored when it runs out. Nearest first.
+    pub hidden_effects: Mutex<HashMap<&'static StatusEffect, Vec<Effect>>>,
     pub entity_equipment: Arc<Mutex<EntityEquipment>>,
     pub equipment_drop_chances: Arc<Mutex<HashMap<EquipmentSlot, f32>>>,
     pub movement_input: AtomicCell<Vector3<f64>>,
@@ -298,6 +301,7 @@ impl LivingEntity {
             active_hand: Mutex::new(None),
             livings_flags: AtomicU8::new(0),
             active_effects: Mutex::new(HashMap::new()),
+            hidden_effects: Mutex::new(HashMap::new()),
             entity_equipment: Arc::new(Mutex::new(EntityEquipment::new())),
             equipment_drop_chances: Arc::new(Mutex::new(HashMap::new())),
             equipment_slots: Arc::new(build_equipment_slots()),
@@ -687,7 +691,7 @@ impl LivingEntity {
         clippy::too_many_lines,
         reason = "effect application also synchronizes attributes"
     )]
-    pub async fn add_effect(&self, effect: Effect) {
+    pub async fn add_effect(&self, mut effect: Effect) {
         if !self.can_be_affected(effect.effect_type) {
             return;
         }
@@ -713,13 +717,26 @@ impl LivingEntity {
         } else {
             let did_apply = {
                 let mut active_effects = self.active_effects.lock().await;
-                let should_replace = active_effects
-                    .get(effect.effect_type)
-                    .is_none_or(|current| should_replace_effect(current, &effect));
-                if should_replace {
+                let mut hidden_effects = self.hidden_effects.lock().await;
+                if let Some(current) = active_effects.get(effect.effect_type) {
+                    let mut chain = Vec::with_capacity(2);
+                    chain.push(current.clone());
+                    if let Some(hidden) = hidden_effects.get(effect.effect_type) {
+                        chain.extend_from_slice(hidden);
+                    }
+                    let changed = update_effect_chain(&mut chain, 0, &effect);
+                    effect = chain.remove(0);
                     active_effects.insert(effect.effect_type, effect.clone());
+                    if chain.is_empty() {
+                        hidden_effects.remove(effect.effect_type);
+                    } else {
+                        hidden_effects.insert(effect.effect_type, chain);
+                    }
+                    changed
+                } else {
+                    active_effects.insert(effect.effect_type, effect.clone());
+                    true
                 }
-                should_replace
             };
 
             if !did_apply {
@@ -834,6 +851,8 @@ impl LivingEntity {
         if !succeeded {
             return false;
         }
+
+        self.hidden_effects.lock().await.remove(&effect_type);
 
         // Broadcast effect removal
         self.entity
@@ -1929,12 +1948,37 @@ impl LivingEntity {
         }
     }
 
+    /// Vanilla `MobEffectInstance.downgradeToHiddenEffect`: when the active instance runs out the
+    /// nearest hidden one takes its place. If that one has run out as well the whole chain goes
+    /// with it, matching vanilla's `hasRemainingDuration` check right after the downgrade.
+    async fn expire_effect(&self, effect_type: &'static StatusEffect) {
+        let promoted = {
+            let mut hidden_effects = self.hidden_effects.lock().await;
+            hidden_effects
+                .remove(&effect_type)
+                .filter(|chain| !chain.is_empty())
+                .map(|mut chain| (chain.remove(0), chain))
+        };
+
+        self.remove_effect(effect_type).await;
+
+        if let Some((next, rest)) = promoted
+            && next.duration != 0
+        {
+            self.add_effect(next).await;
+            if !rest.is_empty() {
+                self.hidden_effects.lock().await.insert(effect_type, rest);
+            }
+        }
+    }
+
     async fn tick_effects(&self) {
         let mut effects_to_remove = Vec::new();
         let mut effects_to_apply = Vec::new();
 
         {
             let mut effects = self.active_effects.lock().await;
+            let mut hidden_effects = self.hidden_effects.lock().await;
             let entity_age = self.entity.age.load(Relaxed);
             for effect in effects.values_mut() {
                 if effect.duration == 0 {
@@ -1955,13 +1999,23 @@ impl LivingEntity {
                 if effect.duration != -1 {
                     effect.duration -= 1;
                 }
+
+                // Vanilla `MobEffectInstance.tickDownDuration` ticks the whole hidden chain, so a
+                // covered instance keeps running out while it is not the active one.
+                if let Some(chain) = hidden_effects.get_mut(effect.effect_type) {
+                    for hidden_effect in chain.iter_mut() {
+                        if hidden_effect.duration > 0 {
+                            hidden_effect.duration -= 1;
+                        }
+                    }
+                }
             }
         }
 
         // Call the central removal function for each expired effect
         // This will now trigger your logs and absorption resets!
         for effect_type in effects_to_remove {
-            self.remove_effect(effect_type).await;
+            self.expire_effect(effect_type).await;
         }
 
         for (effect_type, amplifier) in effects_to_apply {
@@ -2727,12 +2781,29 @@ impl NBTStorage for LivingEntity {
             nbt.put("fall_distance", NbtTag::Float(fall_distance));
             {
                 let effects = self.active_effects.lock().await;
+                let hidden_effects = self.hidden_effects.lock().await;
                 if !effects.is_empty() {
                     // Iterate effects and create Box<[NbtTag]>
                     let mut effects_list = Vec::with_capacity(effects.len());
                     for effect in effects.values() {
                         let mut effect_nbt = pumpkin_nbt::compound::NbtCompound::new();
                         effect.write_nbt(&mut effect_nbt).await;
+                        // Vanilla nests the hidden chain inside the instance covering it, so the
+                        // furthest one down the chain is written innermost.
+                        if let Some(chain) = hidden_effects.get(effect.effect_type) {
+                            let mut nested: Option<NbtCompound> = None;
+                            for hidden_effect in chain.iter().rev() {
+                                let mut hidden_nbt = NbtCompound::new();
+                                hidden_effect.write_nbt(&mut hidden_nbt).await;
+                                if let Some(inner) = nested.take() {
+                                    hidden_nbt.put("hidden_effect", NbtTag::Compound(inner));
+                                }
+                                nested = Some(hidden_nbt);
+                            }
+                            if let Some(nested) = nested {
+                                effect_nbt.put("hidden_effect", NbtTag::Compound(nested));
+                            }
+                        }
                         effects_list.push(NbtTag::Compound(effect_nbt));
                     }
                     nbt.put("active_effects", NbtTag::List(effects_list));
@@ -2797,6 +2868,7 @@ impl NBTStorage for LivingEntity {
             }
             {
                 let mut active_effects = self.active_effects.lock().await;
+                let mut hidden_effects = self.hidden_effects.lock().await;
                 let nbt_effects = nbt.get_list("active_effects");
                 if let Some(nbt_effects) = nbt_effects {
                     for effect in nbt_effects {
@@ -2805,6 +2877,23 @@ impl NBTStorage for LivingEntity {
                                 Effect::create_from_nbt(&mut effect_nbt.clone()).await
                             {
                                 effect.blend = true; // TODO: change, is taken from effect give command
+                                let mut chain = Vec::new();
+                                let mut nested = effect_nbt.get_compound("hidden_effect").cloned();
+                                while let Some(mut hidden_nbt) = nested {
+                                    nested = hidden_nbt.get_compound("hidden_effect").cloned();
+                                    if let Some(mut hidden_effect) =
+                                        Effect::create_from_nbt(&mut hidden_nbt).await
+                                    {
+                                        hidden_effect.blend = true;
+                                        chain.push(hidden_effect);
+                                    } else {
+                                        warn!("Unable to read hidden effect from nbt");
+                                        break;
+                                    }
+                                }
+                                if !chain.is_empty() {
+                                    hidden_effects.insert(effect.effect_type, chain);
+                                }
                                 active_effects.insert(effect.effect_type, effect);
                             } else {
                                 warn!("Unable to read effect from nbt");
@@ -4202,24 +4291,151 @@ fn consumable_remainder(item: &ItemStack) -> Option<&'static Item> {
     }
 }
 
-const fn should_replace_effect(current: &Effect, candidate: &Effect) -> bool {
-    // Vanilla MobEffectInstance#isShorterDurationThan / #update: -1 is infinite duration, always
-    // considered longer than any finite duration. A raw `duration > duration` comparison treats
-    // -1 as shorter than everything, so an equal-amplifier infinite effect would never replace a
-    // finite one.
-    const fn is_longer(candidate_duration: i32, current_duration: i32) -> bool {
-        if current_duration == -1 {
-            false
-        } else if candidate_duration == -1 {
-            true
+/// Vanilla `MobEffectInstance.isShorterDurationThan`: a duration of -1 is infinite, so it is
+/// never shorter than anything and everything finite is shorter than it.
+const fn effect_is_shorter(effect: &Effect, other: &Effect) -> bool {
+    effect.duration != -1 && (effect.duration < other.duration || other.duration == -1)
+}
+
+/// Vanilla `MobEffectInstance.update`. `chain[index]` is the instance being taken over and the
+/// entries after it are its hidden-effect chain, nearest first. A stronger but shorter instance
+/// pushes the one it replaces down the chain, and a weaker but longer one is filed further down
+/// it, so both come back once the instances covering them run out. Returns whether the instance
+/// at `index` changed, which is what decides if clients and attributes need updating.
+fn update_effect_chain(chain: &mut Vec<Effect>, index: usize, take_over: &Effect) -> bool {
+    let mut changed = false;
+    if take_over.amplifier > chain[index].amplifier {
+        if effect_is_shorter(take_over, &chain[index]) {
+            let taken_over = chain[index].clone();
+            chain.insert(index + 1, taken_over);
+        }
+        chain[index].amplifier = take_over.amplifier;
+        chain[index].duration = take_over.duration;
+        changed = true;
+    } else if effect_is_shorter(&chain[index], take_over) {
+        if take_over.amplifier == chain[index].amplifier {
+            chain[index].duration = take_over.duration;
+            changed = true;
+        } else if index + 1 == chain.len() {
+            chain.push(take_over.clone());
         } else {
-            candidate_duration > current_duration
+            update_effect_chain(chain, index + 1, take_over);
         }
     }
 
-    candidate.amplifier > current.amplifier
-        || (candidate.amplifier == current.amplifier
-            && is_longer(candidate.duration, current.duration))
+    if (!take_over.ambient && chain[index].ambient) || changed {
+        chain[index].ambient = take_over.ambient;
+        changed = true;
+    }
+    if take_over.show_particles != chain[index].show_particles {
+        chain[index].show_particles = take_over.show_particles;
+        changed = true;
+    }
+    if take_over.show_icon != chain[index].show_icon {
+        chain[index].show_icon = take_over.show_icon;
+        changed = true;
+    }
+
+    changed
+}
+
+#[cfg(test)]
+mod effect_chain_tests {
+    use super::update_effect_chain;
+    use pumpkin_data::effect::StatusEffect;
+    use pumpkin_data::potion::Effect;
+
+    fn effect(amplifier: u8, duration: i32) -> Effect {
+        Effect {
+            effect_type: &StatusEffect::STRENGTH,
+            duration,
+            amplifier,
+            ambient: false,
+            show_particles: true,
+            show_icon: true,
+            blend: false,
+        }
+    }
+
+    #[test]
+    fn stronger_but_shorter_hides_the_instance_it_replaces() {
+        let mut chain = vec![effect(0, 600)];
+        assert!(update_effect_chain(&mut chain, 0, &effect(1, 100)));
+        assert_eq!((chain[0].amplifier, chain[0].duration), (1, 100));
+        assert_eq!((chain[1].amplifier, chain[1].duration), (0, 600));
+    }
+
+    #[test]
+    fn stronger_and_longer_replaces_outright() {
+        let mut chain = vec![effect(0, 100)];
+        assert!(update_effect_chain(&mut chain, 0, &effect(1, 600)));
+        assert_eq!((chain[0].amplifier, chain[0].duration), (1, 600));
+        assert_eq!(chain.len(), 1);
+    }
+
+    #[test]
+    fn same_amplifier_refreshes_only_a_longer_duration() {
+        let mut chain = vec![effect(1, 100)];
+        assert!(update_effect_chain(&mut chain, 0, &effect(1, 600)));
+        assert_eq!(chain[0].duration, 600);
+        assert!(!update_effect_chain(&mut chain, 0, &effect(1, 200)));
+        assert_eq!(chain[0].duration, 600);
+        assert_eq!(chain.len(), 1);
+    }
+
+    #[test]
+    fn weaker_but_longer_waits_in_the_chain() {
+        let mut chain = vec![effect(1, 100)];
+        assert!(!update_effect_chain(&mut chain, 0, &effect(0, 600)));
+        assert_eq!((chain[0].amplifier, chain[0].duration), (1, 100));
+        assert_eq!((chain[1].amplifier, chain[1].duration), (0, 600));
+    }
+
+    #[test]
+    fn weaker_and_shorter_is_dropped() {
+        let mut chain = vec![effect(1, 600)];
+        assert!(!update_effect_chain(&mut chain, 0, &effect(0, 100)));
+        assert_eq!(chain.len(), 1);
+        assert_eq!((chain[0].amplifier, chain[0].duration), (1, 600));
+    }
+
+    #[test]
+    fn a_second_weaker_instance_merges_into_the_hidden_one() {
+        let mut chain = vec![effect(2, 100), effect(0, 600)];
+        assert!(!update_effect_chain(&mut chain, 0, &effect(0, 900)));
+        assert_eq!(chain.len(), 2);
+        assert_eq!(chain[1].duration, 900);
+    }
+
+    #[test]
+    fn an_infinite_duration_is_never_shorter() {
+        let mut chain = vec![effect(0, -1)];
+        assert!(!update_effect_chain(&mut chain, 0, &effect(0, 6000)));
+        assert_eq!(chain[0].duration, -1);
+        assert_eq!(chain.len(), 1);
+
+        let mut chain = vec![effect(0, 6000)];
+        assert!(update_effect_chain(&mut chain, 0, &effect(0, -1)));
+        assert_eq!(chain[0].duration, -1);
+    }
+
+    #[test]
+    fn a_stronger_infinite_instance_hides_nothing() {
+        let mut chain = vec![effect(0, -1)];
+        assert!(update_effect_chain(&mut chain, 0, &effect(1, -1)));
+        assert_eq!(chain.len(), 1);
+        assert_eq!((chain[0].amplifier, chain[0].duration), (1, -1));
+    }
+
+    #[test]
+    fn flags_track_the_latest_instance() {
+        let mut chain = vec![effect(1, 600)];
+        let mut candidate = effect(0, 100);
+        candidate.show_icon = false;
+        assert!(update_effect_chain(&mut chain, 0, &candidate));
+        assert!(!chain[0].show_icon);
+        assert_eq!((chain[0].amplifier, chain[0].duration), (1, 600));
+    }
 }
 
 #[cfg(test)]
@@ -4468,7 +4684,9 @@ mod tests {
 
     #[test]
     fn stronger_effect_replaces_weaker_effect_even_when_shorter() {
-        assert!(should_replace_effect(&effect(0, 1_200), &effect(1, 100)));
+        let mut chain = vec![effect(0, 1_200)];
+        assert!(update_effect_chain(&mut chain, 0, &effect(1, 100)));
+        assert_eq!((chain[0].amplifier, chain[0].duration), (1, 100));
     }
 
     #[test]
@@ -4496,14 +4714,18 @@ mod tests {
 
     #[test]
     fn longer_effect_replaces_effect_with_same_amplifier() {
-        assert!(should_replace_effect(&effect(1, 100), &effect(1, 101)));
+        let mut chain = vec![effect(1, 100)];
+        assert!(update_effect_chain(&mut chain, 0, &effect(1, 101)));
+        assert_eq!(chain[0].duration, 101);
     }
 
     #[test]
     fn weaker_or_shorter_effect_does_not_replace_active_effect() {
-        assert!(!should_replace_effect(&effect(1, 100), &effect(0, 1_200)));
-        assert!(!should_replace_effect(&effect(1, 100), &effect(1, 99)));
-        assert!(!should_replace_effect(&effect(1, 100), &effect(1, 100)));
+        for candidate in [effect(0, 1_200), effect(1, 99), effect(1, 100)] {
+            let mut chain = vec![effect(1, 100)];
+            assert!(!update_effect_chain(&mut chain, 0, &candidate));
+            assert_eq!((chain[0].amplifier, chain[0].duration), (1, 100));
+        }
     }
 
     // ── bypasses_armor_durability ─────────────────────────────────────
