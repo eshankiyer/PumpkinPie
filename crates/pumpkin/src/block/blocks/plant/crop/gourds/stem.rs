@@ -103,10 +103,15 @@ impl BlockBehaviour for StemBlock {
                     let plant_block_pos = args.position.offset(dir.to_offset());
                     let plant_block_state = args.world.get_block_state(&plant_block_pos);
                     let under_block: &Block = args.world.get_block(&plant_block_pos.down());
-                    if plant_block_state.is_air()
-                        && (under_block == &Block::FARMLAND
-                            || under_block.has_tag(&tag::Block::MINECRAFT_DIRT))
-                    {
+                    // `StemBlock.randomTick`: the fruit needs a block from the stem's own
+                    // `supports_*_stem_fruit` tag beneath it, which covers grass, podzol,
+                    // mycelium, mud and moss as well as dirt and farmland.
+                    let fruit_support = if block == &Block::PUMPKIN_STEM {
+                        &tag::Block::MINECRAFT_SUPPORTS_PUMPKIN_STEM_FRUIT
+                    } else {
+                        &tag::Block::MINECRAFT_SUPPORTS_MELON_STEM_FRUIT
+                    };
+                    if plant_block_state.is_air() && under_block.has_tag(fruit_support) {
                         let attached_stem = Self::get_attached_stem(dir, block);
                         let gourd = Self::get_gourd(block);
                         args.world
