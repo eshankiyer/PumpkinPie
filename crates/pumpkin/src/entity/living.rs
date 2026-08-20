@@ -695,6 +695,7 @@ impl LivingEntity {
         if !self.can_be_affected(effect.effect_type) {
             return;
         }
+        let applied_amplifier = effect.amplifier;
         let inverted = self.is_undead();
         let is_instant = effect.effect_type.id == StatusEffect::INSTANT_HEALTH.id
             || effect.effect_type.id == StatusEffect::INSTANT_DAMAGE.id;
@@ -739,6 +740,10 @@ impl LivingEntity {
                 }
             };
 
+            // Vanilla runs `MobEffectInstance.onEffectStarted` on every application, including
+            // one that loses the merge, so absorption is granted before that check.
+            self.start_absorption(applied_amplifier).await;
+
             if !did_apply {
                 return;
             }
@@ -781,14 +786,6 @@ impl LivingEntity {
                     )
                     .await;
                 }
-            }
-
-            // Apply absorption effect (+4 absorption per level)
-            if effect.effect_type == &StatusEffect::ABSORPTION {
-                let added = 4.0 * (effect.amplifier as f32 + 1.0);
-                let max_abs = self.get_attribute_value(&Attributes::MAX_ABSORPTION) as f32;
-                let new_abs = (self.absorption.load() + added).min(max_abs);
-                self.set_absorption(new_abs).await;
             }
 
             // Apply invisible effect
@@ -888,9 +885,13 @@ impl LivingEntity {
             }
         }
 
-        // If absorption effect removed, clear current absorption amount and notify clients
+        // Vanilla has no absorption reset on removal: dropping the effect drops its
+        // MAX_ABSORPTION modifier, and `LivingEntity.onAttributeUpdated` clamps the current
+        // amount down to whatever maximum is left instead of zeroing it outright.
         if effect_type == &StatusEffect::ABSORPTION {
-            self.set_absorption(0.0).await;
+            let max_absorption = self.get_attribute_value(&Attributes::MAX_ABSORPTION) as f32;
+            let clamped = self.absorption.load().min(max_absorption);
+            self.set_absorption(clamped).await;
         }
 
         // If health boost effect removed, clamp current health to new max and notify clients
@@ -1948,6 +1949,16 @@ impl LivingEntity {
         }
     }
 
+    /// Vanilla `AbsorptionMobEffect.onEffectStarted`: absorption is raised to `4 * (1 + amplifier)`
+    /// rather than accumulated, so drinking a second absorption potion does not stack hearts, and
+    /// `LivingEntity.setAbsorptionAmount` clamps the result to the max absorption attribute.
+    async fn start_absorption(&self, amplifier: u8) {
+        let max_absorption = self.get_attribute_value(&Attributes::MAX_ABSORPTION) as f32;
+        let granted =
+            absorption_after_application(self.absorption.load(), amplifier, max_absorption);
+        self.set_absorption(granted).await;
+    }
+
     /// Vanilla `MobEffectInstance.downgradeToHiddenEffect`: when the active instance runs out the
     /// nearest hidden one takes its place. If that one has run out as well the whole chain goes
     /// with it, matching vanilla's `hasRemainingDuration` check right after the downgrade.
@@ -2051,6 +2062,9 @@ impl LivingEntity {
         } else if effect_type == &StatusEffect::HUNGER {
             // Hunger every 20 ticks
             duration % 20 == 0
+        } else if effect_type == &StatusEffect::ABSORPTION {
+            // `AbsorptionMobEffect.shouldApplyEffectTickThisTick`: every tick.
+            true
         } else if effect_type == &StatusEffect::SATURATION {
             // Saturation every tick
             true
@@ -2091,6 +2105,12 @@ impl LivingEntity {
                         .damage(&*dyn_self, damage_amount, DamageType::MAGIC)
                         .await;
                 }
+            }
+        } else if effect_type == &StatusEffect::ABSORPTION {
+            // `AbsorptionMobEffect.applyEffectTick` returns false once the hearts are gone, which
+            // ends the effect instead of leaving it running with nothing to absorb.
+            if self.absorption.load() <= 0.0 {
+                self.remove_effect(effect_type).await;
             }
         } else if effect_type == &StatusEffect::WITHER {
             let damage_amount = 1.0;
@@ -4291,6 +4311,14 @@ fn consumable_remainder(item: &ItemStack) -> Option<&'static Item> {
     }
 }
 
+/// Vanilla `AbsorptionMobEffect.onEffectStarted` combined with the clamp in
+/// `LivingEntity.setAbsorptionAmount`.
+fn absorption_after_application(current: f32, amplifier: u8, max_absorption: f32) -> f32 {
+    current
+        .max(4.0 * (f32::from(amplifier) + 1.0))
+        .clamp(0.0, max_absorption)
+}
+
 /// Vanilla `MobEffectInstance.isShorterDurationThan`: a duration of -1 is infinite, so it is
 /// never shorter than anything and everything finite is shorter than it.
 const fn effect_is_shorter(effect: &Effect, other: &Effect) -> bool {
@@ -4337,6 +4365,33 @@ fn update_effect_chain(chain: &mut Vec<Effect>, index: usize, take_over: &Effect
     }
 
     changed
+}
+
+#[cfg(test)]
+mod absorption_tests {
+    use super::absorption_after_application;
+
+    #[test]
+    fn a_second_application_does_not_stack_hearts() {
+        assert_eq!(absorption_after_application(0.0, 0, 4.0), 4.0);
+        assert_eq!(absorption_after_application(4.0, 0, 4.0), 4.0);
+    }
+
+    #[test]
+    fn a_stronger_application_raises_the_amount() {
+        assert_eq!(absorption_after_application(4.0, 1, 8.0), 8.0);
+    }
+
+    #[test]
+    fn a_weaker_application_keeps_what_is_there() {
+        assert_eq!(absorption_after_application(8.0, 0, 8.0), 8.0);
+    }
+
+    #[test]
+    fn the_max_absorption_attribute_caps_the_result() {
+        assert_eq!(absorption_after_application(0.0, 3, 8.0), 8.0);
+        assert_eq!(absorption_after_application(0.0, 0, 0.0), 0.0);
+    }
 }
 
 #[cfg(test)]
