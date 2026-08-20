@@ -116,6 +116,21 @@ impl EntityBase for EggEntity {
             // Play egg break particles
             world.send_entity_status(self.get_entity(), EntityStatus::Death, None);
 
+            // `ThrownEgg.onHitEntity`: a zero-damage hurt still flinches the target, plays its
+            // hurt sound and makes it retaliate, which is why an egg annoys a mob it hits.
+            if let crate::entity::projectile::ProjectileHit::Entity { ref entity, .. } = hit {
+                let entity_clone = entity.clone();
+                tokio::spawn(async move {
+                    entity_clone
+                        .damage(
+                            entity_clone.as_ref(),
+                            0.0,
+                            pumpkin_data::damage::DamageType::THROWN,
+                        )
+                        .await;
+                });
+            }
+
             // Decide spawn count per probabilities:
             // r == 0 -> spawn 4 (1/256)
             // r in 1..31 -> spawn 1 (31/256)

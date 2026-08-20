@@ -550,16 +550,27 @@ impl EntityBase for ArrowEntity {
                         target.damage(self, damage as f32, DamageType::ARROW).await;
 
                     if let Some(living) = target.get_living_entity() {
+                        // `AbstractArrow.doKnockback`: the push follows the ARROW's horizontal
+                        // flight, scaled by the target's knockback resistance, and the shooter is
+                        // never touched. Routing this through the melee helper aimed the knockback
+                        // along the shooter's yaw and damped the shooter's own velocity to 60%.
                         let punch = self.punch_level.load(Ordering::Relaxed);
-                        if punch > 0
-                            && let Some(owner_id) = self.owner_id
-                            && let Some(owner_entity) = world.get_entity_by_id(owner_id)
-                        {
-                            crate::entity::combat::handle_knockback(
-                                owner_entity.get_entity(),
-                                target.as_ref(),
-                                f64::from(punch) * 0.6,
-                            );
+                        if punch > 0 {
+                            let resistance = (1.0
+                                - living.get_attribute_value(
+                                    &pumpkin_data::attributes::Attributes::KNOCKBACK_RESISTANCE,
+                                ))
+                            .max(0.0);
+                            let strength = f64::from(punch) * 0.6 * resistance;
+                            let push = velocity
+                                .multiply(1.0, 0.0, 1.0)
+                                .normalize()
+                                .multiply(strength, 0.0, strength);
+                            if push.length_squared() > 0.0 {
+                                target
+                                    .get_entity()
+                                    .add_velocity(Vector3::new(push.x, 0.1, push.z));
+                            }
                         }
 
                         // Play hit sound
