@@ -214,9 +214,25 @@ impl EntityBase for ExperienceOrbEntity {
 
             entity.velocity.store(velo);
 
+            let fall_speed = velo.y;
             entity.move_entity(caller, velo).await;
 
             entity.tick_block_collisions(caller, server).await;
+
+            // `ExperienceOrb.tick`: air drag of 0.98 on every axis, multiplied by the slipperiness
+            // of the block below when grounded, then a small bounce off the floor. Without it an
+            // orb kept accelerating and the pull toward a player made it overshoot and oscillate
+            // instead of converging.
+            let on_ground = entity.on_ground.load(Ordering::Relaxed);
+            let mut friction = 0.98;
+            if on_ground {
+                friction *= f64::from(entity.get_block_with_y_offset(0.999_999).1.slipperiness);
+            }
+            let mut damped = entity.velocity.load() * friction;
+            if on_ground && fall_speed < -self.get_gravity() {
+                damped.y = -fall_speed * 0.4;
+            }
+            entity.velocity.store(damped);
 
             if age >= 6000 {
                 self.entity.remove().await;
