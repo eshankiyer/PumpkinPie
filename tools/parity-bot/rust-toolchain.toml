@@ -1,0 +1,4 @@
+# azalea pulls simdnbt, which needs `portable_simd`, so this tool builds on the same pinned
+# nightly PommeMC uses. It is excluded from the workspace, so the server keeps building on stable.
+[toolchain]
+channel = "nightly-2026-03-21"
