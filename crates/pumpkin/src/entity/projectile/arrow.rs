@@ -1,6 +1,7 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use crossbeam::atomic::AtomicCell;
+use pumpkin_data::BlockStateId;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -74,6 +75,9 @@ pub struct ArrowEntity {
     pub shake_time: AtomicU8,
     pub has_hit: AtomicBool,
     pub last_block_pos: Arc<std::sync::RwLock<Option<BlockPos>>>,
+    /// Vanilla `AbstractArrow.lastState`: the state of the block the arrow stuck into, so the
+    /// arrow can notice when that block is replaced and fall.
+    pub last_block_state_id: AtomicCell<Option<BlockStateId>>,
     pierced_entity_ids: Mutex<HashSet<i32>>,
 }
 
@@ -111,6 +115,7 @@ impl ArrowEntity {
             shake_time: AtomicU8::new(0),
             has_hit: AtomicBool::new(false),
             last_block_pos: Arc::new(std::sync::RwLock::new(None)),
+            last_block_state_id: AtomicCell::new(None),
             pierced_entity_ids: Mutex::new(HashSet::new()),
         }
     }
@@ -142,6 +147,7 @@ impl ArrowEntity {
             shake_time: AtomicU8::new(0),
             has_hit: AtomicBool::new(false),
             last_block_pos: Arc::new(std::sync::RwLock::new(None)),
+            last_block_state_id: AtomicCell::new(None),
             pierced_entity_ids: Mutex::new(HashSet::new()),
         }
     }
@@ -324,15 +330,35 @@ impl EntityBase for ArrowEntity {
             }
 
             if self.in_ground.load(Ordering::Relaxed) {
-                // Increment in-ground time and life
-                let _in_ground_time = self.in_ground_time.fetch_add(1, Ordering::Relaxed);
-                let life = self.life.fetch_add(1, Ordering::Relaxed);
+                // `AbstractArrow.tick`: when the block the arrow is stuck in changes and nothing
+                // collides where the arrow sits any more, it comes loose and falls again instead
+                // of hanging in the air until it despawns.
+                let stuck_pos = *self
+                    .last_block_pos
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let block_changed = stuck_pos.is_some_and(|pos| {
+                    self.last_block_state_id.load() != Some(world.get_block_state_id(&pos))
+                });
 
-                // Despawn after enough time
-                if life >= Self::DESPAWN_TIME {
-                    entity.remove().await;
+                let pos = entity.pos.load();
+                if block_changed
+                    && world.is_space_empty(BoundingBox::new(pos, pos).expand_all(0.06))
+                {
+                    self.in_ground.store(false, Ordering::Relaxed);
+                    self.in_ground_time.store(0, Ordering::Relaxed);
+                    self.life.store(0, Ordering::Relaxed);
+                } else {
+                    // Increment in-ground time and life
+                    let _in_ground_time = self.in_ground_time.fetch_add(1, Ordering::Relaxed);
+                    let life = self.life.fetch_add(1, Ordering::Relaxed);
+
+                    // Despawn after enough time
+                    if life >= Self::DESPAWN_TIME {
+                        entity.remove().await;
+                    }
+                    return;
                 }
-                return;
             }
 
             // Arrow is flying
@@ -485,6 +511,8 @@ impl EntityBase for ArrowEntity {
                         .last_block_pos
                         .write()
                         .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pos);
+                    self.last_block_state_id
+                        .store(Some(world.get_block_state_id(&pos)));
 
                     let block = world.get_block(&pos);
                     if block == &pumpkin_data::Block::TARGET {
