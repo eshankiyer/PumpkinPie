@@ -637,12 +637,13 @@ const fn golem_spawn_conditions_met(
     golem_detected_until == 0 || world_age >= golem_detected_until
 }
 
-/// Day-boundary check for the restock-counter reset, extracted as a pure function for unit
-/// testing. See `maybe_restock`'s doc comment for the approximation this makes relative to
-/// vanilla's `Timelines.OVERWORLD_DAY`-based `isNewDay`.
+/// Vanilla `Villager::shouldRestock`'s half-day check: the restock counter resets once more than
+/// 12000 ticks have passed since the last restock, not on a 24000-tick calendar boundary. Vanilla
+/// additionally resets on a day rollover reported by `Timelines.OVERWORLD_DAY`, which has no
+/// counterpart here; the half-day window fires first in every ordinary case.
 #[must_use]
 const fn is_new_restock_day(last_restock: i64, world_age: i64) -> bool {
-    last_restock != 0 && world_age / 24000 != last_restock / 24000
+    last_restock != 0 && world_age > last_restock + 12000
 }
 
 /// Vanilla `Villager::shouldRestock` (`Villager.java:387-419`) gate (minus the `needsRestock`
@@ -650,10 +651,10 @@ const fn is_new_restock_day(last_restock: i64, world_age: i64) -> bool {
 /// pure function for unit testing.
 #[must_use]
 const fn restock_is_due(last_restock: i64, restocks_today: i32, world_age: i64) -> bool {
-    if restocks_today >= 2 {
-        return false;
-    }
-    last_restock == 0 || world_age - last_restock >= 12000
+    // `allowedToRestock`: the first restock after a counter reset has no cooldown at all, and the
+    // second needs only 2400 ticks. Requiring half a day for the first one meant a villager whose
+    // trades were used up stayed sold out until the next in-game morning.
+    restocks_today == 0 || (restocks_today < 2 && world_age > last_restock + 2400)
 }
 
 impl ScreenHandlerFactory for VillagerEntity {
@@ -1801,17 +1802,18 @@ mod villager_tick_logic_tests {
     }
 
     #[test]
-    fn restock_day_rollover_detected_by_24000_tick_boundary() {
+    fn the_restock_counter_resets_after_half_a_day() {
         assert!(!is_new_restock_day(0, 100));
-        assert!(!is_new_restock_day(100, 24000 - 1));
-        assert!(is_new_restock_day(100, 24000));
+        assert!(!is_new_restock_day(100, 100 + 12000));
+        assert!(is_new_restock_day(100, 100 + 12001));
     }
 
     #[test]
     fn restock_due_gates_on_count_and_cooldown() {
-        assert!(restock_is_due(0, 0, 0));
-        assert!(!restock_is_due(100, 0, 100 + 11999));
-        assert!(restock_is_due(100, 0, 100 + 12000));
+        // The first restock of a cycle is free, the second waits 2400 ticks, and there is no third.
+        assert!(restock_is_due(100, 0, 100));
+        assert!(!restock_is_due(100, 1, 100 + 2400));
+        assert!(restock_is_due(100, 1, 100 + 2401));
         assert!(!restock_is_due(100, 2, 100 + 24000));
     }
 
