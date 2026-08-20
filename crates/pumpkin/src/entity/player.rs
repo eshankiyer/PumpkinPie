@@ -1174,7 +1174,6 @@ impl Player {
 
         // Modify the added damage based on the multiplier.
         let mut damage = (base_damage + add_damage) * damage_multiplier;
-        damage += extra_ench_damage * attack_cooldown_progress;
 
         if let Some(strength) = self
             .living_entity
@@ -1199,6 +1198,11 @@ impl Player {
         if matches!(attack_type, AttackType::Critical) {
             damage *= 1.5;
         }
+
+        // `Player.attack`: the crit multiplier applies to the weapon's base damage only. The
+        // enchantment bonus is held aside as `magicBoost` and added after, so a crit does not
+        // multiply Sharpness.
+        damage += extra_ench_damage * attack_cooldown_progress;
 
         let is_mace_smash = matches!(attack_type, AttackType::MaceSmash);
         if is_mace_smash {
@@ -1303,7 +1307,12 @@ impl Player {
         );
 
         if victim.get_living_entity().is_some() {
-            let mut knockback_strength = 1.0 + f64::from(knockback_level);
+            // `LivingEntity.getKnockback`: the base is the attacker's attack_knockback
+            // attribute, which is zero for a player, not a flat one.
+            let mut knockback_strength = self
+                .living_entity
+                .get_attribute_value(&Attributes::ATTACK_KNOCKBACK)
+                + f64::from(knockback_level);
             match attack_type {
                 AttackType::Knockback => knockback_strength += 1.0,
                 AttackType::Sweeping => {
