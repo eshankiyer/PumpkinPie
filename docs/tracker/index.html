@@ -116,8 +116,23 @@
   <div class="bar-wrap">
     <div class="bar-head">
       <div>
+        <strong>Registry coverage</strong>
+        <div style="color:var(--muted);font-size:.85rem">
+          Blocks, entity types and items that have a behaviour implementation.
+        </div>
+      </div>
+      <div id="surface-legend" style="color:var(--muted);font-size:.85rem"></div>
+    </div>
+    <div id="surface-bars"></div>
+  </div>
+
+  <div class="bar-wrap">
+    <div class="bar-head">
+      <div>
         <strong>Method coverage</strong>
-        <div style="color:var(--muted);font-size:.85rem">Across every tracked class.</div>
+        <div style="color:var(--muted);font-size:.85rem">
+          The stricter view: every method of every tracked class.
+        </div>
       </div>
       <div id="bar-legend" style="color:var(--muted);font-size:.85rem"></div>
     </div>
@@ -143,6 +158,13 @@
   <ul class="rows" id="rows"></ul>
 
   <footer>
+    <p>
+      <strong>Two numbers, two questions.</strong> <em>Registry coverage</em> asks whether a block,
+      entity type or item has a behaviour implementation at all — the question most server trackers
+      put on their front page. <em>Method coverage</em> asks the stricter question of how much of
+      each vanilla class's surface is matched, so it is always the lower figure. Neither is a
+      behaviour guarantee.
+    </p>
     <p>
       <strong>How to read this.</strong> A class counts as <em>complete</em> when every method the
       decompile lists has a plausibly-named counterpart somewhere in the workspace. Matching is by
@@ -246,6 +268,43 @@ document.getElementById("q").addEventListener("input", event => {
   state.q = event.target.value;
   render();
 });
+
+const GROUP_LABEL = { blocks: "Blocks", entities: "Entity types", items: "Items with behaviour" };
+
+fetch("surface.json")
+  .then(response => response.json())
+  .then(data => {
+    const holder = document.getElementById("surface-bars");
+    holder.textContent = "";
+    for (const [name, group] of Object.entries(data.groups)) {
+      const pct = group.total ? (group.covered / group.total) * 100 : 0;
+      const row = document.createElement("div");
+      row.style.margin = ".55rem 0 0";
+
+      const head = document.createElement("div");
+      head.style.cssText = "display:flex;justify-content:space-between;font-size:.85rem";
+      const left = document.createElement("span");
+      left.textContent = GROUP_LABEL[name] || name;
+      const right = document.createElement("span");
+      right.style.color = "var(--muted)";
+      right.textContent = `${group.covered.toLocaleString()} / ${group.total.toLocaleString()} (${pct.toFixed(1)}%)`;
+      head.append(left, right);
+
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      bar.style.marginTop = ".25rem";
+      const seg = document.createElement("span");
+      seg.className = "seg-complete";
+      seg.style.width = `${pct.toFixed(1)}%`;
+      bar.append(seg);
+
+      row.append(head, bar);
+      holder.append(row);
+    }
+    document.getElementById("surface-legend").textContent =
+      "most of the item registry is blocks and materials that need no behaviour of their own";
+  })
+  .catch(() => {});
 
 fetch("data.json")
   .then(response => response.json())
