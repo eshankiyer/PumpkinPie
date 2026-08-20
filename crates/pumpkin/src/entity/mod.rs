@@ -900,6 +900,17 @@ fn velocity_needs_resend(current: Vector3<f64>, last_sent: Vector3<f64>) -> bool
     let difference = current.squared_distance_to_vec(&last_sent);
     difference > 1.0e-7 || (difference > 0.0 && current.length_squared() == 0.0)
 }
+/// Vanilla `ServerEntity.sendChanges`: a move-entity packet carries the delta as a short in
+/// 4096ths of a block, so anything further than about eight blocks since the last update has to
+/// go out as an absolute position instead.
+const fn delta_needs_position_sync(encoded: Vector3<i64>) -> bool {
+    encoded.x < i16::MIN as i64
+        || encoded.x > i16::MAX as i64
+        || encoded.y < i16::MIN as i64
+        || encoded.y > i16::MAX as i64
+        || encoded.z < i16::MIN as i64
+        || encoded.z > i16::MAX as i64
+}
 pub struct Entity {
     /// A unique identifier for the entity
     pub entity_id: i32,
@@ -1933,11 +1944,19 @@ impl Entity {
         let new = self.pos.load();
         let chunk_pos = self.chunk_pos.load();
 
-        let converted = Vector3::new(
-            new.x.mul_add(4096.0, -(old.x * 4096.0)) as i16,
-            new.y.mul_add(4096.0, -(old.y * 4096.0)) as i16,
-            new.z.mul_add(4096.0, -(old.z * 4096.0)) as i16,
+        // `ServerEntity.sendChanges` encodes the delta in 4096ths of a block and falls back to an
+        // absolute position sync when it no longer fits in a short. Casting an out-of-range value
+        // to i16 wraps, which would put the entity somewhere else entirely on the client.
+        let encoded = Vector3::new(
+            new.x.mul_add(4096.0, -(old.x * 4096.0)) as i64,
+            new.y.mul_add(4096.0, -(old.y * 4096.0)) as i64,
+            new.z.mul_add(4096.0, -(old.z * 4096.0)) as i64,
         );
+        if delta_needs_position_sync(encoded) {
+            self.send_position_sync(chunk_pos, new);
+            return;
+        }
+        let converted = Vector3::new(encoded.x as i16, encoded.y as i16, encoded.z as i16);
 
         let yaw = self.yaw.load();
 
@@ -2146,16 +2165,48 @@ impl Entity {
         old
     }
 
+    /// Vanilla falls back to `ClientboundEntityPositionSyncPacket` whenever the delta cannot be
+    /// expressed as a short, so the client is told where the entity actually is.
+    fn send_position_sync(&self, chunk_pos: Vector2<i32>, position: Vector3<f64>) {
+        let yaw = self.yaw.load();
+        let pitch = self.pitch.load();
+        self.last_sent_pos.store(position);
+        self.last_sent_yaw
+            .store((yaw * 256.0 / 360.0).rem_euclid(256.0) as u8, Relaxed);
+        self.last_sent_pitch
+            .store((pitch * 256.0 / 360.0).rem_euclid(256.0) as u8, Relaxed);
+
+        self.world.load().broadcast_to_chunk(
+            chunk_pos,
+            &CEntityPositionSync::new(
+                self.entity_id.into(),
+                position,
+                self.velocity.load(),
+                yaw,
+                pitch,
+                self.on_ground.load(Relaxed),
+            ),
+        );
+    }
+
     pub fn send_pos(&self) {
         let old = self.last_sent_pos.load();
         let new = self.pos.load();
         let chunk_pos = self.chunk_pos.load();
 
-        let converted = Vector3::new(
-            new.x.mul_add(4096.0, -(old.x * 4096.0)) as i16,
-            new.y.mul_add(4096.0, -(old.y * 4096.0)) as i16,
-            new.z.mul_add(4096.0, -(old.z * 4096.0)) as i16,
+        // `ServerEntity.sendChanges` encodes the delta in 4096ths of a block and falls back to an
+        // absolute position sync when it no longer fits in a short. Casting an out-of-range value
+        // to i16 wraps, which would put the entity somewhere else entirely on the client.
+        let encoded = Vector3::new(
+            new.x.mul_add(4096.0, -(old.x * 4096.0)) as i64,
+            new.y.mul_add(4096.0, -(old.y * 4096.0)) as i64,
+            new.z.mul_add(4096.0, -(old.z * 4096.0)) as i64,
         );
+        if delta_needs_position_sync(encoded) {
+            self.send_position_sync(chunk_pos, new);
+            return;
+        }
+        let converted = Vector3::new(encoded.x as i16, encoded.y as i16, encoded.z as i16);
 
         // Only broadcast when position has actually changed.
         if converted.x == 0 && converted.y == 0 && converted.z == 0 {
@@ -4326,6 +4377,45 @@ impl Flag {
             Self::FallFlying => Some(entity_data_flag::GLIDING),
             Self::Glowing => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod position_sync_tests {
+    use super::delta_needs_position_sync;
+    use pumpkin_util::math::vector3::Vector3;
+
+    #[test]
+    fn a_small_step_stays_a_delta_packet() {
+        assert!(!delta_needs_position_sync(Vector3::new(4096, -2048, 0)));
+    }
+
+    #[test]
+    fn eight_blocks_is_the_edge() {
+        assert!(!delta_needs_position_sync(Vector3::new(
+            i16::MAX as i64,
+            0,
+            0
+        )));
+        assert!(delta_needs_position_sync(Vector3::new(
+            i16::MAX as i64 + 1,
+            0,
+            0
+        )));
+        assert!(delta_needs_position_sync(Vector3::new(
+            0,
+            i16::MIN as i64 - 1,
+            0
+        )));
+    }
+
+    #[test]
+    fn a_teleport_across_the_world_needs_a_sync() {
+        assert!(delta_needs_position_sync(Vector3::new(
+            4096 * 10_000,
+            0,
+            -4096 * 10_000
+        )));
     }
 }
 
