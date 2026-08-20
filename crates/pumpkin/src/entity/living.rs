@@ -138,6 +138,9 @@ pub struct LivingEntity {
     pub entity: Entity,
     /// Tracks the remaining time until the entity can regenerate health.
     pub hurt_cooldown: AtomicI32,
+    /// Vanilla `LivingEntity.lastHurtByPlayerMemoryTime`: ticks left in which a death still
+    /// counts as a player kill for loot and experience. Set to 100 by any player-sourced damage.
+    pub last_hurt_by_player_time: AtomicI32,
     /// Stores the amount of damage the entity last received.
     pub last_damage_taken: AtomicCell<f32>,
     /// The current health level of the entity.
@@ -294,6 +297,7 @@ impl LivingEntity {
             air_metadata_initialized: AtomicBool::new(false),
             entity,
             hurt_cooldown: AtomicI32::new(0),
+            last_hurt_by_player_time: AtomicI32::new(0),
             last_damage_taken: AtomicCell::new(0.0),
             absorption: AtomicCell::new(0.0),
             fall_distance: AtomicCell::new(0.0),
@@ -1748,7 +1752,10 @@ impl LivingEntity {
             let is_thundering = world.is_thundering().await;
 
             let params = LootContextParameters {
-                killed_by_player: cause.map(|c| c.get_entity().entity_type == &EntityType::PLAYER),
+                // `dropAllDeathLoot`: the player-kill branch is driven by the memory window, so
+                // a mob that a player tagged and that then died to fall damage, fire or drowning
+                // still drops and still awards experience.
+                killed_by_player: Some(self.last_hurt_by_player_time.load(Relaxed) > 0),
                 this_entity: Some(self.entity.entity_type),
                 killer_entity: cause.map(|c| c.get_entity().entity_type),
                 direct_killer_entity: source.map(|s| s.get_entity().entity_type),
@@ -3110,6 +3117,16 @@ impl EntityBase for LivingEntity {
                 return false; // Dying or dead
             }
 
+            // `LivingEntity.resolvePlayerResponsibleForDamage`: any player-sourced hit starts a
+            // hundred-tick window in which a death still counts as that player's kill.
+            if cause
+                .or(source)
+                .is_some_and(|attacker| attacker.get_entity().entity_type == &EntityType::PLAYER)
+            {
+                self.last_hurt_by_player_time
+                    .store(PLAYER_KILL_MEMORY_TICKS, Relaxed);
+            }
+
             if amount < 0.0 {
                 return false;
             }
@@ -4181,6 +4198,9 @@ impl EntityBase for LivingEntity {
                 if self.hurt_cooldown.load(Relaxed) > 0 {
                     self.hurt_cooldown.fetch_sub(1, Relaxed);
                 }
+                if self.last_hurt_by_player_time.load(Relaxed) > 0 {
+                    self.last_hurt_by_player_time.fetch_sub(1, Relaxed);
+                }
                 if self.health.load() <= 0.0 {
                     let time = self.death_time.fetch_add(1, Relaxed);
                     // Only send death particles once (on the exact tick death_time reaches 20)
@@ -4500,6 +4520,9 @@ fn absorption_after_application(current: f32, amplifier: u8, max_absorption: f32
         .max(4.0 * (f32::from(amplifier) + 1.0))
         .clamp(0.0, max_absorption)
 }
+
+/// Vanilla `LivingEntity.setLastHurtByPlayer` starts this many ticks of player-kill memory.
+const PLAYER_KILL_MEMORY_TICKS: i32 = 100;
 
 /// Vanilla `MobEffectInstance.isShorterDurationThan`: a duration of -1 is infinite, so it is
 /// never shorter than anything and everything finite is shorter than it.
