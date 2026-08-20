@@ -3454,8 +3454,11 @@ impl Entity {
             return false;
         }
 
+        // `Entity.fireImmune` is the entity type's flag; the atomic is the per-instance one that
+        // fire-resistant item stacks set. Vanilla checks the type, so blazes, striders, withers
+        // and the rest shrug off fireballs and campfires, not just lava.
         if damage_type.has_tag(&tag::DamageType::MINECRAFT_IS_FIRE)
-            && self.fire_immune.load(Ordering::Relaxed)
+            && (self.entity_type.fire_immune || self.fire_immune.load(Ordering::Relaxed))
         {
             return true;
         }
