@@ -51,7 +51,18 @@ impl ItemBehaviour for BoneMealItem {
                             }
                             id if id == Block::TORCHFLOWER_CROP.id => 1,
                             id if id == Block::PITCHER_CROP.id => 4,
-                            _ => 7,
+                            id if id == Block::WHEAT.id
+                                || id == Block::CARROTS.id
+                                || id == Block::POTATOES.id
+                                || id == Block::MELON_STEM.id
+                                || id == Block::PUMPKIN_STEM.id =>
+                            {
+                                7
+                            }
+                            // Anything else with an `age` property is not a BonemealableBlock:
+                            // nether wart in particular only encodes ages 0..=3, so the shared
+                            // 0..=7 path wrote a state that decoded back to 0 and ate the item.
+                            _ => return None,
                         };
                         (current_age < max_age).then(|| {
                             let bonus = (rand::random::<u32>() % 4 + 2) as u8;
