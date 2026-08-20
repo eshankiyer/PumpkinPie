@@ -100,7 +100,11 @@ impl BlockEntity for HopperBlockEntity {
         Box::pin(async move {
             self.ticked_game_time
                 .store(world.get_world_age().await, Ordering::Relaxed);
-            if self.cooldown_time.fetch_sub(1, Ordering::Relaxed) <= 0 {
+            // `pushItemsTick` decrements first and then tests `cooldownTime > 0`, so the hopper
+            // acts when the value BEFORE the decrement is at most one. Testing the pre-decrement
+            // value against zero delayed every transfer by a tick, making hoppers move an item
+            // every nine ticks instead of every eight.
+            if self.cooldown_time.fetch_sub(1, Ordering::Relaxed) <= 1 {
                 self.cooldown_time.store(0, Ordering::Relaxed);
                 let state = HopperLikeProperties::from_state_id(
                     world.get_block_state(&self.position).id,
@@ -238,16 +242,26 @@ impl HopperBlockEntity {
             for entity_base in entities {
                 if let Some(item_entity) = entity_base.clone().get_item_entity() {
                     let mut stack = item_entity.get_item_stack().lock().await;
-                    if !stack.is_empty() {
-                        let backup = stack.clone();
+                    // `HopperBlockEntity.addItem(container, entity)` offers the WHOLE stack and
+                    // leaves whatever did not fit on the entity, so a dropped stack of 64 is
+                    // swallowed in one tick rather than one item every eight ticks. Only the
+                    // container-to-container path moves a single item per cycle.
+                    let mut moved = false;
+                    while !stack.is_empty() {
                         let one_item = stack.split(1);
+                        let count = one_item.item_count;
                         if Self::add_one_item(self, self, one_item, &[0, 1, 2, 3, 4]).await {
-                            if stack.is_empty() {
-                                item_entity.get_entity().remove().await;
-                            }
-                            return true;
+                            moved = true;
+                        } else {
+                            stack.item_count += count;
+                            break;
                         }
-                        *stack = backup;
+                    }
+                    if moved {
+                        if stack.is_empty() {
+                            item_entity.get_entity().remove().await;
+                        }
+                        return true;
                     }
                 }
             }
