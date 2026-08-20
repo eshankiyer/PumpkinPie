@@ -99,6 +99,7 @@ use crate::command::context::command_source::CommandSource;
 use crate::command::node::dispatcher::CommandDispatcher;
 use crate::command::{CommandSender, client_suggestions};
 use crate::data::SaveJSONConfiguration;
+use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::entity::{EntityBaseFuture, NbtFuture, TeleportFuture};
 use crate::net::{ClientPlatform, GameProfile};
 use crate::net::{DisconnectReason, PlayerConfig};
@@ -6302,12 +6303,14 @@ impl InventoryPlayer for Player {
 
     fn award_experience(&self, amount: i32) -> PlayerFuture<'_, ()> {
         Box::pin(async move {
-            debug!("Player::award_experience called with amount={amount}");
+            // Both callers of this — the furnace result slot and the grindstone — award through
+            // `ExperienceOrb.award` in vanilla (`AbstractFurnaceBlockEntity.createExperience`,
+            // `GrindstoneMenu.onTake`). Granting the points directly skipped the orb entirely,
+            // and since Mending is applied when an orb is picked up, furnace and grindstone
+            // experience never repaired a Mending tool.
             if amount > 0 {
-                debug!("Player: adding {amount} experience points");
-                if let Some(player) = self.world().get_player_by_uuid(self.gameprofile.id) {
-                    player.add_experience_points(amount).await;
-                }
+                let amount = u32::try_from(amount).unwrap_or(0);
+                ExperienceOrbEntity::spawn(&self.world(), self.position(), amount).await;
             }
         })
     }
