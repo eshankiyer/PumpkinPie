@@ -691,9 +691,11 @@ impl LivingEntity {
         clippy::too_many_lines,
         reason = "effect application also synchronizes attributes"
     )]
-    pub async fn add_effect(&self, mut effect: Effect) {
+    /// Vanilla `LivingEntity.addEffect`: returns whether the active instance changed, which is
+    /// what decides whether a caller counts the application as a success.
+    pub async fn add_effect(&self, mut effect: Effect) -> bool {
         if !self.can_be_affected(effect.effect_type) {
-            return;
+            return false;
         }
         let applied_amplifier = effect.amplifier;
         let inverted = self.is_undead();
@@ -702,7 +704,7 @@ impl LivingEntity {
         if !Self::instant_effect_is_damage(effect.effect_type, inverted) && is_instant {
             let heal_amount = 4.0 * (1 << effect.amplifier) as f32;
             self.heal(heal_amount);
-            return;
+            return true;
         } else if is_instant {
             let damage_amount = 6.0 * (1 << effect.amplifier) as f32;
             if let Some(dyn_self) = self
@@ -745,7 +747,7 @@ impl LivingEntity {
             self.start_absorption(applied_amplifier).await;
 
             if !did_apply {
-                return;
+                return false;
             }
 
             // Effects that modify attributes (ex. speed) should also update the
@@ -823,6 +825,8 @@ impl LivingEntity {
         );
 
         self.entity.world.load().broadcast_packet_all(&packet);
+
+        true
     }
 
     pub async fn remove_all_effects(&self) -> bool {

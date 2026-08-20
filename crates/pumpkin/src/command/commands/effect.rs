@@ -87,28 +87,21 @@ impl CommandExecutor for GiveExecutor {
 
             let mut successes = 0;
 
+            // Vanilla counts an application only when `LivingEntity.addEffect` reports that the
+            // running instance changed, so the merge rules live there rather than here.
             for target in targets {
-                if target.living_entity.has_effect(effect).await
-                    && target
-                        .living_entity
-                        .get_effect(effect)
-                        .await
-                        .expect("Effect should exist because has_effect returned true")
-                        .amplifier
-                        >= amplifier
-                {
-                } else {
-                    target
-                        .add_effect(Effect {
-                            effect_type: effect,
-                            duration: second,
-                            amplifier,
-                            ambient: false, //this is not a beacon effect
-                            show_particles: !hide_particles,
-                            show_icon: true,
-                            blend: true, //Currently only used in the DARKNESS effect to apply extra void fog and adjust the gamma value for lighting.
-                        })
-                        .await;
+                let applied = target
+                    .add_effect(Effect {
+                        effect_type: effect,
+                        duration: second,
+                        amplifier,
+                        ambient: false, //this is not a beacon effect
+                        show_particles: !hide_particles,
+                        show_icon: true,
+                        blend: true, //Currently only used in the DARKNESS effect to apply extra void fog and adjust the gamma value for lighting.
+                    })
+                    .await;
+                if applied {
                     successes += 1;
                 }
             }
@@ -283,7 +276,7 @@ pub fn init_command_tree() -> CommandTree {
                                 ARG_SECOND,
                                 BoundedNumArgumentConsumer::new()
                                     .name("seconds")
-                                    .min(0)
+                                    .min(1)
                                     .max(1_000_000),
                             )
                             .execute(GiveExecutor(Time::Specified, Amplifier::Base, true))
@@ -292,7 +285,7 @@ pub fn init_command_tree() -> CommandTree {
                                     ARG_AMPLIFIER,
                                     BoundedNumArgumentConsumer::new()
                                         .name("amplifier")
-                                        .min(1)
+                                        .min(0)
                                         .max(255),
                                 )
                                 .execute(GiveExecutor(Time::Specified, Amplifier::Specified, true))
@@ -311,7 +304,7 @@ pub fn init_command_tree() -> CommandTree {
                                         ARG_AMPLIFIER,
                                         BoundedNumArgumentConsumer::new()
                                             .name("amplifier")
-                                            .min(1)
+                                            .min(0)
                                             .max(255),
                                     )
                                     .execute(GiveExecutor(

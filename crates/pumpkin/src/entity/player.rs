@@ -4172,8 +4172,8 @@ impl Player {
         self.set_experience(new_level, progress, points).await;
     }
 
-    pub async fn add_effect(&self, effect: Effect) {
-        self.living_entity.add_effect(effect).await;
+    pub async fn add_effect(&self, effect: Effect) -> bool {
+        self.living_entity.add_effect(effect).await
     }
 
     pub async fn has_effect(&self, effect_type: &'static StatusEffect) -> bool {
