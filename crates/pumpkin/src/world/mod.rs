@@ -3815,6 +3815,22 @@ impl World {
         Explosion::new_knockback_only(position, radius, knockback_multiplier)
             .explode(self)
             .await;
+
+        // Vanilla passes the gust emitters and `BREEZE_WIND_CHARGE_BURST` to `Level.explode`,
+        // so a wind burst is seen and heard rather than being an invisible shove.
+        let particle = if radius < 2.0 {
+            Particle::GustEmitterSmall
+        } else {
+            Particle::GustEmitterLarge
+        };
+        self.send_explosion_effect(
+            position,
+            radius as f32,
+            0,
+            particle,
+            Sound::EntityBreezeWindBurst,
+        )
+        .await;
     }
 
     async fn explode_with_blocks(
@@ -3837,24 +3853,45 @@ impl World {
         } else {
             Particle::ExplosionEmitter
         };
+        self.send_explosion_effect(
+            position,
+            power,
+            block_count as i32,
+            particle,
+            Sound::EntityGenericExplode,
+        )
+        .await;
+    }
+
+    /// The client half of an explosion: `Level.explode` always follows the server-side work with
+    /// an explosion packet carrying the particle and sound for that kind of blast.
+    async fn send_explosion_effect(
+        self: &Arc<Self>,
+        position: Vector3<f64>,
+        power: f32,
+        block_count: i32,
+        particle: Particle,
+        sound: Sound,
+    ) {
         for player in self.players.load().iter() {
-            let mut sound_id = Sound::EntityGenericExplode as u16;
-            if let ClientPlatform::Java(java_client) = player.client.as_ref() {
-                sound_id = remap_sound_id_for_version(sound_id, java_client.version.load());
-            }
-            let sound = IdOr::<SoundEvent>::Id(sound_id);
             if player.position().squared_distance_to_vec(&position) > 4096.0 {
                 continue;
             }
+
+            let mut sound_id = sound as u16;
+            if let ClientPlatform::Java(java_client) = player.client.as_ref() {
+                sound_id = remap_sound_id_for_version(sound_id, java_client.version.load());
+            }
+
             player
                 .client
                 .enqueue_packet(&CExplosion::new(
                     position,
                     power,
-                    block_count as i32,
+                    block_count,
                     None,
                     VarInt(particle as i32),
-                    sound.clone(),
+                    IdOr::<SoundEvent>::Id(sound_id),
                 ))
                 .await;
         }
