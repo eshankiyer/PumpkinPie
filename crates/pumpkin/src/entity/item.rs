@@ -511,6 +511,11 @@ impl EntityBase for ItemEntity {
                 return;
             }
 
+            // `ItemEntity.tick` runs `super.tick()` before its own logic. Without it an item
+            // never entered a portal it was thrown into and was never discarded below the
+            // world, and its last position was frozen at the spawn point.
+            entity.tick(caller, server).await;
+
             self.decrement_pickup_delay();
 
             let original_velo = entity.velocity.load();
