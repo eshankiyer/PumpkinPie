@@ -2167,26 +2167,14 @@ impl LivingEntity {
         let effect_type = effect.effect_type;
 
         if effect_type == &StatusEffect::REGENERATION {
-            if duration <= 0 {
-                return false;
-            }
-            let tick_rate = 50 >> effect.amplifier.min(4);
-            duration % tick_rate == 0
+            effect_ticks_this_tick(50, effect.amplifier, duration)
         } else if effect_type == &StatusEffect::POISON {
-            if duration <= 0 {
-                return false;
-            }
-            let tick_rate = 25 >> effect.amplifier.min(4);
-            duration % tick_rate == 0
+            effect_ticks_this_tick(25, effect.amplifier, duration)
         } else if effect_type == &StatusEffect::WITHER {
-            if duration <= 0 {
-                return false;
-            }
-            let tick_rate = 40 >> effect.amplifier.min(4);
-            duration % tick_rate == 0
+            effect_ticks_this_tick(40, effect.amplifier, duration)
         } else if effect_type == &StatusEffect::HUNGER {
-            // Hunger every 20 ticks
-            duration % 20 == 0
+            // `HungerMobEffect.shouldApplyEffectTickThisTick`: every tick.
+            true
         } else if effect_type == &StatusEffect::ABSORPTION {
             // `AbsorptionMobEffect.shouldApplyEffectTickThisTick`: every tick.
             true
@@ -2254,8 +2242,8 @@ impl LivingEntity {
             if let Some(entity) = world.get_entity_by_id(self.entity.entity_id)
                 && let Some(player) = entity.get_player()
             {
-                // Add exhaustion to trigger hunger decrease
-                let exhaustion = 0.1 * (amplifier as f32 + 1.0);
+                // `HungerMobEffect.applyEffectTick`: a twentieth of this lands every tick.
+                let exhaustion = 0.005 * (f32::from(amplifier) + 1.0);
                 player.hunger_manager.add_exhaustion(exhaustion);
             }
             drop(world);
@@ -4436,6 +4424,14 @@ fn consumable_remainder(item: &ItemStack) -> Option<&'static Item> {
     }
 }
 
+/// Vanilla `MobEffect.shouldApplyEffectTickThisTick` for the effects that space their work out:
+/// `interval > 0 ? tickCount % interval == 0 : true`. The amplifier is not clamped, and Java
+/// shifts by the low five bits of it, so a high enough amplifier wraps rather than saturating.
+const fn effect_ticks_this_tick(base_interval: i32, amplifier: u8, tick_count: i32) -> bool {
+    let interval = base_interval >> (amplifier as u32 & 31);
+    interval <= 0 || tick_count % interval == 0
+}
+
 /// `LivingEntity.canBeAffected` and the species overrides in front of it.
 ///
 /// The tag branches are checked in vanilla's order, and the overrides run first because vanilla
@@ -4536,6 +4532,35 @@ fn update_effect_chain(chain: &mut Vec<Effect>, index: usize, take_over: &Effect
     }
 
     changed
+}
+
+#[cfg(test)]
+mod effect_tick_cadence_tests {
+    use super::effect_ticks_this_tick;
+
+    #[test]
+    fn the_interval_halves_with_every_level() {
+        assert!(effect_ticks_this_tick(50, 0, 50));
+        assert!(!effect_ticks_this_tick(50, 0, 49));
+        assert!(effect_ticks_this_tick(50, 1, 25));
+        assert!(effect_ticks_this_tick(50, 2, 12));
+        assert!(!effect_ticks_this_tick(50, 2, 11));
+    }
+
+    #[test]
+    fn an_interval_that_reaches_zero_applies_every_tick() {
+        // Regeneration VII and beyond: 50 >> 6 is 0, so vanilla stops spacing it out.
+        assert!(effect_ticks_this_tick(50, 6, 1));
+        assert!(effect_ticks_this_tick(50, 6, 7));
+        assert!(effect_ticks_this_tick(25, 5, 3));
+    }
+
+    #[test]
+    fn the_shift_wraps_the_way_java_does() {
+        // Java shifts an int by the low five bits of the amplifier, so 32 behaves like 0.
+        assert!(effect_ticks_this_tick(50, 32, 50));
+        assert!(!effect_ticks_this_tick(50, 32, 49));
+    }
 }
 
 #[cfg(test)]
