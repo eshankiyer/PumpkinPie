@@ -352,9 +352,10 @@ impl EntityBase for AreaEffectCloudEntity {
 
                 // AreaEffectCloud.java:222 -- skip victims that none of the effects can affect.
                 let affectable = cand_clone.get_living_entity().is_some_and(|living| {
-                    effects
-                        .iter()
-                        .any(|(effect_type, ..)| living.can_be_affected(effect_type))
+                    living.is_affected_by_potions()
+                        && effects
+                            .iter()
+                            .any(|(effect_type, ..)| living.can_be_affected(effect_type))
                 });
                 if !affectable {
                     continue;

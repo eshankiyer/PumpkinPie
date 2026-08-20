@@ -679,6 +679,13 @@ impl LivingEntity {
         self.entity.entity_id
     }
 
+    /// Vanilla `LivingEntity.isAffectedByPotions`, which `ArmorStand` overrides to false: splash
+    /// and lingering potions pass an armour stand by rather than dosing it.
+    #[must_use]
+    pub fn is_affected_by_potions(&self) -> bool {
+        self.entity.entity_type != &EntityType::ARMOR_STAND
+    }
+
     /// `LivingEntity.canBeAffected` plus the species overrides that sit in front of it:
     /// `Parched` (immune to the Weakness its own arrows apply), `Spider` and `AbstractNautilus`
     /// (poison) and `WitherBoss` / `WitherSkeleton` (wither).

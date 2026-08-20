@@ -240,7 +240,12 @@ impl EntityBase for SplashPotionEntity {
                 let cand_clone = cand.clone();
                 let effs_clone: Vec<_> = effects.clone();
                 tokio::spawn(async move {
-                    if let Some(living) = cand_clone.get_living_entity() {
+                    // `ThrownSplashPotion.hitBlock`: an entity that is not affected by potions,
+                    // such as an armour stand, is skipped before the range test.
+                    if let Some(living) = cand_clone
+                        .get_living_entity()
+                        .filter(|living| living.is_affected_by_potions())
+                    {
                         let target_aabb = cand_clone
                             .get_entity()
                             .bounding_box
