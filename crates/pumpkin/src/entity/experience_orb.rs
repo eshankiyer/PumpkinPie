@@ -5,6 +5,7 @@ use std::sync::{
 };
 
 use pumpkin_data::entity::EntityType;
+use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::{entity::EntityBaseFuture, server::Server, world::World};
@@ -34,10 +35,42 @@ impl ExperienceOrbEntity {
         while amount > 0 {
             let i = Self::round_to_orb_size(amount);
             amount -= i;
+            // `ExperienceOrb.awardWithDirection` folds each split into a nearby orb of the same
+            // value before creating a new entity, which keeps a mob farm's ground from filling
+            // with orbs and keeps the pile alive by resetting the age it despawns on.
+            if Self::try_merge_to_existing(world, position, i) {
+                continue;
+            }
             let entity = Entity::new(world.clone(), position, &EntityType::EXPERIENCE_ORB);
             let orb = Arc::new(Self::new(entity, i));
             world.spawn_entity(orb).await;
         }
+    }
+
+    /// Vanilla `ExperienceOrb.tryMergeToExisting`: look in a one-block box for an orb of the same
+    /// value whose entity id is congruent to a random one modulo forty, and grow it instead.
+    fn try_merge_to_existing(world: &Arc<World>, position: Vector3<f64>, value: u32) -> bool {
+        let half = Vector3::new(0.5, 0.5, 0.5);
+        let box_ = BoundingBox::new(position - half, position + half);
+        let id = rand::random_range(0..40);
+
+        for other in world.get_entities_at_box(&box_) {
+            let Some(orb) = other.cast_any().downcast_ref::<Self>() else {
+                continue;
+            };
+            if orb.entity.is_removed()
+                || orb.amount.load(Ordering::Relaxed) != value
+                || orb.entity.entity_id.wrapping_sub(id) % 40 != 0
+            {
+                continue;
+            }
+
+            orb.count.fetch_add(1, Ordering::Relaxed);
+            orb.orb_age.store(0, Ordering::Relaxed);
+            return true;
+        }
+
+        false
     }
 
     const fn round_to_orb_size(value: u32) -> u32 {
