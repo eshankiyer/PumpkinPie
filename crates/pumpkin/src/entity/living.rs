@@ -56,7 +56,7 @@ use pumpkin_data::data_component_impl::{
     OminousBottleAmplifierImpl,
 };
 use pumpkin_data::effect::StatusEffect;
-use pumpkin_data::entity::{EntityPose, EntityStatus, EntityType};
+use pumpkin_data::entity::{EntityPose, EntityStatus, EntityType, MobCategory};
 use pumpkin_data::item_stack::{DamageResult, ItemStack};
 use pumpkin_data::sound::SoundCategory;
 use pumpkin_data::{Block, Enchantment, translation};
@@ -1782,8 +1782,14 @@ impl LivingEntity {
             )
             .await;
 
-            // Drop loot
-            self.drop_loot(params.clone()).await;
+            // `LivingEntity.dropAllDeathLoot` only reaches the loot table when `shouldDropLoot`
+            // holds: the mob_drops game rule, and for everything but a monster, not being a
+            // baby (`LivingEntity.shouldDropLoot` / `Monster.shouldDropLoot`).
+            let is_baby = self.entity.age.load(Relaxed) < 0;
+            let is_monster = self.entity.entity_type.category == &MobCategory::MONSTER;
+            if world.level_info.load().game_rules.mob_drops && (is_monster || !is_baby) {
+                self.drop_loot(params.clone()).await;
+            }
 
             // Award experience
             if params.killed_by_player.unwrap_or(false)
