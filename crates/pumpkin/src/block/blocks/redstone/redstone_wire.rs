@@ -353,24 +353,26 @@ async fn can_connect_to(
     side: BlockDirection,
     state: &BlockState,
 ) -> bool {
-    if world
-        .block_registry
-        .emits_redstone_power(block, state, side)
-        .await
-    {
+    // `RedStoneWireBlock.shouldConnectTo` checks wire, repeater and observer BEFORE the generic
+    // signal-source fallback. An observer is a signal source in every direction, so testing that
+    // first made dust bend into all four of its sides instead of only its output face.
+    if block == &Block::REDSTONE_WIRE {
         return true;
     }
     if block == &Block::REPEATER {
         let repeater_props = RepeaterLikeProperties::from_state_id(state.id, block);
         return repeater_props.facing.to_block_direction() == side
             || repeater_props.facing.to_block_direction() == side.opposite();
-    } else if block == &Block::OBSERVER {
+    }
+    if block == &Block::OBSERVER {
         let observer_props = ObserverLikeProperties::from_state_id(state.id, block);
         return observer_props.facing == side.to_facing();
-    } else if block == &Block::REDSTONE_WIRE {
-        return true;
     }
-    false
+
+    world
+        .block_registry
+        .emits_redstone_power(block, state, side)
+        .await
 }
 
 fn can_connect_diagonal_to(block: &Block) -> bool {
