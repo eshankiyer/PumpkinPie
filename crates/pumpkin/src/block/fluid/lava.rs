@@ -102,12 +102,17 @@ impl FlowingLava {
             == &Block::SOUL_SOIL;
         let is_still = world.get_block_state_id(block_pos) == Block::LAVA.default_state.id;
 
+        // `LiquidBlock.shouldSpreadLiquid` walks POSSIBLE_FLOW_DIRECTIONS and dereferences the
+        // OPPOSITE of each, so the neighbours it tests are up, north, south, west and east. The
+        // block below is deliberately never tested, and the test is on the neighbour's fluid
+        // state, so a waterlogged slab or stairs counts as water.
         for dir in BlockDirection::all() {
+            if dir == BlockDirection::Down {
+                continue;
+            }
             let neighbor_pos = block_pos.offset(dir.to_offset());
-            if world.get_block(&neighbor_pos) == &Block::WATER {
-                if dir == BlockDirection::Down {
-                    return true;
-                }
+            let (neighbor_fluid, _) = world.get_fluid_and_fluid_state(&neighbor_pos);
+            if neighbor_fluid == &Fluid::WATER || neighbor_fluid == &Fluid::FLOWING_WATER {
                 let block = if is_still {
                     Block::OBSIDIAN
                 } else {
