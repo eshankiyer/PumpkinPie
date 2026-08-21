@@ -65,6 +65,24 @@ def covered_blocks() -> set[str]:
                         break
             for key in re.findall(r"tag::Block::([A-Z0-9_]+)", body):
                 covered.update(tags.get(key, []))
+            # An ids() body may delegate to a local helper - the coral blocks map each live
+            # variant to its dead one through `get_dead_type` - so follow exactly one level of
+            # indirection. Scanning the whole file instead would credit blocks a behaviour
+            # merely mentions, like the FARMLAND in flowerbed's can_place_at.
+            for callee in re.findall(r"\b([a-z_][a-z0-9_]*)\s*\(", body):
+                fn = re.search(r"fn " + callee + r"\b[^{]*\{", text)
+                if not fn:
+                    continue
+                inner, depth = "", 0
+                for index in range(fn.end() - 1, len(text)):
+                    inner += text[index]
+                    if text[index] == "{":
+                        depth += 1
+                    elif text[index] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            break
+                body += inner
             # Both `Block::NAME` and `BlockId::NAME` appear in these bodies.
             for name in re.findall(r"\bBlock(?:Id)?::([A-Z0-9_]+)", body):
                 if not name.startswith(("MINECRAFT_", "C_")):

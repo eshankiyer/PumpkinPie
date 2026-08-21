@@ -161,3 +161,7 @@ patchbukkit/
 # Mechanically transliterated vanilla skeletons (tools/transpile_vanilla.py).
 # Local scaffold only: Mojang proprietary structure, does not compile, never committed.
 reference/transpiled
+
+# Python bytecode from the tracker scripts
+__pycache__/
+*.pyc
