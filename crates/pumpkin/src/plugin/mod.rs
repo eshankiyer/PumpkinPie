@@ -1149,6 +1149,10 @@ impl PluginManager {
         }
     }
 
+    /// The outer `Result<_, ()>` is part of the plugin API's message contract, so it stays
+    /// despite `clippy::result_unit_err`: narrowing it to `Option` here would change a
+    /// published signature for a lint, which is not this change's business.
+    #[allow(clippy::result_unit_err)]
     pub async fn send_message(
         &self,
         sender: &str,

@@ -1,5 +1,9 @@
 #![deny(clippy::unwrap_used)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
+// Several `BlockBehaviour` impls satisfy an `async fn` trait method without awaiting: the
+// async shape is the trait's, and rewriting each one to return `std::future::ready` to please
+// the lint would obscure that they implement the same interface as their awaiting siblings.
+#![allow(clippy::unused_async_trait_impl)]
 // Not warn event sending macros
 #![allow(unused_labels, deprecated)]
 

@@ -199,8 +199,8 @@ fn has_full_upward_face(state: &pumpkin_data::BlockState) -> bool {
 
     x_edges.windows(2).all(|x| {
         z_edges.windows(2).all(|z| {
-            let x = (x[0] + x[1]) * 0.5;
-            let z = (z[0] + z[1]) * 0.5;
+            let x = f64::midpoint(x[0], x[1]);
+            let z = f64::midpoint(z[0], z[1]);
             shapes.iter().any(|shape| {
                 shape.min.x <= x && x <= shape.max.x && shape.min.z <= z && z <= shape.max.z
             })

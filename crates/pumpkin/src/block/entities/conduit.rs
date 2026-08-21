@@ -367,7 +367,7 @@ async fn is_wet(living: &LivingEntity, world: &World) -> bool {
 }
 
 /// `UUIDUtil.CODEC`: four big-endian ints, most-significant first.
-fn uuid_from_int_array(values: &[i32]) -> Option<Uuid> {
+const fn uuid_from_int_array(values: &[i32]) -> Option<Uuid> {
     let &[a, b, c, d] = values else { return None };
     Some(Uuid::from_u128(
         ((a as u32 as u128) << 96)
