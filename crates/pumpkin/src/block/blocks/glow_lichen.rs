@@ -1,3 +1,5 @@
+//! Multiface growth blocks: `glow_lichen` and `resin_clump`.
+//!
 //! `GlowLichenBlock` (`net/minecraft/world/level/block/GlowLichenBlock.java:14`) and the plain
 //! `MultifaceBlock` registration used by `resin_clump`
 //! (`net/minecraft/world/level/block/Blocks.java:2425-2435`, `MultifaceBlock::new`).
@@ -34,9 +36,11 @@ use crate::block::{
 use crate::entity::EntityBase;
 use crate::world::World;
 
-/// Serves both `glow_lichen` (`GlowLichenBlock`) and `resin_clump` (a bare `MultifaceBlock`).
-/// Everything except the bonemeal hooks is identical between them, and the bonemeal hooks are
-/// gated on the block id below, so a single behaviour can own both ids.
+/// Behaviour shared by `glow_lichen` and `resin_clump`.
+///
+/// `glow_lichen` is a `GlowLichenBlock` and `resin_clump` a bare `MultifaceBlock`. Everything
+/// except the bonemeal hooks is identical between them, and those hooks are gated on the block
+/// id below, so a single behaviour can own both ids.
 pub struct MultifaceGrowthBlock;
 
 impl BlockMetadata for MultifaceGrowthBlock {

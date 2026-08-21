@@ -249,8 +249,41 @@ def command_flatten(class_name: str):
     return m.group(1).lower() if m else None
 
 
+def source_roots() -> list[str]:
+    """Top-level directories holding Rust crates, for whichever repo is being measured.
+
+    Hardcoding `crates/` scored SteelMC at 0%: it lays its crates out as `steel-core/`,
+    `steel-registry/` and so on. A workspace member is any directory with a Cargo.toml, plus
+    the children of a `crates/`-style container.
+    """
+    override = os.environ.get("CONFORMANCE_SRC_ROOTS")
+    if override:
+        return [r for r in override.split(",") if (REPO_ROOT / r).is_dir()]
+    roots: list[str] = []
+    for entry in sorted(REPO_ROOT.iterdir()):
+        if not entry.is_dir() or entry.name.startswith("."):
+            continue
+        if entry.name in {"target", "assets", "docs", "tools"}:
+            continue
+        children = [c for c in entry.iterdir() if c.is_dir() and (c / "Cargo.toml").is_file()]
+        if children:
+            roots += [str(c.relative_to(REPO_ROOT)) for c in sorted(children)]
+        elif (entry / "Cargo.toml").is_file():
+            roots.append(entry.name)
+    return roots
+
+
+SRC_ROOTS = source_roots()
+# The crate that holds most gameplay behaviour, used only to break ties between two files
+# declaring the same name. Pumpkin puts it in crates/pumpkin, Steel in steel-core.
+MAIN_CRATE = next(
+    (r for r in SRC_ROOTS if r.endswith(("/pumpkin", "-core", "/core"))),
+    SRC_ROOTS[0] if SRC_ROOTS else "",
+)
+
+
 def rg(pattern: str, replacement: str, with_filename: bool) -> list[str]:
-    crates = sorted(f"crates/{p.name}" for p in (REPO_ROOT / "crates").iterdir() if p.is_dir())
+    crates = SRC_ROOTS
     args = ["rg", "-g", "*.rs", "-o", pattern, "-r", replacement]
     args += ["--no-heading", "--with-filename"] if with_filename else ["--no-filename"]
     out = subprocess.run(args + crates, cwd=REPO_ROOT, capture_output=True, text=True, check=False)
@@ -266,7 +299,7 @@ def _decl_score(name: str, path: str) -> tuple:
     """
     return (
         pathlib.Path(path).stem == camel_to_snake(name),
-        path.startswith("crates/pumpkin/"),
+        bool(MAIN_CRATE) and path.startswith(f"{MAIN_CRATE}/"),
         "/generated/" not in path,
         -len(path),
         path,
@@ -285,14 +318,18 @@ def build_indexes() -> dict:
     structs = set(best) | set(rg(r"^\s*pub (?:const|static) (\w+)", "$1", False))
 
     stems: dict[str, str] = {}
-    for path in sorted(REPO_ROOT.glob("crates/*/**/*.rs")):
+    all_rs = [q for root in SRC_ROOTS for q in (REPO_ROOT / root).rglob("*.rs")]
+    for path in sorted(all_rs):
         rel = str(path.relative_to(REPO_ROOT))
         stem = path.stem if path.stem != "mod" else path.parent.name
         stems.setdefault(stem, rel)
 
+    cmd_dirs = [d for d in (REPO_ROOT / r for r in SRC_ROOTS)
+                if (d / "src/command/commands").is_dir()]
     commands = {
         p.stem: str(p.relative_to(REPO_ROOT))
-        for p in sorted((REPO_ROOT / "crates/pumpkin/src/command/commands").glob("*.rs"))
+        for d in cmd_dirs
+        for p in sorted((d / "src/command/commands").glob("*.rs"))
         if p.stem != "mod"
     }
 
