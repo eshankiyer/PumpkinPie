@@ -121,6 +121,34 @@ def placeable_block_items() -> set[str]:
     return items & blocks
 
 
+def generated_id_list(file_name: str, fn_name: str) -> set[int]:
+    """The ids a generated `fn NAME() -> Box<[u16]>` enumerator returns."""
+    text = read(ROOT / "crates/pumpkin-data/src/generated" / file_name)
+    start = text.find(f"pub fn {fn_name}(")
+    if start < 0:
+        return set()
+    body, depth = "", 0
+    for index in range(text.find("{", start), len(text)):
+        body += text[index]
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+    return {int(n) for n in re.findall(r"(\d+)u16", body)}
+
+
+def items_by_id(ids: set[int]) -> set[str]:
+    """Item registry names for a set of item ids, from the Java table."""
+    text = read(ROOT / "crates/pumpkin-data/src/generated/item.rs")
+    out: set[str] = set()
+    for match in re.finditer(r"pub const ([A-Z0-9_]+): Self = Self \{\s*id: (\d+),", text):
+        if int(match.group(2)) in ids:
+            out.add(match.group(1).lower())
+    return out
+
+
 def java_items() -> set[str]:
     """The Java item registry, separated from the Bedrock one.
 
@@ -203,6 +231,12 @@ def covered_items() -> set[str]:
             # tag constant was also being mistaken for an item name.
             for key in re.findall(r"tag::Item::([A-Z0-9_]+)", body):
                 covered.update(item_tags.get(key, []))
+            # An ids() body may call a generated enumerator in `pumpkin-data`, which is a
+            # different crate and so out of reach of the same-file helper follow above.
+            # `spawn_egg_ids()` is the one in use; it returns a flat id list, so resolve the ids
+            # against the item table rather than guessing from names.
+            if "spawn_egg_ids()" in body:
+                covered.update(items_by_id(generated_id_list("spawn_egg.rs", "spawn_egg_ids")))
             for name in re.findall(r"\bItem(?:Id)?::([A-Z0-9_]+)", body):
                 if not name.startswith(("MINECRAFT_", "C_")):
                     covered.add(name.lower())
