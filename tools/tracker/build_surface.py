@@ -32,7 +32,7 @@ def read(path: pathlib.Path) -> str:
     return path.read_text(errors="ignore")
 
 
-def block_tag_members() -> dict[str, list[str]]:
+def tag_members() -> dict[str, list[str]]:
     """Map `MINECRAFT_FOO` -> the block names in that tag, from the generated tag table."""
     text = read(ROOT / "crates/pumpkin-data/src/generated/tag.rs")
     members: dict[str, list[str]] = {}
@@ -44,7 +44,7 @@ def block_tag_members() -> dict[str, list[str]]:
 
 
 def covered_blocks() -> set[str]:
-    tags = block_tag_members()
+    tags = tag_members()
     covered: set[str] = set()
     for path in (ROOT / "crates/pumpkin/src/block").rglob("*.rs"):
         text = read(path)
@@ -106,6 +106,7 @@ def placeable_block_items() -> set[str]:
 def covered_items() -> set[str]:
     """Every `Item::X.id` named in an `ItemMetadata::ids` body, however it is formatted."""
     covered: set[str] = placeable_block_items()
+    item_tags = tag_members()
     for path in (ROOT / "crates/pumpkin/src/item").rglob("*.rs"):
         text = read(path)
         for match in re.finditer(r"fn ids\(\)[^{]*\{", text):
@@ -119,7 +120,14 @@ def covered_items() -> set[str]:
                     if depth == 0:
                         body = body[:index]
                         break
-            covered.update(name.lower() for name in re.findall(r"Item::([A-Z0-9_]+)", body))
+            # Items register three ways: named individually, or via an item tag
+            # (`tag::Item::MINECRAFT_SWORDS`), or by placing a block. Without the tag branch the
+            # tag constant was also being mistaken for an item name.
+            for key in re.findall(r"tag::Item::([A-Z0-9_]+)", body):
+                covered.update(item_tags.get(key, []))
+            for name in re.findall(r"\bItem(?:Id)?::([A-Z0-9_]+)", body):
+                if not name.startswith(("MINECRAFT_", "C_")):
+                    covered.add(name.lower())
     return covered
 
 
