@@ -645,3 +645,44 @@ pub async fn calculate_comparator_output(
     let output = 1.0 + percentage * 14.0;
     output.floor() as u8
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Ore experience is data-driven through `Block.experience` and `block::drop_loot`, not a
+    /// per-block behaviour: `DropExperienceBlock.spawnAfterBreak` (DropExperienceBlock.java:30-35)
+    /// samples the registered range, which `Blocks.java:367-369` gives as `UniformInt.of(0, 2)`
+    /// for coal ore and `Blocks.java:1261-1263` as `UniformInt.of(3, 7)` for diamond ore.
+    #[test]
+    fn ores_carry_their_vanilla_experience_range() {
+        use pumpkin_util::random::{RandomGenerator, xoroshiro128::Xoroshiro};
+
+        let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(1));
+        for (block, min, max) in [
+            (&Block::COAL_ORE, 0, 2),
+            (&Block::DEEPSLATE_COAL_ORE, 0, 2),
+            (&Block::DIAMOND_ORE, 3, 7),
+            (&Block::EMERALD_ORE, 3, 7),
+            (&Block::LAPIS_ORE, 2, 5),
+            (&Block::NETHER_QUARTZ_ORE, 2, 5),
+            (&Block::NETHER_GOLD_ORE, 0, 1),
+            (&Block::IRON_ORE, 0, 0),
+            (&Block::GOLD_ORE, 0, 0),
+            (&Block::COPPER_ORE, 0, 0),
+        ] {
+            let experience = block
+                .experience
+                .as_ref()
+                .unwrap_or_else(|| panic!("{} has no experience range", block.name));
+            for _ in 0..64 {
+                let amount = experience.experience.get(&mut random);
+                assert!(
+                    (min..=max).contains(&amount),
+                    "{} rolled {amount}, outside {min}..={max}",
+                    block.name
+                );
+            }
+        }
+    }
+}

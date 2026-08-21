@@ -56,7 +56,9 @@ def tag_members(namespace: str = "Block") -> dict[str, list[str]]:
     text = whole[start:end]
     members: dict[str, list[str]] = {}
     for match in re.finditer(
-        r"pub const ((?:MINECRAFT|C)_[A-Z0-9_]+): (?:super::)?Tag = \(\s*&\[(.*?)\]", text, re.S
+        r"pub const ((?:MINECRAFT|C)_[A-Z0-9_]+): (?:super::)?Tag =\s*\(\s*&\[(.*?)\]",
+        text,
+        re.S,
     ):
         members[match.group(1)] = re.findall(r'"([a-z0-9_/]+)"', match.group(2))
     # A shape change in the generated table silently empties this and drags block coverage
@@ -75,7 +77,9 @@ def _unused_tag_members() -> dict[str, list[str]]:
     text = read(ROOT / "crates/pumpkin-data/src/generated/tag.rs")
     members: dict[str, list[str]] = {}
     for match in re.finditer(
-        r"pub const ((?:MINECRAFT|C)_[A-Z0-9_]+): (?:super::)?Tag = \(\s*&\[(.*?)\]", text, re.S
+        r"pub const ((?:MINECRAFT|C)_[A-Z0-9_]+): (?:super::)?Tag =\s*\(\s*&\[(.*?)\]",
+        text,
+        re.S,
     ):
         members[match.group(1)] = re.findall(r'"([a-z0-9_/]+)"', match.group(2))
     return members
