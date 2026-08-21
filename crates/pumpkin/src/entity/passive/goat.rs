@@ -297,6 +297,14 @@ impl Mob for GoatEntity {
         &self.mob_entity
     }
 
+    /// `Goat.calculateFallDamage` (`Goat.java:123-125`): goats take 10 less fall damage.
+    fn mob_calculate_fall_damage(&self, fall_distance: f64, damage_modifier: f32) -> i32 {
+        self.mob_entity
+            .living_entity
+            .default_calculate_fall_damage(fall_distance, damage_modifier)
+            - 10
+    }
+
     fn get_walk_target_value(&self, pos: &pumpkin_util::math::position::BlockPos) -> f64 {
         super::animal::Animal::get_walk_target_value(self, pos)
     }

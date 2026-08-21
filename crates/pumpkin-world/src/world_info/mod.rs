@@ -121,7 +121,9 @@ const fn default_generate_structures() -> bool {
 }
 
 const DEFAULT_BORDER_DAMAGE_PER_BLOCK: f64 = 0.2;
-const DEFAULT_BORDER_SIZE: f64 = 60_000_000.0;
+/// Vanilla `WorldBorder.Settings.DEFAULT` size, `5.999997E7F` (`WorldBorder.java:459`),
+/// which as an `f32` is exactly `59999968.0`.
+const DEFAULT_BORDER_SIZE: f64 = 59_999_968.0;
 const DEFAULT_BORDER_SAFE_ZONE: f64 = 5.0;
 const DEFAULT_BORDER_WARNING_BLOCKS: f64 = 5.0;
 const DEFAULT_BORDER_WARNING_TIME: f64 = 15.0;

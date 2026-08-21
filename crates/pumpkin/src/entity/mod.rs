@@ -299,6 +299,15 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         true
     }
 
+    /// Vanilla `LivingEntity.calculateFallDamage` (`LivingEntity.java:1845-1852`), the virtual
+    /// that `causeFallDamage` (`LivingEntity.java:1801`) consults. Overriders subtract a flat
+    /// amount from the `LivingEntity` result; a non-living entity takes no fall damage.
+    fn calculate_fall_damage(&self, fall_distance: f64, damage_modifier: f32) -> i32 {
+        self.get_living_entity().map_or(0, |living| {
+            living.default_calculate_fall_damage(fall_distance, damage_modifier)
+        })
+    }
+
     /// Per-entity opt-out from explosions, independent of the vanilla
     /// `Entity.ignoreExplosion` rules below (kept because several entity types
     /// override only this one).

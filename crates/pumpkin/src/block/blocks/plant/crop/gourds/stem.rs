@@ -158,6 +158,12 @@ impl BlockBehaviour for StemBlock {
 }
 
 impl PlantBlockBase for StemBlock {
+    /// `StemBlock` extends `CropBlock`, so it inherits `CropBlock.canSurvive`
+    /// (`CropBlock.java:145-147`) with its own `mayPlaceOn` (`StemBlock.java:78-80`).
+    fn can_place_at(&self, block_accessor: &dyn BlockAccessor, block_pos: &BlockPos) -> bool {
+        <Self as CropBlockBase>::crop_can_survive(self, block_accessor, block_pos)
+    }
+
     fn can_plant_on_top(&self, block_accessor: &dyn BlockAccessor, pos: &BlockPos) -> bool {
         let block = block_accessor.get_block(pos);
         if block == &Block::PUMPKIN_STEM {

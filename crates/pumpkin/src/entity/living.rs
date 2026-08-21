@@ -2072,17 +2072,35 @@ impl LivingEntity {
             return;
         }
 
-        // Fetches the safe fall distance attribute
-        let safe_fall_distance = self.get_attribute_value(&Attributes::SAFE_FALL_DISTANCE) as f32;
-        let unsafe_fall_distance = fall_distance + 1.0E-6 - safe_fall_distance;
-
-        let damage = (unsafe_fall_distance * damage_per_distance).floor();
-        if damage > 0.0 {
-            let check_damage = self.damage(caller, damage, DamageType::FALL).await; // Fall
+        let damage = caller.calculate_fall_damage(f64::from(fall_distance), damage_per_distance);
+        if damage > 0 {
+            #[allow(clippy::cast_precision_loss)]
+            let check_damage = self.damage(caller, damage as f32, DamageType::FALL).await; // Fall
             if check_damage {
                 self.entity
                     .play_sound(Self::get_fall_sound(fall_distance as i32));
             }
+        }
+    }
+
+    /// Vanilla `LivingEntity.calculateFallDamage` (`LivingEntity.java:1845-1852`), including the
+    /// `FALL_DAMAGE_MULTIPLIER` attribute that horses, camels and llamas set to 0.5.
+    ///
+    /// Split out so a subclass override (`Goat.calculateFallDamage`,
+    /// `Frog.calculateFallDamage`) can reach the `LivingEntity`-level result without recursing
+    /// back into itself.
+    pub fn default_calculate_fall_damage(&self, fall_distance: f64, damage_modifier: f32) -> i32 {
+        if self.is_immune_to_fall_damage() {
+            return 0;
+        }
+        let fall_power =
+            fall_distance + 1.0E-6 - self.get_attribute_value(&Attributes::SAFE_FALL_DISTANCE);
+        let damage = fall_power
+            * f64::from(damage_modifier)
+            * self.get_attribute_value(&Attributes::FALL_DAMAGE_MULTIPLIER);
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            damage.floor() as i32
         }
     }
 

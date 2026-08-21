@@ -95,4 +95,18 @@ pub trait BlockAccessor: Send + Sync {
     fn get_block_and_state(&self, position: &BlockPos) -> (&'static Block, &'static BlockState);
 
     fn get_fluid(&self, position: &BlockPos) -> Fluid;
+
+    /// Vanilla `LevelReader.getRawBrightness(pos, ambientDarkness)`: `max(skyLight -
+    /// ambientDarkness, blockLight)`.
+    ///
+    /// Several `canSurvive` implementations gate on it - `CropBlock.hasSufficientLight`
+    /// (`CropBlock.java:149-151`), `MushroomBlock.canSurvive` (`MushroomBlock.java:83-87`),
+    /// `PitcherCropBlock.canSurvive` (`PitcherCropBlock.java:104-106`) - but not every
+    /// `BlockAccessor` has a light engine behind it: the worldgen caches read a chunk whose light
+    /// has not been computed yet. `None` means "no light information here"; callers must then
+    /// skip the light gate rather than assume a value, since the gates run in both directions
+    /// (crops want *at least* 8, mushrooms want *less than* 13).
+    fn get_raw_brightness(&self, _position: &BlockPos, _ambient_darkness: u8) -> Option<u8> {
+        None
+    }
 }

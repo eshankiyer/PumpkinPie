@@ -7800,6 +7800,12 @@ impl BlockAccessor for World {
     fn get_fluid(&self, position: &BlockPos) -> pumpkin_data::fluid::Fluid {
         Self::get_fluid(self, position).clone()
     }
+
+    /// A live world does have a light engine, so the trait's "no light information" `None` is
+    /// replaced by the real `LevelReader.getRawBrightness` value.
+    fn get_raw_brightness(&self, position: &BlockPos, ambient_darkness: u8) -> Option<u8> {
+        Some(Self::get_raw_brightness(self, position, ambient_darkness))
+    }
 }
 
 fn bedrock_block_breaking_rate(speed: f32) -> i32 {
