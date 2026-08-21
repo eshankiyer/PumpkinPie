@@ -121,6 +121,33 @@ def placeable_block_items() -> set[str]:
     return items & blocks
 
 
+def java_items() -> set[str]:
+    """The Java item registry, separated from the Bedrock one.
+
+    `item.rs` holds both editions in one table: a Bedrock entry carries a
+    `BedrockItemVersion` and a namespaced `registry_key`, a Java entry neither. Counting their
+    union put the denominator at 2051 and charged this server for 514 Bedrock-only entries -
+    `agent_spawn_egg`, `allow`, the separate `*_double_slab` and `*_standing_sign` items - that
+    have no Java counterpart at all. The Java registry is 1537, which is independently what
+    SteelMC's tracker reports for a Java-only server.
+    """
+    text = read(ROOT / "crates/pumpkin-data/src/generated/item.rs")
+    java: set[str] = set()
+    for match in re.finditer(r"pub const ([A-Z0-9_]+): Self = Self \{", text):
+        chunk, depth = "", 0
+        for index in range(match.end() - 1, len(text)):
+            chunk += text[index]
+            if text[index] == "{":
+                depth += 1
+            elif text[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+        if "BedrockItemVersion" not in chunk:
+            java.add(match.group(1).lower())
+    return java
+
+
 def data_driven_items() -> set[str]:
     """Items whose behaviour the server drives from their data components.
 
@@ -179,12 +206,11 @@ def covered_items() -> set[str]:
             for name in re.findall(r"\bItem(?:Id)?::([A-Z0-9_]+)", body):
                 if not name.startswith(("MINECRAFT_", "C_")):
                     covered.add(name.lower())
-    return covered
+    return covered & java_items()
 
 
 def total_items() -> int:
-    text = read(ROOT / "crates/pumpkin-data/src/generated/item.rs")
-    return len(set(re.findall(r"pub const ([A-Z0-9_]+): Self = Self \{", text)))
+    return len(java_items())
 
 
 def covered_entities() -> set[str]:
