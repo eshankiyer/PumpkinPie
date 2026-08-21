@@ -14,7 +14,7 @@ use crate::block::BlockHitResult;
 use crate::block::registry::BlockActionResult;
 use crate::block::{self};
 use crate::entity::EntityBase;
-use crate::entity::player::statistics::{CustomStatistic, StatisticCategory};
+use crate::entity::player::statistics::StatisticCategory;
 use crate::entity::player::{ChatMode, ChatSession, Player};
 use crate::error::PumpkinError;
 use crate::log_at_level;
@@ -402,13 +402,17 @@ mod tests {
             NbtTag::List(vec![NbtTag::String(Box::from("minecraft:stone"))]),
         );
 
+        let stone = pumpkin_data::Block::from_name("stone").unwrap();
+        let dirt = pumpkin_data::Block::from_name("dirt").unwrap();
         assert!(adventure_predicate_matches_block(
             &NbtTag::Compound(predicate.clone()),
-            pumpkin_data::Block::from_name("stone").unwrap(),
+            stone,
+            stone.default_state,
         ));
         assert!(!adventure_predicate_matches_block(
             &NbtTag::Compound(predicate),
-            pumpkin_data::Block::from_name("dirt").unwrap(),
+            dirt,
+            dirt.default_state,
         ));
     }
 

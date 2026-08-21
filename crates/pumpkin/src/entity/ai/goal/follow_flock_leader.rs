@@ -1,9 +1,7 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::{Arc, Weak};
-
-use tokio::sync::Mutex;
 
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
@@ -15,44 +13,33 @@ use crate::entity::{EntityBase, mob::Mob};
 /// Vanilla: `FollowFlockLeaderGoal.INTERVAL_TICKS` -- base cooldown between school-forming
 /// attempts (`200 + random.nextInt(200) % 20`).
 const INTERVAL_TICKS: i32 = 200;
-/// Search radius used both to find nearby same-species fish and (approximated) for
-/// `AbstractSchoolingFish.inRangeOfLeader` (vanilla: `distanceToSqr(leader) <= 121.0`, i.e. 11
-/// blocks -- reused here as the search radius too instead of a separate 8-block box).
+/// Search box inflation used by `FollowFlockLeaderGoal.canUse`.
 const SCHOOL_RANGE: f64 = 8.0;
 const IN_RANGE_OF_LEADER_SQ: f64 = 121.0;
-/// Vanilla school sizes vary per species (`getMaxSchoolSize`, 4-8); approximated with a single
-/// constant since Pumpkin doesn't track a `schoolSize` counter per fish.
-const MAX_SCHOOL_SIZE: usize = 4;
 
-/// Makes schooling fish (cod, salmon, tropical fish) cluster with, and follow, one "leader" fish
-/// of the same species picked from nearby individuals.
+/// Makes schooling fish (cod, salmon, tropical fish) cluster with, and follow, one leader fish of
+/// the same species picked from nearby individuals.
 ///
 /// Vanilla source: `net/minecraft/world/entity/ai/goal/FollowFlockLeaderGoal.java`, backed by
 /// per-fish state in `net/minecraft/world/entity/animal/fish/AbstractSchoolingFish.java`
 /// (`leader`/`schoolSize`/`isFollower`/`canBeFollowed`).
-///
-/// Scope reduction: vanilla's leader/follower bookkeeping is mutual and shared across every fish
-/// in the school (`addFollowers` mutates the chosen leader's `schoolSize` and every follower's
-/// `leader` reference, and a fish can itself become a leader others follow). Pumpkin's `Goal`s
-/// only have access to their own mob, so this port approximates the same visual clustering with
-/// a per-fish, independently-computed pseudo-leader: each fish picks the lowest-`entity_id` fish
-/// of its own species within `SCHOOL_RANGE`, and follows it if that isn't itself. There is no
-/// shared `schoolSize` cap enforcement beyond `MAX_SCHOOL_SIZE` counted on each tick's search,
-/// and no `canBeFollowed`/`hasFollowers` leader-side gating.
 pub struct FollowFlockLeaderGoal {
     goal_control: Controls,
-    leader: Mutex<Option<Weak<dyn EntityBase>>>,
     next_start_tick: AtomicI32,
     time_to_recalc_path: AtomicI32,
 }
+
+/// A leader and the fish that would join it, as `AbstractSchoolingFish` pairs them.
+type School = (Arc<dyn EntityBase>, Vec<Arc<dyn EntityBase>>);
 
 impl FollowFlockLeaderGoal {
     #[must_use]
     pub fn new() -> Box<Self> {
         Box::new(Self {
             goal_control: Controls::MOVE,
-            leader: Mutex::new(None),
-            next_start_tick: AtomicI32::new(0),
+            // `new()` is kept for existing registrations. The first can_start call seeds the
+            // same randomized delay that vanilla creates in the goal constructor.
+            next_start_tick: AtomicI32::new(-1),
             time_to_recalc_path: AtomicI32::new(0),
         })
     }
@@ -61,39 +48,51 @@ impl FollowFlockLeaderGoal {
         to_goal_ticks(INTERVAL_TICKS + mob.get_random().random_range(0..200) % 20)
     }
 
-    fn find_leader(mob: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
+    fn find_school(mob: &dyn Mob) -> Option<School> {
         let self_entity = mob.get_entity();
         let self_uuid = self_entity.entity_uuid;
-        let self_id = self_entity.entity_id;
         let self_type = self_entity.entity_type;
-        let pos = self_entity.pos.load();
         let world = self_entity.world.load();
+        let search_box =
+            self_entity
+                .bounding_box
+                .load()
+                .expand(SCHOOL_RANGE, SCHOOL_RANGE, SCHOOL_RANGE);
 
-        let mut best: Option<Arc<dyn EntityBase>> = None;
-        let mut best_id = self_id;
-        let mut count = 1usize;
-
-        for (uuid, candidate) in world.get_nearby_entities(pos, SCHOOL_RANGE) {
-            if uuid == self_uuid {
-                continue;
-            }
+        // `get_entities_at_box` preserves the world's entity-list order, matching the order
+        // consumed by vanilla's `getEntitiesOfClass` stream. The existing sphere/HashMap helper
+        // would both select the wrong shape and lose that ordering.
+        let mut candidates = Vec::new();
+        for candidate in world.get_entities_at_box(&search_box) {
             let candidate_entity = candidate.get_entity();
             if candidate_entity.entity_type != self_type || !candidate_entity.is_alive() {
                 continue;
             }
-
-            count += 1;
-            if candidate_entity.entity_id < best_id {
-                best_id = candidate_entity.entity_id;
-                best = Some(candidate);
+            let Some(candidate_mob) = candidate.get_mob() else {
+                continue;
+            };
+            if candidate_mob
+                .get_mob_entity()
+                .can_be_followed_by_schooling_fish()
+                || !candidate_mob.get_mob_entity().is_schooling_follower()
+            {
+                candidates.push(candidate);
             }
         }
 
-        if count > MAX_SCHOOL_SIZE || best_id == self_id {
-            return None;
-        }
+        let leader = candidates
+            .iter()
+            .find(|candidate| {
+                candidate.get_mob().is_some_and(|candidate_mob| {
+                    candidate_mob
+                        .get_mob_entity()
+                        .can_be_followed_by_schooling_fish()
+                })
+            })
+            .cloned()
+            .or_else(|| world.get_entity_by_uuid(self_uuid))?;
 
-        best
+        Some((leader, candidates))
     }
 }
 
@@ -106,7 +105,19 @@ impl Default for FollowFlockLeaderGoal {
 impl Goal for FollowFlockLeaderGoal {
     fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async move {
+            if mob.get_mob_entity().has_schooling_followers() {
+                return false;
+            }
+            if mob.get_mob_entity().is_schooling_follower() {
+                return true;
+            }
+
             let remaining = self.next_start_tick.load(Ordering::Relaxed);
+            if remaining < 0 {
+                self.next_start_tick
+                    .store(Self::roll_next_start_tick(mob) - 1, Ordering::Relaxed);
+                return false;
+            }
             if remaining > 0 {
                 self.next_start_tick.fetch_sub(1, Ordering::Relaxed);
                 return false;
@@ -114,23 +125,44 @@ impl Goal for FollowFlockLeaderGoal {
             self.next_start_tick
                 .store(Self::roll_next_start_tick(mob), Ordering::Relaxed);
 
-            let Some(leader) = Self::find_leader(mob) else {
+            let Some((leader, candidates)) = Self::find_school(mob) else {
                 return false;
             };
 
-            *self.leader.lock().await = Some(Arc::downgrade(&leader));
-            true
+            let Some(leader_mob) = leader.get_mob() else {
+                return false;
+            };
+            let remaining = leader_mob.get_mob_entity().schooling_followers_remaining();
+
+            // Vanilla applies the capacity limit before filtering out the leader itself. Keep
+            // that order, and preserve the query order instead of imposing an entity-id sort.
+            for candidate in candidates.into_iter().take(remaining) {
+                if candidate.get_entity().entity_id == leader.get_entity().entity_id {
+                    continue;
+                }
+                let Some(candidate_mob) = candidate.get_mob() else {
+                    continue;
+                };
+                if candidate_mob.get_mob_entity().is_schooling_follower() {
+                    continue;
+                }
+                let _ = candidate_mob
+                    .get_mob_entity()
+                    .start_schooling_following(&leader);
+            }
+
+            mob.get_mob_entity().is_schooling_follower()
         })
     }
 
     fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async move {
-            let Some(leader) = self.leader.lock().await.as_ref().and_then(Weak::upgrade) else {
-                return false;
-            };
-            if !leader.get_entity().is_alive() {
+            if !mob.get_mob_entity().is_schooling_follower() {
                 return false;
             }
+            let Some(leader) = mob.get_mob_entity().schooling_leader() else {
+                return false;
+            };
 
             let dist_sq = mob
                 .get_entity()
@@ -147,9 +179,12 @@ impl Goal for FollowFlockLeaderGoal {
         })
     }
 
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
-            *self.leader.lock().await = None;
+            let Some(leader) = mob.get_mob_entity().schooling_leader() else {
+                return;
+            };
+            mob.get_mob_entity().stop_schooling_following_if(&leader);
         })
     }
 
@@ -162,7 +197,7 @@ impl Goal for FollowFlockLeaderGoal {
             self.time_to_recalc_path
                 .store(to_goal_ticks(10), Ordering::Relaxed);
 
-            let Some(leader) = self.leader.lock().await.as_ref().and_then(Weak::upgrade) else {
+            let Some(leader) = mob.get_mob_entity().schooling_leader() else {
                 return;
             };
 

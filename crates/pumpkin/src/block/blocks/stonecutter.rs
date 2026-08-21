@@ -35,7 +35,7 @@ impl BlockBehaviour for StonecutterBlock {
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
             args.player
-                .increment_stat(
+                .increment_interaction_stat(
                     pumpkin_data::statistic::StatisticCategory::Custom,
                     pumpkin_data::statistic::CustomStatistic::InteractWithStonecutter as i32,
                     1,

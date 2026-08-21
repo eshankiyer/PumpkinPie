@@ -3,21 +3,26 @@
 use super::{Controls, Goal};
 use crate::entity::EntityBase;
 use crate::entity::ai::goal::GoalFuture;
-use crate::entity::ai::pathfinder::NavigatorGoal;
+use crate::entity::ai::pathfinder::{NavigatorGoal, path::Path};
 use crate::entity::mob::Mob;
 use crate::entity::predicate::EntityPredicate;
+use pumpkin_data::{tag, tag::Taggable};
+use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
+use uuid::Uuid;
 
 const MAX_ATTACK_TIME: i64 = 20;
 
+#[allow(clippy::fn_params_excessive_bools)]
 const fn should_continue_melee_goal(
-    pause_when_mob_idle: bool,
+    following_target_even_if_not_seen: bool,
     navigation_idle: bool,
     target_in_range: bool,
+    target_valid: bool,
 ) -> bool {
-    if pause_when_mob_idle {
-        target_in_range
+    if following_target_even_if_not_seen {
+        target_valid && target_in_range
     } else {
         !navigation_idle
     }
@@ -38,7 +43,9 @@ pub struct MeleeAttackGoal {
     goal_control: Controls,
     speed: f64,
     pause_when_mob_idle: bool,
-    //path: Path, TODO: add path when Navigation is implemented
+    /// Vanilla `MeleeAttackGoal.path`, retained from `canUse` until `start`.
+    path: Option<Path>,
+    path_target: Option<Uuid>,
     #[expect(dead_code)]
     target_location: Vector3<f64>,
     update_countdown_ticks: i32,
@@ -56,6 +63,8 @@ impl MeleeAttackGoal {
             goal_control: Controls::MOVE | Controls::LOOK,
             speed: speed.max(0.23), // Ensure minimum visible speed
             pause_when_mob_idle,
+            path: None,
+            path_target: None,
             target_location: Vector3::new(0.0, 0.0, 0.0),
             update_countdown_ticks: 0,
             cooldown: 0,
@@ -100,16 +109,33 @@ impl Goal for MeleeAttackGoal {
             // this.path = this.mob.getNavigation().createPath(target, 0);
             // return this.path != null ? true : this.mob.isWithinMeleeAttackRange(target);
             let mob_entity = mob.get_mob_entity();
-            let mut navigator = {
-                let mut guard = mob_entity.navigator.lock().unwrap();
-                std::mem::take(&mut *guard)
-            };
+            // Pathfinding is async. Probe a scratch navigator so the live navigator remains
+            // installed while the world is being read and another AI tick cannot overwrite it.
+            let mut navigator = mob_entity.navigator.lock().unwrap().path_probe();
             let path = navigator
-                .compute_path(&mob_entity.living_entity, destination)
+                .compute_path_with_reach(&mob_entity.living_entity, destination, 0)
                 .await;
-            *mob_entity.navigator.lock().unwrap() = navigator;
+
+            // `canUse` and `start` are separate vanilla phases. Do not install a path for a
+            // target that was replaced while the asynchronous probe was running.
+            let target_is_current =
+                mob_entity
+                    .target
+                    .lock()
+                    .await
+                    .as_ref()
+                    .is_some_and(|current| {
+                        current.get_entity().entity_uuid == target.get_entity().entity_uuid
+                    });
+            if !target_is_current {
+                self.path = None;
+                self.path_target = None;
+                return false;
+            }
 
             let path_found = path.is_some();
+            self.path = path;
+            self.path_target = path_found.then_some(target.get_entity().entity_uuid);
             let in_attack_range =
                 !path_found && mob_entity.is_in_attack_range(target.as_ref()).await;
             should_start_melee_goal(path_found, in_attack_range)
@@ -127,24 +153,24 @@ impl Goal for MeleeAttackGoal {
                 return false;
             }
 
-            let is_valid_target = !target
-                .get_player()
-                .is_some_and(|p| p.is_spectator() || p.is_creative());
-
             let in_range = mob
                 .get_mob_entity()
                 .is_in_position_target_range_pos(&target.get_entity().block_pos.load());
 
-            if !is_valid_target {
-                return false;
-            }
-
+            let is_valid_target = !target
+                .get_player()
+                .is_some_and(|p| p.is_spectator() || p.is_creative());
             let navigation_idle = mob
                 .get_mob_entity()
                 .navigator
                 .try_lock()
                 .is_ok_and(|navigator| navigator.is_idle());
-            should_continue_melee_goal(self.pause_when_mob_idle, navigation_idle, in_range)
+            should_continue_melee_goal(
+                self.pause_when_mob_idle,
+                navigation_idle,
+                in_range,
+                is_valid_target,
+            )
         })
     }
 
@@ -154,17 +180,29 @@ impl Goal for MeleeAttackGoal {
 
             let target = mob.get_mob_entity().target.lock().await.clone();
             if let Some(target) = target {
-                let mut navigator = mob
-                    .get_mob_entity()
-                    .navigator
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let pathless_in_attack_range = self.path.is_none()
+                    && mob
+                        .get_mob_entity()
+                        .is_in_attack_range(target.as_ref())
+                        .await;
+                let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
                 let target_pos = target.get_entity().pos.load();
-                navigator.set_progress(NavigatorGoal {
+                let goal = NavigatorGoal {
                     current_progress: mob.get_entity().pos.load(),
                     destination: target_pos,
                     speed: self.speed,
-                });
+                };
+                let path = self
+                    .path_target
+                    .is_some_and(|uuid| uuid == target.get_entity().entity_uuid)
+                    .then(|| self.path.take())
+                    .flatten();
+                if let Some(mut path) = path {
+                    trim_cauldron_path(&mut path, &mob.get_entity().world.load());
+                    navigator.set_path(goal, path);
+                } else if !pathless_in_attack_range {
+                    navigator.set_progress(goal);
+                }
                 self.last_target_position = Some(target_pos);
             }
             mob.get_mob_entity().set_attacking(true);
@@ -198,6 +236,7 @@ impl Goal for MeleeAttackGoal {
                 .stop();
             mob.get_mob_entity().set_attacking(false);
             self.last_target_position = None;
+            self.path_target = None;
         })
     }
 
@@ -227,22 +266,48 @@ impl Goal for MeleeAttackGoal {
             if should_update_nav {
                 let mob_pos = mob.get_entity().pos.load();
                 let dist_sq = mob_pos.squared_distance_to_vec(&current_target_pos);
-                let mut navigator = mob
-                    .get_mob_entity()
-                    .navigator
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                navigator.set_progress(NavigatorGoal {
+                let goal = NavigatorGoal {
                     current_progress: mob_pos,
                     destination: current_target_pos,
                     speed: self.speed,
-                });
+                };
+                let mut path_probe = mob.get_mob_entity().navigator.lock().unwrap().path_probe();
+                let path = path_probe
+                    .compute_path_with_reach(
+                        &mob.get_mob_entity().living_entity,
+                        current_target_pos,
+                        0,
+                    )
+                    .await;
+                let path_found = path.is_some();
+                let target_is_current = mob
+                    .get_mob_entity()
+                    .target
+                    .lock()
+                    .await
+                    .as_ref()
+                    .is_some_and(|current| {
+                        current.get_entity().entity_uuid == target.get_entity().entity_uuid
+                    });
+                let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+                if target_is_current {
+                    if let Some(mut path) = path {
+                        trim_cauldron_path(&mut path, &mob.get_entity().world.load());
+                        navigator.set_path(goal, path);
+                    } else {
+                        navigator.set_progress(goal);
+                    }
+                }
                 self.last_target_position = Some(current_target_pos);
                 self.update_countdown_ticks = 4 + mob.get_random().random_range(0..7);
                 if dist_sq > 1024.0 {
                     self.update_countdown_ticks += 10;
                 } else if dist_sq > 256.0 {
                     self.update_countdown_ticks += 5;
+                }
+                if !path_found {
+                    // Vanilla adds `FAILED_PATH_FINDING_PENALTY` (15 ticks) when moveTo fails.
+                    self.update_countdown_ticks += 15;
                 }
             }
 
@@ -271,16 +336,46 @@ impl Goal for MeleeAttackGoal {
     }
 }
 
+/// `PathNavigation.trimPath` raises waypoints that land in a cauldron and the following waypoint
+/// when it would otherwise descend into the same block. This is part of navigation start, not
+/// path generation, so goals that reuse a computed path must apply it before `moveTo`.
+fn trim_cauldron_path(path: &mut Path, world: &crate::world::World) {
+    for index in 0..path.get_node_count() {
+        let Some(node) = path.get_node(index).copied() else {
+            continue;
+        };
+        if !world
+            .get_block(&node.pos)
+            .has_tag(&tag::Block::MINECRAFT_CAULDRONS)
+        {
+            continue;
+        }
+
+        let raised = BlockPos::new(node.pos.0.x, node.pos.0.y + 1, node.pos.0.z);
+        path.replace_node(index, node.clone_and_move(raised));
+        if let Some(next) = path.get_node(index + 1).copied()
+            && node.pos.0.y >= next.pos.0.y
+        {
+            path.replace_node(
+                index + 1,
+                next.clone_and_move(BlockPos::new(next.pos.0.x, node.pos.0.y + 1, next.pos.0.z)),
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{should_continue_melee_goal, should_start_melee_goal};
 
     #[test]
     fn in_range_targets_continue_when_navigation_is_idle() {
-        assert!(!should_continue_melee_goal(false, true, true));
-        assert!(!should_continue_melee_goal(false, true, false));
-        assert!(!should_continue_melee_goal(true, true, false));
-        assert!(should_continue_melee_goal(true, false, true));
+        assert!(!should_continue_melee_goal(false, true, true, false));
+        assert!(!should_continue_melee_goal(false, true, false, false));
+        assert!(!should_continue_melee_goal(true, true, false, true));
+        assert!(!should_continue_melee_goal(true, false, true, false));
+        assert!(should_continue_melee_goal(false, false, false, false));
+        assert!(should_continue_melee_goal(true, false, true, true));
     }
 
     #[test]

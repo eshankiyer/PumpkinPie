@@ -144,6 +144,8 @@ pub struct LivingEntity {
     pub last_hurt_by_player_time: AtomicI32,
     /// Stores the amount of damage the entity last received.
     pub last_damage_taken: AtomicCell<f32>,
+    /// Packed `(game_time * 2) + panic_causing` state for the most recent accepted damage.
+    ///
     /// The current health level of the entity.
     pub health: AtomicCell<f32>,
     /// The remaining air supply used by vanilla `LivingEntity.baseTick`.
@@ -157,6 +159,12 @@ pub struct LivingEntity {
     pub item_use_time: AtomicI32,
     pub item_in_use: Mutex<Option<ItemStack>>,
     pub active_hand: Mutex<Option<Hand>>,
+    /// Vanilla `LivingEntity.autoSpinAttackTicks`.
+    pub auto_spin_attack_ticks: AtomicI32,
+    pub auto_spin_attack_state: Mutex<()>,
+    /// Vanilla `LivingEntity.autoSpinAttackDmg` and `autoSpinAttackItemStack`.
+    pub auto_spin_attack_damage: AtomicCell<f32>,
+    pub auto_spin_attack_item_stack: Mutex<Option<ItemStack>>,
     pub death_time: AtomicU8,
     /// Indicates whether the entity is dead. (`on_death` called)
     pub dead: AtomicBool,
@@ -260,7 +268,6 @@ impl LivingEntity {
 
     const USING_ITEM_FLAG: u8 = 1;
     const OFF_HAND_ACTIVE_FLAG: u8 = 2;
-    #[expect(dead_code)]
     const USING_RIPTIDE_FLAG: u8 = 4;
 
     const PREVENT_AREA_FALL_DAMAGE_BLOCKS: [&'static Block; 4] = [
@@ -318,7 +325,10 @@ impl LivingEntity {
                     if attr.id == Attributes::MOVEMENT_SPEED.id {
                         base_movement_speed = *base;
                     }
-                    m.insert(attr.id, AttributeInstance::new(*base));
+                    m.insert(
+                        attr.id,
+                        AttributeInstance::new(*base, attr.min_value, attr.max_value),
+                    );
                 }
                 std::sync::RwLock::new(m)
             },
@@ -337,6 +347,10 @@ impl LivingEntity {
             item_use_time: AtomicI32::new(0),
             item_in_use: Mutex::new(None),
             active_hand: Mutex::new(None),
+            auto_spin_attack_ticks: AtomicI32::new(0),
+            auto_spin_attack_state: Mutex::new(()),
+            auto_spin_attack_damage: AtomicCell::new(0.0),
+            auto_spin_attack_item_stack: Mutex::new(None),
             livings_flags: AtomicU8::new(0),
             active_effects: Mutex::new(HashMap::new()),
             hidden_effects: Mutex::new(HashMap::new()),
@@ -513,6 +527,95 @@ impl LivingEntity {
         self.set_living_flag(Self::USING_ITEM_FLAG, false);
     }
 
+    /// Starts vanilla's temporary auto-spin attack state.
+    pub async fn start_auto_spin_attack(
+        &self,
+        activation_ticks: i32,
+        damage: f32,
+        item_stack: ItemStack,
+    ) {
+        let _state = self.auto_spin_attack_state.lock().await;
+        self.auto_spin_attack_ticks
+            .store(activation_ticks, Ordering::Relaxed);
+        self.auto_spin_attack_damage.store(damage);
+        *self.auto_spin_attack_item_stack.lock().await = Some(item_stack);
+        self.set_living_flag(Self::USING_RIPTIDE_FLAG, true);
+    }
+
+    pub fn is_auto_spin_attack(&self) -> bool {
+        self.livings_flags.load(Ordering::Relaxed) & Self::USING_RIPTIDE_FLAG != 0
+    }
+
+    pub async fn auto_spin_attack_item(&self) -> ItemStack {
+        self.auto_spin_attack_item_stack
+            .lock()
+            .await
+            .clone()
+            .unwrap_or_else(|| ItemStack::EMPTY.clone())
+    }
+
+    async fn tick_auto_spin_attack(
+        &self,
+        caller: &Arc<dyn EntityBase>,
+        previous_bounding_box: BoundingBox,
+    ) {
+        let _state = self.auto_spin_attack_state.lock().await;
+        let ticks = self.auto_spin_attack_ticks.load(Ordering::Relaxed);
+        if ticks <= 0 {
+            return;
+        }
+
+        let remaining = ticks - 1;
+        self.auto_spin_attack_ticks
+            .store(remaining, Ordering::Relaxed);
+
+        let current_bounding_box = self.entity.bounding_box.load();
+        let search_box = BoundingBox::new(
+            Vector3::new(
+                previous_bounding_box.min.x.min(current_bounding_box.min.x),
+                previous_bounding_box.min.y.min(current_bounding_box.min.y),
+                previous_bounding_box.min.z.min(current_bounding_box.min.z),
+            ),
+            Vector3::new(
+                previous_bounding_box.max.x.max(current_bounding_box.max.x),
+                previous_bounding_box.max.y.max(current_bounding_box.max.y),
+                previous_bounding_box.max.z.max(current_bounding_box.max.z),
+            ),
+        );
+        let world = self.entity.world.load();
+        let candidates: Vec<_> = world
+            .get_all_at_box(&search_box)
+            .into_iter()
+            .filter(|candidate| candidate.get_entity().entity_id != self.entity.entity_id)
+            .collect();
+        if let Some(player) = caller.get_player() {
+            for candidate in &candidates {
+                let candidate_entity = candidate.get_entity();
+                if candidate_entity.entity_id == self.entity.entity_id
+                    || candidate.get_living_entity().is_none()
+                {
+                    continue;
+                }
+
+                player.attack(candidate.clone()).await;
+                self.auto_spin_attack_ticks.store(0, Ordering::Relaxed);
+                self.entity
+                    .set_velocity(self.entity.velocity.load().multiply(-0.2, -0.2, -0.2));
+                break;
+            }
+        }
+
+        if candidates.is_empty() && self.entity.horizontal_collision.load(SeqCst) {
+            self.auto_spin_attack_ticks.store(0, Ordering::Relaxed);
+        }
+
+        if self.auto_spin_attack_ticks.load(Ordering::Relaxed) <= 0 {
+            self.auto_spin_attack_damage.store(0.0);
+            *self.auto_spin_attack_item_stack.lock().await = None;
+            self.set_living_flag(Self::USING_RIPTIDE_FLAG, false);
+        }
+    }
+
     /// Vanilla: `Raider::hasActiveRaid` (`getCurrentRaid() != null && raid.isActive()`).
     ///
     /// Approximation: reads the cached `RaidMembership` captured at spawn time rather than
@@ -680,7 +783,7 @@ impl LivingEntity {
                     },
                     |a| a.1,
                 );
-            AttributeInstance::new(base)
+            AttributeInstance::new(base, attribute.min_value, attribute.max_value)
         });
 
         f(inst);
@@ -744,7 +847,7 @@ impl LivingEntity {
             inst.base_value = new_base;
             inst.dirty.store(true, Ordering::Relaxed);
         } else {
-            let ai = AttributeInstance::new(new_base);
+            let ai = AttributeInstance::new(new_base, attribute.min_value, attribute.max_value);
             ai.dirty.store(true, Ordering::Relaxed);
             map.insert(attribute.id, ai);
         }
@@ -3368,8 +3471,6 @@ impl EntityBase for LivingEntity {
                 }
             }
 
-            let damage_sequence = self.last_damage_sequence.fetch_add(1, SeqCst) + 1;
-
             // Check for shield blocking. Vanilla resolves blocking in `applyItemBlocking`
             // (hurtServer:1200) before the freeze multiplier (1203-1205) and the helmet
             // multiplier/hurtHelmet call (1207-1210), so this must run on the raw `amount`
@@ -3641,6 +3742,7 @@ impl EntityBase for LivingEntity {
                     self.hurt_cooldown.store(20, Relaxed);
                     (amount, true)
                 };
+            let damage_sequence = self.last_damage_sequence.fetch_add(1, Relaxed) + 1;
             self.last_damage_taken.store(amount);
 
             // Armor, enchantment protection and resistance reduce only the incremental
@@ -3809,7 +3911,7 @@ impl EntityBase for LivingEntity {
             let damage_state = (
                 damage_sequence,
                 damage_tick,
-                damage_type.has_tag(&tag::DamageType::MINECRAFT_PANIC_CAUSES),
+                damage_causes_panic(damage_type),
             );
             let mut observed = self.last_damage_state.load();
             while observed.0 < damage_state.0 {
@@ -3928,7 +4030,13 @@ impl EntityBase for LivingEntity {
             let clamped_health = new_health.max(0.0).min(max_h);
             if remaining > 0.0 {
                 self.set_health(clamped_health);
+            }
 
+            // `PanicGoal.shouldPanic` checks the most recent accepted damage source against
+            // `DamageTypeTags.PANIC_CAUSES`. Publish it immediately after the health change,
+            // matching `LivingEntity.hurtServer` before later statistics and thorns work.
+
+            if remaining > 0.0 {
                 // Statistics updates
                 if let Some(player) = caller.get_player() {
                     player
@@ -4111,9 +4219,12 @@ impl EntityBase for LivingEntity {
                 && (is_alive
                     || (in_death_animation && self.entity.entity_type != &EntityType::PLAYER))
             {
+                let previous_bounding_box = self.entity.bounding_box.load();
                 self.tick_movement(server, caller).await;
                 // Vanilla-like order: freeze logic runs after movement/collisions.
                 self.entity.tick_frozen(caller.as_ref()).await;
+                self.tick_auto_spin_attack(caller, previous_bounding_box)
+                    .await;
                 self.push_entities(caller).await;
             }
 
@@ -5241,6 +5352,10 @@ fn friction_influenced_speed(speed: f64, slipperiness: f64) -> f64 {
     speed * 0.216_000_02 / (slipperiness * slipperiness * slipperiness)
 }
 
+fn damage_causes_panic(damage_type: DamageType) -> bool {
+    damage_type.has_tag(&tag::DamageType::MINECRAFT_PANIC_CAUSES)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5293,6 +5408,30 @@ mod tests {
             &netherite_boots,
             &DamageType::PLAYER_ATTACK
         ));
+    }
+
+    #[test]
+    fn panic_goal_uses_the_vanilla_damage_tag() {
+        for damage_type in [
+            DamageType::CACTUS,
+            DamageType::LAVA,
+            DamageType::ON_FIRE,
+            DamageType::MOB_ATTACK,
+            DamageType::PLAYER_ATTACK,
+        ] {
+            assert!(
+                damage_causes_panic(damage_type),
+                "{}",
+                damage_type.message_id
+            );
+        }
+        for damage_type in [DamageType::FALL, DamageType::DROWN, DamageType::IN_WALL] {
+            assert!(
+                !damage_causes_panic(damage_type),
+                "{}",
+                damage_type.message_id
+            );
+        }
     }
 
     #[test]

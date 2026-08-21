@@ -390,7 +390,6 @@ impl EntityBase for FallingEntity {
     ) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             let entity = &self.entity;
-            entity.tick(caller, server).await;
             self.time.fetch_add(1, Ordering::Relaxed);
 
             let original_velo = entity.velocity.load();

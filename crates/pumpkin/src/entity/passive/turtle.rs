@@ -2,12 +2,15 @@ use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::{Arc, Weak};
 
 use crossbeam::atomic::AtomicCell;
+use pumpkin_data::Block;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::math::boundingbox::EntityDimensions;
 use pumpkin_util::math::position::BlockPos;
 
 use crate::entity::{
@@ -19,6 +22,7 @@ use crate::entity::{
         turtle_go_to_water::TurtleGoToWaterGoal, turtle_lay_egg::TurtleLayEggGoal,
         turtle_random_stroll::TurtleRandomStrollGoal, turtle_travel::TurtleTravelGoal,
     },
+    ai::pathfinder::node::PathType,
     mob::{Mob, MobEntity},
 };
 
@@ -56,6 +60,13 @@ pub struct TurtleEntity {
 impl TurtleEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
+        let mut navigator = mob_entity.navigator.lock().unwrap();
+        // `Turtle` sets these costs in its constructor before any evaluator is prepared.
+        navigator.set_pathfinding_malus(PathType::Water, 0.0);
+        navigator.set_pathfinding_malus(PathType::DoorIronClosed, -1.0);
+        navigator.set_pathfinding_malus(PathType::DoorWoodClosed, -1.0);
+        navigator.set_pathfinding_malus(PathType::DoorOpen, -1.0);
+        drop(navigator);
         let turtle = Self {
             mob_entity,
             ageable_data: crate::entity::ageable::AgeableData::default(),
@@ -137,6 +148,15 @@ impl AgeableMob for TurtleEntity {
     fn get_ageable_data(&self) -> &crate::entity::ageable::AgeableData {
         &self.ageable_data
     }
+
+    fn baby_dimensions(&self) -> Option<EntityDimensions> {
+        let entity = self.get_entity();
+        Some(EntityDimensions::new(
+            entity.entity_type.dimension[0] * 0.3,
+            entity.entity_type.dimension[1] * 0.3,
+            entity.entity_type.eye_height * 0.3,
+        ))
+    }
 }
 
 impl NBTStorage for TurtleEntity {
@@ -167,8 +187,27 @@ impl Mob for TurtleEntity {
         &self.mob_entity
     }
 
+    /// Vanilla `Turtle.canFallInLove` (`Turtle.java:208-211`): a turtle carrying an egg cannot
+    /// enter love mode.
     fn can_breed(&self) -> bool {
         !self.has_egg()
+    }
+
+    /// Vanilla `Turtle.getWalkTargetValue` (`Turtle.java:238-244`).
+    fn get_walk_target_value(&self, pos: &BlockPos) -> f64 {
+        let world = self.get_entity().world.load();
+        if (!self.is_going_home() && world.get_fluid(pos).has_tag(&tag::Fluid::MINECRAFT_WATER))
+            || Block::from_state_id(world.get_block_state(&pos.down()).id)
+                .has_tag(&tag::Block::MINECRAFT_SAND)
+        {
+            10.0
+        } else {
+            let brightness = f64::from(world.get_max_local_raw_brightness(pos)) / 15.0;
+            let curved_brightness = brightness / (4.0 - 3.0 * brightness);
+            let light_value = curved_brightness
+                + f64::from(world.dimension.ambient_light) * (1.0 - curved_brightness);
+            light_value - 0.5
+        }
     }
 
     /// Vanilla `Turtle.canBeLeashed` -> `false`.

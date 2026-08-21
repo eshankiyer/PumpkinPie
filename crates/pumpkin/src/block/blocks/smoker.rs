@@ -89,7 +89,7 @@ impl BlockBehaviour for SmokerBlock {
                 && let Some(experience_container) = block_entity.to_experience_container()
             {
                 args.player
-                    .increment_stat(
+                    .increment_interaction_stat(
                         pumpkin_data::statistic::StatisticCategory::Custom,
                         pumpkin_data::statistic::CustomStatistic::InteractWithSmoker as i32,
                         1,

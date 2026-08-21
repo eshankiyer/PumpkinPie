@@ -221,6 +221,7 @@ impl Server {
                 std::process::exit(1);
             }
         };
+        let needs_initial_spawn = !level_info.initialized;
 
         let seed = level_info.world_gen_settings.seed;
         let level_info = Arc::new(ArcSwap::new(Arc::new(level_info)));
@@ -466,6 +467,34 @@ impl Server {
         }
 
         server.worlds.store(Arc::new(worlds_vec));
+
+        if needs_initial_spawn
+            && let Some(overworld) = server
+                .worlds
+                .load()
+                .iter()
+                .find(|world| world.dimension == Dimension::OVERWORLD)
+        {
+            let spawn = crate::world::spawn_finder::find_initial_world_spawn(overworld).await;
+            let mut level_data = server.level_info.load().as_ref().clone();
+            level_data.spawn_x = spawn.0.x;
+            level_data.spawn_y = spawn.0.y;
+            level_data.spawn_z = spawn.0.z;
+            level_data.spawn_yaw = 0.0;
+            level_data.spawn_pitch = 0.0;
+            level_data.initialized = true;
+            server.level_info.store(Arc::new(level_data.clone()));
+            if let Err(err) = server
+                .world_info_writer
+                .write_world_info(&level_data, &world_path)
+            {
+                error!("Failed to save initial world spawn: {err}");
+            }
+            info!(
+                "Initial overworld spawn selected at ({}, {}, {})",
+                spawn.0.x, spawn.0.y, spawn.0.z
+            );
+        }
 
         info!("All worlds loaded successfully.");
         server

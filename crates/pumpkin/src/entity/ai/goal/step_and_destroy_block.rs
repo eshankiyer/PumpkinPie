@@ -79,6 +79,14 @@ pub trait Stepping: Send + Sync {
         Box::pin(async {})
     }
 
+    fn tick_stepping_particles(
+        &self,
+        _world: Arc<World>,
+        _block_pos: BlockPos,
+    ) -> SteppingFuture<'_> {
+        Box::pin(async {})
+    }
+
     fn on_destroy_block(&self, _world: Arc<World>, _block_pos: BlockPos) -> SteppingFuture<'_> {
         Box::pin(async {})
     }
@@ -146,6 +154,14 @@ impl<S: Stepping + Send + Sync, M: MoveToTargetPos + Send + Sync> Goal
                     .entity
                     .set_velocity(Vector3::new(velocity.x, 0.3, velocity.z));
                 // TODO: spawn particles
+
+                if let Some(stepping) = self.stepping.get() {
+                    stepping
+                        .tick_stepping_particles(world.clone(), tweak_pos)
+                        .await;
+                } else {
+                    self.tick_stepping_particles(world.clone(), tweak_pos).await;
+                }
             }
 
             if counter % 2 == 0 {
@@ -205,6 +221,14 @@ impl<S: Stepping + Send + Sync, M: MoveToTargetPos + Send + Sync> Stepping
     for StepAndDestroyBlockGoal<S, M>
 {
     fn tick_stepping(&self, _world: Arc<World>, _block_pos: BlockPos) -> SteppingFuture<'_> {
+        Box::pin(async {})
+    }
+
+    fn tick_stepping_particles(
+        &self,
+        _world: Arc<World>,
+        _block_pos: BlockPos,
+    ) -> SteppingFuture<'_> {
         Box::pin(async {})
     }
 

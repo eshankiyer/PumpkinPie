@@ -186,13 +186,6 @@ async fn normal_use_chest_impl(
     args: NormalUseArgs<'_>,
     open_stat: pumpkin_data::statistic::CustomStatistic,
 ) -> BlockActionResult {
-    args.player
-        .increment_stat(
-            pumpkin_data::statistic::StatisticCategory::Custom,
-            open_stat as i32,
-            1,
-        )
-        .await;
     let state = args.world.get_block_state_id(args.position);
     let first_chest = args.world.get_block_entity(args.position);
 
@@ -227,6 +220,29 @@ async fn normal_use_chest_impl(
         ChestType::Left => Some(chest_props.facing.rotate_clockwise()),
         ChestType::Right => Some(chest_props.facing.rotate_counter_clockwise()),
     };
+
+    // Vanilla's menu provider combines both halves before opening a double
+    // chest. A spectator cannot open it if either half still has a deferred
+    // loot table.
+    if player_is_spectator
+        && let Some(direction) = connected_towards
+        && let Some(second_entity) = args
+            .world
+            .get_block_entity(&args.position.offset(direction.to_offset()))
+        && second_entity.has_loot_table()
+    {
+        return BlockActionResult::Success;
+    }
+
+    if !player_is_spectator {
+        args.player
+            .increment_stat(
+                pumpkin_data::statistic::StatisticCategory::Custom,
+                open_stat as i32,
+                1,
+            )
+            .await;
+    }
 
     if is_chest_blocked(args.world, args.position) {
         return BlockActionResult::Success;

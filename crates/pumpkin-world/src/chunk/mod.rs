@@ -148,6 +148,21 @@ impl ChunkSections {
             .collect()
     }
 
+    #[must_use]
+    pub fn unique_biomes(&self) -> Vec<u8> {
+        self.biome_sections
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .flat_map(|section| section.iter())
+            .fold(Vec::new(), |mut biomes, biome| {
+                if !biomes.contains(&biome) {
+                    biomes.push(biome);
+                }
+                biomes
+            })
+    }
+
     #[cfg(test)]
     #[must_use]
     pub fn dump_biomes(&self) -> Vec<u8> {
@@ -501,6 +516,29 @@ impl ChunkSections {
         relative_z: usize,
         block_state_id: BlockStateId,
     ) -> BlockStateId {
+        self.set_block_no_heightmap_update_if(
+            relative_x,
+            relative_y,
+            relative_z,
+            None,
+            block_state_id,
+        )
+        .unwrap_or(BlockStateId::AIR)
+    }
+
+    /// Sets a block only when its current state matches `expected_block_state_id`.
+    ///
+    /// The check and write share the same section write lock. This is used by
+    /// asynchronous entity goals that must not remove a block another task has
+    /// replaced since the goal observed it.
+    pub fn set_block_no_heightmap_update_if(
+        &self,
+        relative_x: usize,
+        relative_y: usize,
+        relative_z: usize,
+        expected_block_state_id: Option<BlockStateId>,
+        block_state_id: BlockStateId,
+    ) -> Option<BlockStateId> {
         debug_assert!(relative_x < BlockPalette::SIZE);
         debug_assert!(relative_z < BlockPalette::SIZE);
 
@@ -518,10 +556,16 @@ impl ChunkSections {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         if let Some(section) = sections.get_mut(section_index) {
+            if let Some(expected_block_state_id) = expected_block_state_id
+                && section.get(relative_x, relative_y, relative_z) != expected_block_state_id
+            {
+                return None;
+            }
+
             let replaced_block_state_id =
                 section.set(relative_x, relative_y, relative_z, block_state_id);
             if replaced_block_state_id == block_state_id {
-                return replaced_block_state_id;
+                return Some(replaced_block_state_id);
             }
 
             if (has_random_ticks(block_state_id) || has_random_ticking_fluid(block_state_id))
@@ -571,9 +615,9 @@ impl ChunkSections {
                     .store(mask, std::sync::atomic::Ordering::Relaxed);
             }
 
-            return replaced_block_state_id;
+            return Some(replaced_block_state_id);
         }
-        BlockStateId::AIR
+        (expected_block_state_id.is_none()).then_some(BlockStateId::AIR)
     }
 
     pub fn set_relative_biome(
@@ -765,6 +809,34 @@ impl ChunkData {
             self.update_heightmap(relative_x, relative_y, relative_z, state);
         }
         old
+    }
+
+    /// Atomically replaces a block when its current state matches the expected state.
+    pub fn set_block_absolute_y_if(
+        &self,
+        relative_x: usize,
+        y: i32,
+        relative_z: usize,
+        expected_block_state_id: BlockStateId,
+        block_state_id: BlockStateId,
+    ) -> Option<BlockStateId> {
+        let y_rel = y - self.section.min_y;
+        if y_rel < 0 {
+            return None;
+        }
+        let relative_y = y_rel as usize;
+        let old = self.section.set_block_no_heightmap_update_if(
+            relative_x,
+            relative_y,
+            relative_z,
+            Some(expected_block_state_id),
+            block_state_id,
+        )?;
+        if old != block_state_id {
+            let state = BlockState::from_id(block_state_id);
+            self.update_heightmap(relative_x, relative_y, relative_z, state);
+        }
+        Some(old)
     }
 
     fn update_heightmap(

@@ -13,6 +13,7 @@ use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::math::boundingbox::EntityDimensions;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -273,6 +274,10 @@ impl AgeableMob for HappyGhastEntity {
     fn get_ageable_data(&self) -> &AgeableData {
         &self.ageable_data
     }
+
+    fn baby_dimensions(&self) -> Option<EntityDimensions> {
+        Some(EntityDimensions::new(0.95, 0.95, 0.46875))
+    }
 }
 
 impl NBTStorage for HappyGhastEntity {
@@ -314,8 +319,14 @@ impl Mob for HappyGhastEntity {
         &self.mob_entity
     }
 
+    fn should_follow_leash(&self) -> bool {
+        false
+    }
+
     fn can_be_collided_with(&self) -> bool {
-        true
+        // HappyGhast.canBeCollidedWith only exposes adult, alive ghasts to
+        // collision queries. Babies must remain non-collidable while growing.
+        !self.is_baby() && self.get_entity().is_alive()
     }
 
     fn get_mob_gravity(&self) -> f64 {

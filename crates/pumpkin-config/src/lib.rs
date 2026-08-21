@@ -253,6 +253,8 @@ pub struct BasicConfiguration {
     pub white_list: bool,
     /// Whether to enforce the whitelist.
     pub enforce_whitelist: bool,
+    /// Radius around the overworld spawn where non-operators cannot modify blocks.
+    pub spawn_protection_radius: i32,
 }
 
 impl Default for BasicConfiguration {
@@ -274,6 +276,7 @@ impl Default for BasicConfiguration {
             allow_chat_reports: false,
             white_list: false,
             enforce_whitelist: false,
+            spawn_protection_radius: 16,
         }
     }
 }

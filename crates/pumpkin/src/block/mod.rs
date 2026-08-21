@@ -78,6 +78,11 @@ pub trait BlockBehaviour: Send + Sync {
         Box::pin(async {})
     }
 
+    /// Called when a player starts punching this block (`BlockBehaviour.attack` in vanilla).
+    fn attack<'a>(&'a self, _args: AttackArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async {})
+    }
+
     fn normal_use<'a>(&'a self, _args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move { BlockActionResult::Pass })
     }
@@ -288,6 +293,14 @@ pub struct UseWithItemArgs<'a> {
 pub struct BlockHitResult<'a> {
     pub face: &'a BlockDirection,
     pub cursor_pos: &'a Vector3<f32>,
+}
+
+pub struct AttackArgs<'a> {
+    pub world: &'a Arc<World>,
+    pub block: &'a Block,
+    pub state: &'a BlockState,
+    pub position: &'a BlockPos,
+    pub player: &'a Arc<Player>,
 }
 
 pub struct OnEntityCollisionArgs<'a> {

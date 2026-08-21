@@ -22,6 +22,16 @@ impl GoalSelector {
             .push(PrioritizedGoal::new(TypeId::of::<G>(), priority, goal));
     }
 
+    pub fn add_goal_first<G: Goal + 'static>(&mut self, priority: u8, goal: Box<G>) {
+        for goal_idx in &mut self.goals_by_control {
+            if *goal_idx != usize::MAX {
+                *goal_idx += 1;
+            }
+        }
+        self.goals
+            .insert(0, PrioritizedGoal::new(TypeId::of::<G>(), priority, goal));
+    }
+
     pub async fn remove_goal<G: Goal + 'static>(&mut self, mob: &dyn Mob) {
         for prioritized_goal in &mut self.goals {
             if TypeId::of::<G>() == prioritized_goal.type_id && prioritized_goal.running {

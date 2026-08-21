@@ -26,11 +26,12 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, AtomicU8, Ordering::Relaxed};
 
-use pumpkin_data::data_component_impl::EquipmentSlot;
+use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, IDSet, IdOr};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::particle::Particle;
 use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::{entity::EntityType, tag::Taggable};
 use pumpkin_inventory::generic_container_screen_handler::create_generic_9x3;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
@@ -44,8 +45,82 @@ use rand::RngExt;
 use tokio::sync::Mutex as TokioMutex;
 use uuid::Uuid;
 
+pub(crate) fn is_valid_saddle_item(stack: &ItemStack, entity_type: &EntityType) -> bool {
+    stack
+        .get_data_component::<EquippableImpl>()
+        .is_some_and(|equippable| {
+            *equippable.slot == EquipmentSlot::SADDLE
+                && equippable
+                    .allowed_entities
+                    .as_ref()
+                    .is_none_or(|allowed| match allowed {
+                        IDSet::Tag(tag) => entity_type.is_tagged_with(tag).unwrap_or(false),
+                        IDSet::IDs(ids) => ids.iter().any(|allowed| allowed.id == entity_type.id),
+                    })
+        })
+}
+
+pub(crate) fn saddle_equip_on_interact(stack: &ItemStack, entity_type: &EntityType) -> bool {
+    stack
+        .get_data_component::<EquippableImpl>()
+        .is_some_and(|equippable| {
+            equippable.equip_on_interact && is_valid_saddle_item(stack, entity_type)
+        })
+}
+
+pub(crate) async fn equip_saddle_item(
+    mob_entity: &MobEntity,
+    player: &Arc<Player>,
+    item_stack: &mut ItemStack,
+) {
+    let equip_sound = item_stack
+        .get_data_component::<EquippableImpl>()
+        .map_or(IdOr::Id(Sound::ItemArmorEquipGeneric), |equippable| {
+            equippable.equip_sound.clone()
+        });
+    let new_stack = item_stack.split_unless_creative(player.gamemode.load(), 1);
+    {
+        let mut equipment = mob_entity.living_entity.entity_equipment.lock().await;
+        equipment.put(&EquipmentSlot::SADDLE, new_stack.clone());
+    };
+    mob_entity
+        .living_entity
+        .equipment_drop_chances
+        .lock()
+        .await
+        .insert(EquipmentSlot::SADDLE, 1.0);
+    mob_entity
+        .living_entity
+        .send_equipment_changes(&[(EquipmentSlot::SADDLE, new_stack)]);
+
+    let entity = &mob_entity.living_entity.entity;
+    let world = entity.world.load();
+    world.play_sound_event(&equip_sound, SoundCategory::Neutral, &entity.pos.load());
+}
+
+pub(crate) async fn mount_player(mob_entity: &MobEntity, player: &Arc<Player>) {
+    if player.get_entity().has_vehicle().await {
+        return;
+    }
+
+    let entity = &mob_entity.living_entity.entity;
+    let world = entity.world.load();
+    let Some(vehicle) = world.get_entity_by_id(entity.entity_id) else {
+        return;
+    };
+    let Some(passenger) = world.get_player_by_id(player.entity_id()) else {
+        return;
+    };
+    entity
+        .add_passenger(vehicle, passenger as Arc<dyn EntityBase>)
+        .await;
+}
+
 use crate::entity::{
-    EntityBase, EntityBaseFuture, mob::Mob, passive::animal::Animal, player::Player,
+    EntityBase, EntityBaseFuture,
+    mob::{Mob, MobEntity},
+    passive::animal::Animal,
+    player::Player,
 };
 
 /// `ItemTags.HORSE_TEMPT_ITEMS` (`AbstractHorse.java:151`): golden carrot, golden apple,
@@ -322,7 +397,23 @@ pub trait AbstractHorse: Animal {
                 .lock()
                 .await;
             let stack = equipment.get(&EquipmentSlot::SADDLE);
-            !stack.is_empty()
+            self.can_use_saddle_slot()
+                && is_valid_saddle_item(&stack, self.get_entity().entity_type)
+        })
+    }
+
+    /// Vanilla `AbstractHorse.getControllingPassenger`: the first player controls a
+    /// saddled horse-family mob, regardless of the player's held item.
+    fn has_saddled_player_passenger(&self) -> EntityBaseFuture<'_, bool> {
+        Box::pin(async move {
+            if !AbstractHorse::is_saddled(self).await {
+                return Mob::has_controlling_passenger(self).await;
+            }
+            let passenger = self.get_entity().passengers.lock().await.first().cloned();
+            if passenger.is_some_and(|passenger| passenger.get_player().is_some()) {
+                return true;
+            }
+            Mob::has_controlling_passenger(self).await
         })
     }
 
@@ -332,27 +423,7 @@ pub trait AbstractHorse: Animal {
         item_stack: &'a mut ItemStack,
     ) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
-            let new_stack = item_stack.split_unless_creative(player.gamemode.load(), 1);
-            {
-                let mut equipment = self
-                    .get_mob_entity()
-                    .living_entity
-                    .entity_equipment
-                    .lock()
-                    .await;
-                equipment.put(&EquipmentSlot::SADDLE, new_stack.clone());
-            };
-            self.get_mob_entity()
-                .living_entity
-                .send_equipment_changes(&[(EquipmentSlot::SADDLE, new_stack)]);
-
-            let entity = self.get_entity();
-            let world = entity.world.load();
-            world.play_sound(
-                self.saddle_sound(),
-                SoundCategory::Neutral,
-                &entity.pos.load(),
-            );
+            equip_saddle_item(self.get_mob_entity(), player, item_stack).await;
         })
     }
 
@@ -391,13 +462,12 @@ pub trait AbstractHorse: Animal {
 
             let entity = self.get_entity();
             let world = entity.world.load();
-            let Some(vehicle) = world.get_entity_by_id(entity.entity_id) else {
-                return;
-            };
             let Some(passenger) = world.get_player_by_id(player.entity_id()) else {
                 return;
             };
-
+            let Some(vehicle) = world.get_entity_by_id(entity.entity_id) else {
+                return;
+            };
             entity
                 .add_passenger(vehicle, passenger as Arc<dyn EntityBase>)
                 .await;
@@ -560,7 +630,7 @@ pub trait AbstractHorse: Animal {
                     return true;
                 }
 
-                if item_stack.item.id == Item::SADDLE.id
+                if saddle_equip_on_interact(item_stack, entity.entity_type)
                     && !AbstractHorse::is_saddled(self).await
                     && self.can_use_saddle_slot()
                 {

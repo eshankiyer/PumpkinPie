@@ -166,7 +166,7 @@ use crate::block::blocks::wither_skull::WitherSkeletonSkullBlock;
 use crate::block::fluid::lava::FlowingLava;
 use crate::block::fluid::water::FlowingWater;
 use crate::block::{
-    BlockBehaviour, BlockHitResult, BlockMetadata, BonemealArgs, FluidMetadata,
+    AttackArgs, BlockBehaviour, BlockHitResult, BlockMetadata, BonemealArgs, FluidMetadata,
     GetInsideCollisionShapeArgs, OnEntityCollisionArgs, OnLandedUponArgs,
     UpdateEntityMovementAfterFallOnArgs, stop_vertical_movement_after_fall,
 };
@@ -895,6 +895,83 @@ impl BlockRegistry {
                 .await;
         }
         BlockActionResult::Pass
+    }
+
+    /// Opens the menu provider exposed by a block to a spectator.
+    ///
+    /// Vanilla's spectator path asks the block for a menu provider and never
+    /// calls the normal block-use callback. Keep the allowlist explicit so a
+    /// spectator cannot toggle redstone, consume items, or otherwise mutate a
+    /// block while opening a container screen.
+    pub async fn on_use_for_spectator(
+        &self,
+        block: &Block,
+        player: &Arc<Player>,
+        position: &BlockPos,
+        hit: &BlockHitResult<'_>,
+        server: &Server,
+        world: &Arc<World>,
+    ) -> BlockActionResult {
+        let has_menu_provider = matches!(
+            block.name,
+            "anvil"
+                | "barrel"
+                | "beacon"
+                | "blast_furnace"
+                | "brewing_stand"
+                | "chest"
+                | "copper_chest"
+                | "crafting_table"
+                | "crafter"
+                | "dispenser"
+                | "dropper"
+                | "enchanting_table"
+                | "furnace"
+                | "grindstone"
+                | "hopper"
+                | "lectern"
+                | "loom"
+                | "shulker_box"
+                | "smithing_table"
+                | "smoker"
+                | "stonecutter"
+                | "trapped_chest"
+                | "exposed_copper_chest"
+                | "weathered_copper_chest"
+                | "oxidized_copper_chest"
+                | "waxed_copper_chest"
+                | "waxed_exposed_copper_chest"
+                | "waxed_weathered_copper_chest"
+                | "waxed_oxidized_copper_chest"
+        );
+
+        if has_menu_provider {
+            self.on_use(block, player, position, hit, server, world)
+                .await
+        } else {
+            BlockActionResult::Pass
+        }
+    }
+
+    pub async fn attack(
+        &self,
+        world: &Arc<World>,
+        block: &Block,
+        state: &BlockState,
+        position: &BlockPos,
+        player: &Arc<Player>,
+    ) {
+        if let Some(pumpkin_block) = self.get_pumpkin_block(block.id) {
+            pumpkin_block
+                .attack(AttackArgs {
+                    world,
+                    block,
+                    state,
+                    position,
+                    player,
+                })
+                .await;
+        }
     }
 
     pub async fn explode(&self, block: &Block, world: &Arc<World>, position: &BlockPos) {

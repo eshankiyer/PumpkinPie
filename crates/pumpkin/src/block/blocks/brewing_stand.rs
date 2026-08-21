@@ -56,7 +56,7 @@ impl BlockBehaviour for BrewingStandBlock {
                 && let Some(pd) = block_entity.clone().to_property_delegate()
             {
                 args.player
-                    .increment_stat(
+                    .increment_interaction_stat(
                         pumpkin_data::statistic::StatisticCategory::Custom,
                         pumpkin_data::statistic::CustomStatistic::InteractWithBrewingstand as i32,
                         1,

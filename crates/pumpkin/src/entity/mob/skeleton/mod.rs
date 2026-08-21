@@ -1,6 +1,9 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-use std::sync::{Arc, Weak};
+use std::sync::{
+    Arc, Weak,
+    atomic::{AtomicBool, Ordering::Relaxed},
+};
 
 use pumpkin_data::{
     data_component_impl::{EquipmentSlot, StatusEffectInstance},
@@ -8,6 +11,7 @@ use pumpkin_data::{
     item::Item,
     item_stack::ItemStack,
 };
+use pumpkin_util::Difficulty;
 
 use crate::entity::{
     Entity, NBTStorage, NbtFuture,
@@ -28,22 +32,37 @@ pub mod skeleton;
 pub mod stray;
 pub mod wither;
 
-/// `AbstractSkeleton#getHardAttackInterval` (AbstractSkeleton.java). Pumpkin does not re-run
-/// `reassessWeaponGoal`'s difficulty check, so the hard-difficulty value is used unconditionally,
-/// as it already was before Parched existed. `RangedBowAttackGoal::is_holding_bow` does gate the
-/// goal itself on the current main-hand item (see `ranged_bow_attack.rs`), so a stripped bow stops
-/// a skeleton from shooting -- it just does not fall back to `meleeGoal` the way vanilla does,
-/// since there is no equip-change signal to swap goals on (see `equipment.rs`, spawn-time only).
-const SKELETON_ATTACK_INTERVAL: i32 = 20;
+/// `AbstractSkeleton#getHardAttackInterval` (AbstractSkeleton.java).
+pub const SKELETON_ATTACK_INTERVAL: i32 = 20;
+const SKELETON_ATTACK_INTERVAL_NORMAL: i32 = 40;
 /// `Parched#getHardAttackInterval` (Parched.java).
-const PARCHED_ATTACK_INTERVAL: i32 = 50;
+pub const PARCHED_ATTACK_INTERVAL: i32 = 50;
+const PARCHED_ATTACK_INTERVAL_NORMAL: i32 = 70;
 
 /// `Bogged#getHardAttackInterval` (Bogged.java).
-///
-/// Same "hard value used unconditionally" simplification as `SKELETON_ATTACK_INTERVAL`/
-/// `PARCHED_ATTACK_INTERVAL` above -- `Bogged#getAttackInterval` (70, the non-hard-difficulty
-/// value) is not modeled since `reassessWeaponGoal` is never re-run here.
 pub const BOGGED_ATTACK_INTERVAL: i32 = 50;
+const BOGGED_ATTACK_INTERVAL_NORMAL: i32 = 70;
+
+fn attack_interval(entity_type: &'static EntityType, difficulty: Difficulty) -> i32 {
+    let hard = difficulty == Difficulty::Hard;
+    if entity_type == &EntityType::PARCHED {
+        if hard {
+            PARCHED_ATTACK_INTERVAL
+        } else {
+            PARCHED_ATTACK_INTERVAL_NORMAL
+        }
+    } else if entity_type == &EntityType::BOGGED {
+        if hard {
+            BOGGED_ATTACK_INTERVAL
+        } else {
+            BOGGED_ATTACK_INTERVAL_NORMAL
+        }
+    } else if hard {
+        SKELETON_ATTACK_INTERVAL
+    } else {
+        SKELETON_ATTACK_INTERVAL_NORMAL
+    }
+}
 
 /// `Parched#getArrow` (Parched.java) attaches `new MobEffectInstance(MobEffects.WEAKNESS, 600)`
 /// to every arrow it fires; that constructor defaults to amplifier 0, non-ambient, with
@@ -70,6 +89,7 @@ pub const BOGGED_ARROW_EFFECTS: &[StatusEffectInstance] = &[StatusEffectInstance
 
 pub struct SkeletonEntityBase {
     pub mob_entity: MobEntity,
+    weapon_goal_is_bow: AtomicBool,
 }
 
 impl SkeletonEntityBase {
@@ -78,7 +98,10 @@ impl SkeletonEntityBase {
         let is_parched = entity.entity_type == &EntityType::PARCHED;
         let is_bogged = entity.entity_type == &EntityType::BOGGED;
         let mob_entity = MobEntity::new(entity);
-        let mob = Self { mob_entity };
+        let mob = Self {
+            mob_entity,
+            weapon_goal_is_bow: AtomicBool::new(uses_bow),
+        };
         let mob_arc = Arc::new(mob);
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
@@ -115,12 +138,24 @@ impl SkeletonEntityBase {
             goal_selector.add_goal(3, FleeSunGoal::new(1.0));
             if uses_bow {
                 // Vanilla `AbstractSkeleton#reassessWeaponGoal` selects this at priority 4.
-                let (interval, arrow_effects) = if is_parched {
-                    (PARCHED_ATTACK_INTERVAL, PARCHED_ARROW_EFFECTS)
+                let interval = attack_interval(
+                    mob_arc.mob_entity.living_entity.entity.entity_type,
+                    mob_arc
+                        .mob_entity
+                        .living_entity
+                        .entity
+                        .world
+                        .load()
+                        .level_info
+                        .load()
+                        .difficulty,
+                );
+                let arrow_effects = if is_parched {
+                    PARCHED_ARROW_EFFECTS
                 } else if is_bogged {
-                    (BOGGED_ATTACK_INTERVAL, BOGGED_ARROW_EFFECTS)
+                    BOGGED_ARROW_EFFECTS
                 } else {
-                    (SKELETON_ATTACK_INTERVAL, &[][..])
+                    &[][..]
                 };
                 goal_selector.add_goal(
                     4,
@@ -145,9 +180,58 @@ impl SkeletonEntityBase {
                 2,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),
             );
+            target_selector.add_goal(
+                3,
+                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::IRON_GOLEM, true),
+            );
         };
 
         mob_arc
+    }
+
+    pub async fn reassess_weapon_goal(&self, mob: &dyn Mob) {
+        let main_hand = {
+            let equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
+            equipment.get(&EquipmentSlot::MAIN_HAND)
+        };
+        let main_is_bow = main_hand.item.registry_key == Item::BOW.registry_key;
+        let off_hand = {
+            let equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
+            equipment.get(&EquipmentSlot::OFF_HAND)
+        };
+        let is_bow = main_is_bow || off_hand.item.registry_key == Item::BOW.registry_key;
+
+        if self.weapon_goal_is_bow.swap(is_bow, Relaxed) == is_bow {
+            return;
+        }
+
+        let mut goals = crate::entity::mob::MutexTakeGuard::new(&self.mob_entity.goals_selector);
+        goals.remove_goal::<RangedBowAttackGoal>(mob).await;
+        goals.remove_goal::<MeleeAttackGoal>(mob).await;
+        if is_bow {
+            let entity = &self.mob_entity.living_entity.entity;
+            let interval = attack_interval(
+                entity.entity_type,
+                entity.world.load().level_info.load().difficulty,
+            );
+            let arrow_effects = if entity.entity_type == &EntityType::PARCHED {
+                PARCHED_ARROW_EFFECTS
+            } else if entity.entity_type == &EntityType::BOGGED {
+                BOGGED_ARROW_EFFECTS
+            } else {
+                &[][..]
+            };
+            goals.add_goal(
+                4,
+                Box::new(RangedBowAttackGoal::with_arrow_effects(
+                    interval,
+                    15.0,
+                    arrow_effects,
+                )),
+            );
+        } else {
+            goals.add_goal(4, Box::new(MeleeAttackGoal::new(1.2, false)));
+        }
     }
 }
 

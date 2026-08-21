@@ -10,6 +10,7 @@ use pumpkin_data::{entity::EntityType, item::Item};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
+use rand::RngExt;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -98,7 +99,7 @@ impl SnifferEntity {
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, SnifferDigGoal::new(1.0));
-            goal_selector.add_goal(2, BreedGoal::new(1.0));
+            goal_selector.add_goal(2, BreedGoal::with_mate_predicate(1.0, sniffer_can_mate));
             goal_selector.add_goal(3, Box::new(TemptGoal::new(1.0, TEMPT_ITEMS, false)));
             goal_selector.add_goal(4, Box::new(FollowParentGoal::new(1.0)));
             goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
@@ -154,6 +155,24 @@ impl SnifferEntity {
             world.play_sound(sound, SoundCategory::Neutral, &pos);
         }
     }
+}
+
+fn sniffer_can_mate(mob: &dyn Mob, partner: &dyn EntityBase) -> bool {
+    let Some(sniffer) = mob.cast_any().downcast_ref::<SnifferEntity>() else {
+        return false;
+    };
+    let Some(partner) = partner.cast_any().downcast_ref::<SnifferEntity>() else {
+        return false;
+    };
+
+    sniffer_state_can_mate(sniffer.get_state()) && sniffer_state_can_mate(partner.get_state())
+}
+
+const fn sniffer_state_can_mate(state: SnifferState) -> bool {
+    matches!(
+        state,
+        SnifferState::Idling | SnifferState::Scenting | SnifferState::FeelingHappy
+    )
 }
 
 impl AgeableMob for SnifferEntity {
@@ -247,26 +266,66 @@ impl Mob for SnifferEntity {
     }
 
     /// Vanilla `Sniffer.spawnChildFromBreeding`: drops a `SNIFFER_EGG` item instead of spawning
-    /// a live baby. The item is emitted by `spawn_breeding_item` after the shared finalization.
+    /// a live baby. The item is emitted by `spawn_breeding_result` after the shared breeding XP
+    /// path, matching vanilla's `finalizeSpawnChildFromBreeding` ordering.
     ///
+    /// Vanilla `Sniffer.canMate` gates breeding on both sniffers being in
+    /// `{IDLING, SCENTING, FEELING_HAPPY}`; the predicate supplied to this sniffer's
+    /// `BreedGoal` enforces that state check before selecting a partner.
     fn create_offspring<'a>(
         &'a self,
         _mate: &'a dyn EntityBase,
         _world: &'a Arc<World>,
     ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
-        Box::pin(async move { None })
+        Box::pin(async { None })
     }
 
-    fn spawn_breeding_item<'a>(&'a self, world: &'a Arc<World>) -> EntityBaseFuture<'a, ()> {
+    fn spawn_breeding_result<'a>(
+        &'a self,
+        _offspring: Option<Arc<dyn EntityBase>>,
+        world: &'a Arc<World>,
+        parent_pos: pumpkin_util::math::vector3::Vector3<f64>,
+    ) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
-            let pos = entity.pos.load();
             let item_entity = Arc::new(ItemEntity::new(
-                Entity::new(world.clone(), pos, &EntityType::ITEM),
+                Entity::new(world.clone(), parent_pos, &EntityType::ITEM),
                 ItemStack::new(1, &Item::SNIFFER_EGG),
             ));
+            let pitch =
+                (self.get_random().random::<f32>() - self.get_random().random::<f32>()) * 0.2 + 0.5;
+            world.play_sound_fine(
+                Sound::BlockSnifferEggPlop,
+                SoundCategory::Neutral,
+                &parent_pos,
+                1.0,
+                pitch,
+            );
             world.spawn_entity(item_entity).await;
-            world.play_sound(Sound::BlockSnifferEggPlop, SoundCategory::Neutral, &pos);
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SnifferState, sniffer_state_can_mate};
+
+    #[test]
+    fn sniffer_can_mate_matches_vanilla_state_allowlist() {
+        for state in [
+            SnifferState::Idling,
+            SnifferState::Scenting,
+            SnifferState::FeelingHappy,
+        ] {
+            assert!(sniffer_state_can_mate(state));
+        }
+
+        for state in [
+            SnifferState::Sniffing,
+            SnifferState::Searching,
+            SnifferState::Digging,
+            SnifferState::Rising,
+        ] {
+            assert!(!sniffer_state_can_mate(state));
+        }
     }
 }

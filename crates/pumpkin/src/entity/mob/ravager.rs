@@ -82,7 +82,19 @@ impl RavagerEntity {
             );
             target_selector.add_goal(
                 4,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::VILLAGER, true),
+                Box::new(ActiveTargetGoal::new_types(
+                    &mob_arc.mob_entity,
+                    &[&EntityType::VILLAGER, &EntityType::WANDERING_TRADER],
+                    10,
+                    true,
+                    false,
+                    Some(
+                        |target: crate::entity::ai::target_predicate::TargetData,
+                         _world: Arc<crate::world::World>| async move {
+                            target.age >= 0
+                        },
+                    ),
+                )),
             );
             target_selector.add_goal(
                 4,

@@ -20,7 +20,8 @@ pub struct ActiveTargetGoal {
     track_target_goal: TrackTargetGoal,
     target: Option<Arc<dyn EntityBase>>,
     reciprocal_chance: i32,
-    target_type: &'static EntityType,
+    target_type: Option<&'static EntityType>,
+    target_types: Option<&'static [&'static EntityType]>,
     target_predicate: TargetPredicate,
 }
 
@@ -51,7 +52,40 @@ impl ActiveTargetGoal {
             track_target_goal,
             target: None,
             reciprocal_chance: to_goal_ticks(reciprocal_chance),
-            target_type,
+            target_type: Some(target_type),
+            target_types: None,
+            target_predicate,
+        }
+    }
+
+    pub fn new_types<F, Fut>(
+        mob: &MobEntity,
+        target_types: &'static [&'static EntityType],
+        reciprocal_chance: i32,
+        check_visibility: bool,
+        check_can_navigate: bool,
+        predicate: Option<F>,
+    ) -> Self
+    where
+        F: Fn(TargetData, Arc<World>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = bool> + Send + 'static,
+    {
+        let track_target_goal = TrackTargetGoal::new(check_visibility, check_can_navigate);
+        let mut target_predicate = TargetPredicate::create_attackable();
+        target_predicate.base_max_distance = mob
+            .living_entity
+            .get_attribute_value(&Attributes::FOLLOW_RANGE);
+
+        if let Some(predicate) = predicate {
+            target_predicate.set_predicate(predicate);
+        }
+
+        Self {
+            track_target_goal,
+            target: None,
+            reciprocal_chance: to_goal_ticks(reciprocal_chance),
+            target_type: None,
+            target_types: Some(target_types),
             target_predicate,
         }
     }
@@ -62,7 +96,18 @@ impl ActiveTargetGoal {
         target_type: &'static EntityType,
         check_visibility: bool,
     ) -> Box<Self> {
+        Self::with_default_and_memory(mob, target_type, check_visibility, 60)
+    }
+
+    #[must_use]
+    pub fn with_default_and_memory(
+        mob: &MobEntity,
+        target_type: &'static EntityType,
+        check_visibility: bool,
+        unseen_memory_ticks: i32,
+    ) -> Box<Self> {
         let track_target_goal = TrackTargetGoal::with_default(check_visibility);
+        let track_target_goal = track_target_goal.set_unseen_memory_ticks(unseen_memory_ticks);
         let mut target_predicate = TargetPredicate::create_attackable();
         target_predicate.base_max_distance = mob
             .living_entity
@@ -72,7 +117,41 @@ impl ActiveTargetGoal {
             track_target_goal,
             target: None,
             reciprocal_chance: to_goal_ticks(DEFAULT_RECIPROCAL_CHANCE),
-            target_type,
+            target_type: Some(target_type),
+            target_types: None,
+            target_predicate,
+        })
+    }
+
+    #[must_use]
+    pub fn with_default_types(
+        mob: &MobEntity,
+        target_types: &'static [&'static EntityType],
+        check_visibility: bool,
+    ) -> Box<Self> {
+        Self::with_default_types_and_memory(mob, target_types, check_visibility, 60)
+    }
+
+    #[must_use]
+    pub fn with_default_types_and_memory(
+        mob: &MobEntity,
+        target_types: &'static [&'static EntityType],
+        check_visibility: bool,
+        unseen_memory_ticks: i32,
+    ) -> Box<Self> {
+        let track_target_goal = TrackTargetGoal::with_default(check_visibility);
+        let track_target_goal = track_target_goal.set_unseen_memory_ticks(unseen_memory_ticks);
+        let mut target_predicate = TargetPredicate::create_attackable();
+        target_predicate.base_max_distance = mob
+            .living_entity
+            .get_attribute_value(&Attributes::FOLLOW_RANGE);
+
+        Box::new(Self {
+            track_target_goal,
+            target: None,
+            reciprocal_chance: to_goal_ticks(DEFAULT_RECIPROCAL_CHANCE),
+            target_type: None,
+            target_types: Some(target_types),
             target_predicate,
         })
     }
@@ -111,56 +190,63 @@ impl ActiveTargetGoal {
                 .unwrap()
         };
 
-        self.target = if self.target_type == &EntityType::PLAYER {
-            let mut candidates = world.get_nearby_players(search_pos, follow_range);
-            candidates.sort_by(|a, b| {
-                sort_by_distance(&a.get_entity().pos.load(), &b.get_entity().pos.load())
-            });
-            let mut result = None;
-            for player in candidates {
-                // Vanilla evaluates the selector inside `TargetingConditions.test` before the
-                // targeter's combat checks, so run the predicate before those caller-side checks.
-                if self
-                    .target_predicate
-                    .test(
-                        &world,
-                        Some(&mob_entity.living_entity),
-                        &player.living_entity,
-                    )
-                    .await
-                    && !TrackTargetGoal::is_allied(mob, player.as_ref()).await
-                    && mob.can_attack(player.get_entity())
-                {
-                    result = Some(player as Arc<dyn EntityBase>);
-                    break;
+        self.target =
+            if self.target_types.is_none() && self.target_type == Some(&EntityType::PLAYER) {
+                let mut candidates = world.get_nearby_players(search_pos, follow_range);
+                candidates.sort_by(|a, b| {
+                    sort_by_distance(&a.get_entity().pos.load(), &b.get_entity().pos.load())
+                });
+                let mut result = None;
+                for player in candidates {
+                    // Vanilla `TargetingConditions.test` (combat branch, `TargetingConditions.java:78`)
+                    // consults `targeter.canAttack(target)` before the rest of the predicate.
+                    if !TrackTargetGoal::is_allied(mob, player.as_ref()).await
+                        && mob.can_attack(player.get_entity())
+                        && self
+                            .target_predicate
+                            .test(
+                                &world,
+                                Some(&mob_entity.living_entity),
+                                &player.living_entity,
+                            )
+                            .await
+                    {
+                        result = Some(player as Arc<dyn EntityBase>);
+                        break;
+                    }
                 }
-            }
-            result
-        } else {
-            let mut candidates: Vec<Arc<dyn EntityBase>> = world
-                .get_nearby_entities(search_pos, follow_range)
-                .into_values()
-                .filter(|entity| entity.get_entity().entity_type == self.target_type)
-                .collect();
-            candidates.sort_by(|a, b| {
-                sort_by_distance(&a.get_entity().pos.load(), &b.get_entity().pos.load())
-            });
-            let mut result = None;
-            for entity in candidates {
-                if let Some(living) = entity.get_living_entity()
-                    && self
-                        .target_predicate
-                        .test(&world, Some(&mob_entity.living_entity), living)
-                        .await
-                    && !TrackTargetGoal::is_allied(mob, entity.as_ref()).await
-                    && mob.can_attack(entity.get_entity())
-                {
-                    result = Some(entity);
-                    break;
+                result
+            } else {
+                let mut candidates: Vec<Arc<dyn EntityBase>> = world
+                    .get_nearby_entities(search_pos, follow_range)
+                    .into_values()
+                    .filter(|entity| match (self.target_types, self.target_type) {
+                        (Some(target_types), _) => {
+                            target_types.contains(&entity.get_entity().entity_type)
+                        }
+                        (None, Some(target_type)) => entity.get_entity().entity_type == target_type,
+                        (None, None) => false,
+                    })
+                    .collect();
+                candidates.sort_by(|a, b| {
+                    sort_by_distance(&a.get_entity().pos.load(), &b.get_entity().pos.load())
+                });
+                let mut result = None;
+                for entity in candidates {
+                    if let Some(living) = entity.get_living_entity()
+                        && !TrackTargetGoal::is_allied(mob, entity.as_ref()).await
+                        && mob.can_attack(entity.get_entity())
+                        && self
+                            .target_predicate
+                            .test(&world, Some(&mob_entity.living_entity), living)
+                            .await
+                    {
+                        result = Some(entity);
+                        break;
+                    }
                 }
-            }
-            result
-        };
+                result
+            };
     }
 }
 

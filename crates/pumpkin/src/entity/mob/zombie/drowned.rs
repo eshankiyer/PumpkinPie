@@ -12,6 +12,7 @@ use crate::entity::ai::goal::drowned_go_to_beach::DrownedGoToBeachGoal;
 use crate::entity::ai::goal::drowned_go_to_water::DrownedGoToWaterGoal;
 use crate::entity::ai::goal::drowned_swim_up::DrownedSwimUpGoal;
 use crate::entity::ai::goal::drowned_util::is_bright_outside;
+use crate::entity::ai::goal::non_tame_random_target::baby_turtle_on_land;
 use crate::entity::ai::goal::ranged_trident_attack::DrownedTridentAttackGoal;
 use crate::entity::mob::zombie::ZombieEntityBase;
 use crate::entity::{
@@ -180,16 +181,16 @@ impl DrownedEntity {
                     true,
                 ),
             );
-            // Vanilla restricts this to `Turtle.BABY_ON_LAND_SELECTOR` (baby turtles on land
-            // only); no such predicate exists here, matching `ZombieEntityBase`'s existing
-            // simplification of targeting any turtle.
             target_selector.add_goal(
                 5,
-                ActiveTargetGoal::with_default(
+                Box::new(ActiveTargetGoal::new(
                     &mob_arc.entity.mob_entity,
                     &EntityType::TURTLE,
+                    10,
                     true,
-                ),
+                    false,
+                    Some(baby_turtle_on_land),
+                )),
             );
         };
 

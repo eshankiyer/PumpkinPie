@@ -73,8 +73,14 @@ impl OcelotEntity {
             goal_selector.add_goal(9, BreedGoal::new(0.8));
             // Goal 9: FollowParentGoal
             goal_selector.add_goal(9, Box::new(FollowParentGoal::new(0.8)));
-            // Goal 10: WaterAvoidingRandomStrollGoal (WanderAroundGoal)
-            goal_selector.add_goal(10, Box::new(WanderAroundGoal::new(0.8)));
+            // Goal 10: `WaterAvoidingRandomStrollGoal(this, 0.8, 1.0000001E-5)`
+            // (`Ocelot.registerGoals`, Ocelot.java:110).
+            goal_selector.add_goal(
+                10,
+                Box::new(WanderAroundGoal::new_water_avoiding_with_probability(
+                    0.8, 0.00001,
+                )),
+            );
             // Goal 11: LookAtPlayerGoal
             goal_selector.add_goal(
                 11,

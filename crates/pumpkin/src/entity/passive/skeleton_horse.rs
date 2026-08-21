@@ -169,6 +169,10 @@ impl Mob for SkeletonHorseEntity {
         &self.mob_entity
     }
 
+    fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
+        AbstractHorse::has_saddled_player_passenger(self)
+    }
+
     /// `SkeletonHorse.mobInteract` (`SkeletonHorse.java:174-176`): the trap-despawn timer above
     /// is already correctly ported; this is the one missing gate -- an untamed (non-trap-yet)
     /// skeleton horse cannot be fed/ridden/opened at all until tamed by some other mechanism

@@ -37,6 +37,8 @@ pub struct BlockState {
     /// The ID of the block entity associated with this state.
     /// Set to `u16::MAX` if the block does not hold NBT data.
     pub block_entity_type: u16,
+    /// Vanilla's cached `BlockState.isSolidRender()` result.
+    pub solid_render: bool,
 }
 
 /// Helper struct to ensure the validity of `BlockStateIds` parsed from external sources.
@@ -115,6 +117,11 @@ impl BlockState {
     #[must_use]
     pub const fn is_full_cube(&self) -> bool {
         self.state_flags & IS_FULL_CUBE != 0
+    }
+
+    #[must_use]
+    pub const fn is_solid_render(&self) -> bool {
+        self.solid_render
     }
 
     /// Returns whether the block is solid.

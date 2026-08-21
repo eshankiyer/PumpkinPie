@@ -1,7 +1,9 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use super::{
-    Entity, EntityBase, NBTStorage, ai::pathfinder::Navigator, equipment_break_status,
+    Entity, EntityBase, NBTStorage,
+    ai::pathfinder::{NavigationKind, Navigator, NavigatorGoal},
+    equipment_break_status,
     living::LivingEntity,
 };
 use crate::entity::EntityBaseFuture;
@@ -98,6 +100,7 @@ pub struct MobEntity {
     pub goals_selector: std::sync::Mutex<GoalSelector>,
     pub target_selector: std::sync::Mutex<GoalSelector>,
     pub navigator: std::sync::Mutex<Navigator>,
+    strafe_navigation_kind: AtomicU8,
     pub target: tokio::sync::Mutex<Option<Arc<dyn EntityBase>>>,
     pub look_control: std::sync::Mutex<LookControl>,
     pub move_control: std::sync::Mutex<Box<dyn MoveControlTrait>>,
@@ -105,6 +108,14 @@ pub struct MobEntity {
     pub position_target_range: AtomicI32,
     pub love_ticks: AtomicI32,
     pub breeding_cooldown: AtomicI32,
+    /// Vanilla `AbstractSchoolingFish.leader` reference.
+    ///
+    /// The reference is kept on the mob rather than on the follow goal so that the
+    /// follower state is shared by `FollowFlockLeaderGoal`, random swimming, and
+    /// future spawn/lifecycle hooks.
+    schooling_leader: std::sync::Mutex<Option<Arc<dyn EntityBase>>>,
+    /// Vanilla `AbstractSchoolingFish.schoolSize`, including the leader itself.
+    schooling_size: AtomicI32,
     /// Vanilla `Mob.noActionTime`, used by the random despawn check.
     pub no_action_time: AtomicI32,
     /// Vanilla `Entity.tickCount`, used by species-specific despawn rules.
@@ -149,6 +160,38 @@ impl MobEntity {
 
     #[must_use]
     pub fn new(entity: Entity) -> Self {
+        let mut navigator = Navigator::default();
+        navigator.set_mob_dimensions(
+            entity.entity_type.dimension[0],
+            entity.entity_type.dimension[1],
+        );
+        let id = entity.entity_type.id;
+        if id == pumpkin_data::entity::EntityType::AXOLOTL.id
+            || id == pumpkin_data::entity::EntityType::TURTLE.id
+            || id == pumpkin_data::entity::EntityType::DROWNED.id
+        {
+            navigator.set_amphibious(true);
+        } else if id == pumpkin_data::entity::EntityType::FROG.id {
+            navigator.set_amphibious(true);
+            navigator.set_frog(true);
+        } else if id == pumpkin_data::entity::EntityType::COD.id
+            || id == pumpkin_data::entity::EntityType::DOLPHIN.id
+            || id == pumpkin_data::entity::EntityType::ELDER_GUARDIAN.id
+            || id == pumpkin_data::entity::EntityType::GLOW_SQUID.id
+            || id == pumpkin_data::entity::EntityType::GUARDIAN.id
+            || id == pumpkin_data::entity::EntityType::NAUTILUS.id
+            || id == pumpkin_data::entity::EntityType::ZOMBIE_NAUTILUS.id
+            || id == pumpkin_data::entity::EntityType::PUFFERFISH.id
+            || id == pumpkin_data::entity::EntityType::SALMON.id
+            || id == pumpkin_data::entity::EntityType::SQUID.id
+            || id == pumpkin_data::entity::EntityType::TADPOLE.id
+            || id == pumpkin_data::entity::EntityType::TROPICAL_FISH.id
+        {
+            navigator.set_water_bound(true);
+            if id == pumpkin_data::entity::EntityType::DOLPHIN.id {
+                navigator.set_allow_breaching(true);
+            }
+        }
         Self {
             living_entity: LivingEntity::new(entity),
             sensing: std::sync::Mutex::new(Sensing::default()),
@@ -156,7 +199,8 @@ impl MobEntity {
             brain: None,
             goals_selector: std::sync::Mutex::new(GoalSelector::default()),
             target_selector: std::sync::Mutex::new(GoalSelector::default()),
-            navigator: std::sync::Mutex::new(Navigator::default()),
+            navigator: std::sync::Mutex::new(navigator),
+            strafe_navigation_kind: AtomicU8::new(0),
             target: tokio::sync::Mutex::new(None),
             look_control: std::sync::Mutex::new(LookControl::default()),
             move_control: std::sync::Mutex::new(Box::new(MoveControl::default())),
@@ -164,6 +208,8 @@ impl MobEntity {
             position_target_range: AtomicI32::new(-1),
             love_ticks: AtomicI32::new(0),
             breeding_cooldown: AtomicI32::new(0),
+            schooling_leader: std::sync::Mutex::new(None),
+            schooling_size: AtomicI32::new(1),
             no_action_time: AtomicI32::new(0),
             tick_count: AtomicI32::new(0),
             breeder: AtomicCell::new(None),
@@ -214,6 +260,25 @@ impl MobEntity {
             sensing.unseen.insert(target_id);
         }
         has_line_of_sight
+    }
+
+    pub(crate) fn set_strafe_navigation_kind(&self, kind: NavigationKind) {
+        let encoded = match kind {
+            NavigationKind::Ground => 0,
+            NavigationKind::Water => 1,
+            NavigationKind::Flying => 2,
+            NavigationKind::Amphibious => 3,
+        };
+        self.strafe_navigation_kind.store(encoded, Relaxed);
+    }
+
+    pub(crate) fn strafe_navigation_kind(&self) -> NavigationKind {
+        match self.strafe_navigation_kind.load(Relaxed) {
+            1 => NavigationKind::Water,
+            2 => NavigationKind::Flying,
+            3 => NavigationKind::Amphibious,
+            _ => NavigationKind::Ground,
+        }
     }
 
     pub fn is_in_position_target_range(&self) -> bool {
@@ -379,6 +444,166 @@ impl MobEntity {
         self.love_ticks.load(Relaxed) > 0
     }
 
+    pub fn is_schooling_follower(&self) -> bool {
+        self.schooling_leader
+            .lock()
+            .expect("schooling leader mutex poisoned")
+            .as_ref()
+            .is_some_and(|leader| leader.get_entity().is_alive())
+    }
+
+    pub fn schooling_leader(&self) -> Option<Arc<dyn EntityBase>> {
+        self.schooling_leader
+            .lock()
+            .expect("schooling leader mutex poisoned")
+            .clone()
+    }
+
+    #[must_use]
+    pub fn has_schooling_followers(&self) -> bool {
+        self.schooling_size.load(Relaxed) > 1
+    }
+
+    #[must_use]
+    pub const fn max_school_size(&self) -> i32 {
+        let entity_type = self.living_entity.entity.entity_type;
+        if entity_type.id == EntityType::SALMON.id {
+            5
+        } else if entity_type.id == EntityType::COD.id
+            || entity_type.id == EntityType::TROPICAL_FISH.id
+        {
+            8
+        } else {
+            0
+        }
+    }
+
+    #[must_use]
+    pub fn can_be_followed_by_schooling_fish(&self) -> bool {
+        self.has_schooling_followers() && self.schooling_size.load(Relaxed) < self.max_school_size()
+    }
+
+    #[must_use]
+    pub fn schooling_followers_remaining(&self) -> usize {
+        self.max_school_size()
+            .saturating_sub(self.schooling_size.load(Relaxed)) as usize
+    }
+
+    /// Vanilla `AbstractSchoolingFish.tick`: occasionally release a stale leader cap after the
+    /// school has become isolated. The world query includes this fish, so one nearby fish means
+    /// there are no remaining school members to account for.
+    fn reset_schooling_if_isolated(&self, isolation_roll: u32) {
+        if !self.has_schooling_followers() || isolation_roll != 1 {
+            return;
+        }
+
+        let entity = &self.living_entity.entity;
+        let world = entity.world.load();
+        let search_box = entity.bounding_box.load().expand(8.0, 8.0, 8.0);
+        let entity_type = entity.entity_type;
+        let nearby = world
+            .get_entities_at_box(&search_box)
+            .into_iter()
+            .filter(|candidate| {
+                candidate.get_entity().entity_type == entity_type
+                    && candidate.get_entity().is_alive()
+            })
+            .count();
+        if nearby <= 1 {
+            self.schooling_size.store(1, Relaxed);
+        }
+    }
+
+    /// Vanilla `AbstractSchoolingFish.startFollowing` plus the leader's follower count update.
+    /// Callers must only pass a different, currently non-following fish.
+    pub fn start_schooling_following(&self, leader: &Arc<dyn EntityBase>) -> bool {
+        if leader.get_entity().entity_id == self.living_entity.entity.entity_id {
+            return false;
+        }
+
+        let Some(leader_mob) = leader.get_mob() else {
+            return false;
+        };
+
+        let previous_leader = {
+            let mut current = self
+                .schooling_leader
+                .lock()
+                .expect("schooling leader mutex poisoned");
+            if current.as_ref().is_some_and(|current| {
+                current.get_entity().entity_id == leader.get_entity().entity_id
+            }) {
+                return false;
+            }
+            if !leader_mob.get_mob_entity().try_add_schooling_follower() {
+                return false;
+            }
+            current.replace(leader.clone())
+        };
+
+        if let Some(previous_leader) = previous_leader
+            && let Some(previous_mob) = previous_leader.get_mob()
+        {
+            previous_mob
+                .get_mob_entity()
+                .schooling_size
+                .fetch_update(Relaxed, Relaxed, |size| Some(size.saturating_sub(1)))
+                .ok();
+        }
+
+        true
+    }
+
+    /// Vanilla `AbstractSchoolingFish.stopFollowing`.
+    pub fn stop_schooling_following(&self) {
+        let mut current = self
+            .schooling_leader
+            .lock()
+            .expect("schooling leader mutex poisoned");
+        if let Some(leader) = current.take()
+            && let Some(leader_mob) = leader.get_mob()
+        {
+            leader_mob
+                .get_mob_entity()
+                .schooling_size
+                .fetch_update(Relaxed, Relaxed, |size| Some(size.saturating_sub(1)))
+                .ok();
+        }
+    }
+
+    /// Stop only if the leader is still the one observed by the goal being stopped.
+    /// Entity goals stop asynchronously, so an unconditional clear could erase a newer
+    /// assignment made by another fish between the goal stop and this lock acquisition.
+    pub fn stop_schooling_following_if(&self, expected: &Arc<dyn EntityBase>) {
+        let mut current = self
+            .schooling_leader
+            .lock()
+            .expect("schooling leader mutex poisoned");
+        if current
+            .as_ref()
+            .is_none_or(|leader| leader.get_entity().entity_id != expected.get_entity().entity_id)
+        {
+            return;
+        }
+        if let Some(leader) = current.take()
+            && let Some(leader_mob) = leader.get_mob()
+        {
+            leader_mob
+                .get_mob_entity()
+                .schooling_size
+                .fetch_update(Relaxed, Relaxed, |size| Some(size.saturating_sub(1)))
+                .ok();
+        }
+    }
+
+    fn try_add_schooling_follower(&self) -> bool {
+        self.schooling_size
+            .fetch_update(Relaxed, Relaxed, |size| {
+                (size < self.max_school_size()).then_some(size + 1)
+            })
+            .is_ok()
+    }
+
     pub fn set_love_ticks(&self, ticks: i32, breeder: Option<Uuid>) {
         self.love_ticks.store(ticks, Relaxed);
         self.breeder.store(breeder);
@@ -400,6 +625,10 @@ impl MobEntity {
 
     pub fn set_owner(&self, owner: Uuid) {
         self.owner.store(Some(owner));
+    }
+
+    pub fn clear_owner(&self) {
+        self.owner.store(None);
     }
 
     pub fn is_ordered_to_sit(&self) -> bool {
@@ -747,6 +976,7 @@ const fn spawns_offspring_from_egg(entity_type: &EntityType) -> bool {
 
 pub trait Mob: EntityBase + Send + Sync {
     /// Vanilla `Mob.hasControllingPassenger` and `Mob.getControllingPassenger`.
+    /// Rideable mobs with player-specific controls override this (for example, Pig).
     fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
         Box::pin(async move {
             if self.get_mob_entity().is_no_ai() {
@@ -800,6 +1030,11 @@ pub trait Mob: EntityBase + Send + Sync {
 
     fn get_random(&self) -> rand::rngs::ThreadRng {
         rand::rng()
+    }
+
+    /// Vanilla `Mob.isMaxGroupSizeReached`; most mobs accept the configured group size.
+    fn is_max_group_size_reached(&self, _group_size: i32) -> bool {
+        false
     }
 
     /// Vanilla `Entity.getLightLevelDependentMagicValue` used by
@@ -957,17 +1192,18 @@ pub trait Mob: EntityBase + Send + Sync {
             // CREATURE category.
             id if id == pumpkin_data::entity::EntityType::TADPOLE.id => true,
             // AbstractFish and Axolotl override Animal's non-despawning default.
-            // Bucketed/named variants are made persistent by their interaction/NBT paths.
+            // Vanilla also keeps custom-named fish, even when they were named by NBT
+            // rather than through an interaction that sets PersistenceRequired.
             id if id == pumpkin_data::entity::EntityType::AXOLOTL.id
                 || id == pumpkin_data::entity::EntityType::COD.id
                 || id == pumpkin_data::entity::EntityType::NAUTILUS.id
                 || id == pumpkin_data::entity::EntityType::PUFFERFISH.id
                 || id == pumpkin_data::entity::EntityType::SALMON.id
-                || id == pumpkin_data::entity::EntityType::TROPICAL_FISH.id
-                || id == pumpkin_data::entity::EntityType::ZOMBIE_HORSE.id =>
+                || id == pumpkin_data::entity::EntityType::TROPICAL_FISH.id =>
             {
-                true
+                (**mob_entity.living_entity.entity.custom_name.load()).is_none()
             }
+            id if id == pumpkin_data::entity::EntityType::ZOMBIE_HORSE.id => true,
             // Animal and non-despawning MISC mob implementations in the
             // generated registry use the persistent far-away behavior.
             _ if category == &MobCategory::CREATURE || category == &MobCategory::MISC => false,
@@ -977,8 +1213,24 @@ pub trait Mob: EntityBase + Send + Sync {
 
     /// Vanilla `Mob.requiresCustomPersistence`: passengers and leashed mobs
     /// must not be removed by the normal despawn checks.
+    fn requires_custom_persistence_cached(&self) -> bool {
+        let entity = self.get_entity();
+        self.has_custom_persistence_state()
+            || entity.vehicle_persistence_required.load(Relaxed)
+            || entity.leash_persistence_required.load(Relaxed)
+            || (entity
+                .entity_type
+                .has_tag(&tag::EntityType::MINECRAFT_RAIDERS)
+                && self.get_mob_entity().living_entity.has_active_raid())
+    }
+
+    /// Species-specific state that keeps a mob persistent, such as an Enderman's carried block.
+    fn has_custom_persistence_state(&self) -> bool {
+        false
+    }
+
     fn requires_custom_persistence(&self) -> EntityBaseFuture<'_, bool> {
-        Box::pin(async move { self.get_entity().requires_custom_persistence.load(Relaxed) })
+        Box::pin(async move { self.requires_custom_persistence_cached() })
     }
 
     /// Vanilla `Mob.checkDespawn`, called by the server entity tick loop.
@@ -992,7 +1244,7 @@ pub trait Mob: EntityBase + Send + Sync {
             let world = entity.world.load();
 
             if world.level_info.load().difficulty == Difficulty::Peaceful
-                && !entity.entity_type.category.is_friendly
+                && !entity.entity_type.allowed_in_peaceful
             {
                 entity.remove().await;
                 return;
@@ -1157,9 +1409,51 @@ pub trait Mob: EntityBase + Send + Sync {
 
     fn set_saddled(&self, _saddled: bool) {}
 
+    /// Vanilla `PathfinderMob.closeRangeLeashBehaviour`: keep a non-panicking mob
+    /// navigating toward its leash holder while preserving a two-block gap.
+    fn close_range_leash_behavior(&self, holder_pos: Vector3<f64>, distance: f64) {
+        if !self.should_follow_leash() || self.is_panicking() {
+            return;
+        }
+
+        self.get_mob_entity()
+            .goals_selector
+            .lock()
+            .unwrap()
+            .enable_control(Controls::MOVE);
+
+        let mob_pos = self.get_mob_entity().living_entity.entity.pos.load();
+        let delta = (holder_pos - mob_pos).normalize() * (distance - 2.0).max(0.0);
+        let target = mob_pos + delta;
+        self.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap()
+            .set_progress_if_changed(NavigatorGoal::new(
+                mob_pos,
+                target,
+                f64::from(self.get_follow_leash_speed()),
+            ));
+    }
+
+    /// Vanilla `PathfinderMob.shouldStayCloseToLeashHolder`.
+    fn should_follow_leash(&self) -> bool {
+        true
+    }
+
+    /// Vanilla `PathfinderMob.followLeashSpeed`.
+    fn get_follow_leash_speed(&self) -> f32 {
+        1.0
+    }
+
     /// Per-mob tick hook called after selectors and navigation, before movement controls.
     /// This is vanilla `Mob.customServerAiStep`'s position in `Mob.serverAiStep`.
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async {})
+    }
+
+    /// Runs immediately before the vanilla mob goal selectors.
+    fn pre_ai_tick(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async {})
     }
 
@@ -1641,10 +1935,20 @@ pub trait Mob: EntityBase + Send + Sync {
         })
     }
 
-    /// Hook for species whose vanilla breeding path creates a non-mob result, such as a sniffer
-    /// egg. It runs after the shared parent finalization.
-    fn spawn_breeding_item<'a>(&'a self, _world: &'a Arc<World>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async {})
+    /// Spawns the prepared vanilla breeding result after `Animal.finalizeSpawnChildFromBreeding`
+    /// awards experience. Concrete animals can override this when breeding produces a non-mob
+    /// result, such as Sniffer's egg item.
+    fn spawn_breeding_result<'a>(
+        &'a self,
+        offspring: Option<Arc<dyn EntityBase>>,
+        world: &'a Arc<World>,
+        _parent_pos: Vector3<f64>,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            if let Some(baby) = offspring {
+                world.spawn_entity(baby).await;
+            }
+        })
     }
 
     /// Called once a breed has been claimed (both parents' love ticks reset) and offspring is
@@ -1677,7 +1981,7 @@ pub trait Mob: EntityBase + Send + Sync {
     }
 }
 
-struct MutexTakeGuard<'a, T> {
+pub(crate) struct MutexTakeGuard<'a, T> {
     mutex: &'a std::sync::Mutex<T>,
     value: Option<T>,
 }
@@ -1730,6 +2034,40 @@ pub(crate) fn tick_mob_ai<'a>(
             mob_entity.jump_requested.store(false, Relaxed);
             return;
         }
+
+        // Mob.getNavigation delegates to a controlled Mob vehicle. Resolve that once at the
+        // async AI boundary so the synchronous MoveControl tick can use the same evaluator.
+        let mut strafe_navigation_kind = mob_entity.navigator.lock().unwrap().navigation_kind();
+        let vehicle = mob_entity.living_entity.entity.vehicle.lock().await.clone();
+        if let Some(vehicle) = vehicle
+            && let Some(vehicle_mob) = vehicle.get_mob()
+            && !vehicle_mob.get_mob_entity().is_no_ai()
+        {
+            let first_passenger = vehicle
+                .get_entity()
+                .passengers
+                .lock()
+                .await
+                .first()
+                .cloned();
+            if first_passenger.is_some_and(|passenger| {
+                passenger.get_entity().entity_id == mob_entity.living_entity.entity.entity_id
+                    && !passenger
+                        .get_entity()
+                        .entity_type
+                        .has_tag(&tag::EntityType::MINECRAFT_NON_CONTROLLING_RIDER)
+            }) {
+                strafe_navigation_kind = vehicle_mob
+                    .get_mob_entity()
+                    .navigator
+                    .lock()
+                    .unwrap()
+                    .navigation_kind();
+            }
+        }
+        mob_entity.set_strafe_navigation_kind(strafe_navigation_kind);
+
+        mob.pre_ai_tick().await;
 
         mob_entity.sensing.lock().unwrap().tick();
 
@@ -1873,7 +2211,10 @@ impl<T: Mob + Send + 'static> EntityBase for T {
                     }
                 }
             }
-            mob_entity.living_entity.entity.tick_leash().await;
+            let entity = &mob_entity.living_entity.entity;
+            if let Some((holder_pos, distance)) = entity.tick_leash().await {
+                self.close_range_leash_behavior(holder_pos, distance);
+            }
 
             if mob_entity.breeding_cooldown.load(Relaxed) > 0 {
                 mob_entity.breeding_cooldown.fetch_sub(1, Relaxed);
@@ -1898,6 +2239,7 @@ impl<T: Mob + Send + 'static> EntityBase for T {
             mob_entity.living_entity.tick(caller, server).await;
             self.tick_sun_burn().await;
             self.mob_try_pick_up_items().await;
+            mob_entity.reset_schooling_if_isolated(self.get_random().random_range(0..200));
             self.post_tick().await;
 
             if mob_entity.tick_count.load(Relaxed) % 5 == 0 {
@@ -2216,5 +2558,14 @@ mod tests {
             assert!(!uses_monster_no_action_time(&entity_type));
         }
         assert!(uses_monster_no_action_time(&EntityType::ZOMBIE));
+    }
+
+    #[test]
+    fn peaceful_despawn_uses_the_entity_type_flag() {
+        const {
+            assert!(!EntityType::ZOMBIE.allowed_in_peaceful);
+            assert!(EntityType::PIGLIN.allowed_in_peaceful);
+            assert!(EntityType::SHULKER.allowed_in_peaceful);
+        }
     }
 }

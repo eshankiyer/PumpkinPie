@@ -23,9 +23,9 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::tag;
 use pumpkin_data::tag::Taggable;
+use pumpkin_data::{BlockStateId, game_event::GameEvent};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 
@@ -37,6 +37,7 @@ pub type GameEventFuture<'a> = Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
 // GameEvent.Context (GameEvent.java)
 pub struct GameEventContext {
     pub source_entity: Option<Arc<dyn EntityBase>>,
+    pub affected_block_state: Option<BlockStateId>,
 }
 
 impl GameEventContext {
@@ -44,12 +45,24 @@ impl GameEventContext {
     pub const fn none() -> Self {
         Self {
             source_entity: None,
+            affected_block_state: None,
         }
     }
 
     pub fn of_entity(entity: Arc<dyn EntityBase>) -> Self {
         Self {
             source_entity: Some(entity),
+            affected_block_state: None,
+        }
+    }
+
+    pub fn of_entity_with_block_state(
+        entity: Arc<dyn EntityBase>,
+        affected_block_state: BlockStateId,
+    ) -> Self {
+        Self {
+            source_entity: Some(entity),
+            affected_block_state: Some(affected_block_state),
         }
     }
 }

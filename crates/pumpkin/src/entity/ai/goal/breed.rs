@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use rand::{RngExt, rng};
+use rand::RngExt;
 
 use crate::entity::{
     EntityBase, ai::pathfinder::NavigatorGoal, experience_orb::ExperienceOrbEntity, mob::Mob,
@@ -8,10 +8,13 @@ use crate::entity::{
 
 use super::{Controls, Goal, GoalFuture};
 
+pub type MatePredicate = fn(&dyn Mob, &dyn EntityBase) -> bool;
+
 pub struct BreedGoal {
     speed: f64,
     mate: Option<Arc<dyn EntityBase>>,
     timer: i32,
+    mate_predicate: Option<MatePredicate>,
 }
 
 impl BreedGoal {
@@ -21,10 +24,24 @@ impl BreedGoal {
             speed,
             mate: None,
             timer: 0,
+            mate_predicate: None,
         })
     }
 
-    fn find_mate(mob: &dyn Mob) -> Option<Arc<dyn EntityBase>> {
+    #[must_use]
+    pub fn with_mate_predicate(speed: f64, mate_predicate: MatePredicate) -> Box<Self> {
+        Box::new(Self {
+            speed,
+            mate: None,
+            timer: 0,
+            mate_predicate: Some(mate_predicate),
+        })
+    }
+
+    fn find_mate(
+        mob: &dyn Mob,
+        mate_predicate: Option<MatePredicate>,
+    ) -> Option<Arc<dyn EntityBase>> {
         let mob_entity = mob.get_mob_entity();
         if !mob_entity.is_in_love() || !mob.can_breed() {
             return None;
@@ -56,6 +73,9 @@ impl BreedGoal {
                 || !candidate.is_breeding_ready()
                 || candidate.is_panicking()
             {
+                continue;
+            }
+            if mate_predicate.is_some_and(|predicate| !predicate(mob, candidate.as_ref())) {
                 continue;
             }
 
@@ -133,9 +153,14 @@ impl BreedGoal {
             if let Some(baby_mob) = baby.get_mob() {
                 baby_mob.set_persistence_required();
             }
+            baby.get_entity().set_pos(parent_pos);
             baby.get_entity().set_age(-24000);
         });
 
+        // Vanilla `Animal.finalizeSpawnChildFromBreeding` (`Animal.java:219-232`): both parents
+        // are aged back to 6000, their love state is cleared, entity event 18 plays the heart
+        // particles, and the breeding XP orb only drops when the mob-drops gamerule is enabled.
+        // The offspring is added to the level afterwards.
         mob.get_entity().set_age(6000);
         mob.reset_love();
         mate.get_entity().set_age(6000);
@@ -150,15 +175,11 @@ impl BreedGoal {
         }
 
         if world.level_info.load().game_rules.mob_drops {
-            let xp = rng().random_range(1u32..=7);
+            let xp = mob.get_random().random_range(1u32..=7);
             ExperienceOrbEntity::spawn(&world, parent_pos, xp).await;
         }
 
-        mob.spawn_breeding_item(&world).await;
-
-        if let Some(baby) = baby {
-            world.spawn_entity(baby).await;
-        }
+        mob.spawn_breeding_result(baby, &world, parent_pos).await;
     }
 }
 
@@ -170,7 +191,7 @@ impl Goal for BreedGoal {
                 return false;
             }
 
-            self.mate = Self::find_mate(mob);
+            self.mate = Self::find_mate(mob, self.mate_predicate);
             self.mate.is_some()
         })
     }

@@ -23,6 +23,9 @@ impl BedrockClient {
             PlayerAction::StartBreak
             | PlayerAction::CreativePlayerDestroyBlock
             | PlayerAction::ContinueDestroyBlock => {
+                // The player tick advances the delayed destroy state under the same
+                // lock, so a break action must not interleave with it.
+                let _mining_action = player.mining_action_lock.lock().await;
                 let location = packet.block_pos;
                 if !player.can_interact_with_block_at(&location, 1.0) {
                     return;
@@ -32,11 +35,30 @@ impl BedrockClient {
                 let world = entity.world.load_full();
                 let (block, state) = world.get_block_and_state(&location);
 
-                if matches!(
-                    packet.action,
-                    PlayerAction::StartBreak | PlayerAction::CreativePlayerDestroyBlock
-                ) && !player.can_break_block(server, block).await
+                // ServerPlayerGameMode rejects any block action above the level's
+                // maximum build height, and checks isUnderSpawnProtection plus
+                // ServerLevel.mayInteract when a destroy action starts.
+                if location.0.y > world.get_top_y()
+                    || (matches!(packet.action, PlayerAction::StartBreak)
+                        && (player
+                            .is_under_spawn_protection(server, &world, &location)
+                            .await
+                            || !world
+                                .worldborder
+                                .lock()
+                                .await
+                                .contains_block(location.0.x, location.0.z)))
                 {
+                    let runtime_id = pumpkin_data::BlockState::to_be_network_id(state.id);
+                    self.enqueue_client_packet(&CUpdateBlock::new(location, runtime_id as u32))
+                        .await;
+                    return;
+                }
+
+                // Vanilla checks Player.blockActionRestricted at the start of a destroy
+                // action and defers the held item's destruction rules to
+                // ServerPlayerGameMode.destroyBlock.
+                if !player.can_start_block_break(block, state).await {
                     let runtime_id = pumpkin_data::BlockState::to_be_network_id(state.id);
                     self.enqueue_client_packet(&CUpdateBlock::new(location, runtime_id as u32))
                         .await;
@@ -120,6 +142,9 @@ impl BedrockClient {
                 }
             }
             action @ (PlayerAction::PredictDestroyBlock | PlayerAction::StopBreak) => {
+                // The player tick advances the delayed destroy state under the same
+                // lock, so a break action must not interleave with it.
+                let _mining_action = player.mining_action_lock.lock().await;
                 let location = packet.block_pos;
                 if !player.can_interact_with_block_at(&location, 1.0) {
                     return;
@@ -129,6 +154,14 @@ impl BedrockClient {
                 let world = entity.world.load_full();
 
                 let (block, state) = world.get_block_and_state(&location);
+                // ServerPlayerGameMode rejects any block action above the level's
+                // maximum build height, including STOP_DESTROY_BLOCK.
+                if location.0.y > world.get_top_y() {
+                    let runtime_id = pumpkin_data::BlockState::to_be_network_id(state.id);
+                    self.enqueue_client_packet(&CUpdateBlock::new(location, runtime_id as u32))
+                        .await;
+                    return;
+                }
                 if player.gamemode.load() != GameMode::Creative && !state.is_air() {
                     let speed = crate::block::calc_block_breaking(player, state, block).await;
                     let elapsed = player.tick_counter.load(Ordering::Relaxed)
@@ -151,6 +184,20 @@ impl BedrockClient {
                             .await;
                         }
                     } else {
+                        // ServerPlayerGameMode records a delayed destroy when the stop
+                        // arrives before the destroy threshold, so the block still
+                        // finishes breaking from the player tick.
+                        if player.mining.load(Ordering::Relaxed)
+                            && same_block
+                            && !player.delayed_mining.load(Ordering::Relaxed)
+                        {
+                            *player.delayed_mining_pos.lock().await = location;
+                            player.delayed_mining_start_time.store(
+                                player.start_mining_time.load(Ordering::Relaxed),
+                                Ordering::Relaxed,
+                            );
+                            player.delayed_mining.store(true, Ordering::Relaxed);
+                        }
                         let runtime_id = pumpkin_data::BlockState::to_be_network_id(state.id);
                         self.enqueue_client_packet(&CUpdateBlock::new(location, runtime_id as u32))
                             .await;
@@ -180,7 +227,23 @@ impl BedrockClient {
                 // cracking is done fully server-side.
             }
             PlayerAction::AbortBreak => {
+                // The player tick advances the delayed destroy state under the same
+                // lock, so a break action must not interleave with it.
+                let _mining_action = player.mining_action_lock.lock().await;
+                let location = packet.block_pos;
+                let entity = &player.get_entity();
+                let world = entity.world.load_full();
+
+                // ABORT_DESTROY_BLOCK clears the crack animation for the tracked
+                // target as well as for the position the client named.
+                let active_position = *player.mining_pos.lock().await;
+                player.delayed_mining.store(false, Ordering::Relaxed);
                 player.stop_mining().await;
+                if active_position != location {
+                    world
+                        .set_block_breaking(entity, location, BlockBreakingProgress::Stop)
+                        .await;
+                }
             }
             PlayerAction::DropItem => {
                 player.drop_held_item(false).await;

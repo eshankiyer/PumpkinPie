@@ -24,9 +24,9 @@ use crate::entity::{
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal, beg::BegGoal,
         breed::BreedGoal, escape_danger::EscapeDangerGoal, follow_owner::FollowOwnerGoal,
-        follow_parent::FollowParentGoal, leap_at_target::LeapAtTargetGoal,
-        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
-        melee_attack::MeleeAttackGoal, non_tame_random_target::NonTameRandomTargetGoal,
+        leap_at_target::LeapAtTargetGoal, look_around::RandomLookAroundGoal,
+        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal,
+        non_tame_random_target::NonTameRandomTargetGoal,
         owner_hurt_by_target::OwnerHurtByTargetGoal, owner_hurt_target::OwnerHurtTargetGoal,
         reset_universal_anger_target::ResetUniversalAngerTargetGoal, revenge::RevengeGoal,
         sit::SitGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
@@ -124,9 +124,8 @@ impl WolfEntity {
             goal_selector.add_goal(5, Box::new(MeleeAttackGoal::new(1.0, true)));
             goal_selector.add_goal(6, FollowOwnerGoal::new(1.0, 10.0, 2.0));
             goal_selector.add_goal(7, BreedGoal::new(1.0));
-            // Not in `Wolf.registerGoals`; kept from the pre-merge Pumpkin goal list.
-            goal_selector.add_goal(8, Box::new(FollowParentGoal::new(1.1)));
-            goal_selector.add_goal(8, Box::new(WanderAroundGoal::new(1.0)));
+            // Wolf.java:137 -- 8: WaterAvoidingRandomStrollGoal(this, 1.0)
+            goal_selector.add_goal(8, Box::new(WanderAroundGoal::new_water_avoiding(1.0)));
             goal_selector.add_goal(9, BegGoal::new(8.0));
             goal_selector.add_goal(
                 10,

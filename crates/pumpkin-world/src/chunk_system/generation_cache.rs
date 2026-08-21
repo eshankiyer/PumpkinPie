@@ -102,6 +102,28 @@ impl GenerationCache for Cache {
         }
     }
 
+    fn get_chunk_biomes(&self, chunk_x: i32, chunk_z: i32) -> Option<Vec<u8>> {
+        let dx = chunk_x - self.x;
+        let dz = chunk_z - self.z;
+
+        if dx < 0 || dx >= self.size || dz < 0 || dz >= self.size {
+            return None;
+        }
+
+        match &self.chunks[(dx * self.size + dz) as usize] {
+            Chunk::Proto(chunk) => Some(chunk.flat_biome_map.iter().copied().fold(
+                Vec::new(),
+                |mut biomes, biome| {
+                    if !biomes.contains(&biome) {
+                        biomes.push(biome);
+                    }
+                    biomes
+                },
+            )),
+            Chunk::Level(chunk) => Some(chunk.section.unique_biomes()),
+        }
+    }
+
     fn try_get_proto_chunk(&self, chunk_x: i32, chunk_z: i32) -> Option<&ProtoChunk> {
         let dx = chunk_x - self.x;
         let dz = chunk_z - self.z;
@@ -574,6 +596,7 @@ impl Cache {
                         self,
                         block_registry,
                         &noise_gen.random_config,
+                        &noise_gen.dimension,
                     );
                 }
                 generator::WorldGenerator::Flat(_) => {

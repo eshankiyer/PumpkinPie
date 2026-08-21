@@ -25,6 +25,7 @@ impl GuardianEntity {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
             Arc::downgrade(&mob_arc)
         };
+        let target_weak = mob_weak.clone();
 
         {
             let mut goal_selector = mob_arc
@@ -56,19 +57,36 @@ impl GuardianEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             target_selector.add_goal(
                 1,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),
-            );
-            target_selector.add_goal(
-                2,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::SQUID, true),
-            );
-            target_selector.add_goal(
-                2,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::GLOW_SQUID, true),
-            );
-            target_selector.add_goal(
-                3,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::AXOLOTL, true),
+                Box::new(ActiveTargetGoal::new_types(
+                    &mob_arc.mob_entity,
+                    &[
+                        &EntityType::PLAYER,
+                        &EntityType::SQUID,
+                        &EntityType::GLOW_SQUID,
+                        &EntityType::AXOLOTL,
+                    ],
+                    10,
+                    true,
+                    false,
+                    Some(
+                        move |target: crate::entity::ai::target_predicate::TargetData,
+                              _world: Arc<crate::world::World>| {
+                            let target_weak = target_weak.clone();
+                            async move {
+                                let Some(guardian) = target_weak.upgrade() else {
+                                    return false;
+                                };
+                                // `Guardian.GuardianAttackSelector.test` (Guardian.java:433).
+                                guardian
+                                    .get_entity()
+                                    .pos
+                                    .load()
+                                    .squared_distance_to_vec(&target.target_pos)
+                                    > 9.0
+                            }
+                        },
+                    ),
+                )),
             );
         };
 

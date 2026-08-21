@@ -4,6 +4,7 @@ use pumpkin_util::Difficulty;
 
 use crate::entity::living::LivingEntity;
 use crate::world::World;
+use pumpkin_util::math::vector3::Vector3;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -17,6 +18,8 @@ pub struct TargetData {
     pub entity_uuid: uuid::Uuid,
     pub age: i32,
     pub target_y: f64,
+    /// The target's position, for selectors that test distance (e.g. `Guardian.java:433`).
+    pub target_pos: Vector3<f64>,
     pub touching_water: bool,
     pub in_water: bool,
 }
@@ -28,6 +31,7 @@ impl TargetData {
             entity_uuid: target.entity.entity_uuid,
             age: target.entity.age.load(Relaxed),
             target_y: target.entity.pos.load().y,
+            target_pos: target.entity.pos.load(),
             touching_water: target.entity.touching_water.load(SeqCst),
             in_water: target.is_in_water(),
         }

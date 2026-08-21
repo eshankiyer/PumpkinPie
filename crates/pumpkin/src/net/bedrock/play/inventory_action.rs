@@ -160,13 +160,50 @@ impl BedrockClient {
                     return;
                 };
 
-                if player.gamemode.load() == GameMode::Spectator {
-                    // TODO: openMenu ?
-                    return;
-                }
-
                 if data.action_type.0 == 0 {
-                    // Click block
+                    // Click block.
+                    // ServerGamePacketListenerImpl.handleUseItemOn validates reach, the
+                    // cursor offset from the block centre, the build height, spawn
+                    // protection and the world border before the interaction runs.
+                    let click_offset_within_block = (data.click_position.x - 0.5).abs() < 1.0000001
+                        && (data.click_position.y - 0.5).abs() < 1.0000001
+                        && (data.click_position.z - 0.5).abs() < 1.0000001;
+                    if data.block_position.0.y > world.get_top_y()
+                        || !player.can_interact_with_block_at(&data.block_position, 1.0)
+                        || !click_offset_within_block
+                        || player
+                            .is_under_spawn_protection(&server, &world, &data.block_position)
+                            .await
+                        || !world
+                            .worldborder
+                            .lock()
+                            .await
+                            .contains_block(data.block_position.0.x, data.block_position.0.z)
+                    {
+                        return;
+                    }
+
+                    // ServerPlayerGameMode.useItemOn asks the block for a menu provider
+                    // when the player is a spectator and never runs the normal block-use
+                    // callback.
+                    if player.gamemode.load() == GameMode::Spectator {
+                        server
+                            .block_registry
+                            .on_use_for_spectator(
+                                block,
+                                player,
+                                &data.block_position,
+                                &BlockHitResult {
+                                    face: &face,
+                                    cursor_pos: &data.click_position,
+                                },
+                                &server,
+                                &world,
+                            )
+                            .await;
+                        return;
+                    }
+
                     let client_stack = descriptor_to_stack(&data.item_in_hand);
 
                     let mut held_item = player.inventory().held_item().await;
@@ -262,6 +299,12 @@ impl BedrockClient {
                         player.inventory().set_held_item(stack).await;
                     }
                 } else if data.action_type.0 == 1 {
+                    // ServerPlayerGameMode.useItem returns PASS for spectators before
+                    // reading, consuming or dispatching the held item.
+                    if player.gamemode.load() == GameMode::Spectator {
+                        return;
+                    }
+
                     // Click air / Use item
                     let client_stack = descriptor_to_stack(&data.item_in_hand);
 

@@ -250,6 +250,10 @@ impl Mob for AllayEntity {
         &self.mob_entity
     }
 
+    fn should_follow_leash(&self) -> bool {
+        false
+    }
+
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             self.register_listeners_once().await;

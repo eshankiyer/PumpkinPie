@@ -269,6 +269,29 @@ impl TropicalFishEntity {
         !self.is_school.load(Relaxed)
     }
 
+    /// Applies the shared `TropicalFishGroupData` variant to a later fish in the same spawn
+    /// group. Vanilla also makes this fish a schooling fish when the group has a common variant.
+    pub fn copy_spawn_group_state(&self, leader: &Self, record_tracker: bool) {
+        let packed = leader.packed_variant.load(Relaxed);
+        self.packed_variant.store(packed, Relaxed);
+        self.is_school.store(true, Relaxed);
+        if record_tracker {
+            self.record_spawn_group_state();
+        }
+    }
+
+    /// Records the finalized variant for chunk-generation entities, whose insertion path does
+    /// not run `init_data_tracker` before replaying the tracked-data snapshot.
+    pub fn record_spawn_group_state(&self) {
+        self.mob_entity
+            .living_entity
+            .entity
+            .record_tracked_data_only(&[Metadata::new(
+                pumpkin_data::tracked_data::tropical_fish::ID_TYPE_VARIANT,
+                VarInt(self.packed_variant.load(Relaxed)),
+            )]);
+    }
+
     fn send_packed_variant(&self, packed: i32) {
         self.mob_entity.living_entity.entity.send_meta_data(
             &[Metadata::new(
@@ -301,6 +324,10 @@ impl NBTStorage for TropicalFishEntity {
 impl Mob for TropicalFishEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    fn is_max_group_size_reached(&self, _group_size: i32) -> bool {
+        self.is_max_group_size_reached()
     }
 
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {

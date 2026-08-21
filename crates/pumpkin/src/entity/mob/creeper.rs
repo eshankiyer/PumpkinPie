@@ -29,6 +29,14 @@ use crate::world::game_event::{GameEventContext, emit_game_event};
 const DEFAULT_FUSE_TIME: i32 = 30;
 const DEFAULT_EXPLOSION_RADIUS: i32 = 3;
 
+fn can_attack_target(entity_type: &EntityType) -> bool {
+    entity_type != &EntityType::GHAST
+}
+
+fn can_set_target(entity_type: &EntityType) -> bool {
+    entity_type != &EntityType::GOAT && can_attack_target(entity_type)
+}
+
 pub struct CreeperEntity {
     pub mob_entity: MobEntity,
     pub fuse_speed: AtomicI32,
@@ -240,6 +248,21 @@ impl Mob for CreeperEntity {
         })
     }
 
+    /// Match vanilla's inherited `Mob.canAttack`: ghasts are never valid
+    /// combat targets. The Creeper-specific goat exclusion is enforced by
+    /// `set_mob_target`, matching `Creeper.setTarget`.
+    fn can_attack(&self, target: &Entity) -> bool {
+        can_attack_target(target.entity_type)
+    }
+
+    fn set_mob_target(&self, target: Option<Arc<dyn EntityBase>>) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let target = target.filter(|target| can_set_target(target.get_entity().entity_type));
+            let mut mob_target = self.mob_entity.target.lock().await;
+            *mob_target = target;
+        })
+    }
+
     fn mob_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             let entity = &self.mob_entity.living_entity.entity;
@@ -352,5 +375,21 @@ impl Mob for CreeperEntity {
 
             true
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{can_attack_target, can_set_target};
+    use pumpkin_data::entity::EntityType;
+
+    #[test]
+    fn creepers_reject_goats_when_setting_targets_and_ghasts_when_attacking() {
+        assert!(!can_set_target(&EntityType::GOAT));
+        assert!(!can_set_target(&EntityType::GHAST));
+        assert!(can_set_target(&EntityType::PLAYER));
+        assert!(can_attack_target(&EntityType::GOAT));
+        assert!(!can_attack_target(&EntityType::GHAST));
+        assert!(can_attack_target(&EntityType::PLAYER));
     }
 }

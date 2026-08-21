@@ -64,7 +64,7 @@ impl BlockBehaviour for HopperBlock {
                 && let Some(inventory) = block_entity.get_inventory()
             {
                 args.player
-                    .increment_stat(
+                    .increment_interaction_stat(
                         pumpkin_data::statistic::StatisticCategory::Custom,
                         pumpkin_data::statistic::CustomStatistic::InspectHopper as i32,
                         1,

@@ -33,8 +33,66 @@ impl JavaClient {
             return Err(BlockPlacingError::InvalidHand);
         };
 
+        let entity = &player.get_entity();
+        let world = entity.world.load_full();
+
+        // ServerGamePacketListenerImpl.handleUseItemOn reports the build limit to the
+        // player instead of silently dropping an out-of-range interaction.
+        if position.0.y > world.get_top_y() {
+            player
+                .send_system_message_raw(
+                    &TextComponent::translate_cross(
+                        translation::java::BUILD_TOOHIGH,
+                        translation::bedrock::BUILD_TOOHIGH,
+                        vec![TextComponent::text(world.get_top_y().to_string())],
+                    )
+                    .color_named(pumpkin_util::text::color::NamedColor::Red),
+                    true,
+                )
+                .await;
+            return Ok(());
+        }
+        if position.0.y < world.get_bottom_y() {
+            player
+                .send_system_message_raw(
+                    &TextComponent::translate_cross(
+                        translation::java::BUILD_TOOLOW,
+                        translation::bedrock::BUILD_TOOLOW,
+                        vec![TextComponent::text(world.get_bottom_y().to_string())],
+                    )
+                    .color_named(pumpkin_util::text::color::NamedColor::Red),
+                    true,
+                )
+                .await;
+            return Ok(());
+        }
+        // isUnderSpawnProtection and ServerLevel.mayInteract both gate the
+        // interaction before ServerPlayerGameMode.useItemOn runs.
+        if player
+            .is_under_spawn_protection(server, &world, &position)
+            .await
+            || !world
+                .worldborder
+                .lock()
+                .await
+                .contains_block(position.0.x, position.0.z)
+        {
+            return Ok(());
+        }
+
+        let block = world.get_block(&position);
+
+        // ServerPlayerGameMode.useItemOn asks the block for a menu provider when the
+        // player is a spectator and never runs the normal block-use callback.
         if player.gamemode.load() == GameMode::Spectator {
-            // TODO: openMenu
+            let hit = BlockHitResult {
+                face: &face,
+                cursor_pos: &cursor_pos,
+            };
+            server
+                .block_registry
+                .on_use_for_spectator(block, player, &position, &hit, server, &world)
+                .await;
             return Ok(());
         }
 
@@ -49,10 +107,6 @@ impl JavaClient {
         player
             .increment_stat(StatisticCategory::Used, item_id as i32, 1)
             .await;
-
-        let entity = &player.get_entity();
-        let world = entity.world.load_full();
-        let block = world.get_block(&position);
 
         let event = PlayerInteractEvent::new(
             player,
@@ -88,6 +142,7 @@ impl JavaClient {
             let result = self
                 .call_use_item_on(
                     player,
+                    hand,
                     &position,
                     &cursor_pos,
                     &face,
@@ -164,6 +219,7 @@ impl JavaClient {
     async fn call_use_item_on(
         &self,
         player: &Arc<Player>,
+        hand: Hand,
         position: &BlockPos,
         cursor_pos: &Vector3<f32>,
         face: &BlockDirection,
@@ -192,7 +248,9 @@ impl JavaClient {
             return result;
         }
 
-        if matches!(result, BlockActionResult::PassToDefaultBlockAction) {
+        // BlockState.useItemOn only falls back to useWithoutItem for the main hand,
+        // so an off-hand pass must stay passive.
+        if uses_main_hand(hand) && matches!(result, BlockActionResult::PassToDefaultBlockAction) {
             let result = server
                 .block_registry
                 .on_use(

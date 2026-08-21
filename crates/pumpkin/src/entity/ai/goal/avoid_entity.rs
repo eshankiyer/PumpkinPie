@@ -112,6 +112,7 @@ impl AvoidEntityGoal {
             world
                 .get_closest_player_where(pos, self.flee_distance, |player| {
                     player.living_entity.is_part_of_game()
+                        && !player.is_creative()
                         && self
                             .extra_predicate
                             .as_ref()

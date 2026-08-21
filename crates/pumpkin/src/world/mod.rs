@@ -322,6 +322,8 @@ pub struct World {
     synced_block_event_queue: Mutex<Vec<BlockEvent>>,
     /// A map of unsent block changes, keyed by block position.
     unsent_block_changes: Mutex<HashMap<BlockPos, BlockStateId>>,
+    /// Generation of the most recent asynchronous mutation at each block position.
+    block_mutation_versions: DashMap<BlockPos, u64>,
     /// Persisted vanilla POI storage for portal and villager lookups.
     pub portal_poi: Mutex<portal::PortalPoiStorage>,
     /// Villager job sites and their current owners.
@@ -385,6 +387,9 @@ fn extend_active_chunks(
         }
     }
 }
+
+/// A predicate run against the world before a block placement is committed.
+pub type BlockPlacementValidator = Arc<dyn Fn(&World) -> bool + Send + Sync>;
 
 impl World {
     pub async fn get_block_state_id_async(&self, position: &BlockPos) -> BlockStateId {
@@ -485,6 +490,7 @@ impl World {
             min_y: i32::from(generation_settings.shape.min_y),
             synced_block_event_queue: Mutex::new(Vec::new()),
             unsent_block_changes: Mutex::new(HashMap::new()),
+            block_mutation_versions: DashMap::new(),
             portal_poi: Mutex::new(portal_poi),
             villager_poi: Mutex::new(villager_poi::VillagerPoiStorage::default()),
             dragon_fight,
@@ -5516,39 +5522,135 @@ impl World {
     }
 
     /// Sets a block and returns the old block id
-    #[expect(clippy::too_many_lines)]
     pub async fn set_block_state(
         self: &Arc<Self>,
         position: &BlockPos,
         block_state_id: BlockStateId,
         flags: BlockFlags,
     ) -> BlockStateId {
+        self.set_block_state_internal(position, None, block_state_id, flags, None)
+            .await
+            .unwrap_or(Block::AIR.default_state.id)
+    }
+
+    /// Replaces a block only when its current state is `expected_state`.
+    ///
+    /// The comparison and replacement happen under the chunk's synchronous
+    /// mutation boundary, so callers can safely use this across an `.await`
+    /// without deleting a block that another task placed in the meantime.
+    pub async fn set_block_state_if(
+        self: &Arc<Self>,
+        position: &BlockPos,
+        expected_state: BlockStateId,
+        block_state_id: BlockStateId,
+        flags: BlockFlags,
+    ) -> bool {
+        self.set_block_state_internal(position, Some(expected_state), block_state_id, flags, None)
+            .await
+            .is_some()
+    }
+
+    pub async fn set_block_state_if_validated(
+        self: &Arc<Self>,
+        position: &BlockPos,
+        expected_state: BlockStateId,
+        block_state_id: BlockStateId,
+        flags: BlockFlags,
+        validator: Arc<dyn Fn(&Self) -> bool + Send + Sync>,
+    ) -> bool {
+        self.set_block_state_internal(
+            position,
+            Some(expected_state),
+            block_state_id,
+            flags,
+            Some(validator),
+        )
+        .await
+        .is_some()
+    }
+
+    #[expect(clippy::too_many_lines)]
+    async fn set_block_state_internal(
+        self: &Arc<Self>,
+        position: &BlockPos,
+        expected_state: Option<BlockStateId>,
+        block_state_id: BlockStateId,
+        flags: BlockFlags,
+        validator: Option<BlockPlacementValidator>,
+    ) -> Option<BlockStateId> {
         let (chunk_coordinate, relative) = position.chunk_and_chunk_relative_position();
+        // Serialize the chunk mutation with its broadcast queue insertion. Without
+        // this guard, two async callers can mutate in order A/B but enqueue B/A.
+        let mut unsent_block_changes = self.unsent_block_changes.lock().await;
+        if let Some(validator) = validator
+            && !validator(self)
+        {
+            return None;
+        }
         let replaced_block_state_id = self
             .level
             .read_chunk_sync(&chunk_coordinate, |chunk| {
-                let replaced_block_state_id = chunk.set_block_absolute_y(
-                    relative.x as usize,
-                    relative.y,
-                    relative.z as usize,
-                    block_state_id,
-                );
+                let replaced_block_state_id = expected_state.map_or_else(
+                    || {
+                        Some(chunk.set_block_absolute_y(
+                            relative.x as usize,
+                            relative.y,
+                            relative.z as usize,
+                            block_state_id,
+                        ))
+                    },
+                    |expected_state| {
+                        chunk.set_block_absolute_y_if(
+                            relative.x as usize,
+                            relative.y,
+                            relative.z as usize,
+                            expected_state,
+                            block_state_id,
+                        )
+                    },
+                )?;
                 // Mark chunk dirty if it isn't already
                 if replaced_block_state_id != block_state_id && !chunk.is_dirty() {
                     chunk.mark_dirty(true);
                 }
-                replaced_block_state_id
+                Some(replaced_block_state_id)
             })
-            .unwrap_or(Block::AIR.default_state.id);
+            .flatten()
+            .or_else(|| {
+                expected_state
+                    .is_none()
+                    .then_some(Block::AIR.default_state.id)
+            })?;
 
         if replaced_block_state_id == block_state_id {
-            return block_state_id;
+            return Some(block_state_id);
         }
 
-        self.unsent_block_changes
-            .lock()
-            .await
-            .insert(*position, block_state_id);
+        let mutation_version = {
+            let mutation_version = self
+                .block_mutation_versions
+                .entry(*position)
+                .and_modify(|version| *version = version.saturating_add(1))
+                .or_insert(1);
+            *mutation_version
+        };
+        unsent_block_changes.insert(*position, block_state_id);
+        drop(unsent_block_changes);
+
+        let is_current_mutation = || {
+            self.block_mutation_versions
+                .get(position)
+                .is_some_and(|version| *version == mutation_version)
+                && self.get_block_state_id(position) == block_state_id
+        };
+        let clear_mutation_version = || {
+            self.block_mutation_versions
+                .remove_if(position, |_, version| *version == mutation_version);
+        };
+        if !is_current_mutation() {
+            clear_mutation_version();
+            return None;
+        }
 
         let old_block = Block::from_state_id(replaced_block_state_id);
         let new_block = Block::from_state_id(block_state_id);
@@ -5569,6 +5671,10 @@ impl World {
             let new_poi_type = village_poi::classify_block(new_block, block_state_id);
             if old_poi_type.is_some() || new_poi_type.is_some() {
                 let mut poi_storage = self.portal_poi.lock().await;
+                if !is_current_mutation() {
+                    clear_mutation_version();
+                    return None;
+                }
                 if old_poi_type.is_some() {
                     poi_storage.remove(position);
                 }
@@ -5583,12 +5689,24 @@ impl World {
             && old_block.default_state.block_entity_type != u16::MAX
             && let Some(entity) = self.get_block_entity(position)
         {
+            if !is_current_mutation() {
+                clear_mutation_version();
+                return None;
+            }
             entity.on_block_replaced(self.clone(), *position).await;
+            if !is_current_mutation() {
+                clear_mutation_version();
+                return None;
+            }
             self.remove_block_entity(position);
         }
 
         // WorldChunk.java line 317
         if is_new_block && (flags.contains(BlockFlags::NOTIFY_NEIGHBORS) || block_moved) {
+            if !is_current_mutation() {
+                clear_mutation_version();
+                return None;
+            }
             self.block_registry
                 .on_state_replaced(
                     self,
@@ -5598,10 +5716,18 @@ impl World {
                     block_moved,
                 )
                 .await;
+            if !is_current_mutation() {
+                clear_mutation_version();
+                return None;
+            }
         }
 
         // WorldChunk.java line 318
         if !flags.contains(BlockFlags::SKIP_BLOCK_ADDED_CALLBACK) && new_block != old_block {
+            if !is_current_mutation() {
+                clear_mutation_version();
+                return None;
+            }
             self.block_registry
                 .on_placed(
                     self,
@@ -5612,6 +5738,10 @@ impl World {
                     block_moved,
                 )
                 .await;
+            if !is_current_mutation() {
+                clear_mutation_version();
+                return None;
+            }
             let new_fluid = self.get_fluid(position);
             self.block_registry
                 .on_placed_fluid(
@@ -5623,17 +5753,29 @@ impl World {
                     block_moved,
                 )
                 .await;
+            if !is_current_mutation() {
+                clear_mutation_version();
+                return None;
+            }
         }
 
         // Ig they do this cause it could be modified in chunkPos.setBlockState?
-        if self.get_block_state_id(position) == block_state_id {
+        if is_current_mutation() {
             if flags.contains(BlockFlags::NOTIFY_LISTENERS) {
                 // Mob AI update
             }
 
             if flags.contains(BlockFlags::NOTIFY_NEIGHBORS) {
                 self.update_neighbors(position, None).await;
+                if !is_current_mutation() {
+                    clear_mutation_version();
+                    return None;
+                }
                 self.update_comparators(position, new_block).await;
+                if !is_current_mutation() {
+                    clear_mutation_version();
+                    return None;
+                }
             }
 
             if !flags.contains(BlockFlags::FORCE_STATE) {
@@ -5649,6 +5791,10 @@ impl World {
                         new_flags,
                     )
                     .await;
+                if !is_current_mutation() {
+                    clear_mutation_version();
+                    return None;
+                }
                 self.block_registry
                     .update_neighbors(
                         self,
@@ -5657,6 +5803,10 @@ impl World {
                         new_flags,
                     )
                     .await;
+                if !is_current_mutation() {
+                    clear_mutation_version();
+                    return None;
+                }
                 self.block_registry
                     .prepare(
                         self,
@@ -5666,19 +5816,24 @@ impl World {
                         new_flags,
                     )
                     .await;
+                if !is_current_mutation() {
+                    clear_mutation_version();
+                    return None;
+                }
             }
         }
 
-        let (_chunk_coordinate, _) = position.chunk_and_chunk_relative_position();
+        if is_current_mutation() {
+            self.level.light_engine.update_lighting_at_with_states(
+                &self.level,
+                *position,
+                replaced_block_state_id.to_state(),
+                block_state_id.to_state(),
+            );
+        }
+        clear_mutation_version();
 
-        self.level.light_engine.update_lighting_at_with_states(
-            &self.level,
-            *position,
-            replaced_block_state_id.to_state(),
-            block_state_id.to_state(),
-        );
-
-        replaced_block_state_id
+        Some(replaced_block_state_id)
     }
 
     /// Count of POIs of `poi_type` within a `radius`-block sphere of
@@ -6418,6 +6573,12 @@ impl World {
             return (&Fluid::EMPTY, state);
         };
 
+        // Air is represented by the EMPTY fluid registry entry. It has no
+        // fluid properties, so asking it for an indexed state would panic.
+        if raw_fluid == &Fluid::EMPTY {
+            return (&Fluid::EMPTY, &Fluid::EMPTY.states[0]);
+        }
+
         // Keep the state variant selected by the block state.  Converting source water/lava
         // to its flowing registry entry and then taking states[0] loses the level/height of
         // partial fluid blocks, which is observable by entity eye-fluid checks. Only the
@@ -6584,6 +6745,41 @@ impl World {
         for direction in BlockDirection::all() {
             let neighbor_pos = pos.offset(direction.to_offset());
             let neighbor_state_id = self.get_block_state_id(&neighbor_pos);
+            current_state_id = self
+                .block_registry
+                .get_state_for_neighbor_update(
+                    self,
+                    block,
+                    current_state_id,
+                    pos,
+                    direction,
+                    &neighbor_pos,
+                    neighbor_state_id,
+                )
+                .await;
+        }
+        current_state_id
+    }
+
+    pub async fn update_from_neighbor_shapes_vanilla(
+        self: &Arc<Self>,
+        state_id: BlockStateId,
+        pos: &BlockPos,
+    ) -> BlockStateId {
+        let mut current_state_id = state_id;
+        let directions = [
+            BlockDirection::West,
+            BlockDirection::East,
+            BlockDirection::North,
+            BlockDirection::South,
+            BlockDirection::Down,
+            BlockDirection::Up,
+        ];
+
+        for direction in directions {
+            let neighbor_pos = pos.offset(direction.to_offset());
+            let neighbor_state_id = self.get_block_state_id(&neighbor_pos);
+            let block = Block::from_state_id(current_state_id);
             current_state_id = self
                 .block_registry
                 .get_state_for_neighbor_update(

@@ -9,6 +9,55 @@ use syn::LitInt;
 
 use crate::loot::LootTableStruct;
 
+/// Entity types whose vanilla `EntityType.Builder` calls `notInPeaceful()`.
+///
+/// This is copied from `net.minecraft.world.entity.EntityTypes` in the checked-in
+/// 26.2 decompile. `EntityType.Builder` defaults `allowedInPeaceful` to true.
+const NOT_ALLOWED_IN_PEACEFUL: &[&str] = &[
+    "blaze",
+    "bogged",
+    "breeze",
+    "cave_spider",
+    "creaking",
+    "creeper",
+    "drowned",
+    "elder_guardian",
+    "enderman",
+    "endermite",
+    "evoker",
+    "ghast",
+    "giant",
+    "guardian",
+    "hoglin",
+    "husk",
+    "illusioner",
+    "magma_cube",
+    "parched",
+    "phantom",
+    "piglin_brute",
+    "pillager",
+    "ravager",
+    "silverfish",
+    "skeleton",
+    "slime",
+    "spider",
+    "stray",
+    "vex",
+    "vindicator",
+    "warden",
+    "witch",
+    "wither",
+    "wither_skeleton",
+    "zoglin",
+    "zombie",
+    "zombie_villager",
+    "zombified_piglin",
+];
+
+fn allowed_in_peaceful(name: &str) -> bool {
+    !NOT_ALLOWED_IN_PEACEFUL.contains(&name)
+}
+
 /// Raw deserialization shape for a single entity type entry from `entities.json`.
 #[derive(Deserialize)]
 pub struct EntityType {
@@ -170,6 +219,7 @@ impl ToTokens for NamedEntityType<'_> {
         let mob = entity.mob.unwrap_or(false);
         let limit_per_chunk = entity.limit_per_chunk.unwrap_or(0);
         let can_spawn_far_from_player = entity.can_spawn_far_from_player;
+        let allowed_in_peaceful = allowed_in_peaceful(name);
 
         let dimension0 = entity.dimension[0];
         let dimension1 = entity.dimension[1];
@@ -201,6 +251,7 @@ impl ToTokens for NamedEntityType<'_> {
                 dimension: [#dimension0, #dimension1], // Correctly construct the array
                 eye_height: #eye_height,
                 spawn_restriction: #spawn_restriction,
+                allowed_in_peaceful: #allowed_in_peaceful,
                 resource_name: #name,
             }
         });
@@ -270,6 +321,7 @@ pub fn build() -> TokenStream {
             pub dimension: [f32; 2],
             pub eye_height: f32,
             pub spawn_restriction: SpawnRestriction,
+            pub allowed_in_peaceful: bool,
             pub resource_name: &'static str,
         }
 

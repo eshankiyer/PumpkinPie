@@ -7,6 +7,7 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
         active_target::ActiveTargetGoal,
+        avoid_entity::AvoidEntityGoal,
         evoker_spell::{
             EvokerAttackSpellGoal, EvokerCastingSpellGoal, EvokerSummonSpellGoal,
             EvokerWololoSpellGoal,
@@ -56,9 +57,14 @@ impl EvokerEntity {
                 1,
                 Box::new(EvokerCastingSpellGoal::new(evoker_weak.clone())),
             );
-            // Scope reduction: vanilla also registers `AvoidEntityGoal<Player>` (priority 2) and
-            // `AvoidEntityGoal<Creaking>` (priority 3) here; that's an unrelated pre-existing gap,
-            // not part of evoker spellcasting.
+            goal_selector.add_goal(
+                2,
+                Box::new(AvoidEntityGoal::new(&EntityType::PLAYER, 8.0, 0.6, 1.0)),
+            );
+            goal_selector.add_goal(
+                3,
+                Box::new(AvoidEntityGoal::new(&EntityType::CREAKING, 8.0, 0.6, 1.0)),
+            );
             goal_selector.add_goal(4, Box::new(EvokerSummonSpellGoal::new(evoker_weak.clone())));
             goal_selector.add_goal(5, Box::new(EvokerAttackSpellGoal::new(evoker_weak.clone())));
             goal_selector.add_goal(6, Box::new(EvokerWololoSpellGoal::new(evoker_weak)));
@@ -76,16 +82,26 @@ impl EvokerEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
             target_selector.add_goal(
-                1,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),
-            );
-            target_selector.add_goal(
                 2,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::VILLAGER, true),
+                ActiveTargetGoal::with_default_and_memory(
+                    &mob_arc.mob_entity,
+                    &EntityType::PLAYER,
+                    true,
+                    300,
+                ),
             );
             target_selector.add_goal(
                 3,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::IRON_GOLEM, true),
+                ActiveTargetGoal::with_default_types_and_memory(
+                    &mob_arc.mob_entity,
+                    &[&EntityType::VILLAGER, &EntityType::WANDERING_TRADER],
+                    false,
+                    300,
+                ),
+            );
+            target_selector.add_goal(
+                3,
+                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::IRON_GOLEM, false),
             );
         };
 

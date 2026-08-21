@@ -86,12 +86,16 @@ impl PillagerEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
             target_selector.add_goal(
-                1,
+                2,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),
             );
             target_selector.add_goal(
-                2,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::VILLAGER, true),
+                3,
+                ActiveTargetGoal::with_default_types(
+                    &mob_arc.mob_entity,
+                    &[&EntityType::VILLAGER, &EntityType::WANDERING_TRADER],
+                    false,
+                ),
             );
             target_selector.add_goal(
                 3,

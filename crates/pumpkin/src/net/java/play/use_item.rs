@@ -38,6 +38,19 @@ impl JavaClient {
             return;
         }
 
+        // ServerPlayerGameMode.useItem returns PASS when the stack's cooldown group is
+        // active, before the item is read, consumed or dispatched. ItemCooldowns keys
+        // the cooldown by the use_cooldown component's group, falling back to the item
+        // id, so the lookup happens for every stack and not only for stacks carrying
+        // the component.
+        let cooldown_group = item_in_hand
+            .get_use_cooldown()
+            .and_then(|cooldown| cooldown.cooldown_group.clone())
+            .unwrap_or_else(|| item_in_hand.item.registry_key.to_string());
+        if player.is_on_cooldown(&cooldown_group).await {
+            return;
+        }
+
         let mut consume_event =
             crate::plugin::api::events::player::player_item_consume::PlayerItemConsumeEvent::new(
                 player.clone(),
@@ -100,16 +113,6 @@ impl JavaClient {
         held: &mut ItemStack,
     ) {
         let inventory = player.inventory();
-
-        if let Some(cooldown) = held.get_use_cooldown() {
-            let group = cooldown
-                .cooldown_group
-                .clone()
-                .unwrap_or_else(|| held.item.registry_key.to_string());
-            if player.is_on_cooldown(&group).await {
-                return;
-            }
-        }
 
         if held.get_data_component::<ConsumableImpl>().is_some()
             || held.get_data_component::<BlocksAttacksImpl>().is_some()

@@ -172,6 +172,7 @@ pub struct SpiderEntity {
 impl SpiderEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
+        mob_entity.navigator.lock().unwrap().set_wall_climber(true);
         let spider = Self { mob_entity };
         let mob_arc = Arc::new(spider);
         let mob_weak: Weak<dyn Mob> = {

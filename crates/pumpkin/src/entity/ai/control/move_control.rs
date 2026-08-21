@@ -1,7 +1,9 @@
 use crate::entity::ai::control::{Control, MoveControlTrait};
+use crate::entity::ai::pathfinder::Navigator;
 use crate::entity::mob::Mob;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::tag::Taggable;
+use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use std::sync::atomic::Ordering;
 
@@ -41,6 +43,10 @@ impl Default for MoveControl {
 impl Control for MoveControl {}
 
 impl MoveControlTrait for MoveControl {
+    fn strafe(&mut self, forwards: f32, right: f32) {
+        Self::strafe(self, forwards, right);
+    }
+
     fn tick(&mut self, mob: &dyn Mob) {
         let mob_entity = mob.get_mob_entity();
         let living_entity = &mob_entity.living_entity;
@@ -48,7 +54,39 @@ impl MoveControlTrait for MoveControl {
         if self.operation == Operation::Strafe {
             // MoveControl STRAFE: setSpeed(speedModifier * MOVEMENT_SPEED), then the raw
             // strafe components go into xxa/zza.
-            living_entity.set_speed(living_entity.speed_for_modifier(self.speed_modifier));
+            let speed_modified = living_entity.speed_for_modifier(self.speed_modifier);
+            living_entity.set_speed(speed_modified);
+
+            // Vanilla checks the requested direction after applying the same
+            // speed normalization and yaw rotation used by MoveControl.
+            let mut xa = self.strafe_forwards;
+            let mut za = self.strafe_right;
+            let mut distance = xa.hypot(za);
+            if distance < 1.0 {
+                distance = 1.0;
+            }
+            let scale = speed_modified as f32 / distance;
+            xa *= scale;
+            za *= scale;
+            let yaw = entity.yaw.load().to_radians();
+            let (sin, cos) = yaw.sin_cos();
+            let dx = f64::from(xa.mul_add(cos, -(za * sin)));
+            let dz = f64::from(za.mul_add(cos, xa * sin));
+            let position = entity.pos.load();
+            let target = BlockPos::new(
+                (position.x + dx).floor() as i32,
+                entity.block_pos.load().0.y,
+                (position.z + dz).floor() as i32,
+            );
+            let world = entity.world.load();
+            let navigation_kind = mob_entity.strafe_navigation_kind();
+            let walkable =
+                Navigator::is_strafe_walkable_with_kind(&world, &target, navigation_kind);
+            if !walkable {
+                self.strafe_forwards = 1.0;
+                self.strafe_right = 0.0;
+            }
+
             living_entity.movement_input.store(Vector3::new(
                 f64::from(self.strafe_right),
                 0.0,

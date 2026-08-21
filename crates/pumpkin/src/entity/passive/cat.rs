@@ -204,8 +204,13 @@ impl CatEntity {
             goal_selector.add_goal(6, FollowOwnerGoal::new(1.0, 10.0, 5.0));
             goal_selector.add_goal(9, Box::new(OcelotAttackGoal::new()));
             goal_selector.add_goal(9, Box::new(FollowParentGoal::new(0.8)));
-            // Goal 11: WanderAroundGoal
-            goal_selector.add_goal(11, Box::new(WanderAroundGoal::new(0.8)));
+            // Cat.java:118 -- Goal 11: WaterAvoidingRandomStrollGoal(this, 0.8, 1.0000001E-5F)
+            goal_selector.add_goal(
+                11,
+                Box::new(WanderAroundGoal::new_water_avoiding_with_probability(
+                    0.8, 0.00001,
+                )),
+            );
             // Goal 12: LookAtPlayerGoal
             goal_selector.add_goal(
                 12,
@@ -387,11 +392,12 @@ impl NBTStorage for CatEntity {
                 "CollarColor",
                 self.collar_color.load(Ordering::Relaxed) as i8,
             );
-            nbt.put_bool("IsTame", self.is_tame.load(Ordering::Relaxed));
-            nbt.put_bool("Sitting", self.is_sitting.load(Ordering::Relaxed));
+            // Vanilla `TamableAnimal.addAdditionalSaveData` (TamableAnimal.java:58-63) stores only
+            // the owner reference and `Sitting`; tameness is derived from the owner on load.
             if let Some(owner) = self.owner.load() {
                 nbt.put_uuid("Owner", owner);
             }
+            nbt.put_bool("Sitting", self.is_sitting.load(Ordering::Relaxed));
         })
     }
 
@@ -423,21 +429,48 @@ impl NBTStorage for CatEntity {
             } else if let Some(collar_int) = nbt.get_int("CollarColor") {
                 self.collar_color.store(collar_int as u8, Ordering::Relaxed);
             }
-            if let Some(sitting) = nbt.get_bool("Sitting") {
-                self.is_sitting.store(sitting, Ordering::Relaxed);
-            }
-            if let Some(owner) = nbt.get_uuid("Owner") {
-                self.owner.store(Some(owner));
-                self.is_tame.store(true, Ordering::Relaxed);
-            } else if let Some(is_tame) = nbt.get_bool("IsTame") {
-                self.is_tame.store(is_tame, Ordering::Relaxed);
-                // Vanilla calls `reassessTameGoals` from both the constructor and `setTame`
-                // (which fires on load); `CatEntity::new` only covers the always-untamed spawn
-                // case, so a cat that loads already tamed needs the flee-from-players goal
-                // removed here too.
-                if self.is_tame() {
-                    self.reassess_tame_goals().await;
+            // Vanilla `TamableAnimal.readAdditionalSaveData` (TamableAnimal.java:66-83) derives
+            // tameness purely from the stored owner reference, and
+            // `EntityReference.readWithOldOwnerConversion` accepts both the current UUID
+            // representation and the legacy owner name. Resolve the latter through the
+            // server user cache, just as vanilla resolves old owner names to profiles.
+            let owner = if let Some(owner) = nbt.get_uuid("Owner") {
+                Some(owner)
+            } else if let Some(owner_name) = nbt.get_string("Owner") {
+                let owner_name = owner_name.to_owned();
+                let world = self.mob_entity.living_entity.entity.world.load();
+                if let Some(server) = world.server.upgrade() {
+                    server
+                        .data
+                        .user_cache
+                        .write()
+                        .await
+                        .get_by_name(&owner_name)
+                        .map(|profile| profile.uuid)
+                } else {
+                    None
                 }
+            } else {
+                None
+            };
+
+            self.owner.store(owner);
+            self.is_tame.store(owner.is_some(), Ordering::Relaxed);
+            // `SitGoal` and `MobEntity::is_tamed` read the shared `MobEntity` taming state, so
+            // keep it in step with the cat-local fields the metadata path uses.
+            if let Some(owner) = owner {
+                self.mob_entity.set_owner(owner);
+            } else {
+                self.mob_entity.clear_owner();
+            }
+            let sitting = nbt.get_bool("Sitting").unwrap_or(false);
+            self.is_sitting.store(sitting, Ordering::Relaxed);
+            self.mob_entity.set_ordered_to_sit(sitting);
+
+            // Vanilla calls `reassessTameGoals` from `setTame` during load, so a restored
+            // tamed cat must lose its untamed player-avoidance goal before it starts ticking.
+            if self.is_tame() {
+                self.reassess_tame_goals().await;
             }
         })
     }

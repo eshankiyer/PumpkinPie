@@ -90,7 +90,7 @@ impl BlockBehaviour for FurnaceBlock {
                 && let Some(experience_container) = block_entity.to_experience_container()
             {
                 args.player
-                    .increment_stat(
+                    .increment_interaction_stat(
                         pumpkin_data::statistic::StatisticCategory::Custom,
                         pumpkin_data::statistic::CustomStatistic::InteractWithFurnace as i32,
                         1,

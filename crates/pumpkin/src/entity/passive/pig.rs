@@ -2,10 +2,11 @@ use std::sync::{Arc, Weak};
 
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::Sound;
-use pumpkin_data::{entity::EntityType, item::Item};
+use pumpkin_data::{data_component_impl::EquipmentSlot, entity::EntityType, item::Item};
+use pumpkin_util::math::boundingbox::EntityDimensions;
 
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ageable::AgeableMob,
     ai::goal::{
         breed::BreedGoal, escape_danger::EscapeDangerGoal, follow_parent::FollowParentGoal,
@@ -25,7 +26,6 @@ const PIG_FOOD: &[&Item] = &[
     &Item::CARROT_ON_A_STICK,
 ];
 
-use crate::entity::EntityBase;
 use crate::entity::item_steerable::{ItemBasedSteering, ItemSteerable};
 
 /// Represents a Pig, a common passive mob that provides porkchops.
@@ -65,7 +65,7 @@ impl PigEntity {
             goal_selector.add_goal(2, BreedGoal::new(1.0));
             goal_selector.add_goal(3, Box::new(TemptGoal::new(1.2, PIG_FOOD, false)));
             goal_selector.add_goal(4, Box::new(FollowParentGoal::new(1.1)));
-            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
+            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new_water_avoiding(1.0)));
             goal_selector.add_goal(
                 6,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
@@ -80,6 +80,10 @@ impl PigEntity {
 impl crate::entity::ageable::AgeableMob for PigEntity {
     fn get_ageable_data(&self) -> &crate::entity::ageable::AgeableData {
         &self.ageable_data
+    }
+
+    fn baby_dimensions(&self) -> Option<EntityDimensions> {
+        Some(EntityDimensions::new(0.45, 0.45, 0.40625))
     }
 }
 
@@ -138,6 +142,37 @@ impl Mob for PigEntity {
             .store(saddled, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Vanilla `Pig.getControllingPassenger` (`Pig.java:96-101`): a saddled pig is controlled
+    /// only by its first player passenger while that player holds a carrot on a stick.
+    fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
+        Box::pin(async move {
+            let saddle = {
+                let equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
+                equipment.get(&EquipmentSlot::SADDLE)
+            };
+            let saddled = self.get_entity().is_alive()
+                && !self.is_baby()
+                && super::equine::is_valid_saddle_item(&saddle, self.get_entity().entity_type);
+            if !saddled {
+                return Mob::has_controlling_passenger(self).await;
+            }
+
+            let passenger = self.get_entity().passengers.lock().await.first().cloned();
+            let Some(passenger) = passenger else {
+                return Mob::has_controlling_passenger(self).await;
+            };
+            let Some(player) = passenger.get_player() else {
+                return Mob::has_controlling_passenger(self).await;
+            };
+            let main_hand = player.inventory().held_item().await.item.id;
+            if main_hand == Item::CARROT_ON_A_STICK.id {
+                return true;
+            }
+            player.inventory().off_hand_item().await.item.id == Item::CARROT_ON_A_STICK.id
+                || Mob::has_controlling_passenger(self).await
+        })
+    }
+
     fn mob_interact<'a>(
         &'a self,
         player: &'a Arc<Player>,
@@ -145,19 +180,46 @@ impl Mob for PigEntity {
     ) -> EntityBaseFuture<'a, bool> {
         use super::animal::Animal;
         Box::pin(async move {
-            if self.is_saddled() && !self.is_food(item_stack) {
-                let world = player.world();
-                if let Some(vehicle) = world.get_entity_by_id(self.get_entity().entity_id)
-                    && let Some(passenger) = world.get_player_by_id(player.entity_id())
-                {
-                    self.get_entity()
-                        .add_passenger(vehicle, passenger as Arc<dyn EntityBase>)
-                        .await;
-                    return true;
-                }
+            let has_food = self.is_food(item_stack);
+            let is_saddled = {
+                let equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
+                let saddle = equipment.get(&EquipmentSlot::SADDLE);
+                self.get_entity().is_alive()
+                    && !self.is_baby()
+                    && super::equine::is_valid_saddle_item(&saddle, self.get_entity().entity_type)
+            };
+            if !has_food
+                && is_saddled
+                && self.get_entity().passengers.lock().await.is_empty()
+                && !player.get_entity().is_sneaking()
+            {
+                super::equine::mount_player(&self.mob_entity, player).await;
+                return true;
             }
-            self.animal_interact(player, item_stack, Sound::EntityPigAmbient)
+
+            if self
+                .animal_interact(player, item_stack, Sound::EntityPigAmbient)
                 .await
+            {
+                return true;
+            }
+
+            let can_equip = {
+                let equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
+                let saddle = equipment.get(&EquipmentSlot::SADDLE);
+                saddle.is_empty()
+                    && self.get_entity().is_alive()
+                    && !self.is_baby()
+                    && super::equine::saddle_equip_on_interact(
+                        item_stack,
+                        self.get_entity().entity_type,
+                    )
+            };
+            if can_equip {
+                super::equine::equip_saddle_item(&self.mob_entity, player, item_stack).await;
+                return true;
+            }
+            false
         })
     }
 }

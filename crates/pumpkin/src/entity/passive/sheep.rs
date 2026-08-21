@@ -9,6 +9,7 @@ use pumpkin_data::tracked_data;
 use pumpkin_data::{entity::EntityType, item::Item};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::math::boundingbox::EntityDimensions;
 use pumpkin_util::math::vector3::Vector3;
 use rand::{RngExt, rng};
 
@@ -312,6 +313,10 @@ fn shear_drop_velocity(
 }
 
 impl crate::entity::ageable::AgeableMob for SheepEntity {
+    fn baby_dimensions(&self) -> Option<EntityDimensions> {
+        Some(EntityDimensions::new(0.45, 0.65, 0.65625))
+    }
+
     fn get_ageable_data(&self) -> &crate::entity::ageable::AgeableData {
         &self.ageable_data
     }

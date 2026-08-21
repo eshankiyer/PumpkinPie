@@ -2,7 +2,8 @@ use std::sync::{Arc, Weak};
 
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::Sound;
-use pumpkin_data::{entity::EntityType, item::Item};
+use pumpkin_data::{data_component_impl::EquipmentSlot, entity::EntityType, item::Item};
+use pumpkin_util::math::boundingbox::EntityDimensions;
 
 use crate::entity::item_steerable::{ItemBasedSteering, ItemSteerable};
 use crate::entity::{
@@ -80,6 +81,10 @@ impl AgeableMob for StriderEntity {
     fn get_ageable_data(&self) -> &crate::entity::ageable::AgeableData {
         &self.ageable_data
     }
+
+    fn baby_dimensions(&self) -> Option<EntityDimensions> {
+        Some(EntityDimensions::new(0.45, 0.85, 0.4375))
+    }
 }
 
 impl NBTStorage for StriderEntity {
@@ -134,25 +139,82 @@ impl Mob for StriderEntity {
             .store(saddled, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Vanilla `Strider.getControllingPassenger`: a saddled strider is controlled
+    /// only by its first player passenger while holding warped fungus on a stick.
+    fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
+        Box::pin(async move {
+            let equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
+            let saddle = equipment.get(&EquipmentSlot::SADDLE);
+            let saddled = self.get_entity().is_alive()
+                && !self.is_baby()
+                && super::equine::is_valid_saddle_item(&saddle, self.get_entity().entity_type);
+            drop(equipment);
+            if !saddled {
+                return Mob::has_controlling_passenger(self).await;
+            }
+
+            let passenger = self.get_entity().passengers.lock().await.first().cloned();
+            let Some(passenger) = passenger else {
+                return Mob::has_controlling_passenger(self).await;
+            };
+            let Some(player) = passenger.get_player() else {
+                return Mob::has_controlling_passenger(self).await;
+            };
+            let main_hand = player.inventory().held_item().await.item.id;
+            if main_hand == Item::WARPED_FUNGUS_ON_A_STICK.id {
+                return true;
+            }
+            player.inventory().off_hand_item().await.item.id == Item::WARPED_FUNGUS_ON_A_STICK.id
+                || Mob::has_controlling_passenger(self).await
+        })
+    }
+
     fn mob_interact<'a>(
         &'a self,
         player: &'a Arc<Player>,
         item_stack: &'a mut ItemStack,
     ) -> EntityBaseFuture<'a, bool> {
         Box::pin(async move {
-            if self.is_saddled() && !self.is_food(item_stack) {
-                let world = player.world();
-                if let Some(vehicle) = world.get_entity_by_id(self.get_entity().entity_id)
-                    && let Some(passenger) = world.get_player_by_id(player.entity_id())
-                {
-                    self.get_entity()
-                        .add_passenger(vehicle, passenger as Arc<dyn EntityBase>)
-                        .await;
-                    return true;
-                }
+            let has_food = self.is_food(item_stack);
+            let is_saddled = {
+                let equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
+                let saddle = equipment.get(&EquipmentSlot::SADDLE);
+                self.get_entity().is_alive()
+                    && !self.is_baby()
+                    && super::equine::is_valid_saddle_item(&saddle, self.get_entity().entity_type)
+            };
+            if !has_food
+                && is_saddled
+                && self.get_entity().passengers.lock().await.is_empty()
+                && !player.get_entity().is_sneaking()
+            {
+                super::equine::mount_player(&self.mob_entity, player).await;
+                return true;
             }
-            self.animal_interact(player, item_stack, Sound::EntityStriderEat)
+
+            if self
+                .animal_interact(player, item_stack, Sound::EntityStriderEat)
                 .await
+            {
+                return true;
+            }
+
+            let can_equip = {
+                let equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
+                let saddle = equipment.get(&EquipmentSlot::SADDLE);
+                saddle.is_empty()
+                    && self.get_entity().is_alive()
+                    && !self.is_baby()
+                    && super::equine::saddle_equip_on_interact(
+                        item_stack,
+                        self.get_entity().entity_type,
+                    )
+            };
+            if can_equip {
+                super::equine::equip_saddle_item(&self.mob_entity, player, item_stack).await;
+                return true;
+            }
+            false
         })
     }
 }

@@ -22,6 +22,8 @@ pub struct PathfindingContext {
     mob_position: Vector3<i32>,
     world: Arc<World>,
     collision_cache: FxHashMap<Vector3<i32>, bool>,
+    source_entity_id: Option<i32>,
+    source_root_vehicle_id: Option<i32>,
 }
 
 fn collision_height_for_state(state: &BlockState) -> f64 {
@@ -38,6 +40,8 @@ impl PathfindingContext {
             mob_position,
             world,
             collision_cache: FxHashMap::default(),
+            source_entity_id: None,
+            source_root_vehicle_id: None,
         }
     }
 
@@ -47,7 +51,21 @@ impl PathfindingContext {
             mob_position,
             world,
             collision_cache: FxHashMap::default(),
+            source_entity_id: None,
+            source_root_vehicle_id: None,
         }
+    }
+
+    pub fn for_entity(
+        mob_position: Vector3<i32>,
+        world: Arc<World>,
+        entity_id: i32,
+        root_vehicle_id: i32,
+    ) -> Self {
+        let mut context = Self::new(mob_position, world);
+        context.source_entity_id = Some(entity_id);
+        context.source_root_vehicle_id = Some(root_vehicle_id);
+        context
     }
 
     #[must_use]
@@ -58,6 +76,11 @@ impl PathfindingContext {
     #[must_use]
     pub fn min_y(&self) -> i32 {
         self.world.dimension.min_y
+    }
+
+    #[must_use]
+    pub fn sea_level(&self) -> i32 {
+        self.world.sea_level
     }
 
     pub fn get_path_type_from_state(&mut self, pos: Vector3<i32>) -> PathType {
@@ -187,7 +210,10 @@ impl PathfindingContext {
     pub fn get_land_node_type(&mut self, pos: Vector3<i32>) -> PathType {
         let raw_type = self.get_path_type_from_state(pos);
 
-        if raw_type == PathType::Open {
+        // `WalkNodeEvaluator.getLandNodeType` only inspects below and neighboring blocks above
+        // the world's bottom edge. At minY, vanilla returns the raw open type instead of reading
+        // one block below into the void.
+        if raw_type == PathType::Open && pos.y > self.world.get_bottom_y() {
             let below_type = self.get_path_type_from_state(Vector3::new(pos.x, pos.y - 1, pos.z));
             return match below_type {
                 PathType::Open | PathType::Water | PathType::Lava | PathType::Walkable => {
@@ -204,6 +230,36 @@ impl PathfindingContext {
         }
 
         raw_type
+    }
+
+    /// Matches `FlyNodeEvaluator.getPathType`, including its different
+    /// treatment of fences below open air and its neighbor hazard scan.
+    pub fn get_fly_node_type(&mut self, pos: Vector3<i32>) -> PathType {
+        let mut path_type = self.get_path_type_from_state(pos);
+        if path_type == PathType::Open && pos.y > self.world.get_bottom_y() {
+            let below_pos = Vector3::new(pos.x, pos.y - 1, pos.z);
+            let below_type = self.get_path_type_from_state(below_pos);
+            path_type = match below_type {
+                PathType::DamageFire | PathType::Lava => PathType::DamageFire,
+                PathType::DamageOther => PathType::DamageOther,
+                PathType::Cocoa => PathType::Cocoa,
+                PathType::Fence => {
+                    if below_pos == self.mob_position {
+                        PathType::Open
+                    } else {
+                        PathType::Fence
+                    }
+                }
+                PathType::Walkable | PathType::Open | PathType::Water => PathType::Open,
+                _ => PathType::Walkable,
+            };
+        }
+
+        if matches!(path_type, PathType::Walkable | PathType::Open) {
+            self.get_node_type_from_neighbors(pos, path_type)
+        } else {
+            path_type
+        }
     }
 
     /// Scans a 3x3x3 neighborhood for danger blocks and returns the appropriate danger type.
@@ -256,6 +312,47 @@ impl PathfindingContext {
 
         self.collision_cache.insert(pos, has_collision);
         has_collision
+    }
+
+    /// Tests a mob-sized AABB against the actual block collision shapes. Vanilla uses this for
+    /// the short ray march around fences and closed doors; checking only `is_full_cube()` misses
+    /// partial shapes entirely.
+    #[must_use]
+    pub async fn has_collision_box(&self, bounding_box: BoundingBox) -> bool {
+        let border = self.world.worldborder.lock().await;
+        let border_clear = [
+            (bounding_box.min.x, bounding_box.min.z),
+            (bounding_box.min.x, bounding_box.max.z),
+            (bounding_box.max.x, bounding_box.min.z),
+            (bounding_box.max.x, bounding_box.max.z),
+        ]
+        .into_iter()
+        .all(|(x, z)| border.contains(x, z));
+        drop(border);
+
+        if !border_clear || !self.world.is_space_empty(bounding_box) {
+            return true;
+        }
+
+        let source_root_vehicle_id = self.source_root_vehicle_id;
+        for entity in self.world.get_all_at_box(&bounding_box.expand_all(1.0e-7)) {
+            let entity_base = entity.get_entity();
+            if self.source_entity_id == Some(entity_base.entity_id)
+                || !entity.can_be_collided_with()
+            {
+                continue;
+            }
+
+            if source_root_vehicle_id.is_some()
+                && source_root_vehicle_id == Some(entity_base.root_vehicle_id().await)
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        false
     }
 
     #[must_use]
@@ -325,6 +422,53 @@ impl PathfindingContext {
     pub fn is_water(&self, pos: Vector3<i32>) -> bool {
         Fluid::from_state_id(self.world.get_block_state_id(&pos.as_blockpos()))
             .is_some_and(|fluid| fluid.has_tag(&tag::Fluid::MINECRAFT_WATER))
+    }
+
+    /// Matches `FluidState.isEmpty()` for the pathfinding context.
+    #[must_use]
+    pub fn is_fluid_empty(&self, pos: Vector3<i32>) -> bool {
+        Fluid::from_state_id(self.world.get_block_state_id(&pos.as_blockpos()))
+            .is_none_or(|fluid| fluid.id == Fluid::EMPTY.id)
+    }
+
+    /// Matches the block-state part of `SwimNodeEvaluator`'s breach check.
+    #[must_use]
+    pub fn is_air(&self, pos: Vector3<i32>) -> bool {
+        BlockState::from_id(self.world.get_block_state_id(&pos.as_blockpos())).is_air()
+    }
+
+    /// Matches the block-specific `BlockState.isPathfindable(..., WATER)` rules used by
+    /// `SwimNodeEvaluator`. The default is the water fluid state; doors are the important
+    /// override because vanilla rejects them even when waterlogged.
+    #[must_use]
+    pub fn is_pathfindable_for_water(&self, pos: Vector3<i32>) -> bool {
+        let state_id = self.world.get_block_state_id(&pos.as_blockpos());
+        let block = Block::from_state_id(state_id);
+        let always_blocked_for_water = matches!(
+            block.id,
+            id if id == Block::CHEST.id
+                || id == Block::ENDER_CHEST.id
+                || id == Block::TRAPPED_CHEST.id
+                || id == Block::HOPPER.id
+                || id == Block::CONDUIT.id
+        );
+        Fluid::from_state_id(state_id)
+            .is_some_and(|fluid| fluid.has_tag(&tag::Fluid::MINECRAFT_WATER))
+            && !always_blocked_for_water
+            && !block.has_tag(&tag::Block::MINECRAFT_DOORS)
+            && !block.has_tag(&tag::Block::C_FENCE_GATES)
+            && !block.has_tag(&tag::Block::MINECRAFT_LANTERNS)
+            && !block.has_tag(&tag::Block::MINECRAFT_CAMPFIRES)
+            && !block.has_tag(&tag::Block::MINECRAFT_BARS)
+            && !block.has_tag(&tag::Block::MINECRAFT_FENCES)
+            && !block.has_tag(&tag::Block::MINECRAFT_CHAINS)
+            && !block.has_tag(&tag::Block::MINECRAFT_WALLS)
+            && !block.has_tag(&tag::Block::C_GLASS_PANES)
+    }
+
+    #[must_use]
+    pub fn block_has_tag(&self, pos: Vector3<i32>, tag: &'static tag::Tag) -> bool {
+        Block::from_state_id(self.world.get_block_state_id(&pos.as_blockpos())).has_tag(tag)
     }
 
     pub fn clear_caches(&mut self) {

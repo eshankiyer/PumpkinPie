@@ -1,6 +1,7 @@
 use super::{Mob, MobEntity};
 use crate::entity::ai::goal::destroy_egg::DestroyEggGoal;
 use crate::entity::ai::goal::look_around::RandomLookAroundGoal;
+use crate::entity::ai::goal::non_tame_random_target::baby_turtle_on_land;
 use crate::entity::ai::goal::revenge::RevengeGoal;
 use crate::entity::ai::goal::spear_use::SpearUseGoal;
 use crate::entity::ai::goal::swim::SwimGoal;
@@ -50,7 +51,7 @@ impl ZombieEntityBase {
             goal_selector.add_goal(2, SpearUseGoal::new(1.0, 1.0, 10.0, 2.0));
             goal_selector.add_goal(3, ZombieAttackGoal::new(1.0, false));
             goal_selector.add_goal(4, DestroyEggGoal::new(1.0, 3));
-            goal_selector.add_goal(7, Box::new(WanderAroundGoal::new(1.0)));
+            goal_selector.add_goal(7, Box::new(WanderAroundGoal::new_water_avoiding(1.0)));
             goal_selector.add_goal(
                 8,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 8.0),
@@ -64,7 +65,14 @@ impl ZombieEntityBase {
             );
             target_selector.add_goal(
                 3,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::VILLAGER, true),
+                // `Zombie#addBehaviourGoals` targets `AbstractVillager` with visibility
+                // disabled. The concrete implementations in this version are villagers and
+                // wandering traders.
+                ActiveTargetGoal::with_default_types(
+                    &mob_arc.mob_entity,
+                    &[&EntityType::VILLAGER, &EntityType::WANDERING_TRADER],
+                    false,
+                ),
             );
             target_selector.add_goal(
                 3,
@@ -72,7 +80,14 @@ impl ZombieEntityBase {
             );
             target_selector.add_goal(
                 5,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::TURTLE, true),
+                Box::new(ActiveTargetGoal::new(
+                    &mob_arc.mob_entity,
+                    &EntityType::TURTLE,
+                    10,
+                    true,
+                    false,
+                    Some(baby_turtle_on_land),
+                )),
             );
         };
 

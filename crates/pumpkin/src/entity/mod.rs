@@ -1023,6 +1023,7 @@ pub struct Entity {
     pub on_ground: AtomicBool,
     /// Indicates whether the entity is touching water
     pub touching_water: AtomicBool,
+    pub was_touching_water: AtomicBool,
     /// Indicates whether the entity's eyes were in water at the start of the current tick.
     /// This is the server-side equivalent of vanilla's `wasEyeInWater` field.
     pub was_eye_in_water: AtomicBool,
@@ -1073,11 +1074,11 @@ pub struct Entity {
     /// Vanilla `Mob.persistenceRequired`. Kept on the shared entity because
     /// every mob's NBT path already delegates its base data here.
     pub persistence_required: AtomicBool,
-    /// Vanilla `Mob.requiresCustomPersistence`: passengers and leashed mobs
-    /// are excluded from natural-spawn cap bookkeeping.
-    pub requires_custom_persistence: AtomicBool,
-    /// Whether the current world spawn state has counted this mob.
-    pub natural_spawn_cap_counted: AtomicBool,
+    /// Cached vanilla `Mob.requiresCustomPersistence` state for passenger and
+    /// leash relationships. Keeping the two sources separate avoids clearing
+    /// one relationship when the other ends.
+    pub vehicle_persistence_required: AtomicBool,
+    pub leash_persistence_required: AtomicBool,
     /// Vanilla `Mob.isNoAi`, shared with `LivingEntity` for subclass tick behavior.
     pub no_ai: AtomicBool,
     /// Cooldown before entity can mount again after dismounting
@@ -1255,6 +1256,7 @@ impl Entity {
             entity_type,
             on_ground: AtomicBool::new(false),
             touching_water: AtomicBool::new(false),
+            was_touching_water: AtomicBool::new(false),
             was_eye_in_water: AtomicBool::new(false),
             eye_in_water: AtomicBool::new(false),
             water_height: AtomicCell::new(0.0),
@@ -1307,8 +1309,8 @@ impl Entity {
             vehicle: Mutex::new(None),
             leashed_to: Mutex::new(None),
             persistence_required: AtomicBool::new(false),
-            requires_custom_persistence: AtomicBool::new(false),
-            natural_spawn_cap_counted: AtomicBool::new(false),
+            vehicle_persistence_required: AtomicBool::new(false),
+            leash_persistence_required: AtomicBool::new(false),
             no_ai: AtomicBool::new(false),
 
             riding_cooldown: AtomicI32::new(0),
@@ -1542,7 +1544,7 @@ impl Entity {
     }
 
     pub fn get_eye_height(&self) -> f64 {
-        f64::from(Self::get_entity_dimensions(self.pose.load()).eye_height)
+        f64::from(self.entity_dimension.load().eye_height)
     }
 
     /// Updates the entity's position, block position, and chunk position.
@@ -2402,6 +2404,8 @@ impl Entity {
 
         let in_water = in_fluid[0];
 
+        self.was_touching_water.store(in_water, Ordering::SeqCst);
+
         if in_water {
             if let Some(living) = caller.get_living_entity() {
                 living.fall_distance.store(0.0);
@@ -2619,6 +2623,19 @@ impl Entity {
 
     pub fn move_pos(&self, delta: Vector3<f64>) {
         self.set_pos(self.pos.load() + delta);
+    }
+
+    /// Applies a small self movement through the normal block collision solver.
+    /// Player movement is handled by the player packet path, so `move_entity`
+    /// deliberately skips players; vanilla uses this path for Riptide's lift.
+    pub async fn move_self_with_collisions(&self, caller: &dyn EntityBase, motion: Vector3<f64>) {
+        if self.no_clip.load(Ordering::Relaxed) {
+            self.move_pos(motion);
+            return;
+        }
+
+        let final_move = self.adjust_movement_for_collisions(motion, caller).await;
+        self.move_pos(final_move);
     }
 
     // Move by a delta, adjust for collisions, and send
@@ -3370,6 +3387,13 @@ impl Entity {
         record_tracked_data_into(&mut snapshot, meta);
     }
 
+    /// Records initial tracked data for an entity that has not been announced yet.
+    /// Spawn code uses this to finalize state before the spawn packet without sending an
+    /// out-of-order metadata update.
+    pub(crate) fn record_tracked_data_only<T: MetadataSerializer>(&self, meta: &[Metadata<T>]) {
+        self.record_tracked_data(meta);
+    }
+
     /// Sends every tracked-data value published so far for this entity to a
     /// single player, without touching any other viewer.
     ///
@@ -3673,8 +3697,8 @@ impl Entity {
 
     pub async fn leash_to(&self, holder: Arc<dyn EntityBase>) {
         let holder_entity = holder.get_entity();
-        self.requires_custom_persistence.store(true, Relaxed);
         *self.leashed_to.lock().await = Some(holder.clone());
+        self.leash_persistence_required.store(true, Relaxed);
 
         let je_packet = pumpkin_protocol::java::client::play::CSetEntityLink::new(
             self.entity_id,
@@ -3705,10 +3729,7 @@ impl Entity {
         if old_holder.is_none() {
             return;
         }
-
-        if self.vehicle.lock().await.is_none() {
-            self.requires_custom_persistence.store(false, Relaxed);
-        }
+        self.leash_persistence_required.store(false, Relaxed);
 
         let je_packet =
             pumpkin_protocol::java::client::play::CSetEntityLink::new(self.entity_id, -1);
@@ -3730,7 +3751,7 @@ impl Entity {
         );
     }
 
-    pub async fn tick_leash(&self) {
+    pub async fn tick_leash(&self) -> Option<(Vector3<f64>, f64)> {
         let holder = {
             let guard = self.leashed_to.lock().await;
             guard.clone()
@@ -3742,7 +3763,11 @@ impl Entity {
             // Drop leash if entity or holder is removed or dead
             if !self.is_alive() || !holder_entity.is_alive() {
                 self.unleash().await;
-                return;
+                return None;
+            }
+
+            if !Arc::ptr_eq(&self.world.load_full(), &holder_entity.world.load_full()) {
+                return None;
             }
 
             let self_pos = self.pos.load();
@@ -3759,14 +3784,55 @@ impl Entity {
                     .load()
                     .drop_stack(&self.block_pos.load(), lead_item)
                     .await;
-            } else if distance > Self::LEASH_ELASTIC_DISTANCE {
-                // Elastic pull force towards leash holder
-                let dir = (holder_pos - self_pos).normalize();
-                let pull_strength = (distance - Self::LEASH_ELASTIC_DISTANCE) * 0.11;
-                let current_vel = self.velocity.load();
-                self.velocity.store(current_vel + dir * pull_strength);
-                self.velocity_dirty.store(true, Relaxed);
+                None
+            } else if distance
+                > Self::LEASH_ELASTIC_DISTANCE
+                    - f64::from(holder_entity.width())
+                    - f64::from(self.width())
+                && {
+                    let yaw = -f64::from(self.yaw.load()).to_radians();
+                    let entity_offset_z = f64::from(self.width()) * 0.5;
+                    let entity_attachment = self_pos
+                        + Vector3::new(
+                            entity_offset_z * yaw.sin(),
+                            f64::from(self.height()) * 0.5,
+                            entity_offset_z * yaw.cos(),
+                        );
+                    let holder_attachment = holder_pos
+                        + Vector3::new(0.0, f64::from(holder_entity.height()) * 0.5, 0.0);
+                    let attachment_delta = holder_attachment - entity_attachment;
+                    let attachment_distance = attachment_delta.length();
+                    if attachment_distance < Self::LEASH_ELASTIC_DISTANCE {
+                        false
+                    } else {
+                        let displacement = attachment_delta.normalize()
+                            * (attachment_distance - Self::LEASH_ELASTIC_DISTANCE);
+                        let holder_velocity = if holder
+                            .get_mob()
+                            .is_some_and(|mob| mob.get_mob_entity().is_no_ai())
+                        {
+                            Vector3::new(0.0, 0.0, 0.0)
+                        } else {
+                            holder_entity.velocity.load()
+                        };
+                        let relative_velocity = (holder_velocity - self.velocity.load()) * 0.11;
+                        let force = Vector3::new(
+                            displacement.x * 0.8,
+                            displacement.y * 0.2,
+                            displacement.z * 0.8,
+                        ) + relative_velocity;
+                        self.velocity.store(self.velocity.load() + force);
+                        self.velocity_dirty.store(true, Relaxed);
+                        true
+                    }
+                }
+            {
+                None
+            } else {
+                Some((holder_pos, distance))
             }
+        } else {
+            None
         }
     }
 
@@ -3782,6 +3848,18 @@ impl Entity {
     pub async fn is_leashed(&self) -> bool {
         let leashed_to = self.leashed_to.lock().await;
         leashed_to.is_some()
+    }
+
+    /// Returns the root vehicle id used by vanilla's `isPassengerOfSameVehicle`.
+    pub async fn root_vehicle_id(&self) -> i32 {
+        let mut root_id = self.entity_id;
+        let mut vehicle = self.vehicle.lock().await.clone();
+        while let Some(next) = vehicle.clone() {
+            let next_entity = next.get_entity();
+            root_id = next_entity.entity_id;
+            vehicle.clone_from(&*next_entity.vehicle.lock().await);
+        }
+        root_id
     }
 
     pub async fn add_passenger(
@@ -3812,7 +3890,7 @@ impl Entity {
 
         let passenger_entity = passenger.get_entity();
         passenger_entity
-            .requires_custom_persistence
+            .vehicle_persistence_required
             .store(true, Relaxed);
         *passenger_entity.vehicle.lock().await = Some(vehicle);
 
@@ -3883,13 +3961,11 @@ impl Entity {
             .position(|p| p.get_entity().entity_id == passenger_id)
         {
             let passenger = passengers.remove(idx);
-            *passenger.get_entity().vehicle.lock().await = None;
-            if passenger.get_entity().leashed_to.lock().await.is_none() {
-                passenger
-                    .get_entity()
-                    .requires_custom_persistence
-                    .store(false, Relaxed);
-            }
+            let passenger_entity = passenger.get_entity();
+            *passenger_entity.vehicle.lock().await = None;
+            passenger_entity
+                .vehicle_persistence_required
+                .store(false, Relaxed);
             Some(passenger)
         } else {
             None

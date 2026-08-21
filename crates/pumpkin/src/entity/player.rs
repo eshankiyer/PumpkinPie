@@ -351,7 +351,11 @@ fn block_name_matches_predicate(name: &str, block: &'static Block) -> bool {
     name.strip_prefix("minecraft:").unwrap_or(name) == block.name
 }
 
-pub(crate) fn adventure_predicate_matches_block(predicate: &NbtTag, block: &'static Block) -> bool {
+pub(crate) fn adventure_predicate_matches_block(
+    predicate: &NbtTag,
+    block: &'static Block,
+    state: &'static BlockState,
+) -> bool {
     let predicates: Vec<&NbtTag> = match predicate {
         NbtTag::Compound(_) => vec![predicate],
         NbtTag::List(predicates) => predicates.iter().collect(),
@@ -363,11 +367,65 @@ pub(crate) fn adventure_predicate_matches_block(predicate: &NbtTag, block: &'sta
         let Some(predicate) = predicate.extract_compound() else {
             return false;
         };
-        // State and NBT predicates need the full vanilla matcher.  Do not
-        // silently reduce them to a block-name check and allow a block that
-        // vanilla would reject.
-        if predicate.has("state") || predicate.has("nbt") {
+        // NBT predicates require serializing the block entity, which is not
+        // available from this state-only helper. Keep that predicate
+        // conservative until the block-entity matcher is wired in.
+        if predicate.has("nbt") {
             return false;
+        }
+        if predicate.has("components") {
+            // Component matchers need block-entity component snapshots, just
+            // like NBT matchers. Do not treat an unknown matcher as a match.
+            return false;
+        }
+        if predicate.has("state") && predicate.get_compound("state").is_none() {
+            return false;
+        }
+        if let Some(properties) = predicate.get_compound("state") {
+            let Some(actual_properties) = block.properties(state.id) else {
+                return false;
+            };
+            let actual_properties = actual_properties.to_props();
+            if properties.child_tags.iter().any(|(name, required)| {
+                let Some((_, actual_value)) = actual_properties
+                    .iter()
+                    .find(|(actual_name, _)| *actual_name == name.as_ref())
+                else {
+                    return true;
+                };
+                match required {
+                    NbtTag::String(required) => *actual_value != required.as_ref(),
+                    NbtTag::Compound(range) => {
+                        let min = range.get_string("min");
+                        let max = range.get_string("max");
+                        if min.is_none() && max.is_none() {
+                            return true;
+                        }
+                        let numeric_actual = actual_value.parse::<i32>().ok();
+                        let numeric_min = min.and_then(|value| value.parse::<i32>().ok());
+                        let numeric_max = max.and_then(|value| value.parse::<i32>().ok());
+                        if min.is_some() && numeric_min.is_none() && numeric_actual.is_none() {
+                            return true;
+                        }
+                        if max.is_some() && numeric_max.is_none() && numeric_actual.is_none() {
+                            return true;
+                        }
+                        numeric_actual.map_or_else(
+                            || {
+                                min.is_some_and(|min| *actual_value < min)
+                                    || max.is_some_and(|max| *actual_value > max)
+                            },
+                            |actual| {
+                                numeric_min.is_some_and(|min| actual < min)
+                                    || numeric_max.is_some_and(|max| actual > max)
+                            },
+                        )
+                    }
+                    _ => true,
+                }
+            }) {
+                return false;
+            }
         }
         let Some(blocks) = predicate.get("blocks") else {
             return true;
@@ -790,11 +848,15 @@ pub struct Player {
     /// Vanilla `ServerPlayerGameMode.hasDelayedDestroy`: an early stop keeps
     /// destroying the same block until the full break progress is reached.
     pub delayed_mining: AtomicBool,
+    /// Vanilla `ServerPlayerGameMode.delayedDestroyPos`.
     pub delayed_mining_pos: Mutex<BlockPos>,
+    /// Vanilla `ServerPlayerGameMode.delayedTickStart`.
     pub delayed_mining_start_time: AtomicI32,
     pub start_mining_time: AtomicI32,
     pub tick_counter: AtomicI32,
     pub mining_pos: Mutex<BlockPos>,
+    /// Serializes protocol mining actions that can arrive on separate tasks.
+    pub mining_action_lock: Mutex<()>,
     pub last_input: AtomicI8,
     /// A counter for teleport IDs used to track pending teleports.
     pub teleport_id_count: AtomicI32,
@@ -1061,6 +1123,7 @@ impl Player {
             delayed_mining_pos: Mutex::new(BlockPos::ZERO),
             delayed_mining_start_time: AtomicI32::new(0),
             mining_pos: Mutex::new(BlockPos::ZERO),
+            mining_action_lock: Mutex::new(()),
             abilities: Mutex::new(abilities),
             stats: Mutex::new(statistics::Statistics::default()),
             gamemode: AtomicCell::new(gamemode),
@@ -1407,11 +1470,19 @@ impl Player {
         let config = &server.advanced_config.pvp;
 
         let inventory = self.inventory();
-        let item_stack = inventory.held_item().await;
+        let auto_spin_attack = self.is_auto_spin_attack();
+        let item_stack = if auto_spin_attack {
+            self.living_entity.auto_spin_attack_item().await
+        } else {
+            inventory.held_item().await
+        };
 
-        let base_damage = self
-            .living_entity
-            .get_attribute_value(&Attributes::ATTACK_DAMAGE);
+        let base_damage = if auto_spin_attack {
+            f64::from(self.living_entity.auto_spin_attack_damage.load())
+        } else {
+            self.living_entity
+                .get_attribute_value(&Attributes::ATTACK_DAMAGE)
+        };
         let base_attack_speed = 4.0;
 
         let mut damage_multiplier = 1.0;
@@ -1798,16 +1869,75 @@ impl Player {
             .await
     }
 
-    /// Mirrors `Player.blockActionRestricted` and `ItemStack.canDestroyBlock`
-    /// before a server-side block break is finalized.
-    pub async fn can_break_block(&self, server: &Server, block: &'static Block) -> bool {
+    /// Mirrors `Player.blockActionRestricted` for the start of a block break.
+    /// Vanilla checks the held item's destruction rules only when the block is
+    /// actually destroyed (`ServerPlayerGameMode.destroyBlock`), not when the
+    /// crack animation starts.
+    pub async fn can_start_block_break(
+        &self,
+        block: &'static Block,
+        state: &'static BlockState,
+    ) -> bool {
         let gamemode = self.gamemode.load();
         if gamemode == GameMode::Spectator {
             return false;
         }
 
         let held = self.inventory().held_item().await;
-        if !server.item_registry.can_mine(held.item, self) {
+        let abilities = self.abilities.lock().await;
+        if gamemode == GameMode::Adventure
+            && !abilities.allow_modify_world
+            && !held
+                .get_data_component::<CanBreakImpl>()
+                .is_some_and(|predicate| {
+                    adventure_predicate_matches_block(&predicate.predicate, block, state)
+                })
+        {
+            return false;
+        }
+
+        true
+    }
+
+    /// Matches DedicatedServer.isUnderSpawnProtection for the overworld.
+    pub async fn is_under_spawn_protection(
+        &self,
+        server: &Server,
+        world: &World,
+        position: &BlockPos,
+    ) -> bool {
+        let radius = server.basic_config.spawn_protection_radius;
+        if world.dimension != Dimension::OVERWORLD || radius <= 0 {
+            return false;
+        }
+
+        let operators = server.data.operator_config.read().await;
+        if operators.ops.is_empty() || operators.get_entry(&self.gameprofile.id).is_some() {
+            return false;
+        }
+        drop(operators);
+
+        let level_info = world.level_info.load();
+        let dx = (position.0.x - level_info.spawn_x).abs();
+        let dz = (position.0.z - level_info.spawn_z).abs();
+        dx.max(dz) <= radius
+    }
+
+    /// Mirrors `Item.canDestroyBlock`, game-master block checks, and
+    /// `Player.blockActionRestricted` when a block break is finalized
+    /// (`ServerPlayerGameMode.destroyBlock`, `ServerPlayerGameMode.java:262-277`).
+    pub async fn can_break_block(&self, block: &'static Block, state: &'static BlockState) -> bool {
+        if !self.can_start_block_break(block, state).await {
+            return false;
+        }
+
+        let gamemode = self.gamemode.load();
+        let held = self.inventory().held_item().await;
+
+        // `ItemStack.canDestroyBlock` is only consulted here, at destroy time.
+        if let Some(server) = self.world().server.upgrade()
+            && !server.item_registry.can_mine(held.item, self)
+        {
             return false;
         }
         // DebugStickItem#canDestroyBlock performs its property interaction and
@@ -1820,16 +1950,6 @@ impl Player {
 
         let abilities = self.abilities.lock().await;
         let instabuild = abilities.creative;
-        if gamemode == GameMode::Adventure
-            && !abilities.allow_modify_world
-            && !held
-                .get_data_component::<CanBreakImpl>()
-                .is_some_and(|predicate| {
-                    adventure_predicate_matches_block(&predicate.predicate, block)
-                })
-        {
-            return false;
-        }
         drop(abilities);
 
         if is_game_master_block(block)
@@ -1849,8 +1969,8 @@ impl Player {
         true
     }
 
-    /// Applies the common vanilla destroy path and bookkeeping for delayed
-    /// Java destruction and Bedrock's server-side completion path.
+    /// Applies the common vanilla destroy path and bookkeeping for Java's
+    /// delayed destroy state and Bedrock's server-side completion path.
     pub async fn finish_block_break(
         self: &Arc<Self>,
         server: &Server,
@@ -1858,7 +1978,7 @@ impl Player {
         position: BlockPos,
     ) -> bool {
         let (block, state) = world.get_block_and_state(&position);
-        if state.is_air() || !self.can_break_block(server, block).await {
+        if state.is_air() || !self.can_break_block(block, state).await {
             let runtime_id = pumpkin_data::BlockState::to_be_network_id(state.id);
             self.client
                 .send_packet_now_editioned(
@@ -1884,6 +2004,14 @@ impl Player {
             .await
             .is_none()
         {
+            let (_, current_state) = world.get_block_and_state(&position);
+            let runtime_id = pumpkin_data::BlockState::to_be_network_id(current_state.id);
+            self.client
+                .send_packet_now_editioned(
+                    &CBlockUpdate::new(position, VarInt(i32::from(current_state.id.as_u16()))),
+                    &CUpdateBlock::new(position, runtime_id as u32),
+                )
+                .await;
             return false;
         }
 
@@ -1897,16 +2025,12 @@ impl Player {
         }
         if self.gamemode.load() != GameMode::Creative {
             if has_tool {
-                self.increment_stat(statistics::StatisticCategory::Used, held.item.id as i32, 1)
+                self.increment_stat(StatisticCategory::Used, held.item.id as i32, 1)
                     .await;
             }
             if block_drop {
-                self.increment_stat(
-                    statistics::StatisticCategory::Mined,
-                    state.id.as_u16() as i32,
-                    1,
-                )
-                .await;
+                self.increment_stat(StatisticCategory::Mined, state.id.as_u16() as i32, 1)
+                    .await;
             }
         }
         true
@@ -2070,9 +2194,8 @@ impl Player {
         let block_state = world.get_block_state(pos);
         let above_state = world.get_block_state(&pos.up());
 
-        // Check if blocks are passable (non-solid or air)
-        let block_safe = block_state.is_air() || !block_state.is_solid();
-        let above_safe = above_state.is_air() || !above_state.is_solid();
+        let block_safe = is_valid_for_forced_respawn(block_state);
+        let above_safe = is_valid_for_forced_respawn(above_state);
 
         if block_safe && above_safe {
             let position = Vector3::new(
@@ -2311,9 +2434,8 @@ impl Player {
             && !entity.has_vehicle().await
     }
 
-    const fn is_auto_spin_attack() -> bool {
-        // TODO: Track active auto-spin/riptide state and return true while it is active.
-        false
+    fn is_auto_spin_attack(&self) -> bool {
+        self.living_entity.is_auto_spin_attack()
     }
 
     fn can_fit_pose(&self, pose: EntityPose) -> bool {
@@ -2342,7 +2464,7 @@ impl Player {
             EntityPose::Swimming
         } else if entity.is_fall_flying() {
             EntityPose::FallFlying
-        } else if Self::is_auto_spin_attack() {
+        } else if self.is_auto_spin_attack() {
             EntityPose::SpinAttack
         } else if entity.is_sneaking() && !flying {
             EntityPose::Crouching
@@ -2673,43 +2795,7 @@ impl Player {
         }
 
         if self.delayed_mining.load(Ordering::Relaxed) {
-            let pos = *self.delayed_mining_pos.lock().await;
-            let world = self.world();
-            let state = world.get_block_state(&pos);
-            if state.is_air() {
-                world
-                    .set_block_breaking(
-                        &self.living_entity.entity,
-                        pos,
-                        BlockBreakingProgress::Stop,
-                    )
-                    .await;
-                self.current_block_destroy_stage
-                    .store(-1, Ordering::Relaxed);
-                self.delayed_mining.store(false, Ordering::Relaxed);
-            } else {
-                let finished = self
-                    .continue_mining(
-                        pos,
-                        &world,
-                        state,
-                        self.delayed_mining_start_time.load(Ordering::Relaxed),
-                    )
-                    .await;
-                if finished {
-                    self.delayed_mining.store(false, Ordering::Relaxed);
-                    self.current_block_destroy_stage
-                        .store(-1, Ordering::Relaxed);
-                    world
-                        .set_block_breaking(
-                            &self.living_entity.entity,
-                            pos,
-                            BlockBreakingProgress::Stop,
-                        )
-                        .await;
-                    self.finish_block_break(server, &world, pos).await;
-                }
-            }
+            self.continue_delayed_mining(server).await;
         } else if self.mining.load(Ordering::Relaxed) {
             let pos = *self.mining_pos.lock().await;
             let world = self.world();
@@ -2832,6 +2918,54 @@ impl Player {
                 .set_block_breaking(&self.living_entity.entity, pos, BlockBreakingProgress::Stop)
                 .await;
         }
+    }
+
+    /// Advances vanilla's delayed destroy state after a STOP packet arrived
+    /// before the normal 0.7 destroy threshold.
+    async fn continue_delayed_mining(self: &Arc<Self>, server: &Server) {
+        let _mining_action = self.mining_action_lock.lock().await;
+        if !self.delayed_mining.load(Ordering::Relaxed) {
+            return;
+        }
+        let location = *self.delayed_mining_pos.lock().await;
+        let world = self.world();
+        let (block, state) = world.get_block_and_state(&location);
+
+        if state.is_air() {
+            self.delayed_mining.store(false, Ordering::Relaxed);
+            return;
+        }
+
+        let time = self
+            .tick_counter
+            .load(Ordering::Relaxed)
+            .saturating_sub(self.delayed_mining_start_time.load(Ordering::Relaxed));
+        let destroy_progress =
+            block::calc_block_breaking(self, state, block).await * (time + 1) as f32;
+        let progress = (destroy_progress * 10.0) as i32;
+        if progress != self.current_block_destroy_stage.load(Ordering::Relaxed) {
+            world
+                .set_block_breaking(
+                    &self.living_entity.entity,
+                    location,
+                    BlockBreakingProgress::Update {
+                        stage: progress,
+                        speed: None,
+                    },
+                )
+                .await;
+            self.current_block_destroy_stage
+                .store(progress, Ordering::Relaxed);
+        }
+
+        if destroy_progress < 1.0 {
+            return;
+        }
+
+        self.delayed_mining.store(false, Ordering::Relaxed);
+        self.current_block_destroy_stage
+            .store(-1, Ordering::Relaxed);
+        self.finish_block_break(server, &world, location).await;
     }
 
     pub async fn jump(&self) {
@@ -3141,6 +3275,17 @@ impl Player {
         amount: i32,
     ) {
         self.stats.lock().await.increment(category, stat, amount);
+    }
+
+    pub async fn increment_interaction_stat(
+        &self,
+        category: statistics::StatisticCategory,
+        stat: i32,
+        amount: i32,
+    ) {
+        if self.gamemode.load() != GameMode::Spectator {
+            self.increment_stat(category, stat, amount).await;
+        }
     }
 
     pub async fn set_stat(&self, category: statistics::StatisticCategory, stat: i32, value: i32) {
@@ -7353,12 +7498,27 @@ impl InventoryPlayer for Player {
     }
 }
 
+#[inline]
+fn is_valid_for_forced_respawn(state: &BlockState) -> bool {
+    if state.is_liquid() {
+        return false;
+    }
+
+    let block_name = pumpkin_data::Block::from_state_id(state.id).name;
+    let vanilla_exception = block_name.ends_with("_pressure_plate")
+        || block_name.ends_with("_sign")
+        || block_name.ends_with("_banner");
+
+    vanilla_exception || !state.is_solid()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        Player, ability_invulnerability_blocks, bedrock_inventory_slot, read_root_vehicle,
-        write_root_vehicle,
+        Player, ability_invulnerability_blocks, bedrock_inventory_slot,
+        is_valid_for_forced_respawn, read_root_vehicle, write_root_vehicle,
     };
+    use pumpkin_data::Block;
     use pumpkin_data::damage::DamageType;
     use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
     use uuid::Uuid;
@@ -7457,5 +7617,23 @@ mod tests {
             });
         }
         assert_eq!(counter.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn forced_respawn_rejects_liquid_blocks() {
+        assert!(is_valid_for_forced_respawn(Block::AIR.default_state));
+        assert!(!is_valid_for_forced_respawn(Block::WATER.default_state));
+        assert!(!is_valid_for_forced_respawn(Block::LAVA.default_state));
+    }
+
+    #[test]
+    fn forced_respawn_keeps_non_solid_vanilla_exceptions() {
+        assert!(is_valid_for_forced_respawn(
+            Block::STONE_PRESSURE_PLATE.default_state
+        ));
+        assert!(is_valid_for_forced_respawn(Block::OAK_SIGN.default_state));
+        assert!(is_valid_for_forced_respawn(
+            Block::WHITE_BANNER.default_state
+        ));
     }
 }

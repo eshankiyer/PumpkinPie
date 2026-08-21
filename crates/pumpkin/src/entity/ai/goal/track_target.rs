@@ -70,7 +70,6 @@ pub struct TrackTargetGoal {
     target_predicate: TargetPredicate,
 }
 
-#[expect(dead_code)]
 impl TrackTargetGoal {
     #[must_use]
     pub fn new(check_visibility: bool, check_can_navigate: bool) -> Self {
@@ -251,15 +250,11 @@ impl Goal for TrackTargetGoal {
             }
 
             if self.check_visibility {
-                let world = mob_entity.living_entity.entity.world.load();
-                let has_line_of_sight = world
-                    .raycast(
-                        mob_entity.living_entity.entity.get_eye_pos(),
-                        target.entity.get_eye_pos(),
-                        async |block_pos, world| world.get_block_state(block_pos).is_solid(),
-                    )
-                    .await
-                    .is_none();
+                // TargetGoal uses LivingEntity.hasLineOfSight, which clips
+                // against block collision shapes. Testing `is_solid()` here
+                // incorrectly treats outline-only blocks such as fences as
+                // transparent.
+                let has_line_of_sight = mob_entity.has_line_of_sight(target_base.as_ref()).await;
 
                 if !self.remembers_visible_target(has_line_of_sight) {
                     return false;

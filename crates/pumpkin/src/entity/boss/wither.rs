@@ -5,6 +5,7 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::world::WorldEvent;
 use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_util::Difficulty;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -118,6 +119,26 @@ impl NBTStorage for WitherEntity {
 impl Mob for WitherEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// Vanilla `WitherBoss.checkDespawn` only removes the wither in Peaceful;
+    /// otherwise it resets `noActionTime` instead of applying distance despawn.
+    fn check_despawn(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let entity = self.get_entity();
+            if entity.is_removed() {
+                return;
+            }
+
+            let world = entity.world.load();
+            if world.level_info.load().difficulty == Difficulty::Peaceful
+                && !entity.entity_type.allowed_in_peaceful
+            {
+                entity.remove().await;
+            } else {
+                self.mob_entity.no_action_time.store(0, Ordering::Relaxed);
+            }
+        })
     }
 
     fn can_attack(&self, target: &Entity) -> bool {

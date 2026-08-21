@@ -130,6 +130,10 @@ impl Mob for BoggedSkeletonEntity {
         &self.entity.mob_entity
     }
 
+    fn pre_ai_tick(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move { self.entity.reassess_weapon_goal(self).await })
+    }
+
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             // Vanilla `Bogged` is not an `AgeableMob`, so it has no baby tracker; the

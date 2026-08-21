@@ -1,18 +1,21 @@
 use super::{Controls, Goal, GoalFuture, to_goal_ticks};
 use crate::entity::{ai::pathfinder::NavigatorGoal, mob::Mob};
-use pumpkin_data::tag::{self, Taggable};
-use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
+use pumpkin_data::tag::Taggable;
+use pumpkin_util::math::position::BlockPos;
+use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
-use std::sync::atomic::Ordering::Relaxed;
+use std::sync::atomic::Ordering;
 
 pub struct WanderAroundGoal {
     goal_control: Controls,
     speed: f64,
     target: Option<Vector3<f64>>,
     chance: i32,
+    force_trigger: bool,
     /// Vanilla: `WaterAvoidingRandomStrollGoal` overrides `getPosition()` to reject candidate
     /// positions inside a liquid.
     avoid_water: bool,
+    probability: f32,
 }
 
 impl WanderAroundGoal {
@@ -33,7 +36,9 @@ impl WanderAroundGoal {
             speed,
             target: None,
             chance: to_goal_ticks(interval),
+            force_trigger: false,
             avoid_water: false,
+            probability: 0.0,
         }
     }
 
@@ -45,7 +50,23 @@ impl WanderAroundGoal {
             speed,
             target: None,
             chance: to_goal_ticks(Self::DEFAULT_INTERVAL),
+            force_trigger: false,
             avoid_water: true,
+            probability: 0.001,
+        }
+    }
+
+    /// Vanilla `WaterAvoidingRandomStrollGoal(mob, speed, probability)`.
+    #[must_use]
+    pub const fn new_water_avoiding_with_probability(speed: f64, probability: f32) -> Self {
+        Self {
+            goal_control: Controls::MOVE,
+            speed,
+            target: None,
+            chance: to_goal_ticks(Self::DEFAULT_INTERVAL),
+            force_trigger: false,
+            avoid_water: true,
+            probability,
         }
     }
 
@@ -64,180 +85,175 @@ impl WanderAroundGoal {
         self.avoid_water
     }
 
-    fn find_default_wander_target(mob: &dyn Mob) -> Option<Vector3<f64>> {
+    /// Vanilla `RandomStrollGoal.trigger` bypasses the interval for the next attempt.
+    pub const fn trigger(&mut self) {
+        self.force_trigger = true;
+    }
+
+    fn is_within_home(mob: &dyn Mob, pos: &BlockPos) -> bool {
+        let mob_entity = mob.get_mob_entity();
+        let radius = mob_entity.position_target_range.load(Ordering::Relaxed);
+        if radius == -1 {
+            return true;
+        }
+        let home = mob_entity.position_target.load();
+        let dx = f64::from(home.0.x - pos.0.x);
+        let dy = f64::from(home.0.y - pos.0.y);
+        let dz = f64::from(home.0.z - pos.0.z);
+        let radius_squared = radius.wrapping_mul(radius);
+        dx.mul_add(dx, dy.mul_add(dy, dz * dz)) < f64::from(radius_squared)
+    }
+
+    /// Mirrors vanilla `DefaultRandomPos` and `LandRandomPos` for the two random-stroll goals.
+    /// The client-visible result is the selected bottom-center block, not an unchecked offset.
+    fn find_random_target(
+        mob: &dyn Mob,
+        horizontal_range: i32,
+        vertical_range: i32,
+        land_only: bool,
+    ) -> Option<Vector3<f64>> {
         let entity = &mob.get_mob_entity().living_entity.entity;
-        let pos = entity.pos.load();
+        let origin = entity.pos.load();
         let world = entity.world.load();
-        let mut rng = mob.get_random();
-        let origin = BlockPos::new(
-            pos.x.floor() as i32,
-            pos.y.floor() as i32,
-            pos.z.floor() as i32,
-        );
-        let horizontal_dist = 10;
-        let min_y = world.dimension.min_y;
-        let max_y = min_y + world.dimension.height - 1;
-        let mut best: Option<(f64, BlockPos)> = None;
+        let mob_entity = mob.get_mob_entity();
+        let home = mob_entity.position_target.load();
+        let home_radius = mob_entity.position_target_range.load(Ordering::Relaxed);
+        let has_home = home_radius != -1;
+        let restrict = has_home && {
+            let dx = f64::from(home.0.x) + 0.5 - origin.x;
+            let dy = f64::from(home.0.y) + 0.5 - origin.y;
+            let dz = f64::from(home.0.z) + 0.5 - origin.z;
+            let radius = f64::from(home_radius) + f64::from(horizontal_range) + 1.0;
+            dx.mul_add(dx, dy.mul_add(dy, dz * dz)) < radius * radius
+        };
+        let mut random = mob.get_random();
+        let mut best = None;
+        let mut best_weight = f64::NEG_INFINITY;
 
         for _ in 0..10 {
+            let dx = random.random_range(-horizontal_range..=horizontal_range);
+            let dy = random.random_range(-vertical_range..=vertical_range);
+            let dz = random.random_range(-horizontal_range..=horizontal_range);
+            let (dx, dz) = if has_home && horizontal_range > 1 {
+                let x_bias = random.random_range(0.0..(f64::from(horizontal_range) / 2.0));
+                let z_bias = random.random_range(0.0..(f64::from(horizontal_range) / 2.0));
+                (
+                    f64::from(dx)
+                        + if origin.x > f64::from(home.0.x) {
+                            -x_bias
+                        } else {
+                            x_bias
+                        },
+                    f64::from(dz)
+                        + if origin.z > f64::from(home.0.z) {
+                            -z_bias
+                        } else {
+                            z_bias
+                        },
+                )
+            } else {
+                (f64::from(dx), f64::from(dz))
+            };
             let candidate = BlockPos::new(
-                origin.0.x + rng.random_range(-horizontal_dist..=horizontal_dist),
-                origin.0.y + rng.random_range(-7..=7),
-                origin.0.z + rng.random_range(-horizontal_dist..=horizontal_dist),
+                (origin.x + dx).floor() as i32,
+                (origin.y + f64::from(dy)).floor() as i32,
+                (origin.z + dz).floor() as i32,
             );
-            if candidate.0.y < min_y
-                || candidate.0.y > max_y
-                || !Self::is_within_restriction(mob, &candidate, horizontal_dist)
+
+            if !(world.get_bottom_y()..=world.get_top_y()).contains(&candidate.0.y)
+                || (restrict && !Self::is_within_home(mob, &candidate))
             {
                 continue;
             }
 
-            let navigator = mob
-                .get_mob_entity()
+            let navigator = mob_entity
                 .navigator
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if !navigator.is_stable_destination(&world, &candidate)
-                || navigator.has_pathfinding_malus(&world, &candidate)
-            {
+            if !navigator.is_stable_destination(&world, &candidate) {
                 continue;
             }
+            let candidate_has_malus = navigator.has_pathfinding_malus(&world, &candidate);
+            drop(navigator);
 
-            let weight = mob.get_walk_target_value(&candidate);
-            if best.is_none_or(|(best_weight, _)| weight > best_weight) {
-                best = Some((weight, candidate));
-            }
-        }
-
-        best.map(|(_, candidate)| {
-            Vector3::new(
-                candidate.0.x as f64 + 0.5,
-                candidate.0.y as f64,
-                candidate.0.z as f64 + 0.5,
-            )
-        })
-    }
-
-    fn is_within_restriction(mob: &dyn Mob, candidate: &BlockPos, horizontal_dist: i32) -> bool {
-        let Some(home) = mob.get_home() else {
-            return true;
-        };
-        let entity = mob.get_entity();
-        let pos = entity.pos.load();
-        let range = mob.get_mob_entity().position_target_range.load(Relaxed);
-        if range < 0 {
-            return true;
-        }
-        let dy = pos.y - (f64::from(home.0.y) + 0.5);
-        let dx = pos.x - (f64::from(home.0.x) + 0.5);
-        let dz = pos.z - (f64::from(home.0.z) + 0.5);
-        let max_distance = f64::from(range + horizontal_dist + 1);
-        if dx * dx + dy * dy + dz * dz >= max_distance * max_distance {
-            return true;
-        }
-        let candidate_dy = f64::from(candidate.0.y - home.0.y);
-        let candidate_dx = f64::from(candidate.0.x - home.0.x);
-        let candidate_dz = f64::from(candidate.0.z - home.0.z);
-        candidate_dx * candidate_dx + candidate_dy * candidate_dy + candidate_dz * candidate_dz
-            < f64::from(range) * f64::from(range)
-    }
-
-    /// Vanilla `LandRandomPos.getPos(mob, horizontalDist, 7)`.
-    fn find_land_wander_target(mob: &dyn Mob, horizontal_dist: i32) -> Option<Vector3<f64>> {
-        let entity = &mob.get_mob_entity().living_entity.entity;
-        let pos = entity.pos.load();
-        let world = entity.world.load();
-        let origin = BlockPos::new(
-            pos.x.floor() as i32,
-            pos.y.floor() as i32,
-            pos.z.floor() as i32,
-        );
-        let min_y = world.dimension.min_y;
-        let max_y = min_y + world.dimension.height - 1;
-        let mut rng = mob.get_random();
-        let mut best: Option<(f64, BlockPos)> = None;
-
-        for _ in 0..10 {
-            let mut candidate = BlockPos::new(
-                origin.0.x + rng.random_range(-horizontal_dist..=horizontal_dist),
-                origin.0.y + rng.random_range(-7..=7),
-                origin.0.z + rng.random_range(-horizontal_dist..=horizontal_dist),
-            );
-
-            if candidate.0.y < min_y
-                || candidate.0.y > max_y
-                || !Self::is_within_restriction(mob, &candidate, horizontal_dist)
-                || !mob
-                    .get_mob_entity()
+            let mut landing = candidate;
+            if land_only {
+                while landing.0.y <= world.get_top_y() && world.get_block_state(&landing).is_solid()
+                {
+                    landing = landing.up();
+                }
+                if world
+                    .get_fluid(&landing)
+                    .has_tag(&pumpkin_data::tag::Fluid::MINECRAFT_WATER)
+                {
+                    continue;
+                }
+                let navigator = mob_entity
                     .navigator
                     .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .is_stable_destination(&world, &candidate)
-            {
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if navigator.has_pathfinding_malus(&world, &landing) {
+                    continue;
+                }
+            } else if candidate_has_malus {
                 continue;
             }
 
-            while candidate.0.y <= max_y && world.get_block_state(&candidate).is_solid() {
-                candidate = candidate.up();
-            }
-
-            if candidate.0.y > max_y
-                || world
-                    .get_fluid(&candidate)
-                    .has_tag(&tag::Fluid::MINECRAFT_WATER)
-            {
-                continue;
-            }
-
-            let navigator = mob
-                .get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if navigator.has_pathfinding_malus(&world, &candidate) {
-                continue;
-            }
-
-            let weight = mob.get_walk_target_value(&candidate);
-            if best.is_none_or(|(best_weight, _)| weight > best_weight) {
-                best = Some((weight, candidate));
+            let weight = mob.get_walk_target_value(&landing);
+            if weight > best_weight {
+                best_weight = weight;
+                best = Some(Vector3::new(
+                    f64::from(landing.0.x) + 0.5,
+                    f64::from(landing.0.y),
+                    f64::from(landing.0.z) + 0.5,
+                ));
             }
         }
 
-        best.map(|(_, pos)| {
-            Vector3::new(pos.0.x as f64 + 0.5, pos.0.y as f64, pos.0.z as f64 + 0.5)
-        })
+        best
     }
 }
 
 impl Goal for WanderAroundGoal {
     fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async move {
-            if mob.get_mob_entity().no_action_time.load(Relaxed) >= 100
-                || mob.has_controlling_passenger().await
-            {
+            if mob.has_controlling_passenger().await {
                 return false;
             }
 
-            if mob.get_random().random_range(0..self.chance) != 0 {
+            if mob.get_mob_entity().is_schooling_follower() {
                 return false;
+            }
+
+            if !self.force_trigger {
+                if mob.get_mob_entity().no_action_time.load(Ordering::Relaxed) >= 100 {
+                    return false;
+                }
+
+                if mob.get_random().random_range(0..self.chance) != 0 {
+                    return false;
+                }
             }
 
             if self.avoid_water {
-                let in_water = mob.get_entity().touching_water.load(Relaxed);
+                let in_water = mob.get_entity().was_touching_water.load(Ordering::Relaxed);
                 self.target = if in_water {
-                    Self::find_land_wander_target(mob, 15)
-                        .or_else(|| Self::find_default_wander_target(mob))
-                } else if mob.get_random().random::<f32>() >= 0.001 {
-                    Self::find_land_wander_target(mob, 10)
+                    Self::find_random_target(mob, 15, 7, true)
+                        .or_else(|| Self::find_random_target(mob, 10, 7, false))
+                } else if mob.get_random().random::<f32>() >= self.probability {
+                    Self::find_random_target(mob, 10, 7, true)
                 } else {
-                    Self::find_default_wander_target(mob)
+                    Self::find_random_target(mob, 10, 7, false)
                 };
-                return self.target.is_some();
+            } else {
+                self.target = Self::find_random_target(mob, 10, 7, false);
             }
-
-            self.target = Self::find_default_wander_target(mob);
-            self.target.is_some()
+            if self.target.is_some() {
+                self.force_trigger = false;
+                true
+            } else {
+                false
+            }
         })
     }
 
@@ -315,5 +331,12 @@ mod tests {
         let goal = WanderAroundGoal::new_water_avoiding(0.4);
         assert_eq!(goal.chance, to_goal_ticks(120));
         assert!(goal.avoid_water);
+        assert_eq!(goal.probability, 0.001);
+    }
+
+    #[test]
+    fn water_avoiding_probability_is_configurable() {
+        let goal = WanderAroundGoal::new_water_avoiding_with_probability(0.4, 0.00001);
+        assert_eq!(goal.probability, 0.00001);
     }
 }

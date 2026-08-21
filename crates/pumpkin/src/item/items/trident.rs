@@ -13,6 +13,7 @@ use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::Sound;
 use pumpkin_util::GameMode;
+use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::inventory::Inventory;
 
@@ -41,6 +42,7 @@ impl ItemBehaviour for TridentItem {
         })
     }
 
+    #[expect(clippy::too_many_lines)]
     fn on_stopped_using<'a>(
         &'a self,
         _stack: &'a ItemStack,
@@ -73,33 +75,78 @@ impl ItemBehaviour for TridentItem {
             }
 
             if riptide_level > 0 {
-                let in_water = world.get_block_state(&player.position().to_block_pos()).id
-                    == pumpkin_data::Block::WATER.default_state.id;
-                if !in_water {
+                // Vanilla `TridentItem.releaseUsing` (`TridentItem.java:69`): with a spin-attack
+                // enchantment the release only does anything while the player is in water or
+                // rain and is not riding another entity.
+                let is_touching_water = player
+                    .living_entity
+                    .entity
+                    .touching_water
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                let block_pos = player.get_entity().block_pos.load();
+                let rain_pos = BlockPos::floored(
+                    f64::from(block_pos.0.x),
+                    player.get_entity().bounding_box.load().max.y,
+                    f64::from(block_pos.0.z),
+                );
+                let is_raining =
+                    world.is_raining_at(&block_pos).await || world.is_raining_at(&rain_pos).await;
+                let is_passenger = player.get_entity().has_vehicle().await;
+
+                if !(is_touching_water || is_raining) || is_passenger {
                     player.living_entity.clear_active_hand().await;
                     return;
                 }
 
-                let f = f64::from(riptide_level);
-                let (yaw, pitch) = player.rotation();
-                let f_yaw = f32::to_radians(yaw);
-                let f_pitch = f32::to_radians(pitch);
-
-                let vx = f64::from(-f32::sin(f_yaw) * f32::cos(f_pitch));
-                let vy = f64::from(-f32::sin(f_pitch));
-                let vz = f64::from(f32::cos(f_yaw) * f32::cos(f_pitch));
-
-                let sq = (vx * vx + vy * vy + vz * vz).sqrt();
-                if sq > 0.0 {
-                    let mult = (1.0 + f * 0.75) / sq;
-                    player.living_entity.entity.velocity.store(Vector3::new(
-                        vx * mult,
-                        vy * mult,
-                        vz * mult,
-                    ));
+                // `ItemStack.nextDamageWillBreak` (`TridentItem.java:70`).
+                if stack_guard.is_damageable()
+                    && stack_guard
+                        .get_max_damage()
+                        .is_some_and(|max| stack_guard.get_damage() + 1 >= max)
+                {
+                    player.living_entity.clear_active_hand().await;
+                    return;
                 }
 
-                player.damage_held_item(1).await;
+                let (yaw, pitch) = player.rotation();
+                let look_vec = Vector3::rotation_vector(pitch as f64, yaw as f64);
+                // Riptide's `trident_spin_attack_strength` is
+                // `LevelBasedValue.perLevel(1.5F, 0.75F)` (`Enchantments.java:993`), i.e.
+                // 1.5 at level 1 and +0.75 per level above the first.
+                let speed = f64::from(riptide_level - 1).mul_add(0.75, 1.5);
+                let launch_velocity = look_vec.multiply(speed, speed, speed);
+
+                if player.gamemode.load() != GameMode::Creative {
+                    player.damage_held_item(1).await;
+                }
+                let spin_item = stack_guard.clone();
+                player.get_entity().add_velocity(launch_velocity);
+                if player
+                    .get_entity()
+                    .on_ground
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    player
+                        .get_entity()
+                        .move_self_with_collisions(player, Vector3::new(0.0, 1.2, 0.0))
+                        .await;
+                }
+                player
+                    .living_entity
+                    .start_auto_spin_attack(20, 8.0, spin_item)
+                    .await;
+
+                let sound = match riptide_level {
+                    1 => Sound::ItemTridentRiptide1,
+                    2 => Sound::ItemTridentRiptide2,
+                    _ => Sound::ItemTridentRiptide3,
+                };
+                world.play_sound(
+                    sound,
+                    pumpkin_data::sound::SoundCategory::Players,
+                    &player.position(),
+                );
+
                 player.living_entity.clear_active_hand().await;
                 return;
             }

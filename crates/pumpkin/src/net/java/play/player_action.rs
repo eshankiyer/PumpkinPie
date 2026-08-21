@@ -24,19 +24,54 @@ impl JavaClient {
                         self.update_sequence(player, player_action.sequence.0);
                         return;
                     }
+                    if player.gamemode.load() == GameMode::Spectator {
+                        self.update_sequence(player, player_action.sequence.0);
+                        return;
+                    }
                     let position = player_action.position;
                     let entity = &player.get_entity();
                     let world = entity.world.load_full();
+
+                    // ServerPlayerGameMode rejects positions above the level's
+                    // maximum build height before starting a destroy action.
+                    if position.0.y > world.get_top_y() {
+                        self.sync_block_state_to_client(&world, position).await;
+                        self.update_sequence(player, player_action.sequence.0);
+                        return;
+                    }
+
+                    if player
+                        .is_under_spawn_protection(server, &world, &position)
+                        .await
+                    {
+                        let message = TextComponent::translate_cross(
+                            translation::java::BUILD_SPAWN_PROTECTION,
+                            translation::java::BUILD_SPAWN_PROTECTION,
+                            vec![TextComponent::text(format!("[{position}]"))],
+                        );
+                        player.send_system_message_raw(&message, true).await;
+                        self.update_sequence(player, player_action.sequence.0);
+                        return;
+                    }
+
+                    // ServerLevel.mayInteract also applies the world border.
+                    let inside_world_border = {
+                        let border = world.worldborder.lock().await;
+                        border.contains_block(position.0.x, position.0.z)
+                    };
+                    if !inside_world_border {
+                        self.sync_block_state_to_client(&world, position).await;
+                        self.update_sequence(player, player_action.sequence.0);
+                        return;
+                    }
+
                     let (block, state) = world.get_block_and_state(&position);
 
-                    // Vanilla rejects restricted block actions before calling
-                    // BlockState.attack or firing any block-use side effects.
-                    if !player.can_break_block(server, block).await {
-                        self.enqueue_client_packet(&CBlockUpdate::new(
-                            position,
-                            VarInt(i32::from(state.id.as_u16())),
-                        ))
-                        .await;
+                    // Vanilla checks Player.blockActionRestricted at the start of a
+                    // destroy action and defers the held item's destruction rules to
+                    // ServerPlayerGameMode.destroyBlock.
+                    if !player.can_start_block_break(block, state).await {
+                        self.sync_block_state_to_client(&world, position).await;
                         self.update_sequence(player, player_action.sequence.0);
                         return;
                     }
@@ -59,29 +94,6 @@ impl JavaClient {
                         }
                     }
 
-                    if block == &pumpkin_data::Block::NOTE_BLOCK {
-                        let props =
-                            pumpkin_data::block_properties::NoteBlockLikeProperties::from_state_id(
-                                state.id, block,
-                            );
-                        crate::block::blocks::note::NoteBlock::play_note(
-                            &props,
-                            &world,
-                            &position,
-                            crate::world::game_event::GameEventContext::of_entity(
-                                player.clone() as Arc<dyn EntityBase>
-                            ),
-                        )
-                        .await;
-                        player
-                            .increment_stat(
-                                StatisticCategory::Custom,
-                                CustomStatistic::PlayNoteblock as i32,
-                                1,
-                            )
-                            .await;
-                    }
-
                     if player.gamemode.load() == GameMode::Creative {
                         player.finish_block_break(server, &world, position).await;
                         self.sync_block_state_to_client(&world, position).await;
@@ -92,51 +104,61 @@ impl JavaClient {
                         player.tick_counter.load(Ordering::Relaxed),
                         Ordering::Relaxed,
                     );
-                    if !state.is_air() {
-                        let speed = block::calc_block_breaking(player, state, block).await;
+                    // Vanilla starts an air target with progress 1.0, dispatches
+                    // BlockState.attack for every other block, and only then decides
+                    // between an instant break and a tracked destroy target.
+                    let speed = if state.is_air() {
+                        1.0f32
+                    } else {
+                        server
+                            .block_registry
+                            .attack(&world, block, state, &position, player)
+                            .await;
+                        block::calc_block_breaking(player, state, block).await
+                    };
+
+                    if !state.is_air() && speed >= 1.0 {
                         // Instant break
-                        if speed >= 1.0 {
-                            player.finish_block_break(server, &world, position).await;
-                            self.sync_block_state_to_client(&world, position).await;
-                        } else {
-                            let old_position = *player.mining_pos.lock().await;
-                            let already_mining = player.mining.load(Ordering::Relaxed);
-                            if already_mining && old_position != position {
-                                self.send_packet(&CBlockUpdate::new(
-                                    old_position,
-                                    VarInt(i32::from(
-                                        world.get_block_state(&old_position).id.as_u16(),
-                                    )),
-                                ))
-                                .await;
-                                world
-                                    .set_block_breaking(
-                                        entity,
-                                        old_position,
-                                        BlockBreakingProgress::Stop,
-                                    )
-                                    .await;
-                            }
-                            player.mining.store(true, Ordering::Relaxed);
-                            *player.mining_pos.lock().await = position;
-                            let progress = (speed * 10.0) as i32;
-                            player
-                                .current_block_breaking_speed
-                                .store(speed.to_bits(), Ordering::Relaxed);
+                        player.finish_block_break(server, &world, position).await;
+                        self.sync_block_state_to_client(&world, position).await;
+                    } else {
+                        // Vanilla tracks an air target as an active destroy target so a
+                        // subsequent STOP for another position cannot complete it.
+                        let old_position = *player.mining_pos.lock().await;
+                        let already_mining = player.mining.load(Ordering::Relaxed);
+                        if already_mining && old_position != position {
+                            self.send_packet(&CBlockUpdate::new(
+                                old_position,
+                                VarInt(i32::from(world.get_block_state(&old_position).id.as_u16())),
+                            ))
+                            .await;
                             world
                                 .set_block_breaking(
                                     entity,
-                                    position,
-                                    BlockBreakingProgress::Start {
-                                        stage: progress,
-                                        speed,
-                                    },
+                                    old_position,
+                                    BlockBreakingProgress::Stop,
                                 )
                                 .await;
-                            player
-                                .current_block_destroy_stage
-                                .store(progress, Ordering::Relaxed);
                         }
+                        player.mining.store(true, Ordering::Relaxed);
+                        *player.mining_pos.lock().await = position;
+                        let progress = (speed * 10.0) as i32;
+                        player
+                            .current_block_breaking_speed
+                            .store(speed.to_bits(), Ordering::Relaxed);
+                        world
+                            .set_block_breaking(
+                                entity,
+                                position,
+                                BlockBreakingProgress::Start {
+                                    stage: progress,
+                                    speed,
+                                },
+                            )
+                            .await;
+                        player
+                            .current_block_destroy_stage
+                            .store(progress, Ordering::Relaxed);
                     }
                     self.update_sequence(player, player_action.sequence.0);
                 }
@@ -149,10 +171,18 @@ impl JavaClient {
                         self.update_sequence(player, player_action.sequence.0);
                         return;
                     }
-                    player.mining.store(false, Ordering::Relaxed);
                     let entity = &player.get_entity();
                     let world = entity.world.load_full();
+                    // ServerPlayerGameMode rejects any block action above the level's
+                    // maximum build height, including ABORT_DESTROY_BLOCK.
+                    if player_action.position.0.y > world.get_top_y() {
+                        self.sync_block_state_to_client(&world, player_action.position)
+                            .await;
+                        self.update_sequence(player, player_action.sequence.0);
+                        return;
+                    }
                     let active_position = *player.mining_pos.lock().await;
+                    player.mining.store(false, Ordering::Relaxed);
                     if active_position != player_action.position {
                         world
                             .set_block_breaking(
@@ -182,40 +212,68 @@ impl JavaClient {
                         return;
                     }
 
-                    // Vanilla only accepts STOP_DESTROY_BLOCK for the block currently being
-                    // mined. Without this check a client can start one block and finish any
-                    // other reachable block immediately.
-                    if !player.mining.load(Ordering::Relaxed)
-                        || *player.mining_pos.lock().await != location
-                    {
-                        let world = player.world();
-                        self.sync_block_state_to_client(&world, location).await;
-                        self.update_sequence(player, player_action.sequence.0);
-                        return;
-                    }
-
                     // Block break & play sound
                     let entity = &player.get_entity();
                     let world = entity.world.load_full();
 
-                    let (block, state) = world.get_block_and_state(&location);
-                    if state.is_air() {
-                        player.mining.store(false, Ordering::Relaxed);
+                    // ServerPlayerGameMode rejects any block action above the level's
+                    // maximum build height, including STOP_DESTROY_BLOCK.
+                    if location.0.y > world.get_top_y() {
                         self.sync_block_state_to_client(&world, location).await;
                         self.update_sequence(player, player_action.sequence.0);
                         return;
                     }
 
-                    let elapsed_ticks = player.tick_counter.load(Ordering::Relaxed)
-                        - player.start_mining_time.load(Ordering::Relaxed);
+                    let (block, state) = world.get_block_and_state(&location);
+                    if player.gamemode.load() == GameMode::Spectator {
+                        player.mining.store(false, Ordering::Relaxed);
+                        player.delayed_mining.store(false, Ordering::Relaxed);
+                        self.sync_block_state_to_client(&world, location).await;
+                        self.update_sequence(player, player_action.sequence.0);
+                        return;
+                    }
+
+                    let mining_position = *player.mining_pos.lock().await;
+                    let delayed_position = *player.delayed_mining_pos.lock().await;
+                    let delayed_target = player.delayed_mining.load(Ordering::Relaxed)
+                        && delayed_position == location;
+                    let same_mining_target = (player.mining.load(Ordering::Relaxed)
+                        && mining_position == location)
+                        || delayed_target;
+                    // Vanilla only evaluates STOP_DESTROY_BLOCK for the target
+                    // currently held by ServerPlayerGameMode.
+                    if !same_mining_target {
+                        self.update_sequence(player, player_action.sequence.0);
+                        return;
+                    }
+                    // ServerPlayerGameMode leaves the active target untouched
+                    // when STOP arrives after that target became air.
+                    if state.is_air() {
+                        self.update_sequence(player, player_action.sequence.0);
+                        return;
+                    }
+
+                    let destroy_start = if delayed_target {
+                        player.delayed_mining_start_time.load(Ordering::Relaxed)
+                    } else {
+                        player.start_mining_time.load(Ordering::Relaxed)
+                    };
+                    let elapsed_ticks = player
+                        .tick_counter
+                        .load(Ordering::Relaxed)
+                        .saturating_sub(destroy_start);
                     let speed = block::calc_block_breaking(player, state, block).await;
-                    if speed * ((elapsed_ticks + 1).max(0) as f32) < 0.7 {
-                        if !player.delayed_mining.load(Ordering::Relaxed) {
+                    // ServerPlayerGameMode only destroys a non-instant block after the
+                    // STOP packet has accumulated vanilla's 0.7 progress threshold.
+                    // A client cannot bypass this by sending START and STOP back to back.
+                    if player.gamemode.load() != GameMode::Creative
+                        && speed * ((elapsed_ticks + 1).max(0) as f32) < 0.7
+                    {
+                        if !delayed_target {
                             *player.delayed_mining_pos.lock().await = location;
-                            player.delayed_mining_start_time.store(
-                                player.start_mining_time.load(Ordering::Relaxed),
-                                Ordering::Relaxed,
-                            );
+                            player
+                                .delayed_mining_start_time
+                                .store(destroy_start, Ordering::Relaxed);
                             player.delayed_mining.store(true, Ordering::Relaxed);
                         }
                         player.mining.store(false, Ordering::Relaxed);
