@@ -1,7 +1,7 @@
-use crate::block::blocks::plant::PlantBlockBase;
+use crate::block::blocks::plant::{PlantBlockBase, grow_plant_head};
 use crate::block::{
     BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, CanPlaceAtArgs,
-    GetStateForNeighborUpdateArgs, PlacedArgs,
+    GetStateForNeighborUpdateArgs, PlacedArgs, RandomTickArgs,
 };
 use pumpkin_data::BlockStateId;
 use pumpkin_data::{Block, BlockId};
@@ -15,7 +15,28 @@ impl BlockMetadata for WeepingVinesBlock {
     }
 }
 
+/// `NetherVines.GROW_PER_TICK_PROBABILITY` (`NetherVines.java:8`), passed to the
+/// `GrowingPlantHeadBlock` constructor at `WeepingVinesBlock.java:20`.
+const GROW_PER_TICK_PROBABILITY: f64 = 0.1;
+
 impl BlockBehaviour for WeepingVinesBlock {
+    /// `GrowingPlantHeadBlock.randomTick` with `NetherVines.isValidGrowthState`
+    /// (`NetherVines.java:10-12`: the target must be air).
+    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            grow_plant_head(
+                args.world,
+                args.position,
+                &Block::WEEPING_VINES,
+                &Block::WEEPING_VINES_PLANT,
+                pumpkin_data::BlockDirection::Down,
+                GROW_PER_TICK_PROBABILITY,
+                Block::is_air,
+            )
+            .await;
+        })
+    }
+
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
         <Self as PlantBlockBase>::can_place_at(self, args.block_accessor, args.position)
     }

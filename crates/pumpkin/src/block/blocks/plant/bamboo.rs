@@ -18,6 +18,22 @@ use crate::block::{
 };
 use crate::world::World;
 
+/// `BambooStalkBlock.randomTick`: `random.nextInt(3) == 0`.
+const GROWTH_CHANCE_DENOMINATOR: i32 = 3;
+
+/// `BambooStalkBlock.randomTick`: `level.getRawBrightness(pos.above(), 0) >= 9`.
+const MIN_GROWTH_LIGHT: u8 = 9;
+
+/// `BambooStalkBlock.randomTick`: `height = getHeightBelowUpToMax(...) + 1; if (height < 16)`.
+const MAX_STALK_HEIGHT: usize = 16;
+
+/// `BambooStalkBlock.growBamboo` (`BambooStalkBlock.java:209`):
+/// `(height < 11 || !(random.nextFloat() < 0.25F)) && height != 15 ? 0 : 1`.
+/// `height` counts the stalk blocks below plus this one, so it is 1-based.
+fn grown_stage(height: usize, roll: f32) -> u8 {
+    u8::from(!((height < 11 || roll >= 0.25) && height != 15))
+}
+
 #[pumpkin_block("minecraft:bamboo")]
 pub struct BambooBlock;
 
@@ -126,11 +142,20 @@ impl BlockBehaviour for BambooBlock {
         })
     }
 
+    /// `BambooStalkBlock.randomTick` (`BambooStalkBlock.java:randomTick`): a one-in-three
+    /// draw, an empty block above, and raw brightness >= 9 at that block.
     fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            if rand::rng().random_range(0..=3) == 0 {
-                update_leaves_and_grow(args.world.clone(), args.position).await;
+            if rand::rng().random_range(0..GROWTH_CHANCE_DENOMINATOR) != 0 {
+                return;
             }
+            let above = args.position.up();
+            if !args.world.get_block_state(&above).is_air()
+                || args.world.get_raw_brightness(&above, 0) < MIN_GROWTH_LIGHT
+            {
+                return;
+            }
+            update_leaves_and_grow(args.world.clone(), args.position).await;
         })
     }
 }
@@ -152,8 +177,10 @@ async fn update_leaves_and_grow(world: Arc<World>, position: &BlockPos) {
         return;
     }
 
-    let bamboo_count = count_bamboo_below(&world, position);
-    if bamboo_count >= 16 {
+    // `growBamboo`'s `height` argument: the stalk blocks below plus this one
+    // (`BambooStalkBlock.randomTick` passes `getHeightBelowUpToMax(level, pos) + 1`).
+    let height = count_bamboo_below(&world, position) + 1;
+    if height >= MAX_STALK_HEIGHT {
         return;
     }
     let (block_below, state_id_below) = world.get_block_and_state_id(&below_pos);
@@ -161,7 +188,7 @@ async fn update_leaves_and_grow(world: Arc<World>, position: &BlockPos) {
 
     let mut props_below = BambooLikeProperties::from_state_id(state_id_below, block_below);
 
-    if bamboo_count >= 1 {
+    if height >= 1 {
         let below_is_bamboo = block_below == &Block::BAMBOO;
         let below_has_leaves = props_below.leaves != BambooLeaves::None;
 
@@ -197,9 +224,7 @@ async fn update_leaves_and_grow(world: Arc<World>, position: &BlockPos) {
 
     props.age = u8::from(!(props.age != 1 && block_two_below == &Block::BAMBOO));
 
-    props.stage = u8::from(
-        !((bamboo_count < 11 || rand::rng().random::<f32>() >= 0.25) && bamboo_count != 15),
-    );
+    props.stage = grown_stage(height, rand::rng().random::<f32>());
 
     world
         .set_block_state(&above_pos, props.to_state_id(block), BlockFlags::NOTIFY_ALL)
@@ -277,5 +302,41 @@ impl PlantBlockBase for BambooBlock {
 
     fn can_place_at(&self, block_accessor: &dyn BlockAccessor, block_pos: &BlockPos) -> bool {
         <Self as PlantBlockBase>::can_plant_on_top(self, block_accessor, &block_pos.down())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GROWTH_CHANCE_DENOMINATOR, MAX_STALK_HEIGHT, MIN_GROWTH_LIGHT, grown_stage};
+
+    #[test]
+    fn growth_constants_match_vanilla() {
+        // BambooStalkBlock.randomTick: nextInt(3), brightness >= 9, height < 16.
+        assert_eq!(GROWTH_CHANCE_DENOMINATOR, 3);
+        assert_eq!(MIN_GROWTH_LIGHT, 9);
+        assert_eq!(MAX_STALK_HEIGHT, 16);
+    }
+
+    #[test]
+    fn short_stalks_always_keep_growing() {
+        // height < 11 with any roll leaves STAGE at 0, so the stalk keeps growing.
+        for height in 1..11 {
+            assert_eq!(grown_stage(height, 0.0), 0);
+            assert_eq!(grown_stage(height, 0.99), 0);
+        }
+    }
+
+    #[test]
+    fn tall_stalks_can_stop_on_a_low_roll() {
+        // From height 11 a nextFloat() below 0.25 sets STAGE 1 (stop growing).
+        assert_eq!(grown_stage(11, 0.24), 1);
+        assert_eq!(grown_stage(11, 0.25), 0);
+    }
+
+    #[test]
+    fn height_fifteen_always_stops() {
+        // BambooStalkBlock.java:209's `&& height != 15` forces STAGE 1 at 15.
+        assert_eq!(grown_stage(15, 0.99), 1);
+        assert_eq!(grown_stage(14, 0.99), 0);
     }
 }

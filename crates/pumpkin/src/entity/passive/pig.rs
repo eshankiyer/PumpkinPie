@@ -154,22 +154,22 @@ impl Mob for PigEntity {
                 && !self.is_baby()
                 && super::equine::is_valid_saddle_item(&saddle, self.get_entity().entity_type);
             if !saddled {
-                return Mob::has_controlling_passenger(self).await;
+                return self.default_has_controlling_passenger().await;
             }
 
             let passenger = self.get_entity().passengers.lock().await.first().cloned();
             let Some(passenger) = passenger else {
-                return Mob::has_controlling_passenger(self).await;
+                return self.default_has_controlling_passenger().await;
             };
             let Some(player) = passenger.get_player() else {
-                return Mob::has_controlling_passenger(self).await;
+                return self.default_has_controlling_passenger().await;
             };
             let main_hand = player.inventory().held_item().await.item.id;
             if main_hand == Item::CARROT_ON_A_STICK.id {
                 return true;
             }
             player.inventory().off_hand_item().await.item.id == Item::CARROT_ON_A_STICK.id
-                || Mob::has_controlling_passenger(self).await
+                || self.default_has_controlling_passenger().await
         })
     }
 

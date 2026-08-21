@@ -1,7 +1,7 @@
-use crate::block::blocks::plant::PlantBlockBase;
+use crate::block::blocks::plant::{PlantBlockBase, grow_plant_head};
 use crate::block::{
     BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, CanPlaceAtArgs,
-    GetStateForNeighborUpdateArgs, PlacedArgs,
+    GetStateForNeighborUpdateArgs, PlacedArgs, RandomTickArgs,
 };
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BlockProperties, WaterLikeProperties};
@@ -17,7 +17,27 @@ impl BlockMetadata for KelpBlock {
     }
 }
 
+/// `KelpBlock.GROW_PER_TICK_PROBABILITY` (`KelpBlock.java:23`).
+const GROW_PER_TICK_PROBABILITY: f64 = 0.14;
+
 impl BlockBehaviour for KelpBlock {
+    /// `GrowingPlantHeadBlock.randomTick` with `KelpBlock.canGrowInto`
+    /// (`KelpBlock.java:36-38`: the target must be water).
+    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            grow_plant_head(
+                args.world,
+                args.position,
+                &Block::KELP,
+                &Block::KELP_PLANT,
+                pumpkin_data::BlockDirection::Up,
+                GROW_PER_TICK_PROBABILITY,
+                |block| block == &Block::WATER,
+            )
+            .await;
+        })
+    }
+
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
         <Self as PlantBlockBase>::can_place_at(self, args.block_accessor, args.position)
     }

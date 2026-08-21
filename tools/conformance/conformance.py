@@ -106,6 +106,7 @@ from collections import defaultdict
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from aliases import (  # noqa: E402
+    CLASS_FILE_BLOCKLIST,
     CLASS_FILE_HINTS,
     CLASS_METHOD_ALIASES,
     CLIENT_ONLY_METHODS,
@@ -187,7 +188,134 @@ def probe(label: str, condition: bool, detail: str = "") -> None:
 # ---------------------------------------------------------------------------
 
 
+def _sanitize(text: str) -> str:
+    """Blank out comments and literals, preserving offsets, so brace counting is sound.
+
+    Without this a `"}"` inside a string or a brace in a javadoc snippet closes a class
+    body early and every method after it is attributed to the wrong class.
+    """
+    out = list(text)
+    n = len(text)
+
+    def blank(a: int, b: int) -> None:
+        for k in range(a, min(b, n)):
+            if out[k] != "\n":
+                out[k] = " "
+
+    i = 0
+    while i < n:
+        c = text[i]
+        if c == "/" and text[i + 1 : i + 2] == "/":
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            blank(i, j)
+            i = j
+        elif c == "/" and text[i + 1 : i + 2] == "*":
+            j = text.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            blank(i, j)
+            i = j
+        elif c == '"':
+            if text[i : i + 3] == '"""':
+                j = text.find('"""', i + 3)
+                j = n if j < 0 else j + 3
+            else:
+                j = i + 1
+                while j < n:
+                    if text[j] == "\\":
+                        j += 2
+                        continue
+                    if text[j] == '"':
+                        j += 1
+                        break
+                    if text[j] == "\n":
+                        break
+                    j += 1
+            blank(i, j)
+            i = j
+        elif c == "'":
+            j = i + 1
+            while j < n:
+                if text[j] == "\\":
+                    j += 2
+                    continue
+                if text[j] == "'":
+                    j += 1
+                    break
+                j += 1
+            blank(i, j)
+            i = j
+        else:
+            i += 1
+    return "".join(out)
+
+
+TYPE_DECL_RE = re.compile(
+    r"(?:^|[\s;{}])"
+    r"((?:(?:public|protected|private|static|final|abstract|sealed|non-sealed|strictfp)\s+)*)"
+    r"(class|interface|enum|record)\s+(\w+)"
+)
+
+
+def types_in_file(text: str) -> tuple[str, list[dict]]:
+    """Every named type declared in one .java file, with the span of its body.
+
+    Returns the sanitized text alongside, because method offsets are taken from it.
+    Anonymous classes are deliberately NOT pushed: a method inside `new Runnable() {...}`
+    belongs, for our purposes, to the named class that encloses it.
+    """
+    s = _sanitize(text)
+    decls = {}
+    for m in TYPE_DECL_RE.finditer(s):
+        mods = m.group(1)
+        decls[m.start(2)] = (m.group(3), "public" in mods or "protected" in mods)
+
+    found: list[dict] = []
+    stack: list[list] = []
+    pending = None
+    depth = 0
+    for i, c in enumerate(s):
+        if pending is None and i in decls:
+            pending = decls[i]
+        if c == "{":
+            depth += 1
+            if pending is not None:
+                name, is_pub = pending
+                qual = f"{stack[-1][0]}.{name}" if stack else name
+                stack.append([qual, name, is_pub, i + 1, depth])
+                pending = None
+        elif c == "}":
+            if stack and stack[-1][4] == depth:
+                q, name, is_pub, start, _ = stack.pop()
+                found.append(
+                    {"qualified": q, "simple": name, "public": is_pub, "start": start, "end": i}
+                )
+            depth -= 1
+        elif c == ";" and pending is not None:
+            pending = None
+    for q, name, is_pub, start, _ in stack:
+        found.append(
+            {"qualified": q, "simple": name, "public": is_pub, "start": start, "end": len(s)}
+        )
+    return s, found
+
+
 def enumerate_vanilla() -> list[dict]:
+    """One unit per NAMED vanilla type, nested types included as `Outer.Inner`.
+
+    NESTED-CLASS ATTRIBUTION (fixed 2026-08-21). This used to take the first class
+    declaration in the file as the name and every METHOD_RE hit anywhere in the file as
+    that class's methods. Nested builders therefore hung on their outer class: 41 of
+    `Item`'s 84 methods were really `Item.Properties`'s (`axe`, `durability`, `food`,
+    `fireResistant`), and every one of them was flagged as a missing `Item` method.
+
+    Nested types are emitted as their own units rather than merely dropped, because they
+    ARE separate vanilla classes with their own API; dropping them would shrink the
+    denominator silently and hide real gaps (`TreeConfiguration`, `OreConfiguration`).
+    Only public/protected types are emitted - a package-private helper class in the same
+    file is not part of the outer class's surface - but their methods are still attributed
+    to them, so they no longer inflate the outer class.
+    """
     if not VANILLA_ROOT.exists():
         raise SystemExit(
             f"decompile missing at {VANILLA_ROOT}\nrun tools/decompile-vanilla.sh, or set PUMPKIN_DECOMP"
@@ -198,25 +326,43 @@ def enumerate_vanilla() -> list[dict]:
         if not pkg.exists():
             continue
         for java in sorted(pkg.rglob("*.java")):
-            text = java.read_text(encoding="utf-8", errors="replace")
-            match = CLASS_RE.search(text)
-            name = match.group(1) if match else java.stem
-            if name in NOISE_CLASSES:
+            raw = java.read_text(encoding="utf-8", errors="replace")
+            text, types = types_in_file(raw)
+            if not types:
                 continue
-            methods = {
-                m.group(1)
-                for m in METHOD_RE.finditer(text)
-                if m.group(1) not in KEYWORD_FALSE_POSITIVES and m.group(1) != name
-            }
-            methods -= STRUCTURAL_EXCLUSIONS
-            units.append(
-                {
-                    "subsystem": subsystem,
-                    "vanilla_class": name,
-                    "vanilla_path": str(java.relative_to(DECOMP_ROOT)),
-                    "methods": sorted(methods),
-                }
-            )
+            # innermost-first, so the smallest containing body wins
+            by_span = sorted(types, key=lambda t: t["end"] - t["start"])
+            owned: dict[str, set[str]] = {t["qualified"]: set() for t in types}
+            for m in METHOD_RE.finditer(text):
+                name = m.group(1)
+                if name in KEYWORD_FALSE_POSITIVES:
+                    continue
+                for t in by_span:
+                    if t["start"] <= m.start() < t["end"]:
+                        owned[t["qualified"]].add(name)
+                        break
+
+            emit = [t for t in types if t["public"]]
+            if not emit:
+                # no public type in the file (package-private helper): keep the outermost
+                # so the file is still represented, matching the old fallback.
+                emit = [max(types, key=lambda t: t["end"] - t["start"])]
+            for t in emit:
+                simple = t["simple"]
+                if simple in NOISE_CLASSES or t["qualified"] in NOISE_CLASSES:
+                    continue
+                methods = {m for m in owned[t["qualified"]] if m != simple}
+                methods -= STRUCTURAL_EXCLUSIONS
+                units.append(
+                    {
+                        "subsystem": subsystem,
+                        "vanilla_class": t["qualified"],
+                        "simple_name": simple,
+                        "nested": "." in t["qualified"],
+                        "vanilla_path": str(java.relative_to(DECOMP_ROOT)),
+                        "methods": sorted(methods),
+                    }
+                )
     return units
 
 
@@ -284,6 +430,9 @@ def source_roots() -> list[str]:
 
 
 SRC_ROOTS = source_roots()
+# Some probes assert facts about THIS fork's layout; measuring another repo must not fail
+# on them, but every repo-agnostic probe still runs, so no run ships unprobed.
+IS_PUMPKIN = (REPO_ROOT / "crates" / "pumpkin").is_dir()
 # The crate that holds most gameplay behaviour, used only to break ties between two files
 # declaring the same name. Pumpkin puts it in crates/pumpkin, Steel in steel-core.
 MAIN_CRATE = next(
@@ -309,6 +458,10 @@ def _decl_score(name: str, path: str) -> tuple:
     """
     return (
         pathlib.Path(path).stem == camel_to_snake(name),
+        # The decompile is the JAVA edition. A `pub struct Attribute` in a bedrock packet
+        # module is a different protocol's payload, not this class - it was winning the
+        # Attribute and LevelChunk mappings outright.
+        "/bedrock/" not in path,
         bool(MAIN_CRATE) and path.startswith(f"{MAIN_CRATE}/"),
         "/generated/" not in path,
         -len(path),
@@ -338,7 +491,8 @@ def build_indexes() -> dict:
         stem = path.stem if path.stem != "mod" else path.parent.name
         stems[stem].append(rel)
     for stem, paths in stems.items():
-        paths.sort(key=lambda x: (not (MAIN_CRATE and x.startswith(f"{MAIN_CRATE}/")),
+        paths.sort(key=lambda x: ("/bedrock/" in x,
+                                  not (MAIN_CRATE and x.startswith(f"{MAIN_CRATE}/")),
                                   "/generated/" in x, len(x), x))
 
     cmd_dirs = [d for d in (REPO_ROOT / r for r in SRC_ROOTS)
@@ -362,8 +516,47 @@ def build_indexes() -> dict:
     }
 
 
+# Nested class names that describe a STRUCTURAL role rather than a domain concept. A bare
+# match on these is a coin flip (`Builder` occurs 52 times in the enumerated set alone), so
+# a nested class named one of these is matched only as Outer+Inner.
+GENERIC_NESTED_NAMES = {
+    "Action", "Builder", "Cache", "Config", "Context", "Data", "Entry", "Factory", "Flowing",
+    "Handler", "Holder", "Impl", "Info", "Instance", "Key", "Layer", "Listener", "Mode",
+    "Mutable", "Node", "Operation", "Options", "Output", "Packed", "Pair", "Properties",
+    "Provider", "Result", "Rule", "Serializer", "Settings", "Source", "State", "Status",
+    "Template", "Type", "Types", "Value", "Variant", "Visitor", "Block", "Item", "Entity",
+    "Pos", "Set", "List", "Map",
+}
+
+
+def nested_candidates(class_name: str):
+    """`Item.Properties` -> ItemProperties, then Properties unless the inner name is generic.
+
+    Concatenation first because a Rust port that models a nested Java class nearly always
+    names it after both halves (TreeConfiguration, GeodeCrackSettings).
+    """
+    outer, _, inner = class_name.rpartition(".")
+    outer = outer.replace(".", "")
+    yield outer + inner
+    # A ONE-WORD inner name is not distinctive enough to identify a class by itself.
+    # Measured 2026-08-21 over the 65 nested classes that matched on the bare inner name:
+    # multi-word names (ShipwreckPiece, GhastMoveControl, FoxPounceGoal) were right almost
+    # every time, while one-word names were wrong about half the time - Column.Range hit a
+    # spline Range, SetNameFunction.Target hit a pathfinder Target, VaultBlockEntity.Server
+    # hit the game server. Requiring an internal camel boundary drops both groups' worth of
+    # noise at the cost of a handful of correct one-word hits (ServerStatus.Players).
+    if inner not in GENERIC_NESTED_NAMES and re.search(r"[a-z][A-Z]", inner):
+        yield inner
+
+
 def candidate_names(class_name: str):
     seen = set()
+    if "." in class_name:
+        for name in nested_candidates(class_name):
+            if name not in seen:
+                seen.add(name)
+                yield name
+        return
     for suffix in SUFFIX_VARIANTS:
         for name in (class_name, strip_suffix(class_name, suffix)):
             if name not in seen:
@@ -397,7 +590,46 @@ def hint_files(class_name: str) -> list[str]:
     return out
 
 
-def map_class(class_name: str, idx: dict) -> tuple[str, str | None, list[str]]:
+# Path fragments that a Rust file implementing a class of this subsystem should contain.
+# Used only to BREAK TIES: when several same-named files exist and at least one sits in the
+# right area, the ones sitting in a demonstrably different area are dropped. Vanilla Slime
+# (world/entity) matched both entity/mob/slime.rs and block/blocks/slime.rs, and the block
+# file's fns were credited to the mob. Subsystems whose layout has no single obvious
+# fragment are deliberately absent, so they keep every candidate.
+SUBSYSTEM_PATH_HINTS = {
+    "entity": ("/entity/",),
+    "block": ("/block/", "/blocks/"),
+    "item": ("/item/", "/items/"),
+    "inventory": ("/inventory/", "/screen"),
+    "protocol": ("/protocol/",),
+    "worldgen": ("/generation/",),
+    "chunk": ("/chunk/",),
+    "commands": ("/command",),
+}
+
+
+def _prefer_subsystem(files: list[str], subsystem: str | None) -> list[str]:
+    frags = SUBSYSTEM_PATH_HINTS.get(subsystem or "")
+    if not frags or len(files) < 2:
+        return files
+    right = [f for f in files if any(g in f for g in frags)]
+    if not right:
+        return files
+    other = {g for s, gs in SUBSYSTEM_PATH_HINTS.items() if s != subsystem for g in gs}
+    return [f for f in files if f in right or not any(g in f for g in other)]
+
+
+def _finish(files: list[str], class_name: str, subsystem: str | None) -> list[str]:
+    blocked = CLASS_FILE_BLOCKLIST.get(class_name, ())
+    files = [f for f in files if f not in blocked]
+    # The decompile is the Java edition throughout, so a bedrock-protocol file is never the
+    # best home for a vanilla class when any other candidate exists.
+    if any("/bedrock/" not in f for f in files):
+        files = [f for f in files if "/bedrock/" not in f]
+    return _prefer_subsystem(files, subsystem)
+
+
+def map_class(class_name: str, idx: dict, subsystem: str | None = None) -> tuple[str, str | None, list[str]]:
     """-> (match kind, matched Rust name, every Rust file believed to implement it).
 
     MANY-TO-MANY (2026-08-21). This used to return one file and stop at the first stage
@@ -440,7 +672,7 @@ def map_class(class_name: str, idx: dict) -> tuple[str, str | None, list[str]]:
         alias = KNOWN_ALIASES[class_name]
         note("known_alias", alias)
         add(idx["decls"].get(alias))
-        return kind, matched, files
+        return kind, matched, _finish(files, class_name, subsystem)
 
     flat = command_flatten(class_name)
     if flat is not None:
@@ -451,7 +683,7 @@ def map_class(class_name: str, idx: dict) -> tuple[str, str | None, list[str]]:
         elif flat in idx["commands"]:
             note("command_file_match", flat)
             add(idx["commands"][flat])
-        return kind or "none", matched, files
+        return kind or "none", matched, _finish(files, class_name, subsystem)
 
     cands = list(candidate_names(class_name))
     for cand in cands:
@@ -474,7 +706,7 @@ def map_class(class_name: str, idx: dict) -> tuple[str, str | None, list[str]]:
             add(*paths)
         break
 
-    return kind or "none", matched, files
+    return kind or "none", matched, _finish(files, class_name, subsystem)
 
 
 # ---------------------------------------------------------------------------
@@ -492,20 +724,63 @@ def method_spellings(java_name: str, vanilla_class: str = "") -> set[str]:
     return out
 
 
+# Methods a derive or attribute macro writes for the type it is applied to. Without this
+# an entire crate can look empty: SteelMC declares its packets as derive-only structs
+# (`#[derive(ReadFrom, WriteTo, ClientPacket)] pub struct SUseItemOn { .. }`) with not one
+# literal `fn` in the file, so every packet file scanned as zero functions and its class was
+# dropped as unresolved - 46 of Steel's 135 dropouts. Names verified 2026-08-21 by reading
+# the macro crates: pumpkin-macros/src/lib.rs:203/228/524/585/635 and steel-macros'
+# read_from.rs:187, write_to.rs:241, packet.rs:53.
+MACRO_METHODS = {
+    # SteelMC
+    "ReadFrom": {"read"},
+    "WriteTo": {"write"},
+    "ClientPacket": {"get_id", "packet_id"},
+    "ServerPacket": {"get_id", "packet_id"},
+    "block_behavior": {"block_behavior"},
+    "item_behavior": {"item_behavior"},
+    "entity_behavior": {"entity_behavior"},
+    # Pumpkin
+    "PacketWrite": {"write"},
+    "PacketRead": {"read"},
+    "PacketReadSlice": {"read_slice"},
+    "java_packet": {"to_id", "packet_id"},
+    "bedrock_packet": {"packet_id"},
+    # shared / std, only where vanilla has a same-shaped method
+    "Default": {"default"},
+    "Serialize": {"serialize"},
+    "Deserialize": {"deserialize"},
+}
+DERIVE_RE = re.compile(r"#\[derive\(([^)]*)\)\]")
+ATTR_MACRO_RE = re.compile(r"^\s*#\[(\w+)[\(\]]", re.MULTILINE)
+
+
+def macro_fns(text: str) -> set[str]:
+    names: set[str] = set()
+    for m in DERIVE_RE.finditer(text):
+        for part in m.group(1).split(","):
+            names |= MACRO_METHODS.get(part.strip().rpartition("::")[2], set())
+    for m in ATTR_MACRO_RE.finditer(text):
+        names |= MACRO_METHODS.get(m.group(1), set())
+    return names
+
+
 def fns_in_file(rel: str) -> set[str]:
     path = REPO_ROOT / rel
     try:
-        return set(re.findall(r"\bfn\s+(\w+)", path.read_text(encoding="utf-8", errors="replace")))
+        text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return set()
+    return set(re.findall(r"\bfn\s+(\w+)", text)) | macro_fns(text)
 
 
 def classify(units: list[dict], idx: dict) -> dict:
     rows: list[dict] = []
     unresolved: list[str] = []
+    fnless: list[str] = []
     covered_classes = 0
     for unit in units:
-        kind, matched, refs = map_class(unit["vanilla_class"], idx)
+        kind, matched, refs = map_class(unit["vanilla_class"], idx, unit["subsystem"])
         unit["coverage_match_kind"] = kind
         unit["rust_files"] = refs
         unit["matched_name"] = matched
@@ -519,8 +794,12 @@ def classify(units: list[dict], idx: dict) -> dict:
         for ref in refs:
             local |= fns_in_file(ref)
         if not local:
-            unresolved.append(unit["vanilla_class"])
-            continue
+            # RESOLVED, but the file declares no callable of any kind: a plain data struct.
+            # This used to be lumped in with "unresolved" and dropped from the report, which
+            # is a mapping-failure verdict on what is actually a successful mapping. Keep it
+            # analysed - every method then falls to the elsewhere/absent tiers, which is the
+            # honest reading - and count it separately.
+            fnless.append(unit["vanilla_class"])
 
         in_file, elsewhere, absent, client_only, data_modeled = [], [], [], [], []
         for method in unit["methods"]:
@@ -586,6 +865,8 @@ def classify(units: list[dict], idx: dict) -> dict:
         "classes_analysed": len(rows),
         "classes_unresolved": len(unresolved),
         "unresolved_classes": sorted(unresolved),
+        "classes_resolved_without_fns": len(fnless),
+        "resolved_without_fns": sorted(fnless),
         "classes_multi_file": sum(1 for r in rows if len(r["rust_files"]) > 1),
         "methods_scored": scored,
         "methods_name_matched": present,
@@ -624,10 +905,10 @@ def run_probes(units: list[dict], idx: dict, report: dict) -> list[str]:
 
     probe(
         "class count in a plausible band",
-        1000 <= len(units) <= 3000,
+        2500 <= len(units) <= 4500,
         f"got {len(units)}",
     )
-    passed.append(f"enumerated {len(units)} classes (band 1000-3000)")
+    passed.append(f"enumerated {len(units)} classes (band 2500-4500)")
 
     # known-true: Goal.java carries isInterruptable, read at Goal.java:19 this campaign.
     probe("Goal enumerated", "Goal" in by_name)
@@ -641,21 +922,83 @@ def run_probes(units: list[dict], idx: dict, report: dict) -> list[str]:
     # known-false: a constructor must never be recorded as a method.
     probe(
         "constructors excluded",
-        all(u["vanilla_class"] not in u["methods"] for u in units),
+        all(u["simple_name"] not in u["methods"] for u in units),
     )
     passed.append("no class records its own constructor as a method")
 
     probe("package-info filtered", "package-info" not in by_name)
     passed.append("package-info noise filtered")
 
+    # -- stage 1b: nested-class attribution, added 2026-08-21 --------------------
+    # known-true: Item.Properties is its own unit and owns the builder calls.
+    props = by_name.get("Item.Properties")
+    probe("Item.Properties enumerated as its own class", props is not None)
+    probe(
+        "Item.Properties owns the builder calls",
+        {"axe", "durability", "food", "fireResistant"} <= set(props["methods"]),
+        f"got {props['methods'][:10]}",
+    )
+    # known-false: the outer class must NOT claim them. This was the largest measured
+    # false-positive source - 41 of Item's 84 methods were Properties'.
+    probe(
+        "Item no longer claims its nested builder's methods",
+        not ({"axe", "durability", "food", "fireResistant"} & set(by_name["Item"]["methods"])),
+        f"got {by_name['Item']['methods']}",
+    )
+    probe(
+        "Item still owns its own methods",
+        "useOn" in by_name["Item"]["methods"] or "use" in by_name["Item"]["methods"],
+        "the brace walker lost the outer body",
+    )
+    # known-false: a nested constructor is not a method of its own class either.
+    probe("Properties does not record its constructor", "Properties" not in props["methods"])
+    # known-false: braces inside string and char literals must not close a class body.
+    sanity = 'public class A { public void f() { String s = "}"; char c = \'}\'; } }'
+    _, tys = types_in_file(sanity)
+    probe("literals do not close a class body", len(tys) == 1 and tys[0]["simple"] == "A",
+          f"got {tys}")
+    passed.append("nested attribution: Item.Properties owns axe/durability/food, Item does not")
+
     # -- stage 2: the mapping ----------------------------------------------------
     probe("struct index non-empty", len(idx["structs"]) > 500, f"got {len(idx['structs'])}")
     probe("fn index non-empty", len(idx["fns"]) > 2000, f"got {len(idx['fns'])}")
-    probe("command index non-empty", len(idx["commands"]) > 40, f"got {len(idx['commands'])}")
     passed.append(
         f"indexes: {len(idx['structs'])} types, {len(idx['fns'])} fns, "
         f"{len(idx['commands'])} command files"
     )
+
+    # -- repo-agnostic: macro-declared methods, added 2026-08-21 -----------------
+    # known-true: a derive-only struct has methods. SteelMC's packet structs contain no
+    # literal `fn`, which scanned as an empty file and dropped 46 packet classes.
+    probe(
+        "derive names are read as methods",
+        macro_fns("#[derive(Clone, Debug, WriteTo, ReadFrom)]\npub struct X;") == {"read", "write"},
+        f"got {macro_fns('#[derive(WriteTo, ReadFrom)]')}",
+    )
+    probe(
+        "attribute macros are read as methods",
+        "to_id" in macro_fns("#[java_packet(BLOCK_UPDATE)]\npub struct CBlockUpdate;"),
+    )
+    # known-false: an unknown macro must not invent methods.
+    probe(
+        "unknown macros contribute nothing",
+        macro_fns("#[derive(ZzzNotARealDerive)]\n#[zzz_not_a_real_attr(x)]") == set(),
+    )
+    probe(
+        "a resolved file with no fn is analysed, not dropped",
+        report["classes_unresolved"] < report["classes_analysed"] / 10,
+        f"{report['classes_unresolved']} unresolved vs {report['classes_analysed']} analysed",
+    )
+    passed.append(
+        f"macro-declared methods seen; {report['classes_resolved_without_fns']} classes "
+        f"resolved to a fn-less file are analysed rather than dropped"
+    )
+
+    if not IS_PUMPKIN:
+        passed.append("pumpkin-specific rename/mapping probes skipped (measuring another repo)")
+        return passed
+
+    probe("command index non-empty", len(idx["commands"]) > 40, f"got {len(idx['commands'])}")
 
     # known-true renames that plain name matching cannot recover.
     kind, matched, _ = map_class("FoodData", idx)
@@ -704,7 +1047,21 @@ def run_probes(units: list[dict], idx: dict, report: dict) -> list[str]:
     probe("hints never yield a nonexistent path", all((REPO_ROOT / h).is_file()
                                                       for c in ("Item", "MaceItem")
                                                       for h in hint_files(c)))
+    # known-false: same-stem contamination. Vanilla Slime is an entity; block/blocks/slime.rs
+    # is a different class that happens to share the stem, and its fns were credited to the mob.
+    _, _, slime = map_class("Slime", idx, "entity")
+    probe(
+        "Slime does not pick up the slime BLOCK file",
+        slime and all("/block/" not in r for r in slime),
+        f"got {slime}",
+    )
+    # known-false: a Java-edition class must not land in a bedrock packet module.
+    for cls, sub in (("Attribute", "entity"), ("LevelChunk", "chunk")):
+        _, _, refs = map_class(cls, idx, sub)
+        probe(f"{cls} avoids /bedrock/", refs and all("/bedrock/" not in r for r in refs),
+              f"got {refs}")
     passed.append("many-to-many: Pig falls through, Item spans files, WeatheringCopper* share one")
+    passed.append("wrong-map probes: Slime stays an entity, Attribute/LevelChunk avoid bedrock")
 
     # known-false: an invented class must not match anything.
     kind, matched, _ = map_class("ZzzNotARealVanillaClass", idx)

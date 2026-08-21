@@ -998,6 +998,14 @@ pub trait Mob: EntityBase + Send + Sync {
     /// Vanilla `Mob.hasControllingPassenger` and `Mob.getControllingPassenger`.
     /// Rideable mobs with player-specific controls override this (for example, Pig).
     fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
+        self.default_has_controlling_passenger()
+    }
+
+    /// The `Mob`-level behaviour, callable from an override without recursing.
+    ///
+    /// `Mob::has_controlling_passenger(self)` inside an override resolves back to that same
+    /// override, so a pig that fell through to it recursed until the tokio worker's stack died.
+    fn default_has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
         Box::pin(async move {
             if self.get_mob_entity().is_no_ai() {
                 return false;

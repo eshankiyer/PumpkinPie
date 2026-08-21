@@ -73,6 +73,14 @@ NOISE_CLASSES = {"package-info"}
 # being measured are silently dropped, which is what keeps the table portable to Steel.
 # Every entry must name the read that justifies it.
 CLASS_FILE_HINTS = {
+    # vanilla Attribute (world/entity/ai/attributes) - the only `pub struct Attribute` in
+    # the tree is a bedrock packet payload; the real analogue is the attribute registry.
+    "Attribute": ["crates/pumpkin/src/entity/attributes.rs"],
+    "AttributeInstance": ["crates/pumpkin/src/entity/attributes.rs"],
+    # vanilla LevelChunk (world/level/chunk) - matched bedrock/client/level_chunk.rs, a
+    # packet. ChunkData is the chunk itself.
+    "LevelChunk": ["crates/pumpkin-world/src/chunk/mod.rs"],
+    "ChunkAccess": ["crates/pumpkin-world/src/chunk/mod.rs"],
     # vanilla Item is a behaviour base class; Pumpkin splits it into the generated data
     # table (which the automatic mapping already finds), the ItemBehaviour trait, and
     # ItemStack, which carries hurtAndBreak/getDestroySpeed/isCorrectToolForDrops.
@@ -297,3 +305,17 @@ DATA_MODELED_METHODS = {
 # empty deliberately: every exclusion must be justified by a read, and broad prefix rules
 # (`get*`) hide real gaps. Add here only with a comment naming the evidence.
 STRUCTURAL_EXCLUSIONS: set[str] = set()
+
+
+# Hand-verified WRONG maps: the Rust file declares the same name but implements something
+# else entirely, so every method of the vanilla class becomes a phantom lead. Keyed by
+# exact path, so the entry is a no-op in any repo that does not have that file.
+#
+#   BoundingBox: vanilla's is world/level/levelgen/structure/BoundingBox, an INTEGER box
+#   used to lay out structure pieces. pumpkin-util's boundingbox.rs is the float entity AABB
+#   (vanilla AABB). pumpkin-world has no structure box at all - `rg BoundingBox` over
+#   crates/pumpkin-world/src returns nothing (checked 2026-08-21) - so the class is genuinely
+#   uncovered and its 22 "absences" were an artefact of the name collision.
+CLASS_FILE_BLOCKLIST = {
+    "BoundingBox": ("crates/pumpkin-util/src/math/boundingbox.rs",),
+}
