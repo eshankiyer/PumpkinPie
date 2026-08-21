@@ -1,16 +1,34 @@
 use std::sync::Arc;
 
+use pumpkin_data::BlockId;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_util::GameMode;
 
 use crate::block::BrokenArgs;
-use crate::block::{BlockBehaviour, BlockFuture};
+use crate::block::{BlockBehaviour, BlockFuture, BlockMetadata};
 use crate::entity::Entity;
 
-#[pumpkin_block_from_tag("c:cobblestones/infested")]
 pub struct InfestedBlock;
+
+impl BlockMetadata for InfestedBlock {
+    /// Every infested block, per their registrations in `Blocks.java`: `InfestedBlock` for the
+    /// stone and stone-brick family (:2275-2290) and `InfestedRotatedPillarBlock` for deepslate
+    /// (:5539-5543). No `minecraft:` tag spans them, and `c:cobblestones/infested` - what this
+    /// used to register - names only the cobblestone, so the other six released no silverfish.
+    fn ids() -> Box<[BlockId]> {
+        [
+            BlockId::INFESTED_STONE,
+            BlockId::INFESTED_COBBLESTONE,
+            BlockId::INFESTED_STONE_BRICKS,
+            BlockId::INFESTED_MOSSY_STONE_BRICKS,
+            BlockId::INFESTED_CRACKED_STONE_BRICKS,
+            BlockId::INFESTED_CHISELED_STONE_BRICKS,
+            BlockId::INFESTED_DEEPSLATE,
+        ]
+        .into()
+    }
+}
 
 impl BlockBehaviour for InfestedBlock {
     fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
@@ -36,11 +54,12 @@ impl BlockBehaviour for InfestedBlock {
                 return;
             }
 
-            let entity = Entity::new(
-                args.world.clone(),
-                args.position.0.to_f64(),
-                &EntityType::SILVERFISH,
-            );
+            // `InfestedBlock.spawnInfestation`: x + 0.5, y, z + 0.5 - centred on the block,
+            // not its corner.
+            let mut spawn_pos = args.position.0.to_f64();
+            spawn_pos.x += 0.5;
+            spawn_pos.z += 0.5;
+            let entity = Entity::new(args.world.clone(), spawn_pos, &EntityType::SILVERFISH);
 
             args.world.spawn_entity(Arc::new(entity)).await;
         })

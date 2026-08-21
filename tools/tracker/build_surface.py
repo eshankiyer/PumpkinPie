@@ -53,7 +53,7 @@ def covered_blocks() -> set[str]:
         # A third idiom: a hand-written `impl BlockMetadata { fn ids() }` that reads tag tables
         # directly, which neither attribute macro covers. PressurePlateBlock is one, and all 16
         # pressure plates counted as uncovered because of it.
-        for match in re.finditer(r"impl BlockMetadata for \w+ \{", text):
+        for match in re.finditer(r"impl (?:[\w:]+::)?BlockMetadata for \w+ \{", text):
             body, depth = "", 0
             for index in range(match.end() - 1, len(text)):
                 body += text[index]
