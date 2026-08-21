@@ -356,11 +356,25 @@ pub fn from_type(
     mob
 }
 
+/// The two non-spawner contexts that reach `check_spawn_rules`.
+///
+/// Vanilla evaluates generation-time predicates against a `WorldGenRegion`, whose
+/// `getNearestPlayer` is overridden to return `null` and whose `players()` returns an
+/// empty list (`WorldGenRegion.java:173-175`, `482-484`), while natural spawning
+/// evaluates the same predicates against the live server world. Pumpkin runs both
+/// paths against the same `World`, so the caller has to say which one it is.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SpawnRuleContext {
+    ChunkGeneration,
+    Natural,
+}
+
 #[allow(clippy::too_many_lines)]
 pub fn check_spawn_rules(
     entity_type: &'static EntityType,
     world: &World,
     pos: &BlockPos,
+    context: SpawnRuleContext,
     is_thundering: bool,
 ) -> bool {
     let id = entity_type.id;
@@ -380,13 +394,34 @@ pub fn check_spawn_rules(
         return rand::random_range(0u8..20) == 0 || !world.can_see_sky_from_below_water(pos);
     }
 
-    if id == EntityType::HUSK.id {
-        return world.can_see_sky(pos)
-            && mob::MobEntity::check_monster_spawn_rules(world, pos, is_thundering);
+    // `Monster.checkSurfaceMonstersSpawnRules` (Monster.java:113-117) adds sky visibility
+    // to the usual monster darkness and placement checks. Its `EntitySpawnReason.isSpawner`
+    // escape covers only SPAWNER and TRIAL_SPAWNER (EntitySpawnReason.java:23-25), neither of
+    // which reaches this function, so the sky check always applies here.
+    if uses_surface_monster_spawn_rules(id) {
+        return surface_monster_spawn_rules_allowed(
+            mob::MobEntity::check_monster_spawn_rules(world, pos, is_thundering),
+            world.can_see_sky(pos),
+        );
     }
 
     if id == EntityType::MAGMA_CUBE.id {
         return world.level_info.load().difficulty != pumpkin_util::Difficulty::Peaceful;
+    }
+
+    // `Ghast.checkGhastSpawnRules` (Ghast.java:149-153): no darkness requirement, but only
+    // one in twenty attempts succeeds. Its `checkMobSpawnRules` call is the support-block
+    // test, which the ON_GROUND placement check already applies before this function runs.
+    if id == EntityType::GHAST.id {
+        return world.level_info.load().difficulty != pumpkin_util::Difficulty::Peaceful
+            && ghast_spawn_roll_allowed(rand::random_range(0u8..20));
+    }
+
+    // `Stray.checkStraySpawnRules` (Stray.java:26-37) requires ordinary monster spawning plus
+    // visible sky. Powder snow above the candidate does not block that sky check, so walk
+    // through it before testing.
+    if id == EntityType::STRAY.id {
+        return check_stray_spawn_rules(world, pos, is_thundering);
     }
 
     if id == EntityType::DROWNED.id {
@@ -517,6 +552,32 @@ pub fn check_spawn_rules(
     if id == EntityType::PIGLIN.id {
         return world.level_info.load().difficulty != pumpkin_util::Difficulty::Peaceful
             && world.get_block(&pos.down()) != &Block::NETHER_WART_BLOCK;
+    }
+
+    // `ZombifiedPiglin.checkZombifiedPiglinSpawnRules` (ZombifiedPiglin.java:170-174) uses
+    // the same peaceful and Nether Wart Block gates as piglins, but has no darkness or
+    // support-block requirement.
+    if id == EntityType::ZOMBIFIED_PIGLIN.id {
+        return zombified_piglin_spawn_rules_allowed(
+            world.level_info.load().difficulty != pumpkin_util::Difficulty::Peaceful,
+            world.get_block(&pos.down()) != &Block::NETHER_WART_BLOCK,
+        );
+    }
+
+    // `Endermite.checkEndermiteSpawnRules` (Endermite.java:131-144) and
+    // `Silverfish.checkSilverfishSpawnRules` (Silverfish.java:111-124) use the any-light
+    // predicate, then reject the attempt when `getNearestPlayer(.., 5.0, true)` finds a
+    // player - `true` selects `EntitySelector.NO_CREATIVE_OR_SPECTATOR`
+    // (EntityGetter.java:95-97, EntitySelector.java:14-16). A `WorldGenRegion` has no
+    // players at all, so the query cannot fail on the generation path.
+    if uses_nearby_player_restricted_any_light_spawn_rules(id) {
+        let has_nearby_non_creative_player =
+            !no_non_creative_player_within_spawn_exclusion_range(world, pos);
+        return nearby_player_restricted_any_light_spawn_rules_allowed(
+            context,
+            mob::MobEntity::check_any_light_monster_spawn_rules(world, pos),
+            has_nearby_non_creative_player,
+        );
     }
 
     // `Strider.checkStriderSpawnRules`: after the lava placement check, walk
@@ -677,6 +738,55 @@ const fn uses_any_light_monster_spawn_rules(id: u16) -> bool {
     id == EntityType::BLAZE.id || id == EntityType::BREEZE.id || id == EntityType::ZOGLIN.id
 }
 
+/// `Endermite` and `Silverfish` use the any-light predicate plus a nearby-player exclusion.
+const fn uses_nearby_player_restricted_any_light_spawn_rules(id: u16) -> bool {
+    id == EntityType::ENDERMITE.id || id == EntityType::SILVERFISH.id
+}
+
+fn nearby_player_restricted_any_light_spawn_rules_allowed(
+    context: SpawnRuleContext,
+    any_light_rules_pass: bool,
+    has_nearby_non_creative_player: bool,
+) -> bool {
+    any_light_rules_pass
+        && (context == SpawnRuleContext::ChunkGeneration || !has_nearby_non_creative_player)
+}
+
+/// `SpawnPlacements` registrations using `Monster.checkSurfaceMonstersSpawnRules`
+/// (SpawnPlacements.java:113, 129, 157).
+const fn uses_surface_monster_spawn_rules(id: u16) -> bool {
+    id == EntityType::CAMEL_HUSK.id || id == EntityType::HUSK.id || id == EntityType::PARCHED.id
+}
+
+/// `Monster.checkSurfaceMonstersSpawnRules` outside a spawner.
+const fn surface_monster_spawn_rules_allowed(monster_rules_pass: bool, can_see_sky: bool) -> bool {
+    monster_rules_pass && can_see_sky
+}
+
+/// `Ghast.checkGhastSpawnRules`'s one-in-twenty roll after the difficulty gate.
+const fn ghast_spawn_roll_allowed(roll: u8) -> bool {
+    roll == 0
+}
+
+/// `ZombifiedPiglin.checkZombifiedPiglinSpawnRules`.
+const fn zombified_piglin_spawn_rules_allowed(
+    is_non_peaceful: bool,
+    below_is_not_nether_wart: bool,
+) -> bool {
+    is_non_peaceful && below_is_not_nether_wart
+}
+
+fn no_non_creative_player_within_spawn_exclusion_range(world: &World, pos: &BlockPos) -> bool {
+    world
+        .get_closest_player_where(pos.to_centered_f64(), 5.0, |player| {
+            !matches!(
+                player.gamemode.load(),
+                pumpkin_util::GameMode::Creative | pumpkin_util::GameMode::Spectator
+            )
+        })
+        .is_none()
+}
+
 /// `AgeableWaterCreature.checkSurfaceAgeableWaterCreatureSpawnRules`'s Y-range gate:
 /// `pos.getY() >= seaLevel - 13 && pos.getY() <= seaLevel`.
 const fn is_in_surface_water_y_range(y: i32, sea_level: i32) -> bool {
@@ -701,6 +811,16 @@ fn check_strider_spawn_rules(world: &World, pos: &BlockPos) -> bool {
     }
 
     world.get_block_state(&check_pos).is_air()
+}
+
+fn check_stray_spawn_rules(world: &World, pos: &BlockPos, is_thundering: bool) -> bool {
+    let mut check_sky_pos = pos.up();
+    while world.get_block(&check_sky_pos) == &Block::POWDER_SNOW {
+        check_sky_pos = check_sky_pos.up();
+    }
+
+    mob::MobEntity::check_monster_spawn_rules(world, pos, is_thundering)
+        && world.can_see_sky(&check_sky_pos.down())
 }
 
 fn check_bright_ground_spawn_rules(
@@ -923,7 +1043,13 @@ mod animal_spawn_dispatch_tests {
 
 #[cfg(test)]
 mod slime_spawn_dispatch_tests {
-    use super::{EntityType, uses_generic_monster_spawn_rules};
+    use super::{
+        EntityType, SpawnRuleContext, ghast_spawn_roll_allowed,
+        nearby_player_restricted_any_light_spawn_rules_allowed,
+        surface_monster_spawn_rules_allowed, uses_generic_monster_spawn_rules,
+        uses_nearby_player_restricted_any_light_spawn_rules, uses_surface_monster_spawn_rules,
+        zombified_piglin_spawn_rules_allowed,
+    };
     use pumpkin_data::chunk::{Biome, NETHER_BIOME_SOURCE};
 
     /// Slime is `MobCategory::MONSTER`, so the category-wide branch in `check_spawn_rules`
@@ -944,6 +1070,75 @@ mod slime_spawn_dispatch_tests {
     #[test]
     fn dedicated_monster_placements_skip_the_generic_branch() {
         assert!(!uses_generic_monster_spawn_rules(EntityType::HOGLIN.id));
+    }
+
+    #[test]
+    fn endermites_and_silverfish_use_any_light_with_player_exclusion() {
+        assert!(uses_nearby_player_restricted_any_light_spawn_rules(
+            EntityType::ENDERMITE.id
+        ));
+        assert!(uses_nearby_player_restricted_any_light_spawn_rules(
+            EntityType::SILVERFISH.id
+        ));
+        assert!(!uses_nearby_player_restricted_any_light_spawn_rules(
+            EntityType::ZOMBIE.id
+        ));
+    }
+
+    /// `WorldGenRegion` has no players, so vanilla's nearby-player rejection can only fire
+    /// on the natural path. Pumpkin runs both paths against the live world, so the
+    /// distinction has to come from the context argument.
+    #[test]
+    fn endermites_and_silverfish_only_apply_the_player_check_to_natural_spawns() {
+        assert!(nearby_player_restricted_any_light_spawn_rules_allowed(
+            SpawnRuleContext::ChunkGeneration,
+            true,
+            true,
+        ));
+        assert!(nearby_player_restricted_any_light_spawn_rules_allowed(
+            SpawnRuleContext::Natural,
+            true,
+            false,
+        ));
+        assert!(!nearby_player_restricted_any_light_spawn_rules_allowed(
+            SpawnRuleContext::Natural,
+            true,
+            true,
+        ));
+        assert!(!nearby_player_restricted_any_light_spawn_rules_allowed(
+            SpawnRuleContext::Natural,
+            false,
+            false,
+        ));
+    }
+
+    #[test]
+    fn surface_monster_spawn_rule_dispatch_matches_java_registrations() {
+        assert!(uses_surface_monster_spawn_rules(EntityType::CAMEL_HUSK.id));
+        assert!(uses_surface_monster_spawn_rules(EntityType::HUSK.id));
+        assert!(uses_surface_monster_spawn_rules(EntityType::PARCHED.id));
+        assert!(!uses_surface_monster_spawn_rules(EntityType::SKELETON.id));
+    }
+
+    #[test]
+    fn surface_monsters_require_darkness_and_open_sky() {
+        assert!(surface_monster_spawn_rules_allowed(true, true));
+        assert!(!surface_monster_spawn_rules_allowed(false, true));
+        assert!(!surface_monster_spawn_rules_allowed(true, false));
+    }
+
+    #[test]
+    fn ghasts_use_vanillas_one_in_twenty_roll() {
+        assert!(ghast_spawn_roll_allowed(0));
+        assert!(!ghast_spawn_roll_allowed(1));
+        assert!(!ghast_spawn_roll_allowed(19));
+    }
+
+    #[test]
+    fn zombified_piglins_ignore_darkness_but_reject_peaceful_and_nether_wart() {
+        assert!(zombified_piglin_spawn_rules_allowed(true, true));
+        assert!(!zombified_piglin_spawn_rules_allowed(false, true));
+        assert!(!zombified_piglin_spawn_rules_allowed(true, false));
     }
 
     /// The reported Nether sighting cannot come from the biome spawn tables: no biome the

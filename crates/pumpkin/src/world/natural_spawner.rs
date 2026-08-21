@@ -1,7 +1,8 @@
 use crate::entity::EntityBase;
 use crate::entity::passive::tropical_fish::TropicalFishEntity;
 use crate::entity::r#type::{
-    check_spawn_obstruction, check_spawn_obstruction_state, check_spawn_rules, from_type,
+    SpawnRuleContext, check_spawn_obstruction, check_spawn_obstruction_state, check_spawn_rules,
+    from_type,
 };
 use crate::world::World;
 use arc_swap::ArcSwap;
@@ -688,7 +689,13 @@ pub fn spawn_mobs_for_chunk_generation(
                         spawn_z,
                         entity_type,
                     )
-                    && check_spawn_rules(entity_type, world, &spawn_rule_pos, false)
+                    && check_spawn_rules(
+                        entity_type,
+                        world,
+                        &spawn_rule_pos,
+                        SpawnRuleContext::ChunkGeneration,
+                        false,
+                    )
                     && check_spawn_obstruction_state(
                         spawn_rule_pos.0.y,
                         world.sea_level,
@@ -1047,7 +1054,13 @@ pub fn is_valid_spawn_position_for_type(
     if !is_spawn_position_ok(world, block_pos, entity_type) {
         return false;
     }
-    if !check_spawn_rules(entity_type, world, block_pos, is_thundering) {
+    if !check_spawn_rules(
+        entity_type,
+        world,
+        block_pos,
+        SpawnRuleContext::Natural,
+        is_thundering,
+    ) {
         return false;
     }
     if !check_spawn_obstruction(world, block_pos, entity_type) {
@@ -1301,13 +1314,37 @@ pub fn is_valid_empty_spawn_block(
     entity_type.fire_immune || !block.has_tag(&MINECRAFT_FIRE)
 }
 
-/// Matches the support-block portion of vanilla `Mob.checkMobSpawnRules`.
-/// Magma blocks override `Block.isValidSpawn` and only permit fire-immune
-/// entities; a generic sturdy top-face check is not sufficient here.
+/// Matches the support-block portion of vanilla `Mob.checkMobSpawnRules` (Mob.java:810-815),
+/// which delegates to `BlockState.isValidSpawn`. The default predicate is a sturdy top face
+/// plus a light emission below 14 (BlockBehaviour.java:1006-1009); the blocks listed here are
+/// the ones whose `BlockBehaviour.Properties.isValidSpawn` is overridden in `Blocks.java`, so a
+/// generic sturdy top-face check is not sufficient for them.
 fn is_valid_spawn_support(state: &'static BlockState, entity_type: &'static EntityType) -> bool {
-    state.is_side_solid(BlockDirection::Up)
-        && state.luminance < 14
-        && (entity_type.fire_immune || Block::from_state_id(state.id) != &Block::MAGMA_BLOCK)
+    let block = Block::from_state_id(state.id);
+
+    match block.name {
+        // `Blocks::never`: bedrock 282, glass 635, moving_piston 833, repeater 2132,
+        // barrier 2935, chorus_flower 3642, scaffolding 4378, tinted_glass 5114.
+        "bedrock" | "glass" | "moving_piston" | "repeater" | "barrier" | "chorus_flower"
+        | "scaffolding" | "tinted_glass" => false,
+        // `Blocks::never` for every trapdoor (Blocks.java:2145-2244, 2953, 4727, 4737, 5242)
+        // and every copper grate variant (Blocks.java:5255).
+        name if name.ends_with("_trapdoor") || name.ends_with("copper_grate") => false,
+        // `Blocks::always`: soul_sand 2025, carved_pumpkin 2102, jack_o_lantern 2113,
+        // redstone_lamp 2604, mud 5476. The light emitters among these spawn despite the
+        // default predicate's luminance limit, which is why the override exists.
+        "soul_sand" | "carved_pumpkin" | "jack_o_lantern" | "redstone_lamp" | "mud" => true,
+        // `Blocks::ocelotOrParrot` (Blocks.java:5728-5730), set by `leavesProperties`
+        // (5761-5773) and by the cherry and pale oak leaves registrations (584, 603).
+        name if name.ends_with("_leaves") => {
+            entity_type.id == EntityType::OCELOT.id || entity_type.id == EntityType::PARROT.id
+        }
+        // Polar-bear-only overrides: ice 1954, frosted_ice 3735.
+        "ice" | "frosted_ice" => entity_type.id == EntityType::POLAR_BEAR.id,
+        // `entityType.fireImmune()` (Blocks.java:3747).
+        "magma_block" => entity_type.fire_immune,
+        _ => state.is_side_solid(BlockDirection::Up) && state.luminance < 14,
+    }
 }
 
 #[cfg(test)]
@@ -1331,6 +1368,76 @@ mod tests {
         assert!(counts_for_natural_spawning(GameMode::Survival));
         assert!(counts_for_natural_spawning(GameMode::Adventure));
         assert!(counts_for_natural_spawning(GameMode::Creative));
+    }
+
+    /// Every arm here is a `BlockBehaviour.Properties.isValidSpawn` override read out of
+    /// `Blocks.java`; `firefly_bush` (5699-5710) sets no override and so must keep taking
+    /// the default sturdy-face arm.
+    #[test]
+    fn support_overrides_match_blocks_is_valid_spawn_predicates() {
+        assert!(!is_valid_spawn_support(
+            Block::BEDROCK.default_state,
+            &EntityType::ZOMBIE
+        ));
+        assert!(!is_valid_spawn_support(
+            Block::COPPER_GRATE.default_state,
+            &EntityType::ZOMBIE
+        ));
+        assert!(!is_valid_spawn_support(
+            Block::WAXED_OXIDIZED_COPPER_GRATE.default_state,
+            &EntityType::ZOMBIE
+        ));
+        assert!(!is_valid_spawn_support(
+            Block::IRON_TRAPDOOR.default_state,
+            &EntityType::ZOMBIE
+        ));
+        assert!(is_valid_spawn_support(
+            Block::JACK_O_LANTERN.default_state,
+            &EntityType::ZOMBIE
+        ));
+        assert!(is_valid_spawn_support(
+            Block::SOUL_SAND.default_state,
+            &EntityType::ZOMBIE
+        ));
+        assert!(!is_valid_spawn_support(
+            Block::OAK_LEAVES.default_state,
+            &EntityType::ZOMBIE
+        ));
+        assert!(is_valid_spawn_support(
+            Block::OAK_LEAVES.default_state,
+            &EntityType::PARROT
+        ));
+        assert!(is_valid_spawn_support(
+            Block::FLOWERING_AZALEA_LEAVES.default_state,
+            &EntityType::OCELOT
+        ));
+        assert!(!is_valid_spawn_support(
+            Block::ICE.default_state,
+            &EntityType::ZOMBIE
+        ));
+        assert!(is_valid_spawn_support(
+            Block::ICE.default_state,
+            &EntityType::POLAR_BEAR
+        ));
+        assert!(is_valid_spawn_support(
+            Block::STONE.default_state,
+            &EntityType::ZOMBIE
+        ));
+    }
+
+    /// `firefly_bush` has no `isValidSpawn` override, so it falls through to the default
+    /// predicate and fails it for want of a sturdy top face - unlike leaves, which do carry
+    /// the ocelot-or-parrot override.
+    #[test]
+    fn firefly_bush_takes_the_default_support_predicate() {
+        assert!(!is_valid_spawn_support(
+            Block::FIREFLY_BUSH.default_state,
+            &EntityType::ZOMBIE
+        ));
+        assert!(!is_valid_spawn_support(
+            Block::FIREFLY_BUSH.default_state,
+            &EntityType::PARROT
+        ));
     }
 
     #[test]
