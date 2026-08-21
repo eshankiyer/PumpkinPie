@@ -1592,6 +1592,13 @@ pub trait Mob: EntityBase + Send + Sync {
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             let entity = self.get_entity();
+            // PENDING-INDEX-FIX: this default sits on `Mob`, but `DATA_BABY_ID` at index 16
+            // belongs to `AgeableMob`. Index 16 is a different field on mobs that are not
+            // ageable -- `DATA_SWELL_DIR` on a creeper, for one -- so a non-ageable mob that
+            // ever went to a negative age would publish that field instead. Nothing sets a
+            // negative age outside the ageable path today, which is why this is latent rather
+            // than live. The real fix is to move this send onto the `AgeableMob` trait; doing
+            // that safely means auditing every type that relies on this default first.
             let is_baby = entity.age.load(std::sync::atomic::Ordering::Relaxed) < 0;
             if is_baby {
                 entity.send_meta_data(

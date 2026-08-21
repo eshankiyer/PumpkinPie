@@ -36,6 +36,15 @@ impl ItemBehaviour for BoneMealItem {
         Box::pin(async move {
             let world = player.world();
             let state_id = world.get_block_state_id(&location);
+            // GAP: moss, pale moss and pitcher crop have no handler, so bone meal does nothing
+            // on them. Vanilla registers MOSS_BLOCK as
+            // `BonemealableFeaturePlacerBlock(CaveFeatures.MOSS_PATCH_BONEMEAL)`
+            // (Blocks.java:5429-5432) and PALE_MOSS_BLOCK with PALE_MOSS_PATCH_BONEMEAL
+            // (Blocks.java:5638-5641) -- bone meal places a configured feature, not blocks.
+            // `vegetation_patch.rs` implements the feature, but its `generate` takes a
+            // `GenerationCache`, and no bridge exists from a live World to a configured
+            // feature; `plant/sapling.rs` still says `//TODO generate tree` for the same
+            // reason. Building that bridge fixes both, and is why this is not a local fix.
             if server
                 .block_registry
                 .bone_meal(block, &world, &location, state_id)

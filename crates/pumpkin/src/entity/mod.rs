@@ -4921,6 +4921,175 @@ mod metadata_type_resolves_on_target_version_tests {
         );
         assert!(MetaDataType::INT.id(JavaMinecraftVersion::V_26_2) >= 0);
     }
+
+    /// Parse `pumpkin-data`'s generated tracked-data table into `module -> const -> id`.
+    ///
+    /// Resolving aliases (`pub const FLAGS: TrackedData = DATA_FLAGS_ID;`) matters: most
+    /// constants are reachable under several names in the same module.
+    fn tracked_data_table()
+    -> std::collections::HashMap<String, std::collections::HashMap<String, u8>> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../pumpkin-data/src/generated/tracked_data.rs");
+        let text = std::fs::read_to_string(&path).expect("readable generated tracked_data.rs");
+
+        let mut table: std::collections::HashMap<String, std::collections::HashMap<String, u8>> =
+            std::collections::HashMap::new();
+        let mut module = String::new();
+        let mut pending: Option<String> = None;
+        let mut aliases: Vec<(String, String, String)> = Vec::new();
+
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("pub mod ")
+                && let Some(name) = rest.strip_suffix(" {")
+            {
+                module = name.to_string();
+                continue;
+            }
+            if let Some(rest) = trimmed.strip_prefix("pub const ")
+                && let Some((name, tail)) = rest.split_once(": TrackedData = ")
+            {
+                if tail.starts_with("TrackedData {") {
+                    pending = Some(name.to_string());
+                } else if let Some(source) = tail.strip_suffix(';') {
+                    aliases.push((module.clone(), name.to_string(), source.to_string()));
+                }
+                continue;
+            }
+            if let Some(name) = pending.take()
+                && let Some(rest) = trimmed.strip_prefix("id: TrackedId { v26_2: ")
+                && let Some(value) = rest.strip_suffix("u8 },")
+                && let Ok(id) = value.parse::<u8>()
+            {
+                table.entry(module.clone()).or_default().insert(name, id);
+            }
+        }
+
+        for (module, name, source) in aliases {
+            if let Some(id) = table.get(&module).and_then(|m| m.get(&source)).copied() {
+                table.entry(module).or_default().insert(name, id);
+            }
+        }
+        table
+    }
+
+    /// Guard the per-entity tracked-data migration: a call site must not name another
+    /// entity's module.
+    ///
+    /// Upstream replaced one flat `TrackedData::NAME` namespace with per-entity modules, and
+    /// 24 files were migrated onto it. Naming the wrong module still compiles and still sends
+    /// a well-formed packet -- it just sends the right value under another entity's id, which
+    /// nothing else here would catch. `DATA_VILLAGER_DATA` is 19 under `villager` but 20 under
+    /// `zombie_villager`, so the two are not interchangeable.
+    ///
+    /// A cross-module reference is only accepted when the constant resolves to the SAME id in
+    /// the file's own entity module, which is what inheriting it from a shared superclass looks
+    /// like in the generated table. That keeps the check data-driven: it needs no hand-written
+    /// copy of the vanilla class hierarchy, which would rot.
+    #[test]
+    fn tracked_data_call_sites_use_their_own_entity_module() {
+        let table = tracked_data_table();
+        assert!(
+            table.len() > 50,
+            "parsed only {} modules -- did the generated table change shape?",
+            table.len()
+        );
+
+        let roots = ["entity/passive", "entity/mob", "entity/decoration"];
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rust_sources(&src, &mut files);
+
+        let mut checked = 0usize;
+        let mut wrong = Vec::new();
+
+        for file in &files {
+            let as_text = file.to_string_lossy().replace('\\', "/");
+            if !roots.iter().any(|root| as_text.contains(root)) {
+                continue;
+            }
+            let Some(stem) = file.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
+                continue;
+            };
+            let text = std::fs::read_to_string(file).expect("readable Rust source");
+            // A file can host more than one entity: `decoration/display.rs` defines all three
+            // display entities, so its filename alone is the wrong ownership signal. Treat a
+            // module as owned by the file when the file declares the matching `*Entity` struct.
+            let owned: Vec<&String> = table
+                .keys()
+                .filter(|module| {
+                    **module == stem || {
+                        let camel: String = module
+                            .split('_')
+                            .map(|word| {
+                                let mut chars = word.chars();
+                                chars.next().map_or_else(String::new, |first| {
+                                    first.to_ascii_uppercase().to_string() + chars.as_str()
+                                })
+                            })
+                            .collect();
+                        text.contains(&format!("struct {camel}Entity"))
+                    }
+                })
+                .collect();
+            let Some(own) = owned.first().map(|module| (*module).clone()) else {
+                continue;
+            };
+            let owned_names: std::collections::HashSet<&str> =
+                owned.iter().map(|module| module.as_str()).collect();
+            let Some(own_module) = table.get(&own) else {
+                continue;
+            };
+            let lines: Vec<&str> = text.lines().collect();
+            for (number, line) in lines.iter().enumerate() {
+                // Same per-site, greppable exemption the sibling scanner above uses: a site
+                // knowingly left as-is carries a marker comment saying why.
+                let start = number.saturating_sub(MARKER_LOOKBACK);
+                if lines[start..number].iter().any(|l| l.contains(MARKER)) {
+                    continue;
+                }
+                let mut rest = *line;
+                while let Some(at) = rest.find("tracked_data::") {
+                    rest = &rest[at + "tracked_data::".len()..];
+                    let mut parts = rest.splitn(3, "::");
+                    let (Some(module), Some(tail)) = (parts.next(), parts.next()) else {
+                        break;
+                    };
+                    let name: String = tail
+                        .chars()
+                        .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '_')
+                        .collect();
+                    if name.is_empty() || owned_names.contains(module) {
+                        continue;
+                    }
+                    let Some(referenced) = table.get(module).and_then(|m| m.get(&name)).copied()
+                    else {
+                        continue;
+                    };
+                    checked += 1;
+                    match own_module.get(&name) {
+                        Some(&mine) if mine == referenced => {}
+                        Some(&mine) => wrong.push(format!(
+                            "{}:{}: uses `{module}::{name}` (id {referenced}) but `{own}::{name}` is id {mine}",
+                            file.display(),
+                            number + 1
+                        )),
+                        None => wrong.push(format!(
+                            "{}:{}: uses `{module}::{name}`, which `{own}` does not have at all",
+                            file.display(),
+                            number + 1
+                        )),
+                    }
+                }
+            }
+        }
+
+        assert!(
+            wrong.is_empty(),
+            "tracked data sent under another entity's id ({checked} cross-module references checked):\n{}",
+            wrong.join("\n")
+        );
+    }
 }
 
 #[cfg(test)]

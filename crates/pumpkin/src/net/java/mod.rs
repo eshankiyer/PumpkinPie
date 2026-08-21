@@ -556,6 +556,13 @@ impl JavaClient {
 
     /// Fires the plugin `PacketSend` event for an already-serialized packet and reports
     /// whether a plugin cancelled it.
+    ///
+    /// GAP: only the typed helpers above fire this. Call sites that serialize themselves and
+    /// hand over `Bytes` (`enqueue_packet`, `try_enqueue_packet`, `send_packet_now`) bypass the
+    /// event entirely, so a plugin cannot see or cancel those packets. Closing it means
+    /// threading the packet id through the `Bytes` paths, which changes the plugin API surface;
+    /// it is upstream's feature and has no vanilla counterpart, so it was left alone rather than
+    /// redesigned during the 26.2 merge.
     async fn fire_packet_sent(&self, packet_id: i32, payload: &Bytes) -> bool {
         let player = self.player.load_full();
         if let Some(player) = player.as_ref() {
