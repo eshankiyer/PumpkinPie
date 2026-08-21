@@ -1,5 +1,5 @@
 [files]
-extend-exclude = ["assets/", "crates/pumpkin-data/src/generated"]
+extend-exclude = ["assets/", "crates/pumpkin-data/src/generated", "tools/conformance/*.json"]
 
 [default.extend-words]
 handled = "handled"

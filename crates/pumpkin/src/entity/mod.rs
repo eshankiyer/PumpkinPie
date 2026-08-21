@@ -826,6 +826,18 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         Box::pin(async {})
     }
 
+    /// `Entity.deflection` (`Entity.java:3491-3493`): what happens to a projectile that would
+    /// hit this entity. Vanilla's base implementation returns `REVERSE` for anything tagged
+    /// `DEFLECTS_PROJECTILES` and `NONE` otherwise; the only entity in that tag is the breeze,
+    /// which overrides the method anyway (`Breeze.java:196-202`), so the default here is `None`
+    /// and the tag test lives in `BreezeEntity`.
+    fn projectile_deflection(
+        &self,
+        _projectile: &dyn EntityBase,
+    ) -> crate::entity::projectile_deflection::ProjectileDeflectionType {
+        crate::entity::projectile_deflection::ProjectileDeflectionType::None
+    }
+
     fn set_paddle_state(&self, _left: bool, _right: bool) -> EntityBaseFuture<'_, ()> {
         Box::pin(async {})
     }
@@ -1032,6 +1044,12 @@ pub struct Entity {
     eye_in_water: AtomicBool,
     /// Indicates the fluid height
     pub water_height: AtomicCell<f64>,
+    /// `Projectile.lastDeflectedBy` (`Projectile.java:46`), stored as an entity id or `-1`.
+    /// Only meaningful on projectiles. Vanilla keeps it on `Projectile`; here it lives on
+    /// `Entity` because `ThrownItemEntity` is built by struct literal from files outside this
+    /// change's reach (`block/blocks/redstone/dispenser.rs` among them), and because the arrow
+    /// has its own projectile struct that needs the same guard.
+    pub last_deflected_by: AtomicI32,
     /// Indicates whether the entity is touching lava
     pub touching_lava: AtomicBool,
     /// Indicates the fluid height
@@ -1261,6 +1279,7 @@ impl Entity {
             was_eye_in_water: AtomicBool::new(false),
             eye_in_water: AtomicBool::new(false),
             water_height: AtomicCell::new(0.0),
+            last_deflected_by: AtomicI32::new(-1),
             touching_lava: AtomicBool::new(false),
             lava_height: AtomicCell::new(0.0),
             horizontal_collision: AtomicBool::new(false),

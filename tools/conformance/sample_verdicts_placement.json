@@ -1,0 +1,22 @@
+{"note":"Q1 placement-artifact sample. Pool = methods strict-ABSENT but loose-PRESENT in PumpkinPie, restricted to the 348 classes both repos map. One lead per class, seed 4211, n=15. Every verdict read on BOTH sides this session.",
+ "seed":4211,"n":15,"pool_size":909,
+ "buckets":{"GENUINE":"behaviour really exists in crates/, strict tier under-credits it (artifact)",
+            "NOT_GENUINE":"loose tier credited an unrelated or stubbed name; real gap"},
+ "leads":[
+{"lead":"Entity.getBoundingBox","verdict":"GENUINE","evidence":"Entity.java:3439 final getter over a field; entity/mod.rs:1050 pub bounding_box: AtomicCell<BoundingBox>, read at :650/:1689, rewritten at :1558. Field-modeled, no fn. Loose match was an unrelated structures/mod.rs:57 bounding_box."},
+{"lead":"CaveVinesBlock.canGrowInto","verdict":"GENUINE","evidence":"CaveVinesBlock.java:38 returns state.isAir(); plant/cave_vines.rs:77 `if !world.get_block_state(&grow_pos).is_air()` inlined into grow()."},
+{"lead":"LivingEntity.getSoundVolume","verdict":"GENUINE","evidence":"LivingEntity.java:2317 returns 1.0F. Pumpkin's living.rs:4353 play_sound uses the default volume, so LivingEntity-level behaviour agrees. CAVEAT: per-mob overrides exist (mob/slime.rs:349, sulfur_cube.rs:293) but the hurt path does not consult them."},
+{"lead":"ScaffoldingBlock.getStateForPlacement","verdict":"GENUINE","evidence":"ScaffoldingBlock.java:77 sets WATERLOGGED/DISTANCE/BOTTOM; scaffolding.rs:74 on_place sets exactly those three from get_distance/is_bottom. Rename, same file."},
+{"lead":"ServerboundPlayerAbilitiesPacket.isFlying","verdict":"GENUINE","evidence":"packet keeps raw flags: i8 (player_abilities.rs:14); the bit is decoded at net/java/play/player_abilities.rs:17 `flags & 0x02 != 0 && allow_flying`."},
+{"lead":"VineBlock.mirror","verdict":"NOT_GENUINE","evidence":"VineBlock.java:332 swaps NORTH/SOUTH on LEFT_RIGHT and EAST/WEST on FRONT_BACK. pumpkin-data/src/blocks.rs:211 `pub const fn mirror(&self, id, _mirror) -> &BlockState { BlockState::from_id(id) }` ignores the argument; rotate() at :219 is the same stub. REAL GAP."},
+{"lead":"SculkSensorPhase.toString","verdict":"GENUINE","evidence":"generated/block.rs:644439 pub enum SculkSensorPhase with EnumVariants impl; the phase is generated data, not a fn."},
+{"lead":"CactusFlowerBlock.getShape","verdict":"GENUINE","evidence":"CactusFlowerBlock.java:27 returns a constant SHAPE. Pumpkin models shapes as data: pumpkin-data/src/block_state.rs:30/32 collision_shapes/outline_shapes generated per state."},
+{"lead":"CampfireBlockEntity.getItems","verdict":"GENUINE","evidence":"CampfireBlockEntity.java:125 returns this.items; block/entities/campfire.rs:17 pub items: [Arc<Mutex<ItemStack>>;4] accessed directly at :78/:90/:138."},
+{"lead":"RecipeManager.prepare","verdict":"GENUINE","evidence":"RecipeManager.java:69 scans the datapack recipe directory. Pumpkin bakes recipes at codegen: pumpkin-data/src/generated/recipes.rs. CAVEAT: datapack-supplied recipes are therefore not loadable; that is a separate, real gap."},
+{"lead":"ClientboundTickingStepPacket.from","verdict":"GENUINE","evidence":"packet static factory (ClientboundTickingStepPacket.java:18); Pumpkin has CTickingStep::new(tick_steps) in java/client/play/ticking_step.rs."},
+{"lead":"ItemFrame.playPlacementSound","verdict":"GENUINE","evidence":"ItemFrame.java:214 plays getPlaceSound() at 1.0/1.0; entity/decoration/item_frame.rs:121 play_frame_sound(plain, glow), callers pass Sound::EntityItemFramePlace / EntityGlowItemFramePlace (item/items/item_frame.rs:115-117)."},
+{"lead":"JigsawJunction.deserialize","verdict":"NOT_GENUINE","evidence":"JigsawJunction.java:53 reads source_x/source_ground_y/source_z/delta_y/dest_proj from a Dynamic. Pumpkin's JigsawJunction (generation/structure/structures/jigsaw.rs:453) has the fields but no NBT read; no 'dest_proj' anywhere under crates/. Real but low-value (structure-start persistence)."},
+{"lead":"Item.Properties.setId","verdict":"GENUINE","evidence":"Item.java:629 builder id setter. Pumpkin's item registry is generated: pumpkin-data/src/generated/item.rs."},
+{"lead":"StructurePiece.createBoundingBox","verdict":"NOT_GENUINE","evidence":"StructurePiece.java:501 encapsulates every piece's box into the structure's overall box. No aggregation exists under crates/pumpkin-world/src/generation/structure/ (only BlockBox::expand in pumpkin-util/src/math/block_box.rs:151). Real but low-value."}
+],
+"tally":{"GENUINE_artifact":12,"NOT_GENUINE_real_gap":3,"artifact_fraction":"12/15 = 80%"}}

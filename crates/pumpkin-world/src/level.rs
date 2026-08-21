@@ -1058,9 +1058,22 @@ impl Level {
         delay: u8,
         priority: TickPriority,
     ) {
+        self.schedule_block_tick_long(block, block_pos, i64::from(delay), priority);
+    }
+
+    /// Same as [`Self::schedule_block_tick`], but for delays that do not fit in a `u8`. Vanilla
+    /// stores a scheduled tick's delay as a signed int, and blocks such as frogspawn
+    /// (3600-12000 ticks) and the dried ghast (5000) depend on that range.
+    pub fn schedule_block_tick_long(
+        &self,
+        block: &Block,
+        block_pos: BlockPos,
+        delay: i64,
+        priority: TickPriority,
+    ) {
         let tick_order = self.schedule_tick_counts.fetch_add(1, Ordering::Relaxed);
         let scheduled_tick = ScheduledTick {
-            delay: i64::from(delay),
+            delay,
             position: block_pos,
             priority,
             // SAFETY: `block` is a valid reference that outlives this function call for scheduling.

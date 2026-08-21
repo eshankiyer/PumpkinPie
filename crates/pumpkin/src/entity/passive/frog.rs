@@ -1,6 +1,6 @@
 use std::sync::{
     Arc, Weak,
-    atomic::{AtomicI32, Ordering},
+    atomic::{AtomicBool, AtomicI32, Ordering},
 };
 
 use pumpkin_data::entity::EntityType;
@@ -16,6 +16,8 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ageable::{AgeableData, AgeableMob},
     ai::goal::{
+        breed::BreedGoal,
+        frog_lay_spawn::FrogLaySpawnGoal,
         frog_tongue_attack::{FrogFindFoodGoal, FrogTongueAttackGoal},
         look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal,
@@ -81,6 +83,11 @@ pub struct FrogEntity {
     pub ageable_data: AgeableData,
     pub variant: AtomicI32,
     pub tongue_target_id: AtomicI32,
+    /// `MemoryModuleType.IS_PREGNANT` (`Frog.spawnChildFromBreeding`, `Frog.java:256-259`).
+    /// A breeding frog produces no baby: it becomes pregnant and later lays frogspawn, which is
+    /// what hatches into tadpoles. Pumpkin has no memory system, so the memory is a plain flag,
+    /// the same shape `warden.rs` uses for the warden's activity state.
+    is_pregnant: AtomicBool,
 }
 
 impl FrogEntity {
@@ -91,8 +98,10 @@ impl FrogEntity {
             ageable_data: AgeableData::default(),
             variant: AtomicI32::new(FrogVariant::Temperate.id()),
             tongue_target_id: AtomicI32::new(-1),
+            is_pregnant: AtomicBool::new(false),
         };
         let mob_arc = Arc::new(frog);
+        let frog_weak = Arc::downgrade(&mob_arc);
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
             Arc::downgrade(&mob_arc)
@@ -113,6 +122,10 @@ impl FrogEntity {
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, Box::new(FrogTongueAttackGoal::new()));
             goal_selector.add_goal(1, Box::new(TemptGoal::new(1.0, FROG_FOOD, false)));
+            // `FrogAi.initLaySpawnActivity` (`FrogAi.java:143-168`) outranks the idle bundle,
+            // and `AnimalMakeLove(FROG)` (`FrogAi.java:90`) is what `BreedGoal` stands in for.
+            goal_selector.add_goal(1, FrogLaySpawnGoal::new(frog_weak, 1.0));
+            goal_selector.add_goal(2, BreedGoal::new(1.0));
             goal_selector.add_goal(2, Box::new(WanderAroundGoal::new(1.0)));
             goal_selector.add_goal(
                 3,
@@ -142,6 +155,17 @@ impl FrogEntity {
             None,
         );
     }
+
+    /// Whether `MemoryModuleType.IS_PREGNANT` is present (`FrogAi.java:163-165` gates the
+    /// `LAY_SPAWN` activity on it).
+    #[must_use]
+    pub fn is_pregnant(&self) -> bool {
+        self.is_pregnant.load(Ordering::Relaxed)
+    }
+
+    pub fn set_pregnant(&self, pregnant: bool) {
+        self.is_pregnant.store(pregnant, Ordering::Relaxed);
+    }
 }
 
 impl AgeableMob for FrogEntity {
@@ -164,6 +188,9 @@ impl NBTStorage for FrogEntity {
             self.write_ageable_nbt(nbt);
             self.write_animal_nbt(nbt);
             nbt.put_string("variant", self.get_variant().as_str().to_string());
+            // Vanilla stores `IS_PREGNANT` inside the serialized brain; there is no brain here,
+            // so it gets its own key. A frog written by vanilla therefore loads as not pregnant.
+            nbt.put_bool("IsPregnant", self.is_pregnant());
         })
     }
 
@@ -175,6 +202,10 @@ impl NBTStorage for FrogEntity {
             if let Some(variant_str) = nbt.get_string("variant") {
                 self.set_variant(FrogVariant::from_name(variant_str));
             }
+            self.is_pregnant.store(
+                nbt.get_bool("IsPregnant").unwrap_or(false),
+                Ordering::Relaxed,
+            );
         })
     }
 }
@@ -186,6 +217,32 @@ impl Mob for FrogEntity {
 
     fn mob_set_variant_name(&self, name: &str) {
         self.set_variant(FrogVariant::from_name(name));
+    }
+
+    /// `Frog.spawnChildFromBreeding` (`Frog.java:255-259`): breeding frogs produce no child.
+    /// Vanilla still calls `getBreedOffspring` (`Frog.java:241-248`) through
+    /// `finalizeSpawnChildFromBreeding(level, partner, null)` with a null child, i.e. the
+    /// offspring is discarded; only the XP orb and the love-mode reset survive. Returning `None`
+    /// here reproduces that: `BreedGoal::breed` still applies both cooldowns and the XP drop.
+    fn create_offspring<'a>(
+        &'a self,
+        _mate: &'a dyn EntityBase,
+        _world: &'a Arc<crate::world::World>,
+    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
+        Box::pin(async move { None })
+    }
+
+    /// The other half of `Frog.spawnChildFromBreeding`: the frog becomes pregnant instead, and
+    /// `FrogLaySpawnGoal` turns that into a frogspawn block.
+    fn spawn_breeding_result<'a>(
+        &'a self,
+        _offspring: Option<Arc<dyn EntityBase>>,
+        _world: &'a Arc<crate::world::World>,
+        _parent_pos: pumpkin_util::math::vector3::Vector3<f64>,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            self.set_pregnant(true);
+        })
     }
 
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {

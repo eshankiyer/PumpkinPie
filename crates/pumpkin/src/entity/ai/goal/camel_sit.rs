@@ -71,12 +71,26 @@ impl Goal for CamelSitGoal {
                 return false;
             }
 
+            // `CamelAi.RandomSitting.checkExtraStartConditions` (`CamelAi.java:122-128`) also
+            // refuses to start while the camel is leashed or has a controlling passenger.
+            if entity.leashed_to.lock().await.is_some() || mob.has_controlling_passenger().await {
+                return false;
+            }
+
             mob.get_random().random::<f32>() < SIT_CHANCE_PER_TICK
         })
     }
 
     fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
         Box::pin(async move {
+            // Vanilla stands a sitting camel back up as soon as its rider pushes forward
+            // (`Camel.java:262-263`). Pumpkin has no mounted-input routing, so a mounted camel
+            // would otherwise stay pinned by this goal forever; any passenger boarding is used
+            // as the stand-up trigger instead. That is a deliberate deviation, not a port.
+            if !mob.get_entity().passengers.lock().await.is_empty() {
+                return false;
+            }
+
             if self.pose_ticks < MIN_POSE_TICKS {
                 return true;
             }

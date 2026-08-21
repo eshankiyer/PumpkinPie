@@ -296,7 +296,7 @@ impl MansionTemplatePiece {
                 continue;
             }
 
-            let mut transformed = transformed_palette(palette, self.mirror, self.rotation);
+            let mut transformed = palette.clone();
             if chunk.get_block_state(&position).to_block_id() == Block::WATER.id
                 && property(&transformed, "waterlogged").is_some()
             {
@@ -503,55 +503,6 @@ impl StructurePieceBase for MansionFoundationPiece {
     }
 }
 
-fn transformed_palette(
-    palette: &PaletteEntry,
-    mirror: TemplateMirror,
-    rotation: Rotation,
-) -> PaletteEntry {
-    let mut palette = palette.clone();
-
-    if palette.name.ends_with("_stairs") {
-        let facing = property(&palette, "facing");
-        let shape = property(&palette, "shape");
-        let mirrored_shape = match (mirror, facing, shape) {
-            (TemplateMirror::LeftRight, Some("north" | "south"), Some("inner_left")) => {
-                Some("inner_right")
-            }
-            (TemplateMirror::LeftRight, Some("north" | "south"), Some("inner_right")) => {
-                Some("inner_left")
-            }
-            (TemplateMirror::LeftRight, Some("north" | "south"), Some("outer_left"))
-            | (TemplateMirror::FrontBack, Some("east" | "west"), Some("outer_left")) => {
-                Some("outer_right")
-            }
-            (TemplateMirror::LeftRight, Some("north" | "south"), Some("outer_right"))
-            | (TemplateMirror::FrontBack, Some("east" | "west"), Some("outer_right")) => {
-                Some("outer_left")
-            }
-            _ => None,
-        };
-        if let Some(shape) = mirrored_shape {
-            set_property(&mut palette, "shape", shape);
-        }
-    } else if palette.name.ends_with("_door") && mirror != TemplateMirror::None {
-        let hinge = match property(&palette, "hinge") {
-            Some("left") => Some("right"),
-            Some("right") => Some("left"),
-            _ => None,
-        };
-        if let Some(hinge) = hinge {
-            set_property(&mut palette, "hinge", hinge);
-        }
-    } else if palette.name == "minecraft:rail"
-        && let Some(shape) = property(&palette, "shape")
-        && let Some(shape) = transform_rail_shape(shape, mirror, rotation)
-    {
-        set_property(&mut palette, "shape", shape);
-    }
-
-    palette
-}
-
 fn property<'a>(palette: &'a PaletteEntry, name: &str) -> Option<&'a str> {
     palette
         .properties
@@ -563,70 +514,6 @@ fn set_property(palette: &mut PaletteEntry, name: &str, value: &str) {
     if let Some((_, current)) = palette.properties.iter_mut().find(|(key, _)| key == name) {
         value.clone_into(current);
     }
-}
-
-fn transform_rail_shape(
-    shape: &str,
-    mirror: TemplateMirror,
-    rotation: Rotation,
-) -> Option<&'static str> {
-    let ascending = shape.strip_prefix("ascending_");
-    if let Some(direction) = ascending.and_then(Direction::from_name) {
-        return Some(match transform_direction(direction, mirror, rotation) {
-            Direction::North => "ascending_north",
-            Direction::South => "ascending_south",
-            Direction::West => "ascending_west",
-            Direction::East => "ascending_east",
-            Direction::Up => return None,
-        });
-    }
-    let (first, second) = match shape {
-        "north_south" => (Direction::North, Direction::South),
-        "east_west" => (Direction::East, Direction::West),
-        "north_east" => (Direction::North, Direction::East),
-        "north_west" => (Direction::North, Direction::West),
-        "south_east" => (Direction::South, Direction::East),
-        "south_west" => (Direction::South, Direction::West),
-        _ => return None,
-    };
-    let first = transform_direction(first, mirror, rotation);
-    let second = transform_direction(second, mirror, rotation);
-    match (first, second) {
-        (Direction::North, Direction::South) | (Direction::South, Direction::North) => {
-            Some("north_south")
-        }
-        (Direction::East, Direction::West) | (Direction::West, Direction::East) => {
-            Some("east_west")
-        }
-        (Direction::North, Direction::East) | (Direction::East, Direction::North) => {
-            Some("north_east")
-        }
-        (Direction::North, Direction::West) | (Direction::West, Direction::North) => {
-            Some("north_west")
-        }
-        (Direction::South, Direction::East) | (Direction::East, Direction::South) => {
-            Some("south_east")
-        }
-        (Direction::South, Direction::West) | (Direction::West, Direction::South) => {
-            Some("south_west")
-        }
-        _ => None,
-    }
-}
-
-fn transform_direction(
-    direction: Direction,
-    mirror: TemplateMirror,
-    rotation: Rotation,
-) -> Direction {
-    let mirrored = match (mirror, direction) {
-        (TemplateMirror::LeftRight, Direction::North) => Direction::South,
-        (TemplateMirror::LeftRight, Direction::South) => Direction::North,
-        (TemplateMirror::FrontBack, Direction::East) => Direction::West,
-        (TemplateMirror::FrontBack, Direction::West) => Direction::East,
-        _ => direction,
-    };
-    rotation.rotate(mirrored)
 }
 
 const fn transform(
@@ -666,34 +553,67 @@ mod tests {
         )
     }
 
+    fn resolved(
+        name: &str,
+        properties: &[(&str, &str)],
+        mirror: TemplateMirror,
+        rotation: Rotation,
+    ) -> pumpkin_data::BlockStateId {
+        BlockStateResolver::resolve(&palette(name, properties), rotation, mirror.state_mirror())
+            .expect("known block")
+            .id
+    }
+
+    // The mansion used to pre-mirror stair shapes, door hinges and rail shapes itself
+    // before handing the entry to the resolver. The resolver now does all of it, so this
+    // pins that the placement path still produces the vanilla states and does not apply
+    // the transform twice.
     #[test]
     fn mirrors_directional_shapes_like_java() {
-        let stairs = transformed_palette(
-            &palette(
+        assert_eq!(
+            resolved(
                 "minecraft:dark_oak_stairs",
                 &[("facing", "north"), ("shape", "inner_left")],
+                TemplateMirror::LeftRight,
+                Rotation::Clockwise90,
             ),
-            TemplateMirror::LeftRight,
-            Rotation::Clockwise90,
+            resolved(
+                "minecraft:dark_oak_stairs",
+                &[("facing", "west"), ("shape", "inner_right")],
+                TemplateMirror::None,
+                Rotation::None,
+            ),
         );
-        assert_eq!(property(&stairs, "shape"), Some("inner_right"));
 
-        let door = transformed_palette(
-            &palette(
+        assert_eq!(
+            resolved(
                 "minecraft:dark_oak_door",
                 &[("facing", "east"), ("hinge", "left")],
+                TemplateMirror::FrontBack,
+                Rotation::None,
             ),
-            TemplateMirror::FrontBack,
-            Rotation::None,
+            resolved(
+                "minecraft:dark_oak_door",
+                &[("facing", "west"), ("hinge", "right")],
+                TemplateMirror::None,
+                Rotation::None,
+            ),
         );
-        assert_eq!(property(&door, "hinge"), Some("right"));
 
-        let rail = transformed_palette(
-            &palette("minecraft:rail", &[("shape", "north_east")]),
-            TemplateMirror::LeftRight,
-            Rotation::Clockwise90,
+        assert_eq!(
+            resolved(
+                "minecraft:rail",
+                &[("shape", "north_east")],
+                TemplateMirror::LeftRight,
+                Rotation::Clockwise90,
+            ),
+            resolved(
+                "minecraft:rail",
+                &[("shape", "south_west")],
+                TemplateMirror::None,
+                Rotation::None,
+            ),
         );
-        assert_eq!(property(&rail, "shape"), Some("south_west"));
     }
 
     struct RecordingHeightSampler {

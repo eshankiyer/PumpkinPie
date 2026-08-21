@@ -252,6 +252,8 @@ impl DispenserBlock {
     const FIREBALL_PROJECTILE_UNCERTAINTY: f64 = 6.666_666_5;
     const FIREWORK_PROJECTILE_POWER: f64 = 0.5;
     const FIREWORK_PROJECTILE_UNCERTAINTY: f64 = 1.0;
+    /// `FireworkRocketItem.getEntityJustOutsideOfBlockPos` (FireworkRocketItem.java:92-95).
+    const FIREWORK_JUST_OUTSIDE_OF_BLOCK: f64 = 0.500_009_999_999_747_4;
 
     async fn dispense(
         ctx: &DispenseContext<'_>,
@@ -349,7 +351,13 @@ impl DispenserBlock {
         uncertainty: f64,
     ) {
         let facing = to_normal(ctx.facing);
-        thrown.set_velocity(facing.x, facing.y + 0.1, facing.z, power, uncertainty);
+        // `ProjectileDispenseBehavior.execute` (ProjectileDispenseBehavior.java:30-39) hands
+        // `direction.getStepY()` straight to `Projectile.spawnProjectileUsingShoot`
+        // (Projectile.java:208-219) with no bias. The `+ 0.1` here is the pre-1.17
+        // `AbstractProjectileDispenseBehavior` formula, and it tilted every dispensed
+        // projectile upwards: a downward-facing dispenser fired at a slant instead of straight
+        // down.
+        thrown.set_velocity(facing.x, facing.y, facing.z, power, uncertainty);
     }
 
     async fn finish_projectile_launch(
@@ -382,9 +390,10 @@ impl DispenserBlock {
         let arrow =
             ArrowEntity::new_with_item(arrow_entity, None, &projectile, ArrowPickup::Allowed);
 
+        // No `+ 0.1` Y bias: see `launch_thrown`.
         arrow.set_velocity(
             facing.x,
-            facing.y + 0.1,
+            facing.y,
             facing.z,
             Self::DEFAULT_PROJECTILE_POWER,
             Self::DEFAULT_PROJECTILE_UNCERTAINTY,
@@ -688,19 +697,21 @@ impl DispenserBlock {
     async fn dispense_firework_rocket(ctx: &DispenseContext<'_>, item: &mut ItemStack) {
         let _ = item.split(1);
         let facing = to_normal(ctx.facing);
-        // Vanilla spawns fireworks closer to the dispenser face and slightly above center.
+        // `FireworkRocketItem.getEntityJustOutsideOfBlockPos` (FireworkRocketItem.java:92-95)
+        // is the block centre pushed 0.5000099999997474 along the facing, with no vertical
+        // offset at all.
         let position = ctx
             .position
             .to_centered_f64()
-            .add(&(facing * (0.7 * 0.5125)))
-            .add(&Vector3::new(0.0, 0.08, 0.0));
+            .add(&(facing * Self::FIREWORK_JUST_OUTSIDE_OF_BLOCK));
         let entity = Entity::new(ctx.world.clone(), position, &EntityType::FIREWORK_ROCKET);
         let rocket = FireworkRocketEntity::new(entity);
 
         // `FireworkRocketEntity` does not expose its inner projectile, so replicate
         // `ThrownItemEntity::set_velocity` here.
         let deviation = 0.017_227_5 * Self::FIREWORK_PROJECTILE_UNCERTAINTY;
-        let velocity = Vector3::new(facing.x, facing.y + 0.1, facing.z)
+        // No `+ 0.1` Y bias: see `launch_thrown`.
+        let velocity = Vector3::new(facing.x, facing.y, facing.z)
             .normalize()
             .add_raw(
                 triangle(&mut rng(), 0.0, deviation),
@@ -904,5 +915,60 @@ impl DispenserBlock {
             *ctx.position,
             to_data3d(ctx.facing),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DispenserBlock, to_normal};
+    use pumpkin_data::block_properties::Facing;
+    use pumpkin_util::math::vector3::Vector3;
+
+    /// `Projectile.shoot` (Projectile.java:208-219) normalizes the raw direction before adding
+    /// the uncertainty term, and `ProjectileDispenseBehavior.execute`
+    /// (ProjectileDispenseBehavior.java:30-39) feeds it `direction.getStep{X,Y,Z}()` unmodified.
+    /// With the old `+ 0.1` Y bias a downward-facing dispenser aimed at `(0, -0.9, 0)`, which
+    /// normalizes to itself and so fired straight down only by accident of the sign; a
+    /// north-facing one aimed measurably upward.
+    #[test]
+    fn dispensed_projectile_direction_has_no_vertical_bias() {
+        for facing in [
+            Facing::North,
+            Facing::East,
+            Facing::South,
+            Facing::West,
+            Facing::Up,
+            Facing::Down,
+        ] {
+            let normal = to_normal(facing);
+            let normalized = normal.normalize();
+            assert!(
+                (normalized.x - normal.x).abs() < 1e-9
+                    && (normalized.y - normal.y).abs() < 1e-9
+                    && (normalized.z - normal.z).abs() < 1e-9,
+                "facing {facing:?} must aim exactly along its axis"
+            );
+        }
+    }
+
+    /// `FireworkRocketItem.getEntityJustOutsideOfBlockPos` (FireworkRocketItem.java:92-95):
+    /// block centre plus `0.5000099999997474 * step`, and nothing else.
+    #[test]
+    fn firework_spawns_just_outside_the_dispenser_face() {
+        let centre = Vector3::new(10.5, 64.5, -3.5);
+        let offset = DispenserBlock::FIREWORK_JUST_OUTSIDE_OF_BLOCK;
+        assert!((offset - 0.500_009_999_999_747_4).abs() < 1e-12);
+
+        let up = centre.add(&(to_normal(Facing::Up) * offset));
+        assert!((up.x - centre.x).abs() < 1e-12);
+        assert!((up.z - centre.z).abs() < 1e-12);
+        assert!((up.y - (centre.y + offset)).abs() < 1e-12);
+
+        let north = centre.add(&(to_normal(Facing::North) * offset));
+        assert!(
+            (north.y - centre.y).abs() < 1e-12,
+            "no vertical offset is applied"
+        );
+        assert!((north.z - (centre.z - offset)).abs() < 1e-12);
     }
 }

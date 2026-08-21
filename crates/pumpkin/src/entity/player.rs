@@ -4552,6 +4552,45 @@ impl Player {
         }
     }
 
+    /// Vanilla `Player.destroyVanishingCursedItems`
+    /// (`world/entity/player/Player.java:560-567`): every stack in the player's inventory
+    /// carrying Curse of Vanishing is removed outright when the inventory would otherwise
+    /// drop, so it is neither dropped nor kept.
+    ///
+    /// Deviation, deliberate: vanilla tests
+    /// `EnchantmentHelper.has(stack, EnchantmentEffectComponents.PREVENT_EQUIPMENT_DROP)`.
+    /// `pumpkin-data` models no `prevent_equipment_drop` effect component (confirmed by grep
+    /// this session), so this checks the `minecraft:vanishing_curse` enchantment directly.
+    /// That is the only vanilla enchantment carrying the component, so behaviour matches for
+    /// all vanilla data; a datapack enchantment declaring the component would be missed.
+    ///
+    /// Vanilla's `inventory` covers the hotbar/main grid *and* the armour and off-hand slots,
+    /// so both `main_inventory` and `entity_equipment` are swept here.
+    async fn destroy_vanishing_cursed_items(&self) {
+        fn is_cursed(stack: &ItemStack) -> bool {
+            !stack.is_empty()
+                && stack
+                    .get_data_component::<EnchantmentsImpl>()
+                    .is_some_and(|e| {
+                        e.enchantment.iter().any(|(ench, level)| {
+                            *level > 0 && ench.id == Enchantment::VANISHING_CURSE.id
+                        })
+                    })
+        }
+
+        {
+            let mut main_inv = self.inventory().main_inventory.write().await;
+            for item in main_inv.iter_mut() {
+                if is_cursed(item) {
+                    *item = ItemStack::EMPTY.clone();
+                }
+            }
+        }
+
+        let mut equipment = self.inventory().entity_equipment.lock().await;
+        equipment.equipment.retain(|_, stack| !is_cursed(stack));
+    }
+
     async fn handle_killed(&self, death_msg: TextComponent) {
         self.trigger_advancement(
             crate::entity::player::advancement::trigger::AdvancementTrigger::PlayerKilled,
@@ -4562,6 +4601,10 @@ impl Player {
         let keep_inventory = { self.world().level_info.load().game_rules.keep_inventory };
 
         if !keep_inventory {
+            // `Player.dropEquipment` (`world/entity/player/Player.java:551-557`) calls
+            // `destroyVanishingCursedItems` *before* `inventory.dropAll()`, so cursed items
+            // are erased rather than dropped. Gated on `keepInventory` exactly as vanilla is.
+            self.destroy_vanishing_cursed_items().await;
             let mut main_inv = self.inventory().main_inventory.write().await;
             for item in main_inv.iter_mut() {
                 if !item.is_empty() {

@@ -985,6 +985,16 @@ const fn spawns_offspring_from_egg(entity_type: &EntityType) -> bool {
 }
 
 pub trait Mob: EntityBase + Send + Sync {
+    /// `Entity.deflection` (`Entity.java:3491-3493`) for mobs. The blanket `EntityBase` impl
+    /// below forwards to this so that individual mobs can override it; only the breeze does
+    /// (`Breeze.java:196-202`).
+    fn mob_projectile_deflection(
+        &self,
+        _projectile: &dyn EntityBase,
+    ) -> crate::entity::projectile_deflection::ProjectileDeflectionType {
+        crate::entity::projectile_deflection::ProjectileDeflectionType::None
+    }
+
     /// Vanilla `Mob.hasControllingPassenger` and `Mob.getControllingPassenger`.
     /// Rideable mobs with player-specific controls override this (for example, Pig).
     fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
@@ -2460,6 +2470,13 @@ impl<T: Mob + Send + 'static> EntityBase for T {
 
     fn get_home_pos(&self) -> Option<pumpkin_util::math::position::BlockPos> {
         <T as Mob>::get_home(self)
+    }
+
+    fn projectile_deflection(
+        &self,
+        projectile: &dyn EntityBase,
+    ) -> crate::entity::projectile_deflection::ProjectileDeflectionType {
+        <T as Mob>::mob_projectile_deflection(self, projectile)
     }
 
     fn as_nbt_storage(&self) -> &dyn NBTStorage {

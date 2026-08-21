@@ -149,7 +149,10 @@ impl AvoidEntityGoal {
 
     /// Generates a random walkable position within a cone pointing away from the threat.
     /// Mirrors vanilla's `NoPenaltyTargeting.findFrom()`.
-    fn find_flee_position(mob: &dyn Mob, threat_pos: &Vector3<f64>) -> Option<Vector3<f64>> {
+    pub(crate) fn find_flee_position(
+        mob: &dyn Mob,
+        threat_pos: &Vector3<f64>,
+    ) -> Option<Vector3<f64>> {
         let entity = &mob.get_mob_entity().living_entity.entity;
         let mob_pos = entity.pos.load();
         let world = entity.world.load();

@@ -94,6 +94,8 @@ impl Rotation {
                 "south" => "south",
                 "east" => "east",
                 "west" => "west",
+                "up" => "up",
+                "down" => "down",
                 _ => leak_str(facing),
             },
             Self::Clockwise90 => match facing {
@@ -101,6 +103,8 @@ impl Rotation {
                 "east" => "south",
                 "south" => "west",
                 "west" => "north",
+                "up" => "up",
+                "down" => "down",
                 _ => leak_str(facing),
             },
             Self::Rotate180 => match facing {
@@ -108,6 +112,8 @@ impl Rotation {
                 "south" => "north",
                 "east" => "west",
                 "west" => "east",
+                "up" => "up",
+                "down" => "down",
                 _ => leak_str(facing),
             },
             Self::CounterClockwise90 => match facing {
@@ -115,6 +121,8 @@ impl Rotation {
                 "west" => "south",
                 "south" => "east",
                 "east" => "north",
+                "up" => "up",
+                "down" => "down",
                 _ => leak_str(facing),
             },
         }
@@ -129,11 +137,13 @@ impl Rotation {
             Self::None | Self::Rotate180 => match axis {
                 "x" => "x",
                 "z" => "z",
+                "y" => "y",
                 _ => leak_str(axis),
             },
             Self::Clockwise90 | Self::CounterClockwise90 => match axis {
                 "x" => "z",
                 "z" => "x",
+                "y" => "y",
                 _ => leak_str(axis),
             },
         }
@@ -236,6 +246,8 @@ impl Mirror {
                 "south" => "south",
                 "east" => "east",
                 "west" => "west",
+                "up" => "up",
+                "down" => "down",
                 _ => leak_str(facing),
             },
             Self::LeftRight => match facing {
@@ -243,6 +255,8 @@ impl Mirror {
                 "south" => "north",
                 "east" => "east",
                 "west" => "west",
+                "up" => "up",
+                "down" => "down",
                 _ => leak_str(facing),
             },
             Self::FrontBack => match facing {
@@ -250,6 +264,8 @@ impl Mirror {
                 "west" => "east",
                 "north" => "north",
                 "south" => "south",
+                "up" => "up",
+                "down" => "down",
                 _ => leak_str(facing),
             },
         }
@@ -291,6 +307,292 @@ impl Mirror {
                 Rotation::Rotate180 => Rotation::None,
                 Rotation::CounterClockwise90 => Rotation::CounterClockwise90,
             },
+        }
+    }
+}
+
+/// Block names that carry `north`/`south`/`east`/`west` properties but which vanilla
+/// deliberately leaves untransformed: `FireBlock` (`FireBlock.java:30`) and
+/// `ChorusPlantBlock` (`ChorusPlantBlock.java:18`) declare neither `rotate` nor `mirror`,
+/// so `BlockBehaviour.rotate`/`mirror` (`BlockBehaviour.java:256-262`) returns the state
+/// unchanged for them.
+const SIDE_PERMUTATION_EXEMPT: [&str; 2] = ["fire", "chorus_plant"];
+
+fn permutes_sides(block_name: &str) -> bool {
+    !SIDE_PERMUTATION_EXEMPT.contains(&block_name)
+}
+
+fn is_direction(value: &str) -> bool {
+    matches!(value, "north" | "south" | "east" | "west" | "up" | "down")
+}
+
+/// Maps a `0..16` rotation index to a static string, avoiding an allocation on the
+/// structure-placement hot path.
+const fn rotation16_to_str(rotation: i32) -> &'static str {
+    match rotation.rem_euclid(16) {
+        1 => "1",
+        2 => "2",
+        3 => "3",
+        4 => "4",
+        5 => "5",
+        6 => "6",
+        7 => "7",
+        8 => "8",
+        9 => "9",
+        10 => "10",
+        11 => "11",
+        12 => "12",
+        13 => "13",
+        14 => "14",
+        15 => "15",
+        _ => "0",
+    }
+}
+
+/// Recombines a `FrontAndTop` pair into the `orientation` property value used by
+/// jigsaw blocks and crafters. Returns `None` when the pair is not one of the twelve
+/// valid combinations.
+fn orientation_value(front: &str, top: &str) -> Option<&'static str> {
+    Some(match (front, top) {
+        ("down", "east") => "down_east",
+        ("down", "north") => "down_north",
+        ("down", "south") => "down_south",
+        ("down", "west") => "down_west",
+        ("up", "east") => "up_east",
+        ("up", "north") => "up_north",
+        ("up", "south") => "up_south",
+        ("up", "west") => "up_west",
+        ("west", "up") => "west_up",
+        ("east", "up") => "east_up",
+        ("north", "up") => "north_up",
+        ("south", "up") => "south_up",
+        _ => return None,
+    })
+}
+
+impl Rotation {
+    /// Rotates a rail shape.
+    ///
+    /// Mirrors `BaseRailBlock.rotate(RailShape, Rotation)`
+    /// (`BaseRailBlock.java:146-228`). Returns `None` for values that are not rail
+    /// shapes, such as the stair shapes, which vanilla's `StairBlock.rotate`
+    /// (`StairBlock.java:169-171`) leaves untouched.
+    #[must_use]
+    pub fn rotate_rail_shape(self, shape: &str) -> Option<&'static str> {
+        Some(match self {
+            Self::None => return None,
+            Self::Clockwise90 => match shape {
+                "north_south" => "east_west",
+                "east_west" => "north_south",
+                "ascending_east" => "ascending_south",
+                "ascending_west" => "ascending_north",
+                "ascending_north" => "ascending_east",
+                "ascending_south" => "ascending_west",
+                "south_east" => "south_west",
+                "south_west" => "north_west",
+                "north_west" => "north_east",
+                "north_east" => "south_east",
+                _ => return None,
+            },
+            Self::Rotate180 => match shape {
+                "north_south" => "north_south",
+                "east_west" => "east_west",
+                "ascending_east" => "ascending_west",
+                "ascending_west" => "ascending_east",
+                "ascending_north" => "ascending_south",
+                "ascending_south" => "ascending_north",
+                "south_east" => "north_west",
+                "south_west" => "north_east",
+                "north_west" => "south_east",
+                "north_east" => "south_west",
+                _ => return None,
+            },
+            Self::CounterClockwise90 => match shape {
+                "north_south" => "east_west",
+                "east_west" => "north_south",
+                "ascending_east" => "ascending_north",
+                "ascending_west" => "ascending_south",
+                "ascending_north" => "ascending_west",
+                "ascending_south" => "ascending_east",
+                "south_east" => "north_east",
+                "south_west" => "south_east",
+                "north_west" => "south_west",
+                "north_east" => "north_west",
+                _ => return None,
+            },
+        })
+    }
+
+    /// Rotates a jigsaw/crafter `orientation` value.
+    ///
+    /// Vanilla applies the rotation's `OctahedralGroup` to the `FrontAndTop`
+    /// (`JigsawBlock.java:41-43`, `CrafterBlock.java:234-236`), which for a rotation
+    /// about Y is the same as rotating the front and top directions independently.
+    #[must_use]
+    pub fn rotate_orientation(self, value: &str) -> Option<&'static str> {
+        let (front, top) = value.split_once('_')?;
+        if !is_direction(front) || !is_direction(top) {
+            return None;
+        }
+        orientation_value(self.rotate_facing(front), self.rotate_facing(top))
+    }
+
+    /// Applies this rotation to a block state's property list in place.
+    ///
+    /// This is the property-driven equivalent of vanilla's per-block `rotate`
+    /// overrides: rotating whichever of `facing`, `axis`, `rotation`, `shape`,
+    /// `orientation` and the four side properties a state happens to carry.
+    pub fn apply_to_props(self, block_name: &str, props: &mut [(&'static str, &'static str)]) {
+        if self == Self::None {
+            return;
+        }
+        let sides = permutes_sides(block_name);
+        for (key, value) in props.iter_mut() {
+            match *key {
+                // HorizontalDirectionalBlock.java:21-23, DirectionalBlock subclasses.
+                "facing" if is_direction(*value) => *value = self.rotate_facing(*value),
+                // RotatedPillarBlock.rotatePillar, RotatedPillarBlock.java:31-45.
+                "axis" => *value = self.rotate_axis(*value),
+                // StandingSignBlock.java:72-74, BannerBlock, SkullBlock.
+                "rotation" => {
+                    if let Ok(parsed) = value.parse::<i32>() {
+                        *value = rotation16_to_str(self.rotate_block_rotation(parsed));
+                    }
+                }
+                "shape" => {
+                    if let Some(rotated) = self.rotate_rail_shape(*value) {
+                        *value = rotated;
+                    }
+                }
+                "orientation" => {
+                    if let Some(rotated) = self.rotate_orientation(*value) {
+                        *value = rotated;
+                    }
+                }
+                // CrossCollisionBlock.java:96-112, WallBlock.java:271-287,
+                // MultifaceBlock, VineBlock, TripWireBlock, RedStoneWireBlock: the
+                // value stays put and moves to the rotated side.
+                "north" | "south" | "east" | "west" if sides => *key = self.rotate_facing(*key),
+                _ => {}
+            }
+        }
+    }
+}
+
+impl Mirror {
+    /// Mirrors a rail shape.
+    ///
+    /// Mirrors `BaseRailBlock.mirror(RailShape, Mirror)` (`BaseRailBlock.java:230-276`).
+    #[must_use]
+    pub fn mirror_rail_shape(self, shape: &str) -> Option<&'static str> {
+        Some(match self {
+            Self::None => return None,
+            Self::LeftRight => match shape {
+                "ascending_north" => "ascending_south",
+                "ascending_south" => "ascending_north",
+                "south_east" => "north_east",
+                "south_west" => "north_west",
+                "north_west" => "south_west",
+                "north_east" => "south_east",
+                _ => return None,
+            },
+            Self::FrontBack => match shape {
+                "ascending_east" => "ascending_west",
+                "ascending_west" => "ascending_east",
+                "south_east" => "south_west",
+                "south_west" => "south_east",
+                "north_west" => "north_east",
+                "north_east" => "north_west",
+                _ => return None,
+            },
+        })
+    }
+
+    /// Mirrors a stair `shape`, given whether this mirror flipped the stair's facing.
+    ///
+    /// `StairBlock.mirror` (`StairBlock.java:174-212`) only remaps the shape when the
+    /// facing lies on the mirrored axis, and the two mirrors are deliberately
+    /// asymmetric: `LEFT_RIGHT` swaps both the inner and the outer corners, while
+    /// `FRONT_BACK` swaps only the outer ones.
+    #[must_use]
+    pub fn mirror_stairs_shape(self, shape: &str, facing_flipped: bool) -> Option<&'static str> {
+        if !facing_flipped {
+            return None;
+        }
+        Some(match self {
+            Self::None => return None,
+            Self::LeftRight => match shape {
+                "inner_left" => "inner_right",
+                "inner_right" => "inner_left",
+                "outer_left" => "outer_right",
+                "outer_right" => "outer_left",
+                _ => return None,
+            },
+            Self::FrontBack => match shape {
+                "outer_left" => "outer_right",
+                "outer_right" => "outer_left",
+                _ => return None,
+            },
+        })
+    }
+
+    /// Mirrors a jigsaw/crafter `orientation` value
+    /// (`JigsawBlock.java:46-48`, `CrafterBlock.java:239-241`).
+    #[must_use]
+    pub fn mirror_orientation(self, value: &str) -> Option<&'static str> {
+        let (front, top) = value.split_once('_')?;
+        if !is_direction(front) || !is_direction(top) {
+            return None;
+        }
+        orientation_value(self.mirror_facing(front), self.mirror_facing(top))
+    }
+
+    /// Applies this mirror to a block state's property list in place.
+    pub fn apply_to_props(self, block_name: &str, props: &mut [(&'static str, &'static str)]) {
+        if self == Self::None {
+            return;
+        }
+        let sides = permutes_sides(block_name);
+        // StairBlock.mirror reads the pre-mirror facing to decide the shape remap.
+        let facing_flipped = props
+            .iter()
+            .find(|(key, _)| *key == "facing")
+            .map(|(_, value)| *value)
+            .is_some_and(|value| self.mirror_facing(value) != value);
+        for (key, value) in props.iter_mut() {
+            match *key {
+                "facing" if is_direction(*value) => *value = self.mirror_facing(*value),
+                // Mirror.java: INVERT_X / INVERT_Z never swap axes, so `axis` is fixed.
+                "rotation" => {
+                    if let Ok(parsed) = value.parse::<i32>() {
+                        *value = rotation16_to_str(self.mirror_block_rotation(parsed));
+                    }
+                }
+                // DoorBlock.java:257-259 cycles HINGE for any non-NONE mirror, even
+                // when the facing itself is unaffected.
+                "hinge" => {
+                    *value = match *value {
+                        "left" => "right",
+                        "right" => "left",
+                        other => other,
+                    };
+                }
+                "shape" => {
+                    if let Some(mirrored) = self
+                        .mirror_rail_shape(*value)
+                        .or_else(|| self.mirror_stairs_shape(*value, facing_flipped))
+                    {
+                        *value = mirrored;
+                    }
+                }
+                "orientation" => {
+                    if let Some(mirrored) = self.mirror_orientation(*value) {
+                        *value = mirrored;
+                    }
+                }
+                "north" | "south" | "east" | "west" if sides => *key = self.mirror_facing(*key),
+                _ => {}
+            }
         }
     }
 }
@@ -382,5 +684,267 @@ mod mirror_tests {
         let size = Vector3::new(4, 1, 6);
         let pos = Vector3::new(1, 0, 2);
         assert_eq!(Mirror::None.transform_pos(pos, size), pos);
+    }
+}
+
+#[cfg(test)]
+mod transform_tests {
+    use super::*;
+
+    fn props(pairs: &[(&'static str, &'static str)]) -> Vec<(&'static str, &'static str)> {
+        pairs.to_vec()
+    }
+
+    fn get<'a>(props: &'a [(&'static str, &'static str)], key: &str) -> &'a str {
+        props
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, v)| *v)
+            .unwrap_or_else(|| panic!("missing property {key}"))
+    }
+
+    // HorizontalDirectionalBlock.java:21-23
+    #[test]
+    fn facing_rotates_clockwise() {
+        let mut p = props(&[("facing", "north"), ("half", "bottom")]);
+        Rotation::Clockwise90.apply_to_props("oak_stairs", &mut p);
+        assert_eq!(get(&p, "facing"), "east");
+        assert_eq!(get(&p, "half"), "bottom");
+    }
+
+    // Rotation.rotate(Direction) returns Y-axis directions unchanged (Rotation.java:88-99).
+    #[test]
+    fn vertical_facing_is_rotation_invariant() {
+        let mut p = props(&[("facing", "down")]);
+        Rotation::Clockwise90.apply_to_props("hopper", &mut p);
+        assert_eq!(get(&p, "facing"), "down");
+    }
+
+    // RotatedPillarBlock.rotatePillar, RotatedPillarBlock.java:31-45
+    #[test]
+    fn pillar_axis_swaps_on_quarter_turns_only() {
+        for rotation in [Rotation::Clockwise90, Rotation::CounterClockwise90] {
+            let mut p = props(&[("axis", "x")]);
+            rotation.apply_to_props("oak_log", &mut p);
+            assert_eq!(get(&p, "axis"), "z");
+        }
+        let mut p = props(&[("axis", "x")]);
+        Rotation::Rotate180.apply_to_props("oak_log", &mut p);
+        assert_eq!(get(&p, "axis"), "x");
+        let mut p = props(&[("axis", "y")]);
+        Rotation::Clockwise90.apply_to_props("oak_log", &mut p);
+        assert_eq!(get(&p, "axis"), "y");
+    }
+
+    // Mirror.java: INVERT_X / INVERT_Z never swap axes.
+    #[test]
+    fn mirror_leaves_axis_alone() {
+        let mut p = props(&[("axis", "x")]);
+        Mirror::FrontBack.apply_to_props("oak_log", &mut p);
+        assert_eq!(get(&p, "axis"), "x");
+    }
+
+    // StandingSignBlock.java:72-78, Rotation.rotate(int, 16) / Mirror.mirror(int, 16).
+    #[test]
+    fn sign_rotation_16_steps() {
+        let mut p = props(&[("rotation", "15")]);
+        Rotation::Clockwise90.apply_to_props("oak_sign", &mut p);
+        assert_eq!(get(&p, "rotation"), "3");
+
+        let mut p = props(&[("rotation", "3")]);
+        Mirror::LeftRight.apply_to_props("oak_sign", &mut p);
+        assert_eq!(get(&p, "rotation"), "5");
+    }
+
+    // CrossCollisionBlock.java:96-112: CLOCKWISE_90 sets NORTH from WEST, EAST from
+    // NORTH, SOUTH from EAST, WEST from SOUTH.
+    #[test]
+    fn cross_collision_permutes_sides_clockwise() {
+        let mut p = props(&[
+            ("north", "true"),
+            ("east", "false"),
+            ("south", "false"),
+            ("west", "false"),
+        ]);
+        Rotation::Clockwise90.apply_to_props("oak_fence", &mut p);
+        assert_eq!(get(&p, "east"), "true");
+        assert_eq!(get(&p, "north"), "false");
+        assert_eq!(get(&p, "south"), "false");
+        assert_eq!(get(&p, "west"), "false");
+    }
+
+    // WallBlock.java:290-299: LEFT_RIGHT swaps NORTH and SOUTH, values untouched.
+    #[test]
+    fn wall_sides_mirror_and_keep_their_values() {
+        let mut p = props(&[
+            ("north", "tall"),
+            ("east", "low"),
+            ("south", "none"),
+            ("west", "none"),
+        ]);
+        Mirror::LeftRight.apply_to_props("cobblestone_wall", &mut p);
+        assert_eq!(get(&p, "south"), "tall");
+        assert_eq!(get(&p, "north"), "none");
+        assert_eq!(get(&p, "east"), "low");
+    }
+
+    // FireBlock.java:30 and ChorusPlantBlock.java:18 declare no rotate/mirror override.
+    #[test]
+    fn exempt_blocks_keep_their_sides() {
+        for name in ["fire", "chorus_plant"] {
+            let mut p = props(&[
+                ("north", "true"),
+                ("east", "false"),
+                ("south", "false"),
+                ("west", "false"),
+            ]);
+            Rotation::Clockwise90.apply_to_props(name, &mut p);
+            assert_eq!(get(&p, "north"), "true");
+            assert_eq!(get(&p, "east"), "false");
+        }
+    }
+
+    // DoorBlock.java:257-259: the hinge is cycled for any non-NONE mirror, including
+    // the case where the facing lies off the mirrored axis and does not move.
+    #[test]
+    fn door_hinge_flips_even_when_facing_does_not() {
+        let mut p = props(&[("facing", "east"), ("hinge", "left"), ("half", "lower")]);
+        Mirror::LeftRight.apply_to_props("oak_door", &mut p);
+        assert_eq!(get(&p, "facing"), "east");
+        assert_eq!(get(&p, "hinge"), "right");
+    }
+
+    #[test]
+    fn door_hinge_untouched_by_rotation() {
+        let mut p = props(&[("facing", "east"), ("hinge", "left")]);
+        Rotation::Clockwise90.apply_to_props("oak_door", &mut p);
+        assert_eq!(get(&p, "facing"), "south");
+        assert_eq!(get(&p, "hinge"), "left");
+    }
+
+    // BaseRailBlock.java:146-228, full CLOCKWISE_90 table.
+    #[test]
+    fn rail_shape_rotates_clockwise() {
+        let expected = [
+            ("north_south", "east_west"),
+            ("east_west", "north_south"),
+            ("ascending_east", "ascending_south"),
+            ("ascending_west", "ascending_north"),
+            ("ascending_north", "ascending_east"),
+            ("ascending_south", "ascending_west"),
+            ("south_east", "south_west"),
+            ("south_west", "north_west"),
+            ("north_west", "north_east"),
+            ("north_east", "south_east"),
+        ];
+        for (input, want) in expected {
+            let mut p = props(&[("shape", input)]);
+            Rotation::Clockwise90.apply_to_props("rail", &mut p);
+            assert_eq!(get(&p, "shape"), want, "rotating {input}");
+        }
+    }
+
+    // BaseRailBlock.java:230-276.
+    #[test]
+    fn rail_shape_mirrors() {
+        let left_right = [
+            ("ascending_north", "ascending_south"),
+            ("ascending_south", "ascending_north"),
+            ("ascending_east", "ascending_east"),
+            ("north_south", "north_south"),
+            ("south_east", "north_east"),
+            ("south_west", "north_west"),
+            ("north_west", "south_west"),
+            ("north_east", "south_east"),
+        ];
+        for (input, want) in left_right {
+            let mut p = props(&[("shape", input)]);
+            Mirror::LeftRight.apply_to_props("rail", &mut p);
+            assert_eq!(get(&p, "shape"), want, "left_right on {input}");
+        }
+        let front_back = [
+            ("ascending_east", "ascending_west"),
+            ("ascending_west", "ascending_east"),
+            ("ascending_north", "ascending_north"),
+            ("south_east", "south_west"),
+            ("north_east", "north_west"),
+        ];
+        for (input, want) in front_back {
+            let mut p = props(&[("shape", input)]);
+            Mirror::FrontBack.apply_to_props("rail", &mut p);
+            assert_eq!(get(&p, "shape"), want, "front_back on {input}");
+        }
+    }
+
+    // StairBlock.java:169-171: rotation never touches the shape.
+    #[test]
+    fn stairs_shape_is_rotation_invariant() {
+        let mut p = props(&[("facing", "north"), ("shape", "inner_left")]);
+        Rotation::Clockwise90.apply_to_props("oak_stairs", &mut p);
+        assert_eq!(get(&p, "facing"), "east");
+        assert_eq!(get(&p, "shape"), "inner_left");
+    }
+
+    // StairBlock.java:174-212. LEFT_RIGHT swaps inner and outer corners, but only when
+    // the facing is on the Z axis.
+    #[test]
+    fn stairs_left_right_mirror() {
+        let mut p = props(&[("facing", "north"), ("shape", "inner_left")]);
+        Mirror::LeftRight.apply_to_props("oak_stairs", &mut p);
+        assert_eq!(get(&p, "facing"), "south");
+        assert_eq!(get(&p, "shape"), "inner_right");
+
+        let mut p = props(&[("facing", "east"), ("shape", "inner_left")]);
+        Mirror::LeftRight.apply_to_props("oak_stairs", &mut p);
+        assert_eq!(get(&p, "facing"), "east");
+        assert_eq!(get(&p, "shape"), "inner_left");
+    }
+
+    // StairBlock.java:194-208: FRONT_BACK swaps only the outer corners; INNER_LEFT and
+    // INNER_RIGHT are deliberately mapped to themselves.
+    #[test]
+    fn stairs_front_back_mirror_keeps_inner_corners() {
+        let mut p = props(&[("facing", "east"), ("shape", "inner_left")]);
+        Mirror::FrontBack.apply_to_props("oak_stairs", &mut p);
+        assert_eq!(get(&p, "facing"), "west");
+        assert_eq!(get(&p, "shape"), "inner_left");
+
+        let mut p = props(&[("facing", "east"), ("shape", "outer_left")]);
+        Mirror::FrontBack.apply_to_props("oak_stairs", &mut p);
+        assert_eq!(get(&p, "facing"), "west");
+        assert_eq!(get(&p, "shape"), "outer_right");
+    }
+
+    // JigsawBlock.java:41-48, CrafterBlock.java:234-241.
+    #[test]
+    fn orientation_rotates_front_and_top() {
+        let mut p = props(&[("orientation", "down_east")]);
+        Rotation::Clockwise90.apply_to_props("jigsaw", &mut p);
+        assert_eq!(get(&p, "orientation"), "down_south");
+
+        let mut p = props(&[("orientation", "north_up")]);
+        Rotation::Clockwise90.apply_to_props("jigsaw", &mut p);
+        assert_eq!(get(&p, "orientation"), "east_up");
+
+        let mut p = props(&[("orientation", "north_up")]);
+        Mirror::LeftRight.apply_to_props("jigsaw", &mut p);
+        assert_eq!(get(&p, "orientation"), "south_up");
+
+        let mut p = props(&[("orientation", "down_east")]);
+        Mirror::LeftRight.apply_to_props("jigsaw", &mut p);
+        assert_eq!(get(&p, "orientation"), "down_east");
+    }
+
+    #[test]
+    fn identity_transforms_change_nothing() {
+        let original = props(&[
+            ("facing", "north"),
+            ("shape", "inner_left"),
+            ("hinge", "left"),
+        ]);
+        let mut p = original.clone();
+        Rotation::None.apply_to_props("oak_stairs", &mut p);
+        Mirror::None.apply_to_props("oak_stairs", &mut p);
+        assert_eq!(p, original);
     }
 }

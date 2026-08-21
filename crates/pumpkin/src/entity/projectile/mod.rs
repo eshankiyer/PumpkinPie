@@ -172,6 +172,37 @@ pub fn projectile_land_pos(hit: &ProjectileHit) -> Vector3<f64> {
     }
 }
 
+/// The entity branch of `Projectile.hitTargetOrDeflectSelf` (`Projectile.java:244-255`).
+///
+/// Returns `true` when the target deflected the projectile, in which case the caller must skip
+/// `on_hit` and must NOT despawn the projectile -- a deflected projectile keeps flying. The
+/// `lastDeflectedBy` guard (`Projectile.java:250-251`) is what stops a projectile that is still
+/// inside the deflector's expanded hitbox from being deflected again every tick, which would
+/// otherwise leave it oscillating in place.
+///
+/// The world-border branch of the same method (`Projectile.java:256-262`) is not ported: nothing
+/// here reports a world-border block hit.
+pub fn try_deflect(hit: &ProjectileHit, projectile: &Arc<dyn EntityBase>) -> bool {
+    let ProjectileHit::Entity { entity: target, .. } = hit else {
+        return false;
+    };
+
+    let deflection = target.projectile_deflection(projectile.as_ref());
+    if matches!(
+        deflection,
+        crate::entity::projectile_deflection::ProjectileDeflectionType::None
+    ) {
+        return false;
+    }
+
+    let target_id = target.get_entity().entity_id;
+    let entity = projectile.get_entity();
+    if entity.last_deflected_by.swap(target_id, Ordering::Relaxed) != target_id {
+        deflection.deflect(projectile.as_ref(), Some(target.as_ref()));
+    }
+    true
+}
+
 /// Emits `GameEvent.PROJECTILE_LAND`; call after `on_hit` runs.
 ///
 /// `Projectile.onHit`, lines 299-300/304-305: `onHitEntity`/`onHitBlock` runs first,
@@ -365,6 +396,11 @@ impl ThrownItemEntity {
 
         // Handle hit or continue
         if let Some(h) = hit {
+            // `Projectile.hitTargetOrDeflectSelf`: a deflected projectile is not consumed.
+            if try_deflect(&h, caller) {
+                return;
+            }
+
             // Ensure hit is only processed once per projectile
             if self.has_hit.swap(true, Ordering::SeqCst) {
                 return;

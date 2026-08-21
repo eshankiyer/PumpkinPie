@@ -47,6 +47,21 @@ impl BlockBehaviour for TripwireBlock {
             if props.powered {
                 return;
             }
+            // `TripWireBlock.entityInside` (TripWireBlock.java:149-157) only reaches
+            // `checkPressed` when no tick is already queued, and `checkPressed`
+            // (TripWireBlock.java:172-183) ignores any entity whose
+            // `isIgnoringBlockTriggers` is true. Without those two guards a marker or a
+            // display entity tripped the wire, and a wire already counting down had its
+            // 10-tick reset pushed back on every collision.
+            if args
+                .world
+                .is_block_tick_scheduled(args.position, args.block)
+            {
+                return;
+            }
+            if is_ignoring_block_triggers(args.entity.get_entity().entity_type) {
+                return;
+            }
             props.powered = true;
 
             let state_id = props.to_state_id(args.block);
@@ -110,7 +125,10 @@ impl BlockBehaviour for TripwireBlock {
                         BlockFlags::empty(),
                     )
                     .await;
-                args.player.damage_held_item(1).await;
+                // `TripWireBlock.playerWillDestroy` (TripWireBlock.java:115-122) only writes
+                // DISARMED and fires a game event; it never touches durability, and the generic
+                // mining path skips damage on a zero-hardness block, so vanilla shears lose
+                // nothing to cutting a tripwire.
             }
         })
     }

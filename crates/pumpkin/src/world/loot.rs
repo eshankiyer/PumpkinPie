@@ -32,6 +32,27 @@ pub struct LootContextParameters {
     pub is_on_fire: Option<bool>,
 }
 
+/// Vanilla `LootTable.createStackSplitter` (`LootTable.java:66-82`): a roll whose count is at
+/// or above the item's max stack size is emitted as several stacks of at most `max_stack_size`
+/// rather than one oversized stack.
+///
+/// The `isItemEnabled` feature-flag half of the vanilla lambda has no analogue here and is
+/// deliberately not modelled.
+fn push_split_stack(stacks: &mut Vec<ItemStack>, stack: ItemStack) {
+    let max = stack.get_max_stack_size().max(1);
+    if stack.item_count < max {
+        stacks.push(stack);
+        return;
+    }
+
+    let mut remaining = stack.item_count;
+    while remaining > 0 {
+        let count = max.min(remaining);
+        stacks.push(stack.copy_with_count(count));
+        remaining -= count;
+    }
+}
+
 pub trait LootTableExt {
     fn get_loot(&self, params: LootContextParameters) -> Vec<ItemStack>;
 }
@@ -82,7 +103,7 @@ impl LootTableExt for LootTable {
                             if let Some(loot) = entry.get_loot(&params) {
                                 for stack in loot {
                                     if stack.item_count > 0 {
-                                        stacks.push(stack);
+                                        push_split_stack(&mut stacks, stack);
                                     }
                                 }
                             }
@@ -866,6 +887,42 @@ mod tests {
     use pumpkin_data::entity::EntityType;
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
+
+    #[test]
+    fn stack_splitter_passes_through_a_stack_below_max() {
+        let mut out = Vec::new();
+        push_split_stack(&mut out, ItemStack::new(40, &Item::COBBLESTONE));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].item_count, 40);
+    }
+
+    #[test]
+    fn stack_splitter_splits_an_oversized_stack() {
+        let max = ItemStack::new(1, &Item::COBBLESTONE).get_max_stack_size();
+        assert_eq!(max, 64);
+        let mut out = Vec::new();
+        push_split_stack(&mut out, ItemStack::new(150, &Item::COBBLESTONE));
+        assert_eq!(
+            out.iter().map(|s| u32::from(s.item_count)).sum::<u32>(),
+            150
+        );
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0].item_count, 64);
+        assert_eq!(out[1].item_count, 64);
+        assert_eq!(out[2].item_count, 22);
+    }
+
+    #[test]
+    fn stack_splitter_respects_a_non_default_max_stack_size() {
+        let max = ItemStack::new(1, &Item::ENDER_PEARL).get_max_stack_size();
+        assert_eq!(max, 16);
+        let mut out = Vec::new();
+        push_split_stack(&mut out, ItemStack::new(40, &Item::ENDER_PEARL));
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0].item_count, 16);
+        assert_eq!(out[1].item_count, 16);
+        assert_eq!(out[2].item_count, 8);
+    }
 
     fn base_params() -> LootContextParameters {
         LootContextParameters {

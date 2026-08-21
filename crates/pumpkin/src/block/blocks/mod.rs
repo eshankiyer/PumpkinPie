@@ -1,4 +1,5 @@
 // Portals & dimension blocks
+pub mod end_gateway;
 pub mod end_portal;
 pub mod end_portal_frame;
 pub mod end_rod;
@@ -76,6 +77,7 @@ pub mod torches;
 // Plants, crops & natural blocks
 pub mod amethyst;
 pub mod carved_pumpkin;
+pub mod dried_ghast;
 pub mod dripstone;
 pub mod farmland;
 pub mod hanging_roots;
@@ -95,6 +97,7 @@ pub mod cobweb;
 pub mod dirt_path;
 pub mod dragon_egg;
 pub mod falling;
+pub mod frogspawn;
 pub mod frosted_ice;
 pub mod grass_block;
 pub mod ice;
@@ -134,6 +137,7 @@ pub mod multiface_spreader;
 
 pub mod beacon;
 pub mod heavy_core;
+pub mod honey;
 pub mod huge_mushroom;
 
 // Copper oxidation/weathering (shared utility)

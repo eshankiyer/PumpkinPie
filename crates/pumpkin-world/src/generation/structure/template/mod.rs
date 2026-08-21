@@ -339,6 +339,136 @@ mod tests {
         fn add_block_entity(&mut self, _nbt: NbtCompound) {}
     }
 
+    use std::collections::HashMap;
+
+    struct MapPlacer(HashMap<(i32, i32, i32), BlockStateId>);
+
+    impl BlockPlacer for MapPlacer {
+        fn get_block_state(&self, _pos: &Vector3<i32>) -> BlockStateId {
+            Block::AIR.default_state.id
+        }
+
+        fn set_block_state(&mut self, pos: &Vector3<i32>, state: &BlockState) {
+            self.0.insert((pos.x, pos.y, pos.z), state.id);
+        }
+
+        fn add_block_entity(&mut self, _nbt: NbtCompound) {}
+    }
+
+    fn entry(name: &str, properties: &[(&str, &str)]) -> PaletteEntry {
+        PaletteEntry::with_properties(
+            name.to_string(),
+            properties
+                .iter()
+                .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+                .collect(),
+        )
+    }
+
+    fn state_id(name: &str, properties: &[(&str, &str)]) -> BlockStateId {
+        BlockStateResolver::resolve_simple(&entry(name, properties))
+            .expect("known block")
+            .id
+    }
+
+    /// End-to-end orientation check: a template holding a curved rail and a stair,
+    /// placed under all four rotations. Pins both the state ids (rail `shape` and stair
+    /// `facing` must follow the rotation, stair `shape` must not) and the positions,
+    /// which is what proves the property transform composes with `transform_pos`
+    /// rather than being applied twice or on the wrong axis.
+    #[test]
+    fn placed_rails_and_stairs_follow_the_rotation() {
+        let template = StructureTemplate {
+            size: Vector3::new(3, 1, 3),
+            palette: vec![
+                entry("minecraft:rail", &[("shape", "north_east")]),
+                entry(
+                    "minecraft:oak_stairs",
+                    &[
+                        ("facing", "north"),
+                        ("half", "bottom"),
+                        ("shape", "inner_left"),
+                        ("waterlogged", "false"),
+                    ],
+                ),
+            ],
+            blocks: vec![
+                TemplateBlock {
+                    pos: Vector3::new(0, 0, 0),
+                    state: 0,
+                    nbt: None,
+                },
+                TemplateBlock {
+                    pos: Vector3::new(2, 0, 0),
+                    state: 1,
+                    nbt: None,
+                },
+            ],
+            entities: Vec::new(),
+        };
+
+        // (rotation, rail shape, stair facing, rail pos, stair pos)
+        let cases = [
+            (Rotation::None, "north_east", "north", (0, 0, 0), (2, 0, 0)),
+            (
+                Rotation::Clockwise90,
+                "south_east",
+                "east",
+                (2, 0, 0),
+                (2, 0, 2),
+            ),
+            (
+                Rotation::Rotate180,
+                "south_west",
+                "south",
+                (2, 0, 2),
+                (0, 0, 2),
+            ),
+            (
+                Rotation::CounterClockwise90,
+                "north_west",
+                "west",
+                (0, 0, 2),
+                (0, 0, 0),
+            ),
+        ];
+
+        for (rotation, rail_shape, stair_facing, rail_pos, stair_pos) in cases {
+            let mut placer = MapPlacer(HashMap::new());
+            place_template(
+                &mut placer,
+                &template,
+                Vector3::new(0, 0, 0),
+                (0, 0),
+                rotation,
+                false,
+                false,
+                &[],
+                None,
+            );
+
+            assert_eq!(placer.0.len(), 2, "{rotation:?} placed the wrong count");
+            assert_eq!(
+                placer.0.get(&rail_pos).copied(),
+                Some(state_id("minecraft:rail", &[("shape", rail_shape)])),
+                "rail under {rotation:?}"
+            );
+            assert_eq!(
+                placer.0.get(&stair_pos).copied(),
+                Some(state_id(
+                    "minecraft:oak_stairs",
+                    &[
+                        ("facing", stair_facing),
+                        ("half", "bottom"),
+                        ("shape", "inner_left"),
+                        ("waterlogged", "false"),
+                    ],
+                )),
+                "stairs under {rotation:?}"
+            );
+        }
+    }
+
     #[test]
     fn structure_void_is_never_placed() {
         let mut placed_templates = 0;

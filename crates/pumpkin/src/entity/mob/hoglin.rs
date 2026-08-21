@@ -199,8 +199,13 @@ impl Mob for HoglinEntity {
                     &self.mob_entity,
                     Sound::EntityHoglinConvertedToZombified,
                 );
-                zombification::convert_to(&self.mob_entity, &EntityType::ZOGLIN, ZoglinEntity::new)
-                    .await;
+                zombification::convert_to(
+                    &self.mob_entity,
+                    &EntityType::ZOGLIN,
+                    true,
+                    ZoglinEntity::new,
+                )
+                .await;
                 return;
             }
 

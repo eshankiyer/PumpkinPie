@@ -1,14 +1,19 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+use std::sync::atomic::AtomicI32;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::potion::Effect;
+use pumpkin_data::tracked_data;
+use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_protocol::java::client::play::Metadata;
+use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
         axolotl_play_dead::AxolotlPlayDeadGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal,
@@ -47,17 +52,86 @@ async fn axolotl_attackable(
     target.touching_water
 }
 
+/// `Axolotl.Variant` (`Axolotl.java:624-629`).
+///
+/// The id is what `DATA_VARIANT` and the `Variant` NBT tag both carry; vanilla's `common` flag
+/// marks the four naturally spawning colours, leaving blue as the breeding-only rare
+/// (`getSpawnVariant`, `Axolotl.java:671-674`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum AxolotlVariant {
+    Lucy = 0,
+    Wild = 1,
+    Gold = 2,
+    Cyan = 3,
+    Blue = 4,
+}
+
+/// `Axolotl.Variant.getSpawnVariant(random, true)`: a uniform pick over the common colours.
+const COMMON_VARIANTS: [AxolotlVariant; 4] = [
+    AxolotlVariant::Lucy,
+    AxolotlVariant::Wild,
+    AxolotlVariant::Gold,
+    AxolotlVariant::Cyan,
+];
+
+impl AxolotlVariant {
+    /// `Axolotl.Variant.DEFAULT` (`Axolotl.java:631`).
+    pub const DEFAULT: Self = Self::Lucy;
+
+    /// `Axolotl.Variant.byId`, whose `ByIdMap.OutOfBoundsStrategy.ZERO` maps anything unknown
+    /// back to `LUCY`.
+    #[must_use]
+    pub const fn by_id(id: i32) -> Self {
+        match id {
+            1 => Self::Wild,
+            2 => Self::Gold,
+            3 => Self::Cyan,
+            4 => Self::Blue,
+            _ => Self::Lucy,
+        }
+    }
+
+    #[must_use]
+    pub const fn id(self) -> i32 {
+        self as i32
+    }
+}
+
 /// Represents an Axolotl, a passive aquatic mob that can play dead to regenerate health.
 ///
 /// Wiki: <https://minecraft.wiki/w/Axolotl>
+///
+/// Colour variants (`Axolotl.DATA_VARIANT`, `Axolotl.java:83`; `getVariant`/`setVariant`,
+/// `Axolotl.java:281-285`) are carried here as a plain atomic, synced through `DATA_VARIANT` and
+/// round-tripped through the `Variant` NBT tag (`Axolotl.java:139-150`).
+///
+/// Two halves of vanilla's variant handling are NOT ported, both for want of a hook rather than
+/// by choice:
+/// - `finalizeSpawn`'s `AxolotlGroupData` (`Axolotl.java:160-183`) picks two common colours per
+///   spawn group and gives every member of that group one of the two. Pumpkin has no
+///   `finalizeSpawn`/spawn-group-data hook, so each axolotl rolls its own common colour in
+///   `new()` -- naturally spawned groups here are more varied than vanilla's.
+/// - `getBreedOffspring`'s inheritance and the 1-in-1200 rare-blue roll
+///   (`Axolotl.java:342-357`, `useRareVariant`, `Axolotl.java:309-311`). `AxolotlEntity`
+///   implements neither `Animal` nor `AgeableMob`, so it cannot breed at all yet; blue axolotls
+///   are therefore unobtainable, since vanilla never spawns them naturally. Wiring this is a
+///   follow-up on the missing `Animal` impl, not on the variant field.
 pub struct AxolotlEntity {
     pub mob_entity: MobEntity,
+    /// `Axolotl.DATA_VARIANT` (`Axolotl.java:83`), stored as the variant's id.
+    variant: AtomicI32,
 }
 
 impl AxolotlEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
-        let axolotl = Self { mob_entity };
+        // See the struct doc: stands in for `finalizeSpawn`. An axolotl loaded from disk
+        // overwrites this in `read_nbt_non_mut`, so the roll is harmless for loaded ones.
+        let variant = COMMON_VARIANTS[rand::rng().random_range(0..COMMON_VARIANTS.len())];
+        let axolotl = Self {
+            mob_entity,
+            variant: AtomicI32::new(variant.id()),
+        };
         let mob_arc = Arc::new(axolotl);
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
@@ -125,13 +199,60 @@ impl AxolotlEntity {
         }
         living.remove_effect(&StatusEffect::MINING_FATIGUE).await;
     }
+
+    /// `Axolotl.getVariant` (`Axolotl.java:281-283`).
+    #[must_use]
+    pub fn variant(&self) -> AxolotlVariant {
+        AxolotlVariant::by_id(self.variant.load(Relaxed))
+    }
+
+    /// `Axolotl.setVariant` (`Axolotl.java:285-287`).
+    pub fn set_variant(&self, variant: AxolotlVariant) {
+        self.variant.store(variant.id(), Relaxed);
+        self.get_entity().send_meta_data(
+            &[Metadata::new(tracked_data::axolotl::VARIANT, variant.id())],
+            None,
+        );
+    }
 }
 
-impl NBTStorage for AxolotlEntity {}
+impl NBTStorage for AxolotlEntity {
+    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
+        Box::pin(async move {
+            self.mob_entity.living_entity.write_nbt(nbt).await;
+            // `Axolotl.addAdditionalSaveData` (`Axolotl.java:139-143`). `FromBucket` is not
+            // written: nothing here sets it, since axolotl bucketing lives in `item/`.
+            nbt.put_int("Variant", self.variant.load(Relaxed));
+        })
+    }
+
+    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
+        Box::pin(async move {
+            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
+            // `Axolotl.readAdditionalSaveData` (`Axolotl.java:146-150`): defaults to LUCY.
+            let variant = nbt
+                .get_int("Variant")
+                .map_or(AxolotlVariant::DEFAULT, AxolotlVariant::by_id);
+            self.variant.store(variant.id(), Relaxed);
+        })
+    }
+}
 
 impl Mob for AxolotlEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            self.get_entity().send_meta_data(
+                &[Metadata::new(
+                    tracked_data::axolotl::VARIANT,
+                    self.variant.load(Relaxed),
+                )],
+                None,
+            );
+        })
     }
 
     /// Vanilla `Axolotl.onStopAttacking`: when a hit kills the target and the target's last

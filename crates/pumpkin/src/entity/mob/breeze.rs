@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicI32, Ordering::Relaxed};
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::tag::{self, Taggable};
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage,
@@ -12,6 +13,7 @@ use crate::entity::{
         wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
+    projectile_deflection::ProjectileDeflectionType,
 };
 
 pub struct BreezeEntity {
@@ -125,6 +127,31 @@ impl NBTStorage for BreezeEntity {}
 impl Mob for BreezeEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `Breeze.deflection` (`Breeze.java:196-202`): a breeze bats away every projectile except
+    /// wind charges, its own included. The tag test mirrors vanilla's
+    /// `is(EntityTypeTags.DEFLECTS_PROJECTILES)`, which today matches only the breeze; it is kept
+    /// rather than hardcoded so a datapack retag still behaves. The deflection itself is
+    /// `Breeze.PROJECTILE_DEFLECTION` (`Breeze.java:62-66`) -- the deflect sound plus
+    /// `ProjectileDeflection.REVERSE`.
+    fn mob_projectile_deflection(&self, projectile: &dyn EntityBase) -> ProjectileDeflectionType {
+        let projectile_type = projectile.get_entity().entity_type;
+        if projectile_type.id == EntityType::WIND_CHARGE.id
+            || projectile_type.id == EntityType::BREEZE_WIND_CHARGE.id
+        {
+            return ProjectileDeflectionType::None;
+        }
+
+        if self
+            .get_entity()
+            .entity_type
+            .has_tag(&tag::EntityType::MINECRAFT_DEFLECTS_PROJECTILES)
+        {
+            ProjectileDeflectionType::BreezeDeflect
+        } else {
+            ProjectileDeflectionType::None
+        }
     }
 
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {

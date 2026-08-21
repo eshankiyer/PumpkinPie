@@ -33,7 +33,9 @@ use crate::block::blocks::creaking_heart::CreakingHeartBlock;
 use crate::block::blocks::decorated_pot::DecoratedPotBlock;
 use crate::block::blocks::dirt_path::DirtPathBlock;
 use crate::block::blocks::doors::DoorBlock;
+use crate::block::blocks::dried_ghast::DriedGhastBlock;
 use crate::block::blocks::dripstone::DripstoneBlock;
+use crate::block::blocks::end_gateway::EndGatewayBlock;
 use crate::block::blocks::end_portal::EndPortalBlock;
 use crate::block::blocks::end_portal_frame::EndPortalFrameBlock;
 use crate::block::blocks::falling::{ConcretePowderBlock, FallingBlock};
@@ -44,6 +46,7 @@ use crate::block::blocks::fire::fire::FireBlock;
 use crate::block::blocks::fire::soul_fire::SoulFireBlock;
 use crate::block::blocks::fletching_table::FletchingTableBlock;
 use crate::block::blocks::flower_pots::FlowerPotBlock;
+use crate::block::blocks::frogspawn::FrogspawnBlock;
 use crate::block::blocks::frosted_ice::FrostedIceBlock;
 use crate::block::blocks::furnace::FurnaceBlock;
 use crate::block::blocks::glass_panes::GlassPaneBlock;
@@ -54,6 +57,7 @@ use crate::block::blocks::grindstone::GrindstoneBlock;
 use crate::block::blocks::hanging_roots::HangingRootsBlock;
 use crate::block::blocks::hay::HayBlock;
 use crate::block::blocks::heavy_core::HeavyCoreBlock;
+use crate::block::blocks::honey::HoneyBlock;
 use crate::block::blocks::huge_mushroom::HugeMushroomBlock;
 use crate::block::blocks::ice::IceBlock;
 use crate::block::blocks::infested::InfestedBlock;
@@ -340,6 +344,7 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(crate::block::blocks::pillar::PillarBlock);
     manager.register(PressurePlateBlock);
     manager.register(WeightedPressurePlateBlock);
+    manager.register(EndGatewayBlock);
     manager.register(EndPortalBlock);
     manager.register(SpawnerBlock);
     manager.register(EndPortalFrameBlock);
@@ -363,6 +368,7 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(MangroveRootsBlock);
     manager.register(LayeredSnowBlock);
     manager.register(IceBlock);
+    manager.register(FrogspawnBlock);
     manager.register(FrostedIceBlock);
     manager.register(CobwebBlock);
     manager.register(WitherRoseBlock);
@@ -373,6 +379,7 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(CopperFullBlock);
     manager.register(CopperGolemStatueBlock);
     manager.register(CopperGrateBlock);
+    manager.register(DriedGhastBlock);
     manager.register(DripstoneBlock);
     manager.register(TwistingVinesBlock);
     manager.register(WeepingVinesBlock);
@@ -399,6 +406,7 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(RootedDirtBlock);
     manager.register(BubbleColumnBlock);
     manager.register(HeavyCoreBlock);
+    manager.register(HoneyBlock);
     manager.register(HugeMushroomBlock);
 
     manager.register(FallingBlock);

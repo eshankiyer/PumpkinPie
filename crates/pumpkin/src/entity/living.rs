@@ -2281,6 +2281,11 @@ impl LivingEntity {
                 self.drop_loot(params.clone()).await;
             }
 
+            // `LivingEntity.die` (`world/entity/LivingEntity.java:1474`) calls
+            // `createWitherRose(killer)` directly after `dropAllDeathLoot`, with `killer`
+            // being `getKillCredit()` (:1438) - `cause` here.
+            self.create_wither_rose(cause).await;
+
             // Award experience
             if params.killed_by_player.unwrap_or(false)
                 && world.level_info.load().game_rules.mob_drops
@@ -2445,6 +2450,57 @@ impl LivingEntity {
                     self.entity.entity_type.id as i32,
                     1,
                 )
+                .await;
+        }
+    }
+
+    /// Vanilla `LivingEntity.createWitherRose`
+    /// (`world/entity/LivingEntity.java:1488-1506`), called from `die` at :1474 immediately
+    /// after `dropAllDeathLoot`.
+    ///
+    /// When the kill credit belongs to a wither, a wither rose is planted on the victim's
+    /// block position if `mobGriefing` is on and the block is air and the rose can survive
+    /// there. If either check fails - or `mobGriefing` is off - the rose drops as an item
+    /// instead, so the player gets one either way.
+    ///
+    /// Deviation: vanilla spawns the `ItemEntity` at the victim's exact `getX/Y/Z`; this uses
+    /// `World::drop_stack`, which is block-position based, matching every other drop path here.
+    async fn create_wither_rose(&self, killer: Option<&dyn EntityBase>) {
+        let is_wither =
+            killer.is_some_and(|k| k.get_entity().entity_type.id == EntityType::WITHER.id);
+        if !is_wither {
+            return;
+        }
+
+        let world = self.entity.world.load();
+        let pos = self.entity.block_pos.load();
+        let mut planted = false;
+
+        if world.level_info.load().game_rules.mob_griefing {
+            let state = Block::WITHER_ROSE.default_state;
+            if world.get_block_state(&pos).is_air()
+                && world.block_registry.can_place_at(
+                    None,
+                    None,
+                    &**world,
+                    None,
+                    &Block::WITHER_ROSE,
+                    state,
+                    &pos,
+                    None,
+                    None,
+                )
+            {
+                world
+                    .set_block_state(&pos, state.id, BlockFlags::NOTIFY_ALL)
+                    .await;
+                planted = true;
+            }
+        }
+
+        if !planted {
+            world
+                .drop_stack(&pos, ItemStack::new(1, &Item::WITHER_ROSE))
                 .await;
         }
     }

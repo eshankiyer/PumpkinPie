@@ -125,10 +125,12 @@ impl ZombificationTimer {
     }
 }
 
-/// Spawns `new_type` in place of `old` and gives it 200 ticks of nausea.
+/// Spawns `new_type` in place of `old`, optionally giving it 200 ticks of nausea.
 ///
 /// `Mob.convertTo` as used by `AbstractPiglin.finishConversion` (`AbstractPiglin.java:109-115`)
-/// and `Hoglin.finishConversion` (`Hoglin.java:251-256`).
+/// and `Hoglin.finishConversion` (`Hoglin.java:251-256`). Conversions outside the zombification
+/// path pass `nausea = false` -- `Tadpole.ageUp` (`Tadpole.java:238-247`) is one; the nausea
+/// belongs to zombification, not to `convertTo` itself.
 ///
 /// Simplifications, matching the copy set `ZombieEntity::finish_conversion` already uses for
 /// zombie -> drowned: position, velocity, rotation, ground flag, age, invulnerability, custom
@@ -140,6 +142,7 @@ impl ZombificationTimer {
 pub async fn convert_to<T>(
     old: &MobEntity,
     new_type: &'static EntityType,
+    nausea: bool,
     build: impl FnOnce(Entity) -> Arc<T>,
 ) where
     T: EntityBase + Send + Sync + 'static,
@@ -182,17 +185,19 @@ pub async fn convert_to<T>(
         for effect in effects {
             new_living.add_effect(effect).await;
         }
-        new_living
-            .add_effect(Effect {
-                effect_type: &StatusEffect::NAUSEA,
-                duration: NAUSEA_DURATION_TICKS,
-                amplifier: 0,
-                ambient: false,
-                show_particles: true,
-                show_icon: true,
-                blend: false,
-            })
-            .await;
+        if nausea {
+            new_living
+                .add_effect(Effect {
+                    effect_type: &StatusEffect::NAUSEA,
+                    duration: NAUSEA_DURATION_TICKS,
+                    amplifier: 0,
+                    ambient: false,
+                    show_particles: true,
+                    show_icon: true,
+                    blend: false,
+                })
+                .await;
+        }
     }
 
     world.spawn_entity(converted as Arc<dyn EntityBase>).await;

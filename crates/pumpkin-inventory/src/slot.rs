@@ -279,9 +279,16 @@ pub trait Slot: Send + Sync {
         Box::pin(async move {
             if !stack.is_empty() && self.can_insert(&stack).await {
                 let mut stack_self = self.get_stack().await;
-                let min_count = count
-                    .min(stack.item_count)
-                    .min(self.get_max_item_count_for_stack(&stack).await - stack_self.item_count);
+                // `Slot.safeInsert` (`Slot.java:137-140`) computes the headroom as a signed
+                // int and bails when it is not positive. Doing the subtraction on `u8`
+                // underflows whenever the slot already holds more items than the incoming
+                // stack's own max size allows -- e.g. shift-clicking ender pearls (max 16)
+                // onto a slot holding 64 cobblestone -- which panics in debug builds.
+                let headroom = self
+                    .get_max_item_count_for_stack(&stack)
+                    .await
+                    .saturating_sub(stack_self.item_count);
+                let min_count = count.min(stack.item_count).min(headroom);
 
                 if min_count != 0 {
                     if stack_self.is_empty() {

@@ -17,14 +17,37 @@ use crate::entity::{
     ageable::{AgeableData, AgeableMob},
     ai::goal::{
         breed::BreedGoal, follow_parent::FollowParentGoal, goat_ram::GoatRamGoal,
-        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal, swim::SwimGoal,
-        tempt::TemptGoal, wander_around::WanderAroundGoal,
+        long_jump_to_random_pos::LongJumpToRandomPosGoal, look_around::RandomLookAroundGoal,
+        look_at_entity::LookAtEntityGoal, swim::SwimGoal, tempt::TemptGoal,
+        wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
     player::Player,
 };
 
 const TEMPT_ITEMS: &[&Item] = &[&Item::WHEAT];
+
+/// `GoatAi.TIME_BETWEEN_LONG_JUMPS = UniformInt.of(600, 1200)` (`GoatAi.java:45`).
+const TIME_BETWEEN_LONG_JUMPS: (i32, i32) = (600, 1200);
+/// `GoatAi.MAX_LONG_JUMP_HEIGHT` (`GoatAi.java:46`).
+const MAX_LONG_JUMP_HEIGHT: i32 = 5;
+/// `GoatAi.MAX_LONG_JUMP_WIDTH` (`GoatAi.java:47`).
+const MAX_LONG_JUMP_WIDTH: i32 = 5;
+/// `GoatAi.MAX_JUMP_VELOCITY_MULTIPLIER` (`GoatAi.java:48`).
+const MAX_JUMP_VELOCITY_MULTIPLIER: f64 = 3.571_428_8;
+
+/// `GoatAi.java:119`: a screaming goat has its own long-jump sound.
+fn goat_long_jump_sound(mob: &dyn Mob) -> Sound {
+    let screaming = mob
+        .cast_any()
+        .downcast_ref::<GoatEntity>()
+        .is_some_and(GoatEntity::is_screaming_goat);
+    if screaming {
+        Sound::EntityGoatScreamingLongJump
+    } else {
+        Sound::EntityGoatLongJump
+    }
+}
 
 /// `Goat.GOAT_SCREAMING_CHANCE` (`Goat.java:76`).
 const GOAT_SCREAMING_CHANCE: f64 = 0.02;
@@ -47,11 +70,12 @@ const UNIHORN_CHANCE: f32 = 0.1;
 /// vanilla reaches through `super.mobInteract` -- a goat previously had no `Animal` impl at all,
 /// so it could neither be fed nor bred.
 ///
+/// Also ported: `GoatAi`'s long-jump activity (`GoatAi.java:109-122`), through the new
+/// `LongJumpToRandomPosGoal`. That goal's module doc lists the deviations forced by the missing
+/// memory system and by unbounded per-tick pathfinding in the vanilla original.
+///
 /// NOT ported, with reasons:
 ///
-/// - `GoatAi`'s long-jump activity (`GoatAi.java:109-122`). It is a `LongJumpToRandomPos`
-///   behavior gated on `LONG_JUMP_COOLDOWN_TICKS`/`LONG_JUMP_MID_JUMP` memories, and there is no
-///   long-jump goal in `ai/goal/` to hang it on.
 /// - `createHorn` (`Goat.java:100-107`): needs the `Instrument` registry and
 ///   `InstrumentItem.create` to stamp a goat-horn variant, which does not exist here. Horn
 ///   presence is tracked and persisted, but a dropped horn item is never produced.
@@ -111,15 +135,29 @@ impl GoatEntity {
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, Box::new(GoatRamGoal::new()));
-            goal_selector.add_goal(2, BreedGoal::new(1.0));
-            goal_selector.add_goal(3, Box::new(TemptGoal::new(1.25, TEMPT_ITEMS, false)));
-            goal_selector.add_goal(4, Box::new(FollowParentGoal::new(1.25)));
-            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
+            // `GoatAi.initLongJumpActivity` (`GoatAi.java:109-122`). Vanilla runs the long-jump
+            // activity above IDLE and below RAM, which is what priority 2 buys here.
             goal_selector.add_goal(
-                6,
+                2,
+                Box::new(LongJumpToRandomPosGoal::new(
+                    TIME_BETWEEN_LONG_JUMPS.0,
+                    TIME_BETWEEN_LONG_JUMPS.1,
+                    MAX_LONG_JUMP_HEIGHT,
+                    MAX_LONG_JUMP_WIDTH,
+                    MAX_JUMP_VELOCITY_MULTIPLIER,
+                    goat_long_jump_sound,
+                    Sound::EntityGoatStep,
+                )),
+            );
+            goal_selector.add_goal(3, BreedGoal::new(1.0));
+            goal_selector.add_goal(4, Box::new(TemptGoal::new(1.25, TEMPT_ITEMS, false)));
+            goal_selector.add_goal(5, Box::new(FollowParentGoal::new(1.25)));
+            goal_selector.add_goal(6, Box::new(WanderAroundGoal::new(1.0)));
+            goal_selector.add_goal(
+                7,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
             );
-            goal_selector.add_goal(7, Box::new(RandomLookAroundGoal::default()));
+            goal_selector.add_goal(8, Box::new(RandomLookAroundGoal::default()));
         };
 
         mob_arc

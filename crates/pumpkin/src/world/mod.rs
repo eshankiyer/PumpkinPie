@@ -6081,6 +6081,18 @@ impl World {
             .schedule_block_tick(block, block_pos, delay, priority);
     }
 
+    /// Same as [`Self::schedule_block_tick`], for delays that do not fit in a `u8`.
+    pub fn schedule_block_tick_long(
+        &self,
+        block: &Block,
+        block_pos: BlockPos,
+        delay: i64,
+        priority: TickPriority,
+    ) {
+        self.level
+            .schedule_block_tick_long(block, block_pos, delay, priority);
+    }
+
     pub fn schedule_fluid_tick(
         &self,
         fluid: &Fluid,

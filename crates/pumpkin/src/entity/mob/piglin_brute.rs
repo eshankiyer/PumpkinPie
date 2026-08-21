@@ -158,6 +158,7 @@ impl Mob for PiglinBruteEntity {
                 zombification::convert_to(
                     &self.mob_entity,
                     &EntityType::ZOMBIFIED_PIGLIN,
+                    true,
                     ZombifiedPiglinEntity::new,
                 )
                 .await;

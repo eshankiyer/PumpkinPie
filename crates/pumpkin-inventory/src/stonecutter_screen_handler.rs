@@ -124,6 +124,22 @@ impl ScreenHandler for StonecutterScreenHandler {
         self
     }
 
+    /// `StonecutterMenu.removed` (StonecutterMenu.java:231-235) discards the result slot and
+    /// then `clearContainer`s the menu's own input container, so the ingredient goes back to
+    /// the player (or is dropped). Without this override only the cursor stack was returned
+    /// and the item sitting in the input slot was destroyed on close.
+    fn on_closed<'a>(&'a mut self, player: &'a dyn InventoryPlayer) -> ScreenHandlerFuture<'a, ()> {
+        Box::pin(async move {
+            self.default_on_closed(player).await;
+            self.output_inventory
+                .set_stack(0, ItemStack::EMPTY.clone())
+                .await;
+            self.selected_recipe.store(u8::MAX, Ordering::Relaxed);
+            let input: Arc<dyn Inventory> = self.input_inventory.clone();
+            self.drop_inventory(player, input).await;
+        })
+    }
+
     fn on_slot_click<'a>(
         &'a mut self,
         slot_index: i32,

@@ -1,3 +1,5 @@
+use pumpkin_data::sound::{Sound, SoundCategory};
+
 use crate::entity::EntityBase;
 use std::sync::atomic::Ordering;
 
@@ -7,12 +9,28 @@ pub enum ProjectileDeflectionType {
     Simple,
     Redirected,
     TransferVelocityDirection,
+    /// `Breeze.PROJECTILE_DEFLECTION` (`Breeze.java:62-66`): the breeze deflect sound, then
+    /// `ProjectileDeflection.REVERSE` -- which is exactly what `Simple` already implements.
+    BreezeDeflect,
 }
 
 impl ProjectileDeflectionType {
-    pub fn deflect(&self, projectile: &mut dyn EntityBase, hit_entity: Option<&dyn EntityBase>) {
+    /// Takes the projectile by shared reference: every field written here lives behind an
+    /// atomic, and the dispatch site only ever holds an `Arc<dyn EntityBase>`.
+    pub fn deflect(&self, projectile: &dyn EntityBase, hit_entity: Option<&dyn EntityBase>) {
         match self {
             Self::None => {}
+            Self::BreezeDeflect => {
+                if let Some(hit_entity) = hit_entity {
+                    let entity = hit_entity.get_entity();
+                    entity.world.load().play_sound(
+                        Sound::EntityBreezeDeflect,
+                        SoundCategory::Hostile,
+                        &entity.pos.load(),
+                    );
+                }
+                Self::Simple.deflect(projectile, hit_entity);
+            }
             Self::Simple => {
                 let vel = rand::random::<f32>().mul_add(20.0, 170.0);
 

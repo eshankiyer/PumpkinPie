@@ -121,9 +121,23 @@ impl BlockEntity for CampfireBlockEntity {
                     *cooking_time = 0;
                     continue;
                 };
-                *item = ItemStack::new(recipe.result.count, result_item);
+                // `CampfireBlockEntity.cookTick` (CampfireBlockEntity.java:67-75) DROPS the
+                // finished food with `Containers.dropItemStack` and empties the slot; it never
+                // writes the result back onto the campfire. Replacing the raw item in place left
+                // cooked food sitting on the campfire forever, so nothing ever popped off and the
+                // slot could never be reused.
+                *item = ItemStack::EMPTY.clone();
                 *cooking_time = 0;
                 *total_time = 0;
+                drop(total_time);
+                drop(cooking_time);
+                drop(item);
+                world
+                    .drop_stack(
+                        &self.position,
+                        ItemStack::new(recipe.result.count, result_item),
+                    )
+                    .await;
                 self.dirty.store(true, Ordering::Relaxed);
             }
         })

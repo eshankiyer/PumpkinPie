@@ -14,7 +14,10 @@ use super::PaletteEntry;
 /// This resolver handles:
 /// - Looking up blocks by name
 /// - Applying block state properties
-/// - Rotating/mirroring directional properties (facing, axis, rotation)
+/// - Rotating/mirroring the state, by delegating to the shared
+///   [`Rotation::apply_to_props`] / [`Mirror::apply_to_props`] transforms so that
+///   templates get the same treatment vanilla's per-block `rotate`/`mirror`
+///   overrides give (`StructureTemplate.Palette`: `state.mirror(m).rotate(r)`).
 pub struct BlockStateResolver;
 
 impl BlockStateResolver {
@@ -38,37 +41,36 @@ impl BlockStateResolver {
             return None;
         };
 
-        // If no properties, return default state
-        if entry.properties.is_empty() {
+        // Blocks with no state properties have nothing to transform.
+        let Some(default_props) = block.properties(block.default_state.id) else {
             return Some(block.default_state);
+        };
+
+        // Untransformed state, straight from the palette entry.
+        let base_props = if entry.properties.is_empty() {
+            default_props
+        } else {
+            let props_slice = entry
+                .properties
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str()))
+                .collect::<Vec<_>>();
+            block.from_properties(&props_slice)
+        };
+
+        if rotation == Rotation::None && mirror == Mirror::None {
+            return Some(BlockState::from_id(base_props.to_state_id(block)));
         }
 
-        // Transform properties for rotation/mirror
-        let transformed_props: Vec<(String, String)> = entry
-            .properties
-            .iter()
-            .map(|(key, value)| {
-                let transformed_key = match key.as_str() {
-                    "north" | "south" | "east" | "west" => rotation
-                        .rotate_facing(mirror.mirror_facing(key))
-                        .to_string(),
-                    _ => key.clone(),
-                };
-                let new_value = Self::transform_property(key, value, rotation, mirror);
-                (transformed_key, new_value)
-            })
-            .collect();
+        // `to_props` hands back the block's own `'static` property strings, which is
+        // exactly what the shared transforms want; no interning or leaking needed.
+        let mut props = base_props.to_props();
+        // Vanilla mirrors first and rotates second; `Mirror::apply_to_props` reads the
+        // pre-mirror facing to decide the stair shape remap, so the order matters.
+        mirror.apply_to_props(block.name, &mut props);
+        rotation.apply_to_props(block.name, &mut props);
 
-        // Convert to the format expected by from_properties
-        let props_slice = transformed_props
-            .iter()
-            .map(|(key, value)| (key.as_str(), value.as_str()))
-            .collect::<Vec<_>>();
-
-        // Get the state ID from properties
-        let props_box = block.from_properties(&props_slice);
-        let state_id = props_box.to_state_id(block);
-
+        let state_id = block.from_properties(&props).to_state_id(block);
         Some(BlockState::from_id(state_id))
     }
 
@@ -77,61 +79,25 @@ impl BlockStateResolver {
     pub fn resolve_simple(entry: &PaletteEntry) -> Option<&'static BlockState> {
         Self::resolve(entry, Rotation::None, Mirror::None)
     }
-
-    /// Transforms a property value based on rotation and mirror.
-    fn transform_property(key: &str, value: &str, rotation: Rotation, mirror: Mirror) -> String {
-        match key {
-            // Horizontal facing properties
-            "facing" => {
-                let mirrored = mirror.mirror_facing(value);
-                rotation.rotate_facing(mirrored).to_string()
-            }
-
-            // Axis properties (for logs, pillars, etc.)
-            "axis" => rotation.rotate_axis(value).to_string(),
-
-            // Block rotation (signs, banners - 0-15 value)
-            "rotation" => value.parse::<i32>().map_or_else(
-                |_| value.to_string(),
-                |rot_value| {
-                    let mirrored = mirror.mirror_block_rotation(rot_value);
-                    let rotated = rotation.rotate_block_rotation(mirrored);
-                    Self::rotation_to_str(rotated).to_string()
-                },
-            ),
-
-            // Half properties don't need rotation (top/bottom stays the same)
-            // Shape, mode, and most other properties don't need transformation either
-            _ => value.to_string(),
-        }
-    }
-
-    /// Converts a rotation value (0-15) to a static string.
-    const fn rotation_to_str(rotation: i32) -> &'static str {
-        match rotation % 16 {
-            1 => "1",
-            2 => "2",
-            3 => "3",
-            4 => "4",
-            5 => "5",
-            6 => "6",
-            7 => "7",
-            8 => "8",
-            9 => "9",
-            10 => "10",
-            11 => "11",
-            12 => "12",
-            13 => "13",
-            14 => "14",
-            15 => "15",
-            _ => "0",
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry(name: &str, properties: &[(&str, &str)]) -> PaletteEntry {
+        PaletteEntry::with_properties(
+            name.to_string(),
+            properties
+                .iter()
+                .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+                .collect(),
+        )
+    }
+
+    fn expect_state(name: &str, properties: &[(&str, &str)]) -> &'static BlockState {
+        BlockStateResolver::resolve_simple(&entry(name, properties)).expect("known block")
+    }
 
     #[test]
     fn resolve_simple_block() {
@@ -142,36 +108,16 @@ mod tests {
 
     #[test]
     fn resolve_with_properties() {
-        let entry = PaletteEntry::with_properties(
-            "minecraft:oak_stairs".to_string(),
-            vec![
-                ("facing".to_string(), "north".to_string()),
-                ("half".to_string(), "bottom".to_string()),
-                ("shape".to_string(), "straight".to_string()),
-                ("waterlogged".to_string(), "false".to_string()),
+        let state = expect_state(
+            "minecraft:oak_stairs",
+            &[
+                ("facing", "north"),
+                ("half", "bottom"),
+                ("shape", "straight"),
+                ("waterlogged", "false"),
             ],
         );
-        let state = BlockStateResolver::resolve_simple(&entry);
-        assert!(state.is_some());
-    }
-
-    #[test]
-    fn rotation_transforms_facing() {
-        let entry = PaletteEntry::with_properties(
-            "minecraft:furnace".to_string(),
-            vec![
-                ("facing".to_string(), "north".to_string()),
-                ("lit".to_string(), "false".to_string()),
-            ],
-        );
-
-        // Get state with rotation
-        let rotated = BlockStateResolver::resolve(&entry, Rotation::Clockwise90, Mirror::None);
-        assert!(rotated.is_some());
-
-        // The rotated block should have facing=east after 90 degree clockwise rotation
-        // We can't easily verify the exact facing here without more infrastructure,
-        // but we can verify it resolves successfully
+        assert_eq!(state.id.to_block_id(), Block::OAK_STAIRS.id);
     }
 
     #[test]
@@ -179,5 +125,159 @@ mod tests {
         let entry = PaletteEntry::new("minecraft:nonexistent_block".to_string());
         let state = BlockStateResolver::resolve_simple(&entry);
         assert!(state.is_none());
+    }
+
+    // HorizontalDirectionalBlock.java:21-23
+    #[test]
+    fn rotation_transforms_facing() {
+        let source = entry(
+            "minecraft:furnace",
+            &[("facing", "north"), ("lit", "false")],
+        );
+        for (rotation, want) in [
+            (Rotation::None, "north"),
+            (Rotation::Clockwise90, "east"),
+            (Rotation::Rotate180, "south"),
+            (Rotation::CounterClockwise90, "west"),
+        ] {
+            let got = BlockStateResolver::resolve(&source, rotation, Mirror::None).unwrap();
+            assert_eq!(
+                got.id,
+                expect_state("minecraft:furnace", &[("facing", want), ("lit", "false")]).id,
+                "furnace under {rotation:?}"
+            );
+        }
+    }
+
+    // StairBlock.java:169-171: rotation moves the facing and leaves the shape alone.
+    #[test]
+    fn stairs_rotate_facing_and_keep_shape() {
+        let source = entry(
+            "minecraft:oak_stairs",
+            &[
+                ("facing", "north"),
+                ("half", "bottom"),
+                ("shape", "inner_left"),
+                ("waterlogged", "false"),
+            ],
+        );
+        for (rotation, want) in [
+            (Rotation::None, "north"),
+            (Rotation::Clockwise90, "east"),
+            (Rotation::Rotate180, "south"),
+            (Rotation::CounterClockwise90, "west"),
+        ] {
+            let got = BlockStateResolver::resolve(&source, rotation, Mirror::None).unwrap();
+            assert_eq!(
+                got.id,
+                expect_state(
+                    "minecraft:oak_stairs",
+                    &[
+                        ("facing", want),
+                        ("half", "bottom"),
+                        ("shape", "inner_left"),
+                        ("waterlogged", "false"),
+                    ],
+                )
+                .id,
+                "oak stairs under {rotation:?}"
+            );
+        }
+    }
+
+    // BaseRailBlock.java:146-228: the hand-rolled resolver never touched `shape`.
+    #[test]
+    fn rail_shape_rotates() {
+        let source = entry("minecraft:rail", &[("shape", "north_east")]);
+        for (rotation, want) in [
+            (Rotation::None, "north_east"),
+            (Rotation::Clockwise90, "south_east"),
+            (Rotation::Rotate180, "south_west"),
+            (Rotation::CounterClockwise90, "north_west"),
+        ] {
+            let got = BlockStateResolver::resolve(&source, rotation, Mirror::None).unwrap();
+            assert_eq!(
+                got.id,
+                expect_state("minecraft:rail", &[("shape", want)]).id,
+                "rail under {rotation:?}"
+            );
+        }
+    }
+
+    // DoorBlock.java:257-259
+    #[test]
+    fn door_hinge_mirrors() {
+        let source = entry(
+            "minecraft:oak_door",
+            &[
+                ("facing", "east"),
+                ("half", "lower"),
+                ("hinge", "left"),
+                ("open", "false"),
+                ("powered", "false"),
+            ],
+        );
+        let got = BlockStateResolver::resolve(&source, Rotation::None, Mirror::LeftRight).unwrap();
+        assert_eq!(
+            got.id,
+            expect_state(
+                "minecraft:oak_door",
+                &[
+                    ("facing", "east"),
+                    ("half", "lower"),
+                    ("hinge", "right"),
+                    ("open", "false"),
+                    ("powered", "false"),
+                ],
+            )
+            .id
+        );
+    }
+
+    // JigsawBlock.java:41-43
+    #[test]
+    fn jigsaw_orientation_rotates() {
+        let source = entry("minecraft:jigsaw", &[("orientation", "north_up")]);
+        let got =
+            BlockStateResolver::resolve(&source, Rotation::Clockwise90, Mirror::None).unwrap();
+        assert_eq!(
+            got.id,
+            expect_state("minecraft:jigsaw", &[("orientation", "east_up")]).id
+        );
+    }
+
+    // FireBlock.java:30 declares no rotate override, so the sides stay put.
+    #[test]
+    fn fire_sides_are_exempt() {
+        let source = entry(
+            "minecraft:fire",
+            &[
+                ("north", "true"),
+                ("east", "false"),
+                ("south", "false"),
+                ("west", "false"),
+                ("up", "false"),
+                ("age", "0"),
+            ],
+        );
+        let got =
+            BlockStateResolver::resolve(&source, Rotation::Clockwise90, Mirror::None).unwrap();
+        assert_eq!(
+            got.id,
+            BlockStateResolver::resolve_simple(&source).unwrap().id
+        );
+    }
+
+    // A palette entry that lists no properties still describes a real state, and
+    // vanilla rotates that state like any other.
+    #[test]
+    fn default_state_is_still_transformed() {
+        let source = PaletteEntry::new("minecraft:rail".to_string());
+        let got =
+            BlockStateResolver::resolve(&source, Rotation::Clockwise90, Mirror::None).unwrap();
+        assert_eq!(
+            got.id,
+            expect_state("minecraft:rail", &[("shape", "east_west")]).id
+        );
     }
 }

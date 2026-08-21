@@ -493,8 +493,10 @@ impl Explosion {
                 entity.get_eye_pos()
             };
             let direction = (dir_pos - self.pos).normalize();
+            // `ServerExplosion.java:195-197` reads EXPLOSION_KNOCKBACK_RESISTANCE here, not the
+            // generic KNOCKBACK_RESISTANCE; blast protection contributes only to the former.
             let knockback_resistance = entity_base.get_living_entity().map_or(0.0, |living| {
-                living.get_attribute_value(&Attributes::KNOCKBACK_RESISTANCE)
+                living.get_attribute_value(&Attributes::EXPLOSION_KNOCKBACK_RESISTANCE)
             });
 
             let knockback_power =

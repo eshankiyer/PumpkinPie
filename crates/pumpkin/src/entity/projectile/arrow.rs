@@ -486,6 +486,13 @@ impl EntityBase for ArrowEntity {
 
             // Handle hit
             if let Some(h) = hit {
+                // `Projectile.hitTargetOrDeflectSelf`: a deflected arrow is not consumed. The
+                // arrow has its own hit path, so the dispatch is repeated here for the same
+                // reason `PROJECTILE_LAND` is emitted separately below.
+                if crate::entity::projectile::try_deflect(&h, caller) {
+                    return;
+                }
+
                 let is_piercing_entity = self.pierce_level.load(Ordering::Relaxed) > 0
                     && matches!(&h, ProjectileHit::Entity { .. });
                 if !is_piercing_entity && self.has_hit.swap(true, Ordering::SeqCst) {

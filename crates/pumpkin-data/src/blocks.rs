@@ -207,22 +207,57 @@ impl Block {
         self.default_state.is_air()
     }
 
-    #[must_use]
-    pub const fn mirror(
+    /// Applies a property transform to a state and resolves the result back to a
+    /// `BlockState`. States without properties, and transforms that leave every
+    /// property alone, resolve back to the input state.
+    fn transform_state(
         &self,
         id: BlockStateId,
-        _mirror: crate::block_rotation::Mirror,
+        transform: impl FnOnce(&mut [(&'static str, &'static str)]),
     ) -> &'static BlockState {
-        BlockState::from_id(id)
+        let Some(props_source) = self.properties(id) else {
+            return BlockState::from_id(id);
+        };
+        let mut props = props_source.to_props();
+        transform(&mut props);
+        BlockState::from_id(self.from_properties(&props).to_state_id(self))
     }
 
+    /// Mirrors this block state.
+    ///
+    /// Vanilla dispatches this per block (`BlockBehaviour.mirror`,
+    /// `BlockBehaviour.java:260-262`, returning the state unchanged unless a block
+    /// overrides it). This is the property-driven equivalent: it mirrors whichever of
+    /// `facing`, `rotation`, `hinge`, `shape`, `orientation` and the four side
+    /// properties the state carries. See [`crate::block_rotation::Mirror::apply_to_props`]
+    /// for the per-family citations.
     #[must_use]
-    pub const fn rotate(
+    pub fn mirror(
         &self,
         id: BlockStateId,
-        _rotation: crate::block_rotation::Rotation,
+        mirror: crate::block_rotation::Mirror,
     ) -> &'static BlockState {
-        BlockState::from_id(id)
+        if mirror == crate::block_rotation::Mirror::None {
+            return BlockState::from_id(id);
+        }
+        self.transform_state(id, |props| mirror.apply_to_props(self.name, props))
+    }
+
+    /// Rotates this block state about the Y axis.
+    ///
+    /// The property-driven equivalent of vanilla's per-block `rotate` overrides
+    /// (`BlockBehaviour.rotate`, `BlockBehaviour.java:256-258`). See
+    /// [`crate::block_rotation::Rotation::apply_to_props`] for the per-family citations.
+    #[must_use]
+    pub fn rotate(
+        &self,
+        id: BlockStateId,
+        rotation: crate::block_rotation::Rotation,
+    ) -> &'static BlockState {
+        if rotation == crate::block_rotation::Rotation::None {
+            return BlockState::from_id(id);
+        }
+        self.transform_state(id, |props| rotation.apply_to_props(self.name, props))
     }
 
     /// Parses a block state argument such as `minecraft:wheat[age=0]`, resolving any
@@ -447,5 +482,62 @@ mod tests {
         assert_eq!(xyz_delta.z, 0.5);
 
         assert_eq!(Block::STONE.shape_offset_delta(&positive_extreme).x, 0.0);
+    }
+
+    #[test]
+    fn rotate_and_mirror_resolve_to_real_states() {
+        use crate::block_rotation::{Mirror, Rotation};
+
+        let stairs = Block::from_state_str(
+            "minecraft:oak_stairs[facing=north,half=bottom,shape=inner_left,waterlogged=false]",
+        )
+        .expect("oak stairs state");
+        let block = Block::from_name("oak_stairs").expect("oak stairs");
+
+        // Rotation.NONE / Mirror.NONE are the identity (BlockBehaviour.java:256-262).
+        assert_eq!(block.rotate(stairs.id, Rotation::None).id, stairs.id);
+        assert_eq!(block.mirror(stairs.id, Mirror::None).id, stairs.id);
+
+        let rotated = block.rotate(stairs.id, Rotation::Clockwise90);
+        let expected = Block::from_state_str(
+            "minecraft:oak_stairs[facing=east,half=bottom,shape=inner_left,waterlogged=false]",
+        )
+        .expect("rotated oak stairs state");
+        assert_eq!(rotated.id, expected.id);
+
+        let mirrored = block.mirror(stairs.id, Mirror::LeftRight);
+        let expected = Block::from_state_str(
+            "minecraft:oak_stairs[facing=south,half=bottom,shape=inner_right,waterlogged=false]",
+        )
+        .expect("mirrored oak stairs state");
+        assert_eq!(mirrored.id, expected.id);
+    }
+
+    #[test]
+    fn rotating_a_propertyless_block_is_a_no_op() {
+        use crate::block_rotation::Rotation;
+
+        let stone = &Block::STONE;
+        assert_eq!(
+            stone
+                .rotate(stone.default_state.id, Rotation::Clockwise90)
+                .id,
+            stone.default_state.id
+        );
+    }
+
+    #[test]
+    fn pillar_axis_round_trips_through_state_ids() {
+        use crate::block_rotation::Rotation;
+
+        let block = Block::from_name("oak_log").expect("oak log");
+        let x_axis = Block::from_state_str("minecraft:oak_log[axis=x]").expect("oak log axis=x");
+        let rotated = block.rotate(x_axis.id, Rotation::Clockwise90);
+        let z_axis = Block::from_state_str("minecraft:oak_log[axis=z]").expect("oak log axis=z");
+        assert_eq!(rotated.id, z_axis.id);
+        assert_eq!(
+            block.rotate(rotated.id, Rotation::Clockwise90).id,
+            x_axis.id
+        );
     }
 }

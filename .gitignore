@@ -168,3 +168,5 @@ __pycache__/
 
 # Full per-class conformance output, regenerable
 tools/conformance/conformance.json
+tools/conformance/conformance.pumpkin.json
+tools/conformance/conformance.steel.json
