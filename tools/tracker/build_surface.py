@@ -48,7 +48,9 @@ def covered_blocks() -> set[str]:
     covered: set[str] = set()
     for path in (ROOT / "crates/pumpkin/src/block").rglob("*.rs"):
         text = read(path)
-        for name in re.findall(r'#\[pumpkin_block\("minecraft:([a-z0-9_]+)"\)\]', text):
+        # The namespace is optional in practice: wither_skull.rs writes
+        # `#[pumpkin_block("wither_skeleton_skull")]` with no `minecraft:` prefix.
+        for name in re.findall(r'#\[pumpkin_block\("(?:minecraft:)?([a-z0-9_]+)"\)\]', text):
             covered.add(name)
         # A third idiom: a hand-written `impl BlockMetadata { fn ids() }` that reads tag tables
         # directly, which neither attribute macro covers. PressurePlateBlock is one, and all 16

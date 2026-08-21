@@ -342,6 +342,7 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(CakeBlock);
     manager.register(CandleCakeBlock);
     manager.register(SkullBlock);
+    manager.register(crate::block::blocks::skull_block::WallSkullBlock);
     manager.register(ChiseledBookshelfBlock);
     manager.register(ShelfBlock);
     manager.register(LecternBlock);
