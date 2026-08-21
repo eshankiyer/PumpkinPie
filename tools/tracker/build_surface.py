@@ -121,9 +121,42 @@ def placeable_block_items() -> set[str]:
     return items & blocks
 
 
+def data_driven_items() -> set[str]:
+    """Items whose behaviour the server drives from their data components.
+
+    `use_item_on`/`use_item` read these components straight off the stack, so an item carrying
+    one behaves with no `ItemMetadata` of its own - every food is edible without a registration,
+    every jukebox disc plays, every tool mines. Counting those as unimplemented understated
+    items the same way ore experience understated blocks.
+
+    Only components that give an item its OWN behaviour are counted. Enchantments and attribute
+    modifiers are deliberately excluded: they modify an item that must already do something.
+    """
+    behaviour = (
+        "Food", "Consumable", "Equippable", "Tool", "JukeboxPlayable", "Fireworks",
+        "BlocksAttacks", "ChargedProjectiles", "WrittenBookContent", "WritableBookContent",
+    )
+    text = read(ROOT / "crates/pumpkin-data/src/generated/item.rs")
+    covered: set[str] = set()
+    for match in re.finditer(r"pub const ([A-Z0-9_]+): Self = Self \{", text):
+        chunk, depth = "", 0
+        for index in range(match.end() - 1, len(text)):
+            chunk += text[index]
+            if text[index] == "{":
+                depth += 1
+            elif text[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+        # The name may sit on its own line: `(\n    Food,\n    &FoodImpl {`.
+        if any(re.search(r"\(\s*" + name + r"\s*,", chunk) for name in behaviour):
+            covered.add(match.group(1).lower())
+    return covered
+
+
 def covered_items() -> set[str]:
     """Every `Item::X.id` named in an `ItemMetadata::ids` body, however it is formatted."""
-    covered: set[str] = placeable_block_items()
+    covered: set[str] = placeable_block_items() | data_driven_items()
     item_tags = tag_members()
     for path in (ROOT / "crates/pumpkin/src/item").rglob("*.rs"):
         text = read(path)
