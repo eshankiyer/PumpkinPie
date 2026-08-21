@@ -63,9 +63,30 @@ def total_blocks() -> int:
     return len(set(re.findall(r"pub const ([A-Z0-9_]+): Self = Block \{", text)))
 
 
+def placeable_block_items() -> set[str]:
+    """Items that place a block, which need no `ItemMetadata` of their own.
+
+    `use_item_on` routes any item carrying a `Block::from_item_id` mapping straight to block
+    placement, so those items behave without a registration of their own. Counting them as
+    uncovered understated item support by about a thousand entries.
+
+    Membership is decided by registry name, not by item id: `item.rs` is multi-version and the
+    same item carries different ids in different version tables, so an id-based match pairs an
+    item from one version against a block item from another. Name matching is what the
+    generated mapping is built from and is stable across versions.
+    """
+    items = {name.lower() for name in re.findall(
+        r"pub const ([A-Z0-9_]+): Self = Self \{", read(ROOT / "crates/pumpkin-data/src/generated/item.rs")
+    )}
+    blocks = {name.lower() for name in re.findall(
+        r"pub const ([A-Z0-9_]+): Self = Block \{", read(ROOT / "crates/pumpkin-data/src/generated/block.rs")
+    )}
+    return items & blocks
+
+
 def covered_items() -> set[str]:
     """Every `Item::X.id` named in an `ItemMetadata::ids` body, however it is formatted."""
-    covered: set[str] = set()
+    covered: set[str] = placeable_block_items()
     for path in (ROOT / "crates/pumpkin/src/item").rglob("*.rs"):
         text = read(path)
         for match in re.finditer(r"fn ids\(\)[^{]*\{", text):
