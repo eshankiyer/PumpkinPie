@@ -215,6 +215,14 @@ impl Mob for FrogEntity {
         &self.mob_entity
     }
 
+    /// `Frog.calculateFallDamage` (`Frog.java:304-306`): frogs take 5 less fall damage.
+    fn mob_calculate_fall_damage(&self, fall_distance: f64, damage_modifier: f32) -> i32 {
+        self.mob_entity
+            .living_entity
+            .default_calculate_fall_damage(fall_distance, damage_modifier)
+            - 5
+    }
+
     fn mob_set_variant_name(&self, name: &str) {
         self.set_variant(FrogVariant::from_name(name));
     }

@@ -1474,13 +1474,7 @@ impl HostBeehiveBlockEntity for PluginHostState {
         Ok(entity
             .as_any()
             .downcast_ref::<InternalBeehiveBlockEntity>()
-            .map_or(0, |b| {
-                b.bees
-                    .try_lock()
-                    .ok()
-                    .and_then(|g| g.as_ref().map(|v| v.len() as u32))
-                    .unwrap_or(0)
-            }))
+            .map_or(0, |b| b.bees.try_lock().ok().map_or(0, |g| g.len() as u32)))
     }
 
     async fn drop(&mut self, rep: Resource<BeehiveBlockEntity>) -> wasmtime::Result<()> {

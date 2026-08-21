@@ -299,6 +299,22 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         true
     }
 
+    /// Vanilla `LivingEntity.isSensitiveToWater` (`LivingEntity.java:3174-3176`). A sensitive mob
+    /// takes a point of drown damage every tick it spends in water or rain
+    /// (`LivingEntity.java:3163-3166`).
+    fn is_sensitive_to_water(&self) -> bool {
+        false
+    }
+
+    /// Vanilla `LivingEntity.calculateFallDamage` (`LivingEntity.java:1845-1852`), the virtual
+    /// that `causeFallDamage` (`LivingEntity.java:1801`) consults. Overriders subtract a flat
+    /// amount from the `LivingEntity` result; a non-living entity takes no fall damage.
+    fn calculate_fall_damage(&self, fall_distance: f64, damage_modifier: f32) -> i32 {
+        self.get_living_entity().map_or(0, |living| {
+            living.default_calculate_fall_damage(fall_distance, damage_modifier)
+        })
+    }
+
     /// Per-entity opt-out from explosions, independent of the vanilla
     /// `Entity.ignoreExplosion` rules below (kept because several entity types
     /// override only this one).
@@ -1235,6 +1251,28 @@ impl Entity {
 
     pub fn reserve_ids(count: i32) -> i32 {
         CURRENT_ID.fetch_add(count, Relaxed)
+    }
+
+    /// Vanilla `Entity.isInRain` (`Entity.java:1595-1598`): rain at the feet, or at the block
+    /// containing the top of the bounding box directly above them.
+    pub async fn is_in_rain(&self) -> bool {
+        let world = self.world.load();
+        let pos = self.block_pos.load();
+        if world.is_raining_at(&pos).await {
+            return true;
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        let top = BlockPos::new(
+            pos.0.x,
+            self.bounding_box.load().max.y.floor() as i32,
+            pos.0.z,
+        );
+        world.is_raining_at(&top).await
+    }
+
+    /// Vanilla `Entity.isInWaterOrRain` (`Entity.java:1600-1602`).
+    pub async fn is_in_water_or_rain(&self) -> bool {
+        self.touching_water.load(Ordering::SeqCst) || self.is_in_rain().await
     }
 
     pub fn from_uuid(

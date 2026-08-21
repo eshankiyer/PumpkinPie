@@ -122,6 +122,11 @@ impl Mob for StriderEntity {
         &self.mob_entity
     }
 
+    /// `Strider.isSensitiveToWater` (`Strider.java:371-373`).
+    fn mob_is_sensitive_to_water(&self) -> bool {
+        true
+    }
+
     fn get_item_steerable(&self) -> Option<&dyn ItemSteerable> {
         Some(self)
     }

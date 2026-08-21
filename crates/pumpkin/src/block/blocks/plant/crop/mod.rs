@@ -34,6 +34,16 @@ trait CropBlockBase: PlantBlockBase {
         block == &Block::FARMLAND
     }
 
+    /// `CropBlock.canSurvive` (`CropBlock.java:145-147`):
+    /// `hasSufficientLight(level, pos) && super.canSurvive(...)`.
+    ///
+    /// Wired in by each crop block's `PlantBlockBase::can_place_at` override, so both placement
+    /// and the neighbour-update drop path go through it.
+    fn crop_can_survive(&self, block_accessor: &dyn BlockAccessor, pos: &BlockPos) -> bool {
+        has_sufficient_light(block_accessor, pos)
+            && <Self as CropBlockBase>::can_plant_on_top(self, block_accessor, &pos.down())
+    }
+
     fn max_age(&self) -> i32 {
         7
     }
@@ -103,6 +113,23 @@ trait CropBlockBase: PlantBlockBase {
         }
     }
 }
+
+/// `CropBlock.hasSufficientLight` (`CropBlock.java:149-151`): raw brightness at least
+/// [`MIN_SURVIVE_LIGHT`].
+///
+/// An accessor with no light engine behind it (worldgen) reports `None`; the gate is then
+/// skipped, matching the previous unconditional behaviour rather than uprooting crops during
+/// chunk generation.
+pub fn has_sufficient_light(block_accessor: &dyn BlockAccessor, pos: &BlockPos) -> bool {
+    block_accessor
+        .get_raw_brightness(pos, 0)
+        .is_none_or(|light| light >= MIN_SURVIVE_LIGHT)
+}
+
+/// Raw brightness a crop needs to *stay planted*, `CropBlock.hasSufficientLight`
+/// (`CropBlock.java:149-151`). One less than [`MIN_GROWTH_LIGHT`]: a crop at exactly 8 survives
+/// but never advances.
+pub const MIN_SURVIVE_LIGHT: u8 = 8;
 
 /// Raw brightness a crop or stem needs to advance a growth stage.
 ///

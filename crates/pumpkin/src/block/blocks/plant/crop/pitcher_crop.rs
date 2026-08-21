@@ -7,7 +7,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::{BlockAccessor, BlockFlags};
 use rand::RngExt;
 
-use crate::block::blocks::plant::crop::{MIN_GROWTH_LIGHT, get_available_moisture};
+use crate::block::blocks::plant::crop::{get_available_moisture, has_sufficient_light};
 use crate::block::{
     BlockBehaviour, BlockFuture, BrokenArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
     OnPlaceArgs, RandomTickArgs,
@@ -45,9 +45,26 @@ fn may_place_on(accessor: &dyn BlockAccessor, pos: &BlockPos) -> bool {
     below.has_tag(&tag::Block::MINECRAFT_SUPPORTS_CROPS)
 }
 
-/// `PitcherCropBlock.sufficientLight` / `CropBlock.hasSufficientLight`.
+/// `PitcherCropBlock.sufficientLight` (`PitcherCropBlock.java:167-169`), which delegates to
+/// `CropBlock.hasSufficientLight` (`CropBlock.java:149-151`): raw brightness at least 8, not the
+/// 9 that gates a growth step.
 fn sufficient_light(world: &World, pos: &BlockPos) -> bool {
-    world.get_raw_brightness(pos, 0) >= MIN_GROWTH_LIGHT
+    has_sufficient_light(world, pos)
+}
+
+/// `PitcherCropBlock.canSurvive` (`PitcherCropBlock.java:104-106`): the lower half additionally
+/// needs sufficient light; the upper half is held up by the lower one.
+fn can_survive(accessor: &dyn BlockAccessor, pos: &BlockPos) -> bool {
+    let (block, state) = accessor.get_block_and_state(pos);
+    let half = if block == &Block::PITCHER_CROP {
+        PitcherCropProperties::from_state_id(state.id, block).half
+    } else {
+        DoubleBlockHalf::Lower
+    };
+    if is_lower(block, half) && !has_sufficient_light(accessor, pos) {
+        return false;
+    }
+    may_place_on(accessor, pos)
 }
 
 /// `PitcherCropBlock.canGrowInto`: the space above the lower half must be air, or already the
@@ -104,7 +121,9 @@ async fn grow(
 
 impl BlockBehaviour for PitcherCropBlock {
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
-        may_place_on(args.block_accessor, args.position)
+        // A freshly placed pitcher pod is always the lower half, so the light gate applies.
+        has_sufficient_light(args.block_accessor, args.position)
+            && may_place_on(args.block_accessor, args.position)
     }
 
     /// `PitcherCropBlock.getStateForPlacement`: always starts as the lower half, age 0.
@@ -139,7 +158,7 @@ impl BlockBehaviour for PitcherCropBlock {
                 return Block::AIR.default_state.id;
             }
 
-            if !may_place_on(args.world, args.position) {
+            if !can_survive(args.world, args.position) {
                 return Block::AIR.default_state.id;
             }
             args.state_id

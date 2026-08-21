@@ -1674,6 +1674,12 @@ impl LivingEntity {
         if suffocating {
             self.damage(&**caller, 1.0, DamageType::IN_WALL).await;
         }
+
+        // `LivingEntity.aiStep` (`LivingEntity.java:3163-3166`): a water-sensitive mob takes one
+        // point of drown damage for every tick it spends in water or rain.
+        if caller.is_sensitive_to_water() && self.entity.is_in_water_or_rain().await {
+            self.damage(caller.as_ref(), 1.0, DamageType::DROWN).await;
+        }
     }
 
     async fn travel_in_air<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) {
@@ -2018,6 +2024,15 @@ impl LivingEntity {
         ground: bool,
         dont_damage: bool,
     ) {
+        // A passenger is snapped back onto its vehicle every tick by `Entity.positionRider`, so
+        // it never builds up a fall of its own; the vehicle hands it the fall through
+        // `Entity.propagateFallToPassengers` (`Entity.java:1583-1589`) instead. Without this
+        // guard a rider would be hurt twice for the same drop.
+        if self.entity.has_vehicle().await {
+            self.fall_distance.store(0.0);
+            return;
+        }
+
         if ground {
             let fall_distance = self.fall_distance.swap(0.0);
             if fall_distance <= 0.0
@@ -2072,17 +2087,64 @@ impl LivingEntity {
             return;
         }
 
-        // Fetches the safe fall distance attribute
-        let safe_fall_distance = self.get_attribute_value(&Attributes::SAFE_FALL_DISTANCE) as f32;
-        let unsafe_fall_distance = fall_distance + 1.0E-6 - safe_fall_distance;
+        // `LivingEntity.causeFallDamage` reaches `Entity.causeFallDamage`
+        // (`Entity.java:1574-1581`) through `super` before applying its own damage, and that is
+        // what hurts whoever is riding the falling entity.
+        self.propagate_fall_to_passengers(fall_distance, damage_per_distance)
+            .await;
 
-        let damage = (unsafe_fall_distance * damage_per_distance).floor();
-        if damage > 0.0 {
-            let check_damage = self.damage(caller, damage, DamageType::FALL).await; // Fall
+        let damage = caller.calculate_fall_damage(f64::from(fall_distance), damage_per_distance);
+        if damage > 0 {
+            #[allow(clippy::cast_precision_loss)]
+            let check_damage = self.damage(caller, damage as f32, DamageType::FALL).await; // Fall
             if check_damage {
                 self.entity
                     .play_sound(Self::get_fall_sound(fall_distance as i32));
             }
+        }
+    }
+
+    /// Vanilla `Entity.propagateFallToPassengers` (`Entity.java:1583-1589`): a falling vehicle
+    /// passes the same fall to everyone riding it, so a player who rides a horse off a cliff is
+    /// hurt alongside the horse.
+    ///
+    /// Boxed because the recursion (vehicle -> passenger -> its own passengers) would otherwise
+    /// give the future an infinite type.
+    fn propagate_fall_to_passengers<'a>(
+        &'a self,
+        fall_distance: f32,
+        damage_per_distance: f32,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            let passengers = self.entity.passengers.lock().await.clone();
+            for passenger in passengers {
+                if let Some(living) = passenger.get_living_entity() {
+                    living
+                        .handle_fall_damage(passenger.as_ref(), fall_distance, damage_per_distance)
+                        .await;
+                }
+            }
+        })
+    }
+
+    /// Vanilla `LivingEntity.calculateFallDamage` (`LivingEntity.java:1845-1852`), including the
+    /// `FALL_DAMAGE_MULTIPLIER` attribute that horses, camels and llamas set to 0.5.
+    ///
+    /// Split out so a subclass override (`Goat.calculateFallDamage`,
+    /// `Frog.calculateFallDamage`) can reach the `LivingEntity`-level result without recursing
+    /// back into itself.
+    pub fn default_calculate_fall_damage(&self, fall_distance: f64, damage_modifier: f32) -> i32 {
+        if self.is_immune_to_fall_damage() {
+            return 0;
+        }
+        let fall_power =
+            fall_distance + 1.0E-6 - self.get_attribute_value(&Attributes::SAFE_FALL_DISTANCE);
+        let damage = fall_power
+            * f64::from(damage_modifier)
+            * self.get_attribute_value(&Attributes::FALL_DAMAGE_MULTIPLIER);
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            damage.floor() as i32
         }
     }
 

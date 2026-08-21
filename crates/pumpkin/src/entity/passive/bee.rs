@@ -1,8 +1,8 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::sync::{
-    Arc, Weak,
-    atomic::{AtomicI32, AtomicU8, Ordering::Relaxed},
+    Arc, Mutex as StdMutex, Weak,
+    atomic::{AtomicBool, AtomicI32, AtomicU8, Ordering::Relaxed},
 };
 
 use crossbeam::atomic::AtomicCell;
@@ -23,6 +23,8 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
+use crate::block::entities::BlockEntity;
+use crate::block::entities::beehive::{BeehiveBlockEntity, bees_stay_in_hive, is_beehive};
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
@@ -48,6 +50,20 @@ const COOLDOWN_BEFORE_LOCATING_NEW_FLOWER: i32 = 200;
 /// `Bee.MIN_FIND_FLOWER_RETRY_COOLDOWN` / `Bee.MAX_FIND_FLOWER_RETRY_COOLDOWN`.
 const MIN_FIND_FLOWER_RETRY_COOLDOWN: i32 = 20;
 const MAX_FIND_FLOWER_RETRY_COOLDOWN: i32 = 60;
+/// `Bee.dropHive`: `remainingCooldownBeforeLocatingNewHive = 200`.
+const COOLDOWN_BEFORE_LOCATING_NEW_HIVE: i32 = 200;
+/// `Bee.isTooFarAway`: `!closerThan(pos, 48)`.
+const TOO_FAR_FROM_HIVE: f64 = 48.0;
+/// `BeeGoToHiveGoal.MAX_TRAVELLING_TICKS`.
+const MAX_TRAVELLING_TICKS: i32 = 2400;
+/// `BeeGoToHiveGoal.TICKS_BEFORE_HIVE_DROP`.
+const TICKS_BEFORE_HIVE_DROP: i32 = 60;
+/// `BeeGoToHiveGoal.MAX_BLACKLISTED_TARGETS`.
+const MAX_BLACKLISTED_TARGETS: usize = 3;
+/// `BeeLocateHiveGoal.findNearbyHivesWithSpace` searches the POI manager out to 20 blocks.
+const HIVE_SEARCH_RADIUS: i32 = 20;
+/// `BeeEnterHiveGoal.canBeeUse`: `hivePos.closerToCenterThan(position(), 2.0)`.
+const HIVE_ENTER_DISTANCE: f64 = 2.0;
 
 /// `Bee.doHurtTarget`: `POISON_SECONDS_NORMAL` / `POISON_SECONDS_HARD`.
 const fn poison_duration(difficulty: Difficulty) -> Option<i32> {
@@ -98,6 +114,16 @@ pub struct BeeEntity {
     under_water_ticks: AtomicI32,
     /// `Bee.remainingCooldownBeforeLocatingNewFlower`.
     flower_cooldown: AtomicI32,
+    /// `Bee.remainingCooldownBeforeLocatingNewHive`.
+    hive_cooldown: AtomicI32,
+    /// `Bee.beePollinateGoal.isPollinating()`, hoisted onto the entity because Pumpkin's goals
+    /// are boxed and isolated while vanilla's are inner classes sharing the outer `Bee`.
+    pollinating: AtomicBool,
+    /// `BeeGoToHiveGoal.blacklistedTargets`, hoisted for the same reason: vanilla's
+    /// `BeeLocateHiveGoal` reads and clears the go-to-hive goal's list directly.
+    hive_blacklist: StdMutex<Vec<BlockPos>>,
+    /// `Entity.tickCount`, needed only for the 20-tick hive-validity sweep in `Bee.aiStep`.
+    tick_count: AtomicI32,
 }
 
 impl BeeEntity {
@@ -117,6 +143,10 @@ impl BeeEntity {
                 rand::rng()
                     .random_range(MIN_FIND_FLOWER_RETRY_COOLDOWN..=MAX_FIND_FLOWER_RETRY_COOLDOWN),
             ),
+            hive_cooldown: AtomicI32::new(0),
+            pollinating: AtomicBool::new(false),
+            hive_blacklist: StdMutex::new(Vec::new()),
+            tick_count: AtomicI32::new(0),
         };
         let mob_arc = Arc::new(bee);
         let bee_weak = Arc::downgrade(&mob_arc);
@@ -133,14 +163,17 @@ impl BeeEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(0, Box::new(BeeAttackGoal::new(bee_weak.clone())));
+            goal_selector.add_goal(1, Box::new(BeeEnterHiveGoal::new(bee_weak.clone())));
             goal_selector.add_goal(1, Box::new(SwimGoal::default()));
-            goal_selector.add_goal(2, Box::new(BeePollinateGoal::new(bee_weak)));
-            goal_selector.add_goal(3, Box::new(WanderAroundGoal::new(1.0)));
+            goal_selector.add_goal(2, Box::new(BeePollinateGoal::new(bee_weak.clone())));
+            goal_selector.add_goal(3, Box::new(BeeLocateHiveGoal::new(bee_weak.clone())));
+            goal_selector.add_goal(3, Box::new(BeeGoToHiveGoal::new(bee_weak)));
+            goal_selector.add_goal(4, Box::new(WanderAroundGoal::new(1.0)));
             goal_selector.add_goal(
-                4,
+                5,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
             );
-            goal_selector.add_goal(5, Box::new(RandomLookAroundGoal::default()));
+            goal_selector.add_goal(6, Box::new(RandomLookAroundGoal::default()));
 
             let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
             // `Bee.BeeHurtByOtherGoal extends HurtByTargetGoal`. Its `setAlertOthers` alerting of
@@ -236,6 +269,138 @@ impl BeeEntity {
     fn reset_ticks_without_nectar(&self) {
         self.ticks_without_nectar.store(0, Relaxed);
     }
+
+    /// `Bee.setHivePos`.
+    pub fn set_hive_pos(&self, hive_pos: Option<BlockPos>) {
+        self.hive_pos.store(hive_pos);
+    }
+
+    /// `Bee.hasHive`.
+    #[must_use]
+    pub fn has_hive(&self) -> bool {
+        self.hive_pos.load().is_some()
+    }
+
+    /// `Bee.dropHive`.
+    fn drop_hive(&self) {
+        self.hive_pos.store(None);
+        self.hive_cooldown
+            .store(COOLDOWN_BEFORE_LOCATING_NEW_HIVE, Relaxed);
+    }
+
+    /// `BeeGoToHiveGoal.blacklistTarget`, capped at `MAX_BLACKLISTED_TARGETS`.
+    fn blacklist_hive(&self, pos: BlockPos) {
+        let mut blacklist = self
+            .hive_blacklist
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        blacklist.push(pos);
+        while blacklist.len() > MAX_BLACKLISTED_TARGETS {
+            blacklist.remove(0);
+        }
+    }
+
+    /// `BeeGoToHiveGoal.isTargetBlacklisted`.
+    fn is_hive_blacklisted(&self, pos: BlockPos) -> bool {
+        self.hive_blacklist
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(&pos)
+    }
+
+    /// `BeeGoToHiveGoal.clearBlacklist`.
+    fn clear_hive_blacklist(&self) {
+        self.hive_blacklist
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+    }
+
+    /// `BeeGoToHiveGoal.dropAndBlacklistHive`.
+    fn drop_and_blacklist_hive(&self) {
+        if let Some(hive_pos) = self.hive_pos.load() {
+            self.blacklist_hive(hive_pos);
+        }
+        self.drop_hive();
+    }
+
+    /// `Bee.isTooFarAway`.
+    #[must_use]
+    fn is_too_far_away(&self, pos: BlockPos) -> bool {
+        !self.closer_than(pos, TOO_FAR_FROM_HIVE)
+    }
+
+    /// `Entity.closerThan(BlockPos, double)`, measured against the block centre as vanilla's
+    /// `BlockPos.closerToCenterThan` does.
+    #[must_use]
+    fn closer_than(&self, pos: BlockPos, distance: f64) -> bool {
+        let entity_pos = self.mob_entity.living_entity.entity.pos.load();
+        let centre = Vector3::new(
+            f64::from(pos.0.x) + 0.5,
+            f64::from(pos.0.y) + 0.5,
+            f64::from(pos.0.z) + 0.5,
+        );
+        entity_pos.squared_distance_to_vec(&centre) < distance * distance
+    }
+
+    /// `Bee.getBeehiveBlockEntity`. Returns the erased handle because `Arc<dyn BlockEntity>`
+    /// cannot be downcast in place here; pair it with [`as_hive`].
+    #[must_use]
+    pub fn get_beehive_block_entity(&self) -> Option<Arc<dyn BlockEntity>> {
+        let hive_pos = self.hive_pos.load()?;
+        if self.is_too_far_away(hive_pos) {
+            return None;
+        }
+        let world = self.mob_entity.living_entity.entity.world.load();
+        let block_entity = world.get_block_entity(&hive_pos)?;
+        // `getBlockEntity(pos, BlockEntityTypes.BEEHIVE)` is a typed lookup: a non-beehive
+        // block entity at that position is not a valid hive.
+        (block_entity.resource_location() == BeehiveBlockEntity::ID).then_some(block_entity)
+    }
+
+    /// `Bee.isHiveValid`.
+    #[must_use]
+    pub fn is_hive_valid(&self) -> bool {
+        self.get_beehive_block_entity().is_some()
+    }
+
+    /// `Bee.isHiveNearFire`.
+    fn is_hive_near_fire(&self) -> bool {
+        let world = self.mob_entity.living_entity.entity.world.load();
+        let Some(handle) = self.get_beehive_block_entity() else {
+            return false;
+        };
+        as_hive(&handle).is_some_and(|hive| hive.is_fire_nearby(&world))
+    }
+
+    /// `Bee.wantsToEnterHive`.
+    async fn wants_to_enter_hive(&self) -> bool {
+        if self.stay_out_of_hive_countdown.load(Relaxed) > 0
+            || self.pollinating.load(Relaxed)
+            || self.has_stung()
+            || self.mob_entity.get_target().await.is_some()
+        {
+            return false;
+        }
+        let world = self.mob_entity.living_entity.entity.world.load();
+        let wants = self.has_nectar()
+            || self.is_tired_of_looking_for_nectar()
+            || bees_stay_in_hive(&world).await;
+        wants && !self.is_hive_near_fire()
+    }
+}
+
+/// Downcasts an erased block-entity handle to a beehive.
+#[must_use]
+pub fn as_hive(handle: &Arc<dyn BlockEntity>) -> Option<&BeehiveBlockEntity> {
+    handle.as_any().downcast_ref::<BeehiveBlockEntity>()
+}
+
+/// Downcasts an `EntityBase` handle to a bee, for callers that only hold `Arc<dyn EntityBase>`
+/// (the hive block entity releasing occupants, above all).
+#[must_use]
+pub fn as_bee(entity: &Arc<dyn EntityBase>) -> Option<&BeeEntity> {
+    entity.get_mob().and_then(Mob::get_bee)
 }
 
 /// `Bee.attractsBees`.
@@ -463,6 +628,7 @@ impl Goal for BeePollinateGoal {
             self.last_sound_played_tick = 0;
             self.pollinating = true;
             if let Some(bee) = self.bee.upgrade() {
+                bee.pollinating.store(true, Relaxed);
                 bee.reset_ticks_without_nectar();
             }
         })
@@ -476,6 +642,7 @@ impl Goal for BeePollinateGoal {
                 }
                 bee.flower_cooldown
                     .store(COOLDOWN_BEFORE_LOCATING_NEW_FLOWER, Relaxed);
+                bee.pollinating.store(false, Relaxed);
             }
             self.pollinating = false;
             mob.get_mob_entity().navigator.lock().unwrap().stop();
@@ -495,6 +662,7 @@ impl Goal for BeePollinateGoal {
             if self.pollinating_ticks > MAX_POLLINATING_TICKS {
                 bee.drop_flower();
                 self.pollinating = false;
+                bee.pollinating.store(false, Relaxed);
                 bee.flower_cooldown
                     .store(COOLDOWN_BEFORE_LOCATING_NEW_FLOWER, Relaxed);
                 return;
@@ -538,6 +706,305 @@ impl Goal for BeePollinateGoal {
 
     fn controls(&self) -> Controls {
         self.goal_control
+    }
+}
+
+/// `Bee.BeeEnterHiveGoal`.
+pub struct BeeEnterHiveGoal {
+    bee: Weak<BeeEntity>,
+}
+
+impl BeeEnterHiveGoal {
+    #[must_use]
+    pub const fn new(bee: Weak<BeeEntity>) -> Self {
+        Self { bee }
+    }
+}
+
+impl Goal for BeeEnterHiveGoal {
+    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        Box::pin(async move {
+            let Some(bee) = self.bee.upgrade() else {
+                return false;
+            };
+            let Some(hive_pos) = bee.hive_pos.load() else {
+                return false;
+            };
+            if !bee.wants_to_enter_hive().await || !bee.closer_than(hive_pos, HIVE_ENTER_DISTANCE) {
+                return false;
+            }
+            let Some(handle) = bee.get_beehive_block_entity() else {
+                return false;
+            };
+            let Some(hive) = as_hive(&handle) else {
+                return false;
+            };
+            if hive.is_full().await {
+                // Vanilla forgets a full hive outright rather than hovering at its mouth.
+                bee.hive_pos.store(None);
+                return false;
+            }
+            true
+        })
+    }
+
+    /// `BeeEnterHiveGoal.canBeeContinueToUse` is unconditionally false: entering is a one-shot.
+    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        Box::pin(async { false })
+    }
+
+    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            let Some(bee) = self.bee.upgrade() else {
+                return;
+            };
+            let Some(handle) = bee.get_beehive_block_entity() else {
+                return;
+            };
+            let Some(hive) = as_hive(&handle) else {
+                return;
+            };
+            let world = mob.get_entity().world.load();
+            let flower_pos = bee.flower_pos.load();
+            let entity: Arc<dyn EntityBase> = bee;
+            hive.add_occupant(&world, &entity, flower_pos).await;
+        })
+    }
+}
+
+/// `Bee.BeeLocateHiveGoal`.
+///
+/// Documented reduction: vanilla queries the `PoiManager` for `PoiTypeTags.BEE_HOME` records
+/// within 20 blocks. Pumpkin has no POI manager, so this scans the same 20-block radius for
+/// blocks in `BlockTags.BEEHIVES` directly. The scan runs at most once every
+/// `COOLDOWN_BEFORE_LOCATING_NEW_HIVE` ticks, and only for a bee that already wants to go home,
+/// which is what bounds its cost; it also stops at the first `MAX_OCCUPANTS`-worth of
+/// candidates so a bee in a large apiary does not walk the whole volume.
+pub struct BeeLocateHiveGoal {
+    bee: Weak<BeeEntity>,
+}
+
+/// How many candidate hives the reduced scan collects before it stops looking.
+const MAX_HIVE_CANDIDATES: usize = 8;
+
+impl BeeLocateHiveGoal {
+    #[must_use]
+    pub const fn new(bee: Weak<BeeEntity>) -> Self {
+        Self { bee }
+    }
+
+    /// `BeeLocateHiveGoal.findNearbyHivesWithSpace`, sorted by squared distance as vanilla does.
+    async fn find_nearby_hives_with_space(bee: &BeeEntity) -> Vec<BlockPos> {
+        let origin = bee.mob_entity.living_entity.entity.block_pos.load();
+        let world = bee.mob_entity.living_entity.entity.world.load();
+
+        let mut candidates: Vec<(i64, BlockPos)> = Vec::new();
+        'scan: for x in -HIVE_SEARCH_RADIUS..=HIVE_SEARCH_RADIUS {
+            for y in -HIVE_SEARCH_RADIUS..=HIVE_SEARCH_RADIUS {
+                for z in -HIVE_SEARCH_RADIUS..=HIVE_SEARCH_RADIUS {
+                    let pos = BlockPos::new(origin.0.x + x, origin.0.y + y, origin.0.z + z);
+                    if !is_beehive(world.get_block(&pos)) {
+                        continue;
+                    }
+                    let Some(handle) = world.get_block_entity(&pos) else {
+                        continue;
+                    };
+                    let Some(hive) = as_hive(&handle) else {
+                        continue;
+                    };
+                    if hive.is_full().await {
+                        continue;
+                    }
+                    let distance = i64::from(x) * i64::from(x)
+                        + i64::from(y) * i64::from(y)
+                        + i64::from(z) * i64::from(z);
+                    candidates.push((distance, pos));
+                    if candidates.len() >= MAX_HIVE_CANDIDATES {
+                        break 'scan;
+                    }
+                }
+            }
+        }
+
+        candidates.sort_unstable_by_key(|(distance, _)| *distance);
+        candidates.into_iter().map(|(_, pos)| pos).collect()
+    }
+}
+
+impl Goal for BeeLocateHiveGoal {
+    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        Box::pin(async move {
+            let Some(bee) = self.bee.upgrade() else {
+                return false;
+            };
+            bee.hive_cooldown.load(Relaxed) == 0
+                && !bee.has_hive()
+                && bee.wants_to_enter_hive().await
+        })
+    }
+
+    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        Box::pin(async { false })
+    }
+
+    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            let Some(bee) = self.bee.upgrade() else {
+                return;
+            };
+            bee.hive_cooldown
+                .store(COOLDOWN_BEFORE_LOCATING_NEW_HIVE, Relaxed);
+            let hives = Self::find_nearby_hives_with_space(&bee).await;
+            let Some(&first) = hives.first() else {
+                return;
+            };
+            for pos in &hives {
+                if !bee.is_hive_blacklisted(*pos) {
+                    bee.hive_pos.store(Some(*pos));
+                    return;
+                }
+            }
+            bee.clear_hive_blacklist();
+            bee.hive_pos.store(Some(first));
+        })
+    }
+}
+
+/// `Bee.BeeGoToHiveGoal`.
+///
+/// Documented reductions, both forced by `Navigator` rather than choice:
+///
+/// - Vanilla splits travel into `pathfindRandomlyTowards` beyond 16 blocks and
+///   `pathfindDirectlyTowards` inside it, and drops-and-blacklists the hive when
+///   `path.canReach()` is false. Pumpkin's `Navigator` is a direct-line mover with no path
+///   object and no reachability query, so a single direct goal is used at both ranges and the
+///   unreachable-hive case falls through to the stuck detector below.
+/// - `ticksStuck` compares the freshly computed path against the previous one. With no path to
+///   compare, this counts ticks during which the bee's squared distance to the hive has not
+///   improved, and drops the hive after the same `TICKS_BEFORE_HIVE_DROP`.
+///
+/// The `MAX_TRAVELLING_TICKS` budget, `isTooFarAway` abandonment, the `BlockTags.BEEHIVES`
+/// check and the blacklist are unchanged.
+pub struct BeeGoToHiveGoal {
+    bee: Weak<BeeEntity>,
+    travelling_ticks: i32,
+    ticks_stuck: i32,
+    best_distance: f64,
+}
+
+impl BeeGoToHiveGoal {
+    #[must_use]
+    pub const fn new(bee: Weak<BeeEntity>) -> Self {
+        Self {
+            bee,
+            travelling_ticks: 0,
+            ticks_stuck: 0,
+            best_distance: f64::MAX,
+        }
+    }
+
+    /// `BeeGoToHiveGoal.hasReachedTarget`, reduced to the distance half.
+    fn has_reached_target(bee: &BeeEntity, hive_pos: BlockPos) -> bool {
+        bee.closer_than(hive_pos, HIVE_ENTER_DISTANCE)
+    }
+
+    async fn can_use(bee: &BeeEntity) -> bool {
+        let Some(hive_pos) = bee.hive_pos.load() else {
+            return false;
+        };
+        if bee.is_too_far_away(hive_pos) || Self::has_reached_target(bee, hive_pos) {
+            return false;
+        }
+        if !bee.wants_to_enter_hive().await {
+            return false;
+        }
+        let world = bee.mob_entity.living_entity.entity.world.load();
+        is_beehive(world.get_block(&hive_pos))
+    }
+
+    fn hive_target(hive_pos: BlockPos) -> Vector3<f64> {
+        Vector3::new(
+            f64::from(hive_pos.0.x) + 0.5,
+            f64::from(hive_pos.0.y) + 0.5,
+            f64::from(hive_pos.0.z) + 0.5,
+        )
+    }
+}
+
+impl Goal for BeeGoToHiveGoal {
+    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        Box::pin(async move {
+            let Some(bee) = self.bee.upgrade() else {
+                return false;
+            };
+            Self::can_use(&bee).await
+        })
+    }
+
+    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            self.travelling_ticks = 0;
+            self.ticks_stuck = 0;
+            self.best_distance = f64::MAX;
+        })
+    }
+
+    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            self.travelling_ticks = 0;
+            self.ticks_stuck = 0;
+            self.best_distance = f64::MAX;
+            mob.get_mob_entity().navigator.lock().unwrap().stop();
+        })
+    }
+
+    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            let Some(bee) = self.bee.upgrade() else {
+                return;
+            };
+            let Some(hive_pos) = bee.hive_pos.load() else {
+                return;
+            };
+
+            self.travelling_ticks += 1;
+            if self.travelling_ticks > MAX_TRAVELLING_TICKS {
+                bee.drop_and_blacklist_hive();
+                return;
+            }
+
+            if bee.is_too_far_away(hive_pos) {
+                bee.drop_hive();
+                return;
+            }
+
+            let pos = mob.get_entity().pos.load();
+            let target = Self::hive_target(hive_pos);
+            let distance = (target - pos).length_squared();
+            if distance < self.best_distance {
+                self.best_distance = distance;
+                self.ticks_stuck = 0;
+            } else {
+                self.ticks_stuck += 1;
+                if self.ticks_stuck > TICKS_BEFORE_HIVE_DROP {
+                    bee.drop_and_blacklist_hive();
+                    return;
+                }
+            }
+
+            let mut navigator = mob.get_mob_entity().navigator.lock().unwrap();
+            if navigator.is_idle() {
+                navigator.set_progress(NavigatorGoal::new(pos, target, 1.0));
+            }
+        })
+    }
+
+    fn should_run_every_tick(&self) -> bool {
+        true
+    }
+
+    fn controls(&self) -> Controls {
+        Controls::MOVE
     }
 }
 
@@ -612,6 +1079,10 @@ impl Mob for BeeEntity {
         &self.mob_entity
     }
 
+    fn get_bee(&self) -> Option<&Self> {
+        Some(self)
+    }
+
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             self.mob_entity.living_entity.entity.send_meta_data(
@@ -672,6 +1143,16 @@ impl Mob for BeeEntity {
 
             if self.flower_cooldown.load(Relaxed) > 0 {
                 self.flower_cooldown.fetch_sub(1, Relaxed);
+            }
+
+            if self.hive_cooldown.load(Relaxed) > 0 {
+                self.hive_cooldown.fetch_sub(1, Relaxed);
+            }
+
+            // `Bee.aiStep`: `if (this.tickCount % 20 == 0 && !this.isHiveValid()) hivePos = null`.
+            let tick_count = self.tick_count.fetch_add(1, Relaxed) + 1;
+            if tick_count % 20 == 0 && self.hive_pos.load().is_some() && !self.is_hive_valid() {
+                self.hive_pos.store(None);
             }
 
             if living.is_in_water() {

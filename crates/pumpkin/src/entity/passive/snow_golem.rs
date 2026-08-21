@@ -72,4 +72,9 @@ impl Mob for SnowGolemEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
     }
+
+    /// `SnowGolem.isSensitiveToWater` (`SnowGolem.java:86-88`).
+    fn mob_is_sensitive_to_water(&self) -> bool {
+        true
+    }
 }

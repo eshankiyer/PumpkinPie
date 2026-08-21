@@ -143,6 +143,11 @@ impl Mob for BlazeEntity {
         &self.entity
     }
 
+    /// `Blaze.isSensitiveToWater` (`Blaze.java:114-116`).
+    fn mob_is_sensitive_to_water(&self) -> bool {
+        true
+    }
+
     fn light_level_dependent_magic_value(&self, _world: &World) -> f32 {
         1.0
     }

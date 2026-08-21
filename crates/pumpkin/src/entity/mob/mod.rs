@@ -1022,6 +1022,20 @@ pub trait Mob: EntityBase + Send + Sync {
         })
     }
 
+    /// The `Mob` half of `LivingEntity.isSensitiveToWater`; overridden by Strider, Blaze and the
+    /// snow golem.
+    fn mob_is_sensitive_to_water(&self) -> bool {
+        false
+    }
+
+    /// The `Mob` half of `LivingEntity.calculateFallDamage`. The blanket `EntityBase` impl below
+    /// routes to this, so a mob overrides here rather than on `EntityBase`.
+    fn mob_calculate_fall_damage(&self, fall_distance: f64, damage_modifier: f32) -> i32 {
+        self.get_mob_entity()
+            .living_entity
+            .default_calculate_fall_damage(fall_distance, damage_modifier)
+    }
+
     /// Vanilla `Drowned.wantsToSwim`; ordinary mobs do not have a swimming controller state.
     fn wants_to_swim(&self) -> bool {
         false
@@ -2044,6 +2058,10 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
+    fn get_bee(&self) -> Option<&crate::entity::passive::bee::BeeEntity> {
+        None
+    }
+
     fn mob_on_lightning_strike<'a>(
         &'a self,
         caller: &'a dyn EntityBase,
@@ -2236,6 +2254,14 @@ impl<T: Mob + Send + 'static> EntityBase for T {
 
     fn get_item_steerable(&self) -> Option<&dyn crate::entity::item_steerable::ItemSteerable> {
         Mob::get_item_steerable(self)
+    }
+
+    fn calculate_fall_damage(&self, fall_distance: f64, damage_modifier: f32) -> i32 {
+        self.mob_calculate_fall_damage(fall_distance, damage_modifier)
+    }
+
+    fn is_sensitive_to_water(&self) -> bool {
+        self.mob_is_sensitive_to_water()
     }
 
     fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {

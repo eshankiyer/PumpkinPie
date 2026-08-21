@@ -81,8 +81,9 @@ const UNIHORN_CHANCE: f32 = 0.1;
 ///   presence is tracked and persisted, but a dropped horn item is never produced.
 /// - `isLoweringHead`/`lowerHeadTick` (`Goat.java:283-292`) and the entity events 58/59 that
 ///   drive them: client-side animation state only.
-/// - `calculateFallDamage`'s `GOAT_FALL_DAMAGE_REDUCTION` (`Goat.java:121-125`) and the
-///   `POWDER_SNOW` pathfinding malus (`Goat.java:92-95`), both of which live outside this file.
+/// - The `POWDER_SNOW` pathfinding malus (`Goat.java:92-95`), which lives outside this file.
+///   `calculateFallDamage`'s `GOAT_FALL_DAMAGE_REDUCTION` (`Goat.java:121-125`) is now ported,
+///   through `Mob::mob_calculate_fall_damage` below.
 pub struct GoatEntity {
     pub mob_entity: MobEntity,
     pub ageable_data: AgeableData,
@@ -295,6 +296,14 @@ impl super::animal::Animal for GoatEntity {
 impl Mob for GoatEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `Goat.calculateFallDamage` (`Goat.java:123-125`): goats take 10 less fall damage.
+    fn mob_calculate_fall_damage(&self, fall_distance: f64, damage_modifier: f32) -> i32 {
+        self.mob_entity
+            .living_entity
+            .default_calculate_fall_damage(fall_distance, damage_modifier)
+            - 10
     }
 
     fn get_walk_target_value(&self, pos: &pumpkin_util::math::position::BlockPos) -> f64 {
