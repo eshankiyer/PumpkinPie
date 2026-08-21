@@ -43,6 +43,7 @@ pub mod chain;
 pub mod glass_panes;
 pub mod glazed_terracotta;
 pub mod iron_bars;
+pub mod pillar;
 pub mod slabs;
 pub mod stairs;
 pub mod walls;

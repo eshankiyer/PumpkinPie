@@ -65,7 +65,8 @@ def covered_blocks() -> set[str]:
                         break
             for key in re.findall(r"tag::Block::([A-Z0-9_]+)", body):
                 covered.update(tags.get(key, []))
-            for name in re.findall(r"Block::([A-Z0-9_]+)", body):
+            # Both `Block::NAME` and `BlockId::NAME` appear in these bodies.
+            for name in re.findall(r"\bBlock(?:Id)?::([A-Z0-9_]+)", body):
                 if not name.startswith(("MINECRAFT_", "C_")):
                     covered.add(name.lower())
         for namespace, tag in re.findall(

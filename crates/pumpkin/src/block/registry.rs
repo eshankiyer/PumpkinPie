@@ -330,6 +330,7 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(ComposterBlock);
     manager.register(CauldronBlock);
     manager.register(BeehiveBlock);
+    manager.register(crate::block::blocks::pillar::PillarBlock);
     manager.register(PressurePlateBlock);
     manager.register(WeightedPressurePlateBlock);
     manager.register(EndPortalBlock);
