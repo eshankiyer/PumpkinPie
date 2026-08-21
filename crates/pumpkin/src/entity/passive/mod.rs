@@ -46,3 +46,4 @@ pub mod villager;
 pub mod wandering_trader;
 pub mod wolf;
 pub mod zombie_horse;
+pub mod zombie_nautilus;

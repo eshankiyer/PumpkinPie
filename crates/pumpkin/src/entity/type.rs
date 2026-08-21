@@ -109,6 +109,7 @@ use crate::entity::passive::villager::VillagerEntity;
 use crate::entity::passive::wandering_trader::WanderingTraderEntity;
 use crate::entity::passive::wolf::WolfEntity;
 use crate::entity::passive::zombie_horse::ZombieHorseEntity;
+use crate::entity::passive::zombie_nautilus::ZombieNautilusEntity;
 use crate::entity::projectile::ThrownItemEntity;
 use crate::entity::projectile::arrow::ArrowEntity;
 use crate::entity::projectile::dragon_fireball::DragonFireballEntity;
@@ -220,6 +221,7 @@ pub fn from_type(
         id if id == EntityType::MOOSHROOM.id => MooshroomEntity::new(entity),
         id if id == EntityType::OCELOT.id => OcelotEntity::new(entity),
         id if id == EntityType::NAUTILUS.id => NautilusEntity::new(entity),
+        id if id == EntityType::ZOMBIE_NAUTILUS.id => ZombieNautilusEntity::new(entity),
         id if id == EntityType::PANDA.id => PandaEntity::new(entity),
         id if id == EntityType::PARROT.id => ParrotEntity::new(entity),
         id if id == EntityType::POLAR_BEAR.id => PolarBearEntity::new(entity),

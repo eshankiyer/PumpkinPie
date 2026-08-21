@@ -114,13 +114,49 @@ def placeable_block_items() -> set[str]:
     item from one version against a block item from another. Name matching is what the
     generated mapping is built from and is stable across versions.
     """
-    items = {name.lower() for name in re.findall(
-        r"pub const ([A-Z0-9_]+): Self = Self \{", read(ROOT / "crates/pumpkin-data/src/generated/item.rs")
-    )}
+    item_src = read(ROOT / "crates/pumpkin-data/src/generated/item.rs")
+    items = {name.lower() for name in re.findall(r"pub const ([A-Z0-9_]+): Self = Self \{", item_src)}
     blocks = {name.lower() for name in re.findall(
         r"pub const ([A-Z0-9_]+): Self = Block \{", read(ROOT / "crates/pumpkin-data/src/generated/block.rs")
     )}
-    return items & blocks
+    by_name = items & blocks
+
+    # A placer whose item name differs from the block it places is missed by the name match:
+    # wheat_seeds plants wheat, melon_seeds plants melon_stem. Those are caught through
+    # `Block::from_item_id`, but item.rs holds two version tables per item, so an id alone is
+    # ambiguous - matching on any id made acacia_boat and diamond_sword look like block items.
+    # Only ids owned by exactly one item are trusted, which is enough to catch the seeds while
+    # excluding every collision.
+    pairs = re.findall(r"pub const ([A-Z0-9_]+): Self = Self \{\s*id: (\d+),", item_src)
+    owners: dict[int, set[str]] = {}
+    for name, ident in pairs:
+        owners.setdefault(int(ident), set()).add(name.lower())
+    unambiguous = {ident for ident, names in owners.items() if len(names) == 1}
+    placeable = block_item_ids()
+    by_id = {
+        name.lower()
+        for name, ident in pairs
+        if int(ident) in placeable and int(ident) in unambiguous
+    }
+    return by_name | by_id
+
+
+def block_item_ids() -> set[int]:
+    """Item ids that `Block::from_item_id` maps to a block."""
+    text = read(ROOT / "crates/pumpkin-data/src/generated/block.rs")
+    start = text.find("pub const fn from_item_id")
+    if start < 0:
+        return set()
+    body, depth = "", 0
+    for index in range(text.find("{", start), len(text)):
+        body += text[index]
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+    return {int(n) for n in re.findall(r"^\s+(\d+)u16 => Some", body, re.M)}
 
 
 def generated_id_list(file_name: str, fn_name: str) -> set[int]:

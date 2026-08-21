@@ -3184,6 +3184,15 @@ impl LivingEntity {
             SlimeEntity::magma_cube_hurt_sound_for_size(self.entity.data.load(Relaxed))
         } else if self.entity.entity_type == &EntityType::SULFUR_CUBE {
             SulfurCubeEntity::hurt_sound_for_size(self.entity.data.load(Relaxed))
+        } else if self.entity.entity_type == &EntityType::ZOMBIE_NAUTILUS {
+            // `ZombieNautilus.getHurtSound` (ZombieNautilus.java:91-94) picks by
+            // `isUnderWater` (Entity.java:1608-1610). The generated
+            // `ZOMBIE_NAUTILUS.hurt_sound` is None, so without this branch the mob falls
+            // through to the generic hurt sound.
+            crate::entity::passive::zombie_nautilus::hurt_sound_for(
+                self.entity.was_eye_in_water.load(Relaxed)
+                    && self.entity.touching_water.load(Relaxed),
+            )
         } else {
             Self::hurt_sound_for_entity(self.entity.entity_type)
         }
