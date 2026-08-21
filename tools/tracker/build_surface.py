@@ -50,6 +50,24 @@ def covered_blocks() -> set[str]:
         text = read(path)
         for name in re.findall(r'#\[pumpkin_block\("minecraft:([a-z0-9_]+)"\)\]', text):
             covered.add(name)
+        # A third idiom: a hand-written `impl BlockMetadata { fn ids() }` that reads tag tables
+        # directly, which neither attribute macro covers. PressurePlateBlock is one, and all 16
+        # pressure plates counted as uncovered because of it.
+        for match in re.finditer(r"impl BlockMetadata for \w+ \{", text):
+            body, depth = "", 0
+            for index in range(match.end() - 1, len(text)):
+                body += text[index]
+                if text[index] == "{":
+                    depth += 1
+                elif text[index] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+            for key in re.findall(r"tag::Block::([A-Z0-9_]+)", body):
+                covered.update(tags.get(key, []))
+            for name in re.findall(r"Block::([A-Z0-9_]+)", body):
+                if not name.startswith(("MINECRAFT_", "C_")):
+                    covered.add(name.lower())
         for namespace, tag in re.findall(
             r'#\[pumpkin_block_from_tag\("([a-z]+):([a-z0-9_/]+)"\)\]', text
         ):
