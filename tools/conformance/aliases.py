@@ -264,6 +264,18 @@ CLIENT_ONLY_METHODS = {
     "hurtClient",
     # BaseSpawner.onEventTriggered:249 - body runs only under level.isClientSide()
     "triggerEvent",
+    # The particle hook. Every caller in the tree is a `super.animateTick` inside an
+    # override (EnchantingTableBlock.java:65, SandBlock.java:29, LeavesBlock.java:145,
+    # MyceliumBlock.java:26); the only dispatch is FluidState.java:84. No server tick
+    # path reaches it. 36 leads.
+    "animateTick",
+    # Entity status codes. The sole caller is the client packet handler,
+    # ClientboundEntityEventPacket.java:39. The server SENDS these; it never handles
+    # one. 30 leads.
+    "handleEntityEvent",
+    # No caller anywhere in the server tree - it rebuilds an entity from a spawn packet
+    # on the receiving side. 11 leads.
+    "recreateFromPacket",
 }
 
 # Vanilla methods that exist to feed Mojang's codec/registry machinery, which this
@@ -287,6 +299,10 @@ CLIENT_ONLY_METHODS = {
 # remaining leads, checkTakeAchievements and onSwapCraft, were read this session and have
 # no Rust analogue at all - they are real gaps, not table entries.
 DATA_MODELED_METHODS = {
+    # Entity attribute defaults. The only consumer is DefaultAttributes.java:97+, which
+    # builds one static EntityType -> AttributeSupplier table; pumpkin-data ships that
+    # table as generated data. 69 leads.
+    "createAttributes",
     # DarkOakTrunkPlacer.type():25 just returns TrunkPlacerType.DARK_OAK_TRUNK_PLACER; the
     # dispatch it feeds is a serde-tagged enum here. 177 leads, all of this shape.
     "type",
