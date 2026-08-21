@@ -360,11 +360,7 @@ impl Scoreboard {
             .find(|team| team.players.iter().any(|p| p == entity_name))
     }
 
-    pub async fn add_objective(
-        &mut self,
-        target: &impl ScoreboardTarget,
-        objective: ScoreboardObjective,
-    ) {
+    pub fn add_objective(&mut self, objective: ScoreboardObjective) {
         if self.objectives.contains_key(&objective.name) {
             warn!(
                 "Tried to create an objective which already exists: {}",
@@ -373,29 +369,14 @@ impl Scoreboard {
             return;
         }
 
-        let je_update = CUpdateObjectives::new(
-            objective.name.clone(),
-            Mode::Add,
-            objective.display_name.clone(),
-            objective.render_type,
-            objective.number_format.clone(),
-        );
-
-        let be_update = BSetDisplayObjective {
-            display_slot: "sidebar".to_string(), // Default to sidebar
-            objective_name: objective.name.clone(),
-            display_name: objective.display_name.clone().get_text(),
-            criteria_name: "dummy".to_string(),
-            sort_order: VarInt(0),
-        };
-
-        target.send_editioned(&je_update, &be_update).await;
-
+        // `ServerScoreboard.addObjective` does NOT send anything: an objective only reaches
+        // clients once it is assigned to a display slot, which is where vanilla calls
+        // `startTrackingObjective` (`ServerScoreboard.java:105-113`). Sending here would show
+        // scoreboards the player should not see yet.
         self.objectives_by_criterion
             .entry(objective.criterion.clone())
             .or_default()
             .push(objective.name.clone());
-        self.tracked_objectives.insert(objective.name.clone());
         self.objectives.insert(objective.name.clone(), objective);
     }
 
@@ -462,6 +443,31 @@ impl Scoreboard {
             criteria_name: "dummy".to_string(),
             sort_order: VarInt(0),
         };
+
+        // `ServerScoreboard.setDisplayObjective` (`ServerScoreboard.java:105-113`): an
+        // objective that is not yet tracked is sent to clients here, before the display packet,
+        // and only then recorded as tracked. An already-tracked one just gets the display packet.
+        if let Some(name) = objective_name
+            && !self.tracked_objectives.contains(name)
+            && let Some(objective) = self.objectives.get(name)
+        {
+            let je_update = CUpdateObjectives::new(
+                objective.name.clone(),
+                Mode::Add,
+                objective.display_name.clone(),
+                objective.render_type,
+                objective.number_format.clone(),
+            );
+            let be_update = BSetDisplayObjective {
+                display_slot: slot_str.to_string(),
+                objective_name: objective.name.clone(),
+                display_name: objective.display_name.clone().get_text(),
+                criteria_name: "dummy".to_string(),
+                sort_order: VarInt(0),
+            };
+            target.send_editioned(&je_update, &be_update).await;
+            self.tracked_objectives.insert(name.to_string());
+        }
 
         target.send_editioned(&je_display, &be_display).await;
 

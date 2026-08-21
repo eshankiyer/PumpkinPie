@@ -60,12 +60,7 @@ impl scoreboard::HostScoreboard for PluginHostState {
 
         match provider {
             ScoreboardProvider::World(world) => {
-                world
-                    .scoreboard
-                    .lock()
-                    .await
-                    .add_objective(world.as_ref(), objective)
-                    .await;
+                world.scoreboard.lock().await.add_objective(objective);
             }
             ScoreboardProvider::Player(player) => {
                 let mut custom_guard = player.custom_scoreboard.lock().await;
@@ -80,7 +75,7 @@ impl scoreboard::HostScoreboard for PluginHostState {
                 if let Some(crate::entity::player::CustomScoreboard::Java(sb)) =
                     custom_guard.as_mut()
                 {
-                    sb.add_objective(player.as_ref(), objective).await;
+                    sb.add_objective(objective);
                 }
             }
         }

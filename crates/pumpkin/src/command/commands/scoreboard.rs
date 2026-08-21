@@ -115,7 +115,7 @@ impl CommandExecutor for ObjectivesAddExecutor {
                 criterion,
             );
 
-            scoreboard.add_objective(world, new_objective).await;
+            scoreboard.add_objective(new_objective);
 
             context
                 .source
