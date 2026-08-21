@@ -21,11 +21,13 @@ pub mod animal_panic;
 pub mod count_down_cooldown_ticks;
 pub mod do_nothing;
 pub mod gate;
+pub mod go_and_give_items_to_target;
 pub mod go_to_wanted_item;
 pub mod look_at_target_sink;
 pub mod move_to_target_sink;
 pub mod random_stroll;
 pub mod set_walk_target_from_look_target;
+pub mod stay_close_to_target;
 pub mod swim;
 
 use rand::RngExt;

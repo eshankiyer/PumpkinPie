@@ -23,8 +23,13 @@
 //! still captured here for completeness and testing, but callers don't exist yet — see the
 //! module-level doc on [`EnchantmentEffect`] for exactly which variants are wired vs. deferred.
 
+use crate::entity::attributes::{Modifier, ModifierOperation};
 use pumpkin_data::Enchantment;
+use pumpkin_data::attributes::Attributes;
+use pumpkin_data::data_component_impl::{EnchantmentsImpl, EquipmentSlot};
+use pumpkin_data::enchantment::AttributeModifierSlot;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::tag::{EntityType as EntityTypeTag, Taggable};
 
 /// Mirrors vanilla `LevelBasedValue`.
@@ -98,6 +103,192 @@ impl LevelBasedValue {
             Self::Clamped { value, min, max } => value.calculate(level).clamp(*min, *max),
         }
     }
+}
+
+/// Mirrors vanilla `AttributeModifier.Operation`.
+///
+/// `add_value` -> `ADD_VALUE`, `add_multiplied_base` -> `ADD_MULTIPLIED_BASE`,
+/// `add_multiplied_total` -> `ADD_MULTIPLIED_TOTAL`
+/// (`net/minecraft/world/entity/ai/attributes/AttributeModifier.java`), which map one-to-one
+/// onto Pumpkin's [`ModifierOperation`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttributeOperation {
+    AddValue,
+    AddMultipliedBase,
+    AddMultipliedTotal,
+}
+
+impl AttributeOperation {
+    #[must_use]
+    pub const fn to_modifier_operation(self) -> ModifierOperation {
+        match self {
+            Self::AddValue => ModifierOperation::Add,
+            Self::AddMultipliedBase => ModifierOperation::MultiplyBase,
+            Self::AddMultipliedTotal => ModifierOperation::MultiplyTotal,
+        }
+    }
+}
+
+/// Resolves a vanilla attribute id (without the `minecraft:` prefix) to Pumpkin's generated
+/// attribute constant. Only the ids reachable from an enchantment's `minecraft:attributes`
+/// component are listed; anything else returns `None` rather than silently applying to the
+/// wrong attribute.
+#[must_use]
+pub fn attribute_by_key(key: &str) -> Option<&'static Attributes> {
+    Some(match key {
+        "burning_time" => &Attributes::BURNING_TIME,
+        "explosion_knockback_resistance" => &Attributes::EXPLOSION_KNOCKBACK_RESISTANCE,
+        "mining_efficiency" => &Attributes::MINING_EFFICIENCY,
+        "movement_efficiency" => &Attributes::MOVEMENT_EFFICIENCY,
+        "movement_speed" => &Attributes::MOVEMENT_SPEED,
+        "oxygen_bonus" => &Attributes::OXYGEN_BONUS,
+        "sneaking_speed" => &Attributes::SNEAKING_SPEED,
+        "submerged_mining_speed" => &Attributes::SUBMERGED_MINING_SPEED,
+        "sweeping_damage_ratio" => &Attributes::SWEEPING_DAMAGE_RATIO,
+        "water_movement_efficiency" => &Attributes::WATER_MOVEMENT_EFFICIENCY,
+        _ => return None,
+    })
+}
+
+/// Mirrors `EquipmentSlotGroup.test` (`net/minecraft/world/entity/EquipmentSlotGroup.java:15-25`),
+/// the predicate `Enchantment.matchingSlot` folds over an enchantment's declared slots
+/// (`Enchantment.java:126`).
+#[must_use]
+pub fn slot_group_matches(group: &AttributeModifierSlot, slot: &EquipmentSlot) -> bool {
+    match group {
+        AttributeModifierSlot::Any => true,
+        AttributeModifierSlot::MainHand => matches!(slot, EquipmentSlot::MainHand(_)),
+        AttributeModifierSlot::OffHand => matches!(slot, EquipmentSlot::OffHand(_)),
+        AttributeModifierSlot::Hand => {
+            matches!(slot, EquipmentSlot::MainHand(_) | EquipmentSlot::OffHand(_))
+        }
+        AttributeModifierSlot::Feet => matches!(slot, EquipmentSlot::Feet(_)),
+        AttributeModifierSlot::Legs => matches!(slot, EquipmentSlot::Legs(_)),
+        AttributeModifierSlot::Chest => matches!(slot, EquipmentSlot::Chest(_)),
+        AttributeModifierSlot::Head => matches!(slot, EquipmentSlot::Head(_)),
+        AttributeModifierSlot::Armor => slot.is_armor_slot(),
+        AttributeModifierSlot::Body => matches!(slot, EquipmentSlot::Body(_)),
+        AttributeModifierSlot::Saddle => matches!(slot, EquipmentSlot::Saddle(_)),
+    }
+}
+
+/// Mirrors `EnchantmentAttributeEffect.idForSlot` (`effects/EnchantmentAttributeEffect.java:31`):
+/// the JSON `id` (always `minecraft:enchantment.<registry key>`) suffixed with
+/// `"/" + slot.getSerializedName()`.
+///
+/// The slot suffix is load-bearing: it is what lets the same enchantment on four different
+/// armour pieces contribute four *separate* modifiers instead of overwriting each other.
+#[must_use]
+pub fn modifier_id_for_slot(enchantment: &'static Enchantment, slot: &EquipmentSlot) -> String {
+    format!(
+        "minecraft:enchantment.{}/{}",
+        enchantment.registry_key,
+        slot.to_name()
+    )
+}
+
+/// Vanilla `EnchantmentHelper.forEachModifier(ItemStack, EquipmentSlot, BiConsumer)`
+/// (`EnchantmentHelper.java:395-401`), collected into a vector instead of a callback.
+///
+/// Walks every enchantment on `stack`, keeps the ones whose declared slots match `slot`
+/// (`Enchantment.matchingSlot`), and turns each of their `minecraft:attributes` effects into
+/// a slot-scoped [`Modifier`] via `EnchantmentAttributeEffect.getModifier`.
+///
+/// `minecraft:location_changed` attribute effects (Soul Speed) are deliberately *not*
+/// returned: vanilla only applies those while the entity stands on a soul-speed block.
+#[must_use]
+pub fn attribute_modifiers_for_slot(
+    stack: &ItemStack,
+    slot: &EquipmentSlot,
+) -> Vec<(&'static Attributes, Modifier)> {
+    let Some(enchantments) = stack.get_data_component::<EnchantmentsImpl>() else {
+        return Vec::new();
+    };
+
+    let mut modifiers = Vec::new();
+    for (enchantment, level) in enchantments.enchantment.iter() {
+        if *level <= 0 {
+            continue;
+        }
+        if !enchantment
+            .slots
+            .iter()
+            .any(|group| slot_group_matches(group, slot))
+        {
+            continue;
+        }
+        for effect in effects_for(enchantment) {
+            let EnchantmentEffect::AttributeBonus {
+                attribute,
+                amount,
+                operation,
+            } = effect
+            else {
+                continue;
+            };
+            let Some(target) = attribute_by_key(attribute) else {
+                continue;
+            };
+            modifiers.push((
+                target,
+                Modifier {
+                    id: modifier_id_for_slot(enchantment, slot),
+                    amount: f64::from(amount.calculate(*level)),
+                    operation: operation.to_modifier_operation(),
+                },
+            ));
+        }
+    }
+    modifiers
+}
+
+/// The `minecraft:location_changed` attribute modifiers Soul Speed contributes while active,
+/// scoped to the slot the enchanted boots occupy (`soul_speed.json` -> `minecraft:attribute`
+/// effects nested under `minecraft:all_of`).
+#[must_use]
+pub fn location_based_attribute_modifiers_for_slot(
+    stack: &ItemStack,
+    slot: &EquipmentSlot,
+) -> Vec<(&'static Attributes, Modifier)> {
+    let Some(enchantments) = stack.get_data_component::<EnchantmentsImpl>() else {
+        return Vec::new();
+    };
+
+    let mut modifiers = Vec::new();
+    for (enchantment, level) in enchantments.enchantment.iter() {
+        if *level <= 0 {
+            continue;
+        }
+        if !enchantment
+            .slots
+            .iter()
+            .any(|group| slot_group_matches(group, slot))
+        {
+            continue;
+        }
+        for effect in effects_for(enchantment) {
+            let EnchantmentEffect::LocationBasedAttributeBonus {
+                attribute,
+                amount,
+                operation,
+            } = effect
+            else {
+                continue;
+            };
+            let Some(target) = attribute_by_key(attribute) else {
+                continue;
+            };
+            modifiers.push((
+                target,
+                Modifier {
+                    id: modifier_id_for_slot(enchantment, slot),
+                    amount: f64::from(amount.calculate(*level)),
+                    operation: operation.to_modifier_operation(),
+                },
+            ));
+        }
+    }
+    modifiers
 }
 
 /// Gates a `minecraft:damage` effect the way vanilla's `entity_properties`/
@@ -241,7 +432,22 @@ pub enum EnchantmentEffect {
     /// Generic per-enchantment attribute-modifier bonus (vanilla's `minecraft:attributes`
     /// component, applied on equip rather than per-hit). The `&str` names the vanilla attribute
     /// id for documentation/test purposes only.
-    AttributeBonus(&'static str, LevelBasedValue),
+    AttributeBonus {
+        /// Vanilla attribute id, without the `minecraft:` prefix.
+        attribute: &'static str,
+        amount: LevelBasedValue,
+        operation: AttributeOperation,
+    },
+    /// An attribute modifier vanilla applies through `minecraft:location_changed` rather than
+    /// the plain `minecraft:attributes` component, so it is *conditional* on where the entity
+    /// is standing and must never be applied by the equip-time evaluator.
+    ///
+    /// Only Soul Speed carries these (`soul_speed.json`).
+    LocationBasedAttributeBonus {
+        attribute: &'static str,
+        amount: LevelBasedValue,
+        operation: AttributeOperation,
+    },
     AmmoUseSetZero,
     BlockExperienceSetZero,
     ItemDamageRemoveBinomial(LevelBasedValue),
@@ -304,6 +510,8 @@ const SWEEPING_EDGE_RATIO: LevelBasedValue = LevelBasedValue::Fraction {
     denominator: &SWEEPING_EDGE_DENOMINATOR,
 };
 const SOUL_SPEED_SPEED_ATTR: LevelBasedValue = LevelBasedValue::linear(0.0405, 0.0105);
+const SOUL_SPEED_EFFICIENCY_ATTR: LevelBasedValue = LevelBasedValue::Constant(1.0);
+const FIRE_PROTECTION_BURNING_TIME_ATTR: LevelBasedValue = LevelBasedValue::linear(-0.15, -0.15);
 
 const UNBREAKING_ARMOR_NUMERATOR: LevelBasedValue = LevelBasedValue::linear(2.0, 2.0);
 const UNBREAKING_ARMOR_DENOMINATOR: LevelBasedValue = LevelBasedValue::linear(10.0, 5.0);
@@ -327,10 +535,11 @@ const UNBREAKING_OTHER_CHANCE: LevelBasedValue = LevelBasedValue::Fraction {
 pub fn effects_for(enchantment: &'static Enchantment) -> &'static [EnchantmentEffect] {
     use EnchantmentEffect as E;
     match enchantment.registry_key {
-        "aqua_affinity" => &[E::AttributeBonus(
-            "submerged_mining_speed",
-            AQUA_AFFINITY_ATTR,
-        )],
+        "aqua_affinity" => &[E::AttributeBonus {
+            attribute: "submerged_mining_speed",
+            amount: AQUA_AFFINITY_ATTR,
+            operation: AttributeOperation::AddMultipliedTotal,
+        }],
         "bane_of_arthropods" => &[
             E::Damage(DamageCondition::SensitiveToBaneOfArthropods, BANE_DAMAGE),
             E::ApplyMobEffectOnHit {
@@ -344,26 +553,39 @@ pub fn effects_for(enchantment: &'static Enchantment) -> &'static [EnchantmentEf
         "binding_curse" => &[E::PreventArmorChange],
         "blast_protection" => &[
             E::DamageProtection(ProtectionCondition::IsExplosion, BLAST_PROTECTION_VALUE),
-            E::AttributeBonus("explosion_knockback_resistance", BLAST_PROTECTION_ATTR),
+            E::AttributeBonus {
+                attribute: "explosion_knockback_resistance",
+                amount: BLAST_PROTECTION_ATTR,
+                operation: AttributeOperation::AddValue,
+            },
         ],
         "breach" => &[E::ArmorEffectiveness(BREACH_VALUE)],
         // "channeling" has no numeric formula (boolean-gated lightning summon only) — falls
         // through to the wildcard arm below.
         "density" => &[E::SmashDamagePerFallenBlock(DENSITY_VALUE)],
-        "depth_strider" => &[E::AttributeBonus(
-            "water_movement_efficiency",
-            DEPTH_STRIDER_ATTR,
-        )],
-        "efficiency" => &[E::AttributeBonus("mining_efficiency", EFFICIENCY_ATTR)],
+        "depth_strider" => &[E::AttributeBonus {
+            attribute: "water_movement_efficiency",
+            amount: DEPTH_STRIDER_ATTR,
+            operation: AttributeOperation::AddValue,
+        }],
+        "efficiency" => &[E::AttributeBonus {
+            attribute: "mining_efficiency",
+            amount: EFFICIENCY_ATTR,
+            operation: AttributeOperation::AddValue,
+        }],
         "feather_falling" => &[E::DamageProtection(
             ProtectionCondition::IsFall,
             FEATHER_FALLING_VALUE,
         )],
         "fire_aspect" => &[E::IgniteOnHit(FIRE_ASPECT_DURATION_SECONDS)],
-        "fire_protection" => &[E::DamageProtection(
-            ProtectionCondition::IsFire,
-            FIRE_PROTECTION_VALUE,
-        )],
+        "fire_protection" => &[
+            E::DamageProtection(ProtectionCondition::IsFire, FIRE_PROTECTION_VALUE),
+            E::AttributeBonus {
+                attribute: "burning_time",
+                amount: FIRE_PROTECTION_BURNING_TIME_ATTR,
+                operation: AttributeOperation::AddMultipliedBase,
+            },
+        ],
         // "flame" (constant 100-tick ignite, not level-scaled), "fortune" (loot-table only, no
         // data component), and "frost_walker" (location_changed/replace_disk, no evaluator) all
         // fall through to the wildcard arm below.
@@ -402,17 +624,37 @@ pub fn effects_for(enchantment: &'static Enchantment) -> &'static [EnchantmentEf
             PUNCH_VALUE,
         )],
         "quick_charge" => &[E::CrossbowChargeTime(QUICK_CHARGE_VALUE)],
-        "respiration" => &[E::AttributeBonus("oxygen_bonus", RESPIRATION_ATTR)],
+        "respiration" => &[E::AttributeBonus {
+            attribute: "oxygen_bonus",
+            amount: RESPIRATION_ATTR,
+            operation: AttributeOperation::AddValue,
+        }],
         "riptide" => &[E::TridentSpinAttackStrength(RIPTIDE_SPIN_VALUE)],
         "sharpness" => &[E::Damage(DamageCondition::Always, SHARPNESS_DAMAGE)],
         "silk_touch" => &[E::BlockExperienceSetZero],
         "smite" => &[E::Damage(DamageCondition::SensitiveToSmite, SMITE_DAMAGE)],
-        "soul_speed" => &[E::AttributeBonus("movement_speed", SOUL_SPEED_SPEED_ATTR)],
-        "sweeping_edge" => &[E::AttributeBonus(
-            "sweeping_damage_ratio",
-            SWEEPING_EDGE_RATIO,
-        )],
-        "swift_sneak" => &[E::AttributeBonus("sneaking_speed", SWIFT_SNEAK_ATTR)],
+        "soul_speed" => &[
+            E::LocationBasedAttributeBonus {
+                attribute: "movement_speed",
+                amount: SOUL_SPEED_SPEED_ATTR,
+                operation: AttributeOperation::AddValue,
+            },
+            E::LocationBasedAttributeBonus {
+                attribute: "movement_efficiency",
+                amount: SOUL_SPEED_EFFICIENCY_ATTR,
+                operation: AttributeOperation::AddValue,
+            },
+        ],
+        "sweeping_edge" => &[E::AttributeBonus {
+            attribute: "sweeping_damage_ratio",
+            amount: SWEEPING_EDGE_RATIO,
+            operation: AttributeOperation::AddValue,
+        }],
+        "swift_sneak" => &[E::AttributeBonus {
+            attribute: "sneaking_speed",
+            amount: SWIFT_SNEAK_ATTR,
+            operation: AttributeOperation::AddValue,
+        }],
         "thorns" => &[E::ThornsChance(THORNS_CHANCE)],
         "unbreaking" => &[
             E::ItemDamageRemoveBinomial(UNBREAKING_ARMOR_CHANCE),
@@ -478,6 +720,218 @@ pub fn apply_mob_effect_on_hit(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn enchanted(
+        item: &'static pumpkin_data::item::Item,
+        ench: &'static Enchantment,
+        level: i32,
+    ) -> ItemStack {
+        let mut stack = ItemStack::new(1, item);
+        stack.enchant(ench, level);
+        stack
+    }
+
+    #[test]
+    fn equip_time_attribute_formulas_match_vanilla_json() {
+        // respiration.json: linear(1.0, 1.0), add_value.
+        assert_eq!(RESPIRATION_ATTR.calculate(1), 1.0);
+        assert_eq!(RESPIRATION_ATTR.calculate(3), 3.0);
+        // swift_sneak.json: linear(0.15, 0.15), add_value.
+        assert!((SWIFT_SNEAK_ATTR.calculate(1) - 0.15).abs() < 1e-6);
+        assert!((SWIFT_SNEAK_ATTR.calculate(3) - 0.45).abs() < 1e-6);
+        // blast_protection.json: linear(0.15, 0.15) on explosion_knockback_resistance.
+        assert!((BLAST_PROTECTION_ATTR.calculate(4) - 0.60).abs() < 1e-6);
+        // depth_strider.json: linear(0.33333334, 0.33333334).
+        assert!((DEPTH_STRIDER_ATTR.calculate(3) - 1.0).abs() < 1e-6);
+        // fire_protection.json: linear(-0.15, -0.15) on burning_time, add_multiplied_base.
+        assert!((FIRE_PROTECTION_BURNING_TIME_ATTR.calculate(1) + 0.15).abs() < 1e-6);
+        assert!((FIRE_PROTECTION_BURNING_TIME_ATTR.calculate(4) + 0.60).abs() < 1e-6);
+        // soul_speed.json: linear(0.0405, 0.0105) speed, constant 1.0 efficiency.
+        assert!((SOUL_SPEED_SPEED_ATTR.calculate(1) - 0.0405).abs() < 1e-6);
+        assert!((SOUL_SPEED_SPEED_ATTR.calculate(3) - 0.0615).abs() < 1e-6);
+        assert_eq!(SOUL_SPEED_EFFICIENCY_ATTR.calculate(3), 1.0);
+    }
+
+    #[test]
+    fn attribute_operations_match_the_json_operation_field() {
+        let ops: Vec<(&str, AttributeOperation)> = [
+            "aqua_affinity",
+            "blast_protection",
+            "depth_strider",
+            "efficiency",
+            "fire_protection",
+            "respiration",
+            "sweeping_edge",
+            "swift_sneak",
+        ]
+        .iter()
+        .flat_map(|key| {
+            let enchantment = Enchantment::ALL
+                .iter()
+                .find(|e| e.registry_key == *key)
+                .expect("enchantment exists");
+            effects_for(enchantment)
+                .iter()
+                .filter_map(move |effect| match effect {
+                    EnchantmentEffect::AttributeBonus {
+                        attribute,
+                        operation,
+                        ..
+                    } => Some((*attribute, *operation)),
+                    _ => None,
+                })
+        })
+        .collect();
+
+        assert!(ops.contains(&(
+            "submerged_mining_speed",
+            AttributeOperation::AddMultipliedTotal
+        )));
+        assert!(ops.contains(&("burning_time", AttributeOperation::AddMultipliedBase)));
+        assert!(ops.contains(&(
+            "explosion_knockback_resistance",
+            AttributeOperation::AddValue
+        )));
+        assert!(ops.contains(&("water_movement_efficiency", AttributeOperation::AddValue)));
+        assert!(ops.contains(&("mining_efficiency", AttributeOperation::AddValue)));
+        assert!(ops.contains(&("oxygen_bonus", AttributeOperation::AddValue)));
+        assert!(ops.contains(&("sneaking_speed", AttributeOperation::AddValue)));
+        assert!(ops.contains(&("sweeping_damage_ratio", AttributeOperation::AddValue)));
+    }
+
+    #[test]
+    fn modifier_ids_are_scoped_per_slot_so_four_armour_pieces_stack() {
+        // EnchantmentAttributeEffect.idForSlot: id + "/" + slot.getSerializedName().
+        let ids: Vec<String> = [
+            EquipmentSlot::HEAD,
+            EquipmentSlot::CHEST,
+            EquipmentSlot::LEGS,
+            EquipmentSlot::FEET,
+        ]
+        .iter()
+        .map(|slot| modifier_id_for_slot(&Enchantment::BLAST_PROTECTION, slot))
+        .collect();
+
+        assert_eq!(ids[0], "minecraft:enchantment.blast_protection/head");
+        assert_eq!(ids[3], "minecraft:enchantment.blast_protection/feet");
+        let mut unique = ids.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(
+            unique.len(),
+            4,
+            "slot suffix must keep the four ids distinct"
+        );
+    }
+
+    #[test]
+    fn evaluator_emits_one_modifier_per_matching_slot() {
+        let boots = enchanted(
+            &pumpkin_data::item::Item::DIAMOND_BOOTS,
+            &Enchantment::DEPTH_STRIDER,
+            2,
+        );
+        let applied = attribute_modifiers_for_slot(&boots, &EquipmentSlot::FEET);
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0].0.id, Attributes::WATER_MOVEMENT_EFFICIENCY.id);
+        assert!((applied[0].1.amount - 0.666_666_68).abs() < 1e-6);
+        assert_eq!(applied[0].1.id, "minecraft:enchantment.depth_strider/feet");
+    }
+
+    #[test]
+    fn evaluator_respects_the_enchantment_slot_group() {
+        // depth_strider.json declares slots: ["feet"], so the same boots held in the main hand
+        // must contribute nothing (Enchantment.matchingSlot).
+        let boots = enchanted(
+            &pumpkin_data::item::Item::DIAMOND_BOOTS,
+            &Enchantment::DEPTH_STRIDER,
+            3,
+        );
+        assert!(attribute_modifiers_for_slot(&boots, &EquipmentSlot::MAIN_HAND).is_empty());
+        assert!(attribute_modifiers_for_slot(&boots, &EquipmentSlot::HEAD).is_empty());
+
+        // blast_protection.json declares slots: ["armor"], which matches all four pieces.
+        let helmet = enchanted(
+            &pumpkin_data::item::Item::DIAMOND_HELMET,
+            &Enchantment::BLAST_PROTECTION,
+            2,
+        );
+        assert_eq!(
+            attribute_modifiers_for_slot(&helmet, &EquipmentSlot::HEAD).len(),
+            1
+        );
+        assert!(attribute_modifiers_for_slot(&helmet, &EquipmentSlot::OFF_HAND).is_empty());
+    }
+
+    #[test]
+    fn fire_protection_contributes_a_negative_multiply_base_burning_time_modifier() {
+        let chest = enchanted(
+            &pumpkin_data::item::Item::DIAMOND_CHESTPLATE,
+            &Enchantment::FIRE_PROTECTION,
+            4,
+        );
+        let applied = attribute_modifiers_for_slot(&chest, &EquipmentSlot::CHEST);
+        assert_eq!(applied.len(), 1);
+        assert_eq!(applied[0].0.id, Attributes::BURNING_TIME.id);
+        assert!((applied[0].1.amount + 0.60).abs() < 1e-6);
+        assert!(matches!(
+            applied[0].1.operation,
+            ModifierOperation::MultiplyBase
+        ));
+    }
+
+    #[test]
+    fn soul_speed_is_location_based_and_never_applied_on_equip() {
+        let boots = enchanted(
+            &pumpkin_data::item::Item::DIAMOND_BOOTS,
+            &Enchantment::SOUL_SPEED,
+            3,
+        );
+        assert!(
+            attribute_modifiers_for_slot(&boots, &EquipmentSlot::FEET).is_empty(),
+            "soul speed is a location_changed effect; applying it on equip is a permanent speed buff"
+        );
+
+        let conditional = location_based_attribute_modifiers_for_slot(&boots, &EquipmentSlot::FEET);
+        assert_eq!(conditional.len(), 2);
+        let speed = conditional
+            .iter()
+            .find(|(attribute, _)| attribute.id == Attributes::MOVEMENT_SPEED.id)
+            .expect("movement_speed modifier");
+        assert!((speed.1.amount - 0.0615).abs() < 1e-6);
+        assert_eq!(speed.1.id, "minecraft:enchantment.soul_speed/feet");
+    }
+
+    #[test]
+    fn unenchanted_and_zero_level_stacks_contribute_nothing() {
+        let plain = ItemStack::new(1, &pumpkin_data::item::Item::DIAMOND_BOOTS);
+        assert!(attribute_modifiers_for_slot(&plain, &EquipmentSlot::FEET).is_empty());
+        let zero = enchanted(
+            &pumpkin_data::item::Item::DIAMOND_BOOTS,
+            &Enchantment::DEPTH_STRIDER,
+            0,
+        );
+        assert!(attribute_modifiers_for_slot(&zero, &EquipmentSlot::FEET).is_empty());
+    }
+
+    #[test]
+    fn every_attribute_key_used_by_an_effect_resolves() {
+        for enchantment in Enchantment::ALL {
+            for effect in effects_for(enchantment) {
+                match effect {
+                    EnchantmentEffect::AttributeBonus { attribute, .. }
+                    | EnchantmentEffect::LocationBasedAttributeBonus { attribute, .. } => {
+                        assert!(
+                            attribute_by_key(attribute).is_some(),
+                            "unmapped attribute id {attribute} on {}",
+                            enchantment.registry_key
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
 
     #[test]
     fn linear_matches_vanilla_formula() {

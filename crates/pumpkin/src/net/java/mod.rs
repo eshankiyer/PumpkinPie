@@ -1083,7 +1083,8 @@ impl JavaClient {
                 self.handle_container_slot_state_changed(
                     player,
                     &SContainerSlotStateChanged::read(&mut payload, &version)?,
-                );
+                )
+                .await;
             }
             id if id == SSpectatorAction::to_id(version) => {
                 self.handle_spectator_action(

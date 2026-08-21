@@ -217,7 +217,12 @@ pub trait RedstoneGateBlock<T: Send + Sync + BlockProperties + RedstoneGateBlock
         Self: Send + Sync,
     {
         Box::pin(async move {
-            if args.moved || Block::from_state_id(args.old_state_id) == args.block {
+            // `DiodeBlock.affectNeighborsAfterRemoval` (DiodeBlock.java:174-178) skips the
+            // front-neighbour update only when a piston moved the gate. `args.block` is always
+            // the block the OLD state belongs to, so the extra identity comparison this guard
+            // used to carry was a tautology that made the whole method dead: a broken repeater
+            // or comparator left the block in front of it holding stale power.
+            if args.moved {
                 return;
             }
             RedstoneGateBlock::update_target(

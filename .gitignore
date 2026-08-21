@@ -165,3 +165,6 @@ reference/transpiled
 # Python bytecode from the tracker scripts
 __pycache__/
 *.pyc
+
+# Full per-class conformance output, regenerable
+tools/conformance/conformance.json

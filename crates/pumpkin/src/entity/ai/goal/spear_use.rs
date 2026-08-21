@@ -17,16 +17,40 @@ const MAX_REPOSITION_DISTANCE: f64 = 7.0;
 const MIN_COOLDOWN_DISTANCE: f64 = 9.0;
 const MAX_COOLDOWN_DISTANCE: f64 = 11.0;
 /// `SpearUseGoal.MAX_FLEEING_TIME = reducedTickDelay(100)` (`Mth.positiveCeilDiv(100, 2)`).
-const MAX_FLEEING_TIME: i32 = 50;
+const MAX_FLEEING_TIME: i32 = reduced_tick_delay(100);
 /// `LandRandomPos.getPosAway` vertical search radius argument (`7`) passed by `SpearUseGoal`.
 const REPOSITION_VERTICAL_RANGE: i32 = 7;
 
-/// Vanilla derives the windup duration from the held item's `KineticWeapon` data component
-/// (`delayTicks + damageConditions.maxDurationTicks`, `reducedTickDelay`'d). Pumpkin's
-/// `KineticWeaponImpl` is a marker with no stored per-material fields, so every spear uses a
-/// single fixed duration instead: the `wooden_spear` baseline from `Item.Properties.spear`
-/// (`delay=0.75*20=15`, `damageTime=4.6*20=92`, total `107`, `reducedTickDelay(107) = 54`).
-const ENGAGE_TICKS: i32 = 54;
+/// Vanilla derives the windup duration from the held item's `KineticWeapon` data component:
+/// `SpearUseGoal.getKineticWeaponUseDuration` (`SpearUseGoal.java:53-58`) is
+/// `reducedTickDelay(KineticWeapon.computeDamageUseDuration())`, and
+/// `computeDamageUseDuration` (`KineticWeapon.java:97-99`) is
+/// `delayTicks + damageConditions.maxDurationTicks`.
+///
+/// Pumpkin's `KineticWeaponImpl` is a marker with no stored per-material fields, so every
+/// spear uses a single fixed duration instead: the `wooden_spear` baseline from
+/// `Item.Properties.spear` (`Item.java:486-497`, called at `Items.java:1660` with
+/// `delay = 0.75`, `damageTime = 15.0`). Those are seconds, so
+/// `delayTicks = 0.75 * 20 = 15` and `maxDurationTicks = 15.0 * 20 = 300`
+/// (`Item.java:503,509`), giving `computeDamageUseDuration = 315` and
+/// `reducedTickDelay(315) = Mth.positiveCeilDiv(315, 2) = 158` (`Goal.java:53-55`).
+///
+/// Note `should_run_every_tick` does not exempt this: `getKineticWeaponUseDuration` calls
+/// the static `reducedTickDelay` directly, not `adjustedTickDelay`.
+const ENGAGE_TICKS: i32 =
+    reduced_tick_delay(WOODEN_SPEAR_DELAY_TICKS + WOODEN_SPEAR_DAMAGE_TIME_TICKS);
+
+/// `Item.Properties.spear` delay for `wooden_spear`: `0.75s * 20` (`Items.java:1660`,
+/// `Item.java:503`).
+const WOODEN_SPEAR_DELAY_TICKS: i32 = 15;
+/// `Item.Properties.spear` `damageTime` for `wooden_spear`: `15.0s * 20` (`Items.java:1660`,
+/// `Item.java:509`).
+const WOODEN_SPEAR_DAMAGE_TIME_TICKS: i32 = 300;
+
+/// `Goal.reducedTickDelay` (`Goal.java:53-55`): `Mth.positiveCeilDiv(ticks, 2)`.
+const fn reduced_tick_delay(ticks: i32) -> i32 {
+    (ticks + 1) / 2
+}
 
 struct SpearState {
     engage_time: i32,
@@ -320,7 +344,30 @@ impl Goal for SpearUseGoal {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_FLEEING_TIME, SpearState};
+    use super::{
+        ENGAGE_TICKS, MAX_FLEEING_TIME, SpearState, WOODEN_SPEAR_DAMAGE_TIME_TICKS,
+        WOODEN_SPEAR_DELAY_TICKS, reduced_tick_delay,
+    };
+
+    #[test]
+    fn engage_ticks_is_the_wooden_spear_kinetic_weapon_use_duration() {
+        // `KineticWeapon.computeDamageUseDuration` (`KineticWeapon.java:97-99`).
+        let damage_use_duration = WOODEN_SPEAR_DELAY_TICKS + WOODEN_SPEAR_DAMAGE_TIME_TICKS;
+        assert_eq!(damage_use_duration, 315);
+        // `SpearUseGoal.getKineticWeaponUseDuration` (`SpearUseGoal.java:53-58`).
+        assert_eq!(reduced_tick_delay(damage_use_duration), 158);
+        // The pre-fix value was 54, from swapping `damageTime` (15.0s) with
+        // `damageThreshold` (4.6, dimensionless) in the `spear()` signature.
+        assert_eq!(ENGAGE_TICKS, 158);
+    }
+
+    #[test]
+    fn reduced_tick_delay_rounds_up_like_positive_ceil_div() {
+        assert_eq!(reduced_tick_delay(100), 50);
+        assert_eq!(reduced_tick_delay(101), 51);
+        assert_eq!(reduced_tick_delay(0), 0);
+        assert_eq!(reduced_tick_delay(1), 1);
+    }
 
     #[test]
     fn starts_unengaged_and_not_fleeing() {

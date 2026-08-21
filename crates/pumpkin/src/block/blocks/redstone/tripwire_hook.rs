@@ -95,7 +95,11 @@ impl BlockBehaviour for TripwireHookBlock {
 
     fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            if args.moved || Block::from_state_id(args.old_state_id) == args.block {
+            // `TripWireHookBlock.affectNeighborsAfterRemoval` (TripWireHookBlock.java:227-231)
+            // skips `onRemoved` only for a piston move. `args.block` is always the block the old
+            // state belongs to, so the identity term this guard used to carry was a tautology
+            // that made the whole method dead.
+            if args.moved {
                 return;
             }
             let props = TripwireHookProperties::from_state_id(args.old_state_id, args.block);
@@ -112,13 +116,12 @@ impl BlockBehaviour for TripwireHookBlock {
                 .await;
             }
             if props.powered {
-                args.world.update_neighbor(args.position, args.block).await;
-                args.world
-                    .update_neighbor(
-                        &args.position.offset(props.facing.opposite().to_offset()),
-                        args.block,
-                    )
-                    .await;
+                Self::update_neighbors_on_axis(
+                    args.world,
+                    *args.position,
+                    BlockDirection::from_cardinal_direction(props.facing),
+                )
+                .await;
             }
         })
     }
@@ -251,7 +254,6 @@ impl TripwireHookBlock {
                 )
                 .await;
             Self::update_neighbors_on_axis(
-                &Block::TRIPWIRE_HOOK,
                 world,
                 end_hook_pos,
                 BlockDirection::from_cardinal_direction(future_hook_facing),
@@ -290,7 +292,6 @@ impl TripwireHookBlock {
                 .await;
             if notify_neighbors {
                 Self::update_neighbors_on_axis(
-                    &Block::TRIPWIRE_HOOK,
                     world,
                     start_hook_pos,
                     BlockDirection::from_cardinal_direction(start_hook_props.facing),
@@ -358,17 +359,19 @@ impl TripwireHookBlock {
     }
 
     pub async fn update_neighbors_on_axis(
-        block: &Block,
         world: &Arc<World>,
         block_pos: BlockPos,
         direction: BlockDirection,
     ) {
-        world.update_neighbor(&block_pos, block).await;
+        // `TripWireHookBlock.notifyNeighbors` (TripWireHookBlock.java:219-224) calls
+        // `updateNeighborsAt` on BOTH the hook and the block it is attached to, with no
+        // exclusion. This used to run the `DiodeBlock.updateNeighborsInFront` shape instead
+        // (`neighborChanged` on the hook itself, then the attachment block minus one side),
+        // which never told the six blocks around the hook that its output had changed - so
+        // redstone laid next to a tripwire hook did not react until something else poked it.
+        world.update_neighbors(&block_pos, None).await;
         world
-            .update_neighbors(
-                &block_pos.offset(direction.opposite().to_offset()),
-                Some(direction),
-            )
+            .update_neighbors(&block_pos.offset(direction.opposite().to_offset()), None)
             .await;
     }
 }

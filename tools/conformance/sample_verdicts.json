@@ -1,0 +1,56 @@
+{
+ "note": "Hand verification of randomly drawn leads. Every verdict was reached by reading BOTH the 26.2 decompile and the Rust this session; nothing here is inferred from names.",
+ "samples": [
+  {
+   "date": "2026-08-21",
+   "seed": 815,
+   "n": 15,
+   "instrument_state": "aliases.py as shipped 2026-08-21 (block-trait renames + DATA_MODELED_METHODS present)",
+   "precision_real_gap": "4/15 = 26.7%",
+   "leads": [
+    {"lead": "GateBehavior.debugString", "verdict": "CLIENT_ONLY", "evidence": "GateBehavior.java:95 builds a string of running behaviour class names for the brain debug renderer"},
+    {"lead": "Entity.displayFireAnimation", "verdict": "CLIENT_ONLY", "evidence": "Entity.java:3241 isOnFire && !isSpectator; no server-side caller in the decompile"},
+    {"lead": "ArmorStand.setRightLegPose", "verdict": "DATA_MODELED", "evidence": "entity/decoration/armor_stand.rs:28 right_leg field on PackedRotation, NBT round-tripped at :51"},
+    {"lead": "Entity.ignoreExplosion", "verdict": "RENAME", "evidence": "world/explosion.rs:80 should_damage_entity, same predicate with inverted polarity on the explosion side"},
+    {"lead": "LootTable.createStackSplitter", "verdict": "REAL_GAP", "evidence": "LootTable.java:66 splits any result whose count exceeds getMaxStackSize; world/loot.rs never mentions max_stack, so an oversized roll stays one stack"},
+    {"lead": "SulfurCube.setFromBucket", "verdict": "DATA_MODELED", "evidence": "entity/mob/sulfur_cube.rs:60 from_bucket AtomicBool set inline from NBT"},
+    {"lead": "WorldBorder.getMinZ", "verdict": "RENAME", "evidence": "world/border.rs:156 bounds() returns (min_x, max_x, min_z, max_z) and cites vanilla's BorderExtent getters"},
+    {"lead": "PotionContents.withPotion", "verdict": "DATA_MODELED", "evidence": "potion contents are a data component read by item/potion.rs read_potion_effects; no builder type exists. Lowest-confidence verdict in this sample"},
+    {"lead": "LivingEntity.setStingerCount", "verdict": "REAL_GAP", "evidence": "LivingEntity.java:2006 plus the decay at :2779 and Bee.java:230; the string 'stinger' appears nowhere under crates/"},
+    {"lead": "StonecutterMenu.removed", "verdict": "REAL_GAP", "evidence": "StonecutterMenu.java:231 clears the result slot and returns the input to the player; stonecutter_screen_handler.rs owns its own SimpleInventory input and never overrides on_closed, whose default (screen_handler.rs:387) only drops the cursor stack"},
+    {"lead": "ExperienceOrb.getMovementEmission", "verdict": "NO_OP_OVERRIDE", "evidence": "ExperienceOrb.java:87 returns MovementEmission.NONE, i.e. suppresses emission; Pumpkin emits no movement game events at all, so behaviour already agrees"},
+    {"lead": "LivingEntity.doHurtTarget", "verdict": "RENAME", "evidence": "entity/mob/mod.rs:735 try_attack"},
+    {"lead": "SideChainPartBlock.connectToTheLeft", "verdict": "REAL_GAP", "evidence": "side_chain appears only in pumpkin-data/src/generated/block.rs; no behaviour file exists"},
+    {"lead": "EnchantingTableBlock.newBlockEntity", "verdict": "DATA_MODELED", "evidence": "block/entities/mod.rs:271,379 constructs EnchantingTableBlockEntity from the registry rather than from a per-block hook"},
+    {"lead": "DispenserBlockEntity.createMenu", "verdict": "RENAME", "evidence": "block/blocks/redstone/dispenser.rs:70 DispenserScreenFactory + normal_use at :141"}
+   ]
+  },
+  {
+   "date": "2026-08-21",
+   "seed": 20260821,
+   "n": 18,
+   "instrument_state": "BEFORE the 2026-08-21 alias and DATA_MODELED additions",
+   "precision_real_gap": "2/18 = 11.1%",
+   "leads": [
+    {"lead": "Player.isStayingOnGroundSurface", "verdict": "RENAME", "evidence": "Player.java:300 is isShiftKeyDown; is_sneaking exists"},
+    {"lead": "FireBlock.canBurn", "verdict": "RENAME", "evidence": "FireBlock.java:285 ignite odds > 0 vs block/blocks/fire/fire.rs:37 is_flammable"},
+    {"lead": "SignBlockEntity.updateSignText", "verdict": "INLINED", "evidence": "net/java/play/update_sign.rs:5 reimplements it whole, citing the vanilla method by name"},
+    {"lead": "DispenserBlockEntity.setItems", "verdict": "DATA_MODELED", "evidence": "the Inventory trait models the container with set_stack/clear rather than a whole-list setter"},
+    {"lead": "JigsawBlockEntity.JointType.getSerializedName", "verdict": "DATA_MODELED", "evidence": "block/entities/jigsaw_block.rs:258 JigsawJointType::from_str"},
+    {"lead": "ShelfBlock.hasAnalogOutputSignal", "verdict": "REAL_GAP", "evidence": "ShelfBlock.java:314-327 gives a 3-bit comparator output; block/blocks/shelf.rs is 31 lines with only on_place and placed"},
+    {"lead": "LevelChunk.markUnsaved", "verdict": "RENAME", "evidence": "chunk/format/mod.rs:67 mark_dirty"},
+    {"lead": "ChunkGenerator.getSpawnHeight", "verdict": "RENAME", "evidence": "world/spawn_finder.rs:198 initial_spawn_height, citing it"},
+    {"lead": "CherryFoliagePlacer.foliageHeight", "verdict": "RENAME", "evidence": "tree/foliage/cherry.rs:99 get_random_height"},
+    {"lead": "FenceGateBlock.getBlockSupportShape", "verdict": "DATA_MODELED", "evidence": "pumpkin-data/src/block_state.rs:182 is_side_solid, per-state flags generated from 26.2 data"},
+    {"lead": "EntitySelectorParser.shouldInvertValue", "verdict": "RENAME", "evidence": "command/argument_types/entity_selector/parser.rs:399 consume_inverted_start"},
+    {"lead": "Mob.spawnAnim", "verdict": "INLINED", "evidence": "status 20 is sent inline at silverfish_merge_with_stone.rs:142 and silverfish_wake_up_friends.rs:83; the BaseSpawner caller is not covered, so this one is partial"},
+    {"lead": "TestBlockMode.getSerializedName", "verdict": "DATA_MODELED", "evidence": "java/server/play/set_test_block.rs:47 enum with its own read/write"},
+    {"lead": "MobCategory.getMaxInstancesPerChunk", "verdict": "DATA_MODELED", "evidence": "pumpkin-data entity_type.rs:71 MobCategory.max, used by natural_spawner.rs:135,463"},
+    {"lead": "FarmlandBlock.isPathfindable", "verdict": "REAL_GAP", "evidence": "FarmlandBlock.java:147 returns false; no block-level pathfindability hook exists in block/mod.rs and FARMLAND appears nowhere in the pathfinder"},
+    {"lead": "ItemStack.shrink", "verdict": "RENAME", "evidence": "pumpkin-data/src/item_stack/mod.rs:540 decrement"},
+    {"lead": "DarkOakTrunkPlacer.type", "verdict": "DATA_MODELED", "evidence": "DarkOakTrunkPlacer.java:25 returns a codec type constant; dispatch here is a serde-tagged enum"},
+    {"lead": "ClientboundTrackedWaypointPacket.addWaypointPosition", "verdict": "RENAME", "evidence": "java/client/play/waypoint.rs:89 add_position"}
+   ]
+  }
+ ]
+}

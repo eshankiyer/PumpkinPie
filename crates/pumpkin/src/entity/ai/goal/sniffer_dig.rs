@@ -1,11 +1,12 @@
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use super::move_to_target_pos::{MoveToTargetPos, MoveToTargetPosGoal};
 use super::{Controls, Goal, GoalFuture, ParentHandle, to_goal_ticks};
 use crate::entity::Entity;
 use crate::entity::item::ItemEntity;
 use crate::entity::mob::Mob;
+use crate::entity::passive::sniffer::SnifferEntity;
 use crate::world::World;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
@@ -38,8 +39,6 @@ const DROP_AT_TICKS_REMAINING: i32 = 10;
 /// porting the full Brain system.
 ///
 /// Simplifications versus vanilla:
-/// - No explored-position memory (`getExploredPositions`); the sniffer may redig the same
-///   spot.
 /// - Seed choice is a flat 50/50 between Torchflower Seeds and Pitcher Pod, matching the
 ///   two-entry `sniffer_digging` loot table pool, instead of going through the loot table
 ///   system.
@@ -48,14 +47,18 @@ const DROP_AT_TICKS_REMAINING: i32 = 10;
 pub struct SnifferDigGoal {
     move_to_target_pos_goal: MoveToTargetPosGoal<Self>,
     digging_ticks: i32,
+    /// Needed by `is_target_pos`, which is handed only a `World` and a `BlockPos` and so
+    /// cannot reach the mob to consult `SNIFFER_EXPLORED_POSITIONS`.
+    sniffer: Weak<SnifferEntity>,
 }
 
 impl SnifferDigGoal {
     #[must_use]
-    pub fn new(speed: f64) -> Box<Self> {
+    pub fn new(speed: f64, sniffer: Weak<SnifferEntity>) -> Box<Self> {
         let mut this = Box::new(Self {
             move_to_target_pos_goal: MoveToTargetPosGoal::new(ParentHandle::none(), speed, 10, 2),
             digging_ticks: 0,
+            sniffer,
         });
 
         // SAFETY: `this` heap allocation address is pinned in Box and outlives `ParentHandle` references.
@@ -171,6 +174,10 @@ impl Goal for SnifferDigGoal {
             if self.digging_ticks <= 0 {
                 self.digging_ticks = 0;
                 self.move_to_target_pos_goal.cooldown = to_goal_ticks(200);
+                // `Sniffer.onDiggingComplete(true)` (`Sniffer.java:251-255`).
+                if let Some(sniffer) = self.sniffer.upgrade() {
+                    sniffer.store_explored_position(dig_pos);
+                }
                 if let Some(sniffer) = mob
                     .cast_any()
                     .downcast_ref::<crate::entity::passive::sniffer::SnifferEntity>()
@@ -199,6 +206,16 @@ impl MoveToTargetPos for SnifferDigGoal {
         Box::pin(async move {
             let block = world.get_block(&block_pos);
             if !block.has_tag(&tag::Block::MINECRAFT_SNIFFER_DIGGABLE_BLOCK) {
+                return false;
+            }
+
+            // `Sniffer.canDig(BlockPos)` (`Sniffer.java:280-283`): never dig a position this
+            // sniffer has already dug.
+            if self
+                .sniffer
+                .upgrade()
+                .is_some_and(|sniffer| sniffer.has_explored(block_pos))
+            {
                 return false;
             }
 

@@ -8,8 +8,10 @@ use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{entity::EntityType, item::Item};
 use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_nbt::tag::NbtTag;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::math::position::BlockPos;
 use rand::RngExt;
 
 use crate::entity::{
@@ -70,10 +72,23 @@ impl SnifferState {
     }
 }
 
+/// `Sniffer.storeExploredPosition` truncates the existing list to 20 entries and then
+/// prepends the new one (`Sniffer.java:322-326`), so the list settles at 21 entries.
+const MAX_EXPLORED_POSITIONS: usize = 20;
+
 pub struct SnifferEntity {
     pub mob_entity: MobEntity,
     pub ageable_data: AgeableData,
     state: AtomicI32,
+    /// `MemoryModuleType.SNIFFER_EXPLORED_POSITIONS` (`Sniffer.java:65,322-331`), the memory
+    /// that stops a sniffer digging the same block over and over.
+    ///
+    /// Pumpkin has no `Brain` on the Sniffer, so the memory is carried as a plain field, as
+    /// `warden.rs` does for its own brain-shaped state. Vanilla stores `GlobalPos`
+    /// (dimension + position); a Pumpkin entity never changes `World` in place, so the
+    /// dimension is only re-attached on serialisation and the in-memory comparison is by
+    /// `BlockPos` alone.
+    explored_positions: std::sync::Mutex<Vec<BlockPos>>,
 }
 
 impl SnifferEntity {
@@ -83,6 +98,7 @@ impl SnifferEntity {
             mob_entity,
             ageable_data: AgeableData::default(),
             state: AtomicI32::new(SnifferState::Idling.id()),
+            explored_positions: std::sync::Mutex::new(Vec::new()),
         };
         let mob_arc = Arc::new(sniffer);
         let mob_weak: Weak<dyn Mob> = {
@@ -98,7 +114,7 @@ impl SnifferEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
-            goal_selector.add_goal(1, SnifferDigGoal::new(1.0));
+            goal_selector.add_goal(1, SnifferDigGoal::new(1.0, Arc::downgrade(&mob_arc)));
             goal_selector.add_goal(2, BreedGoal::with_mate_predicate(1.0, sniffer_can_mate));
             goal_selector.add_goal(3, Box::new(TemptGoal::new(1.0, TEMPT_ITEMS, false)));
             goal_selector.add_goal(4, Box::new(FollowParentGoal::new(1.0)));
@@ -111,6 +127,101 @@ impl SnifferEntity {
         };
 
         mob_arc
+    }
+
+    /// `Sniffer.storeExploredPosition` (`Sniffer.java:322-326`).
+    pub fn store_explored_position(&self, pos: BlockPos) {
+        let mut explored = self
+            .explored_positions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        explored.truncate(MAX_EXPLORED_POSITIONS);
+        explored.insert(0, pos);
+    }
+
+    /// The `getExploredPositions().noneMatch(...)` half of `Sniffer.canDig(BlockPos)`
+    /// (`Sniffer.java:281`), inverted.
+    #[must_use]
+    pub fn has_explored(&self, pos: BlockPos) -> bool {
+        self.explored_positions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(&pos)
+    }
+
+    /// Serialises `SNIFFER_EXPLORED_POSITIONS` at vanilla's own NBT path so a sniffer that
+    /// is unloaded and reloaded does not forget which blocks it already dug.
+    ///
+    /// Shape verified against the 26.2 decompile: `Brain.Packed.CODEC` writes a `memories`
+    /// map (`Brain.java:463-467`), `MemoryMap.CODEC` keys it by registry name
+    /// (`MemoryMap.java:19-22`), each entry is an `ExpirableValue` record with a `value`
+    /// field and an optional `ttl` (`ExpirableValue.java:21-28`), and this memory's own
+    /// codec is `Codec.list(GlobalPos.CODEC)` (`MemoryModuleType.java:141`), i.e. a list of
+    /// `{dimension, pos}` with `pos` a three-int array. No `ttl` is written: vanilla stores
+    /// this memory without an expiry.
+    fn write_explored_positions_nbt(&self, nbt: &mut NbtCompound) {
+        let explored = self
+            .explored_positions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if explored.is_empty() {
+            return;
+        }
+
+        let dimension = self
+            .mob_entity
+            .living_entity
+            .entity
+            .world
+            .load()
+            .dimension
+            .minecraft_name
+            .to_string();
+        let entries: Vec<NbtTag> = explored
+            .iter()
+            .map(|pos| {
+                let mut global_pos = NbtCompound::new();
+                global_pos.put_string("dimension", dimension.clone());
+                global_pos.put("pos", NbtTag::IntArray(vec![pos.0.x, pos.0.y, pos.0.z]));
+                NbtTag::Compound(global_pos)
+            })
+            .collect();
+
+        let mut memory = NbtCompound::new();
+        memory.put_list("value", entries);
+        let mut memories = NbtCompound::new();
+        memories.put_compound("minecraft:sniffer_explored_positions", memory);
+        let mut brain = NbtCompound::new();
+        brain.put_compound("memories", memories);
+        nbt.put_compound("Brain", brain);
+    }
+
+    fn read_explored_positions_nbt(&self, nbt: &NbtCompound) {
+        let Some(entries) = nbt
+            .get_compound("Brain")
+            .and_then(|brain| brain.get_compound("memories"))
+            .and_then(|memories| memories.get_compound("minecraft:sniffer_explored_positions"))
+            .and_then(|memory| memory.get_list("value"))
+        else {
+            return;
+        };
+
+        let positions: Vec<BlockPos> = entries
+            .iter()
+            .filter_map(|entry| {
+                let compound = entry.extract_compound()?;
+                let pos = compound.get_int_array("pos")?;
+                match pos {
+                    [x, y, z] => Some(BlockPos::new(*x, *y, *z)),
+                    _ => None,
+                }
+            })
+            .collect();
+        *self
+            .explored_positions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = positions;
     }
 
     #[must_use]
@@ -193,6 +304,7 @@ impl NBTStorage for SnifferEntity {
             self.write_ageable_nbt(nbt);
             self.write_animal_nbt(nbt);
             nbt.put_int("State", self.get_state().id());
+            self.write_explored_positions_nbt(nbt);
         })
     }
 
@@ -205,6 +317,7 @@ impl NBTStorage for SnifferEntity {
             if let Some(state_id) = nbt.get_int("State") {
                 self.state.store(state_id, Ordering::Relaxed);
             }
+            self.read_explored_positions_nbt(nbt);
         })
     }
 }

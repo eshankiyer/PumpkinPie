@@ -12,11 +12,11 @@ use crate::block::entities::shulker_box::ShulkerBoxBlockEntity;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::BlockProperties;
 use pumpkin_data::translation;
-use pumpkin_inventory::generic_container_screen_handler::create_generic_9x3;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
     BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
 };
+use pumpkin_inventory::shulker_box_screen_handler::ShulkerBoxScreenHandler;
 use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::Inventory;
@@ -32,7 +32,11 @@ impl ScreenHandlerFactory for ShulkerBoxScreenFactory {
         _player: &'a dyn InventoryPlayer,
     ) -> BoxFuture<'a, Option<SharedScreenHandler>> {
         Box::pin(async move {
-            let handler = create_generic_9x3(sync_id, player_inventory, self.0.clone()).await;
+            // `ShulkerBoxMenu.java:17-32`: a shulker box is MenuType.SHULKER_BOX with
+            // `ShulkerBoxSlot`s, not a generic 9x3 chest - the slots refuse items that
+            // cannot nest inside container items (`BlockItem.java:193-196`).
+            let handler =
+                ShulkerBoxScreenHandler::new(sync_id, player_inventory, self.0.clone()).await;
             let screen_handler_arc = Arc::new(Mutex::new(handler));
 
             Some(screen_handler_arc as SharedScreenHandler)

@@ -1,4 +1,4 @@
-use crate::block::entities::BlockEntity;
+use crate::block::entities::{BlockEntity, PropertyDelegate};
 use pumpkin_data::BlockDirection;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_nbt::compound::NbtCompound;
@@ -125,11 +125,60 @@ impl BlockEntity for CrafterBlockEntity {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn to_property_delegate(self: Arc<Self>) -> Option<Arc<dyn PropertyDelegate>> {
+        Some(self)
+    }
+}
+
+/// Vanilla's anonymous `ContainerData` on `CrafterBlockEntity`
+/// (`CrafterBlockEntity.java:38-59`): ten entries, indices 0-8 are the per-slot disabled
+/// flags and index 9 is `triggered`.
+impl PropertyDelegate for CrafterBlockEntity {
+    fn get_property(&self, index: i32) -> i32 {
+        match index {
+            Self::TRIGGERED_PROPERTY_INDEX => i32::from(self.triggered.load(Ordering::Relaxed)),
+            _ => usize::try_from(index)
+                .ok()
+                .and_then(|slot| self.disabled_slots.get(slot))
+                .map_or(0, |disabled| i32::from(disabled.load(Ordering::Relaxed))),
+        }
+    }
+
+    fn set_property(&self, index: i32, value: i32) {
+        match index {
+            Self::TRIGGERED_PROPERTY_INDEX => {
+                self.triggered.store(value == 1, Ordering::Relaxed);
+            }
+            _ => {
+                if let Ok(slot) = usize::try_from(index)
+                    && let Some(disabled) = self.disabled_slots.get(slot)
+                {
+                    disabled.store(value == 1, Ordering::Relaxed);
+                }
+            }
+        }
+    }
+
+    fn get_properties_size(&self) -> i32 {
+        Self::PROPERTY_COUNT
+    }
 }
 
 impl CrafterBlockEntity {
     pub const INVENTORY_SIZE: usize = 9;
     pub const ID: &'static str = "minecraft:crafter";
+    /// `ContainerData` index of the `triggered` flag (`CrafterBlockEntity.java:44`).
+    pub const TRIGGERED_PROPERTY_INDEX: i32 = 9;
+    /// `ContainerData.getCount` (`CrafterBlockEntity.java:57`).
+    pub const PROPERTY_COUNT: i32 = 10;
+
+    /// Vanilla `CrafterBlockEntity.setTriggered` (`CrafterBlockEntity.java:228-230`),
+    /// called from `CrafterBlock.setBlockEntityTriggered` (`CrafterBlock.java:100-104`).
+    pub fn set_triggered(&self, triggered: bool) {
+        self.triggered.store(triggered, Ordering::Relaxed);
+        self.mark_dirty();
+    }
 
     #[must_use]
     pub fn new(position: BlockPos) -> Self {

@@ -2,6 +2,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::block::blocks::redstone::block_receives_redstone_power;
+use crate::block::entities::PropertyDelegate;
 use crate::block::entities::crafter::CrafterBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
@@ -15,18 +16,21 @@ use pumpkin_data::sound::Sound;
 use pumpkin_data::translation;
 use pumpkin_data::world::WorldEvent;
 use pumpkin_data::{BlockDirection, BlockStateId};
-use pumpkin_inventory::generic_container_screen_handler::create_crafter_3x3;
+use pumpkin_inventory::crafter_screen_handler::CrafterScreenHandler;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
     BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
 };
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::text::TextComponent;
-use pumpkin_world::inventory::Inventory;
+use pumpkin_world::inventory::{Inventory, SimpleInventory};
 use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockFlags;
 
-struct CrafterScreenFactory(Arc<dyn Inventory>);
+struct CrafterScreenFactory {
+    inventory: Arc<dyn Inventory>,
+    properties: Arc<dyn PropertyDelegate>,
+}
 
 impl ScreenHandlerFactory for CrafterScreenFactory {
     fn create_screen_handler<'a>(
@@ -36,7 +40,19 @@ impl ScreenHandlerFactory for CrafterScreenFactory {
         _player: &'a dyn InventoryPlayer,
     ) -> BoxFuture<'a, Option<SharedScreenHandler>> {
         Box::pin(async move {
-            let handler = create_crafter_3x3(sync_id, player_inventory, self.0.clone()).await;
+            // `CrafterMenu.java:31-39`: the block-entity menu takes the crafter's
+            // `CraftingContainer` plus its ten-entry `ContainerData`, and makes a fresh
+            // `ResultContainer` for the non-interactive recipe preview
+            // (`CrafterMenu.java:18`). Recipe lookup is not implemented here, so that
+            // preview slot stays empty.
+            let handler = CrafterScreenHandler::new(
+                sync_id,
+                player_inventory,
+                self.inventory.clone(),
+                Arc::new(SimpleInventory::new(1)),
+                self.properties.clone(),
+            )
+            .await;
             let screen_handler_arc = Arc::new(Mutex::new(handler));
 
             Some(screen_handler_arc as SharedScreenHandler)
@@ -58,10 +74,17 @@ impl BlockBehaviour for CrafterBlock {
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
             if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(inventory) = block_entity.get_inventory()
+                && let Some(inventory) = block_entity.clone().get_inventory()
+                && let Some(properties) = block_entity.to_property_delegate()
             {
                 args.player
-                    .open_handled_screen(&CrafterScreenFactory(inventory), Some(*args.position))
+                    .open_handled_screen(
+                        &CrafterScreenFactory {
+                            inventory,
+                            properties,
+                        },
+                        Some(*args.position),
+                    )
                     .await;
             }
             BlockActionResult::Success
@@ -110,8 +133,22 @@ impl BlockBehaviour for CrafterBlock {
                 args.block,
             );
 
+            // `CrafterBlock.setBlockEntityTriggered` (`CrafterBlock.java:100-104`): the
+            // block entity carries its own `triggered` flag, which is what feeds the menu's
+            // `powered` property (`CrafterMenu.java:66-68`). Without this the open GUI never
+            // sees a redstone change.
+            let set_block_entity_triggered = |triggered: bool| {
+                if let Some(block_entity) = args.world.get_block_entity(args.position)
+                    && let Some(crafter) =
+                        block_entity.as_any().downcast_ref::<CrafterBlockEntity>()
+                {
+                    crafter.set_triggered(triggered);
+                }
+            };
+
             if powered && !props.triggered {
                 props.triggered = true;
+                set_block_entity_triggered(true);
                 args.world
                     .schedule_block_tick(args.block, *args.position, 4, TickPriority::Normal);
                 args.world
@@ -123,6 +160,7 @@ impl BlockBehaviour for CrafterBlock {
                     .await;
             } else if !powered && props.triggered {
                 props.triggered = false;
+                set_block_entity_triggered(false);
                 args.world
                     .set_block_state(
                         args.position,

@@ -69,6 +69,7 @@ pub mod candle_cakes;
 pub mod candles;
 pub mod fire;
 pub mod lanterns;
+pub mod light;
 pub mod magma;
 pub mod torches;
 
@@ -81,6 +82,7 @@ pub mod hanging_roots;
 pub mod hay;
 pub mod logs;
 pub mod mangrove_roots;
+pub mod pale_hanging_moss;
 pub mod plant;
 pub mod pumpkin;
 pub mod sculk;
@@ -127,6 +129,7 @@ pub mod coral;
 // Misc / abstract
 pub mod abstract_multiface;
 pub mod abstract_wall_mounting;
+pub mod glow_lichen;
 pub mod multiface_spreader;
 
 pub mod beacon;

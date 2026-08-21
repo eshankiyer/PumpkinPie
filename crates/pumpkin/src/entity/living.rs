@@ -224,6 +224,16 @@ pub struct LivingEntity {
     /// The attributes of the entity
     pub attributes: RwLock<HashMap<u8, AttributeInstance>>,
 
+    /// Snapshot of the items this entity had in every equipment slot at the end of the last
+    /// tick, i.e. vanilla `LivingEntity.lastEquipmentItems` (`LivingEntity.java:2948`). Used
+    /// solely to detect equipment *changes*, which is when enchantment attribute modifiers get
+    /// re-evaluated.
+    last_equipment_items: Mutex<HashMap<EquipmentSlot, ItemStack>>,
+    /// Whether Soul Speed's `minecraft:location_changed` attribute modifiers are currently
+    /// applied. Vanilla keeps this as the enchantment's "active location-based effect" set and
+    /// re-tests it through `enchantment_active_check` (`soul_speed.json`).
+    soul_speed_active: AtomicBool,
+
     /// `Raider.raid`/`Raider.wave`/`Raider.isPatrolLeader` (`Raider.java`).
     pub raid_membership: AtomicCell<Option<RaidMembership>>,
     /// `Raider.canJoinRaid` (`Raider.java`).
@@ -379,9 +389,189 @@ impl LivingEntity {
             movement_input: AtomicCell::new(Vector3::default()),
             speed: AtomicCell::new(base_movement_speed),
             water_movement_speed_multiplier,
+            last_equipment_items: Mutex::new(HashMap::new()),
+            soul_speed_active: AtomicBool::new(false),
             raid_membership: AtomicCell::new(None),
             can_join_raid: AtomicBool::new(false),
             ticks_outside_raid: AtomicI32::new(0),
+        }
+    }
+
+    /// The slots vanilla's `collectEquipmentChanges` walks (`EquipmentSlot.VALUES`,
+    /// `LivingEntity.java:2951`).
+    fn attribute_equipment_slots() -> [EquipmentSlot; 8] {
+        [
+            EquipmentSlot::MAIN_HAND,
+            EquipmentSlot::OFF_HAND,
+            EquipmentSlot::FEET,
+            EquipmentSlot::LEGS,
+            EquipmentSlot::CHEST,
+            EquipmentSlot::HEAD,
+            EquipmentSlot::BODY,
+            EquipmentSlot::SADDLE,
+        ]
+    }
+
+    /// `LivingEntity.getItemBySlot`. The main hand is special-cased because a player's held
+    /// item lives in `PlayerInventory.main_inventory[selected]`, not in `entity_equipment` --
+    /// which also means scrolling the hotbar counts as an equipment change, exactly as in
+    /// vanilla.
+    async fn item_by_equipment_slot(
+        &self,
+        caller: &dyn EntityBase,
+        slot: &EquipmentSlot,
+    ) -> ItemStack {
+        if matches!(slot, EquipmentSlot::MainHand(_)) {
+            self.held_item(caller).await
+        } else {
+            self.entity_equipment.lock().await.get(slot)
+        }
+    }
+
+    /// Applies `modifiers` to this entity's attributes, recording every attribute touched so
+    /// one `CUpdateAttributes` can be sent for the batch.
+    fn apply_attribute_modifiers(
+        &self,
+        modifiers: Vec<(&'static Attributes, Modifier)>,
+        remove: bool,
+        touched: &mut Vec<Attributes>,
+    ) {
+        for (attribute, modifier) in modifiers {
+            self.update_attribute(attribute, |instance| {
+                if remove {
+                    instance.remove_modifier(&modifier.id);
+                } else {
+                    instance.add_or_replace_modifier(modifier.clone());
+                }
+            });
+            if !touched.iter().any(|a| a.id == attribute.id) {
+                touched.push(attribute.clone());
+            }
+        }
+    }
+
+    /// Vanilla `LivingEntity.detectEquipmentUpdates`/`collectEquipmentChanges`
+    /// (`LivingEntity.java:2938`/`:2948`), narrowed to the part Pumpkin needs: when the stack
+    /// in a slot changes, drop the outgoing stack's enchantment attribute modifiers
+    /// (`stopLocationBasedEffects`, `LivingEntity.java:3850`) and install the incoming
+    /// stack's (`LivingEntity.java:2972`).
+    ///
+    /// Recomputing only on change -- rather than every tick -- is what vanilla does and what
+    /// keeps `add_or_replace_modifier` from thrashing the attribute cache.
+    pub async fn tick_equipment_attributes(&self, caller: &dyn EntityBase) {
+        let mut changes: Vec<(EquipmentSlot, ItemStack, ItemStack)> = Vec::new();
+        {
+            let mut last = self.last_equipment_items.lock().await;
+            for slot in Self::attribute_equipment_slots() {
+                let current = self.item_by_equipment_slot(caller, &slot).await;
+                let previous = last
+                    .get(&slot)
+                    .cloned()
+                    .unwrap_or_else(|| ItemStack::EMPTY.clone());
+                if !previous.are_equal(&current) {
+                    last.insert(slot.clone(), current.clone());
+                    changes.push((slot, previous, current));
+                }
+            }
+        }
+
+        if changes.is_empty() {
+            return;
+        }
+
+        let mut touched: Vec<Attributes> = Vec::new();
+        for (slot, previous, current) in changes {
+            if !previous.is_empty() {
+                let stale = crate::enchantment::attribute_modifiers_for_slot(&previous, &slot);
+                self.apply_attribute_modifiers(stale, true, &mut touched);
+            }
+            if !current.is_empty() {
+                let fresh = crate::enchantment::attribute_modifiers_for_slot(&current, &slot);
+                self.apply_attribute_modifiers(fresh, false, &mut touched);
+            }
+        }
+
+        if !touched.is_empty() {
+            crate::entity::attributes::send_attribute_updates_for_living(self, touched).await;
+        }
+    }
+
+    /// Forgets the equipment snapshot so the next tick re-derives every enchantment attribute
+    /// modifier from scratch. Needed wherever the attribute map itself is rebuilt, otherwise an
+    /// unchanged snapshot would suppress the re-application.
+    pub async fn clear_equipment_attribute_snapshot(&self) {
+        self.last_equipment_items.lock().await.clear();
+        self.soul_speed_active.store(false, Relaxed);
+    }
+
+    /// Soul Speed's `minecraft:location_changed` effects (`soul_speed.json`).
+    ///
+    /// Unlike every other enchantment attribute this one is *not* equip-time: vanilla only
+    /// holds the `movement_speed`/`movement_efficiency` modifiers while the entity is walking
+    /// on `#minecraft:soul_speed_blocks`, and keeps them for the airborne part of a stride
+    /// once already active (the `enchantment_active_check` branch of the requirement).
+    async fn tick_soul_speed(&self, caller: &dyn EntityBase) {
+        let boots = self.entity_equipment.lock().await.get(&EquipmentSlot::FEET);
+        let level = boots.get_enchantment_level(&Enchantment::SOUL_SPEED);
+        let active = self.soul_speed_active.load(Relaxed);
+
+        let should_be_active = if level <= 0 {
+            false
+        } else {
+            let flying = match caller.get_player() {
+                Some(player) => player.abilities.lock().await.flying,
+                None => false,
+            };
+            if flying || self.entity.has_vehicle().await {
+                false
+            } else {
+                let on_soul_block = self
+                    .entity
+                    .get_block_with_y_offset(0.500_001)
+                    .1
+                    .has_tag(&tag::Block::MINECRAFT_SOUL_SPEED_BLOCKS);
+                if active {
+                    on_soul_block || !self.entity.on_ground.load(Relaxed)
+                } else {
+                    on_soul_block
+                }
+            }
+        };
+
+        if should_be_active == active {
+            return;
+        }
+
+        let modifiers = crate::enchantment::location_based_attribute_modifiers_for_slot(
+            &boots,
+            &EquipmentSlot::FEET,
+        );
+        if modifiers.is_empty() && should_be_active {
+            return;
+        }
+
+        let mut touched: Vec<Attributes> = Vec::new();
+        if should_be_active {
+            self.apply_attribute_modifiers(modifiers, false, &mut touched);
+        } else {
+            // The boots may already be gone, so rebuild the ids from the enchantment itself
+            // rather than from whatever is in the slot now.
+            for attribute in [
+                &Attributes::MOVEMENT_SPEED,
+                &Attributes::MOVEMENT_EFFICIENCY,
+            ] {
+                let id = crate::enchantment::modifier_id_for_slot(
+                    &Enchantment::SOUL_SPEED,
+                    &EquipmentSlot::FEET,
+                );
+                self.update_attribute(attribute, |instance| instance.remove_modifier(&id));
+                touched.push(attribute.clone());
+            }
+        }
+        self.soul_speed_active.store(should_be_active, Relaxed);
+
+        if !touched.is_empty() {
+            crate::entity::attributes::send_attribute_updates_for_living(self, touched).await;
         }
     }
 
@@ -861,7 +1051,19 @@ impl LivingEntity {
         }
     }
 
+    /// `Mth.ceil(numberOfTicks * getAttributeValue(Attributes.BURNING_TIME))`
+    /// (`LivingEntity.java:3990`).
+    #[must_use]
+    pub fn scale_ignite_ticks(&self, ticks: u32) -> u32 {
+        let scaled = f64::from(ticks) * self.get_attribute_value(&Attributes::BURNING_TIME);
+        if scaled <= 0.0 {
+            return 0;
+        }
+        scaled.ceil() as u32
+    }
+
     pub async fn reset_effects_and_attributes(&self) {
+        self.clear_equipment_attribute_snapshot().await;
         // Clear active effects and reset modified attributes
         let effects_to_remove: Vec<_> = {
             let lock = self.active_effects.lock().await;
@@ -3513,6 +3715,33 @@ impl NBTStorage for LivingEntity {
 }
 
 impl EntityBase for LivingEntity {
+    /// `LivingEntity.igniteForTicks` (`LivingEntity.java:3989`): a living entity scales every
+    /// ignite duration by its `minecraft:burning_time` attribute before handing it to
+    /// `Entity.igniteForTicks`. Fire Protection is the only vanilla source of a modifier on
+    /// that attribute (`fire_protection.json`, `add_multiplied_base` of -0.15 per level).
+    fn set_on_fire_for_ticks(&self, ticks: u32) {
+        let ticks = self.scale_ignite_ticks(ticks);
+        let entity = self.get_entity();
+        let mut event = crate::plugin::api::events::entity::entity_combust::EntityCombustEvent::new(
+            entity.entity_id,
+            ticks as f32 / 20.0,
+        );
+        if let Some(server) = entity.world.load().server.upgrade() {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    server.plugin_manager.fire(&server, &mut event).await;
+                });
+            });
+            if event.cancelled {
+                return;
+            }
+        }
+        if entity.fire_ticks.load(Relaxed) < ticks as i32 {
+            entity.fire_ticks.store(ticks as i32, Relaxed);
+        }
+        entity.clear_freeze();
+    }
+
     #[allow(clippy::too_many_lines)]
     fn damage_with_context<'a>(
         &'a self,
@@ -4350,6 +4579,8 @@ impl EntityBase for LivingEntity {
             {
                 mob.update_swimming().await;
             }
+            self.tick_equipment_attributes(caller.as_ref()).await;
+            self.tick_soul_speed(caller.as_ref()).await;
             let was_alive_before_air =
                 !self.dead.load(Relaxed) && self.health.load() > 0.0 && !self.entity.is_removed();
             if self.entity.entity_type == &EntityType::PLAYER

@@ -36,6 +36,12 @@ impl BlockBehaviour for ComparatorBlock {
 
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
+            // `ComparatorBlock.useWithoutItem` (ComparatorBlock.java:131-133) passes when the
+            // player may not build, exactly as the repeater does.
+            if !args.player.abilities.lock().await.allow_modify_world {
+                return BlockActionResult::Pass;
+            }
+
             let state = args.world.get_block_state(args.position);
             let props = ComparatorLikeProperties::from_state_id(state.id, args.block);
             self.on_use(props, args.world, *args.position, args.block, args.player)
@@ -323,12 +329,16 @@ impl ComparatorBlock {
         );
 
         let state_id = props.to_state_id(block);
+        // `ComparatorBlock.useWithoutItem` (ComparatorBlock.java:138-141) writes the cycled
+        // MODE with flag 2 and only refreshes the output while the block is still a comparator.
         world
-            .set_block_state(&block_pos, state_id, BlockFlags::empty())
+            .set_block_state(&block_pos, state_id, BlockFlags::NOTIFY_LISTENERS)
             .await;
 
-        self.update(world, block_pos, BlockState::from_id(state_id), block)
-            .await;
+        if world.get_block(&block_pos) == block {
+            self.update(world, block_pos, BlockState::from_id(state_id), block)
+                .await;
+        }
     }
 
     async fn calculate_output_signal(

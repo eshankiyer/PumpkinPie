@@ -282,8 +282,10 @@ impl RepeaterBlock {
         let mut props = props;
         props.delay = if props.delay == 4 { 1 } else { props.delay + 1 };
         let state = props.to_state_id(block);
+        // `RepeaterBlock.useWithoutItem` (RepeaterBlock.java:47) writes the cycled DELAY with
+        // flag 3, so neighbours are notified as well as clients.
         world
-            .set_block_state(&block_pos, state, BlockFlags::empty())
+            .set_block_state(&block_pos, state, BlockFlags::NOTIFY_ALL)
             .await;
     }
 

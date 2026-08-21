@@ -1839,6 +1839,21 @@ pub trait Mob: EntityBase + Send + Sync {
         true
     }
 
+    /// `net.minecraft.world.entity.npc.InventoryCarrier.getInventory().isEmpty()`, reduced to
+    /// the single question `GoAndGiveItemsToTarget` asks (`GoAndGiveItemsToTarget.java:81`).
+    /// `true` for every mob that is not an `InventoryCarrier`, which is all but the Allay
+    /// today.
+    fn carried_inventory_is_empty(&self) -> bool {
+        true
+    }
+
+    /// `InventoryCarrier.getInventory().removeItem(0, 1)`
+    /// (`GoAndGiveItemsToTarget.java:71`): take a single item out of the carried inventory,
+    /// returning an empty stack when there is nothing to take.
+    fn remove_one_carried_item(&self) -> ItemStack {
+        ItemStack::EMPTY.clone()
+    }
+
     /// Vanilla `Mob.canPickUpLoot`: whether this mob is allowed to pick up dropped items at
     /// all. Backed by the mob's `CanPickUpLoot` tracked-data flag, which defaults to `false`
     /// and is set at spawn time for a few mob types (see `equipment.rs`).

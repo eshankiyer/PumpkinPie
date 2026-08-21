@@ -172,11 +172,17 @@ impl BlockBehaviour for TripwireBlock {
 
     fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            if args.moved || Block::from_state_id(args.old_state_id) == args.block {
+            // `TripWireBlock.affectNeighborsAfterRemoval` (TripWireBlock.java:108-112) feeds the
+            // hooks the state that was REMOVED, with POWERED forced true, so cutting the wire
+            // trips the trap. `args.block` is always the old state's block, so the identity term
+            // this guard used to carry was a tautology that made the method dead, and reading
+            // the position back returned the air that had replaced the wire.
+            if args.moved {
                 return;
             }
-            let state_id = args.world.get_block_state_id(args.position);
-            Self::update(args.world, args.position, state_id).await;
+            let mut props = TripwireProperties::from_state_id(args.old_state_id, args.block);
+            props.powered = true;
+            Self::update(args.world, args.position, props.to_state_id(args.block)).await;
         })
     }
 }

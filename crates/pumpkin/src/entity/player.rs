@@ -4813,10 +4813,11 @@ impl Player {
         crate::enchantment::effects_for(&Enchantment::EFFICIENCY)
             .iter()
             .filter_map(|effect| match effect {
-                crate::enchantment::EnchantmentEffect::AttributeBonus(
-                    "mining_efficiency",
-                    value,
-                ) => Some(value.calculate(level)),
+                crate::enchantment::EnchantmentEffect::AttributeBonus {
+                    attribute: "mining_efficiency",
+                    amount,
+                    ..
+                } => Some(amount.calculate(level)),
                 _ => None,
             })
             .sum()
@@ -6766,6 +6767,9 @@ impl EntityBase for Player {
 
     fn set_on_fire_for_ticks(&self, ticks: u32) {
         let entity = self.get_entity();
+        // `LivingEntity.igniteForTicks` scales by `minecraft:burning_time` before storing
+        // (`LivingEntity.java:3990`); Fire Protection's equip-time modifier is what moves it.
+        let ticks = self.living_entity.scale_ignite_ticks(ticks);
         let ticks = if entity.invulnerable.load(Ordering::Relaxed) {
             1
         } else {

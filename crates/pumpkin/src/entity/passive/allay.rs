@@ -1,38 +1,55 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-// Port of net.minecraft.world.entity.animal.allay.{Allay, AllayAi}, using the GameEvent/
-// vibration engine in `crate::world::game_event`.
+// Port of net.minecraft.world.entity.animal.allay.{Allay, AllayAi}.
 //
-// Pumpkin has no Brain/Memory/Activity system (see PARITY.md), so `AllayAi`'s two
-// activities (CORE / IDLE, each a `Brain` memory-gated `Behavior` list) are not portable
-// as-is. This implementation keeps `LIKED_PLAYER` / `LIKED_NOTEBLOCK_POSITION` /
-// `LIKED_NOTEBLOCK_COOLDOWN_TICKS` as plain fields on `AllayEntity`, ticked directly from
-// `mob_tick`. Concretely ported: jukebox/note-block-triggered dancing (`setJukeboxPlaying`,
-// `hearNoteblock`, `shouldStopDancing`), the duplication cooldown/predicate
-// (`canDuplicate`/`duplicateAllay`), and the give/take/duplicate `mobInteract` branch.
+// This is Stage 2 of `BRAIN_DESIGN.md`: the Allay is the first mob in this codebase driven by
+// `crate::entity::ai::brain` rather than by the Goal system, matching vanilla, where `Allay`
+// has no `goalSelector` entries at all and `AllayAi.getActivities()` (`AllayAi.java:57-59`)
+// supplies a CORE and an IDLE activity. The previous revision of this file carried
+// `LIKED_PLAYER` / `LIKED_NOTEBLOCK_POSITION` / `LIKED_NOTEBLOCK_COOLDOWN_TICKS` as plain
+// fields and had no item-fetch loop at all; those three are now real brain memories and the
+// fetch loop is the vanilla behavior set.
+//
+// Concretely ported: the CORE activity (`AllayAi.java:61-73`) and the IDLE activity
+// (`AllayAi.java:75-90`) minus `SetEntityLookTargetSometimes`, the item give/take/duplicate
+// `mobInteract` branch (`Allay.java:281-317`), jukebox/note-block dancing
+// (`setJukeboxPlaying`, `hearNoteblock`, `shouldStopDancing`), the duplication cooldown, and
+// the `wantsToPickUp`/`canPickUpLoot`/`pickUpItem` inventory path (`Allay.java:263-362`).
+//
 // Explicitly NOT ported, with reasons:
 //
+// - `SetEntityLookTargetSometimes.create(6.0F, UniformInt.of(30, 60))` (`AllayAi.java:85`).
+//   It reads `NEAREST_VISIBLE_LIVING_ENTITIES`, which needs a `NearestLivingEntitiesSensor`;
+//   only `NearestItemSensor` is ported (`ai/brain/sensor/`). An Allay therefore does not
+//   glance at nearby players while idling. `SetWalkTargetFromLookTarget` in the `RunOne` is
+//   kept, but with nothing writing `LOOK_TARGET` from the world it only ever follows a look
+//   target some other behavior set.
 // - `DATA_DANCING`/`DATA_CAN_DUPLICATE` client-synced booleans and the client-side
 //   `holdingItemAnimationTicks`/`dancingAnimationTicks`/`spinningAnimationTicks` animation
-//   state (Allay.java lines 80-81, 228-260, 393-404): Pumpkin's `Entity` has no generic
-//   boolean tracked-data slot exposed to per-mob code the way vanilla's
-//   `SynchedEntityData.Builder` does, and no client animation-state channel at all (same
-//   gap noted in `warden.rs` for `AnimationState`). `is_dancing` below is server-side only:
-//   an Allay here will duplicate/react correctly but the client will not visibly dance.
-// - `AllayAi`'s item-carrying/delivery `Behavior`s (`GoToWantedItem`, `GoAndGiveItemsToTarget`,
-//   `StayCloseToTarget`, `SensorType.NEAREST_ITEMS`): these depend on a "nearest wanted
-//   item" sensor and a location-targeted walk-and-throw behavior, neither of which exist
-//   in Pumpkin's Goal system (grepped `pumpkin/src/entity/ai/goal/` — no item-seeking or
-//   deliver-to-position goal). `wantsToPickUp`/`allayConsidersItemEqual` (the item-match
-//   predicate) and the single-slot inventory (`InventoryCarrier`) are ported as plain
-//   methods for a future goal to call, but nothing currently drives an Allay to walk
-//   toward a dropped item or to the liked note block to deposit it.
-// - `hasNonMatchingPotion` (comparing `DataComponents.POTION_CONTENTS`): the general
-//   item-equality check (`ItemStack::is_same_item`-equivalent) is ported; the potion-content
-//   special case is left out pending confirmation `pumpkin_data::ItemStack` exposes potion
-//   contents as a comparable data component the same way.
-// - `LIKED_PLAYER`'s gamemode/distance liveness re-check (`AllayAi.getLikedPlayer`:
-//   survival-or-creative and within 64 blocks) beyond what's needed for `mobInteract`.
+//   state (`Allay.java:80-81, 228-260, 393-404`): Pumpkin's `Entity` has no generic boolean
+//   tracked-data slot exposed to per-mob code the way vanilla's `SynchedEntityData.Builder`
+//   does, and no client animation-state channel at all (the same gap `warden.rs` notes for
+//   `AnimationState`). `is_dancing` below is server-side only.
+// - `hasNonMatchingPotion` (`Allay.java:353-358`), which compares
+//   `DataComponents.POTION_CONTENTS`: the item-identity half of `allayConsidersItemEqual` is
+//   ported, the potion-content special case is not, so an Allay holding a healing potion will
+//   also fetch a poison potion.
+// - `CriteriaTriggers.ALLAY_DROP_ITEM_ON_BLOCK` in `AllayAi.onItemThrown` (`AllayAi.java:159`):
+//   no advancement trigger of that name is wired up here.
+// - `Allay.getPickupReach()` (`Allay.java:336-339`), a custom pickup box. The shared
+//   `Mob::mob_try_pick_up_items` pass uses its own reach and is not parameterised.
+//
+// Two deviations worth naming because they are structural, not omissions:
+//
+// - The main-hand item is mirrored into a plain `std::sync::Mutex<ItemStack>`. Vanilla reads
+//   it via `getItemInHand`, but `Mob::wants_to_pick_up_item` is a synchronous trait method and
+//   `LivingEntity::entity_equipment` is behind a `tokio::sync::Mutex`, so the sync mirror is
+//   what `wantsToPickUp` and `canPickUpLoot` consult. Every write goes to both. An external
+//   equipment write (`/item replace`) would desync the mirror; vanilla blocks dispensers from
+//   this slot anyway (`canDispenserEquipIntoSlot`, `Allay.java:271-274`).
+// - `LIKED_NOTEBLOCK_POSITION` is a `BlockPos`, not a `GlobalPos`; see
+//   `ai/brain/memory.rs`'s module comment. `shouldDepositItemsAtLikedNoteblock`'s
+//   dimension equality check is therefore not performed.
 
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Weak};
@@ -43,17 +60,32 @@ use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_util::GameMode;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
+use rand::RngExt;
 use uuid::Uuid;
 
+use crate::entity::ai::brain::behavior::count_down_cooldown_ticks::CountDownCooldownTicks;
+use crate::entity::ai::brain::behavior::do_nothing::DoNothing;
+use crate::entity::ai::brain::behavior::gate::GateBehavior;
+use crate::entity::ai::brain::behavior::go_and_give_items_to_target::GoAndGiveItemsToTarget;
+use crate::entity::ai::brain::behavior::go_to_wanted_item::GoToWantedItem;
+use crate::entity::ai::brain::behavior::look_at_target_sink::LookAtTargetSink;
+use crate::entity::ai::brain::behavior::move_to_target_sink::MoveToTargetSink;
+use crate::entity::ai::brain::behavior::random_stroll::RandomStrollFly;
+use crate::entity::ai::brain::behavior::set_walk_target_from_look_target::SetWalkTargetFromLookTarget;
+use crate::entity::ai::brain::behavior::stay_close_to_target::StayCloseToTarget;
+use crate::entity::ai::brain::behavior::{animal_panic::AnimalPanic, swim::Swim};
+use crate::entity::ai::brain::memory::{
+    ItemPickupCooldownTicksMemory, LikedNoteblockCooldownTicksMemory, LikedNoteblockPositionMemory,
+    LikedPlayerMemory, NearestVisibleWantedItemMemory, PositionTracker,
+};
+use crate::entity::ai::brain::sensor::nearest_item::NearestItemSensor;
+use crate::entity::ai::brain::{Activity, ActivityData, Brain};
 use crate::entity::player::Player;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage,
-    ai::goal::{
-        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal, swim::SwimGoal,
-        wander_around::WanderAroundGoal,
-    },
     mob::{Mob, MobEntity},
 };
 use crate::world::World;
@@ -63,16 +95,43 @@ use crate::world::game_event::{
 
 /// `Allay.DUPLICATION_COOLDOWN_TICKS`
 const DUPLICATION_COOLDOWN_TICKS: i64 = 6000;
-/// `AllayAi.TIME_TO_FORGET_NOTEBLOCK`
+/// `AllayAi.TIME_TO_FORGET_NOTEBLOCK` (`AllayAi.java:53`)
 const TIME_TO_FORGET_NOTEBLOCK_TICKS: i32 = 600;
+/// The chessboard distance `shouldDepositItemsAtLikedNoteblock` allows (`AllayAi.java:131`).
+const MAX_NOTEBLOCK_DISTANCE: i32 = 1024;
+/// `AllayAi.SPEED_MULTIPLIER_WHEN_RETRIEVING_ITEM` (`AllayAi.java:46`)
+const SPEED_WHEN_RETRIEVING_ITEM: f32 = 1.75;
+/// `AllayAi.SPEED_MULTIPLIER_WHEN_FOLLOWING_DEPOSIT_TARGET` (`AllayAi.java:45`)
+const SPEED_WHEN_FOLLOWING_DEPOSIT_TARGET: f32 = 2.25;
+/// `AllayAi.SPEED_MULTIPLIER_WHEN_IDLING` (`AllayAi.java:44`)
+const SPEED_WHEN_IDLING: f32 = 1.0;
+/// `AllayAi.SPEED_MULTIPLIER_WHEN_PANICKING` (`AllayAi.java:47`)
+const SPEED_WHEN_PANICKING: f32 = 2.5;
+/// `AllayAi.CLOSE_ENOUGH_TO_TARGET` / `TOO_FAR_FROM_TARGET` (`AllayAi.java:48-49`)
+const CLOSE_ENOUGH_TO_TARGET: i32 = 4;
+const TOO_FAR_FROM_TARGET: i32 = 16;
+/// `AllayAi.DISTANCE_TO_WANTED_ITEM` (`AllayAi.java:54`)
+const DISTANCE_TO_WANTED_ITEM: f64 = 32.0;
+/// `AllayAi.GIVE_ITEM_TIMEOUT_DURATION` (`AllayAi.java:55`)
+const GIVE_ITEM_TIMEOUT_DURATION: i32 = 20;
+/// `AllayAi.MIN_WAIT_DURATION` / `MAX_WAIT_DURATION` (`AllayAi.java:51-52`), the `DoNothing`
+/// bounds inside the idle `RunOne`.
+const MIN_WAIT_DURATION: i32 = 30;
+const MAX_WAIT_DURATION: i32 = 60;
+/// `AllayAi.getLikedPlayer`'s liveness radius (`AllayAi.java:148`).
+const LIKED_PLAYER_MAX_DISTANCE: f64 = 64.0;
 /// `Allay.NUM_OF_DUPLICATION_HEARTS`. Currently unused: there is no heart-particle
 /// broadcast channel wired up for this yet (see module doc comment on client sync gaps).
 #[allow(dead_code)]
 const NUM_OF_DUPLICATION_HEARTS: u32 = 3;
-/// `Allay.MAX_NOTEBLOCK_DISTANCE` / the notification radius `GameEvent.JUKEBOX_PLAY` uses
-/// (`shouldStopDancing` compares against `GameEvent.JUKEBOX_PLAY.value().notificationRadius()`,
-/// which is 10 — see `crate::world::game_event::notification_radius`).
+/// The notification radius `GameEvent.JUKEBOX_PLAY` uses (`shouldStopDancing` compares against
+/// `GameEvent.JUKEBOX_PLAY.value().notificationRadius()`, which is 10 -- see
+/// `crate::world::game_event::notification_radius`).
 const JUKEBOX_DANCE_RADIUS: f64 = 10.0;
+/// `Allay.THROW_SOUND_PITCHES` (`Allay.java:87-89`).
+const THROW_SOUND_PITCHES: [f32; 16] = [
+    0.5625, 0.625, 0.75, 0.9375, 1.0, 1.0, 1.125, 1.25, 1.5, 1.875, 2.0, 2.25, 2.5, 3.0, 3.75, 4.0,
+];
 
 /// Represents an Allay, a passive, flying entity that can collect items for the player.
 ///
@@ -81,9 +140,11 @@ pub struct AllayEntity {
     pub mob_entity: MobEntity,
     is_dancing: AtomicBool,
     jukebox_pos: std::sync::Mutex<Option<BlockPos>>,
-    liked_player: std::sync::Mutex<Option<Uuid>>,
-    liked_noteblock_pos: std::sync::Mutex<Option<BlockPos>>,
-    liked_noteblock_cooldown: std::sync::atomic::AtomicI32,
+    /// `Allay.inventory = new SimpleContainer(1)` (`Allay.java:95`). One slot, so every
+    /// container operation collapses to an operation on a single stack.
+    inventory: std::sync::Mutex<ItemStack>,
+    /// Synchronous mirror of `EquipmentSlot::MAIN_HAND`; see the module comment.
+    item_in_hand: std::sync::Mutex<ItemStack>,
     duplication_cooldown: AtomicI64,
     listener_registered: AtomicBool,
     vibration_listener: std::sync::Mutex<Option<Arc<AllayVibrationListener>>>,
@@ -92,38 +153,21 @@ pub struct AllayEntity {
 
 impl AllayEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
-        let mob_entity = MobEntity::new(entity);
+        let mut mob_entity = MobEntity::new(entity);
+        mob_entity.brain = Some(Self::make_brain());
+
         let allay = Self {
             mob_entity,
             is_dancing: AtomicBool::new(false),
             jukebox_pos: std::sync::Mutex::new(None),
-            liked_player: std::sync::Mutex::new(None),
-            liked_noteblock_pos: std::sync::Mutex::new(None),
-            liked_noteblock_cooldown: std::sync::atomic::AtomicI32::new(0),
+            inventory: std::sync::Mutex::new(ItemStack::EMPTY.clone()),
+            item_in_hand: std::sync::Mutex::new(ItemStack::EMPTY.clone()),
             duplication_cooldown: AtomicI64::new(0),
             listener_registered: AtomicBool::new(false),
             vibration_listener: std::sync::Mutex::new(None),
             jukebox_listener: std::sync::Mutex::new(None),
         };
         let mob_arc = Arc::new(allay);
-        let mob_weak: Weak<dyn Mob> = {
-            let mob_arc: Arc<dyn Mob> = mob_arc.clone();
-            Arc::downgrade(&mob_arc)
-        };
-
-        let mut goal_selector = mob_arc
-            .mob_entity
-            .goals_selector
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        goal_selector.add_goal(0, Box::new(SwimGoal::default()));
-        goal_selector.add_goal(1, Box::new(WanderAroundGoal::new(1.0)));
-        goal_selector.add_goal(
-            2,
-            LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
-        );
-        goal_selector.add_goal(3, Box::new(RandomLookAroundGoal::default()));
-        drop(goal_selector);
 
         let uuid = mob_arc.mob_entity.living_entity.entity.entity_uuid;
         *mob_arc.vibration_listener.lock().unwrap() = Some(Arc::new(AllayVibrationListener {
@@ -138,14 +182,82 @@ impl AllayEntity {
         mob_arc
     }
 
+    /// `Allay.BRAIN_PROVIDER` / `AllayAi.getActivities()` (`AllayAi.java:57-59`). The Allay has
+    /// no goals: every entry below is a `Behavior`, not a `Goal`.
+    fn make_brain() -> Brain {
+        let brain = Brain::new(
+            vec![NearestItemSensor::new()],
+            vec![Self::init_core_activity(), Self::init_idle_activity()],
+        );
+        // Memories read through `getMemory` rather than declared as a behavior's required
+        // memory still have to be registered, or `Brain.checkMemory` reports them absent
+        // (`Brain.java:242-249`). Vanilla registers them via `Allay.MEMORY_TYPES`.
+        brain.register::<LikedPlayerMemory>();
+        brain.register::<LikedNoteblockPositionMemory>();
+        brain.register::<LikedNoteblockCooldownTicksMemory>();
+        brain
+    }
+
+    /// `AllayAi.initCoreActivity` (`AllayAi.java:61-73`).
+    fn init_core_activity() -> ActivityData {
+        ActivityData::create(
+            Activity::Core,
+            0,
+            vec![
+                Swim::new(0.8),
+                AnimalPanic::new(SPEED_WHEN_PANICKING),
+                LookAtTargetSink::new(45, 90),
+                MoveToTargetSink::new(),
+                CountDownCooldownTicks::<LikedNoteblockCooldownTicksMemory>::new(),
+                CountDownCooldownTicks::<ItemPickupCooldownTicksMemory>::new(),
+            ],
+        )
+    }
+
+    /// `AllayAi.initIdleActivity` (`AllayAi.java:75-90`), minus
+    /// `SetEntityLookTargetSometimes` (see module comment).
+    fn init_idle_activity() -> ActivityData {
+        ActivityData::create(
+            Activity::Idle,
+            0,
+            vec![
+                GoToWantedItem::new(SPEED_WHEN_RETRIEVING_ITEM, true, DISTANCE_TO_WANTED_ITEM),
+                GoAndGiveItemsToTarget::new(
+                    get_item_deposit_position,
+                    SPEED_WHEN_FOLLOWING_DEPOSIT_TARGET,
+                    GIVE_ITEM_TIMEOUT_DURATION,
+                    on_item_thrown,
+                ),
+                StayCloseToTarget::new(
+                    get_item_deposit_position,
+                    does_not_have_wanted_item,
+                    CLOSE_ENOUGH_TO_TARGET,
+                    TOO_FAR_FROM_TARGET,
+                    SPEED_WHEN_FOLLOWING_DEPOSIT_TARGET,
+                ),
+                GateBehavior::run_one(vec![
+                    (RandomStrollFly::new(SPEED_WHEN_IDLING), 2),
+                    (SetWalkTargetFromLookTarget::new(SPEED_WHEN_IDLING, 3), 2),
+                    (DoNothing::new(MIN_WAIT_DURATION, MAX_WAIT_DURATION), 1),
+                ]),
+            ],
+        )
+    }
+
+    fn brain(&self) -> &Brain {
+        self.mob_entity
+            .brain
+            .as_ref()
+            .expect("AllayEntity is always constructed with a brain")
+    }
+
     #[must_use]
     pub fn is_dancing(&self) -> bool {
         self.is_dancing.load(Ordering::Relaxed)
     }
 
-    /// `Allay.setDancing`, minus the `isEffectiveAi`/panic gate (Pumpkin has no panic-goal
-    /// state check available here) and the client `DATA_DANCING` sync (see module doc
-    /// comment).
+    /// `Allay.setDancing`, minus the `isEffectiveAi`/panic gate and the client `DATA_DANCING`
+    /// sync (see module doc comment).
     fn set_dancing(&self, dancing: bool) {
         self.is_dancing.store(dancing, Ordering::Relaxed);
     }
@@ -183,20 +295,18 @@ impl AllayEntity {
         })
     }
 
-    /// `AllayAi.hearNoteblock`
+    /// `AllayAi.hearNoteblock` (`AllayAi.java:96-106`).
     fn hear_noteblock(&self, pos: BlockPos) {
-        let mut liked = self.liked_noteblock_pos.lock().unwrap();
-        match *liked {
+        let brain = self.brain();
+        match brain.get::<LikedNoteblockPositionMemory>() {
             None => {
-                *liked = Some(pos);
-                self.liked_noteblock_cooldown
-                    .store(TIME_TO_FORGET_NOTEBLOCK_TICKS, Ordering::Relaxed);
+                brain.set::<LikedNoteblockPositionMemory>(pos);
+                brain.set::<LikedNoteblockCooldownTicksMemory>(TIME_TO_FORGET_NOTEBLOCK_TICKS);
             }
             Some(existing) if existing == pos => {
-                self.liked_noteblock_cooldown
-                    .store(TIME_TO_FORGET_NOTEBLOCK_TICKS, Ordering::Relaxed);
+                brain.set::<LikedNoteblockCooldownTicksMemory>(TIME_TO_FORGET_NOTEBLOCK_TICKS);
             }
-            _ => {}
+            Some(_) => {}
         }
     }
 
@@ -207,6 +317,36 @@ impl AllayEntity {
     fn reset_duplication_cooldown(&self) {
         self.duplication_cooldown
             .store(DUPLICATION_COOLDOWN_TICKS, Ordering::Relaxed);
+    }
+
+    /// `Allay.hasItemInHand` (`Allay.java:267-269`), off the sync mirror.
+    #[must_use]
+    pub fn has_item_in_hand(&self) -> bool {
+        !self.item_in_hand.lock().unwrap().is_empty()
+    }
+
+    /// `Allay.isOnPickupCooldown` (`Allay.java:278-280`).
+    fn is_on_pickup_cooldown(&self) -> bool {
+        self.brain().has_value::<ItemPickupCooldownTicksMemory>()
+    }
+
+    /// Writes both the sync mirror and the real equipment slot.
+    async fn set_item_in_hand(&self, stack: ItemStack) {
+        *self.item_in_hand.lock().unwrap() = stack.clone();
+        self.mob_entity
+            .living_entity
+            .entity_equipment
+            .lock()
+            .await
+            .put(&EquipmentSlot::MAIN_HAND, stack);
+    }
+
+    /// `SimpleContainer.canAddItem` for a one-slot container (`SimpleContainer.java:86-97`).
+    fn inventory_can_add(&self, stack: &ItemStack) -> bool {
+        let slot = self.inventory.lock().unwrap();
+        slot.is_empty()
+            || (slot.are_items_and_components_equal(stack)
+                && slot.item_count < slot.get_max_stack_size())
     }
 
     /// `allayConsidersItemEqual`, minus the potion-content special case (see module doc
@@ -243,6 +383,96 @@ impl AllayEntity {
     }
 }
 
+/// `AllayAi.hasWantedItem` (`AllayAi.java:122-125`), negated -- vanilla passes
+/// `Predicate.not(AllayAi::hasWantedItem)` to `StayCloseToTarget` (`AllayAi.java:84`), so an
+/// Allay that has spotted an item on the ground stops trailing its deposit target.
+fn does_not_have_wanted_item(_mob: &dyn Mob, brain: &Brain) -> bool {
+    !brain.has_value::<NearestVisibleWantedItemMemory>()
+}
+
+/// `AllayAi.getItemDepositPosition` (`AllayAi.java:109-120`): the liked note block if it is
+/// still valid, otherwise the liked player.
+fn get_item_deposit_position(mob: &dyn Mob, brain: &Brain) -> Option<PositionTracker> {
+    if let Some(noteblock_pos) = brain.get::<LikedNoteblockPositionMemory>() {
+        if should_deposit_items_at_liked_noteblock(mob, brain, noteblock_pos) {
+            return Some(PositionTracker::of_block(noteblock_pos.up()));
+        }
+        brain.erase::<LikedNoteblockPositionMemory>();
+    }
+    get_liked_player_position_tracker(mob, brain)
+}
+
+/// `AllayAi.shouldDepositItemsAtLikedNoteblock` (`AllayAi.java:127-134`).
+/// `GlobalPos.isCloseEnough` is a **chessboard** distance compare (`GlobalPos.java:31-33`), not
+/// Euclidean, and its dimension-equality half is not representable here (see module comment).
+fn should_deposit_items_at_liked_noteblock(
+    mob: &dyn Mob,
+    brain: &Brain,
+    noteblock_pos: BlockPos,
+) -> bool {
+    let entity = &mob.get_mob_entity().living_entity.entity;
+    let mob_block_pos = entity.block_pos.load();
+    let chessboard_distance = (noteblock_pos.0.x - mob_block_pos.0.x)
+        .abs()
+        .max((noteblock_pos.0.y - mob_block_pos.0.y).abs())
+        .max((noteblock_pos.0.z - mob_block_pos.0.z).abs());
+    if chessboard_distance > MAX_NOTEBLOCK_DISTANCE {
+        return false;
+    }
+    if entity.world.load().get_block(&noteblock_pos) != &pumpkin_data::Block::NOTE_BLOCK {
+        return false;
+    }
+    brain.has_value::<LikedNoteblockCooldownTicksMemory>()
+}
+
+/// `AllayAi.getLikedPlayerPositionTracker` / `getLikedPlayer` (`AllayAi.java:136-155`).
+fn get_liked_player_position_tracker(mob: &dyn Mob, brain: &Brain) -> Option<PositionTracker> {
+    let uuid = brain.get::<LikedPlayerMemory>()?;
+    let entity = &mob.get_mob_entity().living_entity.entity;
+    let player = entity.world.load().get_player_by_uuid(uuid)?;
+
+    if !matches!(
+        player.gamemode.load(),
+        GameMode::Survival | GameMode::Creative
+    ) {
+        return None;
+    }
+    let distance_sq = player
+        .living_entity
+        .entity
+        .pos
+        .load()
+        .squared_distance_to_vec(&entity.pos.load());
+    if distance_sq > LIKED_PLAYER_MAX_DISTANCE * LIKED_PLAYER_MAX_DISTANCE {
+        return None;
+    }
+
+    let player: Arc<dyn EntityBase> = player;
+    Some(PositionTracker::of_entity(&player, true))
+}
+
+/// `AllayAi.onItemThrown` (`AllayAi.java:157-164`), minus the advancement trigger.
+/// `SoundEvents.ALLAY_THROW` is the registry name `entity.allay.item_thrown`
+/// (`SoundEvents.java:30`).
+fn on_item_thrown(mob: &dyn Mob, _item: &ItemStack, _target_pos: BlockPos, game_time: i64) {
+    if game_time % 7 != 0 {
+        return;
+    }
+    let mut rng = mob.get_random();
+    if rng.random::<f64>() >= 0.9 {
+        return;
+    }
+    let index = rng.random_range(0..THROW_SOUND_PITCHES.len());
+    let entity = &mob.get_mob_entity().living_entity.entity;
+    entity.world.load().play_sound_raw(
+        Sound::EntityAllayItemThrown as u16,
+        SoundCategory::Neutral,
+        &entity.pos.load(),
+        1.0,
+        THROW_SOUND_PITCHES[index],
+    );
+}
+
 impl NBTStorage for AllayEntity {}
 
 impl Mob for AllayEntity {
@@ -254,9 +484,54 @@ impl Mob for AllayEntity {
         false
     }
 
+    /// `Allay.canPickUpLoot` (`Allay.java:262-265`).
+    fn can_pick_up_loot(&self) -> bool {
+        !self.is_on_pickup_cooldown() && self.has_item_in_hand()
+    }
+
+    /// `Allay.wantsToPickUp` (`Allay.java:340-347`).
+    fn wants_to_pick_up_item(&self, world: &World, stack: &ItemStack) -> bool {
+        let held = self.item_in_hand.lock().unwrap().clone();
+        !held.is_empty()
+            && world.level_info.load().game_rules.mob_griefing
+            && self.inventory_can_add(stack)
+            && Self::considers_item_equal(&held, stack)
+    }
+
+    /// `InventoryCarrier.pickUpItem` (`Allay.java:360-362`): the stack goes into the single
+    /// inventory slot, up to that slot's maximum.
+    fn on_item_pickup(&self, stack: &ItemStack) -> u8 {
+        let mut slot = self.inventory.lock().unwrap();
+        if slot.is_empty() {
+            let taken = stack.item_count.min(stack.get_max_stack_size());
+            *slot = stack.copy_with_count(taken);
+            return taken;
+        }
+        if !slot.are_items_and_components_equal(stack) {
+            return 0;
+        }
+        let room = slot.get_max_stack_size().saturating_sub(slot.item_count);
+        let taken = stack.item_count.min(room);
+        slot.item_count += taken;
+        taken
+    }
+
+    fn carried_inventory_is_empty(&self) -> bool {
+        self.inventory.lock().unwrap().is_empty()
+    }
+
+    fn remove_one_carried_item(&self) -> ItemStack {
+        self.inventory.lock().unwrap().split(1)
+    }
+
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             self.register_listeners_once().await;
+
+            // `AllayAi.updateActivity` (`AllayAi.java:92-94`), called from
+            // `Allay.customServerAiStep` right after the brain ticks.
+            self.brain()
+                .set_active_activity_to_first_valid(&[Activity::Idle]);
 
             let age = self
                 .mob_entity
@@ -283,18 +558,6 @@ impl Mob for AllayEntity {
             if self.duplication_cooldown.load(Ordering::Relaxed) > 0 {
                 self.duplication_cooldown.fetch_sub(1, Ordering::Relaxed);
             }
-
-            // `CountDownCooldownTicks(LIKED_NOTEBLOCK_COOLDOWN_TICKS)`: once it reaches 0,
-            // vanilla erases the memory entirely (see `AllayAi.shouldDepositItemsAtLikedNoteblock`
-            // requiring the cooldown memory to be *present*).
-            if self.liked_noteblock_cooldown.load(Ordering::Relaxed) > 0
-                && self
-                    .liked_noteblock_cooldown
-                    .fetch_sub(1, Ordering::Relaxed)
-                    <= 1
-            {
-                *self.liked_noteblock_pos.lock().unwrap() = None;
-            }
         })
     }
 
@@ -305,13 +568,7 @@ impl Mob for AllayEntity {
     ) -> EntityBaseFuture<'a, bool> {
         Box::pin(async move {
             let world = self.mob_entity.living_entity.entity.world.load_full();
-            let held = self
-                .mob_entity
-                .living_entity
-                .entity_equipment
-                .lock()
-                .await
-                .get(&EquipmentSlot::MAIN_HAND);
+            let held = self.item_in_hand.lock().unwrap().clone();
             let my_pos = self.mob_entity.living_entity.entity.pos.load();
 
             // `Allay.mobInteract`, dancing + DUPLICATES_ALLAYS + canDuplicate branch.
@@ -333,31 +590,33 @@ impl Mob for AllayEntity {
 
             // Empty-handed Allay + player holding an item: give it to the Allay.
             if held.is_empty() && !item_stack.is_empty() {
-                let to_give = item_stack.copy_with_count(1);
-                self.mob_entity
-                    .living_entity
-                    .entity_equipment
-                    .lock()
-                    .await
-                    .put(&EquipmentSlot::MAIN_HAND, to_give);
+                self.set_item_in_hand(item_stack.copy_with_count(1)).await;
                 item_stack.decrement(1);
                 world.play_sound(Sound::EntityAllayItemGiven, SoundCategory::Neutral, &my_pos);
-                *self.liked_player.lock().unwrap() = Some(player.get_entity().entity_uuid);
+                self.brain()
+                    .set::<LikedPlayerMemory>(player.get_entity().entity_uuid);
                 return true;
             }
 
-            // Allay holding an item + player empty-handed: take it back.
+            // Allay holding an item + player empty-handed: take it back, and release whatever
+            // the Allay had already collected (`Allay.java:306-308`).
             if !held.is_empty() && item_stack.is_empty() {
-                let taken = self
-                    .mob_entity
-                    .living_entity
-                    .entity_equipment
-                    .lock()
-                    .await
-                    .put(&EquipmentSlot::MAIN_HAND, ItemStack::EMPTY.clone());
+                self.set_item_in_hand(ItemStack::EMPTY.clone()).await;
                 world.play_sound(Sound::EntityAllayItemTaken, SoundCategory::Neutral, &my_pos);
-                *self.liked_player.lock().unwrap() = None;
-                let mut taken = taken;
+                self.brain().erase::<LikedPlayerMemory>();
+
+                let collected = std::mem::replace(
+                    &mut *self.inventory.lock().unwrap(),
+                    ItemStack::EMPTY.clone(),
+                );
+                if !collected.is_empty() {
+                    let mut collected = collected;
+                    if !player.inventory.insert_stack_anywhere(&mut collected).await {
+                        player.drop_item(collected).await;
+                    }
+                }
+
+                let mut taken = held;
                 if !player.inventory.insert_stack_anywhere(&mut taken).await {
                     player.drop_item(taken).await;
                 }
@@ -483,5 +742,29 @@ mod tests {
         let c = ItemStack::new(1, &pumpkin_data::item::Item::EMERALD);
         assert!(AllayEntity::considers_item_equal(&a, &b));
         assert!(!AllayEntity::considers_item_equal(&a, &c));
+    }
+
+    /// The brain must come up with CORE and IDLE both active, or nothing in the idle activity
+    /// ever gets a `try_start` and the Allay never moves.
+    #[test]
+    fn brain_starts_with_core_and_idle_active() {
+        let brain = AllayEntity::make_brain();
+        assert!(brain.is_active(Activity::Core));
+        assert!(brain.is_active(Activity::Idle));
+    }
+
+    /// `AllayAi.shouldDepositItemsAtLikedNoteblock` requires the cooldown memory to be
+    /// *present* (`AllayAi.java:133`), which is what makes `CountDownCooldownTicks`'
+    /// erase-on-stop the mechanism that forgets a note block.
+    #[test]
+    fn noteblock_memories_are_registered_and_start_empty() {
+        let brain = AllayEntity::make_brain();
+        assert!(!brain.has_value::<LikedNoteblockPositionMemory>());
+        assert!(!brain.has_value::<LikedNoteblockCooldownTicksMemory>());
+        brain.set::<LikedNoteblockPositionMemory>(BlockPos::new(1, 2, 3));
+        assert_eq!(
+            brain.get::<LikedNoteblockPositionMemory>(),
+            Some(BlockPos::new(1, 2, 3))
+        );
     }
 }
