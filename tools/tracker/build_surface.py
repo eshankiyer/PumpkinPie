@@ -56,9 +56,17 @@ def tag_members(namespace: str = "Block") -> dict[str, list[str]]:
     text = whole[start:end]
     members: dict[str, list[str]] = {}
     for match in re.finditer(
-        r"pub const ((?:MINECRAFT|C)_[A-Z0-9_]+): super::Tag = \(\s*&\[(.*?)\]", text, re.S
+        r"pub const ((?:MINECRAFT|C)_[A-Z0-9_]+): (?:super::)?Tag = \(\s*&\[(.*?)\]", text, re.S
     ):
         members[match.group(1)] = re.findall(r'"([a-z0-9_/]+)"', match.group(2))
+    # A shape change in the generated table silently empties this and drags block coverage
+    # down by fifty points rather than erroring. Upstream renaming `super::Tag` to `Tag` did
+    # exactly that once; fail loudly instead.
+    if not members:
+        raise SystemExit(
+            f"tag.rs: found `pub mod {namespace}` but parsed no tags from it - "
+            "the generated tag literal shape changed and this parser needs updating"
+        )
     return members
 
 
@@ -67,7 +75,7 @@ def _unused_tag_members() -> dict[str, list[str]]:
     text = read(ROOT / "crates/pumpkin-data/src/generated/tag.rs")
     members: dict[str, list[str]] = {}
     for match in re.finditer(
-        r"pub const ((?:MINECRAFT|C)_[A-Z0-9_]+): super::Tag = \(\s*&\[(.*?)\]", text, re.S
+        r"pub const ((?:MINECRAFT|C)_[A-Z0-9_]+): (?:super::)?Tag = \(\s*&\[(.*?)\]", text, re.S
     ):
         members[match.group(1)] = re.findall(r'"([a-z0-9_/]+)"', match.group(2))
     return members
