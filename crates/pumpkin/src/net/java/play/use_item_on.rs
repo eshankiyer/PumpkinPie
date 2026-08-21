@@ -1,6 +1,17 @@
 #[allow(clippy::wildcard_imports)]
 use super::*;
 
+/// `ServerGamePacketListenerImpl.handleUseItemOn`'s hit-location guard
+/// (ServerGamePacketListenerImpl.java:1346-1348): the packet carries the hit point relative to
+/// the block, so vanilla accepts only points within 1.0000001 of the block centre on every axis.
+fn valid_block_hit_cursor(cursor_pos: &Vector3<f32>) -> bool {
+    const LIMIT: f64 = 1.0000001;
+
+    (f64::from(cursor_pos.x) - 0.5).abs() < LIMIT
+        && (f64::from(cursor_pos.y) - 0.5).abs() < LIMIT
+        && (f64::from(cursor_pos.z) - 0.5).abs() < LIMIT
+}
+
 impl JavaClient {
     #[allow(clippy::too_many_lines)]
     pub async fn handle_use_item_on(
@@ -23,6 +34,15 @@ impl JavaClient {
         if !player.can_interact_with_block_at(&position, 1.0) {
             // TODO: maybe log?
             return Err(BlockPlacingError::BlockOutOfReach);
+        }
+
+        if !valid_block_hit_cursor(&cursor_pos) {
+            tracing::warn!(
+                ?position,
+                ?cursor_pos,
+                "rejecting invalid block hit location"
+            );
+            return Ok(());
         }
 
         let Ok(face) = BlockDirection::try_from(use_item_on.face.0) else {
