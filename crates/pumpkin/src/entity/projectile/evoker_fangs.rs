@@ -75,7 +75,7 @@ impl EvokerFangsEntity {
         let bb = self.entity.bounding_box.load().expand(0.2, 0.0, 0.2);
         let owner = self.owner_id.and_then(|id| world.get_entity_by_id(id));
 
-        for candidate in world.get_entities_at_box(&bb) {
+        for candidate in world.get_all_at_box(&bb) {
             let target_entity = candidate.get_entity();
             if candidate.get_living_entity().is_none()
                 || !target_entity.is_alive()

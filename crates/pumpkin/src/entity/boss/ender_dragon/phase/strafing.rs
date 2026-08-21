@@ -2,13 +2,23 @@ use super::EnderDragonPhase;
 use crate::entity::EntityBase;
 use crate::entity::{
     Entity,
-    area_effect_cloud::AreaEffectCloudEntity,
     boss::ender_dragon::{EnderDragonEntity, Vector3Ext, find_path},
+    projectile::dragon_fireball::DragonFireballEntity,
 };
 use futures::future::BoxFuture;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::world::WorldEvent;
 use pumpkin_util::math::vector3::Vector3;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use uuid::Uuid;
+
+/// `this.dragon.head` is `new EnderDragonPart(this, "head", 1.0F, 1.0F)` (EnderDragon.java:93),
+/// so `head.getY(0.5) + 0.5` is `head.y + 1.0`. The parts in this codebase all carry the
+/// dragon's own dimensions, so the vanilla head height has to be spelled out here.
+const HEAD_SPAWN_Y_OFFSET: f64 = 1.0;
+/// `viewVector.x * 1.0` / `viewVector.z * 1.0` (DragonStrafePlayerPhase.java:65-67).
+const HEAD_SPAWN_BACKOFF: f64 = 1.0;
 
 pub struct StrafingPhase;
 
@@ -130,31 +140,58 @@ impl super::Phase for StrafingPhase {
                     *charge = 0;
                     drop(charge);
 
-                    let cloud_entity =
-                        Entity::new(world.clone(), player_pos, &EntityType::AREA_EFFECT_CLOUD);
-                    let cloud = AreaEffectCloudEntity::create(
-                        cloud_entity,
-                        pumpkin_data::item_stack::ItemStack::new(
+                    let dragon_entity = &dragon.mob_entity.living_entity.entity;
+
+                    // `DragonStrafePlayerPhase.java:72-74`: the shoot sound is a level event,
+                    // suppressed while the dragon is silent.
+                    if !dragon_entity.is_silent() {
+                        world.sync_world_event(
+                            WorldEvent::SoundDragonFireball,
+                            dragon_entity.block_pos.load(),
                             0,
-                            &pumpkin_data::item::Item::DRAGON_BREATH,
-                        ),
-                        vec![(
-                            &pumpkin_data::effect::StatusEffect::INSTANT_DAMAGE,
-                            1,
-                            1,
-                            false,
-                            true,
-                            true,
-                        )],
-                        600,
-                        3.0,
-                        20,
-                        20,
-                        0.0,
-                        0,
-                        (7.0 - 3.0) / 600.0,
+                        );
+                    }
+
+                    // `DragonStrafePlayerPhase.java:62-71`: the fireball starts one block
+                    // behind the head along the dragon's view vector and is aimed at the
+                    // target's mid-height.
+                    let head_pos = dragon
+                        .parts
+                        .first()
+                        .map_or(pos, |head| head.entity.pos.load());
+                    let view_vector = Vector3::rotation_vector(
+                        f64::from(dragon_entity.pitch.load()),
+                        f64::from(dragon_entity.yaw.load()),
                     );
-                    world.spawn_entity(cloud).await;
+                    let spawn_pos = Vector3::new(
+                        head_pos.x - view_vector.x * HEAD_SPAWN_BACKOFF,
+                        head_pos.y + HEAD_SPAWN_Y_OFFSET,
+                        head_pos.z - view_vector.z * HEAD_SPAWN_BACKOFF,
+                    );
+
+                    let target_mid_y = player_pos.y
+                        + f64::from(player.living_entity.entity.entity_dimension.load().height)
+                            * 0.5;
+                    let direction = Vector3::new(
+                        player_pos.x - spawn_pos.x,
+                        target_mid_y - spawn_pos.y,
+                        player_pos.z - spawn_pos.z,
+                    );
+
+                    if direction.length_squared() > 1e-6 {
+                        let base_entity = Entity::from_uuid(
+                            Uuid::new_v4(),
+                            world.clone(),
+                            spawn_pos,
+                            &EntityType::DRAGON_FIREBALL,
+                        );
+                        let fireball = DragonFireballEntity::new_shot(
+                            base_entity,
+                            dragon_entity.entity_id,
+                            direction,
+                        );
+                        world.spawn_entity(Arc::new(fireball)).await;
+                    }
 
                     dragon.path.lock().await.clear();
                     dragon.set_phase(EnderDragonPhase::Circling).await;

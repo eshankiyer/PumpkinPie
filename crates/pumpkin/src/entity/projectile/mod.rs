@@ -13,6 +13,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 pub mod arrow;
+pub mod dragon_fireball;
 pub mod egg;
 pub mod ender_pearl;
 pub mod evoker_fangs;
@@ -44,6 +45,7 @@ pub fn is_projectile(entity_type: &EntityType) -> bool {
         || *entity_type == EntityType::ENDER_PEARL
         || *entity_type == EntityType::SHULKER_BULLET
         || *entity_type == EntityType::FIREBALL
+        || *entity_type == EntityType::DRAGON_FIREBALL
         || *entity_type == EntityType::SMALL_FIREBALL
         || *entity_type == EntityType::FISHING_BOBBER
         || *entity_type == EntityType::EXPERIENCE_BOTTLE
@@ -133,6 +135,9 @@ pub fn projectile_owner_id(source: &dyn EntityBase) -> Option<i32> {
         return e.thrown.owner_id;
     }
     if let Some(e) = any.downcast_ref::<small_fireball::SmallFireballEntity>() {
+        return e.thrown.owner_id;
+    }
+    if let Some(e) = any.downcast_ref::<dragon_fireball::DragonFireballEntity>() {
         return e.thrown.owner_id;
     }
     if let Some(e) = any.downcast_ref::<wither_skull::WitherSkullEntity>() {
@@ -338,7 +343,7 @@ impl ThrownItemEntity {
         }
 
         // Entity collisions
-        let candidates = world.get_entities_at_box(&search_box);
+        let candidates = world.get_all_at_box(&search_box);
         for cand in candidates {
             if self.should_skip_collision(entity, &cand) {
                 continue;
@@ -384,6 +389,40 @@ impl ThrownItemEntity {
         // Skip owner for initial frames
         if Some(other_ent.entity_id) == self.owner_id && self_ent.age.load(Ordering::Relaxed) < 5 {
             return true;
+        }
+
+        // The ender dragon body is never a projectile target in vanilla:
+        // `EnderDragon.isPickable()` is false (EnderDragon.java:758-761), so
+        // `Entity.canBeHitByProjectile` (Entity.java:2005-2007) rejects it. The `age < 5`
+        // owner skip above is tuned for player-sized owners and expires while a
+        // `DragonFireball` is still inside the dragon's own 16-wide bounding box.
+        if Some(other_ent.entity_id) == self.owner_id
+            && other
+                .cast_any()
+                .downcast_ref::<crate::entity::boss::ender_dragon::EnderDragonEntity>()
+                .is_some()
+        {
+            return true;
+        }
+
+        // An ender dragon's own body parts are separate world entities here, each carrying
+        // the *dragon's* 16x8 bounding box, so a `DragonFireball` spawned at the head
+        // (`DragonStrafePlayerPhase.java:64-77`) would collide with them on its first tick.
+        // Vanilla never sees this: `Level.getEntities` (Level.java:782-786) is the only place
+        // parts enter a hit scan, and `EnderDragonPart.is` (EnderDragonPart.java:57-60) treats
+        // a part as its parent mob. Skip parts belonging to this projectile's own shooter.
+        if let Some(owner_id) = self.owner_id
+            && let Some(part) = other
+                .cast_any()
+                .downcast_ref::<crate::entity::boss::ender_dragon::EnderDragonPart>()
+        {
+            let world = self_ent.world.load();
+            if world
+                .get_entity_by_id(owner_id)
+                .is_some_and(|owner| owner.get_entity().entity_uuid == part.dragon_uuid)
+            {
+                return true;
+            }
         }
 
         // Projectiles should pass through lingering clouds
