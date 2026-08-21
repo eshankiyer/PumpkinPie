@@ -161,12 +161,16 @@ impl EntityBase for WitherSkullEntity {
             }
 
             let hit_pos = hit.hit_pos();
-            let mob_griefing = world.level_info.load().game_rules.mob_griefing;
-            if mob_griefing {
-                world.explode(hit_pos, EXPLOSION_POWER).await;
-            } else {
-                world.explode_without_blocks(hit_pos, EXPLOSION_POWER).await;
-            }
+            // Vanilla `WitherSkull.onHit` (WitherSkull.java:97) always explodes with
+            // `ExplosionInteraction.MOB`; the `mobGriefing` game rule is applied inside
+            // `World::get_block_interaction`, which demotes a MOB blast to `Keep`.
+            world
+                .explode(
+                    hit_pos,
+                    EXPLOSION_POWER,
+                    crate::world::ExplosionInteraction::Mob,
+                )
+                .await;
         })
     }
 }

@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
 
 use crossbeam::atomic::AtomicCell;
@@ -8,6 +8,8 @@ use pumpkin_data::entity::{EntityStatus, EntityType};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
@@ -22,7 +24,6 @@ use crate::entity::{
     mob::{Mob, MobEntity},
     player::Player,
 };
-use pumpkin_nbt::compound::NbtCompound;
 
 /// `IronGolem.IRON_INGOT_HEAL_AMOUNT` (`IronGolem.java:54`).
 const IRON_INGOT_HEAL_AMOUNT: f32 = 25.0;
@@ -81,6 +82,10 @@ pub struct IronGolemEntity {
     /// around its `super.hurtServer` call. Re-seeded on every damage attempt, so it cannot go
     /// stale across NBT loads or regeneration.
     health_before_damage: AtomicCell<f32>,
+    /// Vanilla `IronGolem.attackAnimationTick`, counted down every tick.
+    pub attack_animation_tick: AtomicI32,
+    /// Vanilla `IronGolem.offerFlowerTick`, counted down every tick.
+    pub offer_flower_tick: AtomicI32,
 }
 
 impl IronGolemEntity {
@@ -90,6 +95,8 @@ impl IronGolemEntity {
             mob_entity,
             player_created: AtomicBool::new(false),
             health_before_damage: AtomicCell::new(0.0),
+            attack_animation_tick: AtomicI32::new(0),
+            offer_flower_tick: AtomicI32::new(0),
         };
         let mob_arc = Arc::new(iron_golem);
         let mob_weak: Weak<dyn Mob> = {
@@ -137,6 +144,24 @@ impl IronGolemEntity {
         };
 
         mob_arc
+    }
+
+    #[must_use]
+    pub fn is_player_created(&self) -> bool {
+        self.player_created.load(Ordering::Relaxed)
+    }
+
+    pub fn set_player_created(&self, value: bool) {
+        self.player_created.store(value, Ordering::Relaxed);
+        let entity = self.get_entity();
+        let flag: u8 = u8::from(value);
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::iron_golem::FLAGS_ID,
+                flag,
+            )],
+            None,
+        );
     }
 }
 
@@ -261,6 +286,34 @@ impl Mob for IronGolemEntity {
             if before != after {
                 living.entity.play_sound(Sound::EntityIronGolemDamage);
             }
+        })
+    }
+
+    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            let attack_tick = self.attack_animation_tick.load(Ordering::Relaxed);
+            if attack_tick > 0 {
+                self.attack_animation_tick.fetch_sub(1, Ordering::Relaxed);
+            }
+
+            let flower_tick = self.offer_flower_tick.load(Ordering::Relaxed);
+            if flower_tick > 0 {
+                self.offer_flower_tick.fetch_sub(1, Ordering::Relaxed);
+            }
+        })
+    }
+
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let entity = self.get_entity();
+            let flag: u8 = u8::from(self.is_player_created());
+            entity.send_meta_data(
+                &[Metadata::new(
+                    pumpkin_data::tracked_data::iron_golem::FLAGS_ID,
+                    flag,
+                )],
+                None,
+            );
         })
     }
 

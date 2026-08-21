@@ -1,6 +1,6 @@
 use std::sync::{
     Arc, Weak,
-    atomic::{AtomicU8, Ordering},
+    atomic::{AtomicI32, Ordering},
 };
 
 use pumpkin_data::item_stack::ItemStack;
@@ -8,6 +8,8 @@ use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{entity::EntityType, item::Item};
 use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_protocol::codec::var_int::VarInt;
+use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -26,7 +28,7 @@ const TEMPT_ITEMS: &[&Item] = &[&Item::TORCHFLOWER_SEEDS];
 
 /// Vanilla `Sniffer.SNIFFER_BABY_START_AGE`: twice the default baby age, sniffers take twice as
 /// long to grow up.
-const BABY_START_AGE: i32 = -48000;
+pub const SNIFFER_BABY_START_AGE: i32 = -48000;
 
 /// Vanilla `Sniffer.State`.
 ///
@@ -34,9 +36,10 @@ const BABY_START_AGE: i32 = -48000;
 /// start/stop boundaries (see its `transition_to` call sites) --
 /// `SCENTING`/`SNIFFING`/`SEARCHING`/`RISING`/`FEELING_HAPPY` belong to `SnifferAi` Brain
 /// behaviors that are not ported at all yet and are left for a follow-up.
-#[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SnifferState {
+    #[default]
     Idling = 0,
     FeelingHappy = 1,
     Scenting = 2,
@@ -46,9 +49,10 @@ pub enum SnifferState {
     Rising = 6,
 }
 
-impl From<u8> for SnifferState {
-    fn from(value: u8) -> Self {
-        match value {
+impl SnifferState {
+    #[must_use]
+    pub const fn from_id(id: i32) -> Self {
+        match id {
             1 => Self::FeelingHappy,
             2 => Self::Scenting,
             3 => Self::Sniffing,
@@ -58,12 +62,17 @@ impl From<u8> for SnifferState {
             _ => Self::Idling,
         }
     }
+
+    #[must_use]
+    pub const fn id(self) -> i32 {
+        self as i32
+    }
 }
 
 pub struct SnifferEntity {
     pub mob_entity: MobEntity,
     pub ageable_data: AgeableData,
-    state: AtomicU8,
+    state: AtomicI32,
 }
 
 impl SnifferEntity {
@@ -72,7 +81,7 @@ impl SnifferEntity {
         let sniffer = Self {
             mob_entity,
             ageable_data: AgeableData::default(),
-            state: AtomicU8::new(SnifferState::Idling as u8),
+            state: AtomicI32::new(SnifferState::Idling.id()),
         };
         let mob_arc = Arc::new(sniffer);
         let mob_weak: Weak<dyn Mob> = {
@@ -105,14 +114,27 @@ impl SnifferEntity {
 
     #[must_use]
     pub fn get_state(&self) -> SnifferState {
-        SnifferState::from(self.state.load(Ordering::Relaxed))
+        SnifferState::from_id(self.state.load(Ordering::Relaxed))
+    }
+
+    /// `Sniffer.DATA_STATE`: the animation state has to reach the client or the sniffer
+    /// keeps its idle pose while it digs.
+    pub fn set_state(&self, state: SnifferState) {
+        self.state.store(state.id(), Ordering::Relaxed);
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::sniffer::STATE,
+                VarInt(state.id()),
+            )],
+            None,
+        );
     }
 
     /// Vanilla `Sniffer.transitionTo`. Only `IDLING`/`DIGGING` are driven anywhere today (by
     /// `SnifferDigGoal`); the sound-per-state switch mirrors vanilla but most states are
     /// currently unreachable, so most arms never fire yet.
     pub fn transition_to(&self, state: SnifferState) {
-        self.state.store(state as u8, Ordering::Relaxed);
+        self.set_state(state);
 
         let entity = &self.mob_entity.living_entity.entity;
         let world = entity.world.load();
@@ -140,7 +162,7 @@ impl AgeableMob for SnifferEntity {
     }
 
     fn get_baby_start_age(&self) -> i32 {
-        BABY_START_AGE
+        SNIFFER_BABY_START_AGE
     }
 }
 
@@ -151,6 +173,7 @@ impl NBTStorage for SnifferEntity {
             self.mob_entity.living_entity.write_nbt(nbt).await;
             self.write_ageable_nbt(nbt);
             self.write_animal_nbt(nbt);
+            nbt.put_int("State", self.get_state().id());
         })
     }
 
@@ -160,6 +183,9 @@ impl NBTStorage for SnifferEntity {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
             self.read_ageable_nbt(nbt);
             self.read_animal_nbt(nbt);
+            if let Some(state_id) = nbt.get_int("State") {
+                self.state.store(state_id, Ordering::Relaxed);
+            }
         })
     }
 }
@@ -173,6 +199,28 @@ impl super::animal::Animal for SnifferEntity {
 impl Mob for SnifferEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let entity = &self.mob_entity.living_entity.entity;
+            if entity.age.load(Ordering::Relaxed) < 0 {
+                entity.send_meta_data(
+                    &[Metadata::new(
+                        pumpkin_data::tracked_data::sniffer::BABY_ID,
+                        true,
+                    )],
+                    None,
+                );
+            }
+            entity.send_meta_data(
+                &[Metadata::new(
+                    pumpkin_data::tracked_data::sniffer::STATE,
+                    VarInt(self.get_state().id()),
+                )],
+                None,
+            );
+        })
     }
 
     fn can_breed_with(&self, mate: &dyn EntityBase) -> bool {

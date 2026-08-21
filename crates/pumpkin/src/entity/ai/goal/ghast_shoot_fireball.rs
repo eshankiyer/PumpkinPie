@@ -152,7 +152,7 @@ impl Goal for GhastShootFireballGoal {
                         &pumpkin_data::entity::EntityType::FIREBALL,
                     );
                     let mut fireball = FireballEntity::new(base_entity);
-                    fireball.explosion_power = f32::from(ghast.explosion_power());
+                    fireball.set_explosion_power(f32::from(ghast.explosion_power()));
                     fireball.thrown.owner_id = Some(entity.entity_id);
                     // Vanilla: `AbstractHurtingProjectile.assignDirectionalMovement` scales the
                     // normalized direction by `accelerationPower` (0.1) (AbstractHurtingProjectile.java:180-182).

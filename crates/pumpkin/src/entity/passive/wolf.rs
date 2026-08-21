@@ -8,11 +8,9 @@ use std::sync::{
 use pumpkin_data::entity::{EntityStatus, EntityType};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::particle::Particle;
 use pumpkin_data::sound::Sound;
-use pumpkin_data::tag;
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
@@ -22,17 +20,19 @@ use rand::RngExt;
 use crate::block::entities::sign::DyeColor;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    ageable::{AgeableData, AgeableMob},
     ai::goal::{
-        active_target::ActiveTargetGoal, beg::BegGoal, breed::BreedGoal,
-        escape_danger::EscapeDangerGoal, follow_owner::FollowOwnerGoal,
+        active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal, beg::BegGoal,
+        breed::BreedGoal, escape_danger::EscapeDangerGoal, follow_owner::FollowOwnerGoal,
         follow_parent::FollowParentGoal, leap_at_target::LeapAtTargetGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
-        non_tame_random_target::NonTameRandomTargetGoal,
+        melee_attack::MeleeAttackGoal, non_tame_random_target::NonTameRandomTargetGoal,
         owner_hurt_by_target::OwnerHurtByTargetGoal, owner_hurt_target::OwnerHurtTargetGoal,
         reset_universal_anger_target::ResetUniversalAngerTargetGoal, revenge::RevengeGoal,
         sit::SitGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
+    passive::animal::Animal,
     persistent_anger::PersistentAnger,
     player::Player,
 };
@@ -78,9 +78,11 @@ pub struct WolfEntity {
     is_wet: AtomicBool,
     is_shaking: AtomicBool,
     shake_anim: AtomicU32,
+    pub ageable_data: AgeableData,
 }
 
 impl WolfEntity {
+    #[allow(clippy::too_many_lines)]
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
         let wolf = Self {
@@ -91,6 +93,7 @@ impl WolfEntity {
             is_wet: AtomicBool::new(false),
             is_shaking: AtomicBool::new(false),
             shake_anim: AtomicU32::new(0),
+            ageable_data: AgeableData::default(),
         };
         let mob_arc = Arc::new(wolf);
         let mob_weak: Weak<dyn Mob> = {
@@ -105,21 +108,31 @@ impl WolfEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
+            // Wolf.java:129-140.
             goal_selector.add_goal(1, Box::new(SwimGoal::default()));
+            // 1: TamableAnimalPanicGoal
+            goal_selector.add_goal(1, EscapeDangerGoal::new(1.5));
             goal_selector.add_goal(2, SitGoal::new());
-            goal_selector.add_goal(4, EscapeDangerGoal::new(1.5));
+            // 3: WolfAvoidEntityGoal<Llama>
+            goal_selector.add_goal(
+                3,
+                Box::new(AvoidEntityGoal::new(&EntityType::LLAMA, 24.0, 1.5, 1.5)),
+            );
             // Wolf.java:133
             goal_selector.add_goal(4, LeapAtTargetGoal::new(0.4));
-            goal_selector.add_goal(5, BreedGoal::new(1.0));
+            // 5: MeleeAttackGoal
+            goal_selector.add_goal(5, Box::new(MeleeAttackGoal::new(1.0, true)));
             goal_selector.add_goal(6, FollowOwnerGoal::new(1.0, 10.0, 2.0));
+            goal_selector.add_goal(7, BreedGoal::new(1.0));
+            // Not in `Wolf.registerGoals`; kept from the pre-merge Pumpkin goal list.
             goal_selector.add_goal(8, Box::new(FollowParentGoal::new(1.1)));
-            goal_selector.add_goal(9, BegGoal::new(8.0, &[&Item::BONE]));
+            goal_selector.add_goal(8, Box::new(WanderAroundGoal::new(1.0)));
+            goal_selector.add_goal(9, BegGoal::new(8.0));
             goal_selector.add_goal(
                 10,
                 LookAtEntityGoal::with_default(mob_weak.clone(), &EntityType::PLAYER, 8.0),
             );
             goal_selector.add_goal(10, Box::new(RandomLookAroundGoal::default()));
-            goal_selector.add_goal(12, Box::new(WanderAroundGoal::new(1.0)));
 
             let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
             target_selector.add_goal(1, OwnerHurtByTargetGoal::new());
@@ -194,12 +207,23 @@ impl WolfEntity {
         mob_arc
     }
 
+    /// Vanilla `TamableAnimal` flag byte: bit 0 sitting, bit 2 tame.
+    pub fn get_tame_flags(&self) -> u8 {
+        let mut flags = 0u8;
+        if self.mob_entity.is_ordered_to_sit() {
+            flags |= 0x01;
+        }
+        if self.mob_entity.is_tamed() {
+            flags |= 0x04;
+        }
+        flags
+    }
+
     pub fn set_collar_color(&self, color: u8) {
         self.collar_color.store(color, Ordering::Relaxed);
         self.mob_entity.living_entity.entity.send_meta_data(
             &[Metadata::new(
-                TrackedData::COLLAR_COLOR,
-                MetaDataType::INT,
+                pumpkin_data::tracked_data::wolf::COLLAR_COLOR,
                 VarInt(i32::from(color)),
             )],
             None,
@@ -281,10 +305,25 @@ impl WolfEntity {
     }
 }
 
+impl AgeableMob for WolfEntity {
+    fn get_ageable_data(&self) -> &AgeableData {
+        &self.ageable_data
+    }
+}
+
+impl Animal for WolfEntity {
+    fn is_food(&self, item_stack: &ItemStack) -> bool {
+        let item = item_stack.get_item();
+        item.has_tag(&tag::Item::MINECRAFT_WOLF_FOOD) || item == &Item::BONE
+    }
+}
+
 impl NBTStorage for WolfEntity {
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async {
             self.mob_entity.living_entity.write_nbt(nbt).await;
+            self.write_ageable_nbt(nbt);
+            self.write_animal_nbt(nbt);
             // Vanilla Wolf.java persists collar color as a legacy dye-color id (0-15).
             nbt.put_byte(
                 "CollarColor",
@@ -302,6 +341,10 @@ impl NBTStorage for WolfEntity {
                 _ => "minecraft:pale",
             };
             nbt.put_string("variant", variant_str.to_string());
+            nbt.put_bool("Sitting", self.mob_entity.is_ordered_to_sit());
+            if let Some(owner) = self.mob_entity.owner.load() {
+                nbt.put_uuid("Owner", owner);
+            }
             self.persistent_anger.write_nbt(nbt).await;
         })
     }
@@ -309,6 +352,8 @@ impl NBTStorage for WolfEntity {
     fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
+            self.read_ageable_nbt(nbt);
+            self.read_animal_nbt(nbt);
             self.persistent_anger.read_nbt(nbt).await;
             if let Some(variant_str) = nbt.get_string("variant") {
                 let variant = match variant_str
@@ -329,6 +374,14 @@ impl NBTStorage for WolfEntity {
             }
             if let Some(color) = nbt.get_byte("CollarColor") {
                 self.collar_color.store(color as u8, Ordering::Relaxed);
+            } else if let Some(color) = nbt.get_int("CollarColor") {
+                self.collar_color.store(color as u8, Ordering::Relaxed);
+            }
+            if let Some(sitting) = nbt.get_bool("Sitting") {
+                self.mob_entity.set_ordered_to_sit(sitting);
+            }
+            if let Some(owner) = nbt.get_uuid("Owner") {
+                self.mob_entity.set_owner(owner);
             }
         })
     }
@@ -475,8 +528,7 @@ impl Mob for WolfEntity {
             if is_baby {
                 entity.send_meta_data(
                     &[Metadata::new(
-                        TrackedData::BABY_ID,
-                        MetaDataType::BOOLEAN,
+                        pumpkin_data::tracked_data::wolf::BABY_ID,
                         true,
                     )],
                     None,
@@ -484,17 +536,31 @@ impl Mob for WolfEntity {
             }
             entity.send_meta_data(
                 &[Metadata::new(
-                    TrackedData::WOLF_VARIANT_ID,
-                    MetaDataType::WOLF_VARIANT,
+                    pumpkin_data::tracked_data::wolf::WOLF_VARIANT_ID,
                     VarInt(self.variant.load(Ordering::Relaxed) as i32),
                 )],
                 None,
             );
             entity.send_meta_data(
                 &[Metadata::new(
-                    TrackedData::COLLAR_COLOR,
-                    MetaDataType::INT,
+                    pumpkin_data::tracked_data::wolf::COLLAR_COLOR,
                     VarInt(i32::from(self.collar_color.load(Ordering::Relaxed))),
+                )],
+                None,
+            );
+            // Vanilla syncs the tameable flag byte and owner so a sitting/tamed wolf renders
+            // as such; `SitGoal` alone never pushed this to clients.
+            entity.send_meta_data(
+                &[Metadata::new(
+                    pumpkin_data::tracked_data::wolf::TAMEABLE_FLAGS,
+                    self.get_tame_flags(),
+                )],
+                None,
+            );
+            entity.send_meta_data(
+                &[Metadata::new(
+                    pumpkin_data::tracked_data::wolf::OWNER_UUID,
+                    self.mob_entity.owner.load(),
                 )],
                 None,
             );

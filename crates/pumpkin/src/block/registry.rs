@@ -7,12 +7,14 @@ use crate::block::blocks::beacon::BeaconBlock;
 use crate::block::blocks::bed::BedBlock;
 use crate::block::blocks::beehive::BeehiveBlock;
 use crate::block::blocks::brewing_stand::BrewingStandBlock;
+use crate::block::blocks::brushable_block::BrushableBlock;
 use crate::block::blocks::bubble_column::BubbleColumnBlock;
 use crate::block::blocks::cake::CakeBlock;
 use crate::block::blocks::campfire::CampfireBlock;
 use crate::block::blocks::candle_cakes::CandleCakeBlock;
 use crate::block::blocks::candles::CandleBlock;
 use crate::block::blocks::carpet::{CarpetBlock, MossCarpetBlock, PaleMossCarpetBlock};
+use crate::block::blocks::cartography_table::CartographyTableBlock;
 use crate::block::blocks::carved_pumpkin::CarvedPumpkinBlock;
 use crate::block::blocks::cauldron::CauldronBlock;
 use crate::block::blocks::chests::{ChestBlock, CopperChestBlock, TrappedChestBlock};
@@ -27,6 +29,7 @@ use crate::block::blocks::coral::coral_block::CoralBlock;
 use crate::block::blocks::coral::coral_fan::CoralFanBlock;
 use crate::block::blocks::coral::coral_plant::CoralPlantBlock;
 use crate::block::blocks::creaking_heart::CreakingHeartBlock;
+use crate::block::blocks::decorated_pot::DecoratedPotBlock;
 use crate::block::blocks::dirt_path::DirtPathBlock;
 use crate::block::blocks::doors::DoorBlock;
 use crate::block::blocks::dripstone::DripstoneBlock;
@@ -38,6 +41,7 @@ use crate::block::blocks::fence_gates::FenceGateBlock;
 use crate::block::blocks::fences::FenceBlock;
 use crate::block::blocks::fire::fire::FireBlock;
 use crate::block::blocks::fire::soul_fire::SoulFireBlock;
+use crate::block::blocks::fletching_table::FletchingTableBlock;
 use crate::block::blocks::flower_pots::FlowerPotBlock;
 use crate::block::blocks::frosted_ice::FrostedIceBlock;
 use crate::block::blocks::furnace::FurnaceBlock;
@@ -53,6 +57,7 @@ use crate::block::blocks::infested::InfestedBlock;
 use crate::block::blocks::iron_bars::IronBarsBlock;
 use crate::block::blocks::jigsaw::JigsawBlock;
 use crate::block::blocks::logs::LogBlock;
+use crate::block::blocks::loom::LoomBlock;
 use crate::block::blocks::magma::MagmaBlock;
 use crate::block::blocks::mangrove_roots::MangroveRootsBlock;
 use crate::block::blocks::mycelium::MyceliumBlock;
@@ -141,15 +146,19 @@ use crate::block::blocks::shelf::ShelfBlock;
 use crate::block::blocks::signs::SignBlock;
 use crate::block::blocks::slabs::SlabBlock;
 use crate::block::blocks::slime::SlimeBlock;
+use crate::block::blocks::smithing_table::SmithingTableBlock;
+use crate::block::blocks::sniffer_egg::SnifferEggBlock;
 use crate::block::blocks::snow::LayeredSnowBlock;
 use crate::block::blocks::spawner::SpawnerBlock;
 use crate::block::blocks::sponge::{SpongeBlock, WetSpongeBlock};
 use crate::block::blocks::stairs::StairBlock;
+use crate::block::blocks::structure_block::StructureBlock;
 use crate::block::blocks::test_block::TestBlock;
 use crate::block::blocks::tnt::TNTBlock;
 use crate::block::blocks::torches::TorchBlock;
 use crate::block::blocks::trapdoor::TrapDoorBlock;
 use crate::block::blocks::trial_spawner::TrialSpawnerBlock;
+use crate::block::blocks::turtle_egg::TurtleEggBlock;
 use crate::block::blocks::vault::VaultBlock;
 use crate::block::blocks::vine::VineBlock;
 use crate::block::blocks::walls::WallBlock;
@@ -157,9 +166,9 @@ use crate::block::blocks::wither_skull::WitherSkeletonSkullBlock;
 use crate::block::fluid::lava::FlowingLava;
 use crate::block::fluid::water::FlowingWater;
 use crate::block::{
-    BlockBehaviour, BlockHitResult, BlockMetadata, FluidMetadata, GetInsideCollisionShapeArgs,
-    OnEntityCollisionArgs, OnLandedUponArgs, UpdateEntityMovementAfterFallOnArgs,
-    stop_vertical_movement_after_fall,
+    BlockBehaviour, BlockHitResult, BlockMetadata, BonemealArgs, FluidMetadata,
+    GetInsideCollisionShapeArgs, OnEntityCollisionArgs, OnLandedUponArgs,
+    UpdateEntityMovementAfterFallOnArgs, stop_vertical_movement_after_fall,
 };
 use crate::entity::EntityBase;
 use crate::entity::player::Player;
@@ -204,15 +213,13 @@ use crate::block::blocks::ladder::LadderBlock;
 use crate::block::blocks::lanterns::LanternBlock;
 use crate::block::blocks::leaves::LeavesBlock;
 use crate::block::blocks::lectern::LecternBlock;
-use crate::block::blocks::loom::LoomBlock;
 use crate::block::blocks::respawn_anchor::RespawnAnchorBlock;
+use crate::block::blocks::rooted_dirt::RootedDirtBlock;
 use crate::block::blocks::scaffolding::ScaffoldingBlock;
 use crate::block::blocks::shulker_box::ShulkerBoxBlock;
 use crate::block::blocks::skull_block::SkullBlock;
-use crate::block::blocks::smithing_table::SmithingTableBlock;
 use crate::block::blocks::smoker::SmokerBlock;
 use crate::block::blocks::stonecutter::StonecutterBlock;
-use crate::block::blocks::structure_block::StructureBlockBlock;
 
 #[must_use]
 #[expect(clippy::too_many_lines)]
@@ -270,6 +277,10 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(StairBlock);
     manager.register(StonecutterBlock);
     manager.register(SmithingTableBlock);
+    manager.register(LoomBlock);
+    manager.register(CartographyTableBlock);
+    manager.register(FletchingTableBlock);
+    manager.register(StructureBlock);
     manager.register(ShortPlantBlock);
     manager.register(DryVegetationBlock);
     manager.register(LilyPadBlock);
@@ -278,6 +289,13 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(SculkVeinBlock);
     manager.register(SculkBlock);
     manager.register(TNTBlock);
+    manager.register(TrialSpawnerBlock);
+    manager.register(VaultBlock);
+    manager.register(DecoratedPotBlock);
+    manager.register(CreakingHeartBlock);
+    manager.register(SnifferEggBlock);
+    manager.register(TurtleEggBlock);
+    manager.register(BrushableBlock);
     manager.register(BushBlock);
     manager.register(FlowerBlock);
     manager.register(PotatoBlock);
@@ -316,8 +334,6 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(WeightedPressurePlateBlock);
     manager.register(EndPortalBlock);
     manager.register(SpawnerBlock);
-    manager.register(TrialSpawnerBlock);
-    manager.register(VaultBlock);
     manager.register(EndPortalFrameBlock);
     manager.register(RespawnAnchorBlock);
     manager.register(CandleBlock);
@@ -328,7 +344,6 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(ChiseledBookshelfBlock);
     manager.register(ShelfBlock);
     manager.register(LecternBlock);
-    manager.register(LoomBlock);
     manager.register(DragonEggBlock);
     manager.register(StemBlock);
     manager.register(AttachedStemBlock);
@@ -348,7 +363,6 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(ConduitBlock);
     manager.register(CopperFullBlock);
     manager.register(CopperGolemStatueBlock);
-    manager.register(CreakingHeartBlock);
     manager.register(CopperGrateBlock);
     manager.register(DripstoneBlock);
     manager.register(TwistingVinesBlock);
@@ -365,6 +379,7 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(GrassBlock);
     manager.register(MyceliumBlock);
     manager.register(NyliumBlock);
+    manager.register(RootedDirtBlock);
     manager.register(BubbleColumnBlock);
     manager.register(HeavyCoreBlock);
     manager.register(HugeMushroomBlock);
@@ -385,7 +400,6 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(LightningRodBlock);
     manager.register(SculkSensorBlock);
     manager.register(TestBlock);
-    manager.register(SculkVeinBlock);
     manager.register(SculkCatalystBlock);
     manager.register(SculkShriekerBlock);
     manager.register(ObserverBlock);
@@ -414,9 +428,7 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(DispenserBlock);
     manager.register(LadderBlock);
     manager.register(DaylightDetectorBlock);
-    manager.register(RespawnAnchorBlock);
     manager.register(ScaffoldingBlock);
-    manager.register(StructureBlockBlock);
 
     // Rails
     manager.register(RailBlock);
@@ -467,6 +479,31 @@ pub enum BlockPlacingError {
 }
 
 impl BlockRegistry {
+    pub async fn bone_meal(
+        &self,
+        block: &Block,
+        world: &Arc<World>,
+        position: &BlockPos,
+        state_id: BlockStateId,
+    ) -> bool {
+        let Some(behaviour) = self.get_pumpkin_block(block.id) else {
+            return false;
+        };
+        let args = BonemealArgs {
+            world,
+            block,
+            position,
+            state_id,
+        };
+        if !behaviour.is_valid_bonemeal_target(args) {
+            return false;
+        }
+        if behaviour.is_bonemeal_success(args) {
+            behaviour.perform_bonemeal(args).await;
+        }
+        true
+    }
+
     fn entity_blocks_block_placement(entity: &dyn EntityBase) -> bool {
         let base_entity = entity.get_entity();
         if base_entity.is_removed()
@@ -658,7 +695,7 @@ impl BlockRegistry {
         // placement. (e.g. arrows/xp orbs/displays/markers should not)
         let state = BlockState::from_id(new_state);
         let mut buildable = true;
-        for shape in state.get_block_collision_shapes() {
+        for shape in state.get_block_collision_shapes_at(&final_block_pos) {
             let placed_box = shape.at_pos(final_block_pos);
 
             if Self::has_blocking_entity_in_box(world.as_ref(), &placed_box) {

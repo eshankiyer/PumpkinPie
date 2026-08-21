@@ -3,8 +3,6 @@ use crate::entity::player::Player;
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::EntityStatus;
-use pumpkin_data::meta_data_type::MetaDataType;
-use pumpkin_data::tracked_data::TrackedData;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::GameMode;
@@ -94,7 +92,8 @@ impl BreathManager {
             };
             if new_air != prev {
                 self.air_supply.store(new_air, Ordering::Relaxed);
-                if let Some(server) = player.world().server.upgrade() {
+                let server = player.world().server.upgrade();
+                if let Some(server) = server {
                     let mut event = crate::plugin::api::events::entity::entity_air_change::EntityAirChangeEvent::new(
                         player.entity_id(),
                         new_air,
@@ -151,8 +150,7 @@ impl BreathManager {
 
         player.get_entity().send_meta_data(
             &[Metadata::new(
-                TrackedData::AIR_SUPPLY_ID,
-                MetaDataType::INT,
+                pumpkin_data::tracked_data::entity::DATA_AIR_SUPPLY_ID,
                 VarInt(air),
             )],
             Some(&bedrock_meta),

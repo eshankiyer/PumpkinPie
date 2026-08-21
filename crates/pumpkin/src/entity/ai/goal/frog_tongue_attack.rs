@@ -15,9 +15,8 @@
 use std::sync::Arc;
 
 use pumpkin_data::entity::{EntityPose, EntityType};
-use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::sound::{Sound, SoundCategory};
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_protocol::codec::optional_int::OptionalInt;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
@@ -40,11 +39,7 @@ use crate::entity::{Entity, EntityBase};
 fn sync_tongue_pose(entity: &Entity, pose: EntityPose) {
     entity.pose.store(pose);
     entity.send_meta_data(
-        &[Metadata::new(
-            TrackedData::POSE,
-            MetaDataType::POSE,
-            VarInt(pose as i32),
-        )],
+        &[Metadata::new(tracked_data::frog::POSE, VarInt(pose as i32))],
         None,
     );
 }
@@ -55,8 +50,7 @@ fn sync_tongue_pose(entity: &Entity, pose: EntityPose) {
 fn sync_tongue_target(entity: &Entity, target_id: Option<i32>) {
     entity.send_meta_data(
         &[Metadata::new(
-            TrackedData::TONGUE_TARGET_ID,
-            MetaDataType::OPTIONAL_UNSIGNED_INT,
+            tracked_data::frog::TONGUE_TARGET_ID,
             OptionalInt(target_id),
         )],
         None,

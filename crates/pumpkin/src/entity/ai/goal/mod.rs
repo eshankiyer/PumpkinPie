@@ -107,6 +107,7 @@ pub mod swim;
 pub mod teleport_towards_player;
 pub mod tempt;
 pub(crate) mod track_target;
+pub mod trade_with_player;
 pub mod trader_llama_defend_wandering_trader;
 pub mod transport_items;
 pub mod try_find_water;
@@ -121,6 +122,7 @@ pub mod vex_random_move;
 pub mod villager_schedule;
 pub mod wander_around;
 pub mod witch_attack;
+pub mod work_at_job_site;
 pub mod zombie_attack;
 
 #[must_use]

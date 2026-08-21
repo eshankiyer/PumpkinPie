@@ -156,10 +156,12 @@ impl ElderGuardianEntity {
                 })
                 .await;
 
-            player.client.try_enqueue_packet(&CGameEvent::new(
-                GameEvent::PlayElderGuardianMobAppearance,
-                1.0,
-            ));
+            player
+                .send_client_packet(&CGameEvent::new(
+                    GameEvent::PlayElderGuardianMobAppearance,
+                    1.0,
+                ))
+                .await;
         }
     }
 }

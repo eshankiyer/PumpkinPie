@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BlockProperties, WallTorchLikeProperties};
+use pumpkin_data::translation;
 use pumpkin_inventory::loom_screen_handler::LoomScreenHandler;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
-    BoxFuture as ScreenHandlerBoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
+    BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
 };
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::text::TextComponent;
@@ -61,7 +62,7 @@ impl ScreenHandlerFactory for LoomScreenFactory {
         sync_id: u8,
         player_inventory: &'a Arc<PlayerInventory>,
         _player: &'a dyn InventoryPlayer,
-    ) -> ScreenHandlerBoxFuture<'a, Option<SharedScreenHandler>> {
+    ) -> BoxFuture<'a, Option<SharedScreenHandler>> {
         Box::pin(async move {
             let handler: SharedScreenHandler = Arc::new(Mutex::new(LoomScreenHandler::new(
                 sync_id,
@@ -73,8 +74,8 @@ impl ScreenHandlerFactory for LoomScreenFactory {
 
     fn get_display_name(&self) -> TextComponent {
         TextComponent::translate_cross(
-            pumpkin_data::translation::java::CONTAINER_LOOM,
-            pumpkin_data::translation::bedrock::CONTAINER_LOOM,
+            translation::java::CONTAINER_LOOM,
+            translation::bedrock::CONTAINER_LOOM,
             &[],
         )
     }

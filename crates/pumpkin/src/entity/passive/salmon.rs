@@ -2,8 +2,7 @@ use std::sync::atomic::{AtomicU8, Ordering::Relaxed};
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::entity::EntityType;
-use pumpkin_data::meta_data_type::MetaDataType;
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
@@ -150,8 +149,7 @@ impl SalmonEntity {
         self.variant.store(variant as u8, Relaxed);
         self.mob_entity.living_entity.entity.send_meta_data(
             &[Metadata::new(
-                TrackedData::SALMON_VARIANT,
-                MetaDataType::INT,
+                tracked_data::salmon::DATA_TYPE,
                 VarInt(i32::from(variant as u8)),
             )],
             None,
@@ -190,8 +188,7 @@ impl Mob for SalmonEntity {
         Box::pin(async move {
             self.mob_entity.living_entity.entity.send_meta_data(
                 &[Metadata::new(
-                    TrackedData::SALMON_VARIANT,
-                    MetaDataType::INT,
+                    tracked_data::salmon::DATA_TYPE,
                     VarInt(i32::from(self.variant.load(Relaxed))),
                 )],
                 None,

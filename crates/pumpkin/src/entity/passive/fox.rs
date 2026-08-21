@@ -8,9 +8,7 @@ use std::sync::{
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_data::{
-    entity::EntityType, item::Item, meta_data_type::MetaDataType, tracked_data::TrackedData,
-};
+use pumpkin_data::{entity::EntityType, item::Item};
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
 use rand::{RngExt, rng};
@@ -95,10 +93,16 @@ impl FoxVariant {
         }
     }
 
+    /// Wire ordinal for `Fox.DATA_TYPE_ID`.
+    #[must_use]
+    pub const fn id(self) -> i32 {
+        self as u8 as i32
+    }
+
     #[must_use]
     pub fn from_name(name: &str) -> Self {
         match name {
-            "snow" => Self::Snow,
+            "snow" | "minecraft:snow" => Self::Snow,
             _ => Self::Red,
         }
     }
@@ -321,15 +325,8 @@ impl FoxEntity {
         self.flags.load(Relaxed) & mask != 0
     }
 
-    /// Note: `TrackedData::FOX_FLAGS` resolves to the "not present in this protocol version"
-    /// sentinel (255, a documented no-op in `Metadata::write`) on the v26.x versions this
-    /// build targets -- `pumpkin-data`'s codegen flattens `DATA_FLAGS_ID` across every vanilla
-    /// class that reuses that literal field name (Fox, Bee, Spider, Vex, `IronGolem`,
-    /// `TamableAnimal`, Blaze) into one global key per version, and loses Fox's entry for v26.x
-    /// in the process. `BeeEntity` hits the identical gap with `BEE_FLAGS` today. Server-side
-    /// state (`self.flags`) stays authoritative either way; this only means clients on v26.x
-    /// won't see the crouch/sit/sleep pose until `pumpkin-data`'s tracked-data generation is
-    /// fixed to disambiguate per-class collisions (out of scope here).
+    /// `Fox.DATA_FLAGS_ID`, the byte bitfield that drives the crouch/sit/sleep poses
+    /// client-side.
     fn set_flag(&self, mask: u8, value: bool) {
         let old = if value {
             self.flags.fetch_or(mask, Relaxed)
@@ -339,8 +336,7 @@ impl FoxEntity {
         let byte = if value { old | mask } else { old & !mask };
         self.mob_entity.living_entity.entity.send_meta_data(
             &[Metadata::new(
-                TrackedData::FOX_FLAGS,
-                MetaDataType::BYTE,
+                pumpkin_data::tracked_data::fox::FLAGS_ID,
                 byte as i8,
             )],
             None,
@@ -447,9 +443,8 @@ impl FoxEntity {
         self.variant.store(variant as u8, Relaxed);
         self.mob_entity.living_entity.entity.send_meta_data(
             &[Metadata::new(
-                TrackedData::TYPE_ID,
-                MetaDataType::INT,
-                VarInt(i32::from(variant as u8)),
+                pumpkin_data::tracked_data::fox::TYPE_ID,
+                VarInt(variant.id()),
             )],
             None,
         );
@@ -490,7 +485,8 @@ impl AgeableMob for FoxEntity {
 
 impl Animal for FoxEntity {
     fn is_food(&self, item_stack: &ItemStack) -> bool {
-        TEMPT_ITEMS.iter().any(|i| i.id == item_stack.item.id)
+        item_stack.item.has_tag(&tag::Item::MINECRAFT_FOX_FOOD)
+            || TEMPT_ITEMS.iter().any(|i| i.id == item_stack.item.id)
     }
 }
 
@@ -545,6 +541,10 @@ impl Mob for FoxEntity {
         &self.mob_entity
     }
 
+    fn mob_set_variant_name(&self, name: &str) {
+        self.set_variant(FoxVariant::from_name(name));
+    }
+
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             if self.variant.load(Relaxed) == VARIANT_UNSET {
@@ -569,10 +569,19 @@ impl Mob for FoxEntity {
                 // client has the up-to-date tracked value.
                 self.set_variant(self.variant());
             }
-            self.mob_entity.living_entity.entity.send_meta_data(
+            let entity = &self.mob_entity.living_entity.entity;
+            if entity.age.load(Relaxed) < 0 {
+                entity.send_meta_data(
+                    &[Metadata::new(
+                        pumpkin_data::tracked_data::fox::BABY_ID,
+                        true,
+                    )],
+                    None,
+                );
+            }
+            entity.send_meta_data(
                 &[Metadata::new(
-                    TrackedData::FOX_FLAGS,
-                    MetaDataType::BYTE,
+                    pumpkin_data::tracked_data::fox::FLAGS_ID,
                     self.flags.load(Relaxed) as i8,
                 )],
                 None,

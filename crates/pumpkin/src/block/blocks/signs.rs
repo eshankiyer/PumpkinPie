@@ -468,8 +468,7 @@ impl BlockBehaviour for SignBlock {
                     let source = CommandSender::Dummy.into_source(&server).await;
                     server
                         .command_dispatcher
-                        .read()
-                        .await
+                        .load()
                         .handle_command(&source, command)
                         .await;
                     executed_command = true;

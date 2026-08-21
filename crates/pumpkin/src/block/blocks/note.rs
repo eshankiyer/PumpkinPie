@@ -42,6 +42,17 @@ impl NoteBlock {
         context: GameEventContext,
     ) {
         if !is_base_block(props.instrument) || world.get_block_state(&pos.up()).is_air() {
+            let mut event = crate::plugin::api::events::block::note_play::NotePlayEvent::new(
+                *pos,
+                format!("{:?}", props.instrument),
+                props.note,
+            );
+            if let Some(server) = world.server.upgrade() {
+                server.plugin_manager.fire(&server, &mut event).await;
+            }
+            if event.cancelled {
+                return;
+            }
             world.add_synced_block_event(*pos, 0, 0).await;
             emit_game_event(
                 world,

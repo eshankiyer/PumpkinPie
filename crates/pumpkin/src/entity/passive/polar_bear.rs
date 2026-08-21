@@ -4,9 +4,8 @@ use std::sync::{
 };
 
 use pumpkin_data::entity::EntityType;
-use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::sound::Sound;
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 
@@ -160,11 +159,7 @@ impl PolarBearEntity {
     pub fn set_standing(&self, value: bool) {
         if self.is_standing.swap(value, Relaxed) != value {
             self.mob_entity.living_entity.entity.send_meta_data(
-                &[Metadata::new(
-                    TrackedData::STANDING_ID,
-                    MetaDataType::BOOLEAN,
-                    value,
-                )],
+                &[Metadata::new(tracked_data::polar_bear::STANDING_ID, value)],
                 None,
             );
         }

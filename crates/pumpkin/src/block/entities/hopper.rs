@@ -199,6 +199,17 @@ impl HopperBlockEntity {
     async fn suck_in_items(&self, world: &Arc<World>) -> bool {
         // TODO getEntityContainer
         let pos_up = &self.position.up();
+        let mut search_event = crate::plugin::api::events::inventory::hopper_inventory_search::HopperInventorySearchEvent::new(
+            self.position,
+            *pos_up,
+        );
+        if let Some(server) = world.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut search_event).await;
+        }
+        if search_event.cancelled {
+            return false;
+        }
+
         if let Some(entity) = world.get_block_entity(pos_up)
             && let Some(container) = entity.clone().get_inventory()
         {
@@ -233,6 +244,20 @@ impl HopperBlockEntity {
             for entity_base in entities {
                 if let Some(item_entity) = entity_base.clone().get_item_entity() {
                     let mut stack = item_entity.get_item_stack().lock().await;
+                    if stack.is_empty() {
+                        continue;
+                    }
+                    let mut pickup_event = crate::plugin::api::events::inventory::inventory_pickup_item::InventoryPickupItemEvent::new(
+                        self.position,
+                        item_entity.get_entity().entity_id,
+                        stack.item.registry_key.to_string(),
+                    );
+                    if let Some(server) = world.server.upgrade() {
+                        server.plugin_manager.fire(&server, &mut pickup_event).await;
+                    }
+                    if pickup_event.cancelled {
+                        continue;
+                    }
                     // `HopperBlockEntity.addItem(container, entity)` offers the WHOLE stack and
                     // leaves whatever did not fit on the entity, so a dropped stack of 64 is
                     // swallowed in one tick rather than one item every eight ticks. Only the
@@ -288,9 +313,22 @@ impl HopperBlockEntity {
             if is_full {
                 return false;
             }
+            let target_pos = output_position(self.position, *state);
             for i in 0..self.size() {
                 let item = self.get_stack(i).await;
                 if !item.is_empty() {
+                    let mut move_event = crate::plugin::api::events::inventory::inventory_move_item::InventoryMoveItemEvent::new(
+                        self.position,
+                        target_pos,
+                        item.item.registry_key.to_string(),
+                        1,
+                    );
+                    if let Some(server) = world.server.upgrade() {
+                        server.plugin_manager.fire(&server, &mut move_event).await;
+                    }
+                    if move_event.cancelled {
+                        continue;
+                    }
                     let mut insertable_slots = Vec::new();
                     for &slot in &target_slots {
                         if container

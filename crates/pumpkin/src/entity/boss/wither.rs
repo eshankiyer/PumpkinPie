@@ -182,7 +182,13 @@ impl Mob for WitherEntity {
                 }
                 if next == 0 {
                     let world = entity.world.load_full();
-                    world.explode(entity.get_eye_pos(), 7.0).await;
+                    world
+                        .explode(
+                            entity.get_eye_pos(),
+                            7.0,
+                            crate::world::ExplosionInteraction::Mob,
+                        )
+                        .await;
                 }
                 return;
             }

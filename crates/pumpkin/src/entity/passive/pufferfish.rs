@@ -4,11 +4,10 @@ use std::sync::{Arc, Weak};
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::EntityType;
-use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::potion::Effect;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
 
@@ -154,8 +153,7 @@ impl PufferfishEntity {
     fn send_puff_state(&self, state: u8) {
         self.mob_entity.living_entity.entity.send_meta_data(
             &[Metadata::new(
-                TrackedData::PUFF_STATE,
-                MetaDataType::INT,
+                tracked_data::pufferfish::PUFF_STATE,
                 VarInt(i32::from(state)),
             )],
             None,

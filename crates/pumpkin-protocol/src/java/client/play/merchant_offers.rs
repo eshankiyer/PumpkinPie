@@ -1,4 +1,4 @@
-use pumpkin_data::packet::clientbound::PLAY_MERCHANT_OFFERS;
+use pumpkin_data::packet::clientbound::play::MERCHANT_OFFERS;
 use pumpkin_macros::java_packet;
 
 use crate::ClientPacket;
@@ -9,10 +9,10 @@ use pumpkin_util::version::JavaMinecraftVersion;
 
 #[derive(Clone)]
 pub struct MerchantOffer {
-    pub base_cost_a: ItemStackSerializer<'static>, // TODO: item cost
+    pub base_cost_a: ItemStackSerializer<'static>,
     pub output: ItemStackSerializer<'static>,
-    pub cost_b: Option<ItemStackSerializer<'static>>, // TODO: item cost
-    pub is_disabled: bool,
+    pub cost_b: Option<ItemStackSerializer<'static>>,
+    pub reward_exp: bool,
     pub uses: i32,
     pub max_uses: i32,
     pub xp: i32,
@@ -42,9 +42,22 @@ impl MerchantOffer {
         (base_count + demand_diff + special_price).clamp(1, max_stack_size.max(1))
     }
 
-    /// Vanilla `MerchantOffer::updateDemand` (`MerchantOffer.java:145-147`).
+    #[must_use]
+    pub const fn is_out_of_stock(&self) -> bool {
+        self.uses >= self.max_uses
+    }
+
+    #[must_use]
+    pub const fn needs_restock(&self) -> bool {
+        self.uses > 0
+    }
+
     pub const fn update_demand(&mut self) {
         self.demand += self.uses - (self.max_uses - self.uses);
+    }
+
+    pub const fn reset_uses(&mut self) {
+        self.uses = 0;
     }
 
     fn write(
@@ -52,15 +65,13 @@ impl MerchantOffer {
         mut write: impl std::io::Write,
         version: JavaMinecraftVersion,
     ) -> Result<(), crate::ser::WritingError> {
-        self.base_cost_a.write_with_version(&mut write, &version)?;
+        self.base_cost_a
+            .write_item_cost_with_version(&mut write, &version)?;
         self.output.write_with_version(&mut write, &version)?;
         write.write_option(&self.cost_b, |w, cost_b| {
-            cost_b.write_with_version(w, &version)
+            cost_b.write_item_cost_with_version(w, &version)
         })?;
-        // Vanilla `MerchantOffer.writeToStream` (`MerchantOffer.java:242`) writes
-        // `offer.isOutOfStock()` (`uses >= maxUses`) in this slot, not `rewardExp` -- that
-        // field is never sent over the wire at all, only through NBT (`rewardExp` key).
-        write.write_bool(self.uses >= self.max_uses)?;
+        write.write_bool(self.is_out_of_stock())?;
         write.write_i32_be(self.uses)?;
         write.write_i32_be(self.max_uses)?;
         write.write_i32_be(self.xp)?;
@@ -71,7 +82,7 @@ impl MerchantOffer {
     }
 }
 
-#[java_packet(PLAY_MERCHANT_OFFERS)]
+#[java_packet(MERCHANT_OFFERS)]
 pub struct CMerchantOffers {
     pub window_id: VarInt,
     pub offers: Vec<MerchantOffer>,
@@ -122,8 +133,58 @@ impl ClientPacket for CMerchantOffers {
 }
 
 #[cfg(test)]
-mod test {
-    use super::MerchantOffer;
+mod tests {
+    use std::{borrow::Cow, io::Cursor};
+
+    use pumpkin_data::{
+        data_component::DataComponent,
+        data_component_impl::{
+            DataComponentImpl, DyedColorImpl, ItemNameImpl, MapIdImpl, SuspiciousStewEffect,
+            SuspiciousStewEffectsImpl,
+        },
+        item::Item,
+        item_id_remap::remap_item_id_for_version,
+        item_stack::ItemStack,
+    };
+    use pumpkin_util::version::JavaMinecraftVersion;
+
+    use crate::ser::NetworkReadExt;
+
+    use super::*;
+
+    fn offer() -> MerchantOffer {
+        MerchantOffer {
+            base_cost_a: ItemStackSerializer(Cow::Owned(ItemStack::new(12, &Item::EMERALD))),
+            output: ItemStackSerializer(Cow::Owned(ItemStack::new(1, &Item::BOOK))),
+            cost_b: None,
+            reward_exp: true,
+            uses: 0,
+            max_uses: 12,
+            xp: 1,
+            special_price: 0,
+            price_multiplier: 0.05,
+            demand: 0,
+        }
+    }
+
+    #[test]
+    fn merchant_inputs_use_item_cost_encoding() {
+        let version = JavaMinecraftVersion::V_26_2;
+        let packet =
+            CMerchantOffers::new(VarInt(1), vec![offer()], VarInt(1), VarInt(0), true, true);
+        let mut bytes = Vec::new();
+        packet.write_packet_data(&mut bytes, &version).unwrap();
+        let mut cursor = Cursor::new(&bytes);
+
+        assert_eq!(cursor.get_var_int().unwrap(), VarInt(1));
+        assert_eq!(cursor.get_var_int().unwrap(), VarInt(1));
+        assert_eq!(
+            cursor.get_var_int().unwrap(),
+            VarInt::from(remap_item_id_for_version(Item::EMERALD.id, version))
+        );
+        assert_eq!(cursor.get_var_int().unwrap(), VarInt(12));
+        assert_eq!(cursor.get_var_int().unwrap(), VarInt(0));
+    }
 
     #[test]
     fn modified_cost_count_applies_demand_and_special_price() {
@@ -144,96 +205,75 @@ mod test {
     }
 
     #[test]
-    fn update_demand_matches_vanilla_formula() {
-        let mut offer = MerchantOffer {
-            base_cost_a: crate::codec::item_stack_seralizer::ItemStackSerializer(
-                std::borrow::Cow::Owned(pumpkin_data::item_stack::ItemStack::EMPTY.clone()),
-            ),
-            output: crate::codec::item_stack_seralizer::ItemStackSerializer(
-                std::borrow::Cow::Owned(pumpkin_data::item_stack::ItemStack::EMPTY.clone()),
-            ),
-            cost_b: None,
-            is_disabled: false,
-            uses: 12,
-            max_uses: 12,
-            xp: 2,
-            special_price: 0,
-            price_multiplier: 0.05,
-            demand: 0,
-        };
-        // demand += uses - (max_uses - uses) = 12 - 0 = 12
-        offer.update_demand();
-        assert_eq!(offer.demand, 12);
-
-        offer.uses = 0;
-        offer.update_demand();
-        // demand += 0 - 12 = 12 - 12 = 0
-        assert_eq!(offer.demand, 0);
+    fn merchant_offer_is_out_of_stock_at_max_uses() {
+        let mut offer = offer();
+        offer.uses = offer.max_uses - 1;
+        assert!(!offer.is_out_of_stock());
+        offer.uses += 1;
+        assert!(offer.is_out_of_stock());
     }
 
-    fn test_offer(is_disabled: bool, uses: i32, max_uses: i32) -> MerchantOffer {
-        MerchantOffer {
-            base_cost_a: crate::codec::item_stack_seralizer::ItemStackSerializer(
-                std::borrow::Cow::Owned(pumpkin_data::item_stack::ItemStack::EMPTY.clone()),
+    #[test]
+    fn restock_updates_demand_before_resetting_uses() {
+        let mut offer = offer();
+        offer.uses = 8;
+
+        assert!(offer.needs_restock());
+        offer.update_demand();
+        offer.reset_uses();
+
+        assert_eq!(offer.demand, 4);
+        assert_eq!(offer.uses, 0);
+        assert!(!offer.needs_restock());
+    }
+
+    #[test]
+    fn dynamic_villager_results_have_network_codecs() {
+        let mut dyed = ItemStack::new(1, &Item::LEATHER_CHESTPLATE);
+        dyed.patch.push((
+            DataComponent::DyedColor,
+            Some(DyedColorImpl { rgb: 0x12_34_56 }.to_dyn()),
+        ));
+        let mut stew = ItemStack::new(1, &Item::SUSPICIOUS_STEW);
+        stew.patch.push((
+            DataComponent::SuspiciousStewEffects,
+            Some(
+                SuspiciousStewEffectsImpl {
+                    effects: Cow::Owned(vec![SuspiciousStewEffect {
+                        effect: Cow::Borrowed("minecraft:night_vision"),
+                        duration: 100,
+                    }]),
+                }
+                .to_dyn(),
             ),
-            output: crate::codec::item_stack_seralizer::ItemStackSerializer(
-                std::borrow::Cow::Owned(pumpkin_data::item_stack::ItemStack::EMPTY.clone()),
+        ));
+        let mut map = ItemStack::new(1, &Item::FILLED_MAP);
+        map.patch
+            .push((DataComponent::MapId, Some(MapIdImpl { id: 1 }.to_dyn())));
+        map.patch.push((
+            DataComponent::ItemName,
+            Some(
+                ItemNameImpl {
+                    name: Cow::Borrowed("filled_map.mansion"),
+                }
+                .to_dyn(),
             ),
-            cost_b: None,
-            is_disabled,
-            uses,
-            max_uses,
-            xp: 2,
-            special_price: 0,
-            price_multiplier: 0.05,
-            demand: 0,
+        ));
+
+        for output in [dyed, stew, map] {
+            let mut dynamic_offer = offer();
+            dynamic_offer.output = ItemStackSerializer(Cow::Owned(output));
+            let packet = CMerchantOffers::new(
+                VarInt(1),
+                vec![dynamic_offer],
+                VarInt(1),
+                VarInt(0),
+                true,
+                true,
+            );
+            packet
+                .write_packet_data(&mut Vec::new(), &JavaMinecraftVersion::V_26_2)
+                .unwrap();
         }
-    }
-
-    fn write_bytes(offer: &MerchantOffer) -> Vec<u8> {
-        let mut buf = Vec::new();
-        offer
-            .write(
-                &mut buf,
-                pumpkin_util::version::JavaMinecraftVersion::V_1_21_11,
-            )
-            .unwrap();
-        buf
-    }
-
-    #[test]
-    fn wire_write_ignores_is_disabled_reward_exp_flag() {
-        // `is_disabled` (populated from `!rewardExp` elsewhere) must have no effect on the
-        // wire encoding: vanilla `MerchantOffer.writeToStream` (`MerchantOffer.java:242`)
-        // never sends `rewardExp` over the network at all.
-        let a = write_bytes(&test_offer(false, 3, 12));
-        let b = write_bytes(&test_offer(true, 3, 12));
-        assert_eq!(a, b);
-    }
-
-    #[test]
-    fn wire_write_sends_is_out_of_stock_not_is_disabled() {
-        // Vanilla `MerchantOffer.writeToStream` (`MerchantOffer.java:242`) writes
-        // `offer.isOutOfStock()`, i.e. `uses >= maxUses`, in the boolean slot right after the
-        // optional second cost. `is_disabled` true here must not force that byte to 1, and
-        // `uses >= max_uses` must force it to 1 even when `is_disabled` is false.
-        let not_exhausted = write_bytes(&test_offer(true, 3, 12));
-        let exhausted = write_bytes(&test_offer(false, 12, 12));
-
-        // The flag is derived from `uses`, so flipping it also changes the `uses` i32 field
-        // written right after it -- but the flag byte itself always comes first, so it is
-        // always the first differing byte.
-        assert_eq!(not_exhausted.len(), exhausted.len());
-        let diff_positions: Vec<usize> = not_exhausted
-            .iter()
-            .zip(exhausted.iter())
-            .enumerate()
-            .filter(|(_, (x, y))| x != y)
-            .map(|(i, _)| i)
-            .collect();
-        assert_eq!(diff_positions.len(), 2);
-        let pos = diff_positions[0];
-        assert_eq!(not_exhausted[pos], 0);
-        assert_eq!(exhausted[pos], 1);
     }
 }

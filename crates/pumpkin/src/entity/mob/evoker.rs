@@ -62,10 +62,10 @@ impl EvokerEntity {
             goal_selector.add_goal(4, Box::new(EvokerSummonSpellGoal::new(evoker_weak.clone())));
             goal_selector.add_goal(5, Box::new(EvokerAttackSpellGoal::new(evoker_weak.clone())));
             goal_selector.add_goal(6, Box::new(EvokerWololoSpellGoal::new(evoker_weak)));
-            goal_selector.add_goal(8, Box::new(WanderAroundGoal::new(1.0)));
+            goal_selector.add_goal(8, Box::new(WanderAroundGoal::new(0.6)));
             goal_selector.add_goal(
                 9,
-                LookAtEntityGoal::with_default(mob_weak.clone(), &EntityType::PLAYER, 8.0),
+                LookAtEntityGoal::with_default(mob_weak.clone(), &EntityType::PLAYER, 3.0),
             );
             goal_selector.add_goal(10, Box::new(RandomLookAroundGoal::default()));
 

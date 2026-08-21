@@ -278,25 +278,31 @@ impl ProtoChunk {
                     .trim_height(bottom_y, (dimension.min_y + dimension.height) as u16);
                 (shape.height, shape.min_y)
             }
-            super::generator::WorldGenerator::Flat(_) => (height, bottom_y),
+            super::generator::WorldGenerator::Flat(_)
+            | super::generator::WorldGenerator::Custom(_) => (height, bottom_y),
         };
 
         let default_block = match generator {
             super::generator::WorldGenerator::Noise(noise_gen) => noise_gen.default_block,
             super::generator::WorldGenerator::Flat(_) => Block::AIR.default_state,
+            super::generator::WorldGenerator::Custom(custom_gen) => custom_gen.default_block(),
         };
         let biome_mixer_seed = match generator {
             super::generator::WorldGenerator::Noise(noise_gen) => noise_gen.biome_mixer_seed,
             super::generator::WorldGenerator::Flat(flat_gen) => {
                 crate::biome::hash_seed(flat_gen.seed)
             }
+            super::generator::WorldGenerator::Custom(custom_gen) => custom_gen.biome_mixer_seed(),
         };
         let sea_level = match generator {
             super::generator::WorldGenerator::Noise(noise_gen) => noise_gen.settings.sea_level,
             // Flat world generator has no configured sea level; 63 is the standard overworld
             // value and these features (blue ice, icebergs, freeze-top-layer, basalt columns)
             // are overworld/nether-specific, so a fixed fallback here is safe.
-            super::generator::WorldGenerator::Flat(_) => 63,
+            // Upstream's plugin-supplied generator exposes no sea level either, so it takes
+            // the same fallback.
+            super::generator::WorldGenerator::Flat(_)
+            | super::generator::WorldGenerator::Custom(_) => 63,
         };
 
         let default_heightmap = [i16::MIN; CHUNK_AREA];

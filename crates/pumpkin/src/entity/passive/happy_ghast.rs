@@ -1,29 +1,38 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-use std::sync::Arc;
-use std::sync::atomic::{AtomicI32, Ordering::Relaxed};
+use std::sync::{
+    Arc, Weak,
+    atomic::{AtomicBool, AtomicI32, Ordering, Ordering::Relaxed},
+};
 
 use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, IDSet, IdOr};
+use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ageable::{AgeableData, AgeableMob},
-    ai::goal::{swim::SwimGoal, tempt::TemptGoal, wander_around::WanderAroundGoal},
+    ai::goal::{
+        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal, swim::SwimGoal,
+        tempt::TemptGoal, wander_around::WanderAroundGoal,
+    },
     mob::{Mob, MobEntity},
     passive::animal::Animal,
     player::Player,
 };
 
-/// Happy Ghast Tempt items are the harness-color tags plus the snowball
+/// What tempts a happy ghast: the snowball.
+///
+/// Vanilla's tempt set is the harness-color tags plus the snowball
 /// (`ItemTags.HAPPY_GHAST_TEMPT_ITEMS`); Pumpkin's `TemptGoal` only accepts a
 /// static item list, not a tag/predicate, so this is narrowed to the snowball,
 /// matching `ItemTags.HAPPY_GHAST_FOOD` (the baby feed/growth tag) exactly.
-const TEMPT_ITEMS: &[&Item] = &[&Item::SNOWBALL];
+pub const HAPPY_GHAST_FOOD: &[&Item] = &[&Item::SNOWBALL];
 
 const HEAL_INTERVAL_TICKS: i32 = 600;
 
@@ -41,6 +50,10 @@ pub struct HappyGhastEntity {
     pub mob_entity: MobEntity,
     pub ageable_data: AgeableData,
     heal_ticks: AtomicI32,
+    pub server_still_timeout: AtomicI32,
+    pub leash_holder_time: AtomicI32,
+    pub is_leash_holder: AtomicBool,
+    pub stays_still: AtomicBool,
 }
 
 impl HappyGhastEntity {
@@ -53,20 +66,42 @@ impl HappyGhastEntity {
             mob_entity,
             ageable_data: AgeableData::default(),
             heal_ticks: AtomicI32::new(0),
+            server_still_timeout: AtomicI32::new(0),
+            leash_holder_time: AtomicI32::new(0),
+            is_leash_holder: AtomicBool::new(false),
+            stays_still: AtomicBool::new(false),
         };
 
         let mob_arc = Arc::new(happy_ghast);
+        let mob_weak: Weak<dyn Mob> = {
+            let mob_arc: Arc<dyn Mob> = mob_arc.clone();
+            Arc::downgrade(&mob_arc)
+        };
 
         {
-            let mut goal_selector = mob_arc.mob_entity.goals_selector.lock().unwrap();
+            let mut goal_selector = mob_arc
+                .mob_entity
+                .goals_selector
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             // `HappyGhast.java:107-114`: `TemptGoal.ForNonPathfinders(this, 1.0, ..., false, 7.0)`.
             goal_selector.add_goal(
                 1,
-                Box::new(TemptGoal::with_stop_distance(1.0, TEMPT_ITEMS, false, 7.0)),
+                Box::new(TemptGoal::with_stop_distance(
+                    1.0,
+                    HAPPY_GHAST_FOOD,
+                    false,
+                    7.0,
+                )),
             );
             goal_selector.add_goal(2, Box::new(WanderAroundGoal::new(1.0)));
+            goal_selector.add_goal(
+                3,
+                LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
+            );
+            goal_selector.add_goal(4, Box::new(RandomLookAroundGoal::default()));
         };
 
         mob_arc
@@ -195,23 +230,42 @@ impl HappyGhastEntity {
             .store(entity.block_pos.load());
         self.mob_entity.position_target_range.store(radius, Relaxed);
     }
-}
 
-impl NBTStorage for HappyGhastEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_ageable_nbt(nbt);
-            self.write_animal_nbt(nbt);
-        })
+    pub fn set_server_still_timeout(&self, timeout: i32) {
+        self.server_still_timeout.store(timeout, Ordering::Relaxed);
+        self.sync_stay_still_flag();
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_ageable_nbt(nbt);
-            self.read_animal_nbt(nbt);
-        })
+    #[must_use]
+    pub fn is_on_still_timeout(&self) -> bool {
+        self.stays_still.load(Ordering::Relaxed)
+            || self.server_still_timeout.load(Ordering::Relaxed) > 0
+    }
+
+    fn set_leash_holder(&self, is_leash_holder: bool) {
+        self.is_leash_holder
+            .store(is_leash_holder, Ordering::Relaxed);
+        let entity = self.get_entity();
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::happy_ghast::IS_LEASH_HOLDER,
+                is_leash_holder,
+            )],
+            None,
+        );
+    }
+
+    fn sync_stay_still_flag(&self) {
+        let stays_still = self.server_still_timeout.load(Ordering::Relaxed) > 0;
+        self.stays_still.store(stays_still, Ordering::Relaxed);
+        let entity = self.get_entity();
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::happy_ghast::STAYS_STILL,
+                stays_still,
+            )],
+            None,
+        );
     }
 }
 
@@ -221,11 +275,37 @@ impl AgeableMob for HappyGhastEntity {
     }
 }
 
+impl NBTStorage for HappyGhastEntity {
+    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
+        Box::pin(async move {
+            self.mob_entity.living_entity.write_nbt(nbt).await;
+            self.write_ageable_nbt(nbt);
+            self.write_animal_nbt(nbt);
+            nbt.put_int(
+                "still_timeout",
+                self.server_still_timeout.load(Ordering::Relaxed),
+            );
+        })
+    }
+
+    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
+        Box::pin(async move {
+            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
+            self.read_ageable_nbt(nbt);
+            self.read_animal_nbt(nbt);
+            if let Some(timeout) = nbt.get_int("still_timeout") {
+                self.set_server_still_timeout(timeout);
+            }
+        })
+    }
+}
+
 impl Animal for HappyGhastEntity {
     fn is_food(&self, item_stack: &ItemStack) -> bool {
         item_stack
             .item
             .has_tag(&tag::Item::MINECRAFT_HAPPY_GHAST_FOOD)
+            || HAPPY_GHAST_FOOD.iter().any(|i| i.id == item_stack.item.id)
     }
 }
 
@@ -240,6 +320,35 @@ impl Mob for HappyGhastEntity {
 
     fn get_mob_gravity(&self) -> f64 {
         0.0
+    }
+
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let entity = self.get_entity();
+            let is_baby = entity.age.load(Ordering::Relaxed) < 0;
+            if is_baby {
+                entity.send_meta_data(
+                    &[Metadata::new(
+                        pumpkin_data::tracked_data::happy_ghast::BABY_ID,
+                        true,
+                    )],
+                    None,
+                );
+            }
+            entity.send_meta_data(
+                &[
+                    Metadata::new(
+                        pumpkin_data::tracked_data::happy_ghast::IS_LEASH_HOLDER,
+                        self.is_leash_holder.load(Ordering::Relaxed),
+                    ),
+                    Metadata::new(
+                        pumpkin_data::tracked_data::happy_ghast::STAYS_STILL,
+                        self.stays_still.load(Ordering::Relaxed),
+                    ),
+                ],
+                None,
+            );
+        })
     }
 
     fn mob_interact<'a>(
@@ -274,6 +383,21 @@ impl Mob for HappyGhastEntity {
         Box::pin(async move {
             if !self.mob_entity.living_entity.entity.is_alive() {
                 return;
+            }
+
+            self.ageable_ai_step();
+
+            let leash_time = self.leash_holder_time.load(Relaxed);
+            if leash_time > 0 {
+                self.leash_holder_time.fetch_sub(1, Relaxed);
+            }
+            self.set_leash_holder(leash_time > 0);
+
+            if self.server_still_timeout.load(Relaxed) > 0 {
+                if self.get_entity().age.load(Relaxed) > 60 {
+                    self.server_still_timeout.fetch_sub(1, Relaxed);
+                }
+                self.sync_stay_still_flag();
             }
 
             self.continuous_heal();

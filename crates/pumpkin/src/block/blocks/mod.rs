@@ -99,6 +99,7 @@ pub mod mycelium;
 pub mod nylium;
 pub mod potent_sulfur;
 pub mod powder_snow;
+pub mod rooted_dirt;
 pub mod snow;
 pub mod sponge;
 
@@ -137,3 +138,10 @@ pub mod creaking_heart;
 
 pub mod scaffolding;
 pub mod structure_block;
+
+pub mod brushable_block;
+pub mod cartography_table;
+pub mod decorated_pot;
+pub mod fletching_table;
+pub mod sniffer_egg;
+pub mod turtle_egg;

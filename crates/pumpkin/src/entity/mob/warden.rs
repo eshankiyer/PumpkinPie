@@ -74,9 +74,8 @@ use std::sync::{Arc, Weak};
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::{EntityPose, EntityType};
 use pumpkin_data::game_event::GameEvent;
-use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::sound::{Sound, SoundCategory};
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::GameMode;
@@ -119,8 +118,7 @@ fn sync_warden_pose(entity: &Entity, pose: EntityPose) {
     entity.pose.store(pose);
     entity.send_meta_data(
         &[Metadata::new(
-            TrackedData::POSE,
-            MetaDataType::POSE,
+            tracked_data::warden::POSE,
             VarInt(pose as i32),
         )],
         None,

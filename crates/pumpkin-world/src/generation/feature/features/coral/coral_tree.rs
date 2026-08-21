@@ -35,7 +35,10 @@ impl CoralTreeFeature {
         let trunk_top_pos = pos;
         let branch_count = random.next_bounded_i32(3) + 2;
 
-        let mut directions = BlockDirection::horizontal();
+        // vanilla takes the first `branch_count` of Plane.HORIZONTAL.shuffledCopy(random):
+        // a Fisher-Yates over the horizontal_worldgen() [N, E, S, W] base order that
+        // consumes RNG draws.
+        let mut directions = BlockDirection::horizontal_worldgen();
         shuffle(&mut directions, random);
         for dir in &directions[..branch_count as usize] {
             pos = trunk_top_pos;

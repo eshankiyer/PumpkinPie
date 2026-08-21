@@ -13,15 +13,14 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::meta_data_type::MetaDataType;
+use pumpkin_data::packet::CURRENT_MC_VERSION;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_data::tracked_data::TrackedId;
 use pumpkin_data::{Block, BlockDirection, BlockState};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::item_stack_seralizer::ItemStackSerializer;
 use pumpkin_protocol::codec::var_int::VarInt;
-use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_protocol::java::client::play::{CSetEntityMetadata, Metadata};
 use pumpkin_util::GameMode;
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::vector3::Vector3;
@@ -52,39 +51,6 @@ pub struct ItemFrameEntity {
 impl ItemFrameEntity {
     /// Facing used when a frame is created without NBT, matching vanilla.
     const DEFAULT_FACING: BlockDirection = BlockDirection::South;
-
-    /// `ItemFrame.DATA_ITEM`. `HangingEntity` gained a synched `DATA_DIRECTION`
-    /// field in 26.1 (generated `TrackedData::DIRECTION` is absent before then
-    /// and 8 from 26.1), which pushed both item-frame fields up by one. The
-    /// pre-26.1 values follow from `Entity` occupying 0..=7 in every supported
-    /// version; the generated `ROTATION` entry is a cross-entity name collision
-    /// and is deliberately not used here.
-    const DATA_ITEM: TrackedId = TrackedId {
-        v1_21: 8,
-        v1_21_2: 8,
-        v1_21_4: 8,
-        v1_21_5: 8,
-        v1_21_6: 8,
-        v1_21_7: 8,
-        v1_21_9: 8,
-        v1_21_11: 8,
-        v26_1: 9,
-        v26_2: 9,
-    };
-
-    /// `ItemFrame.DATA_ROTATION`.
-    const DATA_ROTATION: TrackedId = TrackedId {
-        v1_21: 9,
-        v1_21_2: 9,
-        v1_21_4: 9,
-        v1_21_5: 9,
-        v1_21_6: 9,
-        v1_21_7: 9,
-        v1_21_9: 9,
-        v1_21_11: 9,
-        v26_1: 10,
-        v26_2: 10,
-    };
 
     pub fn new(entity: Entity) -> Self {
         let facing = Self::DEFAULT_FACING.to_index();
@@ -172,8 +138,7 @@ impl ItemFrameEntity {
     fn sync_item(&self, stack: &ItemStack) {
         self.entity.send_meta_data(
             &[Metadata::new(
-                Self::DATA_ITEM,
-                MetaDataType::ITEM_STACK,
+                pumpkin_data::tracked_data::item_frame::ITEM,
                 &ItemStackSerializer::from(stack.clone()),
             )],
             None,
@@ -181,10 +146,11 @@ impl ItemFrameEntity {
     }
 
     fn sync_rotation(&self, rotation: u8) {
+        // `EntityDataSerializers.INT` is `ByteBufCodecs.VAR_INT`, so this has to go out as a
+        // VarInt rather than a fixed-width i32.
         self.entity.send_meta_data(
             &[Metadata::new(
-                Self::DATA_ROTATION,
-                MetaDataType::INT,
+                pumpkin_data::tracked_data::item_frame::ROTATION,
                 VarInt(i32::from(rotation)),
             )],
             None,
@@ -445,6 +411,47 @@ impl EntityBase for ItemFrameEntity {
             let stack = self.item_stack.lock().await.clone();
             self.sync_item(&stack);
             self.sync_rotation(self.rotation.load(Ordering::Relaxed));
+        })
+    }
+
+    /// The frame's item and rotation have to reach the client together with the spawn
+    /// packet, otherwise a freshly streamed-in frame renders empty until something else
+    /// dirties its data tracker.
+    fn send_java_spawn_packet<'a>(
+        &'a self,
+        client: &'a crate::net::java::JavaClient,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            let spawn_packet = self.entity.create_spawn_packet();
+            if let Ok(data) = client.serialize_packet(&spawn_packet) {
+                client.enqueue_packet(data).await;
+            }
+
+            let ver = client.version.load();
+            if ver >= CURRENT_MC_VERSION {
+                let item_serializer =
+                    ItemStackSerializer::from(self.item_stack.lock().await.clone());
+                let rotation = VarInt(i32::from(self.rotation.load(Ordering::Relaxed) % 8));
+
+                let mut data = Vec::new();
+                let meta_item = Metadata::new(
+                    pumpkin_data::tracked_data::item_frame::ITEM,
+                    item_serializer,
+                );
+                let meta_rot =
+                    Metadata::new(pumpkin_data::tracked_data::item_frame::ROTATION, rotation);
+
+                if meta_item.write(&mut data, &ver).is_ok()
+                    && meta_rot.write(&mut data, &ver).is_ok()
+                {
+                    data.push(255);
+                    let meta_packet =
+                        CSetEntityMetadata::new(self.entity.entity_id.into(), data.into());
+                    if let Ok(meta_data) = client.serialize_packet(&meta_packet) {
+                        client.enqueue_packet(meta_data).await;
+                    }
+                }
+            }
         })
     }
 

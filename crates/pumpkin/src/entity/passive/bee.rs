@@ -14,7 +14,7 @@ use pumpkin_data::damage::DamageType;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{Block, effect::StatusEffect, potion::Effect};
-use pumpkin_data::{entity::EntityType, meta_data_type::MetaDataType, tracked_data::TrackedData};
+use pumpkin_data::{entity::EntityType, tracked_data};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_protocol::java::client::play::Metadata;
@@ -169,11 +169,7 @@ impl BeeEntity {
             return;
         }
         self.mob_entity.living_entity.entity.send_meta_data(
-            &[Metadata::new(
-                TrackedData::BEE_FLAGS,
-                MetaDataType::BYTE,
-                new as i8,
-            )],
+            &[Metadata::new(tracked_data::bee::FLAGS_ID, new as i8)],
             None,
         );
     }
@@ -620,8 +616,7 @@ impl Mob for BeeEntity {
         Box::pin(async move {
             self.mob_entity.living_entity.entity.send_meta_data(
                 &[Metadata::new(
-                    TrackedData::BEE_FLAGS,
-                    MetaDataType::BYTE,
+                    tracked_data::bee::FLAGS_ID,
                     self.flags.load(Relaxed) as i8,
                 )],
                 None,

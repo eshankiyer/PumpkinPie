@@ -12,8 +12,7 @@ use crate::{
 use pumpkin_data::entity::{EntityStatus, EntityType};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::meta_data_type::MetaDataType;
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_protocol::bedrock::server::actor_event::ActorEventType;
 use pumpkin_protocol::codec::item_stack_seralizer::ItemStackSerializer;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::vector3::Vector3;
@@ -75,8 +74,7 @@ impl EntityBase for EggEntity {
             // Sync the item stack so the client renders the correct color/variant
             entity.send_meta_data(
                 &[Metadata::new(
-                    TrackedData::ITEM_STACK,
-                    MetaDataType::ITEM_STACK,
+                    pumpkin_data::tracked_data::egg::ITEM_STACK,
                     &ItemStackSerializer::from(stack.clone()),
                 )],
                 None,
@@ -114,7 +112,11 @@ impl EntityBase for EggEntity {
             let spawn_pos = hit_pos.add(&normal.multiply(0.5, 0.5, 0.5));
 
             // Play egg break particles
-            world.send_entity_status(self.get_entity(), EntityStatus::Death, None);
+            world.send_entity_status(
+                self.get_entity(),
+                EntityStatus::Death,
+                Some(ActorEventType::Death),
+            );
 
             // `ThrownEgg.onHitEntity`: a zero-damage hurt still flinches the target, plays its
             // hurt sound and makes it retaliate, which is why an egg annoys a mob it hits.

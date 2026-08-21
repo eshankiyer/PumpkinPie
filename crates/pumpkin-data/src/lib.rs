@@ -1,4 +1,5 @@
 #![allow(
+    unused,
     clippy::all,
     clippy::pedantic,
     clippy::nursery,
@@ -186,7 +187,7 @@ pub mod dimension;
 #[cfg(feature = "enchantment")]
 #[rustfmt::skip]
 #[path = "generated/enchantment.rs"]
-mod enchantment;
+pub mod enchantment;
 
 #[cfg(feature = "enchantment")]
 pub use enchantment::*;
@@ -275,10 +276,30 @@ pub mod sound_id_remap;
 #[path = "generated/particle_id_remap.rs"]
 pub mod particle_id_remap;
 
+#[cfg(feature = "menu_id_remap")]
+#[rustfmt::skip]
+#[path = "generated/menu_id_remap.rs"]
+pub mod menu_id_remap;
+
+#[cfg(feature = "recipe_serializer_id_remap")]
+#[rustfmt::skip]
+#[path = "generated/recipe_serializer_id_remap.rs"]
+pub mod recipe_serializer_id_remap;
+
+#[cfg(feature = "argument_type_id_remap")]
+#[rustfmt::skip]
+#[path = "generated/argument_type_id_remap.rs"]
+pub mod argument_type_id_remap;
+
 #[cfg(feature = "bedrock_creative")]
 #[rustfmt::skip]
 #[path = "generated/bedrock_creative.rs"]
 pub mod bedrock_creative;
+
+#[cfg(feature = "bedrock_biome")]
+#[rustfmt::skip]
+#[path = "generated/bedrock_biome.rs"]
+pub mod bedrock_biome;
 
 #[cfg(feature = "tag")]
 #[rustfmt::skip]
@@ -387,3 +408,18 @@ pub mod villager;
 #[rustfmt::skip]
 #[path = "generated/slot_ranges.rs"]
 pub mod slot_ranges;
+
+#[cfg(feature = "map_color")]
+#[rustfmt::skip]
+#[path = "generated/map_color.rs"]
+pub mod map_color;
+
+#[cfg(feature = "map_decoration")]
+#[rustfmt::skip]
+#[path = "generated/map_decoration.rs"]
+pub mod map_decoration;
+
+#[cfg(feature = "dye_color")]
+#[rustfmt::skip]
+#[path = "generated/dye_color.rs"]
+pub mod dye_color;

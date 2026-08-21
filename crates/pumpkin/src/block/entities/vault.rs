@@ -411,6 +411,24 @@ impl VaultBlockEntity {
         true
     }
 
+    /// Whether `player_id` already claimed this vault's reward
+    /// (`VaultServerData.hasRewardedPlayer`).
+    pub async fn has_rewarded(&self, player_id: &Uuid) -> bool {
+        self.rewarded_players.lock().await.contains(player_id)
+    }
+
+    /// `VaultServerData.addToRewardedPlayers`, including the FIFO eviction at the cap.
+    pub async fn mark_rewarded(&self, player_id: Uuid) {
+        let mut rewarded = self.rewarded_players.lock().await;
+        if rewarded.contains(&player_id) {
+            return;
+        }
+        rewarded.push(player_id);
+        if rewarded.len() > MAX_REWARD_PLAYERS {
+            rewarded.remove(0);
+        }
+    }
+
     fn play_insert_fail_sound(&self, world: &Arc<World>, sound: Sound, game_time: i64) {
         if game_time
             >= self.last_insert_fail_timestamp.load(Ordering::Relaxed)

@@ -577,6 +577,7 @@ mod test {
     use crate::command::node::{
         CommandExecutor, CommandExecutorResult, RedirectModifier, Redirection,
     };
+    use pumpkin_util::math::vector3::Vector3;
 
     struct TenExecutor;
     impl CommandExecutor for TenExecutor {
@@ -762,5 +763,50 @@ mod test {
         let top_context = result.context.build("foo");
 
         assert!(ContextChain::try_flatten(&top_context).is_none());
+    }
+
+    struct CustomExecutor;
+    impl CommandExecutor for CustomExecutor {
+        fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
+            Box::pin(async move {
+                let source = &context.source;
+                assert_eq!(source.position, Vector3::new(0f64, 10f64, 0f64));
+                Ok(1)
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn multi_stage_modifier_execution() {
+        let mut dispatcher = CommandDispatcher::new();
+        dispatcher.register(
+            CommandArgumentBuilder::new("foo", "A test command").executes(CustomExecutor),
+        );
+        dispatcher.register(
+            CommandArgumentBuilder::new("bar", "Another test command").redirect_with_modifier(
+                Redirection::Root,
+                RedirectModifier::Custom(Arc::new(|context| {
+                    Box::pin(async move {
+                        let mut new_source = context.source.as_ref().clone();
+                        new_source.position = Vector3::new(0f64, 10f64, 0f64);
+                        Ok(vec![Arc::new(new_source)])
+                    })
+                })),
+            ),
+        );
+        let source = Arc::new(CommandSource::dummy());
+        let result = dispatcher.parse_input("bar foo", &source).await;
+        let top_context = result.context.build("bar foo");
+        let chain = ContextChain::try_flatten(&top_context)
+            .expect("The context should have properly flattened, as it has a command to execute");
+        assert_eq!(chain.get_top_context().source.position, Vector3::default());
+        let chain2 = chain
+            .next_stage()
+            .expect("There should have been the next stage");
+        assert!(chain2.next_stage().is_none());
+        let res = chain
+            .execute_all(&source, dispatcher.consumer.as_ref())
+            .await;
+        assert!(res.is_ok_and(|val| val == 1));
     }
 }

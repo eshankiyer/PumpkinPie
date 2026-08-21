@@ -11,10 +11,8 @@ use crate::{
 };
 use pumpkin_data::Block;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::Taggable;
-use pumpkin_data::tracked_data::TrackedData;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::vector3::Vector3;
@@ -228,6 +226,16 @@ impl FishingBobberEntity {
                 )))
                 .await;
 
+            // `FishingHook.retrieve` (`FishingHook.java:456`) fires FISHING_ROD_HOOKED with
+            // the rolled loot; Pumpkin models that as the `FishedItem` trigger.
+            player
+                .trigger_advancement(
+                    crate::entity::player::advancement::trigger::AdvancementTrigger::FishedItem {
+                        item_id: format!("minecraft:{}", item.registry_key),
+                    },
+                )
+                .await;
+
             // Vanilla constructs a single `ExperienceOrb` directly here (FishingHook.java:465),
             // unlike XP-drop sources that go through `ExperienceOrb.award` and split into
             // round-sized orbs - so spawn one orb with the exact roll instead of
@@ -415,8 +423,7 @@ impl FishingBobberEntity {
                     .store(cand.get_entity().entity_id, Ordering::Relaxed);
                 entity.send_meta_data(
                     &[Metadata::new(
-                        TrackedData::HOOKED_ENTITY,
-                        MetaDataType::INT,
+                        pumpkin_data::tracked_data::fishing_bobber::HOOKED_ENTITY,
                         cand.get_entity().entity_id + 1,
                     )],
                     None,

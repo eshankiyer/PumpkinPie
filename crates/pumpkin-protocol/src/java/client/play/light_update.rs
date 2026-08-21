@@ -1,7 +1,7 @@
 use crate::WritingError;
 use crate::codec::bit_set::BitSet;
 use crate::{ClientPacket, VarInt, ser::NetworkWriteExt};
-use pumpkin_data::packet::clientbound::PLAY_LIGHT_UPDATE;
+use pumpkin_data::packet::clientbound::play::LIGHT_UPDATE;
 use pumpkin_macros::java_packet;
 use pumpkin_util::version::JavaMinecraftVersion;
 use pumpkin_world::chunk::format::LightContainer;
@@ -12,7 +12,7 @@ use std::io::Write;
 ///
 /// This packet updates lighting data for a specific chunk without sending the full chunk data.
 /// It's used when block placement or removal changes the lighting in a chunk.
-#[java_packet(PLAY_LIGHT_UPDATE)]
+#[java_packet(LIGHT_UPDATE)]
 pub struct CLightUpdate<'a>(pub &'a ChunkData, pub Option<&'a [usize]>);
 
 impl<'a> CLightUpdate<'a> {
@@ -112,7 +112,7 @@ impl ClientPacket for CLightUpdate<'_> {
     fn write_packet_data(
         &self,
         write: impl Write,
-        _version: &JavaMinecraftVersion,
+        version: &JavaMinecraftVersion,
     ) -> Result<(), WritingError> {
         let mut write = write;
 
@@ -128,6 +128,10 @@ impl ClientPacket for CLightUpdate<'_> {
             .map_err(|_| WritingError::Message("light_engine lock poisoned".into()))?;
         let num_sections = light_engine.sky_light.len();
         let masks = light_masks_for_sections(&light_engine, self.1);
+
+        if version < &JavaMinecraftVersion::V_1_20_2 {
+            write.write_bool(true)?; // trust edges (removed in 1.20.2)
+        }
 
         // Write Sky Light Mask
         write.write_bitset(&BitSet(Box::new([masks.sky as i64])))?;
@@ -199,6 +203,7 @@ mod tests {
             unknown_nbt: pumpkin_nbt::compound::NbtCompound::new(),
             dirty: std::sync::atomic::AtomicBool::new(false),
             inhabited_time: std::sync::atomic::AtomicU64::new(0),
+            custom_data: std::sync::Mutex::new(pumpkin_nbt::compound::NbtCompound::new()),
         }
     }
 

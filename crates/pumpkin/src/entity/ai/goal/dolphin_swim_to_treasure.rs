@@ -35,7 +35,7 @@ impl DolphinSwimToTreasureGoal {
     fn find_treasure(mob: &dyn Mob) -> Option<BlockPos> {
         let entity = mob.get_entity();
         let world = entity.world.load();
-        let generator = &world.level.world_gen;
+        let generator = world.level.world_gen.load();
         let seed = world.level.seed.0;
         let global_cache = generator.global_structure_cache()?;
 

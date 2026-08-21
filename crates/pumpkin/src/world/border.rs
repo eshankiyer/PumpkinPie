@@ -68,7 +68,7 @@ impl Worldborder {
 
     pub async fn init_client(&self, client: &JavaClient) {
         client
-            .enqueue_packet(&CInitializeWorldBorder::new(
+            .enqueue_client_packet(&CInitializeWorldBorder::new(
                 self.center_x,
                 self.center_z,
                 self.current_diameter,

@@ -5,10 +5,9 @@ use std::sync::{Arc, Weak, atomic::Ordering::Relaxed};
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
 use rand::RngExt;
@@ -119,12 +118,12 @@ impl HorseEntity {
 
     fn sync_type_variant(&self) {
         // Horse "Variant (Color & Style)" is index 19 on 26.x: Ageable Mob 16-17, Abstract
-        // Horse's Byte bit mask 18. The flattened `ID_TYPE_VARIANT` (17) is `AbstractFish`'s.
+        // Horse's Byte bit mask 18. The per-entity table keys this off the `horse` module, so
+        // it does not collide with `AbstractFish`'s same-named tracker at 17.
         // 26.2 tables: https://minecraft.wiki/w/Java_Edition_protocol/Entity_metadata
         self.mob_entity.living_entity.entity.send_meta_data(
             &[Metadata::new(
-                TrackedData::HORSE_VARIANT,
-                MetaDataType::INT,
+                tracked_data::horse::ID_TYPE_VARIANT,
                 VarInt(i32::from(self.variant_and_markings.load(Relaxed))),
             )],
             None,

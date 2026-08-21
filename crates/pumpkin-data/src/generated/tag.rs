@@ -20,8 +20,55 @@ pub enum RegistryKey {
     Potion,
     Timeline,
     WorldgenBiome,
+    WorldgenConfiguredFeature,
 }
 impl RegistryKey {
+    pub const ALL: &[Self] = &[
+        Self::BannerPattern,
+        Self::Block,
+        Self::CatVariant,
+        Self::DamageType,
+        Self::Dialog,
+        Self::DimensionType,
+        Self::Enchantment,
+        Self::EntityType,
+        Self::Fluid,
+        Self::GameEvent,
+        Self::Instrument,
+        Self::Item,
+        Self::PaintingVariant,
+        Self::PointOfInterestType,
+        Self::Potion,
+        Self::Timeline,
+        Self::WorldgenBiome,
+        Self::WorldgenConfiguredFeature,
+    ];
+    pub const NETWORK_KEYS: &[Self] = &[
+        Self::BannerPattern,
+        Self::Block,
+        Self::CatVariant,
+        Self::DamageType,
+        Self::Dialog,
+        Self::DimensionType,
+        Self::Enchantment,
+        Self::EntityType,
+        Self::Fluid,
+        Self::GameEvent,
+        Self::Instrument,
+        Self::Item,
+        Self::PaintingVariant,
+        Self::PointOfInterestType,
+        Self::Potion,
+        Self::Timeline,
+        Self::WorldgenBiome,
+    ];
+    #[must_use]
+    pub const fn is_network_synced(&self) -> bool {
+        match self {
+            Self::WorldgenConfiguredFeature => false,
+            _ => true,
+        }
+    }
     #[must_use]
     pub fn from_string(s: &str) -> Option<Self> {
         match s {
@@ -42,6 +89,7 @@ impl RegistryKey {
             "potion" => Some(Self::Potion),
             "timeline" => Some(Self::Timeline),
             "worldgen/biome" => Some(Self::WorldgenBiome),
+            "worldgen/configured_feature" => Some(Self::WorldgenConfiguredFeature),
             _ => None,
         }
     }
@@ -65,6 +113,7 @@ impl RegistryKey {
             Self::Potion => "potion",
             Self::Timeline => "timeline",
             Self::WorldgenBiome => "worldgen/biome",
+            Self::WorldgenConfiguredFeature => "worldgen/configured_feature",
         }
     }
 }
@@ -105,18 +154,22 @@ pub mod BannerPattern {
             "gradient",
             "gradient_up",
         ],
-        &[],
+        &[
+            26u16, 27u16, 28u16, 29u16, 31u16, 38u16, 35u16, 37u16, 32u16, 36u16, 34u16, 33u16,
+            25u16, 5u16, 30u16, 39u16, 40u16, 41u16, 42u16, 7u16, 10u16, 9u16, 8u16, 3u16, 23u16,
+            19u16, 17u16, 20u16, 18u16, 1u16, 14u16, 15u16,
+        ],
     );
-    pub const MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED: super::Tag = (&["curly_border"], &[]);
-    pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::Tag = (&["creeper"], &[]);
-    pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::Tag = (&["bricks"], &[]);
-    pub const MINECRAFT_PATTERN_ITEM_FLOW: super::Tag = (&["flow"], &[]);
-    pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::Tag = (&["flower"], &[]);
-    pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::Tag = (&["globe"], &[]);
-    pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::Tag = (&["guster"], &[]);
-    pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::Tag = (&["mojang"], &[]);
-    pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::Tag = (&["piglin"], &[]);
-    pub const MINECRAFT_PATTERN_ITEM_SKULL: super::Tag = (&["skull"], &[]);
+    pub const MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED: super::Tag = (&["curly_border"], &[6u16]);
+    pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::Tag = (&["creeper"], &[4u16]);
+    pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::Tag = (&["bricks"], &[2u16]);
+    pub const MINECRAFT_PATTERN_ITEM_FLOW: super::Tag = (&["flow"], &[11u16]);
+    pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::Tag = (&["flower"], &[12u16]);
+    pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::Tag = (&["globe"], &[13u16]);
+    pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::Tag = (&["guster"], &[16u16]);
+    pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::Tag = (&["mojang"], &[21u16]);
+    pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::Tag = (&["piglin"], &[22u16]);
+    pub const MINECRAFT_PATTERN_ITEM_SKULL: super::Tag = (&["skull"], &[24u16]);
 }
 static BANNERPATTERN_TAGS: phf::Map<&'static str, &'static Tag> = phf::phf_map! { "minecraft:no_item_required" => & BannerPattern :: MINECRAFT_NO_ITEM_REQUIRED , "minecraft:pattern_item/bordure_indented" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED , "minecraft:pattern_item/creeper" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_CREEPER , "minecraft:pattern_item/field_masoned" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FIELD_MASONED , "minecraft:pattern_item/flow" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOW , "minecraft:pattern_item/flower" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOWER , "minecraft:pattern_item/globe" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GLOBE , "minecraft:pattern_item/guster" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GUSTER , "minecraft:pattern_item/mojang" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_MOJANG , "minecraft:pattern_item/piglin" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_PIGLIN , "minecraft:pattern_item/skull" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_SKULL };
 #[allow(non_snake_case)]
@@ -6977,7 +7030,7 @@ pub mod DamageType {
             "player_explosion",
             "bad_respawn_point",
         ],
-        &[],
+        &[15u16, 9u16, 35u16, 1u16],
     );
     pub const MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS: super::Tag = (
         &[
@@ -6987,10 +7040,10 @@ pub mod DamageType {
             "wither_skull",
             "wind_charge",
         ],
-        &[],
+        &[0u16, 46u16, 14u16, 50u16, 48u16],
     );
-    pub const MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL: super::Tag = (&["out_of_world"], &[]);
-    pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::Tag = (&["magic"], &[]);
+    pub const MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL: super::Tag = (&["out_of_world"], &[32u16]);
+    pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::Tag = (&["magic"], &[27u16]);
     pub const MINECRAFT_AVOIDS_GUARDIAN_THORNS: super::Tag = (
         &[
             "magic",
@@ -7000,11 +7053,13 @@ pub mod DamageType {
             "player_explosion",
             "bad_respawn_point",
         ],
-        &[],
+        &[27u16, 44u16, 15u16, 9u16, 35u16, 1u16],
     );
-    pub const MINECRAFT_BURN_FROM_STEPPING: super::Tag =
-        (&["campfire", "hot_floor", "sulfur_cube_hot"], &[]);
-    pub const MINECRAFT_BURNS_ARMOR_STANDS: super::Tag = (&["on_fire"], &[]);
+    pub const MINECRAFT_BURN_FROM_STEPPING: super::Tag = (
+        &["campfire", "hot_floor", "sulfur_cube_hot"],
+        &[3u16, 20u16, 42u16],
+    );
+    pub const MINECRAFT_BURNS_ARMOR_STANDS: super::Tag = (&["on_fire"], &[31u16]);
     pub const MINECRAFT_BYPASSES_ARMOR: super::Tag = (
         &[
             "on_fire",
@@ -7027,13 +7082,17 @@ pub mod DamageType {
             "sonic_boom",
             "outside_border",
         ],
-        &[],
+        &[
+            31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16, 39u16,
+            27u16, 23u16, 32u16, 19u16, 36u16, 33u16,
+        ],
     );
-    pub const MINECRAFT_BYPASSES_EFFECTS: super::Tag = (&["starve"], &[]);
-    pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::Tag = (&["sonic_boom"], &[]);
+    pub const MINECRAFT_BYPASSES_EFFECTS: super::Tag = (&["starve"], &[40u16]);
+    pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::Tag = (&["sonic_boom"], &[36u16]);
     pub const MINECRAFT_BYPASSES_INVULNERABILITY: super::Tag =
-        (&["out_of_world", "generic_kill"], &[]);
-    pub const MINECRAFT_BYPASSES_RESISTANCE: super::Tag = (&["out_of_world", "generic_kill"], &[]);
+        (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
+    pub const MINECRAFT_BYPASSES_RESISTANCE: super::Tag =
+        (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
     pub const MINECRAFT_BYPASSES_SHIELD: super::Tag = (
         &[
             "on_fire",
@@ -7067,7 +7126,11 @@ pub mod DamageType {
             "lightning_bolt",
             "sweet_berry_bush",
         ],
-        &[],
+        &[
+            31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16, 39u16,
+            27u16, 23u16, 32u16, 19u16, 36u16, 33u16, 2u16, 3u16, 7u16, 11u16, 13u16, 20u16, 42u16,
+            21u16, 24u16, 25u16, 43u16,
+        ],
     );
     pub const MINECRAFT_BYPASSES_WOLF_ARMOR: super::Tag = (
         &[
@@ -7085,18 +7148,21 @@ pub mod DamageType {
             "thorns",
             "wither",
         ],
-        &[],
+        &[
+            32u16, 19u16, 4u16, 6u16, 7u16, 17u16, 22u16, 23u16, 27u16, 33u16, 40u16, 44u16, 49u16,
+        ],
     );
     pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::Tag = (
         &["player_explosion", "player_attack", "spear", "mace_smash"],
-        &[],
+        &[35u16, 34u16, 37u16, 26u16],
     );
     pub const MINECRAFT_DAMAGES_HELMET: super::Tag = (
         &["falling_anvil", "falling_block", "falling_stalactite"],
-        &[],
+        &[11u16, 12u16, 13u16],
     );
-    pub const MINECRAFT_IGNITES_ARMOR_STANDS: super::Tag = (&["in_fire", "campfire"], &[]);
-    pub const MINECRAFT_IS_DROWNING: super::Tag = (&["drown"], &[]);
+    pub const MINECRAFT_IGNITES_ARMOR_STANDS: super::Tag =
+        (&["in_fire", "campfire"], &[21u16, 3u16]);
+    pub const MINECRAFT_IS_DROWNING: super::Tag = (&["drown"], &[6u16]);
     pub const MINECRAFT_IS_EXPLOSION: super::Tag = (
         &[
             "fireworks",
@@ -7104,9 +7170,12 @@ pub mod DamageType {
             "player_explosion",
             "bad_respawn_point",
         ],
-        &[],
+        &[15u16, 9u16, 35u16, 1u16],
     );
-    pub const MINECRAFT_IS_FALL: super::Tag = (&["fall", "ender_pearl", "stalagmite"], &[]);
+    pub const MINECRAFT_IS_FALL: super::Tag = (
+        &["fall", "ender_pearl", "stalagmite"],
+        &[10u16, 8u16, 39u16],
+    );
     pub const MINECRAFT_IS_FIRE: super::Tag = (
         &[
             "in_fire",
@@ -7118,12 +7187,14 @@ pub mod DamageType {
             "unattributed_fireball",
             "fireball",
         ],
-        &[],
+        &[21u16, 3u16, 31u16, 24u16, 20u16, 42u16, 47u16, 14u16],
     );
-    pub const MINECRAFT_IS_FREEZING: super::Tag = (&["freeze"], &[]);
-    pub const MINECRAFT_IS_LIGHTNING: super::Tag = (&["lightning_bolt"], &[]);
-    pub const MINECRAFT_IS_PLAYER_ATTACK: super::Tag =
-        (&["player_attack", "spear", "mace_smash"], &[]);
+    pub const MINECRAFT_IS_FREEZING: super::Tag = (&["freeze"], &[17u16]);
+    pub const MINECRAFT_IS_LIGHTNING: super::Tag = (&["lightning_bolt"], &[25u16]);
+    pub const MINECRAFT_IS_PLAYER_ATTACK: super::Tag = (
+        &["player_attack", "spear", "mace_smash"],
+        &[34u16, 37u16, 26u16],
+    );
     pub const MINECRAFT_IS_PROJECTILE: super::Tag = (
         &[
             "arrow",
@@ -7135,11 +7206,11 @@ pub mod DamageType {
             "thrown",
             "wind_charge",
         ],
-        &[],
+        &[0u16, 46u16, 30u16, 47u16, 14u16, 50u16, 45u16, 48u16],
     );
-    pub const MINECRAFT_MACE_SMASH: super::Tag = (&["mace_smash"], &[]);
-    pub const MINECRAFT_NO_ANGER: super::Tag = (&["mob_attack_no_aggro"], &[]);
-    pub const MINECRAFT_NO_IMPACT: super::Tag = (&["drown"], &[]);
+    pub const MINECRAFT_MACE_SMASH: super::Tag = (&["mace_smash"], &[26u16]);
+    pub const MINECRAFT_NO_ANGER: super::Tag = (&["mob_attack_no_aggro"], &[29u16]);
+    pub const MINECRAFT_NO_IMPACT: super::Tag = (&["drown"], &[6u16]);
     pub const MINECRAFT_NO_KNOCKBACK: super::Tag = (
         &[
             "explosion",
@@ -7173,7 +7244,11 @@ pub mod DamageType {
             "campfire",
             "spear",
         ],
-        &[],
+        &[
+            9u16, 35u16, 1u16, 21u16, 25u16, 31u16, 24u16, 20u16, 42u16, 22u16, 4u16, 6u16, 40u16,
+            2u16, 10u16, 8u16, 16u16, 32u16, 18u16, 27u16, 49u16, 5u16, 7u16, 43u16, 17u16, 39u16,
+            33u16, 19u16, 3u16, 37u16,
+        ],
     );
     pub const MINECRAFT_PANIC_CAUSES: super::Tag = (
         &[
@@ -7207,7 +7282,11 @@ pub mod DamageType {
             "spear",
             "mace_smash",
         ],
-        &[],
+        &[
+            2u16, 17u16, 20u16, 42u16, 21u16, 24u16, 25u16, 31u16, 0u16, 5u16, 9u16, 14u16, 15u16,
+            23u16, 27u16, 28u16, 30u16, 35u16, 36u16, 41u16, 45u16, 46u16, 47u16, 48u16, 49u16,
+            50u16, 34u16, 37u16, 26u16,
+        ],
     );
     pub const MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES: super::Tag = (
         &[
@@ -7220,7 +7299,7 @@ pub mod DamageType {
             "lightning_bolt",
             "on_fire",
         ],
-        &[],
+        &[2u16, 17u16, 20u16, 42u16, 21u16, 24u16, 25u16, 31u16],
     );
     pub const MINECRAFT_SULFUR_CUBE_WITH_BLOCK_IMMUNE_TO: super::Tag = (
         &[
@@ -7252,11 +7331,17 @@ pub mod DamageType {
             "player_explosion",
             "bad_respawn_point",
         ],
-        &[],
+        &[
+            0u16, 2u16, 7u16, 10u16, 11u16, 12u16, 13u16, 17u16, 26u16, 20u16, 28u16, 29u16, 30u16,
+            34u16, 37u16, 38u16, 39u16, 41u16, 42u16, 43u16, 45u16, 46u16, 48u16, 15u16, 9u16,
+            35u16, 1u16,
+        ],
     );
-    pub const MINECRAFT_WITCH_RESISTANT_TO: super::Tag =
-        (&["magic", "indirect_magic", "sonic_boom", "thorns"], &[]);
-    pub const MINECRAFT_WITHER_IMMUNE_TO: super::Tag = (&["drown"], &[]);
+    pub const MINECRAFT_WITCH_RESISTANT_TO: super::Tag = (
+        &["magic", "indirect_magic", "sonic_boom", "thorns"],
+        &[27u16, 23u16, 36u16, 44u16],
+    );
+    pub const MINECRAFT_WITHER_IMMUNE_TO: super::Tag = (&["drown"], &[6u16]);
 }
 static DAMAGETYPE_TAGS: phf::Map<&'static str, &'static Tag> = phf::phf_map! { "minecraft:always_hurts_ender_dragons" => & DamageType :: MINECRAFT_ALWAYS_HURTS_ENDER_DRAGONS , "minecraft:always_kills_armor_stands" => & DamageType :: MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS , "minecraft:always_most_significant_fall" => & DamageType :: MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL , "minecraft:always_triggers_silverfish" => & DamageType :: MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH , "minecraft:avoids_guardian_thorns" => & DamageType :: MINECRAFT_AVOIDS_GUARDIAN_THORNS , "minecraft:burn_from_stepping" => & DamageType :: MINECRAFT_BURN_FROM_STEPPING , "minecraft:burns_armor_stands" => & DamageType :: MINECRAFT_BURNS_ARMOR_STANDS , "minecraft:bypasses_armor" => & DamageType :: MINECRAFT_BYPASSES_ARMOR , "minecraft:bypasses_effects" => & DamageType :: MINECRAFT_BYPASSES_EFFECTS , "minecraft:bypasses_enchantments" => & DamageType :: MINECRAFT_BYPASSES_ENCHANTMENTS , "minecraft:bypasses_invulnerability" => & DamageType :: MINECRAFT_BYPASSES_INVULNERABILITY , "minecraft:bypasses_resistance" => & DamageType :: MINECRAFT_BYPASSES_RESISTANCE , "minecraft:bypasses_shield" => & DamageType :: MINECRAFT_BYPASSES_SHIELD , "minecraft:bypasses_wolf_armor" => & DamageType :: MINECRAFT_BYPASSES_WOLF_ARMOR , "minecraft:can_break_armor_stand" => & DamageType :: MINECRAFT_CAN_BREAK_ARMOR_STAND , "minecraft:damages_helmet" => & DamageType :: MINECRAFT_DAMAGES_HELMET , "minecraft:ignites_armor_stands" => & DamageType :: MINECRAFT_IGNITES_ARMOR_STANDS , "minecraft:is_drowning" => & DamageType :: MINECRAFT_IS_DROWNING , "minecraft:is_explosion" => & DamageType :: MINECRAFT_IS_EXPLOSION , "minecraft:is_fall" => & DamageType :: MINECRAFT_IS_FALL , "minecraft:is_fire" => & DamageType :: MINECRAFT_IS_FIRE , "minecraft:is_freezing" => & DamageType :: MINECRAFT_IS_FREEZING , "minecraft:is_lightning" => & DamageType :: MINECRAFT_IS_LIGHTNING , "minecraft:is_player_attack" => & DamageType :: MINECRAFT_IS_PLAYER_ATTACK , "minecraft:is_projectile" => & DamageType :: MINECRAFT_IS_PROJECTILE , "minecraft:mace_smash" => & DamageType :: MINECRAFT_MACE_SMASH , "minecraft:no_anger" => & DamageType :: MINECRAFT_NO_ANGER , "minecraft:no_impact" => & DamageType :: MINECRAFT_NO_IMPACT , "minecraft:no_knockback" => & DamageType :: MINECRAFT_NO_KNOCKBACK , "minecraft:panic_causes" => & DamageType :: MINECRAFT_PANIC_CAUSES , "minecraft:panic_environmental_causes" => & DamageType :: MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES , "minecraft:sulfur_cube_with_block_immune_to" => & DamageType :: MINECRAFT_SULFUR_CUBE_WITH_BLOCK_IMMUNE_TO , "minecraft:witch_resistant_to" => & DamageType :: MINECRAFT_WITCH_RESISTANT_TO , "minecraft:wither_immune_to" => & DamageType :: MINECRAFT_WITHER_IMMUNE_TO };
 #[allow(non_snake_case)]
@@ -8306,7 +8391,7 @@ pub mod Fluid {
 static FLUID_TAGS: phf::Map<&'static str, &'static Tag> = phf::phf_map! { "c:beetroot_soup" => & Fluid :: C_BEETROOT_SOUP , "c:experience" => & Fluid :: C_EXPERIENCE , "c:gaseous" => & Fluid :: C_GASEOUS , "c:hidden_from_recipe_viewers" => & Fluid :: C_HIDDEN_FROM_RECIPE_VIEWERS , "c:honey" => & Fluid :: C_HONEY , "c:lava" => & Fluid :: C_LAVA , "c:milk" => & Fluid :: C_MILK , "c:mushroom_stew" => & Fluid :: C_MUSHROOM_STEW , "c:potion" => & Fluid :: C_POTION , "c:rabbit_stew" => & Fluid :: C_RABBIT_STEW , "c:suspicious_stew" => & Fluid :: C_SUSPICIOUS_STEW , "c:water" => & Fluid :: C_WATER , "minecraft:bubble_column_can_occupy" => & Fluid :: MINECRAFT_BUBBLE_COLUMN_CAN_OCCUPY , "minecraft:lava" => & Fluid :: MINECRAFT_LAVA , "minecraft:supports_frogspawn" => & Fluid :: MINECRAFT_SUPPORTS_FROGSPAWN , "minecraft:supports_lily_pad" => & Fluid :: MINECRAFT_SUPPORTS_LILY_PAD , "minecraft:supports_sugar_cane_adjacently" => & Fluid :: MINECRAFT_SUPPORTS_SUGAR_CANE_ADJACENTLY , "minecraft:water" => & Fluid :: MINECRAFT_WATER };
 #[allow(non_snake_case)]
 pub mod GameEvent {
-    pub const MINECRAFT_ALLAY_CAN_LISTEN: super::Tag = (&["note_block_play"], &[]);
+    pub const MINECRAFT_ALLAY_CAN_LISTEN: super::Tag = (&["note_block_play"], &[34u16]);
     pub const MINECRAFT_IGNORE_VIBRATIONS_SNEAKING: super::Tag = (
         &[
             "hit_ground",
@@ -8316,10 +8401,10 @@ pub mod GameEvent {
             "item_interact_start",
             "item_interact_finish",
         ],
-        &[],
+        &[27u16, 37u16, 42u16, 43u16, 30u16, 29u16],
     );
     pub const MINECRAFT_SHRIEKER_CAN_LISTEN: super::Tag =
-        (&["sculk_sensor_tendrils_clicking"], &[]);
+        (&["sculk_sensor_tendrils_clicking"], &[38u16]);
     pub const MINECRAFT_VIBRATIONS: super::Tag = (
         &[
             "block_attach",
@@ -8379,7 +8464,13 @@ pub mod GameEvent {
             "resonate_15",
             "flap",
         ],
-        &[],
+        &[
+            1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 9u16, 10u16, 11u16, 12u16, 13u16,
+            14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+            27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+            44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+            56u16, 57u16, 58u16, 59u16, 60u16, 24u16,
+        ],
     );
     pub const MINECRAFT_WARDEN_CAN_LISTEN: super::Tag = (
         &[
@@ -8441,7 +8532,13 @@ pub mod GameEvent {
             "shriek",
             "sculk_sensor_tendrils_clicking",
         ],
-        &[],
+        &[
+            1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 9u16, 10u16, 11u16, 12u16, 13u16,
+            14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+            27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+            44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+            56u16, 57u16, 58u16, 59u16, 60u16, 40u16, 38u16,
+        ],
     );
 }
 static GAMEEVENT_TAGS: phf::Map<&'static str, &'static Tag> = phf::phf_map! { "minecraft:allay_can_listen" => & GameEvent :: MINECRAFT_ALLAY_CAN_LISTEN , "minecraft:ignore_vibrations_sneaking" => & GameEvent :: MINECRAFT_IGNORE_VIBRATIONS_SNEAKING , "minecraft:shrieker_can_listen" => & GameEvent :: MINECRAFT_SHRIEKER_CAN_LISTEN , "minecraft:vibrations" => & GameEvent :: MINECRAFT_VIBRATIONS , "minecraft:warden_can_listen" => & GameEvent :: MINECRAFT_WARDEN_CAN_LISTEN };
@@ -8458,7 +8555,7 @@ pub mod Instrument {
             "yearn_goat_horn",
             "dream_goat_horn",
         ],
-        &[],
+        &[4u16, 6u16, 5u16, 3u16, 0u16, 1u16, 7u16, 2u16],
     );
     pub const MINECRAFT_REGULAR_GOAT_HORNS: super::Tag = (
         &[
@@ -8467,7 +8564,7 @@ pub mod Instrument {
             "seek_goat_horn",
             "feel_goat_horn",
         ],
-        &[],
+        &[4u16, 6u16, 5u16, 3u16],
     );
     pub const MINECRAFT_SCREAMING_GOAT_HORNS: super::Tag = (
         &[
@@ -8476,7 +8573,7 @@ pub mod Instrument {
             "yearn_goat_horn",
             "dream_goat_horn",
         ],
-        &[],
+        &[0u16, 1u16, 7u16, 2u16],
     );
 }
 static INSTRUMENT_TAGS: phf::Map<&'static str, &'static Tag> = phf::phf_map! { "minecraft:goat_horns" => & Instrument :: MINECRAFT_GOAT_HORNS , "minecraft:regular_goat_horns" => & Instrument :: MINECRAFT_REGULAR_GOAT_HORNS , "minecraft:screaming_goat_horns" => & Instrument :: MINECRAFT_SCREAMING_GOAT_HORNS };
@@ -14466,7 +14563,12 @@ pub mod PaintingVariant {
             "tides",
             "dennis",
         ],
-        &[],
+        &[
+            24u16, 1u16, 0u16, 2u16, 5u16, 32u16, 47u16, 35u16, 12u16, 37u16, 42u16, 13u16, 46u16,
+            22u16, 26u16, 8u16, 40u16, 45u16, 39u16, 50u16, 19u16, 33u16, 31u16, 7u16, 38u16,
+            15u16, 4u16, 23u16, 27u16, 36u16, 44u16, 3u16, 6u16, 9u16, 10u16, 11u16, 17u16, 18u16,
+            20u16, 25u16, 28u16, 29u16, 30u16, 34u16, 41u16, 43u16, 14u16,
+        ],
     );
 }
 static PAINTINGVARIANT_TAGS: phf::Map<&'static str, &'static Tag> =
@@ -14489,9 +14591,11 @@ pub mod PointOfInterestType {
             "toolsmith",
             "weaponsmith",
         ],
-        &[],
+        &[
+            0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+        ],
     );
-    pub const MINECRAFT_BEE_HOME: super::Tag = (&["beehive", "bee_nest"], &[]);
+    pub const MINECRAFT_BEE_HOME: super::Tag = (&["beehive", "bee_nest"], &[15u16, 16u16]);
     pub const MINECRAFT_VILLAGE: super::Tag = (
         &[
             "armorer",
@@ -14510,7 +14614,10 @@ pub mod PointOfInterestType {
             "home",
             "meeting",
         ],
-        &[],
+        &[
+            0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16, 13u16,
+            14u16,
+        ],
     );
 }
 static POINTOFINTERESTTYPE_TAGS: phf::Map<&'static str, &'static Tag> = phf::phf_map! { "minecraft:acquirable_job_site" => & PointOfInterestType :: MINECRAFT_ACQUIRABLE_JOB_SITE , "minecraft:bee_home" => & PointOfInterestType :: MINECRAFT_BEE_HOME , "minecraft:village" => & PointOfInterestType :: MINECRAFT_VILLAGE };
@@ -14561,7 +14668,12 @@ pub mod Potion {
             "slow_falling",
             "long_slow_falling",
         ],
-        &[],
+        &[
+            42u16, 44u16, 45u16, 43u16, 4u16, 5u16, 6u16, 7u16, 11u16, 12u16, 8u16, 9u16, 10u16,
+            16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 13u16, 14u16, 15u16, 22u16, 23u16, 24u16,
+            25u16, 26u16, 27u16, 28u16, 29u16, 30u16, 31u16, 32u16, 33u16, 34u16, 35u16, 36u16,
+            37u16, 38u16, 40u16, 41u16,
+        ],
     );
 }
 static POTION_TAGS: phf::Map<&'static str, &'static Tag> = phf::phf_map! { "c:hidden_from_recipe_viewers" => & Potion :: C_HIDDEN_FROM_RECIPE_VIEWERS , "minecraft:tradeable" => & Potion :: MINECRAFT_TRADEABLE };
@@ -16124,6 +16236,23 @@ pub mod WorldgenBiome {
     pub const MINECRAFT_WITHOUT_ZOMBIE_SIEGES: super::Tag = (&["mushroom_fields"], &[33u16]);
 }
 static WORLDGENBIOME_TAGS: phf::Map<&'static str, &'static Tag> = phf::phf_map! { "c:hidden_from_locator_selection" => & WorldgenBiome :: C_HIDDEN_FROM_LOCATOR_SELECTION , "c:is_aquatic" => & WorldgenBiome :: C_IS_AQUATIC , "c:is_aquatic_icy" => & WorldgenBiome :: C_IS_AQUATIC_ICY , "c:is_badlands" => & WorldgenBiome :: C_IS_BADLANDS , "c:is_beach" => & WorldgenBiome :: C_IS_BEACH , "c:is_birch_forest" => & WorldgenBiome :: C_IS_BIRCH_FOREST , "c:is_cave" => & WorldgenBiome :: C_IS_CAVE , "c:is_cold" => & WorldgenBiome :: C_IS_COLD , "c:is_cold/end" => & WorldgenBiome :: C_IS_COLD_END , "c:is_cold/nether" => & WorldgenBiome :: C_IS_COLD_NETHER , "c:is_cold/overworld" => & WorldgenBiome :: C_IS_COLD_OVERWORLD , "c:is_dark_forest" => & WorldgenBiome :: C_IS_DARK_FOREST , "c:is_dead" => & WorldgenBiome :: C_IS_DEAD , "c:is_deep_ocean" => & WorldgenBiome :: C_IS_DEEP_OCEAN , "c:is_dense_vegetation" => & WorldgenBiome :: C_IS_DENSE_VEGETATION , "c:is_dense_vegetation/end" => & WorldgenBiome :: C_IS_DENSE_VEGETATION_END , "c:is_dense_vegetation/nether" => & WorldgenBiome :: C_IS_DENSE_VEGETATION_NETHER , "c:is_dense_vegetation/overworld" => & WorldgenBiome :: C_IS_DENSE_VEGETATION_OVERWORLD , "c:is_desert" => & WorldgenBiome :: C_IS_DESERT , "c:is_dry" => & WorldgenBiome :: C_IS_DRY , "c:is_dry/end" => & WorldgenBiome :: C_IS_DRY_END , "c:is_dry/nether" => & WorldgenBiome :: C_IS_DRY_NETHER , "c:is_dry/overworld" => & WorldgenBiome :: C_IS_DRY_OVERWORLD , "c:is_end" => & WorldgenBiome :: C_IS_END , "c:is_floral" => & WorldgenBiome :: C_IS_FLORAL , "c:is_flower_forest" => & WorldgenBiome :: C_IS_FLOWER_FOREST , "c:is_forest" => & WorldgenBiome :: C_IS_FOREST , "c:is_hill" => & WorldgenBiome :: C_IS_HILL , "c:is_hot" => & WorldgenBiome :: C_IS_HOT , "c:is_hot/end" => & WorldgenBiome :: C_IS_HOT_END , "c:is_hot/nether" => & WorldgenBiome :: C_IS_HOT_NETHER , "c:is_hot/overworld" => & WorldgenBiome :: C_IS_HOT_OVERWORLD , "c:is_icy" => & WorldgenBiome :: C_IS_ICY , "c:is_jungle" => & WorldgenBiome :: C_IS_JUNGLE , "c:is_lush" => & WorldgenBiome :: C_IS_LUSH , "c:is_magical" => & WorldgenBiome :: C_IS_MAGICAL , "c:is_mountain" => & WorldgenBiome :: C_IS_MOUNTAIN , "c:is_mountain/peak" => & WorldgenBiome :: C_IS_MOUNTAIN_PEAK , "c:is_mountain/slope" => & WorldgenBiome :: C_IS_MOUNTAIN_SLOPE , "c:is_mushroom" => & WorldgenBiome :: C_IS_MUSHROOM , "c:is_nether" => & WorldgenBiome :: C_IS_NETHER , "c:is_nether_forest" => & WorldgenBiome :: C_IS_NETHER_FOREST , "c:is_ocean" => & WorldgenBiome :: C_IS_OCEAN , "c:is_old_growth" => & WorldgenBiome :: C_IS_OLD_GROWTH , "c:is_outer_end_island" => & WorldgenBiome :: C_IS_OUTER_END_ISLAND , "c:is_overworld" => & WorldgenBiome :: C_IS_OVERWORLD , "c:is_plains" => & WorldgenBiome :: C_IS_PLAINS , "c:is_plateau" => & WorldgenBiome :: C_IS_PLATEAU , "c:is_rare" => & WorldgenBiome :: C_IS_RARE , "c:is_river" => & WorldgenBiome :: C_IS_RIVER , "c:is_sandy" => & WorldgenBiome :: C_IS_SANDY , "c:is_savanna" => & WorldgenBiome :: C_IS_SAVANNA , "c:is_shallow_ocean" => & WorldgenBiome :: C_IS_SHALLOW_OCEAN , "c:is_snowy" => & WorldgenBiome :: C_IS_SNOWY , "c:is_snowy_plains" => & WorldgenBiome :: C_IS_SNOWY_PLAINS , "c:is_sparse_vegetation" => & WorldgenBiome :: C_IS_SPARSE_VEGETATION , "c:is_sparse_vegetation/end" => & WorldgenBiome :: C_IS_SPARSE_VEGETATION_END , "c:is_sparse_vegetation/nether" => & WorldgenBiome :: C_IS_SPARSE_VEGETATION_NETHER , "c:is_sparse_vegetation/overworld" => & WorldgenBiome :: C_IS_SPARSE_VEGETATION_OVERWORLD , "c:is_spooky" => & WorldgenBiome :: C_IS_SPOOKY , "c:is_stony_shores" => & WorldgenBiome :: C_IS_STONY_SHORES , "c:is_swamp" => & WorldgenBiome :: C_IS_SWAMP , "c:is_taiga" => & WorldgenBiome :: C_IS_TAIGA , "c:is_temperate" => & WorldgenBiome :: C_IS_TEMPERATE , "c:is_temperate/end" => & WorldgenBiome :: C_IS_TEMPERATE_END , "c:is_temperate/nether" => & WorldgenBiome :: C_IS_TEMPERATE_NETHER , "c:is_temperate/overworld" => & WorldgenBiome :: C_IS_TEMPERATE_OVERWORLD , "c:is_tree/coniferous" => & WorldgenBiome :: C_IS_TREE_CONIFEROUS , "c:is_tree/deciduous" => & WorldgenBiome :: C_IS_TREE_DECIDUOUS , "c:is_tree/jungle" => & WorldgenBiome :: C_IS_TREE_JUNGLE , "c:is_tree/savanna" => & WorldgenBiome :: C_IS_TREE_SAVANNA , "c:is_underground" => & WorldgenBiome :: C_IS_UNDERGROUND , "c:is_void" => & WorldgenBiome :: C_IS_VOID , "c:is_wasteland" => & WorldgenBiome :: C_IS_WASTELAND , "c:is_wet" => & WorldgenBiome :: C_IS_WET , "c:is_wet/end" => & WorldgenBiome :: C_IS_WET_END , "c:is_wet/nether" => & WorldgenBiome :: C_IS_WET_NETHER , "c:is_wet/overworld" => & WorldgenBiome :: C_IS_WET_OVERWORLD , "c:is_windswept" => & WorldgenBiome :: C_IS_WINDSWEPT , "c:no_default_monsters" => & WorldgenBiome :: C_NO_DEFAULT_MONSTERS , "c:primary_wood_type" => & WorldgenBiome :: C_PRIMARY_WOOD_TYPE , "c:primary_wood_type/acacia" => & WorldgenBiome :: C_PRIMARY_WOOD_TYPE_ACACIA , "c:primary_wood_type/bamboo" => & WorldgenBiome :: C_PRIMARY_WOOD_TYPE_BAMBOO , "c:primary_wood_type/birch" => & WorldgenBiome :: C_PRIMARY_WOOD_TYPE_BIRCH , "c:primary_wood_type/cherry" => & WorldgenBiome :: C_PRIMARY_WOOD_TYPE_CHERRY , "c:primary_wood_type/crimson" => & WorldgenBiome :: C_PRIMARY_WOOD_TYPE_CRIMSON , "c:primary_wood_type/dark_oak" => & WorldgenBiome :: C_PRIMARY_WOOD_TYPE_DARK_OAK , "c:primary_wood_type/jungle" => & WorldgenBiome :: C_PRIMARY_WOOD_TYPE_JUNGLE , "c:primary_wood_type/mangrove" => & WorldgenBiome :: C_PRIMARY_WOOD_TYPE_MANGROVE , "c:primary_wood_type/oak" => & WorldgenBiome :: C_PRIMARY_WOOD_TYPE_OAK , "c:primary_wood_type/pale_oak" => & WorldgenBiome :: C_PRIMARY_WOOD_TYPE_PALE_OAK , "c:primary_wood_type/spruce" => & WorldgenBiome :: C_PRIMARY_WOOD_TYPE_SPRUCE , "c:primary_wood_type/warped" => & WorldgenBiome :: C_PRIMARY_WOOD_TYPE_WARPED , "minecraft:allows_surface_slime_spawns" => & WorldgenBiome :: MINECRAFT_ALLOWS_SURFACE_SLIME_SPAWNS , "minecraft:allows_tropical_fish_spawns_at_any_height" => & WorldgenBiome :: MINECRAFT_ALLOWS_TROPICAL_FISH_SPAWNS_AT_ANY_HEIGHT , "minecraft:has_structure/ancient_city" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_ANCIENT_CITY , "minecraft:has_structure/bastion_remnant" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_BASTION_REMNANT , "minecraft:has_structure/buried_treasure" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_BURIED_TREASURE , "minecraft:has_structure/desert_pyramid" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_DESERT_PYRAMID , "minecraft:has_structure/end_city" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_END_CITY , "minecraft:has_structure/igloo" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_IGLOO , "minecraft:has_structure/jungle_temple" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_JUNGLE_TEMPLE , "minecraft:has_structure/mineshaft" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_MINESHAFT , "minecraft:has_structure/mineshaft_mesa" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_MINESHAFT_MESA , "minecraft:has_structure/nether_fortress" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_NETHER_FORTRESS , "minecraft:has_structure/nether_fossil" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_NETHER_FOSSIL , "minecraft:has_structure/ocean_monument" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_OCEAN_MONUMENT , "minecraft:has_structure/ocean_ruin_cold" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_OCEAN_RUIN_COLD , "minecraft:has_structure/ocean_ruin_warm" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_OCEAN_RUIN_WARM , "minecraft:has_structure/pillager_outpost" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_PILLAGER_OUTPOST , "minecraft:has_structure/ruined_portal_desert" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_RUINED_PORTAL_DESERT , "minecraft:has_structure/ruined_portal_jungle" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_RUINED_PORTAL_JUNGLE , "minecraft:has_structure/ruined_portal_mountain" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_RUINED_PORTAL_MOUNTAIN , "minecraft:has_structure/ruined_portal_nether" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_RUINED_PORTAL_NETHER , "minecraft:has_structure/ruined_portal_ocean" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_RUINED_PORTAL_OCEAN , "minecraft:has_structure/ruined_portal_standard" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_RUINED_PORTAL_STANDARD , "minecraft:has_structure/ruined_portal_swamp" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_RUINED_PORTAL_SWAMP , "minecraft:has_structure/shipwreck" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_SHIPWRECK , "minecraft:has_structure/shipwreck_beached" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_SHIPWRECK_BEACHED , "minecraft:has_structure/stronghold" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_STRONGHOLD , "minecraft:has_structure/swamp_hut" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_SWAMP_HUT , "minecraft:has_structure/trail_ruins" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_TRAIL_RUINS , "minecraft:has_structure/trial_chambers" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_TRIAL_CHAMBERS , "minecraft:has_structure/village_desert" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_VILLAGE_DESERT , "minecraft:has_structure/village_plains" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_VILLAGE_PLAINS , "minecraft:has_structure/village_savanna" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_VILLAGE_SAVANNA , "minecraft:has_structure/village_snowy" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_VILLAGE_SNOWY , "minecraft:has_structure/village_taiga" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_VILLAGE_TAIGA , "minecraft:has_structure/woodland_mansion" => & WorldgenBiome :: MINECRAFT_HAS_STRUCTURE_WOODLAND_MANSION , "minecraft:is_badlands" => & WorldgenBiome :: MINECRAFT_IS_BADLANDS , "minecraft:is_beach" => & WorldgenBiome :: MINECRAFT_IS_BEACH , "minecraft:is_deep_ocean" => & WorldgenBiome :: MINECRAFT_IS_DEEP_OCEAN , "minecraft:is_end" => & WorldgenBiome :: MINECRAFT_IS_END , "minecraft:is_forest" => & WorldgenBiome :: MINECRAFT_IS_FOREST , "minecraft:is_hill" => & WorldgenBiome :: MINECRAFT_IS_HILL , "minecraft:is_jungle" => & WorldgenBiome :: MINECRAFT_IS_JUNGLE , "minecraft:is_mountain" => & WorldgenBiome :: MINECRAFT_IS_MOUNTAIN , "minecraft:is_nether" => & WorldgenBiome :: MINECRAFT_IS_NETHER , "minecraft:is_ocean" => & WorldgenBiome :: MINECRAFT_IS_OCEAN , "minecraft:is_overworld" => & WorldgenBiome :: MINECRAFT_IS_OVERWORLD , "minecraft:is_river" => & WorldgenBiome :: MINECRAFT_IS_RIVER , "minecraft:is_savanna" => & WorldgenBiome :: MINECRAFT_IS_SAVANNA , "minecraft:is_taiga" => & WorldgenBiome :: MINECRAFT_IS_TAIGA , "minecraft:mineshaft_blocking" => & WorldgenBiome :: MINECRAFT_MINESHAFT_BLOCKING , "minecraft:more_frequent_drowned_spawns" => & WorldgenBiome :: MINECRAFT_MORE_FREQUENT_DROWNED_SPAWNS , "minecraft:polar_bears_spawn_on_alternate_blocks" => & WorldgenBiome :: MINECRAFT_POLAR_BEARS_SPAWN_ON_ALTERNATE_BLOCKS , "minecraft:produces_corals_from_bonemeal" => & WorldgenBiome :: MINECRAFT_PRODUCES_CORALS_FROM_BONEMEAL , "minecraft:reduce_water_ambient_spawns" => & WorldgenBiome :: MINECRAFT_REDUCE_WATER_AMBIENT_SPAWNS , "minecraft:required_ocean_monument_surrounding" => & WorldgenBiome :: MINECRAFT_REQUIRED_OCEAN_MONUMENT_SURROUNDING , "minecraft:spawns_cold_variant_farm_animals" => & WorldgenBiome :: MINECRAFT_SPAWNS_COLD_VARIANT_FARM_ANIMALS , "minecraft:spawns_cold_variant_frogs" => & WorldgenBiome :: MINECRAFT_SPAWNS_COLD_VARIANT_FROGS , "minecraft:spawns_coral_variant_zombie_nautilus" => & WorldgenBiome :: MINECRAFT_SPAWNS_CORAL_VARIANT_ZOMBIE_NAUTILUS , "minecraft:spawns_gold_rabbits" => & WorldgenBiome :: MINECRAFT_SPAWNS_GOLD_RABBITS , "minecraft:spawns_snow_foxes" => & WorldgenBiome :: MINECRAFT_SPAWNS_SNOW_FOXES , "minecraft:spawns_warm_variant_farm_animals" => & WorldgenBiome :: MINECRAFT_SPAWNS_WARM_VARIANT_FARM_ANIMALS , "minecraft:spawns_warm_variant_frogs" => & WorldgenBiome :: MINECRAFT_SPAWNS_WARM_VARIANT_FROGS , "minecraft:spawns_white_rabbits" => & WorldgenBiome :: MINECRAFT_SPAWNS_WHITE_RABBITS , "minecraft:stronghold_biased_to" => & WorldgenBiome :: MINECRAFT_STRONGHOLD_BIASED_TO , "minecraft:water_on_map_outlines" => & WorldgenBiome :: MINECRAFT_WATER_ON_MAP_OUTLINES , "minecraft:without_wandering_trader_spawns" => & WorldgenBiome :: MINECRAFT_WITHOUT_WANDERING_TRADER_SPAWNS , "minecraft:without_zombie_sieges" => & WorldgenBiome :: MINECRAFT_WITHOUT_ZOMBIE_SIEGES };
+#[allow(non_snake_case)]
+pub mod WorldgenConfiguredFeature {
+    pub const MINECRAFT_CAN_SPAWN_FROM_BONE_MEAL: super::Tag = (
+        &[
+            "flower_default",
+            "flower_flower_forest",
+            "flower_swamp",
+            "flower_plain",
+            "flower_meadow",
+            "flower_cherry",
+            "wildflower",
+            "flower_pale_garden",
+        ],
+        &[65u16, 66u16, 70u16, 69u16, 67u16, 64u16, 225u16, 68u16],
+    );
+}
+static WORLDGENCONFIGUREDFEATURE_TAGS: phf::Map<&'static str, &'static Tag> = phf::phf_map! { "minecraft:can_spawn_from_bone_meal" => & WorldgenConfiguredFeature :: MINECRAFT_CAN_SPAWN_FROM_BONE_MEAL };
 #[allow(unreachable_patterns)]
 #[must_use]
 pub const fn get_latest_map(
@@ -16145,6 +16274,7 @@ pub const fn get_latest_map(
         RegistryKey::Potion => Some(&POTION_TAGS),
         RegistryKey::Timeline => Some(&TIMELINE_TAGS),
         RegistryKey::WorldgenBiome => Some(&WORLDGENBIOME_TAGS),
+        RegistryKey::WorldgenConfiguredFeature => Some(&WORLDGENCONFIGUREDFEATURE_TAGS),
         _ => None,
     }
 }
@@ -16187,19 +16317,23 @@ mod tags_v1_20_5 {
                 "gradient",
                 "gradient_up",
             ],
-            &[],
+            &[
+                26u16, 27u16, 28u16, 29u16, 31u16, 38u16, 35u16, 37u16, 32u16, 36u16, 34u16, 33u16,
+                25u16, 5u16, 30u16, 39u16, 40u16, 41u16, 42u16, 7u16, 10u16, 9u16, 8u16, 3u16,
+                23u16, 19u16, 17u16, 20u16, 18u16, 1u16, 14u16, 15u16,
+            ],
         );
         pub const MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED: super::super::Tag =
-            (&["curly_border"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[]);
+            (&["curly_border"], &[6u16]);
+        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[4u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[2u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[11u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[12u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[13u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[16u16]);
+        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[21u16]);
+        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[22u16]);
+        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[24u16]);
     }
     static BANNERPATTERN_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:no_item_required" => & BannerPattern :: MINECRAFT_NO_ITEM_REQUIRED , "minecraft:pattern_item/bordure_indented" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED , "minecraft:pattern_item/creeper" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_CREEPER , "minecraft:pattern_item/field_masoned" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FIELD_MASONED , "minecraft:pattern_item/flow" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOW , "minecraft:pattern_item/flower" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOWER , "minecraft:pattern_item/globe" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GLOBE , "minecraft:pattern_item/guster" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GUSTER , "minecraft:pattern_item/mojang" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_MOJANG , "minecraft:pattern_item/piglin" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_PIGLIN , "minecraft:pattern_item/skull" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_SKULL };
     #[allow(non_snake_case)]
@@ -21590,7 +21724,7 @@ mod tags_v1_20_5 {
                 "white",
                 "jellie",
             ],
-            &[],
+            &[9u16, 1u16, 7u16, 8u16, 2u16, 3u16, 5u16, 6u16, 10u16, 4u16],
         );
         pub const MINECRAFT_FULL_MOON_SPAWNS: super::super::Tag = (
             &[
@@ -21606,7 +21740,9 @@ mod tags_v1_20_5 {
                 "jellie",
                 "all_black",
             ],
-            &[],
+            &[
+                9u16, 1u16, 7u16, 8u16, 2u16, 3u16, 5u16, 6u16, 10u16, 4u16, 0u16,
+            ],
         );
     }
     static CATVARIANT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:default_spawns" => & CatVariant :: MINECRAFT_DEFAULT_SPAWNS , "minecraft:full_moon_spawns" => & CatVariant :: MINECRAFT_FULL_MOON_SPAWNS };
@@ -21619,7 +21755,7 @@ mod tags_v1_20_5 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS: super::super::Tag = (
             &[
@@ -21629,11 +21765,11 @@ mod tags_v1_20_5 {
                 "wither_skull",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 14u16, 50u16, 48u16],
         );
         pub const MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL: super::super::Tag =
-            (&["out_of_world"], &[]);
-        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[]);
+            (&["out_of_world"], &[32u16]);
+        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[27u16]);
         pub const MINECRAFT_AVOIDS_GUARDIAN_THORNS: super::super::Tag = (
             &[
                 "magic",
@@ -21643,11 +21779,11 @@ mod tags_v1_20_5 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[27u16, 44u16, 15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_BURN_FROM_STEPPING: super::super::Tag =
-            (&["campfire", "hot_floor"], &[]);
-        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[]);
+            (&["campfire", "hot_floor"], &[3u16, 20u16]);
+        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[31u16]);
         pub const MINECRAFT_BYPASSES_ARMOR: super::super::Tag = (
             &[
                 "on_fire",
@@ -21670,14 +21806,17 @@ mod tags_v1_20_5 {
                 "sonic_boom",
                 "outside_border",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16,
+            ],
         );
-        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[]);
-        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[]);
+        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[40u16]);
+        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[36u16]);
         pub const MINECRAFT_BYPASSES_INVULNERABILITY: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_RESISTANCE: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_SHIELD: super::super::Tag = (
             &[
                 "on_fire",
@@ -21702,7 +21841,10 @@ mod tags_v1_20_5 {
                 "falling_anvil",
                 "falling_stalactite",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16, 11u16, 13u16,
+            ],
         );
         pub const MINECRAFT_BYPASSES_WOLF_ARMOR: super::super::Tag = (
             &[
@@ -21720,17 +21862,22 @@ mod tags_v1_20_5 {
                 "thorns",
                 "wither",
             ],
-            &[],
+            &[
+                32u16, 19u16, 4u16, 6u16, 7u16, 17u16, 22u16, 23u16, 27u16, 33u16, 40u16, 44u16,
+                49u16,
+            ],
         );
-        pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag =
-            (&["player_explosion", "player_attack", "mace_smash"], &[]);
+        pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag = (
+            &["player_explosion", "player_attack", "mace_smash"],
+            &[35u16, 34u16, 26u16],
+        );
         pub const MINECRAFT_DAMAGES_HELMET: super::super::Tag = (
             &["falling_anvil", "falling_block", "falling_stalactite"],
-            &[],
+            &[11u16, 12u16, 13u16],
         );
         pub const MINECRAFT_IGNITES_ARMOR_STANDS: super::super::Tag =
-            (&["in_fire", "campfire"], &[]);
-        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[]);
+            (&["in_fire", "campfire"], &[21u16, 3u16]);
+        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_IS_EXPLOSION: super::super::Tag = (
             &[
                 "fireworks",
@@ -21738,10 +21885,12 @@ mod tags_v1_20_5 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
-        pub const MINECRAFT_IS_FALL: super::super::Tag =
-            (&["fall", "ender_pearl", "stalagmite"], &[]);
+        pub const MINECRAFT_IS_FALL: super::super::Tag = (
+            &["fall", "ender_pearl", "stalagmite"],
+            &[10u16, 8u16, 39u16],
+        );
         pub const MINECRAFT_IS_FIRE: super::super::Tag = (
             &[
                 "in_fire",
@@ -21752,12 +21901,12 @@ mod tags_v1_20_5 {
                 "unattributed_fireball",
                 "fireball",
             ],
-            &[],
+            &[21u16, 3u16, 31u16, 24u16, 20u16, 47u16, 14u16],
         );
-        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[]);
-        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[]);
+        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[17u16]);
+        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[25u16]);
         pub const MINECRAFT_IS_PLAYER_ATTACK: super::super::Tag =
-            (&["player_attack", "mace_smash"], &[]);
+            (&["player_attack", "mace_smash"], &[34u16, 26u16]);
         pub const MINECRAFT_IS_PROJECTILE: super::super::Tag = (
             &[
                 "arrow",
@@ -21769,11 +21918,11 @@ mod tags_v1_20_5 {
                 "thrown",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 30u16, 47u16, 14u16, 50u16, 45u16, 48u16],
         );
-        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[]);
-        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[]);
-        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[26u16]);
+        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[29u16]);
+        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_NO_KNOCKBACK: super::super::Tag = (
             &[
                 "explosion",
@@ -21805,7 +21954,11 @@ mod tags_v1_20_5 {
                 "generic_kill",
                 "campfire",
             ],
-            &[],
+            &[
+                9u16, 35u16, 1u16, 21u16, 25u16, 31u16, 24u16, 20u16, 22u16, 4u16, 6u16, 40u16,
+                2u16, 10u16, 8u16, 16u16, 32u16, 18u16, 27u16, 49u16, 5u16, 7u16, 43u16, 17u16,
+                39u16, 33u16, 19u16, 3u16,
+            ],
         );
         pub const MINECRAFT_PANIC_CAUSES: super::super::Tag = (
             &[
@@ -21837,7 +21990,11 @@ mod tags_v1_20_5 {
                 "player_attack",
                 "mace_smash",
             ],
-            &[],
+            &[
+                2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16, 0u16, 5u16, 9u16, 14u16, 15u16,
+                23u16, 27u16, 28u16, 30u16, 35u16, 36u16, 41u16, 45u16, 46u16, 47u16, 48u16, 49u16,
+                50u16, 34u16, 26u16,
+            ],
         );
         pub const MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES: super::super::Tag = (
             &[
@@ -21849,11 +22006,13 @@ mod tags_v1_20_5 {
                 "lightning_bolt",
                 "on_fire",
             ],
-            &[],
+            &[2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16],
         );
-        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag =
-            (&["magic", "indirect_magic", "sonic_boom", "thorns"], &[]);
-        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag = (
+            &["magic", "indirect_magic", "sonic_boom", "thorns"],
+            &[27u16, 23u16, 36u16, 44u16],
+        );
+        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[6u16]);
     }
     static DAMAGETYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:always_hurts_ender_dragons" => & DamageType :: MINECRAFT_ALWAYS_HURTS_ENDER_DRAGONS , "minecraft:always_kills_armor_stands" => & DamageType :: MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS , "minecraft:always_most_significant_fall" => & DamageType :: MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL , "minecraft:always_triggers_silverfish" => & DamageType :: MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH , "minecraft:avoids_guardian_thorns" => & DamageType :: MINECRAFT_AVOIDS_GUARDIAN_THORNS , "minecraft:burn_from_stepping" => & DamageType :: MINECRAFT_BURN_FROM_STEPPING , "minecraft:burns_armor_stands" => & DamageType :: MINECRAFT_BURNS_ARMOR_STANDS , "minecraft:bypasses_armor" => & DamageType :: MINECRAFT_BYPASSES_ARMOR , "minecraft:bypasses_effects" => & DamageType :: MINECRAFT_BYPASSES_EFFECTS , "minecraft:bypasses_enchantments" => & DamageType :: MINECRAFT_BYPASSES_ENCHANTMENTS , "minecraft:bypasses_invulnerability" => & DamageType :: MINECRAFT_BYPASSES_INVULNERABILITY , "minecraft:bypasses_resistance" => & DamageType :: MINECRAFT_BYPASSES_RESISTANCE , "minecraft:bypasses_shield" => & DamageType :: MINECRAFT_BYPASSES_SHIELD , "minecraft:bypasses_wolf_armor" => & DamageType :: MINECRAFT_BYPASSES_WOLF_ARMOR , "minecraft:can_break_armor_stand" => & DamageType :: MINECRAFT_CAN_BREAK_ARMOR_STAND , "minecraft:damages_helmet" => & DamageType :: MINECRAFT_DAMAGES_HELMET , "minecraft:ignites_armor_stands" => & DamageType :: MINECRAFT_IGNITES_ARMOR_STANDS , "minecraft:is_drowning" => & DamageType :: MINECRAFT_IS_DROWNING , "minecraft:is_explosion" => & DamageType :: MINECRAFT_IS_EXPLOSION , "minecraft:is_fall" => & DamageType :: MINECRAFT_IS_FALL , "minecraft:is_fire" => & DamageType :: MINECRAFT_IS_FIRE , "minecraft:is_freezing" => & DamageType :: MINECRAFT_IS_FREEZING , "minecraft:is_lightning" => & DamageType :: MINECRAFT_IS_LIGHTNING , "minecraft:is_player_attack" => & DamageType :: MINECRAFT_IS_PLAYER_ATTACK , "minecraft:is_projectile" => & DamageType :: MINECRAFT_IS_PROJECTILE , "minecraft:mace_smash" => & DamageType :: MINECRAFT_MACE_SMASH , "minecraft:no_anger" => & DamageType :: MINECRAFT_NO_ANGER , "minecraft:no_impact" => & DamageType :: MINECRAFT_NO_IMPACT , "minecraft:no_knockback" => & DamageType :: MINECRAFT_NO_KNOCKBACK , "minecraft:panic_causes" => & DamageType :: MINECRAFT_PANIC_CAUSES , "minecraft:panic_environmental_causes" => & DamageType :: MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES , "minecraft:witch_resistant_to" => & DamageType :: MINECRAFT_WITCH_RESISTANT_TO , "minecraft:wither_immune_to" => & DamageType :: MINECRAFT_WITHER_IMMUNE_TO };
     #[allow(non_snake_case)]
@@ -22733,7 +22892,7 @@ mod tags_v1_20_5 {
     static FLUID_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "c:beetroot_soup" => & Fluid :: C_BEETROOT_SOUP , "c:experience" => & Fluid :: C_EXPERIENCE , "c:gaseous" => & Fluid :: C_GASEOUS , "c:hidden_from_recipe_viewers" => & Fluid :: C_HIDDEN_FROM_RECIPE_VIEWERS , "c:honey" => & Fluid :: C_HONEY , "c:lava" => & Fluid :: C_LAVA , "c:milk" => & Fluid :: C_MILK , "c:mushroom_stew" => & Fluid :: C_MUSHROOM_STEW , "c:potion" => & Fluid :: C_POTION , "c:rabbit_stew" => & Fluid :: C_RABBIT_STEW , "c:suspicious_stew" => & Fluid :: C_SUSPICIOUS_STEW , "c:water" => & Fluid :: C_WATER , "minecraft:lava" => & Fluid :: MINECRAFT_LAVA , "minecraft:water" => & Fluid :: MINECRAFT_WATER };
     #[allow(non_snake_case)]
     pub mod GameEvent {
-        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[]);
+        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[34u16]);
         pub const MINECRAFT_IGNORE_VIBRATIONS_SNEAKING: super::super::Tag = (
             &[
                 "hit_ground",
@@ -22743,10 +22902,10 @@ mod tags_v1_20_5 {
                 "item_interact_start",
                 "item_interact_finish",
             ],
-            &[],
+            &[27u16, 37u16, 42u16, 43u16, 30u16, 29u16],
         );
         pub const MINECRAFT_SHRIEKER_CAN_LISTEN: super::super::Tag =
-            (&["sculk_sensor_tendrils_clicking"], &[]);
+            (&["sculk_sensor_tendrils_clicking"], &[38u16]);
         pub const MINECRAFT_VIBRATIONS: super::super::Tag = (
             &[
                 "block_attach",
@@ -22805,7 +22964,13 @@ mod tags_v1_20_5 {
                 "resonate_15",
                 "flap",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 24u16,
+            ],
         );
         pub const MINECRAFT_WARDEN_CAN_LISTEN: super::super::Tag = (
             &[
@@ -22866,7 +23031,13 @@ mod tags_v1_20_5 {
                 "shriek",
                 "sculk_sensor_tendrils_clicking",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 40u16, 38u16,
+            ],
         );
     }
     static GAMEEVENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:allay_can_listen" => & GameEvent :: MINECRAFT_ALLAY_CAN_LISTEN , "minecraft:ignore_vibrations_sneaking" => & GameEvent :: MINECRAFT_IGNORE_VIBRATIONS_SNEAKING , "minecraft:shrieker_can_listen" => & GameEvent :: MINECRAFT_SHRIEKER_CAN_LISTEN , "minecraft:vibrations" => & GameEvent :: MINECRAFT_VIBRATIONS , "minecraft:warden_can_listen" => & GameEvent :: MINECRAFT_WARDEN_CAN_LISTEN };
@@ -22883,7 +23054,7 @@ mod tags_v1_20_5 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16, 0u16, 1u16, 7u16, 2u16],
         );
         pub const MINECRAFT_REGULAR_GOAT_HORNS: super::super::Tag = (
             &[
@@ -22892,7 +23063,7 @@ mod tags_v1_20_5 {
                 "seek_goat_horn",
                 "feel_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16],
         );
         pub const MINECRAFT_SCREAMING_GOAT_HORNS: super::super::Tag = (
             &[
@@ -22901,7 +23072,7 @@ mod tags_v1_20_5 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[0u16, 1u16, 7u16, 2u16],
         );
     }
     static INSTRUMENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:goat_horns" => & Instrument :: MINECRAFT_GOAT_HORNS , "minecraft:regular_goat_horns" => & Instrument :: MINECRAFT_REGULAR_GOAT_HORNS , "minecraft:screaming_goat_horns" => & Instrument :: MINECRAFT_SCREAMING_GOAT_HORNS };
@@ -27064,7 +27235,12 @@ mod tags_v1_20_5 {
                 "sunflowers",
                 "tides",
             ],
-            &[],
+            &[
+                24u16, 1u16, 0u16, 2u16, 5u16, 32u16, 47u16, 35u16, 12u16, 37u16, 42u16, 13u16,
+                46u16, 22u16, 26u16, 8u16, 40u16, 45u16, 39u16, 50u16, 19u16, 33u16, 31u16, 7u16,
+                38u16, 15u16, 4u16, 23u16, 27u16, 36u16, 44u16, 3u16, 6u16, 9u16, 10u16, 11u16,
+                17u16, 18u16, 20u16, 25u16, 28u16, 29u16, 30u16, 34u16, 41u16, 43u16,
+            ],
         );
     }
     static PAINTINGVARIANT_TAGS: phf::Map<&'static str, &'static super::Tag> =
@@ -27087,9 +27263,12 @@ mod tags_v1_20_5 {
                 "toolsmith",
                 "weaponsmith",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+            ],
         );
-        pub const MINECRAFT_BEE_HOME: super::super::Tag = (&["beehive", "bee_nest"], &[]);
+        pub const MINECRAFT_BEE_HOME: super::super::Tag =
+            (&["beehive", "bee_nest"], &[15u16, 16u16]);
         pub const MINECRAFT_VILLAGE: super::super::Tag = (
             &[
                 "armorer",
@@ -27108,7 +27287,10 @@ mod tags_v1_20_5 {
                 "home",
                 "meeting",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+                13u16, 14u16,
+            ],
         );
     }
     static POINTOFINTERESTTYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:acquirable_job_site" => & PointOfInterestType :: MINECRAFT_ACQUIRABLE_JOB_SITE , "minecraft:bee_home" => & PointOfInterestType :: MINECRAFT_BEE_HOME , "minecraft:village" => & PointOfInterestType :: MINECRAFT_VILLAGE };
@@ -28572,19 +28754,23 @@ mod tags_v1_21 {
                 "gradient",
                 "gradient_up",
             ],
-            &[],
+            &[
+                26u16, 27u16, 28u16, 29u16, 31u16, 38u16, 35u16, 37u16, 32u16, 36u16, 34u16, 33u16,
+                25u16, 5u16, 30u16, 39u16, 40u16, 41u16, 42u16, 7u16, 10u16, 9u16, 8u16, 3u16,
+                23u16, 19u16, 17u16, 20u16, 18u16, 1u16, 14u16, 15u16,
+            ],
         );
         pub const MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED: super::super::Tag =
-            (&["curly_border"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[]);
+            (&["curly_border"], &[6u16]);
+        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[4u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[2u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[11u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[12u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[13u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[16u16]);
+        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[21u16]);
+        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[22u16]);
+        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[24u16]);
     }
     static BANNERPATTERN_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:no_item_required" => & BannerPattern :: MINECRAFT_NO_ITEM_REQUIRED , "minecraft:pattern_item/bordure_indented" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED , "minecraft:pattern_item/creeper" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_CREEPER , "minecraft:pattern_item/field_masoned" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FIELD_MASONED , "minecraft:pattern_item/flow" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOW , "minecraft:pattern_item/flower" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOWER , "minecraft:pattern_item/globe" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GLOBE , "minecraft:pattern_item/guster" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GUSTER , "minecraft:pattern_item/mojang" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_MOJANG , "minecraft:pattern_item/piglin" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_PIGLIN , "minecraft:pattern_item/skull" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_SKULL };
     #[allow(non_snake_case)]
@@ -33975,7 +34161,7 @@ mod tags_v1_21 {
                 "white",
                 "jellie",
             ],
-            &[],
+            &[9u16, 1u16, 7u16, 8u16, 2u16, 3u16, 5u16, 6u16, 10u16, 4u16],
         );
         pub const MINECRAFT_FULL_MOON_SPAWNS: super::super::Tag = (
             &[
@@ -33991,7 +34177,9 @@ mod tags_v1_21 {
                 "jellie",
                 "all_black",
             ],
-            &[],
+            &[
+                9u16, 1u16, 7u16, 8u16, 2u16, 3u16, 5u16, 6u16, 10u16, 4u16, 0u16,
+            ],
         );
     }
     static CATVARIANT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:default_spawns" => & CatVariant :: MINECRAFT_DEFAULT_SPAWNS , "minecraft:full_moon_spawns" => & CatVariant :: MINECRAFT_FULL_MOON_SPAWNS };
@@ -34004,7 +34192,7 @@ mod tags_v1_21 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS: super::super::Tag = (
             &[
@@ -34014,11 +34202,11 @@ mod tags_v1_21 {
                 "wither_skull",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 14u16, 50u16, 48u16],
         );
         pub const MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL: super::super::Tag =
-            (&["out_of_world"], &[]);
-        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[]);
+            (&["out_of_world"], &[32u16]);
+        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[27u16]);
         pub const MINECRAFT_AVOIDS_GUARDIAN_THORNS: super::super::Tag = (
             &[
                 "magic",
@@ -34028,11 +34216,11 @@ mod tags_v1_21 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[27u16, 44u16, 15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_BURN_FROM_STEPPING: super::super::Tag =
-            (&["campfire", "hot_floor"], &[]);
-        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[]);
+            (&["campfire", "hot_floor"], &[3u16, 20u16]);
+        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[31u16]);
         pub const MINECRAFT_BYPASSES_ARMOR: super::super::Tag = (
             &[
                 "on_fire",
@@ -34055,14 +34243,17 @@ mod tags_v1_21 {
                 "sonic_boom",
                 "outside_border",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16,
+            ],
         );
-        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[]);
-        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[]);
+        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[40u16]);
+        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[36u16]);
         pub const MINECRAFT_BYPASSES_INVULNERABILITY: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_RESISTANCE: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_SHIELD: super::super::Tag = (
             &[
                 "on_fire",
@@ -34087,7 +34278,10 @@ mod tags_v1_21 {
                 "falling_anvil",
                 "falling_stalactite",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16, 11u16, 13u16,
+            ],
         );
         pub const MINECRAFT_BYPASSES_WOLF_ARMOR: super::super::Tag = (
             &[
@@ -34105,17 +34299,22 @@ mod tags_v1_21 {
                 "thorns",
                 "wither",
             ],
-            &[],
+            &[
+                32u16, 19u16, 4u16, 6u16, 7u16, 17u16, 22u16, 23u16, 27u16, 33u16, 40u16, 44u16,
+                49u16,
+            ],
         );
-        pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag =
-            (&["player_explosion", "player_attack", "mace_smash"], &[]);
+        pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag = (
+            &["player_explosion", "player_attack", "mace_smash"],
+            &[35u16, 34u16, 26u16],
+        );
         pub const MINECRAFT_DAMAGES_HELMET: super::super::Tag = (
             &["falling_anvil", "falling_block", "falling_stalactite"],
-            &[],
+            &[11u16, 12u16, 13u16],
         );
         pub const MINECRAFT_IGNITES_ARMOR_STANDS: super::super::Tag =
-            (&["in_fire", "campfire"], &[]);
-        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[]);
+            (&["in_fire", "campfire"], &[21u16, 3u16]);
+        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_IS_EXPLOSION: super::super::Tag = (
             &[
                 "fireworks",
@@ -34123,10 +34322,12 @@ mod tags_v1_21 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
-        pub const MINECRAFT_IS_FALL: super::super::Tag =
-            (&["fall", "ender_pearl", "stalagmite"], &[]);
+        pub const MINECRAFT_IS_FALL: super::super::Tag = (
+            &["fall", "ender_pearl", "stalagmite"],
+            &[10u16, 8u16, 39u16],
+        );
         pub const MINECRAFT_IS_FIRE: super::super::Tag = (
             &[
                 "in_fire",
@@ -34137,12 +34338,12 @@ mod tags_v1_21 {
                 "unattributed_fireball",
                 "fireball",
             ],
-            &[],
+            &[21u16, 3u16, 31u16, 24u16, 20u16, 47u16, 14u16],
         );
-        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[]);
-        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[]);
+        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[17u16]);
+        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[25u16]);
         pub const MINECRAFT_IS_PLAYER_ATTACK: super::super::Tag =
-            (&["player_attack", "mace_smash"], &[]);
+            (&["player_attack", "mace_smash"], &[34u16, 26u16]);
         pub const MINECRAFT_IS_PROJECTILE: super::super::Tag = (
             &[
                 "arrow",
@@ -34154,11 +34355,11 @@ mod tags_v1_21 {
                 "thrown",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 30u16, 47u16, 14u16, 50u16, 45u16, 48u16],
         );
-        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[]);
-        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[]);
-        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[26u16]);
+        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[29u16]);
+        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_NO_KNOCKBACK: super::super::Tag = (
             &[
                 "explosion",
@@ -34190,7 +34391,11 @@ mod tags_v1_21 {
                 "generic_kill",
                 "campfire",
             ],
-            &[],
+            &[
+                9u16, 35u16, 1u16, 21u16, 25u16, 31u16, 24u16, 20u16, 22u16, 4u16, 6u16, 40u16,
+                2u16, 10u16, 8u16, 16u16, 32u16, 18u16, 27u16, 49u16, 5u16, 7u16, 43u16, 17u16,
+                39u16, 33u16, 19u16, 3u16,
+            ],
         );
         pub const MINECRAFT_PANIC_CAUSES: super::super::Tag = (
             &[
@@ -34222,7 +34427,11 @@ mod tags_v1_21 {
                 "player_attack",
                 "mace_smash",
             ],
-            &[],
+            &[
+                2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16, 0u16, 5u16, 9u16, 14u16, 15u16,
+                23u16, 27u16, 28u16, 30u16, 35u16, 36u16, 41u16, 45u16, 46u16, 47u16, 48u16, 49u16,
+                50u16, 34u16, 26u16,
+            ],
         );
         pub const MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES: super::super::Tag = (
             &[
@@ -34234,11 +34443,13 @@ mod tags_v1_21 {
                 "lightning_bolt",
                 "on_fire",
             ],
-            &[],
+            &[2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16],
         );
-        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag =
-            (&["magic", "indirect_magic", "sonic_boom", "thorns"], &[]);
-        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag = (
+            &["magic", "indirect_magic", "sonic_boom", "thorns"],
+            &[27u16, 23u16, 36u16, 44u16],
+        );
+        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[6u16]);
     }
     static DAMAGETYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:always_hurts_ender_dragons" => & DamageType :: MINECRAFT_ALWAYS_HURTS_ENDER_DRAGONS , "minecraft:always_kills_armor_stands" => & DamageType :: MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS , "minecraft:always_most_significant_fall" => & DamageType :: MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL , "minecraft:always_triggers_silverfish" => & DamageType :: MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH , "minecraft:avoids_guardian_thorns" => & DamageType :: MINECRAFT_AVOIDS_GUARDIAN_THORNS , "minecraft:burn_from_stepping" => & DamageType :: MINECRAFT_BURN_FROM_STEPPING , "minecraft:burns_armor_stands" => & DamageType :: MINECRAFT_BURNS_ARMOR_STANDS , "minecraft:bypasses_armor" => & DamageType :: MINECRAFT_BYPASSES_ARMOR , "minecraft:bypasses_effects" => & DamageType :: MINECRAFT_BYPASSES_EFFECTS , "minecraft:bypasses_enchantments" => & DamageType :: MINECRAFT_BYPASSES_ENCHANTMENTS , "minecraft:bypasses_invulnerability" => & DamageType :: MINECRAFT_BYPASSES_INVULNERABILITY , "minecraft:bypasses_resistance" => & DamageType :: MINECRAFT_BYPASSES_RESISTANCE , "minecraft:bypasses_shield" => & DamageType :: MINECRAFT_BYPASSES_SHIELD , "minecraft:bypasses_wolf_armor" => & DamageType :: MINECRAFT_BYPASSES_WOLF_ARMOR , "minecraft:can_break_armor_stand" => & DamageType :: MINECRAFT_CAN_BREAK_ARMOR_STAND , "minecraft:damages_helmet" => & DamageType :: MINECRAFT_DAMAGES_HELMET , "minecraft:ignites_armor_stands" => & DamageType :: MINECRAFT_IGNITES_ARMOR_STANDS , "minecraft:is_drowning" => & DamageType :: MINECRAFT_IS_DROWNING , "minecraft:is_explosion" => & DamageType :: MINECRAFT_IS_EXPLOSION , "minecraft:is_fall" => & DamageType :: MINECRAFT_IS_FALL , "minecraft:is_fire" => & DamageType :: MINECRAFT_IS_FIRE , "minecraft:is_freezing" => & DamageType :: MINECRAFT_IS_FREEZING , "minecraft:is_lightning" => & DamageType :: MINECRAFT_IS_LIGHTNING , "minecraft:is_player_attack" => & DamageType :: MINECRAFT_IS_PLAYER_ATTACK , "minecraft:is_projectile" => & DamageType :: MINECRAFT_IS_PROJECTILE , "minecraft:mace_smash" => & DamageType :: MINECRAFT_MACE_SMASH , "minecraft:no_anger" => & DamageType :: MINECRAFT_NO_ANGER , "minecraft:no_impact" => & DamageType :: MINECRAFT_NO_IMPACT , "minecraft:no_knockback" => & DamageType :: MINECRAFT_NO_KNOCKBACK , "minecraft:panic_causes" => & DamageType :: MINECRAFT_PANIC_CAUSES , "minecraft:panic_environmental_causes" => & DamageType :: MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES , "minecraft:witch_resistant_to" => & DamageType :: MINECRAFT_WITCH_RESISTANT_TO , "minecraft:wither_immune_to" => & DamageType :: MINECRAFT_WITHER_IMMUNE_TO };
     #[allow(non_snake_case)]
@@ -35118,7 +35329,7 @@ mod tags_v1_21 {
     static FLUID_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "c:beetroot_soup" => & Fluid :: C_BEETROOT_SOUP , "c:experience" => & Fluid :: C_EXPERIENCE , "c:gaseous" => & Fluid :: C_GASEOUS , "c:hidden_from_recipe_viewers" => & Fluid :: C_HIDDEN_FROM_RECIPE_VIEWERS , "c:honey" => & Fluid :: C_HONEY , "c:lava" => & Fluid :: C_LAVA , "c:milk" => & Fluid :: C_MILK , "c:mushroom_stew" => & Fluid :: C_MUSHROOM_STEW , "c:potion" => & Fluid :: C_POTION , "c:rabbit_stew" => & Fluid :: C_RABBIT_STEW , "c:suspicious_stew" => & Fluid :: C_SUSPICIOUS_STEW , "c:water" => & Fluid :: C_WATER , "minecraft:lava" => & Fluid :: MINECRAFT_LAVA , "minecraft:water" => & Fluid :: MINECRAFT_WATER };
     #[allow(non_snake_case)]
     pub mod GameEvent {
-        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[]);
+        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[34u16]);
         pub const MINECRAFT_IGNORE_VIBRATIONS_SNEAKING: super::super::Tag = (
             &[
                 "hit_ground",
@@ -35128,10 +35339,10 @@ mod tags_v1_21 {
                 "item_interact_start",
                 "item_interact_finish",
             ],
-            &[],
+            &[27u16, 37u16, 42u16, 43u16, 30u16, 29u16],
         );
         pub const MINECRAFT_SHRIEKER_CAN_LISTEN: super::super::Tag =
-            (&["sculk_sensor_tendrils_clicking"], &[]);
+            (&["sculk_sensor_tendrils_clicking"], &[38u16]);
         pub const MINECRAFT_VIBRATIONS: super::super::Tag = (
             &[
                 "block_attach",
@@ -35190,7 +35401,13 @@ mod tags_v1_21 {
                 "resonate_15",
                 "flap",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 24u16,
+            ],
         );
         pub const MINECRAFT_WARDEN_CAN_LISTEN: super::super::Tag = (
             &[
@@ -35251,7 +35468,13 @@ mod tags_v1_21 {
                 "shriek",
                 "sculk_sensor_tendrils_clicking",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 40u16, 38u16,
+            ],
         );
     }
     static GAMEEVENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:allay_can_listen" => & GameEvent :: MINECRAFT_ALLAY_CAN_LISTEN , "minecraft:ignore_vibrations_sneaking" => & GameEvent :: MINECRAFT_IGNORE_VIBRATIONS_SNEAKING , "minecraft:shrieker_can_listen" => & GameEvent :: MINECRAFT_SHRIEKER_CAN_LISTEN , "minecraft:vibrations" => & GameEvent :: MINECRAFT_VIBRATIONS , "minecraft:warden_can_listen" => & GameEvent :: MINECRAFT_WARDEN_CAN_LISTEN };
@@ -35268,7 +35491,7 @@ mod tags_v1_21 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16, 0u16, 1u16, 7u16, 2u16],
         );
         pub const MINECRAFT_REGULAR_GOAT_HORNS: super::super::Tag = (
             &[
@@ -35277,7 +35500,7 @@ mod tags_v1_21 {
                 "seek_goat_horn",
                 "feel_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16],
         );
         pub const MINECRAFT_SCREAMING_GOAT_HORNS: super::super::Tag = (
             &[
@@ -35286,7 +35509,7 @@ mod tags_v1_21 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[0u16, 1u16, 7u16, 2u16],
         );
     }
     static INSTRUMENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:goat_horns" => & Instrument :: MINECRAFT_GOAT_HORNS , "minecraft:regular_goat_horns" => & Instrument :: MINECRAFT_REGULAR_GOAT_HORNS , "minecraft:screaming_goat_horns" => & Instrument :: MINECRAFT_SCREAMING_GOAT_HORNS };
@@ -39449,7 +39672,12 @@ mod tags_v1_21 {
                 "sunflowers",
                 "tides",
             ],
-            &[],
+            &[
+                24u16, 1u16, 0u16, 2u16, 5u16, 32u16, 47u16, 35u16, 12u16, 37u16, 42u16, 13u16,
+                46u16, 22u16, 26u16, 8u16, 40u16, 45u16, 39u16, 50u16, 19u16, 33u16, 31u16, 7u16,
+                38u16, 15u16, 4u16, 23u16, 27u16, 36u16, 44u16, 3u16, 6u16, 9u16, 10u16, 11u16,
+                17u16, 18u16, 20u16, 25u16, 28u16, 29u16, 30u16, 34u16, 41u16, 43u16,
+            ],
         );
     }
     static PAINTINGVARIANT_TAGS: phf::Map<&'static str, &'static super::Tag> =
@@ -39472,9 +39700,12 @@ mod tags_v1_21 {
                 "toolsmith",
                 "weaponsmith",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+            ],
         );
-        pub const MINECRAFT_BEE_HOME: super::super::Tag = (&["beehive", "bee_nest"], &[]);
+        pub const MINECRAFT_BEE_HOME: super::super::Tag =
+            (&["beehive", "bee_nest"], &[15u16, 16u16]);
         pub const MINECRAFT_VILLAGE: super::super::Tag = (
             &[
                 "armorer",
@@ -39493,7 +39724,10 @@ mod tags_v1_21 {
                 "home",
                 "meeting",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+                13u16, 14u16,
+            ],
         );
     }
     static POINTOFINTERESTTYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:acquirable_job_site" => & PointOfInterestType :: MINECRAFT_ACQUIRABLE_JOB_SITE , "minecraft:bee_home" => & PointOfInterestType :: MINECRAFT_BEE_HOME , "minecraft:village" => & PointOfInterestType :: MINECRAFT_VILLAGE };
@@ -40957,19 +41191,23 @@ mod tags_v1_21_2 {
                 "gradient",
                 "gradient_up",
             ],
-            &[],
+            &[
+                26u16, 27u16, 28u16, 29u16, 31u16, 38u16, 35u16, 37u16, 32u16, 36u16, 34u16, 33u16,
+                25u16, 5u16, 30u16, 39u16, 40u16, 41u16, 42u16, 7u16, 10u16, 9u16, 8u16, 3u16,
+                23u16, 19u16, 17u16, 20u16, 18u16, 1u16, 14u16, 15u16,
+            ],
         );
         pub const MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED: super::super::Tag =
-            (&["curly_border"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[]);
+            (&["curly_border"], &[6u16]);
+        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[4u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[2u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[11u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[12u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[13u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[16u16]);
+        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[21u16]);
+        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[22u16]);
+        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[24u16]);
     }
     static BANNERPATTERN_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:no_item_required" => & BannerPattern :: MINECRAFT_NO_ITEM_REQUIRED , "minecraft:pattern_item/bordure_indented" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED , "minecraft:pattern_item/creeper" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_CREEPER , "minecraft:pattern_item/field_masoned" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FIELD_MASONED , "minecraft:pattern_item/flow" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOW , "minecraft:pattern_item/flower" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOWER , "minecraft:pattern_item/globe" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GLOBE , "minecraft:pattern_item/guster" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GUSTER , "minecraft:pattern_item/mojang" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_MOJANG , "minecraft:pattern_item/piglin" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_PIGLIN , "minecraft:pattern_item/skull" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_SKULL };
     #[allow(non_snake_case)]
@@ -46360,7 +46598,7 @@ mod tags_v1_21_2 {
                 "white",
                 "jellie",
             ],
-            &[],
+            &[9u16, 1u16, 7u16, 8u16, 2u16, 3u16, 5u16, 6u16, 10u16, 4u16],
         );
         pub const MINECRAFT_FULL_MOON_SPAWNS: super::super::Tag = (
             &[
@@ -46376,7 +46614,9 @@ mod tags_v1_21_2 {
                 "jellie",
                 "all_black",
             ],
-            &[],
+            &[
+                9u16, 1u16, 7u16, 8u16, 2u16, 3u16, 5u16, 6u16, 10u16, 4u16, 0u16,
+            ],
         );
     }
     static CATVARIANT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:default_spawns" => & CatVariant :: MINECRAFT_DEFAULT_SPAWNS , "minecraft:full_moon_spawns" => & CatVariant :: MINECRAFT_FULL_MOON_SPAWNS };
@@ -46389,7 +46629,7 @@ mod tags_v1_21_2 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS: super::super::Tag = (
             &[
@@ -46399,11 +46639,11 @@ mod tags_v1_21_2 {
                 "wither_skull",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 14u16, 50u16, 48u16],
         );
         pub const MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL: super::super::Tag =
-            (&["out_of_world"], &[]);
-        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[]);
+            (&["out_of_world"], &[32u16]);
+        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[27u16]);
         pub const MINECRAFT_AVOIDS_GUARDIAN_THORNS: super::super::Tag = (
             &[
                 "magic",
@@ -46413,11 +46653,11 @@ mod tags_v1_21_2 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[27u16, 44u16, 15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_BURN_FROM_STEPPING: super::super::Tag =
-            (&["campfire", "hot_floor"], &[]);
-        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[]);
+            (&["campfire", "hot_floor"], &[3u16, 20u16]);
+        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[31u16]);
         pub const MINECRAFT_BYPASSES_ARMOR: super::super::Tag = (
             &[
                 "on_fire",
@@ -46440,14 +46680,17 @@ mod tags_v1_21_2 {
                 "sonic_boom",
                 "outside_border",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16,
+            ],
         );
-        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[]);
-        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[]);
+        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[40u16]);
+        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[36u16]);
         pub const MINECRAFT_BYPASSES_INVULNERABILITY: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_RESISTANCE: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_SHIELD: super::super::Tag = (
             &[
                 "on_fire",
@@ -46472,7 +46715,10 @@ mod tags_v1_21_2 {
                 "falling_anvil",
                 "falling_stalactite",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16, 11u16, 13u16,
+            ],
         );
         pub const MINECRAFT_BYPASSES_WOLF_ARMOR: super::super::Tag = (
             &[
@@ -46490,17 +46736,22 @@ mod tags_v1_21_2 {
                 "thorns",
                 "wither",
             ],
-            &[],
+            &[
+                32u16, 19u16, 4u16, 6u16, 7u16, 17u16, 22u16, 23u16, 27u16, 33u16, 40u16, 44u16,
+                49u16,
+            ],
         );
-        pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag =
-            (&["player_explosion", "player_attack", "mace_smash"], &[]);
+        pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag = (
+            &["player_explosion", "player_attack", "mace_smash"],
+            &[35u16, 34u16, 26u16],
+        );
         pub const MINECRAFT_DAMAGES_HELMET: super::super::Tag = (
             &["falling_anvil", "falling_block", "falling_stalactite"],
-            &[],
+            &[11u16, 12u16, 13u16],
         );
         pub const MINECRAFT_IGNITES_ARMOR_STANDS: super::super::Tag =
-            (&["in_fire", "campfire"], &[]);
-        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[]);
+            (&["in_fire", "campfire"], &[21u16, 3u16]);
+        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_IS_EXPLOSION: super::super::Tag = (
             &[
                 "fireworks",
@@ -46508,10 +46759,12 @@ mod tags_v1_21_2 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
-        pub const MINECRAFT_IS_FALL: super::super::Tag =
-            (&["fall", "ender_pearl", "stalagmite"], &[]);
+        pub const MINECRAFT_IS_FALL: super::super::Tag = (
+            &["fall", "ender_pearl", "stalagmite"],
+            &[10u16, 8u16, 39u16],
+        );
         pub const MINECRAFT_IS_FIRE: super::super::Tag = (
             &[
                 "in_fire",
@@ -46522,12 +46775,12 @@ mod tags_v1_21_2 {
                 "unattributed_fireball",
                 "fireball",
             ],
-            &[],
+            &[21u16, 3u16, 31u16, 24u16, 20u16, 47u16, 14u16],
         );
-        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[]);
-        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[]);
+        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[17u16]);
+        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[25u16]);
         pub const MINECRAFT_IS_PLAYER_ATTACK: super::super::Tag =
-            (&["player_attack", "mace_smash"], &[]);
+            (&["player_attack", "mace_smash"], &[34u16, 26u16]);
         pub const MINECRAFT_IS_PROJECTILE: super::super::Tag = (
             &[
                 "arrow",
@@ -46539,11 +46792,11 @@ mod tags_v1_21_2 {
                 "thrown",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 30u16, 47u16, 14u16, 50u16, 45u16, 48u16],
         );
-        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[]);
-        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[]);
-        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[26u16]);
+        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[29u16]);
+        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_NO_KNOCKBACK: super::super::Tag = (
             &[
                 "explosion",
@@ -46575,7 +46828,11 @@ mod tags_v1_21_2 {
                 "generic_kill",
                 "campfire",
             ],
-            &[],
+            &[
+                9u16, 35u16, 1u16, 21u16, 25u16, 31u16, 24u16, 20u16, 22u16, 4u16, 6u16, 40u16,
+                2u16, 10u16, 8u16, 16u16, 32u16, 18u16, 27u16, 49u16, 5u16, 7u16, 43u16, 17u16,
+                39u16, 33u16, 19u16, 3u16,
+            ],
         );
         pub const MINECRAFT_PANIC_CAUSES: super::super::Tag = (
             &[
@@ -46607,7 +46864,11 @@ mod tags_v1_21_2 {
                 "player_attack",
                 "mace_smash",
             ],
-            &[],
+            &[
+                2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16, 0u16, 5u16, 9u16, 14u16, 15u16,
+                23u16, 27u16, 28u16, 30u16, 35u16, 36u16, 41u16, 45u16, 46u16, 47u16, 48u16, 49u16,
+                50u16, 34u16, 26u16,
+            ],
         );
         pub const MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES: super::super::Tag = (
             &[
@@ -46619,11 +46880,13 @@ mod tags_v1_21_2 {
                 "lightning_bolt",
                 "on_fire",
             ],
-            &[],
+            &[2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16],
         );
-        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag =
-            (&["magic", "indirect_magic", "sonic_boom", "thorns"], &[]);
-        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag = (
+            &["magic", "indirect_magic", "sonic_boom", "thorns"],
+            &[27u16, 23u16, 36u16, 44u16],
+        );
+        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[6u16]);
     }
     static DAMAGETYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:always_hurts_ender_dragons" => & DamageType :: MINECRAFT_ALWAYS_HURTS_ENDER_DRAGONS , "minecraft:always_kills_armor_stands" => & DamageType :: MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS , "minecraft:always_most_significant_fall" => & DamageType :: MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL , "minecraft:always_triggers_silverfish" => & DamageType :: MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH , "minecraft:avoids_guardian_thorns" => & DamageType :: MINECRAFT_AVOIDS_GUARDIAN_THORNS , "minecraft:burn_from_stepping" => & DamageType :: MINECRAFT_BURN_FROM_STEPPING , "minecraft:burns_armor_stands" => & DamageType :: MINECRAFT_BURNS_ARMOR_STANDS , "minecraft:bypasses_armor" => & DamageType :: MINECRAFT_BYPASSES_ARMOR , "minecraft:bypasses_effects" => & DamageType :: MINECRAFT_BYPASSES_EFFECTS , "minecraft:bypasses_enchantments" => & DamageType :: MINECRAFT_BYPASSES_ENCHANTMENTS , "minecraft:bypasses_invulnerability" => & DamageType :: MINECRAFT_BYPASSES_INVULNERABILITY , "minecraft:bypasses_resistance" => & DamageType :: MINECRAFT_BYPASSES_RESISTANCE , "minecraft:bypasses_shield" => & DamageType :: MINECRAFT_BYPASSES_SHIELD , "minecraft:bypasses_wolf_armor" => & DamageType :: MINECRAFT_BYPASSES_WOLF_ARMOR , "minecraft:can_break_armor_stand" => & DamageType :: MINECRAFT_CAN_BREAK_ARMOR_STAND , "minecraft:damages_helmet" => & DamageType :: MINECRAFT_DAMAGES_HELMET , "minecraft:ignites_armor_stands" => & DamageType :: MINECRAFT_IGNITES_ARMOR_STANDS , "minecraft:is_drowning" => & DamageType :: MINECRAFT_IS_DROWNING , "minecraft:is_explosion" => & DamageType :: MINECRAFT_IS_EXPLOSION , "minecraft:is_fall" => & DamageType :: MINECRAFT_IS_FALL , "minecraft:is_fire" => & DamageType :: MINECRAFT_IS_FIRE , "minecraft:is_freezing" => & DamageType :: MINECRAFT_IS_FREEZING , "minecraft:is_lightning" => & DamageType :: MINECRAFT_IS_LIGHTNING , "minecraft:is_player_attack" => & DamageType :: MINECRAFT_IS_PLAYER_ATTACK , "minecraft:is_projectile" => & DamageType :: MINECRAFT_IS_PROJECTILE , "minecraft:mace_smash" => & DamageType :: MINECRAFT_MACE_SMASH , "minecraft:no_anger" => & DamageType :: MINECRAFT_NO_ANGER , "minecraft:no_impact" => & DamageType :: MINECRAFT_NO_IMPACT , "minecraft:no_knockback" => & DamageType :: MINECRAFT_NO_KNOCKBACK , "minecraft:panic_causes" => & DamageType :: MINECRAFT_PANIC_CAUSES , "minecraft:panic_environmental_causes" => & DamageType :: MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES , "minecraft:witch_resistant_to" => & DamageType :: MINECRAFT_WITCH_RESISTANT_TO , "minecraft:wither_immune_to" => & DamageType :: MINECRAFT_WITHER_IMMUNE_TO };
     #[allow(non_snake_case)]
@@ -47503,7 +47766,7 @@ mod tags_v1_21_2 {
     static FLUID_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "c:beetroot_soup" => & Fluid :: C_BEETROOT_SOUP , "c:experience" => & Fluid :: C_EXPERIENCE , "c:gaseous" => & Fluid :: C_GASEOUS , "c:hidden_from_recipe_viewers" => & Fluid :: C_HIDDEN_FROM_RECIPE_VIEWERS , "c:honey" => & Fluid :: C_HONEY , "c:lava" => & Fluid :: C_LAVA , "c:milk" => & Fluid :: C_MILK , "c:mushroom_stew" => & Fluid :: C_MUSHROOM_STEW , "c:potion" => & Fluid :: C_POTION , "c:rabbit_stew" => & Fluid :: C_RABBIT_STEW , "c:suspicious_stew" => & Fluid :: C_SUSPICIOUS_STEW , "c:water" => & Fluid :: C_WATER , "minecraft:lava" => & Fluid :: MINECRAFT_LAVA , "minecraft:water" => & Fluid :: MINECRAFT_WATER };
     #[allow(non_snake_case)]
     pub mod GameEvent {
-        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[]);
+        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[34u16]);
         pub const MINECRAFT_IGNORE_VIBRATIONS_SNEAKING: super::super::Tag = (
             &[
                 "hit_ground",
@@ -47513,10 +47776,10 @@ mod tags_v1_21_2 {
                 "item_interact_start",
                 "item_interact_finish",
             ],
-            &[],
+            &[27u16, 37u16, 42u16, 43u16, 30u16, 29u16],
         );
         pub const MINECRAFT_SHRIEKER_CAN_LISTEN: super::super::Tag =
-            (&["sculk_sensor_tendrils_clicking"], &[]);
+            (&["sculk_sensor_tendrils_clicking"], &[38u16]);
         pub const MINECRAFT_VIBRATIONS: super::super::Tag = (
             &[
                 "block_attach",
@@ -47575,7 +47838,13 @@ mod tags_v1_21_2 {
                 "resonate_15",
                 "flap",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 24u16,
+            ],
         );
         pub const MINECRAFT_WARDEN_CAN_LISTEN: super::super::Tag = (
             &[
@@ -47636,7 +47905,13 @@ mod tags_v1_21_2 {
                 "shriek",
                 "sculk_sensor_tendrils_clicking",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 40u16, 38u16,
+            ],
         );
     }
     static GAMEEVENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:allay_can_listen" => & GameEvent :: MINECRAFT_ALLAY_CAN_LISTEN , "minecraft:ignore_vibrations_sneaking" => & GameEvent :: MINECRAFT_IGNORE_VIBRATIONS_SNEAKING , "minecraft:shrieker_can_listen" => & GameEvent :: MINECRAFT_SHRIEKER_CAN_LISTEN , "minecraft:vibrations" => & GameEvent :: MINECRAFT_VIBRATIONS , "minecraft:warden_can_listen" => & GameEvent :: MINECRAFT_WARDEN_CAN_LISTEN };
@@ -47653,7 +47928,7 @@ mod tags_v1_21_2 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16, 0u16, 1u16, 7u16, 2u16],
         );
         pub const MINECRAFT_REGULAR_GOAT_HORNS: super::super::Tag = (
             &[
@@ -47662,7 +47937,7 @@ mod tags_v1_21_2 {
                 "seek_goat_horn",
                 "feel_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16],
         );
         pub const MINECRAFT_SCREAMING_GOAT_HORNS: super::super::Tag = (
             &[
@@ -47671,7 +47946,7 @@ mod tags_v1_21_2 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[0u16, 1u16, 7u16, 2u16],
         );
     }
     static INSTRUMENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:goat_horns" => & Instrument :: MINECRAFT_GOAT_HORNS , "minecraft:regular_goat_horns" => & Instrument :: MINECRAFT_REGULAR_GOAT_HORNS , "minecraft:screaming_goat_horns" => & Instrument :: MINECRAFT_SCREAMING_GOAT_HORNS };
@@ -51834,7 +52109,12 @@ mod tags_v1_21_2 {
                 "sunflowers",
                 "tides",
             ],
-            &[],
+            &[
+                24u16, 1u16, 0u16, 2u16, 5u16, 32u16, 47u16, 35u16, 12u16, 37u16, 42u16, 13u16,
+                46u16, 22u16, 26u16, 8u16, 40u16, 45u16, 39u16, 50u16, 19u16, 33u16, 31u16, 7u16,
+                38u16, 15u16, 4u16, 23u16, 27u16, 36u16, 44u16, 3u16, 6u16, 9u16, 10u16, 11u16,
+                17u16, 18u16, 20u16, 25u16, 28u16, 29u16, 30u16, 34u16, 41u16, 43u16,
+            ],
         );
     }
     static PAINTINGVARIANT_TAGS: phf::Map<&'static str, &'static super::Tag> =
@@ -51857,9 +52137,12 @@ mod tags_v1_21_2 {
                 "toolsmith",
                 "weaponsmith",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+            ],
         );
-        pub const MINECRAFT_BEE_HOME: super::super::Tag = (&["beehive", "bee_nest"], &[]);
+        pub const MINECRAFT_BEE_HOME: super::super::Tag =
+            (&["beehive", "bee_nest"], &[15u16, 16u16]);
         pub const MINECRAFT_VILLAGE: super::super::Tag = (
             &[
                 "armorer",
@@ -51878,7 +52161,10 @@ mod tags_v1_21_2 {
                 "home",
                 "meeting",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+                13u16, 14u16,
+            ],
         );
     }
     static POINTOFINTERESTTYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:acquirable_job_site" => & PointOfInterestType :: MINECRAFT_ACQUIRABLE_JOB_SITE , "minecraft:bee_home" => & PointOfInterestType :: MINECRAFT_BEE_HOME , "minecraft:village" => & PointOfInterestType :: MINECRAFT_VILLAGE };
@@ -53342,19 +53628,23 @@ mod tags_v1_21_4 {
                 "gradient",
                 "gradient_up",
             ],
-            &[],
+            &[
+                26u16, 27u16, 28u16, 29u16, 31u16, 38u16, 35u16, 37u16, 32u16, 36u16, 34u16, 33u16,
+                25u16, 5u16, 30u16, 39u16, 40u16, 41u16, 42u16, 7u16, 10u16, 9u16, 8u16, 3u16,
+                23u16, 19u16, 17u16, 20u16, 18u16, 1u16, 14u16, 15u16,
+            ],
         );
         pub const MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED: super::super::Tag =
-            (&["curly_border"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[]);
+            (&["curly_border"], &[6u16]);
+        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[4u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[2u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[11u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[12u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[13u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[16u16]);
+        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[21u16]);
+        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[22u16]);
+        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[24u16]);
     }
     static BANNERPATTERN_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:no_item_required" => & BannerPattern :: MINECRAFT_NO_ITEM_REQUIRED , "minecraft:pattern_item/bordure_indented" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED , "minecraft:pattern_item/creeper" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_CREEPER , "minecraft:pattern_item/field_masoned" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FIELD_MASONED , "minecraft:pattern_item/flow" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOW , "minecraft:pattern_item/flower" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOWER , "minecraft:pattern_item/globe" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GLOBE , "minecraft:pattern_item/guster" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GUSTER , "minecraft:pattern_item/mojang" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_MOJANG , "minecraft:pattern_item/piglin" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_PIGLIN , "minecraft:pattern_item/skull" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_SKULL };
     #[allow(non_snake_case)]
@@ -59159,7 +59449,7 @@ mod tags_v1_21_4 {
                 "white",
                 "jellie",
             ],
-            &[],
+            &[9u16, 1u16, 7u16, 8u16, 2u16, 3u16, 5u16, 6u16, 10u16, 4u16],
         );
         pub const MINECRAFT_FULL_MOON_SPAWNS: super::super::Tag = (
             &[
@@ -59175,7 +59465,9 @@ mod tags_v1_21_4 {
                 "jellie",
                 "all_black",
             ],
-            &[],
+            &[
+                9u16, 1u16, 7u16, 8u16, 2u16, 3u16, 5u16, 6u16, 10u16, 4u16, 0u16,
+            ],
         );
     }
     static CATVARIANT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:default_spawns" => & CatVariant :: MINECRAFT_DEFAULT_SPAWNS , "minecraft:full_moon_spawns" => & CatVariant :: MINECRAFT_FULL_MOON_SPAWNS };
@@ -59188,7 +59480,7 @@ mod tags_v1_21_4 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS: super::super::Tag = (
             &[
@@ -59198,11 +59490,11 @@ mod tags_v1_21_4 {
                 "wither_skull",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 14u16, 50u16, 48u16],
         );
         pub const MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL: super::super::Tag =
-            (&["out_of_world"], &[]);
-        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[]);
+            (&["out_of_world"], &[32u16]);
+        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[27u16]);
         pub const MINECRAFT_AVOIDS_GUARDIAN_THORNS: super::super::Tag = (
             &[
                 "magic",
@@ -59212,11 +59504,11 @@ mod tags_v1_21_4 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[27u16, 44u16, 15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_BURN_FROM_STEPPING: super::super::Tag =
-            (&["campfire", "hot_floor"], &[]);
-        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[]);
+            (&["campfire", "hot_floor"], &[3u16, 20u16]);
+        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[31u16]);
         pub const MINECRAFT_BYPASSES_ARMOR: super::super::Tag = (
             &[
                 "on_fire",
@@ -59239,14 +59531,17 @@ mod tags_v1_21_4 {
                 "sonic_boom",
                 "outside_border",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16,
+            ],
         );
-        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[]);
-        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[]);
+        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[40u16]);
+        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[36u16]);
         pub const MINECRAFT_BYPASSES_INVULNERABILITY: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_RESISTANCE: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_SHIELD: super::super::Tag = (
             &[
                 "on_fire",
@@ -59271,7 +59566,10 @@ mod tags_v1_21_4 {
                 "falling_anvil",
                 "falling_stalactite",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16, 11u16, 13u16,
+            ],
         );
         pub const MINECRAFT_BYPASSES_WOLF_ARMOR: super::super::Tag = (
             &[
@@ -59289,17 +59587,22 @@ mod tags_v1_21_4 {
                 "thorns",
                 "wither",
             ],
-            &[],
+            &[
+                32u16, 19u16, 4u16, 6u16, 7u16, 17u16, 22u16, 23u16, 27u16, 33u16, 40u16, 44u16,
+                49u16,
+            ],
         );
-        pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag =
-            (&["player_explosion", "player_attack", "mace_smash"], &[]);
+        pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag = (
+            &["player_explosion", "player_attack", "mace_smash"],
+            &[35u16, 34u16, 26u16],
+        );
         pub const MINECRAFT_DAMAGES_HELMET: super::super::Tag = (
             &["falling_anvil", "falling_block", "falling_stalactite"],
-            &[],
+            &[11u16, 12u16, 13u16],
         );
         pub const MINECRAFT_IGNITES_ARMOR_STANDS: super::super::Tag =
-            (&["in_fire", "campfire"], &[]);
-        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[]);
+            (&["in_fire", "campfire"], &[21u16, 3u16]);
+        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_IS_EXPLOSION: super::super::Tag = (
             &[
                 "fireworks",
@@ -59307,10 +59610,12 @@ mod tags_v1_21_4 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
-        pub const MINECRAFT_IS_FALL: super::super::Tag =
-            (&["fall", "ender_pearl", "stalagmite"], &[]);
+        pub const MINECRAFT_IS_FALL: super::super::Tag = (
+            &["fall", "ender_pearl", "stalagmite"],
+            &[10u16, 8u16, 39u16],
+        );
         pub const MINECRAFT_IS_FIRE: super::super::Tag = (
             &[
                 "in_fire",
@@ -59321,12 +59626,12 @@ mod tags_v1_21_4 {
                 "unattributed_fireball",
                 "fireball",
             ],
-            &[],
+            &[21u16, 3u16, 31u16, 24u16, 20u16, 47u16, 14u16],
         );
-        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[]);
-        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[]);
+        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[17u16]);
+        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[25u16]);
         pub const MINECRAFT_IS_PLAYER_ATTACK: super::super::Tag =
-            (&["player_attack", "mace_smash"], &[]);
+            (&["player_attack", "mace_smash"], &[34u16, 26u16]);
         pub const MINECRAFT_IS_PROJECTILE: super::super::Tag = (
             &[
                 "arrow",
@@ -59338,11 +59643,11 @@ mod tags_v1_21_4 {
                 "thrown",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 30u16, 47u16, 14u16, 50u16, 45u16, 48u16],
         );
-        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[]);
-        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[]);
-        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[26u16]);
+        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[29u16]);
+        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_NO_KNOCKBACK: super::super::Tag = (
             &[
                 "explosion",
@@ -59374,7 +59679,11 @@ mod tags_v1_21_4 {
                 "generic_kill",
                 "campfire",
             ],
-            &[],
+            &[
+                9u16, 35u16, 1u16, 21u16, 25u16, 31u16, 24u16, 20u16, 22u16, 4u16, 6u16, 40u16,
+                2u16, 10u16, 8u16, 16u16, 32u16, 18u16, 27u16, 49u16, 5u16, 7u16, 43u16, 17u16,
+                39u16, 33u16, 19u16, 3u16,
+            ],
         );
         pub const MINECRAFT_PANIC_CAUSES: super::super::Tag = (
             &[
@@ -59406,7 +59715,11 @@ mod tags_v1_21_4 {
                 "player_attack",
                 "mace_smash",
             ],
-            &[],
+            &[
+                2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16, 0u16, 5u16, 9u16, 14u16, 15u16,
+                23u16, 27u16, 28u16, 30u16, 35u16, 36u16, 41u16, 45u16, 46u16, 47u16, 48u16, 49u16,
+                50u16, 34u16, 26u16,
+            ],
         );
         pub const MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES: super::super::Tag = (
             &[
@@ -59418,11 +59731,13 @@ mod tags_v1_21_4 {
                 "lightning_bolt",
                 "on_fire",
             ],
-            &[],
+            &[2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16],
         );
-        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag =
-            (&["magic", "indirect_magic", "sonic_boom", "thorns"], &[]);
-        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag = (
+            &["magic", "indirect_magic", "sonic_boom", "thorns"],
+            &[27u16, 23u16, 36u16, 44u16],
+        );
+        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[6u16]);
     }
     static DAMAGETYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:always_hurts_ender_dragons" => & DamageType :: MINECRAFT_ALWAYS_HURTS_ENDER_DRAGONS , "minecraft:always_kills_armor_stands" => & DamageType :: MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS , "minecraft:always_most_significant_fall" => & DamageType :: MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL , "minecraft:always_triggers_silverfish" => & DamageType :: MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH , "minecraft:avoids_guardian_thorns" => & DamageType :: MINECRAFT_AVOIDS_GUARDIAN_THORNS , "minecraft:burn_from_stepping" => & DamageType :: MINECRAFT_BURN_FROM_STEPPING , "minecraft:burns_armor_stands" => & DamageType :: MINECRAFT_BURNS_ARMOR_STANDS , "minecraft:bypasses_armor" => & DamageType :: MINECRAFT_BYPASSES_ARMOR , "minecraft:bypasses_effects" => & DamageType :: MINECRAFT_BYPASSES_EFFECTS , "minecraft:bypasses_enchantments" => & DamageType :: MINECRAFT_BYPASSES_ENCHANTMENTS , "minecraft:bypasses_invulnerability" => & DamageType :: MINECRAFT_BYPASSES_INVULNERABILITY , "minecraft:bypasses_resistance" => & DamageType :: MINECRAFT_BYPASSES_RESISTANCE , "minecraft:bypasses_shield" => & DamageType :: MINECRAFT_BYPASSES_SHIELD , "minecraft:bypasses_wolf_armor" => & DamageType :: MINECRAFT_BYPASSES_WOLF_ARMOR , "minecraft:can_break_armor_stand" => & DamageType :: MINECRAFT_CAN_BREAK_ARMOR_STAND , "minecraft:damages_helmet" => & DamageType :: MINECRAFT_DAMAGES_HELMET , "minecraft:ignites_armor_stands" => & DamageType :: MINECRAFT_IGNITES_ARMOR_STANDS , "minecraft:is_drowning" => & DamageType :: MINECRAFT_IS_DROWNING , "minecraft:is_explosion" => & DamageType :: MINECRAFT_IS_EXPLOSION , "minecraft:is_fall" => & DamageType :: MINECRAFT_IS_FALL , "minecraft:is_fire" => & DamageType :: MINECRAFT_IS_FIRE , "minecraft:is_freezing" => & DamageType :: MINECRAFT_IS_FREEZING , "minecraft:is_lightning" => & DamageType :: MINECRAFT_IS_LIGHTNING , "minecraft:is_player_attack" => & DamageType :: MINECRAFT_IS_PLAYER_ATTACK , "minecraft:is_projectile" => & DamageType :: MINECRAFT_IS_PROJECTILE , "minecraft:mace_smash" => & DamageType :: MINECRAFT_MACE_SMASH , "minecraft:no_anger" => & DamageType :: MINECRAFT_NO_ANGER , "minecraft:no_impact" => & DamageType :: MINECRAFT_NO_IMPACT , "minecraft:no_knockback" => & DamageType :: MINECRAFT_NO_KNOCKBACK , "minecraft:panic_causes" => & DamageType :: MINECRAFT_PANIC_CAUSES , "minecraft:panic_environmental_causes" => & DamageType :: MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES , "minecraft:witch_resistant_to" => & DamageType :: MINECRAFT_WITCH_RESISTANT_TO , "minecraft:wither_immune_to" => & DamageType :: MINECRAFT_WITHER_IMMUNE_TO };
     #[allow(non_snake_case)]
@@ -60306,7 +60621,7 @@ mod tags_v1_21_4 {
     static FLUID_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "c:beetroot_soup" => & Fluid :: C_BEETROOT_SOUP , "c:experience" => & Fluid :: C_EXPERIENCE , "c:gaseous" => & Fluid :: C_GASEOUS , "c:hidden_from_recipe_viewers" => & Fluid :: C_HIDDEN_FROM_RECIPE_VIEWERS , "c:honey" => & Fluid :: C_HONEY , "c:lava" => & Fluid :: C_LAVA , "c:milk" => & Fluid :: C_MILK , "c:mushroom_stew" => & Fluid :: C_MUSHROOM_STEW , "c:potion" => & Fluid :: C_POTION , "c:rabbit_stew" => & Fluid :: C_RABBIT_STEW , "c:suspicious_stew" => & Fluid :: C_SUSPICIOUS_STEW , "c:water" => & Fluid :: C_WATER , "minecraft:lava" => & Fluid :: MINECRAFT_LAVA , "minecraft:water" => & Fluid :: MINECRAFT_WATER };
     #[allow(non_snake_case)]
     pub mod GameEvent {
-        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[]);
+        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[34u16]);
         pub const MINECRAFT_IGNORE_VIBRATIONS_SNEAKING: super::super::Tag = (
             &[
                 "hit_ground",
@@ -60316,10 +60631,10 @@ mod tags_v1_21_4 {
                 "item_interact_start",
                 "item_interact_finish",
             ],
-            &[],
+            &[27u16, 37u16, 42u16, 43u16, 30u16, 29u16],
         );
         pub const MINECRAFT_SHRIEKER_CAN_LISTEN: super::super::Tag =
-            (&["sculk_sensor_tendrils_clicking"], &[]);
+            (&["sculk_sensor_tendrils_clicking"], &[38u16]);
         pub const MINECRAFT_VIBRATIONS: super::super::Tag = (
             &[
                 "block_attach",
@@ -60378,7 +60693,13 @@ mod tags_v1_21_4 {
                 "resonate_15",
                 "flap",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 24u16,
+            ],
         );
         pub const MINECRAFT_WARDEN_CAN_LISTEN: super::super::Tag = (
             &[
@@ -60439,7 +60760,13 @@ mod tags_v1_21_4 {
                 "shriek",
                 "sculk_sensor_tendrils_clicking",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 40u16, 38u16,
+            ],
         );
     }
     static GAMEEVENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:allay_can_listen" => & GameEvent :: MINECRAFT_ALLAY_CAN_LISTEN , "minecraft:ignore_vibrations_sneaking" => & GameEvent :: MINECRAFT_IGNORE_VIBRATIONS_SNEAKING , "minecraft:shrieker_can_listen" => & GameEvent :: MINECRAFT_SHRIEKER_CAN_LISTEN , "minecraft:vibrations" => & GameEvent :: MINECRAFT_VIBRATIONS , "minecraft:warden_can_listen" => & GameEvent :: MINECRAFT_WARDEN_CAN_LISTEN };
@@ -60456,7 +60783,7 @@ mod tags_v1_21_4 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16, 0u16, 1u16, 7u16, 2u16],
         );
         pub const MINECRAFT_REGULAR_GOAT_HORNS: super::super::Tag = (
             &[
@@ -60465,7 +60792,7 @@ mod tags_v1_21_4 {
                 "seek_goat_horn",
                 "feel_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16],
         );
         pub const MINECRAFT_SCREAMING_GOAT_HORNS: super::super::Tag = (
             &[
@@ -60474,7 +60801,7 @@ mod tags_v1_21_4 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[0u16, 1u16, 7u16, 2u16],
         );
     }
     static INSTRUMENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:goat_horns" => & Instrument :: MINECRAFT_GOAT_HORNS , "minecraft:regular_goat_horns" => & Instrument :: MINECRAFT_REGULAR_GOAT_HORNS , "minecraft:screaming_goat_horns" => & Instrument :: MINECRAFT_SCREAMING_GOAT_HORNS };
@@ -64952,7 +65279,12 @@ mod tags_v1_21_4 {
                 "sunflowers",
                 "tides",
             ],
-            &[],
+            &[
+                24u16, 1u16, 0u16, 2u16, 5u16, 32u16, 47u16, 35u16, 12u16, 37u16, 42u16, 13u16,
+                46u16, 22u16, 26u16, 8u16, 40u16, 45u16, 39u16, 50u16, 19u16, 33u16, 31u16, 7u16,
+                38u16, 15u16, 4u16, 23u16, 27u16, 36u16, 44u16, 3u16, 6u16, 9u16, 10u16, 11u16,
+                17u16, 18u16, 20u16, 25u16, 28u16, 29u16, 30u16, 34u16, 41u16, 43u16,
+            ],
         );
     }
     static PAINTINGVARIANT_TAGS: phf::Map<&'static str, &'static super::Tag> =
@@ -64975,9 +65307,12 @@ mod tags_v1_21_4 {
                 "toolsmith",
                 "weaponsmith",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+            ],
         );
-        pub const MINECRAFT_BEE_HOME: super::super::Tag = (&["beehive", "bee_nest"], &[]);
+        pub const MINECRAFT_BEE_HOME: super::super::Tag =
+            (&["beehive", "bee_nest"], &[15u16, 16u16]);
         pub const MINECRAFT_VILLAGE: super::super::Tag = (
             &[
                 "armorer",
@@ -64996,7 +65331,10 @@ mod tags_v1_21_4 {
                 "home",
                 "meeting",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+                13u16, 14u16,
+            ],
         );
     }
     static POINTOFINTERESTTYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:acquirable_job_site" => & PointOfInterestType :: MINECRAFT_ACQUIRABLE_JOB_SITE , "minecraft:bee_home" => & PointOfInterestType :: MINECRAFT_BEE_HOME , "minecraft:village" => & PointOfInterestType :: MINECRAFT_VILLAGE };
@@ -66546,19 +66884,23 @@ mod tags_v1_21_5 {
                 "gradient",
                 "gradient_up",
             ],
-            &[],
+            &[
+                26u16, 27u16, 28u16, 29u16, 31u16, 38u16, 35u16, 37u16, 32u16, 36u16, 34u16, 33u16,
+                25u16, 5u16, 30u16, 39u16, 40u16, 41u16, 42u16, 7u16, 10u16, 9u16, 8u16, 3u16,
+                23u16, 19u16, 17u16, 20u16, 18u16, 1u16, 14u16, 15u16,
+            ],
         );
         pub const MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED: super::super::Tag =
-            (&["curly_border"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[]);
+            (&["curly_border"], &[6u16]);
+        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[4u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[2u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[11u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[12u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[13u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[16u16]);
+        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[21u16]);
+        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[22u16]);
+        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[24u16]);
     }
     static BANNERPATTERN_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:no_item_required" => & BannerPattern :: MINECRAFT_NO_ITEM_REQUIRED , "minecraft:pattern_item/bordure_indented" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED , "minecraft:pattern_item/creeper" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_CREEPER , "minecraft:pattern_item/field_masoned" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FIELD_MASONED , "minecraft:pattern_item/flow" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOW , "minecraft:pattern_item/flower" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOWER , "minecraft:pattern_item/globe" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GLOBE , "minecraft:pattern_item/guster" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GUSTER , "minecraft:pattern_item/mojang" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_MOJANG , "minecraft:pattern_item/piglin" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_PIGLIN , "minecraft:pattern_item/skull" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_SKULL };
     #[allow(non_snake_case)]
@@ -72389,7 +72731,7 @@ mod tags_v1_21_5 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS: super::super::Tag = (
             &[
@@ -72399,11 +72741,11 @@ mod tags_v1_21_5 {
                 "wither_skull",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 14u16, 50u16, 48u16],
         );
         pub const MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL: super::super::Tag =
-            (&["out_of_world"], &[]);
-        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[]);
+            (&["out_of_world"], &[32u16]);
+        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[27u16]);
         pub const MINECRAFT_AVOIDS_GUARDIAN_THORNS: super::super::Tag = (
             &[
                 "magic",
@@ -72413,11 +72755,11 @@ mod tags_v1_21_5 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[27u16, 44u16, 15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_BURN_FROM_STEPPING: super::super::Tag =
-            (&["campfire", "hot_floor"], &[]);
-        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[]);
+            (&["campfire", "hot_floor"], &[3u16, 20u16]);
+        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[31u16]);
         pub const MINECRAFT_BYPASSES_ARMOR: super::super::Tag = (
             &[
                 "on_fire",
@@ -72440,14 +72782,17 @@ mod tags_v1_21_5 {
                 "sonic_boom",
                 "outside_border",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16,
+            ],
         );
-        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[]);
-        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[]);
+        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[40u16]);
+        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[36u16]);
         pub const MINECRAFT_BYPASSES_INVULNERABILITY: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_RESISTANCE: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_SHIELD: super::super::Tag = (
             &[
                 "on_fire",
@@ -72480,7 +72825,11 @@ mod tags_v1_21_5 {
                 "lightning_bolt",
                 "sweet_berry_bush",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16, 2u16, 3u16, 7u16, 11u16, 13u16,
+                20u16, 21u16, 24u16, 25u16, 43u16,
+            ],
         );
         pub const MINECRAFT_BYPASSES_WOLF_ARMOR: super::super::Tag = (
             &[
@@ -72498,17 +72847,22 @@ mod tags_v1_21_5 {
                 "thorns",
                 "wither",
             ],
-            &[],
+            &[
+                32u16, 19u16, 4u16, 6u16, 7u16, 17u16, 22u16, 23u16, 27u16, 33u16, 40u16, 44u16,
+                49u16,
+            ],
         );
-        pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag =
-            (&["player_explosion", "player_attack", "mace_smash"], &[]);
+        pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag = (
+            &["player_explosion", "player_attack", "mace_smash"],
+            &[35u16, 34u16, 26u16],
+        );
         pub const MINECRAFT_DAMAGES_HELMET: super::super::Tag = (
             &["falling_anvil", "falling_block", "falling_stalactite"],
-            &[],
+            &[11u16, 12u16, 13u16],
         );
         pub const MINECRAFT_IGNITES_ARMOR_STANDS: super::super::Tag =
-            (&["in_fire", "campfire"], &[]);
-        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[]);
+            (&["in_fire", "campfire"], &[21u16, 3u16]);
+        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_IS_EXPLOSION: super::super::Tag = (
             &[
                 "fireworks",
@@ -72516,10 +72870,12 @@ mod tags_v1_21_5 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
-        pub const MINECRAFT_IS_FALL: super::super::Tag =
-            (&["fall", "ender_pearl", "stalagmite"], &[]);
+        pub const MINECRAFT_IS_FALL: super::super::Tag = (
+            &["fall", "ender_pearl", "stalagmite"],
+            &[10u16, 8u16, 39u16],
+        );
         pub const MINECRAFT_IS_FIRE: super::super::Tag = (
             &[
                 "in_fire",
@@ -72530,12 +72886,12 @@ mod tags_v1_21_5 {
                 "unattributed_fireball",
                 "fireball",
             ],
-            &[],
+            &[21u16, 3u16, 31u16, 24u16, 20u16, 47u16, 14u16],
         );
-        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[]);
-        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[]);
+        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[17u16]);
+        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[25u16]);
         pub const MINECRAFT_IS_PLAYER_ATTACK: super::super::Tag =
-            (&["player_attack", "mace_smash"], &[]);
+            (&["player_attack", "mace_smash"], &[34u16, 26u16]);
         pub const MINECRAFT_IS_PROJECTILE: super::super::Tag = (
             &[
                 "arrow",
@@ -72547,11 +72903,11 @@ mod tags_v1_21_5 {
                 "thrown",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 30u16, 47u16, 14u16, 50u16, 45u16, 48u16],
         );
-        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[]);
-        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[]);
-        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[26u16]);
+        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[29u16]);
+        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_NO_KNOCKBACK: super::super::Tag = (
             &[
                 "explosion",
@@ -72583,7 +72939,11 @@ mod tags_v1_21_5 {
                 "generic_kill",
                 "campfire",
             ],
-            &[],
+            &[
+                9u16, 35u16, 1u16, 21u16, 25u16, 31u16, 24u16, 20u16, 22u16, 4u16, 6u16, 40u16,
+                2u16, 10u16, 8u16, 16u16, 32u16, 18u16, 27u16, 49u16, 5u16, 7u16, 43u16, 17u16,
+                39u16, 33u16, 19u16, 3u16,
+            ],
         );
         pub const MINECRAFT_PANIC_CAUSES: super::super::Tag = (
             &[
@@ -72615,7 +72975,11 @@ mod tags_v1_21_5 {
                 "player_attack",
                 "mace_smash",
             ],
-            &[],
+            &[
+                2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16, 0u16, 5u16, 9u16, 14u16, 15u16,
+                23u16, 27u16, 28u16, 30u16, 35u16, 36u16, 41u16, 45u16, 46u16, 47u16, 48u16, 49u16,
+                50u16, 34u16, 26u16,
+            ],
         );
         pub const MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES: super::super::Tag = (
             &[
@@ -72627,11 +72991,13 @@ mod tags_v1_21_5 {
                 "lightning_bolt",
                 "on_fire",
             ],
-            &[],
+            &[2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16],
         );
-        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag =
-            (&["magic", "indirect_magic", "sonic_boom", "thorns"], &[]);
-        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag = (
+            &["magic", "indirect_magic", "sonic_boom", "thorns"],
+            &[27u16, 23u16, 36u16, 44u16],
+        );
+        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[6u16]);
     }
     static DAMAGETYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:always_hurts_ender_dragons" => & DamageType :: MINECRAFT_ALWAYS_HURTS_ENDER_DRAGONS , "minecraft:always_kills_armor_stands" => & DamageType :: MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS , "minecraft:always_most_significant_fall" => & DamageType :: MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL , "minecraft:always_triggers_silverfish" => & DamageType :: MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH , "minecraft:avoids_guardian_thorns" => & DamageType :: MINECRAFT_AVOIDS_GUARDIAN_THORNS , "minecraft:burn_from_stepping" => & DamageType :: MINECRAFT_BURN_FROM_STEPPING , "minecraft:burns_armor_stands" => & DamageType :: MINECRAFT_BURNS_ARMOR_STANDS , "minecraft:bypasses_armor" => & DamageType :: MINECRAFT_BYPASSES_ARMOR , "minecraft:bypasses_effects" => & DamageType :: MINECRAFT_BYPASSES_EFFECTS , "minecraft:bypasses_enchantments" => & DamageType :: MINECRAFT_BYPASSES_ENCHANTMENTS , "minecraft:bypasses_invulnerability" => & DamageType :: MINECRAFT_BYPASSES_INVULNERABILITY , "minecraft:bypasses_resistance" => & DamageType :: MINECRAFT_BYPASSES_RESISTANCE , "minecraft:bypasses_shield" => & DamageType :: MINECRAFT_BYPASSES_SHIELD , "minecraft:bypasses_wolf_armor" => & DamageType :: MINECRAFT_BYPASSES_WOLF_ARMOR , "minecraft:can_break_armor_stand" => & DamageType :: MINECRAFT_CAN_BREAK_ARMOR_STAND , "minecraft:damages_helmet" => & DamageType :: MINECRAFT_DAMAGES_HELMET , "minecraft:ignites_armor_stands" => & DamageType :: MINECRAFT_IGNITES_ARMOR_STANDS , "minecraft:is_drowning" => & DamageType :: MINECRAFT_IS_DROWNING , "minecraft:is_explosion" => & DamageType :: MINECRAFT_IS_EXPLOSION , "minecraft:is_fall" => & DamageType :: MINECRAFT_IS_FALL , "minecraft:is_fire" => & DamageType :: MINECRAFT_IS_FIRE , "minecraft:is_freezing" => & DamageType :: MINECRAFT_IS_FREEZING , "minecraft:is_lightning" => & DamageType :: MINECRAFT_IS_LIGHTNING , "minecraft:is_player_attack" => & DamageType :: MINECRAFT_IS_PLAYER_ATTACK , "minecraft:is_projectile" => & DamageType :: MINECRAFT_IS_PROJECTILE , "minecraft:mace_smash" => & DamageType :: MINECRAFT_MACE_SMASH , "minecraft:no_anger" => & DamageType :: MINECRAFT_NO_ANGER , "minecraft:no_impact" => & DamageType :: MINECRAFT_NO_IMPACT , "minecraft:no_knockback" => & DamageType :: MINECRAFT_NO_KNOCKBACK , "minecraft:panic_causes" => & DamageType :: MINECRAFT_PANIC_CAUSES , "minecraft:panic_environmental_causes" => & DamageType :: MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES , "minecraft:witch_resistant_to" => & DamageType :: MINECRAFT_WITCH_RESISTANT_TO , "minecraft:wither_immune_to" => & DamageType :: MINECRAFT_WITHER_IMMUNE_TO };
     #[allow(non_snake_case)]
@@ -73529,7 +73895,7 @@ mod tags_v1_21_5 {
     static FLUID_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "c:beetroot_soup" => & Fluid :: C_BEETROOT_SOUP , "c:experience" => & Fluid :: C_EXPERIENCE , "c:gaseous" => & Fluid :: C_GASEOUS , "c:hidden_from_recipe_viewers" => & Fluid :: C_HIDDEN_FROM_RECIPE_VIEWERS , "c:honey" => & Fluid :: C_HONEY , "c:lava" => & Fluid :: C_LAVA , "c:milk" => & Fluid :: C_MILK , "c:mushroom_stew" => & Fluid :: C_MUSHROOM_STEW , "c:potion" => & Fluid :: C_POTION , "c:rabbit_stew" => & Fluid :: C_RABBIT_STEW , "c:suspicious_stew" => & Fluid :: C_SUSPICIOUS_STEW , "c:water" => & Fluid :: C_WATER , "minecraft:lava" => & Fluid :: MINECRAFT_LAVA , "minecraft:water" => & Fluid :: MINECRAFT_WATER };
     #[allow(non_snake_case)]
     pub mod GameEvent {
-        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[]);
+        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[34u16]);
         pub const MINECRAFT_IGNORE_VIBRATIONS_SNEAKING: super::super::Tag = (
             &[
                 "hit_ground",
@@ -73539,10 +73905,10 @@ mod tags_v1_21_5 {
                 "item_interact_start",
                 "item_interact_finish",
             ],
-            &[],
+            &[27u16, 37u16, 42u16, 43u16, 30u16, 29u16],
         );
         pub const MINECRAFT_SHRIEKER_CAN_LISTEN: super::super::Tag =
-            (&["sculk_sensor_tendrils_clicking"], &[]);
+            (&["sculk_sensor_tendrils_clicking"], &[38u16]);
         pub const MINECRAFT_VIBRATIONS: super::super::Tag = (
             &[
                 "block_attach",
@@ -73601,7 +73967,13 @@ mod tags_v1_21_5 {
                 "resonate_15",
                 "flap",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 24u16,
+            ],
         );
         pub const MINECRAFT_WARDEN_CAN_LISTEN: super::super::Tag = (
             &[
@@ -73662,7 +74034,13 @@ mod tags_v1_21_5 {
                 "shriek",
                 "sculk_sensor_tendrils_clicking",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 40u16, 38u16,
+            ],
         );
     }
     static GAMEEVENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:allay_can_listen" => & GameEvent :: MINECRAFT_ALLAY_CAN_LISTEN , "minecraft:ignore_vibrations_sneaking" => & GameEvent :: MINECRAFT_IGNORE_VIBRATIONS_SNEAKING , "minecraft:shrieker_can_listen" => & GameEvent :: MINECRAFT_SHRIEKER_CAN_LISTEN , "minecraft:vibrations" => & GameEvent :: MINECRAFT_VIBRATIONS , "minecraft:warden_can_listen" => & GameEvent :: MINECRAFT_WARDEN_CAN_LISTEN };
@@ -73679,7 +74057,7 @@ mod tags_v1_21_5 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16, 0u16, 1u16, 7u16, 2u16],
         );
         pub const MINECRAFT_REGULAR_GOAT_HORNS: super::super::Tag = (
             &[
@@ -73688,7 +74066,7 @@ mod tags_v1_21_5 {
                 "seek_goat_horn",
                 "feel_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16],
         );
         pub const MINECRAFT_SCREAMING_GOAT_HORNS: super::super::Tag = (
             &[
@@ -73697,7 +74075,7 @@ mod tags_v1_21_5 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[0u16, 1u16, 7u16, 2u16],
         );
     }
     static INSTRUMENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:goat_horns" => & Instrument :: MINECRAFT_GOAT_HORNS , "minecraft:regular_goat_horns" => & Instrument :: MINECRAFT_REGULAR_GOAT_HORNS , "minecraft:screaming_goat_horns" => & Instrument :: MINECRAFT_SCREAMING_GOAT_HORNS };
@@ -78230,7 +78608,12 @@ mod tags_v1_21_5 {
                 "sunflowers",
                 "tides",
             ],
-            &[],
+            &[
+                24u16, 1u16, 0u16, 2u16, 5u16, 32u16, 47u16, 35u16, 12u16, 37u16, 42u16, 13u16,
+                46u16, 22u16, 26u16, 8u16, 40u16, 45u16, 39u16, 50u16, 19u16, 33u16, 31u16, 7u16,
+                38u16, 15u16, 4u16, 23u16, 27u16, 36u16, 44u16, 3u16, 6u16, 9u16, 10u16, 11u16,
+                17u16, 18u16, 20u16, 25u16, 28u16, 29u16, 30u16, 34u16, 41u16, 43u16,
+            ],
         );
     }
     static PAINTINGVARIANT_TAGS: phf::Map<&'static str, &'static super::Tag> =
@@ -78253,9 +78636,12 @@ mod tags_v1_21_5 {
                 "toolsmith",
                 "weaponsmith",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+            ],
         );
-        pub const MINECRAFT_BEE_HOME: super::super::Tag = (&["beehive", "bee_nest"], &[]);
+        pub const MINECRAFT_BEE_HOME: super::super::Tag =
+            (&["beehive", "bee_nest"], &[15u16, 16u16]);
         pub const MINECRAFT_VILLAGE: super::super::Tag = (
             &[
                 "armorer",
@@ -78274,7 +78660,10 @@ mod tags_v1_21_5 {
                 "home",
                 "meeting",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+                13u16, 14u16,
+            ],
         );
     }
     static POINTOFINTERESTTYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:acquirable_job_site" => & PointOfInterestType :: MINECRAFT_ACQUIRABLE_JOB_SITE , "minecraft:bee_home" => & PointOfInterestType :: MINECRAFT_BEE_HOME , "minecraft:village" => & PointOfInterestType :: MINECRAFT_VILLAGE };
@@ -79945,19 +80334,23 @@ mod tags_v1_21_6 {
                 "gradient",
                 "gradient_up",
             ],
-            &[],
+            &[
+                26u16, 27u16, 28u16, 29u16, 31u16, 38u16, 35u16, 37u16, 32u16, 36u16, 34u16, 33u16,
+                25u16, 5u16, 30u16, 39u16, 40u16, 41u16, 42u16, 7u16, 10u16, 9u16, 8u16, 3u16,
+                23u16, 19u16, 17u16, 20u16, 18u16, 1u16, 14u16, 15u16,
+            ],
         );
         pub const MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED: super::super::Tag =
-            (&["curly_border"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[]);
+            (&["curly_border"], &[6u16]);
+        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[4u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[2u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[11u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[12u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[13u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[16u16]);
+        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[21u16]);
+        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[22u16]);
+        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[24u16]);
     }
     static BANNERPATTERN_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:no_item_required" => & BannerPattern :: MINECRAFT_NO_ITEM_REQUIRED , "minecraft:pattern_item/bordure_indented" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED , "minecraft:pattern_item/creeper" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_CREEPER , "minecraft:pattern_item/field_masoned" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FIELD_MASONED , "minecraft:pattern_item/flow" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOW , "minecraft:pattern_item/flower" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOWER , "minecraft:pattern_item/globe" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GLOBE , "minecraft:pattern_item/guster" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GUSTER , "minecraft:pattern_item/mojang" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_MOJANG , "minecraft:pattern_item/piglin" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_PIGLIN , "minecraft:pattern_item/skull" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_SKULL };
     #[allow(non_snake_case)]
@@ -85803,7 +86196,7 @@ mod tags_v1_21_6 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS: super::super::Tag = (
             &[
@@ -85813,11 +86206,11 @@ mod tags_v1_21_6 {
                 "wither_skull",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 14u16, 50u16, 48u16],
         );
         pub const MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL: super::super::Tag =
-            (&["out_of_world"], &[]);
-        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[]);
+            (&["out_of_world"], &[32u16]);
+        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[27u16]);
         pub const MINECRAFT_AVOIDS_GUARDIAN_THORNS: super::super::Tag = (
             &[
                 "magic",
@@ -85827,11 +86220,11 @@ mod tags_v1_21_6 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[27u16, 44u16, 15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_BURN_FROM_STEPPING: super::super::Tag =
-            (&["campfire", "hot_floor"], &[]);
-        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[]);
+            (&["campfire", "hot_floor"], &[3u16, 20u16]);
+        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[31u16]);
         pub const MINECRAFT_BYPASSES_ARMOR: super::super::Tag = (
             &[
                 "on_fire",
@@ -85854,14 +86247,17 @@ mod tags_v1_21_6 {
                 "sonic_boom",
                 "outside_border",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16,
+            ],
         );
-        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[]);
-        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[]);
+        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[40u16]);
+        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[36u16]);
         pub const MINECRAFT_BYPASSES_INVULNERABILITY: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_RESISTANCE: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_SHIELD: super::super::Tag = (
             &[
                 "on_fire",
@@ -85894,7 +86290,11 @@ mod tags_v1_21_6 {
                 "lightning_bolt",
                 "sweet_berry_bush",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16, 2u16, 3u16, 7u16, 11u16, 13u16,
+                20u16, 21u16, 24u16, 25u16, 43u16,
+            ],
         );
         pub const MINECRAFT_BYPASSES_WOLF_ARMOR: super::super::Tag = (
             &[
@@ -85912,17 +86312,22 @@ mod tags_v1_21_6 {
                 "thorns",
                 "wither",
             ],
-            &[],
+            &[
+                32u16, 19u16, 4u16, 6u16, 7u16, 17u16, 22u16, 23u16, 27u16, 33u16, 40u16, 44u16,
+                49u16,
+            ],
         );
-        pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag =
-            (&["player_explosion", "player_attack", "mace_smash"], &[]);
+        pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag = (
+            &["player_explosion", "player_attack", "mace_smash"],
+            &[35u16, 34u16, 26u16],
+        );
         pub const MINECRAFT_DAMAGES_HELMET: super::super::Tag = (
             &["falling_anvil", "falling_block", "falling_stalactite"],
-            &[],
+            &[11u16, 12u16, 13u16],
         );
         pub const MINECRAFT_IGNITES_ARMOR_STANDS: super::super::Tag =
-            (&["in_fire", "campfire"], &[]);
-        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[]);
+            (&["in_fire", "campfire"], &[21u16, 3u16]);
+        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_IS_EXPLOSION: super::super::Tag = (
             &[
                 "fireworks",
@@ -85930,10 +86335,12 @@ mod tags_v1_21_6 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
-        pub const MINECRAFT_IS_FALL: super::super::Tag =
-            (&["fall", "ender_pearl", "stalagmite"], &[]);
+        pub const MINECRAFT_IS_FALL: super::super::Tag = (
+            &["fall", "ender_pearl", "stalagmite"],
+            &[10u16, 8u16, 39u16],
+        );
         pub const MINECRAFT_IS_FIRE: super::super::Tag = (
             &[
                 "in_fire",
@@ -85944,12 +86351,12 @@ mod tags_v1_21_6 {
                 "unattributed_fireball",
                 "fireball",
             ],
-            &[],
+            &[21u16, 3u16, 31u16, 24u16, 20u16, 47u16, 14u16],
         );
-        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[]);
-        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[]);
+        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[17u16]);
+        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[25u16]);
         pub const MINECRAFT_IS_PLAYER_ATTACK: super::super::Tag =
-            (&["player_attack", "mace_smash"], &[]);
+            (&["player_attack", "mace_smash"], &[34u16, 26u16]);
         pub const MINECRAFT_IS_PROJECTILE: super::super::Tag = (
             &[
                 "arrow",
@@ -85961,11 +86368,11 @@ mod tags_v1_21_6 {
                 "thrown",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 30u16, 47u16, 14u16, 50u16, 45u16, 48u16],
         );
-        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[]);
-        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[]);
-        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[26u16]);
+        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[29u16]);
+        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_NO_KNOCKBACK: super::super::Tag = (
             &[
                 "explosion",
@@ -85997,7 +86404,11 @@ mod tags_v1_21_6 {
                 "generic_kill",
                 "campfire",
             ],
-            &[],
+            &[
+                9u16, 35u16, 1u16, 21u16, 25u16, 31u16, 24u16, 20u16, 22u16, 4u16, 6u16, 40u16,
+                2u16, 10u16, 8u16, 16u16, 32u16, 18u16, 27u16, 49u16, 5u16, 7u16, 43u16, 17u16,
+                39u16, 33u16, 19u16, 3u16,
+            ],
         );
         pub const MINECRAFT_PANIC_CAUSES: super::super::Tag = (
             &[
@@ -86029,7 +86440,11 @@ mod tags_v1_21_6 {
                 "player_attack",
                 "mace_smash",
             ],
-            &[],
+            &[
+                2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16, 0u16, 5u16, 9u16, 14u16, 15u16,
+                23u16, 27u16, 28u16, 30u16, 35u16, 36u16, 41u16, 45u16, 46u16, 47u16, 48u16, 49u16,
+                50u16, 34u16, 26u16,
+            ],
         );
         pub const MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES: super::super::Tag = (
             &[
@@ -86041,11 +86456,13 @@ mod tags_v1_21_6 {
                 "lightning_bolt",
                 "on_fire",
             ],
-            &[],
+            &[2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16],
         );
-        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag =
-            (&["magic", "indirect_magic", "sonic_boom", "thorns"], &[]);
-        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag = (
+            &["magic", "indirect_magic", "sonic_boom", "thorns"],
+            &[27u16, 23u16, 36u16, 44u16],
+        );
+        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[6u16]);
     }
     static DAMAGETYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:always_hurts_ender_dragons" => & DamageType :: MINECRAFT_ALWAYS_HURTS_ENDER_DRAGONS , "minecraft:always_kills_armor_stands" => & DamageType :: MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS , "minecraft:always_most_significant_fall" => & DamageType :: MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL , "minecraft:always_triggers_silverfish" => & DamageType :: MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH , "minecraft:avoids_guardian_thorns" => & DamageType :: MINECRAFT_AVOIDS_GUARDIAN_THORNS , "minecraft:burn_from_stepping" => & DamageType :: MINECRAFT_BURN_FROM_STEPPING , "minecraft:burns_armor_stands" => & DamageType :: MINECRAFT_BURNS_ARMOR_STANDS , "minecraft:bypasses_armor" => & DamageType :: MINECRAFT_BYPASSES_ARMOR , "minecraft:bypasses_effects" => & DamageType :: MINECRAFT_BYPASSES_EFFECTS , "minecraft:bypasses_enchantments" => & DamageType :: MINECRAFT_BYPASSES_ENCHANTMENTS , "minecraft:bypasses_invulnerability" => & DamageType :: MINECRAFT_BYPASSES_INVULNERABILITY , "minecraft:bypasses_resistance" => & DamageType :: MINECRAFT_BYPASSES_RESISTANCE , "minecraft:bypasses_shield" => & DamageType :: MINECRAFT_BYPASSES_SHIELD , "minecraft:bypasses_wolf_armor" => & DamageType :: MINECRAFT_BYPASSES_WOLF_ARMOR , "minecraft:can_break_armor_stand" => & DamageType :: MINECRAFT_CAN_BREAK_ARMOR_STAND , "minecraft:damages_helmet" => & DamageType :: MINECRAFT_DAMAGES_HELMET , "minecraft:ignites_armor_stands" => & DamageType :: MINECRAFT_IGNITES_ARMOR_STANDS , "minecraft:is_drowning" => & DamageType :: MINECRAFT_IS_DROWNING , "minecraft:is_explosion" => & DamageType :: MINECRAFT_IS_EXPLOSION , "minecraft:is_fall" => & DamageType :: MINECRAFT_IS_FALL , "minecraft:is_fire" => & DamageType :: MINECRAFT_IS_FIRE , "minecraft:is_freezing" => & DamageType :: MINECRAFT_IS_FREEZING , "minecraft:is_lightning" => & DamageType :: MINECRAFT_IS_LIGHTNING , "minecraft:is_player_attack" => & DamageType :: MINECRAFT_IS_PLAYER_ATTACK , "minecraft:is_projectile" => & DamageType :: MINECRAFT_IS_PROJECTILE , "minecraft:mace_smash" => & DamageType :: MINECRAFT_MACE_SMASH , "minecraft:no_anger" => & DamageType :: MINECRAFT_NO_ANGER , "minecraft:no_impact" => & DamageType :: MINECRAFT_NO_IMPACT , "minecraft:no_knockback" => & DamageType :: MINECRAFT_NO_KNOCKBACK , "minecraft:panic_causes" => & DamageType :: MINECRAFT_PANIC_CAUSES , "minecraft:panic_environmental_causes" => & DamageType :: MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES , "minecraft:witch_resistant_to" => & DamageType :: MINECRAFT_WITCH_RESISTANT_TO , "minecraft:wither_immune_to" => & DamageType :: MINECRAFT_WITHER_IMMUNE_TO };
     #[allow(non_snake_case)]
@@ -86986,7 +87403,7 @@ mod tags_v1_21_6 {
     static FLUID_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "c:beetroot_soup" => & Fluid :: C_BEETROOT_SOUP , "c:experience" => & Fluid :: C_EXPERIENCE , "c:gaseous" => & Fluid :: C_GASEOUS , "c:hidden_from_recipe_viewers" => & Fluid :: C_HIDDEN_FROM_RECIPE_VIEWERS , "c:honey" => & Fluid :: C_HONEY , "c:lava" => & Fluid :: C_LAVA , "c:milk" => & Fluid :: C_MILK , "c:mushroom_stew" => & Fluid :: C_MUSHROOM_STEW , "c:potion" => & Fluid :: C_POTION , "c:rabbit_stew" => & Fluid :: C_RABBIT_STEW , "c:suspicious_stew" => & Fluid :: C_SUSPICIOUS_STEW , "c:water" => & Fluid :: C_WATER , "minecraft:lava" => & Fluid :: MINECRAFT_LAVA , "minecraft:water" => & Fluid :: MINECRAFT_WATER };
     #[allow(non_snake_case)]
     pub mod GameEvent {
-        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[]);
+        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[34u16]);
         pub const MINECRAFT_IGNORE_VIBRATIONS_SNEAKING: super::super::Tag = (
             &[
                 "hit_ground",
@@ -86996,10 +87413,10 @@ mod tags_v1_21_6 {
                 "item_interact_start",
                 "item_interact_finish",
             ],
-            &[],
+            &[27u16, 37u16, 42u16, 43u16, 30u16, 29u16],
         );
         pub const MINECRAFT_SHRIEKER_CAN_LISTEN: super::super::Tag =
-            (&["sculk_sensor_tendrils_clicking"], &[]);
+            (&["sculk_sensor_tendrils_clicking"], &[38u16]);
         pub const MINECRAFT_VIBRATIONS: super::super::Tag = (
             &[
                 "block_attach",
@@ -87058,7 +87475,13 @@ mod tags_v1_21_6 {
                 "resonate_15",
                 "flap",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 24u16,
+            ],
         );
         pub const MINECRAFT_WARDEN_CAN_LISTEN: super::super::Tag = (
             &[
@@ -87119,7 +87542,13 @@ mod tags_v1_21_6 {
                 "shriek",
                 "sculk_sensor_tendrils_clicking",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 40u16, 38u16,
+            ],
         );
     }
     static GAMEEVENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:allay_can_listen" => & GameEvent :: MINECRAFT_ALLAY_CAN_LISTEN , "minecraft:ignore_vibrations_sneaking" => & GameEvent :: MINECRAFT_IGNORE_VIBRATIONS_SNEAKING , "minecraft:shrieker_can_listen" => & GameEvent :: MINECRAFT_SHRIEKER_CAN_LISTEN , "minecraft:vibrations" => & GameEvent :: MINECRAFT_VIBRATIONS , "minecraft:warden_can_listen" => & GameEvent :: MINECRAFT_WARDEN_CAN_LISTEN };
@@ -87136,7 +87565,7 @@ mod tags_v1_21_6 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16, 0u16, 1u16, 7u16, 2u16],
         );
         pub const MINECRAFT_REGULAR_GOAT_HORNS: super::super::Tag = (
             &[
@@ -87145,7 +87574,7 @@ mod tags_v1_21_6 {
                 "seek_goat_horn",
                 "feel_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16],
         );
         pub const MINECRAFT_SCREAMING_GOAT_HORNS: super::super::Tag = (
             &[
@@ -87154,7 +87583,7 @@ mod tags_v1_21_6 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[0u16, 1u16, 7u16, 2u16],
         );
     }
     static INSTRUMENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:goat_horns" => & Instrument :: MINECRAFT_GOAT_HORNS , "minecraft:regular_goat_horns" => & Instrument :: MINECRAFT_REGULAR_GOAT_HORNS , "minecraft:screaming_goat_horns" => & Instrument :: MINECRAFT_SCREAMING_GOAT_HORNS };
@@ -91774,7 +92203,12 @@ mod tags_v1_21_6 {
                 "sunflowers",
                 "tides",
             ],
-            &[],
+            &[
+                24u16, 1u16, 0u16, 2u16, 5u16, 32u16, 47u16, 35u16, 12u16, 37u16, 42u16, 13u16,
+                46u16, 22u16, 26u16, 8u16, 40u16, 45u16, 39u16, 50u16, 19u16, 33u16, 31u16, 7u16,
+                38u16, 15u16, 4u16, 23u16, 27u16, 36u16, 44u16, 3u16, 6u16, 9u16, 10u16, 11u16,
+                17u16, 18u16, 20u16, 25u16, 28u16, 29u16, 30u16, 34u16, 41u16, 43u16,
+            ],
         );
     }
     static PAINTINGVARIANT_TAGS: phf::Map<&'static str, &'static super::Tag> =
@@ -91797,9 +92231,12 @@ mod tags_v1_21_6 {
                 "toolsmith",
                 "weaponsmith",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+            ],
         );
-        pub const MINECRAFT_BEE_HOME: super::super::Tag = (&["beehive", "bee_nest"], &[]);
+        pub const MINECRAFT_BEE_HOME: super::super::Tag =
+            (&["beehive", "bee_nest"], &[15u16, 16u16]);
         pub const MINECRAFT_VILLAGE: super::super::Tag = (
             &[
                 "armorer",
@@ -91818,7 +92255,10 @@ mod tags_v1_21_6 {
                 "home",
                 "meeting",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+                13u16, 14u16,
+            ],
         );
     }
     static POINTOFINTERESTTYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:acquirable_job_site" => & PointOfInterestType :: MINECRAFT_ACQUIRABLE_JOB_SITE , "minecraft:bee_home" => & PointOfInterestType :: MINECRAFT_BEE_HOME , "minecraft:village" => & PointOfInterestType :: MINECRAFT_VILLAGE };
@@ -93490,19 +93930,23 @@ mod tags_v1_21_7 {
                 "gradient",
                 "gradient_up",
             ],
-            &[],
+            &[
+                26u16, 27u16, 28u16, 29u16, 31u16, 38u16, 35u16, 37u16, 32u16, 36u16, 34u16, 33u16,
+                25u16, 5u16, 30u16, 39u16, 40u16, 41u16, 42u16, 7u16, 10u16, 9u16, 8u16, 3u16,
+                23u16, 19u16, 17u16, 20u16, 18u16, 1u16, 14u16, 15u16,
+            ],
         );
         pub const MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED: super::super::Tag =
-            (&["curly_border"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[]);
+            (&["curly_border"], &[6u16]);
+        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[4u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[2u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[11u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[12u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[13u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[16u16]);
+        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[21u16]);
+        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[22u16]);
+        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[24u16]);
     }
     static BANNERPATTERN_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:no_item_required" => & BannerPattern :: MINECRAFT_NO_ITEM_REQUIRED , "minecraft:pattern_item/bordure_indented" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED , "minecraft:pattern_item/creeper" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_CREEPER , "minecraft:pattern_item/field_masoned" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FIELD_MASONED , "minecraft:pattern_item/flow" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOW , "minecraft:pattern_item/flower" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOWER , "minecraft:pattern_item/globe" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GLOBE , "minecraft:pattern_item/guster" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GUSTER , "minecraft:pattern_item/mojang" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_MOJANG , "minecraft:pattern_item/piglin" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_PIGLIN , "minecraft:pattern_item/skull" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_SKULL };
     #[allow(non_snake_case)]
@@ -99348,7 +99792,7 @@ mod tags_v1_21_7 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS: super::super::Tag = (
             &[
@@ -99358,11 +99802,11 @@ mod tags_v1_21_7 {
                 "wither_skull",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 14u16, 50u16, 48u16],
         );
         pub const MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL: super::super::Tag =
-            (&["out_of_world"], &[]);
-        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[]);
+            (&["out_of_world"], &[32u16]);
+        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[27u16]);
         pub const MINECRAFT_AVOIDS_GUARDIAN_THORNS: super::super::Tag = (
             &[
                 "magic",
@@ -99372,11 +99816,11 @@ mod tags_v1_21_7 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[27u16, 44u16, 15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_BURN_FROM_STEPPING: super::super::Tag =
-            (&["campfire", "hot_floor"], &[]);
-        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[]);
+            (&["campfire", "hot_floor"], &[3u16, 20u16]);
+        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[31u16]);
         pub const MINECRAFT_BYPASSES_ARMOR: super::super::Tag = (
             &[
                 "on_fire",
@@ -99399,14 +99843,17 @@ mod tags_v1_21_7 {
                 "sonic_boom",
                 "outside_border",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16,
+            ],
         );
-        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[]);
-        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[]);
+        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[40u16]);
+        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[36u16]);
         pub const MINECRAFT_BYPASSES_INVULNERABILITY: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_RESISTANCE: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_SHIELD: super::super::Tag = (
             &[
                 "on_fire",
@@ -99439,7 +99886,11 @@ mod tags_v1_21_7 {
                 "lightning_bolt",
                 "sweet_berry_bush",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16, 2u16, 3u16, 7u16, 11u16, 13u16,
+                20u16, 21u16, 24u16, 25u16, 43u16,
+            ],
         );
         pub const MINECRAFT_BYPASSES_WOLF_ARMOR: super::super::Tag = (
             &[
@@ -99457,17 +99908,22 @@ mod tags_v1_21_7 {
                 "thorns",
                 "wither",
             ],
-            &[],
+            &[
+                32u16, 19u16, 4u16, 6u16, 7u16, 17u16, 22u16, 23u16, 27u16, 33u16, 40u16, 44u16,
+                49u16,
+            ],
         );
-        pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag =
-            (&["player_explosion", "player_attack", "mace_smash"], &[]);
+        pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag = (
+            &["player_explosion", "player_attack", "mace_smash"],
+            &[35u16, 34u16, 26u16],
+        );
         pub const MINECRAFT_DAMAGES_HELMET: super::super::Tag = (
             &["falling_anvil", "falling_block", "falling_stalactite"],
-            &[],
+            &[11u16, 12u16, 13u16],
         );
         pub const MINECRAFT_IGNITES_ARMOR_STANDS: super::super::Tag =
-            (&["in_fire", "campfire"], &[]);
-        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[]);
+            (&["in_fire", "campfire"], &[21u16, 3u16]);
+        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_IS_EXPLOSION: super::super::Tag = (
             &[
                 "fireworks",
@@ -99475,10 +99931,12 @@ mod tags_v1_21_7 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
-        pub const MINECRAFT_IS_FALL: super::super::Tag =
-            (&["fall", "ender_pearl", "stalagmite"], &[]);
+        pub const MINECRAFT_IS_FALL: super::super::Tag = (
+            &["fall", "ender_pearl", "stalagmite"],
+            &[10u16, 8u16, 39u16],
+        );
         pub const MINECRAFT_IS_FIRE: super::super::Tag = (
             &[
                 "in_fire",
@@ -99489,12 +99947,12 @@ mod tags_v1_21_7 {
                 "unattributed_fireball",
                 "fireball",
             ],
-            &[],
+            &[21u16, 3u16, 31u16, 24u16, 20u16, 47u16, 14u16],
         );
-        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[]);
-        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[]);
+        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[17u16]);
+        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[25u16]);
         pub const MINECRAFT_IS_PLAYER_ATTACK: super::super::Tag =
-            (&["player_attack", "mace_smash"], &[]);
+            (&["player_attack", "mace_smash"], &[34u16, 26u16]);
         pub const MINECRAFT_IS_PROJECTILE: super::super::Tag = (
             &[
                 "arrow",
@@ -99506,11 +99964,11 @@ mod tags_v1_21_7 {
                 "thrown",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 30u16, 47u16, 14u16, 50u16, 45u16, 48u16],
         );
-        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[]);
-        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[]);
-        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[26u16]);
+        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[29u16]);
+        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_NO_KNOCKBACK: super::super::Tag = (
             &[
                 "explosion",
@@ -99542,7 +100000,11 @@ mod tags_v1_21_7 {
                 "generic_kill",
                 "campfire",
             ],
-            &[],
+            &[
+                9u16, 35u16, 1u16, 21u16, 25u16, 31u16, 24u16, 20u16, 22u16, 4u16, 6u16, 40u16,
+                2u16, 10u16, 8u16, 16u16, 32u16, 18u16, 27u16, 49u16, 5u16, 7u16, 43u16, 17u16,
+                39u16, 33u16, 19u16, 3u16,
+            ],
         );
         pub const MINECRAFT_PANIC_CAUSES: super::super::Tag = (
             &[
@@ -99574,7 +100036,11 @@ mod tags_v1_21_7 {
                 "player_attack",
                 "mace_smash",
             ],
-            &[],
+            &[
+                2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16, 0u16, 5u16, 9u16, 14u16, 15u16,
+                23u16, 27u16, 28u16, 30u16, 35u16, 36u16, 41u16, 45u16, 46u16, 47u16, 48u16, 49u16,
+                50u16, 34u16, 26u16,
+            ],
         );
         pub const MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES: super::super::Tag = (
             &[
@@ -99586,11 +100052,13 @@ mod tags_v1_21_7 {
                 "lightning_bolt",
                 "on_fire",
             ],
-            &[],
+            &[2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16],
         );
-        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag =
-            (&["magic", "indirect_magic", "sonic_boom", "thorns"], &[]);
-        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag = (
+            &["magic", "indirect_magic", "sonic_boom", "thorns"],
+            &[27u16, 23u16, 36u16, 44u16],
+        );
+        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[6u16]);
     }
     static DAMAGETYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:always_hurts_ender_dragons" => & DamageType :: MINECRAFT_ALWAYS_HURTS_ENDER_DRAGONS , "minecraft:always_kills_armor_stands" => & DamageType :: MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS , "minecraft:always_most_significant_fall" => & DamageType :: MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL , "minecraft:always_triggers_silverfish" => & DamageType :: MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH , "minecraft:avoids_guardian_thorns" => & DamageType :: MINECRAFT_AVOIDS_GUARDIAN_THORNS , "minecraft:burn_from_stepping" => & DamageType :: MINECRAFT_BURN_FROM_STEPPING , "minecraft:burns_armor_stands" => & DamageType :: MINECRAFT_BURNS_ARMOR_STANDS , "minecraft:bypasses_armor" => & DamageType :: MINECRAFT_BYPASSES_ARMOR , "minecraft:bypasses_effects" => & DamageType :: MINECRAFT_BYPASSES_EFFECTS , "minecraft:bypasses_enchantments" => & DamageType :: MINECRAFT_BYPASSES_ENCHANTMENTS , "minecraft:bypasses_invulnerability" => & DamageType :: MINECRAFT_BYPASSES_INVULNERABILITY , "minecraft:bypasses_resistance" => & DamageType :: MINECRAFT_BYPASSES_RESISTANCE , "minecraft:bypasses_shield" => & DamageType :: MINECRAFT_BYPASSES_SHIELD , "minecraft:bypasses_wolf_armor" => & DamageType :: MINECRAFT_BYPASSES_WOLF_ARMOR , "minecraft:can_break_armor_stand" => & DamageType :: MINECRAFT_CAN_BREAK_ARMOR_STAND , "minecraft:damages_helmet" => & DamageType :: MINECRAFT_DAMAGES_HELMET , "minecraft:ignites_armor_stands" => & DamageType :: MINECRAFT_IGNITES_ARMOR_STANDS , "minecraft:is_drowning" => & DamageType :: MINECRAFT_IS_DROWNING , "minecraft:is_explosion" => & DamageType :: MINECRAFT_IS_EXPLOSION , "minecraft:is_fall" => & DamageType :: MINECRAFT_IS_FALL , "minecraft:is_fire" => & DamageType :: MINECRAFT_IS_FIRE , "minecraft:is_freezing" => & DamageType :: MINECRAFT_IS_FREEZING , "minecraft:is_lightning" => & DamageType :: MINECRAFT_IS_LIGHTNING , "minecraft:is_player_attack" => & DamageType :: MINECRAFT_IS_PLAYER_ATTACK , "minecraft:is_projectile" => & DamageType :: MINECRAFT_IS_PROJECTILE , "minecraft:mace_smash" => & DamageType :: MINECRAFT_MACE_SMASH , "minecraft:no_anger" => & DamageType :: MINECRAFT_NO_ANGER , "minecraft:no_impact" => & DamageType :: MINECRAFT_NO_IMPACT , "minecraft:no_knockback" => & DamageType :: MINECRAFT_NO_KNOCKBACK , "minecraft:panic_causes" => & DamageType :: MINECRAFT_PANIC_CAUSES , "minecraft:panic_environmental_causes" => & DamageType :: MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES , "minecraft:witch_resistant_to" => & DamageType :: MINECRAFT_WITCH_RESISTANT_TO , "minecraft:wither_immune_to" => & DamageType :: MINECRAFT_WITHER_IMMUNE_TO };
     #[allow(non_snake_case)]
@@ -100531,7 +100999,7 @@ mod tags_v1_21_7 {
     static FLUID_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "c:beetroot_soup" => & Fluid :: C_BEETROOT_SOUP , "c:experience" => & Fluid :: C_EXPERIENCE , "c:gaseous" => & Fluid :: C_GASEOUS , "c:hidden_from_recipe_viewers" => & Fluid :: C_HIDDEN_FROM_RECIPE_VIEWERS , "c:honey" => & Fluid :: C_HONEY , "c:lava" => & Fluid :: C_LAVA , "c:milk" => & Fluid :: C_MILK , "c:mushroom_stew" => & Fluid :: C_MUSHROOM_STEW , "c:potion" => & Fluid :: C_POTION , "c:rabbit_stew" => & Fluid :: C_RABBIT_STEW , "c:suspicious_stew" => & Fluid :: C_SUSPICIOUS_STEW , "c:water" => & Fluid :: C_WATER , "minecraft:lava" => & Fluid :: MINECRAFT_LAVA , "minecraft:water" => & Fluid :: MINECRAFT_WATER };
     #[allow(non_snake_case)]
     pub mod GameEvent {
-        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[]);
+        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[34u16]);
         pub const MINECRAFT_IGNORE_VIBRATIONS_SNEAKING: super::super::Tag = (
             &[
                 "hit_ground",
@@ -100541,10 +101009,10 @@ mod tags_v1_21_7 {
                 "item_interact_start",
                 "item_interact_finish",
             ],
-            &[],
+            &[27u16, 37u16, 42u16, 43u16, 30u16, 29u16],
         );
         pub const MINECRAFT_SHRIEKER_CAN_LISTEN: super::super::Tag =
-            (&["sculk_sensor_tendrils_clicking"], &[]);
+            (&["sculk_sensor_tendrils_clicking"], &[38u16]);
         pub const MINECRAFT_VIBRATIONS: super::super::Tag = (
             &[
                 "block_attach",
@@ -100603,7 +101071,13 @@ mod tags_v1_21_7 {
                 "resonate_15",
                 "flap",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 24u16,
+            ],
         );
         pub const MINECRAFT_WARDEN_CAN_LISTEN: super::super::Tag = (
             &[
@@ -100664,7 +101138,13 @@ mod tags_v1_21_7 {
                 "shriek",
                 "sculk_sensor_tendrils_clicking",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 40u16, 38u16,
+            ],
         );
     }
     static GAMEEVENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:allay_can_listen" => & GameEvent :: MINECRAFT_ALLAY_CAN_LISTEN , "minecraft:ignore_vibrations_sneaking" => & GameEvent :: MINECRAFT_IGNORE_VIBRATIONS_SNEAKING , "minecraft:shrieker_can_listen" => & GameEvent :: MINECRAFT_SHRIEKER_CAN_LISTEN , "minecraft:vibrations" => & GameEvent :: MINECRAFT_VIBRATIONS , "minecraft:warden_can_listen" => & GameEvent :: MINECRAFT_WARDEN_CAN_LISTEN };
@@ -100681,7 +101161,7 @@ mod tags_v1_21_7 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16, 0u16, 1u16, 7u16, 2u16],
         );
         pub const MINECRAFT_REGULAR_GOAT_HORNS: super::super::Tag = (
             &[
@@ -100690,7 +101170,7 @@ mod tags_v1_21_7 {
                 "seek_goat_horn",
                 "feel_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16],
         );
         pub const MINECRAFT_SCREAMING_GOAT_HORNS: super::super::Tag = (
             &[
@@ -100699,7 +101179,7 @@ mod tags_v1_21_7 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[0u16, 1u16, 7u16, 2u16],
         );
     }
     static INSTRUMENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:goat_horns" => & Instrument :: MINECRAFT_GOAT_HORNS , "minecraft:regular_goat_horns" => & Instrument :: MINECRAFT_REGULAR_GOAT_HORNS , "minecraft:screaming_goat_horns" => & Instrument :: MINECRAFT_SCREAMING_GOAT_HORNS };
@@ -105322,7 +105802,12 @@ mod tags_v1_21_7 {
                 "tides",
                 "dennis",
             ],
-            &[],
+            &[
+                24u16, 1u16, 0u16, 2u16, 5u16, 32u16, 47u16, 35u16, 12u16, 37u16, 42u16, 13u16,
+                46u16, 22u16, 26u16, 8u16, 40u16, 45u16, 39u16, 50u16, 19u16, 33u16, 31u16, 7u16,
+                38u16, 15u16, 4u16, 23u16, 27u16, 36u16, 44u16, 3u16, 6u16, 9u16, 10u16, 11u16,
+                17u16, 18u16, 20u16, 25u16, 28u16, 29u16, 30u16, 34u16, 41u16, 43u16, 14u16,
+            ],
         );
     }
     static PAINTINGVARIANT_TAGS: phf::Map<&'static str, &'static super::Tag> =
@@ -105345,9 +105830,12 @@ mod tags_v1_21_7 {
                 "toolsmith",
                 "weaponsmith",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+            ],
         );
-        pub const MINECRAFT_BEE_HOME: super::super::Tag = (&["beehive", "bee_nest"], &[]);
+        pub const MINECRAFT_BEE_HOME: super::super::Tag =
+            (&["beehive", "bee_nest"], &[15u16, 16u16]);
         pub const MINECRAFT_VILLAGE: super::super::Tag = (
             &[
                 "armorer",
@@ -105366,7 +105854,10 @@ mod tags_v1_21_7 {
                 "home",
                 "meeting",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+                13u16, 14u16,
+            ],
         );
     }
     static POINTOFINTERESTTYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:acquirable_job_site" => & PointOfInterestType :: MINECRAFT_ACQUIRABLE_JOB_SITE , "minecraft:bee_home" => & PointOfInterestType :: MINECRAFT_BEE_HOME , "minecraft:village" => & PointOfInterestType :: MINECRAFT_VILLAGE };
@@ -107038,19 +107529,23 @@ mod tags_v1_21_9 {
                 "gradient",
                 "gradient_up",
             ],
-            &[],
+            &[
+                26u16, 27u16, 28u16, 29u16, 31u16, 38u16, 35u16, 37u16, 32u16, 36u16, 34u16, 33u16,
+                25u16, 5u16, 30u16, 39u16, 40u16, 41u16, 42u16, 7u16, 10u16, 9u16, 8u16, 3u16,
+                23u16, 19u16, 17u16, 20u16, 18u16, 1u16, 14u16, 15u16,
+            ],
         );
         pub const MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED: super::super::Tag =
-            (&["curly_border"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[]);
+            (&["curly_border"], &[6u16]);
+        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[4u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[2u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[11u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[12u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[13u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[16u16]);
+        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[21u16]);
+        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[22u16]);
+        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[24u16]);
     }
     static BANNERPATTERN_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:no_item_required" => & BannerPattern :: MINECRAFT_NO_ITEM_REQUIRED , "minecraft:pattern_item/bordure_indented" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED , "minecraft:pattern_item/creeper" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_CREEPER , "minecraft:pattern_item/field_masoned" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FIELD_MASONED , "minecraft:pattern_item/flow" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOW , "minecraft:pattern_item/flower" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOWER , "minecraft:pattern_item/globe" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GLOBE , "minecraft:pattern_item/guster" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GUSTER , "minecraft:pattern_item/mojang" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_MOJANG , "minecraft:pattern_item/piglin" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_PIGLIN , "minecraft:pattern_item/skull" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_SKULL };
     #[allow(non_snake_case)]
@@ -113261,7 +113756,7 @@ mod tags_v1_21_9 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS: super::super::Tag = (
             &[
@@ -113271,11 +113766,11 @@ mod tags_v1_21_9 {
                 "wither_skull",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 14u16, 50u16, 48u16],
         );
         pub const MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL: super::super::Tag =
-            (&["out_of_world"], &[]);
-        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[]);
+            (&["out_of_world"], &[32u16]);
+        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[27u16]);
         pub const MINECRAFT_AVOIDS_GUARDIAN_THORNS: super::super::Tag = (
             &[
                 "magic",
@@ -113285,11 +113780,11 @@ mod tags_v1_21_9 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[27u16, 44u16, 15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_BURN_FROM_STEPPING: super::super::Tag =
-            (&["campfire", "hot_floor"], &[]);
-        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[]);
+            (&["campfire", "hot_floor"], &[3u16, 20u16]);
+        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[31u16]);
         pub const MINECRAFT_BYPASSES_ARMOR: super::super::Tag = (
             &[
                 "on_fire",
@@ -113312,14 +113807,17 @@ mod tags_v1_21_9 {
                 "sonic_boom",
                 "outside_border",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16,
+            ],
         );
-        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[]);
-        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[]);
+        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[40u16]);
+        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[36u16]);
         pub const MINECRAFT_BYPASSES_INVULNERABILITY: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_RESISTANCE: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_SHIELD: super::super::Tag = (
             &[
                 "on_fire",
@@ -113352,7 +113850,11 @@ mod tags_v1_21_9 {
                 "lightning_bolt",
                 "sweet_berry_bush",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16, 2u16, 3u16, 7u16, 11u16, 13u16,
+                20u16, 21u16, 24u16, 25u16, 43u16,
+            ],
         );
         pub const MINECRAFT_BYPASSES_WOLF_ARMOR: super::super::Tag = (
             &[
@@ -113370,17 +113872,22 @@ mod tags_v1_21_9 {
                 "thorns",
                 "wither",
             ],
-            &[],
+            &[
+                32u16, 19u16, 4u16, 6u16, 7u16, 17u16, 22u16, 23u16, 27u16, 33u16, 40u16, 44u16,
+                49u16,
+            ],
         );
-        pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag =
-            (&["player_explosion", "player_attack", "mace_smash"], &[]);
+        pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag = (
+            &["player_explosion", "player_attack", "mace_smash"],
+            &[35u16, 34u16, 26u16],
+        );
         pub const MINECRAFT_DAMAGES_HELMET: super::super::Tag = (
             &["falling_anvil", "falling_block", "falling_stalactite"],
-            &[],
+            &[11u16, 12u16, 13u16],
         );
         pub const MINECRAFT_IGNITES_ARMOR_STANDS: super::super::Tag =
-            (&["in_fire", "campfire"], &[]);
-        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[]);
+            (&["in_fire", "campfire"], &[21u16, 3u16]);
+        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_IS_EXPLOSION: super::super::Tag = (
             &[
                 "fireworks",
@@ -113388,10 +113895,12 @@ mod tags_v1_21_9 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
-        pub const MINECRAFT_IS_FALL: super::super::Tag =
-            (&["fall", "ender_pearl", "stalagmite"], &[]);
+        pub const MINECRAFT_IS_FALL: super::super::Tag = (
+            &["fall", "ender_pearl", "stalagmite"],
+            &[10u16, 8u16, 39u16],
+        );
         pub const MINECRAFT_IS_FIRE: super::super::Tag = (
             &[
                 "in_fire",
@@ -113402,12 +113911,12 @@ mod tags_v1_21_9 {
                 "unattributed_fireball",
                 "fireball",
             ],
-            &[],
+            &[21u16, 3u16, 31u16, 24u16, 20u16, 47u16, 14u16],
         );
-        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[]);
-        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[]);
+        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[17u16]);
+        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[25u16]);
         pub const MINECRAFT_IS_PLAYER_ATTACK: super::super::Tag =
-            (&["player_attack", "mace_smash"], &[]);
+            (&["player_attack", "mace_smash"], &[34u16, 26u16]);
         pub const MINECRAFT_IS_PROJECTILE: super::super::Tag = (
             &[
                 "arrow",
@@ -113419,11 +113928,11 @@ mod tags_v1_21_9 {
                 "thrown",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 30u16, 47u16, 14u16, 50u16, 45u16, 48u16],
         );
-        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[]);
-        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[]);
-        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[26u16]);
+        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[29u16]);
+        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_NO_KNOCKBACK: super::super::Tag = (
             &[
                 "explosion",
@@ -113455,7 +113964,11 @@ mod tags_v1_21_9 {
                 "generic_kill",
                 "campfire",
             ],
-            &[],
+            &[
+                9u16, 35u16, 1u16, 21u16, 25u16, 31u16, 24u16, 20u16, 22u16, 4u16, 6u16, 40u16,
+                2u16, 10u16, 8u16, 16u16, 32u16, 18u16, 27u16, 49u16, 5u16, 7u16, 43u16, 17u16,
+                39u16, 33u16, 19u16, 3u16,
+            ],
         );
         pub const MINECRAFT_PANIC_CAUSES: super::super::Tag = (
             &[
@@ -113487,7 +114000,11 @@ mod tags_v1_21_9 {
                 "player_attack",
                 "mace_smash",
             ],
-            &[],
+            &[
+                2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16, 0u16, 5u16, 9u16, 14u16, 15u16,
+                23u16, 27u16, 28u16, 30u16, 35u16, 36u16, 41u16, 45u16, 46u16, 47u16, 48u16, 49u16,
+                50u16, 34u16, 26u16,
+            ],
         );
         pub const MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES: super::super::Tag = (
             &[
@@ -113499,11 +114016,13 @@ mod tags_v1_21_9 {
                 "lightning_bolt",
                 "on_fire",
             ],
-            &[],
+            &[2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16],
         );
-        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag =
-            (&["magic", "indirect_magic", "sonic_boom", "thorns"], &[]);
-        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag = (
+            &["magic", "indirect_magic", "sonic_boom", "thorns"],
+            &[27u16, 23u16, 36u16, 44u16],
+        );
+        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[6u16]);
     }
     static DAMAGETYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:always_hurts_ender_dragons" => & DamageType :: MINECRAFT_ALWAYS_HURTS_ENDER_DRAGONS , "minecraft:always_kills_armor_stands" => & DamageType :: MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS , "minecraft:always_most_significant_fall" => & DamageType :: MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL , "minecraft:always_triggers_silverfish" => & DamageType :: MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH , "minecraft:avoids_guardian_thorns" => & DamageType :: MINECRAFT_AVOIDS_GUARDIAN_THORNS , "minecraft:burn_from_stepping" => & DamageType :: MINECRAFT_BURN_FROM_STEPPING , "minecraft:burns_armor_stands" => & DamageType :: MINECRAFT_BURNS_ARMOR_STANDS , "minecraft:bypasses_armor" => & DamageType :: MINECRAFT_BYPASSES_ARMOR , "minecraft:bypasses_effects" => & DamageType :: MINECRAFT_BYPASSES_EFFECTS , "minecraft:bypasses_enchantments" => & DamageType :: MINECRAFT_BYPASSES_ENCHANTMENTS , "minecraft:bypasses_invulnerability" => & DamageType :: MINECRAFT_BYPASSES_INVULNERABILITY , "minecraft:bypasses_resistance" => & DamageType :: MINECRAFT_BYPASSES_RESISTANCE , "minecraft:bypasses_shield" => & DamageType :: MINECRAFT_BYPASSES_SHIELD , "minecraft:bypasses_wolf_armor" => & DamageType :: MINECRAFT_BYPASSES_WOLF_ARMOR , "minecraft:can_break_armor_stand" => & DamageType :: MINECRAFT_CAN_BREAK_ARMOR_STAND , "minecraft:damages_helmet" => & DamageType :: MINECRAFT_DAMAGES_HELMET , "minecraft:ignites_armor_stands" => & DamageType :: MINECRAFT_IGNITES_ARMOR_STANDS , "minecraft:is_drowning" => & DamageType :: MINECRAFT_IS_DROWNING , "minecraft:is_explosion" => & DamageType :: MINECRAFT_IS_EXPLOSION , "minecraft:is_fall" => & DamageType :: MINECRAFT_IS_FALL , "minecraft:is_fire" => & DamageType :: MINECRAFT_IS_FIRE , "minecraft:is_freezing" => & DamageType :: MINECRAFT_IS_FREEZING , "minecraft:is_lightning" => & DamageType :: MINECRAFT_IS_LIGHTNING , "minecraft:is_player_attack" => & DamageType :: MINECRAFT_IS_PLAYER_ATTACK , "minecraft:is_projectile" => & DamageType :: MINECRAFT_IS_PROJECTILE , "minecraft:mace_smash" => & DamageType :: MINECRAFT_MACE_SMASH , "minecraft:no_anger" => & DamageType :: MINECRAFT_NO_ANGER , "minecraft:no_impact" => & DamageType :: MINECRAFT_NO_IMPACT , "minecraft:no_knockback" => & DamageType :: MINECRAFT_NO_KNOCKBACK , "minecraft:panic_causes" => & DamageType :: MINECRAFT_PANIC_CAUSES , "minecraft:panic_environmental_causes" => & DamageType :: MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES , "minecraft:witch_resistant_to" => & DamageType :: MINECRAFT_WITCH_RESISTANT_TO , "minecraft:wither_immune_to" => & DamageType :: MINECRAFT_WITHER_IMMUNE_TO };
     #[allow(non_snake_case)]
@@ -114468,7 +114987,7 @@ mod tags_v1_21_9 {
     static FLUID_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "c:beetroot_soup" => & Fluid :: C_BEETROOT_SOUP , "c:experience" => & Fluid :: C_EXPERIENCE , "c:gaseous" => & Fluid :: C_GASEOUS , "c:hidden_from_recipe_viewers" => & Fluid :: C_HIDDEN_FROM_RECIPE_VIEWERS , "c:honey" => & Fluid :: C_HONEY , "c:lava" => & Fluid :: C_LAVA , "c:milk" => & Fluid :: C_MILK , "c:mushroom_stew" => & Fluid :: C_MUSHROOM_STEW , "c:potion" => & Fluid :: C_POTION , "c:rabbit_stew" => & Fluid :: C_RABBIT_STEW , "c:suspicious_stew" => & Fluid :: C_SUSPICIOUS_STEW , "c:water" => & Fluid :: C_WATER , "minecraft:lava" => & Fluid :: MINECRAFT_LAVA , "minecraft:water" => & Fluid :: MINECRAFT_WATER };
     #[allow(non_snake_case)]
     pub mod GameEvent {
-        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[]);
+        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[34u16]);
         pub const MINECRAFT_IGNORE_VIBRATIONS_SNEAKING: super::super::Tag = (
             &[
                 "hit_ground",
@@ -114478,10 +114997,10 @@ mod tags_v1_21_9 {
                 "item_interact_start",
                 "item_interact_finish",
             ],
-            &[],
+            &[27u16, 37u16, 42u16, 43u16, 30u16, 29u16],
         );
         pub const MINECRAFT_SHRIEKER_CAN_LISTEN: super::super::Tag =
-            (&["sculk_sensor_tendrils_clicking"], &[]);
+            (&["sculk_sensor_tendrils_clicking"], &[38u16]);
         pub const MINECRAFT_VIBRATIONS: super::super::Tag = (
             &[
                 "block_attach",
@@ -114540,7 +115059,13 @@ mod tags_v1_21_9 {
                 "resonate_15",
                 "flap",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 24u16,
+            ],
         );
         pub const MINECRAFT_WARDEN_CAN_LISTEN: super::super::Tag = (
             &[
@@ -114601,7 +115126,13 @@ mod tags_v1_21_9 {
                 "shriek",
                 "sculk_sensor_tendrils_clicking",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 40u16, 38u16,
+            ],
         );
     }
     static GAMEEVENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:allay_can_listen" => & GameEvent :: MINECRAFT_ALLAY_CAN_LISTEN , "minecraft:ignore_vibrations_sneaking" => & GameEvent :: MINECRAFT_IGNORE_VIBRATIONS_SNEAKING , "minecraft:shrieker_can_listen" => & GameEvent :: MINECRAFT_SHRIEKER_CAN_LISTEN , "minecraft:vibrations" => & GameEvent :: MINECRAFT_VIBRATIONS , "minecraft:warden_can_listen" => & GameEvent :: MINECRAFT_WARDEN_CAN_LISTEN };
@@ -114618,7 +115149,7 @@ mod tags_v1_21_9 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16, 0u16, 1u16, 7u16, 2u16],
         );
         pub const MINECRAFT_REGULAR_GOAT_HORNS: super::super::Tag = (
             &[
@@ -114627,7 +115158,7 @@ mod tags_v1_21_9 {
                 "seek_goat_horn",
                 "feel_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16],
         );
         pub const MINECRAFT_SCREAMING_GOAT_HORNS: super::super::Tag = (
             &[
@@ -114636,7 +115167,7 @@ mod tags_v1_21_9 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[0u16, 1u16, 7u16, 2u16],
         );
     }
     static INSTRUMENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:goat_horns" => & Instrument :: MINECRAFT_GOAT_HORNS , "minecraft:regular_goat_horns" => & Instrument :: MINECRAFT_REGULAR_GOAT_HORNS , "minecraft:screaming_goat_horns" => & Instrument :: MINECRAFT_SCREAMING_GOAT_HORNS };
@@ -119586,7 +120117,12 @@ mod tags_v1_21_9 {
                 "tides",
                 "dennis",
             ],
-            &[],
+            &[
+                24u16, 1u16, 0u16, 2u16, 5u16, 32u16, 47u16, 35u16, 12u16, 37u16, 42u16, 13u16,
+                46u16, 22u16, 26u16, 8u16, 40u16, 45u16, 39u16, 50u16, 19u16, 33u16, 31u16, 7u16,
+                38u16, 15u16, 4u16, 23u16, 27u16, 36u16, 44u16, 3u16, 6u16, 9u16, 10u16, 11u16,
+                17u16, 18u16, 20u16, 25u16, 28u16, 29u16, 30u16, 34u16, 41u16, 43u16, 14u16,
+            ],
         );
     }
     static PAINTINGVARIANT_TAGS: phf::Map<&'static str, &'static super::Tag> =
@@ -119609,9 +120145,12 @@ mod tags_v1_21_9 {
                 "toolsmith",
                 "weaponsmith",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+            ],
         );
-        pub const MINECRAFT_BEE_HOME: super::super::Tag = (&["beehive", "bee_nest"], &[]);
+        pub const MINECRAFT_BEE_HOME: super::super::Tag =
+            (&["beehive", "bee_nest"], &[15u16, 16u16]);
         pub const MINECRAFT_VILLAGE: super::super::Tag = (
             &[
                 "armorer",
@@ -119630,7 +120169,10 @@ mod tags_v1_21_9 {
                 "home",
                 "meeting",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+                13u16, 14u16,
+            ],
         );
     }
     static POINTOFINTERESTTYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:acquirable_job_site" => & PointOfInterestType :: MINECRAFT_ACQUIRABLE_JOB_SITE , "minecraft:bee_home" => & PointOfInterestType :: MINECRAFT_BEE_HOME , "minecraft:village" => & PointOfInterestType :: MINECRAFT_VILLAGE };
@@ -121304,19 +121846,23 @@ mod tags_v1_21_11 {
                 "gradient",
                 "gradient_up",
             ],
-            &[],
+            &[
+                26u16, 27u16, 28u16, 29u16, 31u16, 38u16, 35u16, 37u16, 32u16, 36u16, 34u16, 33u16,
+                25u16, 5u16, 30u16, 39u16, 40u16, 41u16, 42u16, 7u16, 10u16, 9u16, 8u16, 3u16,
+                23u16, 19u16, 17u16, 20u16, 18u16, 1u16, 14u16, 15u16,
+            ],
         );
         pub const MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED: super::super::Tag =
-            (&["curly_border"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[]);
+            (&["curly_border"], &[6u16]);
+        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[4u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[2u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[11u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[12u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[13u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[16u16]);
+        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[21u16]);
+        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[22u16]);
+        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[24u16]);
     }
     static BANNERPATTERN_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:no_item_required" => & BannerPattern :: MINECRAFT_NO_ITEM_REQUIRED , "minecraft:pattern_item/bordure_indented" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED , "minecraft:pattern_item/creeper" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_CREEPER , "minecraft:pattern_item/field_masoned" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FIELD_MASONED , "minecraft:pattern_item/flow" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOW , "minecraft:pattern_item/flower" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOWER , "minecraft:pattern_item/globe" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GLOBE , "minecraft:pattern_item/guster" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GUSTER , "minecraft:pattern_item/mojang" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_MOJANG , "minecraft:pattern_item/piglin" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_PIGLIN , "minecraft:pattern_item/skull" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_SKULL };
     #[allow(non_snake_case)]
@@ -127539,7 +128085,7 @@ mod tags_v1_21_11 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS: super::super::Tag = (
             &[
@@ -127549,11 +128095,11 @@ mod tags_v1_21_11 {
                 "wither_skull",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 14u16, 50u16, 48u16],
         );
         pub const MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL: super::super::Tag =
-            (&["out_of_world"], &[]);
-        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[]);
+            (&["out_of_world"], &[32u16]);
+        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[27u16]);
         pub const MINECRAFT_AVOIDS_GUARDIAN_THORNS: super::super::Tag = (
             &[
                 "magic",
@@ -127563,11 +128109,11 @@ mod tags_v1_21_11 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[27u16, 44u16, 15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_BURN_FROM_STEPPING: super::super::Tag =
-            (&["campfire", "hot_floor"], &[]);
-        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[]);
+            (&["campfire", "hot_floor"], &[3u16, 20u16]);
+        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[31u16]);
         pub const MINECRAFT_BYPASSES_ARMOR: super::super::Tag = (
             &[
                 "on_fire",
@@ -127590,14 +128136,17 @@ mod tags_v1_21_11 {
                 "sonic_boom",
                 "outside_border",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16,
+            ],
         );
-        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[]);
-        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[]);
+        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[40u16]);
+        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[36u16]);
         pub const MINECRAFT_BYPASSES_INVULNERABILITY: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_RESISTANCE: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_SHIELD: super::super::Tag = (
             &[
                 "on_fire",
@@ -127630,7 +128179,11 @@ mod tags_v1_21_11 {
                 "lightning_bolt",
                 "sweet_berry_bush",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16, 2u16, 3u16, 7u16, 11u16, 13u16,
+                20u16, 21u16, 24u16, 25u16, 43u16,
+            ],
         );
         pub const MINECRAFT_BYPASSES_WOLF_ARMOR: super::super::Tag = (
             &[
@@ -127648,19 +128201,22 @@ mod tags_v1_21_11 {
                 "thorns",
                 "wither",
             ],
-            &[],
+            &[
+                32u16, 19u16, 4u16, 6u16, 7u16, 17u16, 22u16, 23u16, 27u16, 33u16, 40u16, 44u16,
+                49u16,
+            ],
         );
         pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag = (
             &["player_explosion", "player_attack", "spear", "mace_smash"],
-            &[],
+            &[35u16, 34u16, 37u16, 26u16],
         );
         pub const MINECRAFT_DAMAGES_HELMET: super::super::Tag = (
             &["falling_anvil", "falling_block", "falling_stalactite"],
-            &[],
+            &[11u16, 12u16, 13u16],
         );
         pub const MINECRAFT_IGNITES_ARMOR_STANDS: super::super::Tag =
-            (&["in_fire", "campfire"], &[]);
-        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[]);
+            (&["in_fire", "campfire"], &[21u16, 3u16]);
+        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_IS_EXPLOSION: super::super::Tag = (
             &[
                 "fireworks",
@@ -127668,10 +128224,12 @@ mod tags_v1_21_11 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
-        pub const MINECRAFT_IS_FALL: super::super::Tag =
-            (&["fall", "ender_pearl", "stalagmite"], &[]);
+        pub const MINECRAFT_IS_FALL: super::super::Tag = (
+            &["fall", "ender_pearl", "stalagmite"],
+            &[10u16, 8u16, 39u16],
+        );
         pub const MINECRAFT_IS_FIRE: super::super::Tag = (
             &[
                 "in_fire",
@@ -127682,12 +128240,14 @@ mod tags_v1_21_11 {
                 "unattributed_fireball",
                 "fireball",
             ],
-            &[],
+            &[21u16, 3u16, 31u16, 24u16, 20u16, 47u16, 14u16],
         );
-        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[]);
-        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[]);
-        pub const MINECRAFT_IS_PLAYER_ATTACK: super::super::Tag =
-            (&["player_attack", "spear", "mace_smash"], &[]);
+        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[17u16]);
+        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[25u16]);
+        pub const MINECRAFT_IS_PLAYER_ATTACK: super::super::Tag = (
+            &["player_attack", "spear", "mace_smash"],
+            &[34u16, 37u16, 26u16],
+        );
         pub const MINECRAFT_IS_PROJECTILE: super::super::Tag = (
             &[
                 "arrow",
@@ -127699,11 +128259,11 @@ mod tags_v1_21_11 {
                 "thrown",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 30u16, 47u16, 14u16, 50u16, 45u16, 48u16],
         );
-        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[]);
-        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[]);
-        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[26u16]);
+        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[29u16]);
+        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_NO_KNOCKBACK: super::super::Tag = (
             &[
                 "explosion",
@@ -127736,7 +128296,11 @@ mod tags_v1_21_11 {
                 "campfire",
                 "spear",
             ],
-            &[],
+            &[
+                9u16, 35u16, 1u16, 21u16, 25u16, 31u16, 24u16, 20u16, 22u16, 4u16, 6u16, 40u16,
+                2u16, 10u16, 8u16, 16u16, 32u16, 18u16, 27u16, 49u16, 5u16, 7u16, 43u16, 17u16,
+                39u16, 33u16, 19u16, 3u16, 37u16,
+            ],
         );
         pub const MINECRAFT_PANIC_CAUSES: super::super::Tag = (
             &[
@@ -127769,7 +128333,11 @@ mod tags_v1_21_11 {
                 "spear",
                 "mace_smash",
             ],
-            &[],
+            &[
+                2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16, 0u16, 5u16, 9u16, 14u16, 15u16,
+                23u16, 27u16, 28u16, 30u16, 35u16, 36u16, 41u16, 45u16, 46u16, 47u16, 48u16, 49u16,
+                50u16, 34u16, 37u16, 26u16,
+            ],
         );
         pub const MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES: super::super::Tag = (
             &[
@@ -127781,11 +128349,13 @@ mod tags_v1_21_11 {
                 "lightning_bolt",
                 "on_fire",
             ],
-            &[],
+            &[2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16],
         );
-        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag =
-            (&["magic", "indirect_magic", "sonic_boom", "thorns"], &[]);
-        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag = (
+            &["magic", "indirect_magic", "sonic_boom", "thorns"],
+            &[27u16, 23u16, 36u16, 44u16],
+        );
+        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[6u16]);
     }
     static DAMAGETYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:always_hurts_ender_dragons" => & DamageType :: MINECRAFT_ALWAYS_HURTS_ENDER_DRAGONS , "minecraft:always_kills_armor_stands" => & DamageType :: MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS , "minecraft:always_most_significant_fall" => & DamageType :: MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL , "minecraft:always_triggers_silverfish" => & DamageType :: MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH , "minecraft:avoids_guardian_thorns" => & DamageType :: MINECRAFT_AVOIDS_GUARDIAN_THORNS , "minecraft:burn_from_stepping" => & DamageType :: MINECRAFT_BURN_FROM_STEPPING , "minecraft:burns_armor_stands" => & DamageType :: MINECRAFT_BURNS_ARMOR_STANDS , "minecraft:bypasses_armor" => & DamageType :: MINECRAFT_BYPASSES_ARMOR , "minecraft:bypasses_effects" => & DamageType :: MINECRAFT_BYPASSES_EFFECTS , "minecraft:bypasses_enchantments" => & DamageType :: MINECRAFT_BYPASSES_ENCHANTMENTS , "minecraft:bypasses_invulnerability" => & DamageType :: MINECRAFT_BYPASSES_INVULNERABILITY , "minecraft:bypasses_resistance" => & DamageType :: MINECRAFT_BYPASSES_RESISTANCE , "minecraft:bypasses_shield" => & DamageType :: MINECRAFT_BYPASSES_SHIELD , "minecraft:bypasses_wolf_armor" => & DamageType :: MINECRAFT_BYPASSES_WOLF_ARMOR , "minecraft:can_break_armor_stand" => & DamageType :: MINECRAFT_CAN_BREAK_ARMOR_STAND , "minecraft:damages_helmet" => & DamageType :: MINECRAFT_DAMAGES_HELMET , "minecraft:ignites_armor_stands" => & DamageType :: MINECRAFT_IGNITES_ARMOR_STANDS , "minecraft:is_drowning" => & DamageType :: MINECRAFT_IS_DROWNING , "minecraft:is_explosion" => & DamageType :: MINECRAFT_IS_EXPLOSION , "minecraft:is_fall" => & DamageType :: MINECRAFT_IS_FALL , "minecraft:is_fire" => & DamageType :: MINECRAFT_IS_FIRE , "minecraft:is_freezing" => & DamageType :: MINECRAFT_IS_FREEZING , "minecraft:is_lightning" => & DamageType :: MINECRAFT_IS_LIGHTNING , "minecraft:is_player_attack" => & DamageType :: MINECRAFT_IS_PLAYER_ATTACK , "minecraft:is_projectile" => & DamageType :: MINECRAFT_IS_PROJECTILE , "minecraft:mace_smash" => & DamageType :: MINECRAFT_MACE_SMASH , "minecraft:no_anger" => & DamageType :: MINECRAFT_NO_ANGER , "minecraft:no_impact" => & DamageType :: MINECRAFT_NO_IMPACT , "minecraft:no_knockback" => & DamageType :: MINECRAFT_NO_KNOCKBACK , "minecraft:panic_causes" => & DamageType :: MINECRAFT_PANIC_CAUSES , "minecraft:panic_environmental_causes" => & DamageType :: MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES , "minecraft:witch_resistant_to" => & DamageType :: MINECRAFT_WITCH_RESISTANT_TO , "minecraft:wither_immune_to" => & DamageType :: MINECRAFT_WITHER_IMMUNE_TO };
     #[allow(non_snake_case)]
@@ -128828,7 +129398,7 @@ mod tags_v1_21_11 {
     static FLUID_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "c:beetroot_soup" => & Fluid :: C_BEETROOT_SOUP , "c:experience" => & Fluid :: C_EXPERIENCE , "c:gaseous" => & Fluid :: C_GASEOUS , "c:hidden_from_recipe_viewers" => & Fluid :: C_HIDDEN_FROM_RECIPE_VIEWERS , "c:honey" => & Fluid :: C_HONEY , "c:lava" => & Fluid :: C_LAVA , "c:milk" => & Fluid :: C_MILK , "c:mushroom_stew" => & Fluid :: C_MUSHROOM_STEW , "c:potion" => & Fluid :: C_POTION , "c:rabbit_stew" => & Fluid :: C_RABBIT_STEW , "c:suspicious_stew" => & Fluid :: C_SUSPICIOUS_STEW , "c:water" => & Fluid :: C_WATER , "minecraft:lava" => & Fluid :: MINECRAFT_LAVA , "minecraft:water" => & Fluid :: MINECRAFT_WATER };
     #[allow(non_snake_case)]
     pub mod GameEvent {
-        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[]);
+        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[34u16]);
         pub const MINECRAFT_IGNORE_VIBRATIONS_SNEAKING: super::super::Tag = (
             &[
                 "hit_ground",
@@ -128838,10 +129408,10 @@ mod tags_v1_21_11 {
                 "item_interact_start",
                 "item_interact_finish",
             ],
-            &[],
+            &[27u16, 37u16, 42u16, 43u16, 30u16, 29u16],
         );
         pub const MINECRAFT_SHRIEKER_CAN_LISTEN: super::super::Tag =
-            (&["sculk_sensor_tendrils_clicking"], &[]);
+            (&["sculk_sensor_tendrils_clicking"], &[38u16]);
         pub const MINECRAFT_VIBRATIONS: super::super::Tag = (
             &[
                 "block_attach",
@@ -128900,7 +129470,13 @@ mod tags_v1_21_11 {
                 "resonate_15",
                 "flap",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 24u16,
+            ],
         );
         pub const MINECRAFT_WARDEN_CAN_LISTEN: super::super::Tag = (
             &[
@@ -128961,7 +129537,13 @@ mod tags_v1_21_11 {
                 "shriek",
                 "sculk_sensor_tendrils_clicking",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 40u16, 38u16,
+            ],
         );
     }
     static GAMEEVENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:allay_can_listen" => & GameEvent :: MINECRAFT_ALLAY_CAN_LISTEN , "minecraft:ignore_vibrations_sneaking" => & GameEvent :: MINECRAFT_IGNORE_VIBRATIONS_SNEAKING , "minecraft:shrieker_can_listen" => & GameEvent :: MINECRAFT_SHRIEKER_CAN_LISTEN , "minecraft:vibrations" => & GameEvent :: MINECRAFT_VIBRATIONS , "minecraft:warden_can_listen" => & GameEvent :: MINECRAFT_WARDEN_CAN_LISTEN };
@@ -128978,7 +129560,7 @@ mod tags_v1_21_11 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16, 0u16, 1u16, 7u16, 2u16],
         );
         pub const MINECRAFT_REGULAR_GOAT_HORNS: super::super::Tag = (
             &[
@@ -128987,7 +129569,7 @@ mod tags_v1_21_11 {
                 "seek_goat_horn",
                 "feel_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16],
         );
         pub const MINECRAFT_SCREAMING_GOAT_HORNS: super::super::Tag = (
             &[
@@ -128996,7 +129578,7 @@ mod tags_v1_21_11 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[0u16, 1u16, 7u16, 2u16],
         );
     }
     static INSTRUMENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:goat_horns" => & Instrument :: MINECRAFT_GOAT_HORNS , "minecraft:regular_goat_horns" => & Instrument :: MINECRAFT_REGULAR_GOAT_HORNS , "minecraft:screaming_goat_horns" => & Instrument :: MINECRAFT_SCREAMING_GOAT_HORNS };
@@ -134151,7 +134733,12 @@ mod tags_v1_21_11 {
                 "tides",
                 "dennis",
             ],
-            &[],
+            &[
+                24u16, 1u16, 0u16, 2u16, 5u16, 32u16, 47u16, 35u16, 12u16, 37u16, 42u16, 13u16,
+                46u16, 22u16, 26u16, 8u16, 40u16, 45u16, 39u16, 50u16, 19u16, 33u16, 31u16, 7u16,
+                38u16, 15u16, 4u16, 23u16, 27u16, 36u16, 44u16, 3u16, 6u16, 9u16, 10u16, 11u16,
+                17u16, 18u16, 20u16, 25u16, 28u16, 29u16, 30u16, 34u16, 41u16, 43u16, 14u16,
+            ],
         );
     }
     static PAINTINGVARIANT_TAGS: phf::Map<&'static str, &'static super::Tag> =
@@ -134174,9 +134761,12 @@ mod tags_v1_21_11 {
                 "toolsmith",
                 "weaponsmith",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+            ],
         );
-        pub const MINECRAFT_BEE_HOME: super::super::Tag = (&["beehive", "bee_nest"], &[]);
+        pub const MINECRAFT_BEE_HOME: super::super::Tag =
+            (&["beehive", "bee_nest"], &[15u16, 16u16]);
         pub const MINECRAFT_VILLAGE: super::super::Tag = (
             &[
                 "armorer",
@@ -134195,7 +134785,10 @@ mod tags_v1_21_11 {
                 "home",
                 "meeting",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+                13u16, 14u16,
+            ],
         );
     }
     static POINTOFINTERESTTYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:acquirable_job_site" => & PointOfInterestType :: MINECRAFT_ACQUIRABLE_JOB_SITE , "minecraft:bee_home" => & PointOfInterestType :: MINECRAFT_BEE_HOME , "minecraft:village" => & PointOfInterestType :: MINECRAFT_VILLAGE };
@@ -135829,19 +136422,23 @@ mod tags_v26_1 {
                 "gradient",
                 "gradient_up",
             ],
-            &[],
+            &[
+                26u16, 27u16, 28u16, 29u16, 31u16, 38u16, 35u16, 37u16, 32u16, 36u16, 34u16, 33u16,
+                25u16, 5u16, 30u16, 39u16, 40u16, 41u16, 42u16, 7u16, 10u16, 9u16, 8u16, 3u16,
+                23u16, 19u16, 17u16, 20u16, 18u16, 1u16, 14u16, 15u16,
+            ],
         );
         pub const MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED: super::super::Tag =
-            (&["curly_border"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[]);
-        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[]);
+            (&["curly_border"], &[6u16]);
+        pub const MINECRAFT_PATTERN_ITEM_CREEPER: super::super::Tag = (&["creeper"], &[4u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FIELD_MASONED: super::super::Tag = (&["bricks"], &[2u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOW: super::super::Tag = (&["flow"], &[11u16]);
+        pub const MINECRAFT_PATTERN_ITEM_FLOWER: super::super::Tag = (&["flower"], &[12u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GLOBE: super::super::Tag = (&["globe"], &[13u16]);
+        pub const MINECRAFT_PATTERN_ITEM_GUSTER: super::super::Tag = (&["guster"], &[16u16]);
+        pub const MINECRAFT_PATTERN_ITEM_MOJANG: super::super::Tag = (&["mojang"], &[21u16]);
+        pub const MINECRAFT_PATTERN_ITEM_PIGLIN: super::super::Tag = (&["piglin"], &[22u16]);
+        pub const MINECRAFT_PATTERN_ITEM_SKULL: super::super::Tag = (&["skull"], &[24u16]);
     }
     static BANNERPATTERN_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:no_item_required" => & BannerPattern :: MINECRAFT_NO_ITEM_REQUIRED , "minecraft:pattern_item/bordure_indented" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_BORDURE_INDENTED , "minecraft:pattern_item/creeper" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_CREEPER , "minecraft:pattern_item/field_masoned" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FIELD_MASONED , "minecraft:pattern_item/flow" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOW , "minecraft:pattern_item/flower" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_FLOWER , "minecraft:pattern_item/globe" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GLOBE , "minecraft:pattern_item/guster" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_GUSTER , "minecraft:pattern_item/mojang" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_MOJANG , "minecraft:pattern_item/piglin" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_PIGLIN , "minecraft:pattern_item/skull" => & BannerPattern :: MINECRAFT_PATTERN_ITEM_SKULL };
     #[allow(non_snake_case)]
@@ -142538,7 +143135,7 @@ mod tags_v26_1 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS: super::super::Tag = (
             &[
@@ -142548,11 +143145,11 @@ mod tags_v26_1 {
                 "wither_skull",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 14u16, 50u16, 48u16],
         );
         pub const MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL: super::super::Tag =
-            (&["out_of_world"], &[]);
-        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[]);
+            (&["out_of_world"], &[32u16]);
+        pub const MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH: super::super::Tag = (&["magic"], &[27u16]);
         pub const MINECRAFT_AVOIDS_GUARDIAN_THORNS: super::super::Tag = (
             &[
                 "magic",
@@ -142562,11 +143159,11 @@ mod tags_v26_1 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[27u16, 44u16, 15u16, 9u16, 35u16, 1u16],
         );
         pub const MINECRAFT_BURN_FROM_STEPPING: super::super::Tag =
-            (&["campfire", "hot_floor"], &[]);
-        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[]);
+            (&["campfire", "hot_floor"], &[3u16, 20u16]);
+        pub const MINECRAFT_BURNS_ARMOR_STANDS: super::super::Tag = (&["on_fire"], &[31u16]);
         pub const MINECRAFT_BYPASSES_ARMOR: super::super::Tag = (
             &[
                 "on_fire",
@@ -142589,14 +143186,17 @@ mod tags_v26_1 {
                 "sonic_boom",
                 "outside_border",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16,
+            ],
         );
-        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[]);
-        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[]);
+        pub const MINECRAFT_BYPASSES_EFFECTS: super::super::Tag = (&["starve"], &[40u16]);
+        pub const MINECRAFT_BYPASSES_ENCHANTMENTS: super::super::Tag = (&["sonic_boom"], &[36u16]);
         pub const MINECRAFT_BYPASSES_INVULNERABILITY: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_RESISTANCE: super::super::Tag =
-            (&["out_of_world", "generic_kill"], &[]);
+            (&["out_of_world", "generic_kill"], &[32u16, 19u16]);
         pub const MINECRAFT_BYPASSES_SHIELD: super::super::Tag = (
             &[
                 "on_fire",
@@ -142629,7 +143229,11 @@ mod tags_v26_1 {
                 "lightning_bolt",
                 "sweet_berry_bush",
             ],
-            &[],
+            &[
+                31u16, 22u16, 4u16, 6u16, 16u16, 18u16, 49u16, 5u16, 40u16, 10u16, 8u16, 17u16,
+                39u16, 27u16, 23u16, 32u16, 19u16, 36u16, 33u16, 2u16, 3u16, 7u16, 11u16, 13u16,
+                20u16, 21u16, 24u16, 25u16, 43u16,
+            ],
         );
         pub const MINECRAFT_BYPASSES_WOLF_ARMOR: super::super::Tag = (
             &[
@@ -142647,19 +143251,22 @@ mod tags_v26_1 {
                 "thorns",
                 "wither",
             ],
-            &[],
+            &[
+                32u16, 19u16, 4u16, 6u16, 7u16, 17u16, 22u16, 23u16, 27u16, 33u16, 40u16, 44u16,
+                49u16,
+            ],
         );
         pub const MINECRAFT_CAN_BREAK_ARMOR_STAND: super::super::Tag = (
             &["player_explosion", "player_attack", "spear", "mace_smash"],
-            &[],
+            &[35u16, 34u16, 37u16, 26u16],
         );
         pub const MINECRAFT_DAMAGES_HELMET: super::super::Tag = (
             &["falling_anvil", "falling_block", "falling_stalactite"],
-            &[],
+            &[11u16, 12u16, 13u16],
         );
         pub const MINECRAFT_IGNITES_ARMOR_STANDS: super::super::Tag =
-            (&["in_fire", "campfire"], &[]);
-        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[]);
+            (&["in_fire", "campfire"], &[21u16, 3u16]);
+        pub const MINECRAFT_IS_DROWNING: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_IS_EXPLOSION: super::super::Tag = (
             &[
                 "fireworks",
@@ -142667,10 +143274,12 @@ mod tags_v26_1 {
                 "player_explosion",
                 "bad_respawn_point",
             ],
-            &[],
+            &[15u16, 9u16, 35u16, 1u16],
         );
-        pub const MINECRAFT_IS_FALL: super::super::Tag =
-            (&["fall", "ender_pearl", "stalagmite"], &[]);
+        pub const MINECRAFT_IS_FALL: super::super::Tag = (
+            &["fall", "ender_pearl", "stalagmite"],
+            &[10u16, 8u16, 39u16],
+        );
         pub const MINECRAFT_IS_FIRE: super::super::Tag = (
             &[
                 "in_fire",
@@ -142681,12 +143290,14 @@ mod tags_v26_1 {
                 "unattributed_fireball",
                 "fireball",
             ],
-            &[],
+            &[21u16, 3u16, 31u16, 24u16, 20u16, 47u16, 14u16],
         );
-        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[]);
-        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[]);
-        pub const MINECRAFT_IS_PLAYER_ATTACK: super::super::Tag =
-            (&["player_attack", "spear", "mace_smash"], &[]);
+        pub const MINECRAFT_IS_FREEZING: super::super::Tag = (&["freeze"], &[17u16]);
+        pub const MINECRAFT_IS_LIGHTNING: super::super::Tag = (&["lightning_bolt"], &[25u16]);
+        pub const MINECRAFT_IS_PLAYER_ATTACK: super::super::Tag = (
+            &["player_attack", "spear", "mace_smash"],
+            &[34u16, 37u16, 26u16],
+        );
         pub const MINECRAFT_IS_PROJECTILE: super::super::Tag = (
             &[
                 "arrow",
@@ -142698,11 +143309,11 @@ mod tags_v26_1 {
                 "thrown",
                 "wind_charge",
             ],
-            &[],
+            &[0u16, 46u16, 30u16, 47u16, 14u16, 50u16, 45u16, 48u16],
         );
-        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[]);
-        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[]);
-        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_MACE_SMASH: super::super::Tag = (&["mace_smash"], &[26u16]);
+        pub const MINECRAFT_NO_ANGER: super::super::Tag = (&["mob_attack_no_aggro"], &[29u16]);
+        pub const MINECRAFT_NO_IMPACT: super::super::Tag = (&["drown"], &[6u16]);
         pub const MINECRAFT_NO_KNOCKBACK: super::super::Tag = (
             &[
                 "explosion",
@@ -142735,7 +143346,11 @@ mod tags_v26_1 {
                 "campfire",
                 "spear",
             ],
-            &[],
+            &[
+                9u16, 35u16, 1u16, 21u16, 25u16, 31u16, 24u16, 20u16, 22u16, 4u16, 6u16, 40u16,
+                2u16, 10u16, 8u16, 16u16, 32u16, 18u16, 27u16, 49u16, 5u16, 7u16, 43u16, 17u16,
+                39u16, 33u16, 19u16, 3u16, 37u16,
+            ],
         );
         pub const MINECRAFT_PANIC_CAUSES: super::super::Tag = (
             &[
@@ -142768,7 +143383,11 @@ mod tags_v26_1 {
                 "spear",
                 "mace_smash",
             ],
-            &[],
+            &[
+                2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16, 0u16, 5u16, 9u16, 14u16, 15u16,
+                23u16, 27u16, 28u16, 30u16, 35u16, 36u16, 41u16, 45u16, 46u16, 47u16, 48u16, 49u16,
+                50u16, 34u16, 37u16, 26u16,
+            ],
         );
         pub const MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES: super::super::Tag = (
             &[
@@ -142780,11 +143399,13 @@ mod tags_v26_1 {
                 "lightning_bolt",
                 "on_fire",
             ],
-            &[],
+            &[2u16, 17u16, 20u16, 21u16, 24u16, 25u16, 31u16],
         );
-        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag =
-            (&["magic", "indirect_magic", "sonic_boom", "thorns"], &[]);
-        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[]);
+        pub const MINECRAFT_WITCH_RESISTANT_TO: super::super::Tag = (
+            &["magic", "indirect_magic", "sonic_boom", "thorns"],
+            &[27u16, 23u16, 36u16, 44u16],
+        );
+        pub const MINECRAFT_WITHER_IMMUNE_TO: super::super::Tag = (&["drown"], &[6u16]);
     }
     static DAMAGETYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:always_hurts_ender_dragons" => & DamageType :: MINECRAFT_ALWAYS_HURTS_ENDER_DRAGONS , "minecraft:always_kills_armor_stands" => & DamageType :: MINECRAFT_ALWAYS_KILLS_ARMOR_STANDS , "minecraft:always_most_significant_fall" => & DamageType :: MINECRAFT_ALWAYS_MOST_SIGNIFICANT_FALL , "minecraft:always_triggers_silverfish" => & DamageType :: MINECRAFT_ALWAYS_TRIGGERS_SILVERFISH , "minecraft:avoids_guardian_thorns" => & DamageType :: MINECRAFT_AVOIDS_GUARDIAN_THORNS , "minecraft:burn_from_stepping" => & DamageType :: MINECRAFT_BURN_FROM_STEPPING , "minecraft:burns_armor_stands" => & DamageType :: MINECRAFT_BURNS_ARMOR_STANDS , "minecraft:bypasses_armor" => & DamageType :: MINECRAFT_BYPASSES_ARMOR , "minecraft:bypasses_effects" => & DamageType :: MINECRAFT_BYPASSES_EFFECTS , "minecraft:bypasses_enchantments" => & DamageType :: MINECRAFT_BYPASSES_ENCHANTMENTS , "minecraft:bypasses_invulnerability" => & DamageType :: MINECRAFT_BYPASSES_INVULNERABILITY , "minecraft:bypasses_resistance" => & DamageType :: MINECRAFT_BYPASSES_RESISTANCE , "minecraft:bypasses_shield" => & DamageType :: MINECRAFT_BYPASSES_SHIELD , "minecraft:bypasses_wolf_armor" => & DamageType :: MINECRAFT_BYPASSES_WOLF_ARMOR , "minecraft:can_break_armor_stand" => & DamageType :: MINECRAFT_CAN_BREAK_ARMOR_STAND , "minecraft:damages_helmet" => & DamageType :: MINECRAFT_DAMAGES_HELMET , "minecraft:ignites_armor_stands" => & DamageType :: MINECRAFT_IGNITES_ARMOR_STANDS , "minecraft:is_drowning" => & DamageType :: MINECRAFT_IS_DROWNING , "minecraft:is_explosion" => & DamageType :: MINECRAFT_IS_EXPLOSION , "minecraft:is_fall" => & DamageType :: MINECRAFT_IS_FALL , "minecraft:is_fire" => & DamageType :: MINECRAFT_IS_FIRE , "minecraft:is_freezing" => & DamageType :: MINECRAFT_IS_FREEZING , "minecraft:is_lightning" => & DamageType :: MINECRAFT_IS_LIGHTNING , "minecraft:is_player_attack" => & DamageType :: MINECRAFT_IS_PLAYER_ATTACK , "minecraft:is_projectile" => & DamageType :: MINECRAFT_IS_PROJECTILE , "minecraft:mace_smash" => & DamageType :: MINECRAFT_MACE_SMASH , "minecraft:no_anger" => & DamageType :: MINECRAFT_NO_ANGER , "minecraft:no_impact" => & DamageType :: MINECRAFT_NO_IMPACT , "minecraft:no_knockback" => & DamageType :: MINECRAFT_NO_KNOCKBACK , "minecraft:panic_causes" => & DamageType :: MINECRAFT_PANIC_CAUSES , "minecraft:panic_environmental_causes" => & DamageType :: MINECRAFT_PANIC_ENVIRONMENTAL_CAUSES , "minecraft:witch_resistant_to" => & DamageType :: MINECRAFT_WITCH_RESISTANT_TO , "minecraft:wither_immune_to" => & DamageType :: MINECRAFT_WITHER_IMMUNE_TO };
     #[allow(non_snake_case)]
@@ -143838,7 +144459,7 @@ mod tags_v26_1 {
     static FLUID_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "c:beetroot_soup" => & Fluid :: C_BEETROOT_SOUP , "c:experience" => & Fluid :: C_EXPERIENCE , "c:gaseous" => & Fluid :: C_GASEOUS , "c:hidden_from_recipe_viewers" => & Fluid :: C_HIDDEN_FROM_RECIPE_VIEWERS , "c:honey" => & Fluid :: C_HONEY , "c:lava" => & Fluid :: C_LAVA , "c:milk" => & Fluid :: C_MILK , "c:mushroom_stew" => & Fluid :: C_MUSHROOM_STEW , "c:potion" => & Fluid :: C_POTION , "c:rabbit_stew" => & Fluid :: C_RABBIT_STEW , "c:suspicious_stew" => & Fluid :: C_SUSPICIOUS_STEW , "c:water" => & Fluid :: C_WATER , "minecraft:bubble_column_can_occupy" => & Fluid :: MINECRAFT_BUBBLE_COLUMN_CAN_OCCUPY , "minecraft:lava" => & Fluid :: MINECRAFT_LAVA , "minecraft:supports_frogspawn" => & Fluid :: MINECRAFT_SUPPORTS_FROGSPAWN , "minecraft:supports_lily_pad" => & Fluid :: MINECRAFT_SUPPORTS_LILY_PAD , "minecraft:supports_sugar_cane_adjacently" => & Fluid :: MINECRAFT_SUPPORTS_SUGAR_CANE_ADJACENTLY , "minecraft:water" => & Fluid :: MINECRAFT_WATER };
     #[allow(non_snake_case)]
     pub mod GameEvent {
-        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[]);
+        pub const MINECRAFT_ALLAY_CAN_LISTEN: super::super::Tag = (&["note_block_play"], &[34u16]);
         pub const MINECRAFT_IGNORE_VIBRATIONS_SNEAKING: super::super::Tag = (
             &[
                 "hit_ground",
@@ -143848,10 +144469,10 @@ mod tags_v26_1 {
                 "item_interact_start",
                 "item_interact_finish",
             ],
-            &[],
+            &[27u16, 37u16, 42u16, 43u16, 30u16, 29u16],
         );
         pub const MINECRAFT_SHRIEKER_CAN_LISTEN: super::super::Tag =
-            (&["sculk_sensor_tendrils_clicking"], &[]);
+            (&["sculk_sensor_tendrils_clicking"], &[38u16]);
         pub const MINECRAFT_VIBRATIONS: super::super::Tag = (
             &[
                 "block_attach",
@@ -143910,7 +144531,13 @@ mod tags_v26_1 {
                 "resonate_15",
                 "flap",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 24u16,
+            ],
         );
         pub const MINECRAFT_WARDEN_CAN_LISTEN: super::super::Tag = (
             &[
@@ -143971,7 +144598,13 @@ mod tags_v26_1 {
                 "shriek",
                 "sculk_sensor_tendrils_clicking",
             ],
-            &[],
+            &[
+                1u16, 2u16, 3u16, 5u16, 6u16, 7u16, 8u16, 0u16, 4u16, 10u16, 11u16, 12u16, 13u16,
+                14u16, 15u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 22u16, 23u16, 25u16, 26u16,
+                27u16, 28u16, 29u16, 33u16, 34u16, 35u16, 36u16, 37u16, 39u16, 41u16, 42u16, 43u16,
+                44u16, 45u16, 46u16, 47u16, 48u16, 49u16, 50u16, 51u16, 52u16, 53u16, 54u16, 55u16,
+                56u16, 57u16, 58u16, 59u16, 60u16, 40u16, 38u16,
+            ],
         );
     }
     static GAMEEVENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:allay_can_listen" => & GameEvent :: MINECRAFT_ALLAY_CAN_LISTEN , "minecraft:ignore_vibrations_sneaking" => & GameEvent :: MINECRAFT_IGNORE_VIBRATIONS_SNEAKING , "minecraft:shrieker_can_listen" => & GameEvent :: MINECRAFT_SHRIEKER_CAN_LISTEN , "minecraft:vibrations" => & GameEvent :: MINECRAFT_VIBRATIONS , "minecraft:warden_can_listen" => & GameEvent :: MINECRAFT_WARDEN_CAN_LISTEN };
@@ -143988,7 +144621,7 @@ mod tags_v26_1 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16, 0u16, 1u16, 7u16, 2u16],
         );
         pub const MINECRAFT_REGULAR_GOAT_HORNS: super::super::Tag = (
             &[
@@ -143997,7 +144630,7 @@ mod tags_v26_1 {
                 "seek_goat_horn",
                 "feel_goat_horn",
             ],
-            &[],
+            &[4u16, 6u16, 5u16, 3u16],
         );
         pub const MINECRAFT_SCREAMING_GOAT_HORNS: super::super::Tag = (
             &[
@@ -144006,7 +144639,7 @@ mod tags_v26_1 {
                 "yearn_goat_horn",
                 "dream_goat_horn",
             ],
-            &[],
+            &[0u16, 1u16, 7u16, 2u16],
         );
     }
     static INSTRUMENT_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:goat_horns" => & Instrument :: MINECRAFT_GOAT_HORNS , "minecraft:regular_goat_horns" => & Instrument :: MINECRAFT_REGULAR_GOAT_HORNS , "minecraft:screaming_goat_horns" => & Instrument :: MINECRAFT_SCREAMING_GOAT_HORNS };
@@ -149125,7 +149758,12 @@ mod tags_v26_1 {
                 "tides",
                 "dennis",
             ],
-            &[],
+            &[
+                24u16, 1u16, 0u16, 2u16, 5u16, 32u16, 47u16, 35u16, 12u16, 37u16, 42u16, 13u16,
+                46u16, 22u16, 26u16, 8u16, 40u16, 45u16, 39u16, 50u16, 19u16, 33u16, 31u16, 7u16,
+                38u16, 15u16, 4u16, 23u16, 27u16, 36u16, 44u16, 3u16, 6u16, 9u16, 10u16, 11u16,
+                17u16, 18u16, 20u16, 25u16, 28u16, 29u16, 30u16, 34u16, 41u16, 43u16, 14u16,
+            ],
         );
     }
     static PAINTINGVARIANT_TAGS: phf::Map<&'static str, &'static super::Tag> =
@@ -149148,9 +149786,12 @@ mod tags_v26_1 {
                 "toolsmith",
                 "weaponsmith",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+            ],
         );
-        pub const MINECRAFT_BEE_HOME: super::super::Tag = (&["beehive", "bee_nest"], &[]);
+        pub const MINECRAFT_BEE_HOME: super::super::Tag =
+            (&["beehive", "bee_nest"], &[15u16, 16u16]);
         pub const MINECRAFT_VILLAGE: super::super::Tag = (
             &[
                 "armorer",
@@ -149169,7 +149810,10 @@ mod tags_v26_1 {
                 "home",
                 "meeting",
             ],
-            &[],
+            &[
+                0u16, 1u16, 2u16, 3u16, 4u16, 5u16, 6u16, 7u16, 8u16, 9u16, 10u16, 11u16, 12u16,
+                13u16, 14u16,
+            ],
         );
     }
     static POINTOFINTERESTTYPE_TAGS: phf::Map<&'static str, &'static super::Tag> = phf::phf_map! { "minecraft:acquirable_job_site" => & PointOfInterestType :: MINECRAFT_ACQUIRABLE_JOB_SITE , "minecraft:bee_home" => & PointOfInterestType :: MINECRAFT_BEE_HOME , "minecraft:village" => & PointOfInterestType :: MINECRAFT_VILLAGE };
@@ -149219,7 +149863,12 @@ mod tags_v26_1 {
                 "slow_falling",
                 "long_slow_falling",
             ],
-            &[],
+            &[
+                42u16, 44u16, 45u16, 43u16, 4u16, 5u16, 6u16, 7u16, 11u16, 12u16, 8u16, 9u16,
+                10u16, 16u16, 17u16, 18u16, 19u16, 20u16, 21u16, 13u16, 14u16, 15u16, 22u16, 23u16,
+                24u16, 25u16, 26u16, 27u16, 28u16, 29u16, 30u16, 31u16, 32u16, 33u16, 34u16, 35u16,
+                36u16, 37u16, 38u16, 40u16, 41u16,
+            ],
         );
     }
     static POTION_TAGS: phf::Map<&'static str, &'static super::Tag> =

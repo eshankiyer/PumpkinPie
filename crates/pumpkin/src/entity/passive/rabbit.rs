@@ -7,10 +7,9 @@ use std::sync::{
 
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_data::{
     entity::{EntityType, MobCategory},
     item::Item,
@@ -253,12 +252,12 @@ impl RabbitEntity {
     /// removes the transient attack-damage modifier on un-set and never actually un-sets a
     /// rabbit's variant in practice -- it's set once at spawn/NBT-read and never reverted).
     ///
-    /// Deferred: no entity-metadata sync for the variant byte. `TrackedData::RABBIT_TYPE` is
-    /// `255` (absent) for the protocol versions this server currently targets -- vanilla itself
-    /// moved rabbit variant to a `DataComponents.RABBIT_VARIANT` data component in newer
-    /// versions, which Pumpkin's client metadata sync does not yet cover for this mob. State is
-    /// still tracked server-side (goals/attributes/NBT/genetics all work); only the client-side
-    /// visual variant is unaddressed.
+    /// Deferred: no entity-metadata sync for the variant byte. The tracker exists
+    /// (`tracked_data::rabbit::TYPE_ID`, id 18), but vanilla moved rabbit variant to a
+    /// `DataComponents.RABBIT_VARIANT` data component, which Pumpkin's client metadata sync
+    /// does not yet cover for this mob. State is still tracked server-side
+    /// (goals/attributes/NBT/genetics all work); only the client-side visual variant is
+    /// unaddressed.
     pub fn set_variant(&self, variant: RabbitVariant) {
         self.variant.store(variant as u8, Ordering::Relaxed);
 
@@ -475,14 +474,7 @@ impl Mob for RabbitEntity {
             // default body, which sends `BABY_ID` for age < 0 -- replicate that here so bred
             // kits (spawned at age -24000) still render baby-sized.
             if entity.age.load(Ordering::Relaxed) < 0 {
-                entity.send_meta_data(
-                    &[Metadata::new(
-                        TrackedData::BABY_ID,
-                        MetaDataType::BOOLEAN,
-                        true,
-                    )],
-                    None,
-                );
+                entity.send_meta_data(&[Metadata::new(tracked_data::rabbit::BABY_ID, true)], None);
             }
         })
     }

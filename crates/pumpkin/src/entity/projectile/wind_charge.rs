@@ -38,6 +38,31 @@ pub struct WindChargeEntity {
     pub thrown_item_entity: ThrownItemEntity,
 }
 
+use crate::world::SimpleExplosionDamageCalculator;
+use pumpkin_data::tag;
+use std::sync::LazyLock;
+
+pub static WIND_CHARGE_EXPLOSION_DAMAGE_CALCULATOR: LazyLock<Arc<SimpleExplosionDamageCalculator>> =
+    LazyLock::new(|| {
+        Arc::new(SimpleExplosionDamageCalculator::new(
+            true,
+            false,
+            Some(1.22),
+            Some(&tag::Block::MINECRAFT_BLOCKS_WIND_CHARGE_EXPLOSIONS),
+        ))
+    });
+
+pub static BREEZE_WIND_CHARGE_EXPLOSION_DAMAGE_CALCULATOR: LazyLock<
+    Arc<SimpleExplosionDamageCalculator>,
+> = LazyLock::new(|| {
+    Arc::new(SimpleExplosionDamageCalculator::new(
+        true,
+        false,
+        None,
+        Some(&tag::Block::MINECRAFT_BLOCKS_WIND_CHARGE_EXPLOSIONS),
+    ))
+});
+
 impl WindChargeEntity {
     #[must_use]
     pub const fn new_normal(thrown_item_entity: ThrownItemEntity) -> Self {
@@ -69,14 +94,26 @@ impl WindChargeEntity {
     }
 
     pub async fn create_explosion(&self, position: Vector3<f64>) {
-        let power = match self.kind {
-            WindChargeKind::Normal { .. } => EXPLOSION_POWER,
-            WindChargeKind::Breeze => BREEZE_EXPLOSION_POWER,
+        // WindCharge.java RADIUS = 1.2F vs BreezeWindCharge.java RADIUS = 3.0F.
+        let (power, calculator) = match self.kind {
+            WindChargeKind::Normal { .. } => (
+                EXPLOSION_POWER,
+                WIND_CHARGE_EXPLOSION_DAMAGE_CALCULATOR.clone(),
+            ),
+            WindChargeKind::Breeze => (
+                BREEZE_EXPLOSION_POWER,
+                BREEZE_WIND_CHARGE_EXPLOSION_DAMAGE_CALCULATOR.clone(),
+            ),
         };
         self.get_entity()
             .world
             .load()
-            .explode_without_blocks(position, power)
+            .explode_with_calculator(
+                position,
+                power,
+                crate::world::ExplosionInteraction::Trigger,
+                Some(calculator),
+            )
             .await;
     }
 

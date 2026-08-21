@@ -5,10 +5,12 @@ use dashmap::DashMap;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::chunk::Biome;
 use pumpkin_data::item::{BedrockItem, BedrockItemVersion};
-use pumpkin_protocol::bedrock::client::EntityProperties;
 use pumpkin_protocol::bedrock::client::item_registry::{CItemRegistry, ItemDefinition};
 use pumpkin_protocol::bedrock::client::level_event::{CLevelEvent, LevelEvent};
-use pumpkin_protocol::bedrock::network_item::NetworkItemDescriptor;
+use pumpkin_protocol::bedrock::client::{
+    CBiomeDefinitionList, EntityProperties, block_actor_data::CBlockActorData,
+};
+use pumpkin_protocol::bedrock::network_item::{NetworkItemDescriptor, NetworkItemStackDescriptor};
 use pumpkin_protocol::codec::data_component::data_to_proto_sound;
 use pumpkin_world::generation::proto_chunk::GenerationCache;
 use std::sync::atomic::Ordering::Relaxed;
@@ -26,6 +28,7 @@ pub mod loot;
 pub mod map;
 pub mod portal;
 pub mod time;
+pub mod villager_poi;
 
 use crate::block::{HandlePrecipitationArgs, Precipitation, RandomTickArgs};
 use crate::world::chunker::is_within_view_distance;
@@ -38,9 +41,9 @@ use crate::{
         {OnNeighborUpdateArgs, OnScheduledTickArgs},
     },
     command::client_suggestions,
-    entity::{Entity, EntityBase, NBTStorage, player::Player, r#type::from_type},
+    entity::{Entity, EntityBase, NBTStorage, RemovalReason, player::Player, r#type::from_type},
     error::PumpkinError,
-    net::{ClientPlatform, java::JavaClient},
+    net::{ClientPlatform, bedrock::BedrockClient, java::JavaClient},
     plugin::{
         block::block_break::BlockBreakEvent,
         player::{
@@ -52,8 +55,11 @@ use crate::{
 };
 use arc_swap::ArcSwap;
 use border::Worldborder;
-use bytes::BufMut;
-use explosion::Explosion;
+use bytes::{BufMut, Bytes};
+pub use explosion::{
+    BlockInteraction, DefaultExplosionDamageCalculator, Explosion, ExplosionDamageCalculator,
+    ExplosionInteraction, SimpleExplosionDamageCalculator,
+};
 use pumpkin_config::BasicConfiguration;
 use pumpkin_data::block_properties::{
     BlockProperties, SnowLikeProperties, blocks_movement, is_air,
@@ -64,20 +70,24 @@ use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::dimension::Dimension;
 use pumpkin_data::entity::MobCategory;
 use pumpkin_data::fluid::{Falling, FluidProperties, FluidState};
-use pumpkin_data::meta_data_type::MetaDataType;
-use pumpkin_data::tag::Taggable;
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::game_rules::{GameRule, GameRuleValue};
 use pumpkin_data::{
     Block, BlockId, BlockStateId,
     entity::{EntityStatus, EntityType},
     fluid::Fluid,
     item_stack::ItemStack,
+    packet::CURRENT_MC_VERSION,
     particle::Particle,
     sound::{Sound, SoundCategory},
     sound_id_remap::remap_sound_id_for_version,
     world::{RAW, WorldEvent},
 };
-use pumpkin_data::{BlockDirection, BlockState, HorizontalFacingExt, translation};
+use pumpkin_data::{
+    BlockDirection, BlockState, HorizontalFacingExt,
+    block_properties::{ChestLikeProperties, ChestType},
+    tag::Taggable,
+    translation,
+};
 use pumpkin_inventory::crafting::recipe_provider::RecipeProvider;
 use pumpkin_inventory::screen_handler::InventoryPlayer;
 use pumpkin_nbt::compound::NbtCompound;
@@ -96,9 +106,11 @@ use pumpkin_protocol::{
     bedrock::{
         client::{
             add_player::CAddPlayer,
+            block_event::CBlockEvent as CBedrockBlockEvent,
             common::BuildPlatform,
             creative_content::{CCreativeContent, CreativeCategory, Entry, Group},
             gamerules_changed::GameRules,
+            level_sound_event::CLevelSoundEvent,
             player_list::{CPlayerList, PlayerListEntry, Skin},
             remove_actor::CRemoveActor,
             start_game::{Experiments, GamePublishSetting, LevelSettings},
@@ -143,7 +155,9 @@ use pumpkin_util::{
 use pumpkin_world::inventory::Clearable;
 use pumpkin_world::world::{GetBlockError, WorldPortalExt};
 use pumpkin_world::{
-    CURRENT_BEDROCK_MC_VERSION, biome, chunk::io::Dirtiable, inventory::Inventory,
+    CURRENT_BEDROCK_MC_VERSION, biome,
+    chunk::{io::Dirtiable, palette::bedrock_water_state},
+    inventory::Inventory,
 };
 use pumpkin_world::{chunk::ChunkData, world::BlockAccessor};
 use pumpkin_world::{
@@ -217,6 +231,41 @@ where
     }
 }
 
+fn bedrock_chest_block_actor(state_id: BlockStateId, position: BlockPos) -> Option<NbtCompound> {
+    let (block, _) = BlockState::from_id_with_block(state_id);
+    if !block.has_tag(&pumpkin_data::tag::Block::C_CHESTS_WOODEN)
+        && !block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_COPPER_CHESTS)
+    {
+        return None;
+    }
+
+    // Block actor tags describe the chest itself. Container contents are synchronized
+    // through inventory packets and must not be exposed in chunk data.
+    let mut nbt = NbtCompound::new();
+    nbt.put_string("id", "Chest".to_string());
+    nbt.put_int("x", position.0.x);
+    nbt.put_int("y", position.0.y);
+    nbt.put_int("z", position.0.z);
+    nbt.put_bool("isMovable", true);
+
+    let properties = ChestLikeProperties::from_state_id(state_id, block);
+    if properties.r#type != ChestType::Single {
+        let direction = if properties.r#type == ChestType::Left {
+            properties.facing.rotate_clockwise()
+        } else {
+            properties.facing.rotate_counter_clockwise()
+        };
+        let pair = position.offset(direction.to_offset());
+        nbt.put_int("pairx", pair.0.x);
+        nbt.put_int("pairz", pair.0.z);
+        if properties.r#type == ChestType::Right {
+            nbt.put_bool("pairlead", true);
+        }
+    }
+
+    Some(nbt)
+}
+
 impl PumpkinError for GetBlockError {
     fn is_kick(&self) -> bool {
         false
@@ -273,8 +322,10 @@ pub struct World {
     synced_block_event_queue: Mutex<Vec<BlockEvent>>,
     /// A map of unsent block changes, keyed by block position.
     unsent_block_changes: Mutex<HashMap<BlockPos, BlockStateId>>,
-    /// POI storage for fast portal lookups
+    /// Persisted vanilla POI storage for portal and villager lookups.
     pub portal_poi: Mutex<portal::PortalPoiStorage>,
+    /// Villager job sites and their current owners.
+    pub villager_poi: Mutex<villager_poi::VillagerPoiStorage>,
     /// End Dragon fight manager (only present in `THE_END` dimension).
     pub dragon_fight: Option<Mutex<dragon_fight::DragonFight>>,
     /// Active raids for this world (`Raids` `SavedData` in vanilla).
@@ -302,6 +353,10 @@ pub struct World {
     pub trader_tick_delay: AtomicI32,
     pub trader_spawn_delay: AtomicI32,
     pub trader_spawn_chance: AtomicI32,
+    /// Persistent custom data for the world (matching Bukkit's `PersistentDataHolder`)
+    pub custom_data: std::sync::Mutex<NbtCompound>,
+    /// Persistent custom data for block entities at specific positions
+    pub custom_block_entity_data: DashMap<BlockPos, NbtCompound>,
 }
 
 #[derive(Clone, Copy)]
@@ -397,6 +452,22 @@ impl World {
         let dragon_fight = (dimension.minecraft_name == Dimension::THE_END.minecraft_name)
             .then(|| Mutex::new(dragon_fight::DragonFight::new()));
 
+        let custom_data_path = level
+            .level_folder
+            .root_folder
+            .join("pumpkin_custom_data.nbt");
+        let custom_data = if custom_data_path.exists()
+            && let Ok(bytes) = std::fs::read(&custom_data_path)
+            && let Ok(nbt) = pumpkin_nbt::Nbt::read_unnamed(
+                &mut pumpkin_nbt::deserializer::NbtReadHelperJava::new(&mut std::io::Cursor::new(
+                    bytes,
+                )),
+            ) {
+            nbt.root_tag
+        } else {
+            NbtCompound::new()
+        };
+
         Self {
             uuid: Uuid::new_v4(),
             level,
@@ -415,6 +486,7 @@ impl World {
             synced_block_event_queue: Mutex::new(Vec::new()),
             unsent_block_changes: Mutex::new(HashMap::new()),
             portal_poi: Mutex::new(portal_poi),
+            villager_poi: Mutex::new(villager_poi::VillagerPoiStorage::default()),
             dragon_fight,
             raids: Mutex::new(raid::RaidManager::new()),
             spawn_state: ArcSwap::new(Arc::new(SpawnState::empty())),
@@ -431,6 +503,8 @@ impl World {
             trader_tick_delay: AtomicI32::new(1200),
             trader_spawn_delay: AtomicI32::new(24000),
             trader_spawn_chance: AtomicI32::new(25),
+            custom_data: std::sync::Mutex::new(custom_data),
+            custom_block_entity_data: DashMap::new(),
         }
     }
 
@@ -541,6 +615,15 @@ impl World {
             self.save_entity(entity).await;
         }
 
+        let chunks: Vec<Vector2<i32>> = self
+            .block_entities
+            .iter()
+            .map(|chunk_block_entities| *chunk_block_entities.key())
+            .collect();
+        for chunk_pos in chunks {
+            self.save_block_entities(&chunk_pos).await;
+        }
+
         // Save portal POI to disk
         let save_result = self.portal_poi.lock().await.save_all();
         if let Err(e) = save_result {
@@ -558,13 +641,17 @@ impl World {
     /// currently in; the chunk is rewritten from scratch every unload cycle, so
     /// there is nothing stale to deduplicate.
     async fn save_entity(&self, entity: &Arc<dyn EntityBase>) {
+        let base_entity = entity.get_entity();
         // Vanilla `Entity.saveAsPassenger` refuses to serialize a type whose
         // `EntityType.canSerialize()` is false, and `EnderDragonPart` additionally
         // overrides `shouldBeSaved()` to false.
         if !entity.should_be_saved() {
             return;
         }
-        let current_chunk = entity.get_entity().block_pos.load().chunk_position();
+        if base_entity.is_removed() {
+            return;
+        }
+        let current_chunk = base_entity.block_pos.load().chunk_position();
         let mut nbt = NbtCompound::new();
         // Vanilla always writes the base `Entity`/`LivingEntity` data (`saveWithoutId`)
         // before the type specific `addAdditionalSaveData`. Most Pumpkin entity types
@@ -579,6 +666,34 @@ impl World {
         let chunk = self.level.get_entity_chunk(current_chunk).await;
         chunk.data.lock().await.push(nbt);
         chunk.mark_dirty(true);
+    }
+
+    /// Serializes the live block entities of a chunk back into that chunk's block
+    /// entity data. The live map is the source of truth while a chunk is loaded -
+    /// `get_block_entity` takes the saved NBT out of the chunk when it wakes an
+    /// entity up - so this has to run before the chunk is dropped, or everything
+    /// the entity did since it was loaded is lost.
+    async fn save_block_entities(&self, chunk_pos: &Vector2<i32>) {
+        let Some(block_entities) = self
+            .block_entities
+            .get(chunk_pos)
+            .map(|chunk_block_entities| chunk_block_entities.values().cloned().collect::<Vec<_>>())
+        else {
+            return;
+        };
+
+        for block_entity in block_entities {
+            let mut nbt = NbtCompound::new();
+            block_entity.write_internal(&mut nbt).await;
+            if let Some(custom_data) = self
+                .custom_block_entity_data
+                .get(&block_entity.get_position())
+                && !custom_data.is_empty()
+            {
+                nbt.put_compound("PumpkinCustomData", custom_data.clone());
+            }
+            self.add_block_entity_nbt(block_entity.get_position(), &nbt);
+        }
     }
 
     /// Sends an entity status update to all players tracking the specified entity.
@@ -605,14 +720,23 @@ impl World {
 
     pub fn send_remove_mob_effect(&self, entity: &Entity, effect_type: &'static StatusEffect) {
         let chunk_pos = entity.chunk_pos.load();
-        self.broadcast_to_chunk(
-            chunk_pos,
-            &CRemoveMobEffect::new(entity.entity_id.into(), VarInt(i32::from(effect_type.id))),
+        let je_packet =
+            CRemoveMobEffect::new(entity.entity_id.into(), VarInt(i32::from(effect_type.id)));
+        let be_packet = pumpkin_protocol::bedrock::client::CMobEffect::new(
+            VarULong(entity.entity_id as u64),
+            pumpkin_protocol::bedrock::client::CMobEffect::EVENT_REMOVE,
+            VarInt(effect_type.to_bedrock_id()),
+            VarInt(0),
+            false,
+            VarInt(0),
+            VarULong(0),
+            false,
         );
+        self.broadcast_to_chunk_editioned_sync(chunk_pos, &je_packet, &be_packet);
     }
 
     pub fn send_add_mob_effect(&self, entity: &Entity, effect: &pumpkin_data::potion::Effect) {
-        // TODO: only nearby
+        let chunk_pos = entity.chunk_pos.load();
         let mut flags: i8 = 0;
         if effect.ambient {
             flags |= 0x01;
@@ -624,19 +748,54 @@ impl World {
             flags |= 0x04;
         }
 
-        self.broadcast_packet_all(&CUpdateMobEffect::new(
+        let je_packet = CUpdateMobEffect::new(
             VarInt(entity.entity_id),
             VarInt(i32::from(effect.effect_type.id)),
             VarInt(i32::from(effect.amplifier)),
             VarInt(effect.duration),
             flags,
-        ));
+        );
+        let be_packet = pumpkin_protocol::bedrock::client::CMobEffect::new(
+            VarULong(entity.entity_id as u64),
+            pumpkin_protocol::bedrock::client::CMobEffect::EVENT_ADD,
+            VarInt(effect.effect_type.to_bedrock_id()),
+            VarInt(i32::from(effect.amplifier)),
+            effect.show_particles,
+            VarInt(effect.duration),
+            VarULong(0),
+            effect.ambient,
+        );
+
+        self.broadcast_to_chunk_editioned_sync(chunk_pos, &je_packet, &be_packet);
     }
 
     pub fn set_difficulty(&self, difficulty: Difficulty) {
         let current_info = self.level_info.load();
         let mut new_info = (**current_info).clone();
         new_info.difficulty = difficulty;
+        self.level_info.store(Arc::new(new_info));
+    }
+
+    pub fn get_game_rule(&self, rule: &GameRule) -> GameRuleValue<i64, bool> {
+        let level_info = self.level_info.load();
+        match level_info.game_rules.get(rule) {
+            GameRuleValue::Int(v) => GameRuleValue::Int(*v),
+            GameRuleValue::Bool(v) => GameRuleValue::Bool(*v),
+        }
+    }
+
+    pub fn set_game_rule(&self, rule: &GameRule, value: GameRuleValue<i64, bool>) {
+        let current_info = self.level_info.load();
+        let mut new_info = (**current_info).clone();
+        match (new_info.game_rules.get_mut(rule), value) {
+            (GameRuleValue::Int(target), GameRuleValue::Int(val)) => {
+                *target = val;
+            }
+            (GameRuleValue::Bool(target), GameRuleValue::Bool(val)) => {
+                *target = val;
+            }
+            _ => {}
+        }
         self.level_info.store(Arc::new(new_info));
     }
 
@@ -663,7 +822,7 @@ impl World {
                 continue;
             }
             let chunk_pos = event.pos.chunk_position();
-            self.broadcast_to_chunk(
+            self.broadcast_to_chunk_editioned_sync(
                 chunk_pos,
                 &CBlockEvent::new(
                     event.pos,
@@ -671,11 +830,12 @@ impl World {
                     event.data,
                     VarInt(block.id.as_u16() as i32),
                 ),
+                &CBedrockBlockEvent::new(event.pos, i32::from(event.r#type), i32::from(event.data)),
             );
         }
     }
 
-    fn collect_java_recipients_by_version<'a>(
+    pub(crate) fn collect_java_recipients_by_version<'a>(
         players: impl Iterator<Item = &'a Arc<Player>>,
     ) -> BTreeMap<JavaMinecraftVersion, Vec<&'a JavaClient>> {
         let mut recipients_by_version: BTreeMap<JavaMinecraftVersion, Vec<&'a JavaClient>> =
@@ -689,6 +849,21 @@ impl World {
             }
         }
         recipients_by_version
+    }
+
+    pub fn broadcast_java_clients<'a, P: ClientPacket>(
+        packet: &P,
+        recipients: impl Iterator<Item = &'a JavaClient>,
+    ) {
+        let mut recipients_by_version: BTreeMap<JavaMinecraftVersion, Vec<&JavaClient>> =
+            BTreeMap::new();
+        for client in recipients {
+            recipients_by_version
+                .entry(client.version.load())
+                .or_default()
+                .push(client);
+        }
+        Self::broadcast_java_grouped(packet, recipients_by_version);
     }
 
     fn broadcast_java_grouped<P: ClientPacket>(
@@ -710,8 +885,52 @@ impl World {
             };
 
             for recipient in recipients {
-                recipient.try_enqueue_packet_data(packet_data.clone());
+                recipient.try_enqueue_packet(packet_data.clone());
             }
+        }
+    }
+
+    fn broadcast_bedrock_grouped<'a, P: BClientPacket>(
+        packet: &P,
+        recipients: impl Iterator<Item = &'a Arc<BedrockClient>>,
+    ) {
+        let packet_data = match pumpkin_protocol::bedrock::packet_encoder::serialize_packet(packet)
+        {
+            Ok(packet_data) => packet_data,
+            Err(err) => {
+                error!(
+                    "Failed to serialize bedrock packet {}: {}",
+                    std::any::type_name::<P>(),
+                    err
+                );
+                return;
+            }
+        };
+
+        for recipient in recipients {
+            recipient.try_enqueue_packet(packet_data.clone());
+        }
+    }
+
+    async fn broadcast_bedrock_grouped_async<'a, P: BClientPacket>(
+        packet: &P,
+        recipients: impl Iterator<Item = &'a Arc<BedrockClient>>,
+    ) {
+        let packet_data = match pumpkin_protocol::bedrock::packet_encoder::serialize_packet(packet)
+        {
+            Ok(packet_data) => packet_data,
+            Err(err) => {
+                error!(
+                    "Failed to serialize bedrock packet {}: {}",
+                    std::any::type_name::<P>(),
+                    err
+                );
+                return;
+            }
+        };
+
+        for recipient in recipients {
+            recipient.enqueue_packet(packet_data.clone()).await;
         }
     }
 
@@ -729,20 +948,8 @@ impl World {
 
     pub fn broadcast_packet_all_sync<P: ClientPacket>(&self, packet: &P) {
         let players = self.players.load();
-        for player in players.iter() {
-            match player.client.as_ref() {
-                ClientPlatform::Java(java) => {
-                    if let Ok(data) =
-                        JavaClient::serialize_packet_for_version(packet, java.version.load())
-                    {
-                        java.try_enqueue_packet_data(data);
-                    }
-                }
-                ClientPlatform::Bedrock(_) => {
-                    // TODO
-                }
-            }
-        }
+        let recipients_by_version = Self::collect_java_recipients_by_version(players.iter());
+        Self::broadcast_java_grouped(packet, recipients_by_version);
     }
 
     pub async fn broadcast_system_message(&self, message: &TextComponent, overlay: bool) {
@@ -795,19 +1002,16 @@ impl World {
     ) {
         let players = self.players.load();
         let je_recipients_by_version = Self::collect_java_recipients_by_version(players.iter());
-        let mut be_recipients = Vec::new();
-
-        for player in players.iter() {
-            if let ClientPlatform::Bedrock(be_client) = player.client.as_ref() {
-                be_recipients.push(be_client.clone());
-            }
-        }
 
         Self::broadcast_java_grouped(je_packet, je_recipients_by_version);
-
-        for recipient in be_recipients {
-            recipient.enqueue_packet(be_packet).await;
-        }
+        Self::broadcast_bedrock_grouped_async(
+            be_packet,
+            players.iter().filter_map(|p| match p.client.as_ref() {
+                ClientPlatform::Bedrock(be) => Some(be),
+                ClientPlatform::Java(_) => None,
+            }),
+        )
+        .await;
     }
 
     pub async fn broadcast_secure_player_chat(
@@ -839,7 +1043,18 @@ impl World {
                 TextComponent::empty(), // Not needed since we're injecting the name in the message for custom formatting
                 None,
             );
-            recipient.client.enqueue_packet(packet).await;
+            let packet_data = recipient.client.java().map_or_else(
+                || {
+                    JavaClient::serialize_packet_for_version(
+                        packet,
+                        recipient.client.java_version(),
+                    )
+                },
+                |j| j.serialize_packet(packet),
+            );
+            if let Ok(data) = packet_data {
+                recipient.client.enqueue_packet(data).await;
+            }
 
             if let Some(signature) = chat_message.signature {
                 recipient
@@ -871,6 +1086,7 @@ impl World {
     ) {
         let players = self.players.load();
         let mut java_recipients = Vec::new();
+        let mut bedrock_recipients = Vec::new();
 
         for p in players.iter() {
             if except.contains(&p.gameprofile.id) {
@@ -878,13 +1094,14 @@ impl World {
             }
             match p.client.as_ref() {
                 ClientPlatform::Java(_) => java_recipients.push(p),
-                ClientPlatform::Bedrock(be_client) => be_client.try_enqueue_packet(be_packet),
+                ClientPlatform::Bedrock(be_client) => bedrock_recipients.push(be_client),
             }
         }
 
         let recipients_by_version =
             Self::collect_java_recipients_by_version(java_recipients.into_iter());
         Self::broadcast_java_grouped(je_packet, recipients_by_version);
+        Self::broadcast_bedrock_grouped(be_packet, bedrock_recipients.into_iter());
     }
 
     /// Broadcasts the skin layers of a player, encoding the metadata for each Java client's own
@@ -896,35 +1113,50 @@ impl World {
         skin_parts: u8,
         be_packet: &B,
     ) {
-        for p in self.players.load().iter() {
+        let players = self.players.load();
+        let mut java_recipients = Vec::new();
+        let mut bedrock_recipients = Vec::new();
+
+        for p in players.iter() {
             if except.contains(&p.gameprofile.id) {
                 continue;
             }
             match p.client.as_ref() {
-                ClientPlatform::Java(client) => {
-                    let version = client.version.load();
-                    let mut buf = Vec::new();
-                    for meta in [
-                        Metadata::new(
-                            TrackedData::PLAYER_MODE_CUSTOMISATION,
-                            MetaDataType::BYTE,
-                            skin_parts,
-                        ),
-                        Metadata::new(
-                            TrackedData::PLAYER_MODE_CUSTOMIZATION_ID,
-                            MetaDataType::BYTE,
-                            skin_parts,
-                        ),
-                    ] {
-                        let _ = meta.write(&mut buf, &version);
-                    }
-                    buf.put_u8(255);
-                    client
-                        .try_enqueue_packet(&CSetEntityMetadata::new(entity_id.into(), buf.into()));
-                }
-                ClientPlatform::Bedrock(be_client) => be_client.try_enqueue_packet(be_packet),
+                ClientPlatform::Java(_) => java_recipients.push(p),
+                ClientPlatform::Bedrock(be_client) => bedrock_recipients.push(be_client),
             }
         }
+
+        let recipients_by_version =
+            Self::collect_java_recipients_by_version(java_recipients.into_iter());
+
+        for (version, recipients) in recipients_by_version {
+            if version < CURRENT_MC_VERSION {
+                continue;
+            }
+            let mut buf = Vec::new();
+            for meta in [
+                Metadata::new(
+                    pumpkin_data::tracked_data::player::PLAYER_MODE_CUSTOMISATION,
+                    skin_parts,
+                ),
+                Metadata::new(
+                    pumpkin_data::tracked_data::player::PLAYER_MODE_CUSTOMIZATION_ID,
+                    skin_parts,
+                ),
+            ] {
+                let _ = meta.write(&mut buf, &version);
+            }
+            buf.put_u8(255);
+            let packet = CSetEntityMetadata::new(entity_id.into(), buf.into());
+            if let Ok(packet_data) = JavaClient::serialize_packet_for_version(&packet, version) {
+                for recipient in recipients {
+                    recipient.try_enqueue_packet(packet_data.clone());
+                }
+            }
+        }
+
+        Self::broadcast_bedrock_grouped(be_packet, bedrock_recipients.into_iter());
     }
 
     pub async fn broadcast_packet_except_editioned<J: ClientPacket, B: BClientPacket>(
@@ -943,17 +1175,14 @@ impl World {
             }
             match p.client.as_ref() {
                 ClientPlatform::Java(_) => java_recipients.push(p),
-                ClientPlatform::Bedrock(be_client) => bedrock_recipients.push(be_client.clone()),
+                ClientPlatform::Bedrock(be_client) => bedrock_recipients.push(be_client),
             }
         }
 
         let recipients_by_version =
             Self::collect_java_recipients_by_version(java_recipients.into_iter());
         Self::broadcast_java_grouped(je_packet, recipients_by_version);
-
-        for be_client in bedrock_recipients {
-            be_client.enqueue_packet(be_packet).await;
-        }
+        Self::broadcast_bedrock_grouped_async(be_packet, bedrock_recipients.into_iter()).await;
     }
 
     /// Broadcasts a packet to all connected players within the world, excluding the specified players.
@@ -1038,6 +1267,36 @@ impl World {
         pitch: f32,
     ) {
         self.play_sound_raw(sound as u16, category, position, volume, pitch);
+    }
+
+    /// Plays a Bedrock level sound for players close enough to hear it.
+    pub fn play_bedrock_level_sound(
+        &self,
+        sound_id: &str,
+        position: &Vector3<f64>,
+        extra_data: i32,
+    ) {
+        let packet = CLevelSoundEvent {
+            sound_id: sound_id.to_string(),
+            position: Vector3::new(position.x as f32, position.y as f32, position.z as f32),
+            extra_data: VarInt(extra_data),
+            entity_type: String::new(),
+            is_baby_mob: false,
+            is_global: false,
+            actor_unique_id: 0,
+            fire_at_position: None,
+        };
+        let chunk_pos = BlockPos::floored_v(*position).chunk_position();
+
+        if let Ok(data) = pumpkin_protocol::bedrock::packet_encoder::serialize_packet(&packet) {
+            for player in self.players.load().iter() {
+                if is_within_view_distance(chunk_pos, player.get_entity().chunk_pos.load(), 1)
+                    && let ClientPlatform::Bedrock(client) = player.client.as_ref()
+                {
+                    client.try_enqueue_packet(data.clone());
+                }
+            }
+        }
     }
 
     pub fn play_sound_expect(
@@ -1155,7 +1414,11 @@ impl World {
                     let entity = player.get_entity();
                     let pos = entity.pos.load();
                     let bb = entity.bounding_box.load().expand(1.0, 0.5, 1.0);
-                    (player.clone(), pos, bb)
+                    let chunk_pos = Vector2::new(
+                        get_section_cord(pos.x.floor() as i32),
+                        get_section_cord(pos.z.floor() as i32),
+                    );
+                    (player.clone(), pos, bb, chunk_pos)
                 })
                 .collect::<Vec<_>>(),
         );
@@ -1183,6 +1446,7 @@ impl World {
         let entity_count = entities_to_tick.len();
         let server_for_entities = server.clone();
         let active_chunks = self.active_chunks.load_full();
+        let level_for_entities = self.level.clone();
 
         let entity_future = async move {
             let t = tokio::time::Instant::now();
@@ -1196,6 +1460,7 @@ impl World {
                 let s_clone = server_for_entities.clone();
                 let p_cache = players_cache.clone();
                 let active_chunks = active_chunks.clone();
+                let level_clone = level_for_entities.clone();
 
                 tasks.spawn(async move {
                     e_clone.check_despawn().await;
@@ -1215,6 +1480,14 @@ impl World {
                         return;
                     }
 
+                    // A chunk stays active while it is still being generated. Mobs spawned by
+                    // the generator are added to the world before their chunk is published, and
+                    // every block read in a missing chunk reports air, so ticking them here
+                    // would let them fall through the terrain that is about to appear.
+                    if !level_clone.is_chunk_loaded(&entity_chunk) {
+                        return;
+                    }
+
                     e_clone.get_entity().age.fetch_add(1, Relaxed);
                     e_clone.tick(&e_clone, &s_clone).await;
 
@@ -1222,8 +1495,10 @@ impl World {
                     let entity_pos = entity_inner.pos.load();
                     let entity_bb = entity_inner.bounding_box.load();
 
-                    for (player, player_pos, player_bb) in p_cache.iter() {
-                        if (player_pos.x - entity_pos.x).abs() < 5.0
+                    for (player, player_pos, player_bb, player_chunk) in p_cache.iter() {
+                        if (player_chunk.x - entity_chunk.x).abs() <= 1
+                            && (player_chunk.y - entity_chunk.y).abs() <= 1
+                            && (player_pos.x - entity_pos.x).abs() < 5.0
                             && (player_pos.y - entity_pos.y).abs() < 5.0
                             && (player_pos.z - entity_pos.z).abs() < 5.0
                             && player_bb.intersects(&entity_bb)
@@ -1255,17 +1530,19 @@ impl World {
         let block_entity_future = async move {
             let t = tokio::time::Instant::now();
             let mut tasks = tokio::task::JoinSet::new();
-            for be in block_entities {
-                let be_clone = be.clone();
+            for be_batch in block_entities.chunks(16) {
+                let batch = be_batch.to_vec();
                 let w_clone = world_for_be.clone();
                 tasks.spawn(async move {
-                    be_clone.tick(&w_clone).await;
-                    if be_clone.is_dirty() {
-                        w_clone.update_block_entity(&be_clone);
-                        let position = be_clone.get_position();
-                        let changed_block = w_clone.get_block(&position);
-                        w_clone.update_comparators(&position, changed_block).await;
-                        be_clone.clear_dirty();
+                    for be in batch {
+                        be.tick(&w_clone).await;
+                        if be.is_dirty() {
+                            w_clone.update_block_entity(&be);
+                            let position = be.get_position();
+                            let changed_block = w_clone.get_block(&position);
+                            w_clone.update_comparators(&position, changed_block).await;
+                            be.clear_dirty();
+                        }
                     }
                 });
             }
@@ -1329,6 +1606,7 @@ impl World {
         }
     }
 
+    #[expect(clippy::too_many_lines)]
     pub async fn flush_block_updates(&self) {
         let mut block_state_updates_by_chunk_section: HashMap<
             Vector3<i32>,
@@ -1363,6 +1641,12 @@ impl World {
                         be_block_id as u32,
                     ),
                 );
+                if let Some(data) = self.bedrock_block_entity_data(block_state_id, block_pos) {
+                    self.broadcast_to_chunk_bedrock(
+                        chunk_pos,
+                        &CBlockActorData::new(block_pos, data),
+                    );
+                }
             } else {
                 let players = self.players.load();
                 let mut java_recipients = Vec::new();
@@ -1373,20 +1657,44 @@ impl World {
                     is_within_view_distance(chunk_pos, center, view_distance)
                 });
 
+                let mut bedrock_packets: Vec<Bytes> = Vec::new();
+                for (block_pos, block_state_id) in &updates {
+                    let be_block_id = BlockState::to_be_network_id(*block_state_id);
+                    let update_packet = pumpkin_protocol::bedrock::client::CUpdateBlock::new(
+                        *block_pos,
+                        be_block_id as u32,
+                    );
+                    if let Ok(data) =
+                        pumpkin_protocol::bedrock::packet_encoder::serialize_packet(&update_packet)
+                    {
+                        bedrock_packets.push(data);
+                    }
+                    if let Some(data) = self.bedrock_block_entity_data(*block_state_id, *block_pos)
+                    {
+                        let actor_packet = CBlockActorData::new(*block_pos, data);
+                        if let Ok(data) =
+                            pumpkin_protocol::bedrock::packet_encoder::serialize_packet(
+                                &actor_packet,
+                            )
+                        {
+                            bedrock_packets.push(data);
+                        }
+                    }
+                }
+
+                let mut bedrock_recipients = Vec::new();
                 for p in recipients {
                     match p.client.as_ref() {
                         ClientPlatform::Java(_) => java_recipients.push(p),
                         ClientPlatform::Bedrock(be_client) => {
-                            for (block_pos, block_state_id) in &updates {
-                                let be_block_id = BlockState::to_be_network_id(*block_state_id);
-                                be_client.try_enqueue_packet(
-                                    &pumpkin_protocol::bedrock::client::CUpdateBlock::new(
-                                        *block_pos,
-                                        be_block_id as u32,
-                                    ),
-                                );
-                            }
+                            bedrock_recipients.push(be_client);
                         }
+                    }
+                }
+
+                for be_client in bedrock_recipients {
+                    for packet_data in &bedrock_packets {
+                        be_client.try_enqueue_packet(packet_data.clone());
                     }
                 }
 
@@ -1396,6 +1704,37 @@ impl World {
                     &CMultiBlockUpdate::new(&updates),
                     recipients_by_version,
                 );
+            }
+
+            let mut bedrock_water_packets: Vec<Bytes> = Vec::new();
+            for (block_pos, block_state_id) in &updates {
+                let water_state = bedrock_water_state(*block_state_id);
+                let packet = pumpkin_protocol::bedrock::client::CUpdateBlock::with_layer(
+                    *block_pos,
+                    u32::from(BlockState::to_be_network_id(water_state)),
+                    1,
+                );
+                if let Ok(data) =
+                    pumpkin_protocol::bedrock::packet_encoder::serialize_packet(&packet)
+                {
+                    bedrock_water_packets.push(data);
+                }
+            }
+
+            if !bedrock_water_packets.is_empty() {
+                let players = self.players.load();
+                let recipients = players.iter().filter(|player| {
+                    let center = player.get_entity().chunk_pos.load();
+                    let view_distance = get_view_distance(player).get() as i32;
+                    is_within_view_distance(chunk_pos, center, view_distance)
+                });
+                for player in recipients {
+                    if let ClientPlatform::Bedrock(client) = player.client.as_ref() {
+                        for packet_data in &bedrock_water_packets {
+                            client.try_enqueue_packet(packet_data.clone());
+                        }
+                    }
+                }
             }
         }
 
@@ -1648,15 +1987,18 @@ impl World {
 
             spawning_chunks.shuffle(&mut rng());
 
-            for (pos, chunk) in spawning_chunks {
+            for chunk_batch in spawning_chunks.chunks(8) {
+                let batch = chunk_batch.to_vec();
                 let world = self.clone();
                 let s_list = spawn_list.clone();
                 let s_state = spawn_state.clone();
 
                 chunk_tasks.spawn(async move {
-                    world
-                        .tick_spawning_chunk(pos, &chunk, &s_list, &s_state)
-                        .await;
+                    for (pos, chunk) in batch {
+                        world
+                            .tick_spawning_chunk(pos, &chunk, &s_list, &s_state)
+                            .await;
+                    }
                 });
             }
         }
@@ -1991,7 +2333,7 @@ impl World {
         }
 
         let mut inside = false;
-        'shapes: for shape in state.get_block_outline_shapes() {
+        'shapes: for shape in state.get_block_outline_shapes_at(&pos) {
             let outline_shape = shape.at_pos(pos);
 
             if outline_shape.intersects(bounding_box) {
@@ -2023,7 +2365,7 @@ impl World {
         }
 
         let mut shapes = state
-            .get_block_collision_shapes()
+            .get_block_collision_shapes_at(&pos)
             .map(|shape| shape.at_pos(pos));
 
         if use_collision_shape {
@@ -2077,7 +2419,7 @@ impl World {
                     }
                 }
             } else {
-                for shape in state.get_block_collision_shapes() {
+                for shape in state.get_block_collision_shapes_at(&pos) {
                     let shape = shape.at_pos(pos);
                     if shape.intersects(&bounding_box) {
                         collided = true;
@@ -2115,7 +2457,7 @@ impl World {
     pub fn get_dismount_height(&self, pos: &BlockPos) -> f64 {
         let state = self.get_block_state(pos);
         let max_y = state
-            .get_block_collision_shapes()
+            .get_block_collision_shapes_at(pos)
             .map(|s| s.max.y)
             .fold(f64::NEG_INFINITY, f64::max);
         if max_y != f64::NEG_INFINITY {
@@ -2125,7 +2467,7 @@ impl World {
         let below = BlockPos(Vector3::new(pos.0.x, pos.0.y - 1, pos.0.z));
         let below_state = self.get_block_state(&below);
         let below_max_y = below_state
-            .get_block_collision_shapes()
+            .get_block_collision_shapes_at(&below)
             .map(|s| s.max.y)
             .fold(f64::NEG_INFINITY, f64::max);
         if below_max_y >= 1.0 {
@@ -2360,7 +2702,6 @@ impl World {
         let level_info = server.level_info.load();
         let weather = self.weather.lock().await;
         let runtime_id = player.entity_id() as u64;
-
         let (position, yaw, pitch) = if player.has_played_before.load(Ordering::Relaxed) {
             let position = player.position();
             let yaw = player.get_entity().yaw.load(); //info.spawn_angle;
@@ -2380,6 +2721,12 @@ impl World {
             );
             (position, level_info.spawn_yaw, level_info.spawn_pitch)
         };
+
+        // Keep the server-side transform aligned with the StartGame position. In
+        // particular, this ensures an early disconnect persists the real spawn.
+        player.living_entity.entity.set_pos(position);
+        player.living_entity.entity.set_rotation(yaw, pitch);
+        player.living_entity.entity.last_pos.store(position);
 
         // Todo make the data less spread
         let level_settings = LevelSettings {
@@ -2460,64 +2807,75 @@ impl World {
             return;
         };
 
-        client
-            .send_game_packet(&CStartGame {
-                entity_id: VarLong(runtime_id as _),
-                runtime_entity_id: VarULong(runtime_id),
-                player_gamemode: player.gamemode.load(),
-                position: Vector3::new(position.x as f32, position.y as f32, position.z as f32),
-                pitch,
-                yaw,
-                level_settings,
-                level_id: String::new(),
-                level_name: "Pumpkin world".to_string(),
-                premium_world_template_id: String::new(),
-                is_trial: false,
-                rewind_history_size: VarInt(0),
-                server_authoritative_block_breaking: true,
-                current_level_time: self.level_time.lock().await.world_age as _,
-                enchantment_seed: VarInt(0),
-                block_properties_size: VarUInt(0),
-                // TODO Make this unique
-                multiplayer_correlation_id: Uuid::default().to_string(),
-                enable_itemstack_net_manager: true,
-                server_version: "Pumpkin Rust Server".to_string(),
-                compound_id: 10,
-                compound_len: VarUInt(0),
-                compound_end: 0,
-                block_registry_checksum: 0,
-                world_template_id: Uuid::nil(),
-                enable_clientside_generation: false,
-                blocknetwork_ids_are_hashed: false,
-                server_auth_sounds: true,
-                server_join_information: None,
-                telemetry: ServerTelemetryData {
-                    server_id: String::new(),
-                    scenario_id: String::new(),
-                    world_id: String::new(),
-                    owner_id: String::new(),
-                },
-            })
-            .await;
+        let start_game = CStartGame {
+            entity_id: VarLong(runtime_id as _),
+            runtime_entity_id: VarULong(runtime_id),
+            player_gamemode: player.gamemode.load(),
+            // Bedrock represents the local player at eye height; Pumpkin stores feet position.
+            position: Vector3::new(
+                position.x as f32,
+                position.y as f32 + player.get_entity().entity_type.eye_height,
+                position.z as f32,
+            ),
+            pitch,
+            yaw,
+            level_settings,
+            level_id: String::new(),
+            level_name: "Pumpkin world".to_string(),
+            premium_world_template_id: String::new(),
+            is_trial: false,
+            rewind_history_size: VarInt(0),
+            server_authoritative_block_breaking: true,
+            current_level_time: self.level_time.lock().await.world_age as _,
+            enchantment_seed: VarInt(0),
+            block_properties_size: VarUInt(0),
+            // TODO Make this unique
+            multiplayer_correlation_id: Uuid::default().to_string(),
+            enable_itemstack_net_manager: true,
+            server_version: "Pumpkin Rust Server".to_string(),
+            compound_id: 10,
+            compound_len: VarUInt(0),
+            compound_end: 0,
+            block_registry_checksum: 0,
+            world_template_id: Uuid::nil(),
+            enable_clientside_generation: false,
+            blocknetwork_ids_are_hashed: false,
+            server_auth_sounds: true,
+            server_join_information: None,
+            telemetry: ServerTelemetryData {
+                server_id: String::new(),
+                scenario_id: String::new(),
+                world_id: String::new(),
+                owner_id: String::new(),
+            },
+        };
+        if let Ok(data) = client.serialize_packet(&start_game) {
+            client.send_game_packet(data).await;
+        }
 
-        client
-            .send_game_packet(&CItemRegistry {
-                items: BedrockItem::ALL_BEDROCK_ITEMS
-                    .iter()
-                    .map(|b| ItemDefinition {
-                        name: b.registry_key.into(),
-                        id: b.id,
-                        component_based: b.component_based,
-                        item_version: VarInt::from(match b.version {
-                            BedrockItemVersion::Legacy => 0,
-                            BedrockItemVersion::DataDriven => 1,
-                            BedrockItemVersion::None => 2,
-                        }),
-                        component_data: b.definition_components.into(),
-                    })
-                    .collect::<Vec<_>>(),
-            })
-            .await;
+        if let Ok(data) = client.serialize_packet(&CBiomeDefinitionList) {
+            client.send_game_packet(data).await;
+        }
+
+        let item_registry = CItemRegistry {
+            items: BedrockItem::ALL_BEDROCK_ITEMS
+                .iter()
+                .map(|b| ItemDefinition {
+                    name: b.registry_key.into(),
+                    id: b.id,
+                    component_based: b.component_based,
+                    item_version: VarInt::from(match b.version {
+                        BedrockItemVersion::Legacy => 0,
+                        BedrockItemVersion::DataDriven => 1,
+                        BedrockItemVersion::None => 2,
+                    }),
+                    component_data: b.definition_components.into(),
+                })
+                .collect::<Vec<_>>(),
+        };
+        if let Ok(data) = client.serialize_packet(&item_registry) {
+            client.send_game_packet(data).await;
+        }
 
         let (groups, entries) = CREATIVE_CONTENT.get_or_init(|| {
             let groups = pumpkin_data::bedrock_creative::CREATIVE_GROUPS
@@ -2575,10 +2933,10 @@ impl World {
 
             (groups, entries)
         });
-
-        client
-            .send_game_packet(&CCreativeContent { groups, entries })
-            .await;
+        let creative_content = CCreativeContent { groups, entries };
+        if let Ok(data) = client.serialize_packet(&creative_content) {
+            client.send_game_packet(data).await;
+        }
 
         let bedrock_recipes = BEDROCK_CRAFTING_DATA.get_or_init(|| {
             use pumpkin_data::item::{Item, JavaToBedrockItemMapping};
@@ -2699,7 +3057,7 @@ impl World {
                                 height: VarInt(height),
                                 input,
                                 output: vec![output_descriptor],
-                                uuid: [0; 16],
+                                uuid: Uuid::nil(),
                                 block: "crafting_table".to_string(),
                                 priority: VarInt(1),
                                 assume_symmetry: true,
@@ -2737,7 +3095,7 @@ impl World {
                                 recipe_id: format!("pumpkin:recipe_{network_id_counter}"),
                                 input,
                                 output: vec![output_descriptor],
-                                uuid: [0; 16],
+                                uuid: Uuid::nil(),
                                 block: "crafting_table".to_string(),
                                 priority: VarInt(1),
                                 unlock_requirement: RecipeUnlockRequirement { context: 1 },
@@ -2752,12 +3110,13 @@ impl World {
             mapped_recipes
         });
 
-        client
-            .send_game_packet(&pumpkin_protocol::bedrock::client::CCraftingData {
-                recipes: bedrock_recipes.clone(),
-                clean_recipes: false,
-            })
-            .await;
+        let crafting_data = pumpkin_protocol::bedrock::client::CCraftingData {
+            recipes: bedrock_recipes.clone(),
+            clean_recipes: false,
+        };
+        if let Ok(data) = client.serialize_packet(&crafting_data) {
+            client.send_game_packet(data).await;
+        }
 
         player
             .on_screen_handler_opened(player.player_screen_handler.clone())
@@ -2780,17 +3139,19 @@ impl World {
             },
             tick: VarULong(0),
         };
-        client.send_game_packet(&actor_data).await;
+        if let Ok(data) = client.serialize_packet(&actor_data) {
+            client.send_game_packet(data).await;
+        }
         player.send_abilities_update().await;
 
         {
-            let command_dispatcher = server.command_dispatcher.read().await;
+            let command_dispatcher = server.command_dispatcher.load();
             client_suggestions::send_bedrock_commands_packet(&player, server, &command_dispatcher)
                 .await;
         };
 
         client
-            .enqueue_packet_internal(&CUpdateAttributes {
+            .enqueue_client_packet(&CUpdateAttributes {
                 runtime_id: VarULong(runtime_id),
                 attributes: vec![
                     Attribute {
@@ -2836,7 +3197,7 @@ impl World {
                     Attribute {
                         min_value: 0.0,
                         max_value: 20.0,
-                        current_value: 20.0,
+                        current_value: player.living_entity.health.load(),
                         default_min_value: 0.0,
                         default_max_value: 20.0,
                         default_value: 20.0,
@@ -2846,7 +3207,7 @@ impl World {
                     Attribute {
                         min_value: 0.0,
                         max_value: 20.0,
-                        current_value: 20.0,
+                        current_value: player.hunger_manager.level.load().into(),
                         default_min_value: 0.0,
                         default_max_value: 20.0,
                         default_value: 20.0,
@@ -2963,6 +3324,8 @@ impl World {
             &bedrock_add_player,
         );
 
+        self.send_player_equipment(&player).await;
+
         // Broadcast metadata to Java players so they can correctly interact with the new player
         let skin_parts = player.config.load().skin_parts;
 
@@ -3002,7 +3365,7 @@ impl World {
                 }],
             };
             // Send PlayerList FIRST
-            client.send_game_packet(&ex_player_list).await;
+            client.send_packet(&ex_player_list).await;
 
             let ex_add_player = CAddPlayer {
                 uuid: ex_profile.id,
@@ -3041,8 +3404,22 @@ impl World {
                 build_platform: BuildPlatform::Unknown,
             };
 
-            client.send_game_packet(&ex_add_player).await;
+            client.send_packet(&ex_add_player).await;
+
+            let ex_held_item = existing_player.inventory().held_item().await;
+
+            let ex_be_mob_equipment = pumpkin_protocol::bedrock::client::CMobEquipment::new(
+                existing_player.entity_id() as u64,
+                NetworkItemStackDescriptor::from(&ex_held_item),
+                0,
+                0,
+                0,
+            );
+
+            client.send_packet(&ex_be_mob_equipment).await;
         }
+
+        player.has_played_before.store(true, Ordering::Relaxed);
 
         // 3. Trigger Join Event and Broadcast Join Message
         let msg_comp = TextComponent::translate_cross(
@@ -3089,7 +3466,7 @@ impl World {
         };
         // Send the login packet for our new player
         client
-            .send_packet_now(&CLogin::new(
+            .send_packet(&CLogin::new(
                 entity_id,
                 base_config.hardcore,
                 &dimensions,
@@ -3147,10 +3524,27 @@ impl World {
         // Difficulty of the world
         player.send_difficulty_update().await;
         {
-            let command_dispatcher = server.command_dispatcher.read().await;
+            let command_dispatcher = server.command_dispatcher.load();
 
             client_suggestions::send_c_commands_packet(player, server, &command_dispatcher).await;
         };
+
+        if client.version.load() < JavaMinecraftVersion::V_1_20_2 {
+            let mut tags = Vec::new();
+            let version = client.version.load();
+            for &key in pumpkin_data::tag::RegistryKey::NETWORK_KEYS {
+                if pumpkin_data::tag::get_registry_key_tags(version, key)
+                    .is_some_and(|map| !map.is_empty())
+                {
+                    tags.push(key);
+                }
+            }
+            client
+                .send_packet(&pumpkin_protocol::java::client::play::CUpdateTagsPlay::new(
+                    &tags,
+                ))
+                .await;
+        }
 
         let (position, yaw, pitch) = if player.has_played_before.load(Ordering::Relaxed) {
             let position = player.position();
@@ -3187,9 +3581,13 @@ impl World {
                 return;
             }
         }
-        client.send_packet_now(&CChunkBatchStart).await;
-        client.send_packet_now(&CChunkData(&chunk)).await;
-        client.send_packet_now(&CChunkBatchEnd::new(1u16)).await;
+        if client.version.load() >= JavaMinecraftVersion::V_1_20_2 {
+            client.send_packet(&CChunkBatchStart).await;
+        }
+        client.send_packet(&CChunkData(&chunk)).await;
+        if client.version.load() >= JavaMinecraftVersion::V_1_20_2 {
+            client.send_packet(&CChunkBatchEnd::new(1u16)).await;
+        }
 
         let velocity = player.living_entity.entity.velocity.load();
 
@@ -3334,7 +3732,7 @@ impl World {
 
             debug!("Sending player info to {}", player.gameprofile.name);
             client
-                .enqueue_packet(&CPlayerInfoUpdate::new(action_flags.bits(), &entries))
+                .enqueue_client_packet(&CPlayerInfoUpdate::new(action_flags.bits(), &entries))
                 .await;
 
             // Send tab_list_names for existing players with custom names
@@ -3346,7 +3744,7 @@ impl World {
                         actions: &actions,
                     }];
                     client
-                        .enqueue_packet(&CPlayerInfoUpdate::new(
+                        .enqueue_client_packet(&CPlayerInfoUpdate::new(
                             PlayerInfoFlags::UPDATE_DISPLAY_NAME.bits(),
                             &java_player,
                         ))
@@ -3554,21 +3952,19 @@ impl World {
                 )
                 .await;
 
-            {
+            if client.version.load() >= CURRENT_MC_VERSION {
                 let config = existing_player.config.load();
                 let mut buf = Vec::new();
                 {
                     let meta = Metadata::new(
-                        TrackedData::PLAYER_MODE_CUSTOMISATION,
-                        MetaDataType::BYTE,
+                        pumpkin_data::tracked_data::player::PLAYER_MODE_CUSTOMISATION,
                         config.skin_parts,
                     );
                     let _ = meta.write(&mut buf, &client.version.load());
                 };
                 {
                     let meta = Metadata::new(
-                        TrackedData::PLAYER_MODE_CUSTOMIZATION_ID,
-                        MetaDataType::BYTE,
+                        pumpkin_data::tracked_data::player::PLAYER_MODE_CUSTOMIZATION_ID,
                         config.skin_parts,
                     );
                     let _ = meta.write(&mut buf, &client.version.load());
@@ -3577,20 +3973,17 @@ impl World {
                 // END
                 buf.put_u8(255);
                 client
-                    .enqueue_packet(&CSetEntityMetadata::new(
+                    .enqueue_client_packet(&CSetEntityMetadata::new(
                         existing_player.get_entity().entity_id.into(),
                         buf.into(),
                     ))
                     .await;
-            };
+            }
 
             {
-                let mut equipment_list = Vec::new();
-
-                equipment_list.push((
-                    EquipmentSlot::MAIN_HAND.discriminant(),
-                    existing_player.inventory.held_item().await,
-                ));
+                let held_item = existing_player.inventory.held_item().await;
+                let mut equipment_list =
+                    vec![(EquipmentSlot::MAIN_HAND.discriminant(), held_item.clone())];
 
                 let equipment_guard = existing_player.inventory.entity_equipment.lock().await;
                 for (slot, item_stack) in &equipment_guard.equipment {
@@ -3602,11 +3995,19 @@ impl World {
                     .map(|(slot, stack)| (*slot, ItemStackSerializer::from(stack.clone())))
                     .collect();
 
-                client
-                    .enqueue_packet(&CSetEquipment::new(
-                        existing_player.entity_id().into(),
-                        equipment,
-                    ))
+                let je_packet = CSetEquipment::new(existing_player.entity_id().into(), equipment);
+
+                let be_mob_equipment = pumpkin_protocol::bedrock::client::CMobEquipment::new(
+                    existing_player.entity_id() as u64,
+                    NetworkItemStackDescriptor::from(&held_item),
+                    0,
+                    0,
+                    0,
+                );
+
+                player
+                    .client
+                    .enqueue_packet_editioned(&je_packet, &be_mob_equipment)
                     .await;
             }
         }
@@ -3621,16 +4022,21 @@ impl World {
             ))
             .await;
 
-        // Start waiting for level chunks. Sets the "Loading Terrain" screen
-        debug!("Sending waiting chunks to {}", player.gameprofile.name);
-        client
-            .send_packet_now(&CGameEvent::new(GameEvent::StartWaitingChunks, 0.0))
-            .await;
+        if client.version.load() >= JavaMinecraftVersion::V_1_20_2 {
+            // Start waiting for level chunks. Sets the "Loading Terrain" screen (Added in 1.20.2)
+            debug!("Sending waiting chunks to {}", player.gameprofile.name);
+            client
+                .send_packet(&CGameEvent::new(GameEvent::StartWaitingChunks, 0.0))
+                .await;
+        }
 
         self.worldborder.lock().await.init_client(client).await;
 
         // Sends initial time
         player.send_time(self).await;
+
+        // Sends initial scoreboard state
+        player.send_scoreboard().await;
 
         let (spawn_block_pos, yaw, pitch) = {
             let level_info_lock = self.level_info.load();
@@ -3646,7 +4052,7 @@ impl World {
         };
 
         client
-            .send_packet_now(&CPlayerSpawnPosition::new(
+            .send_packet(&CPlayerSpawnPosition::new(
                 spawn_block_pos,
                 yaw,
                 pitch,
@@ -3658,7 +4064,7 @@ impl World {
         let weather = self.weather.lock().await;
         if weather.raining {
             client
-                .enqueue_packet(&CGameEvent::new(GameEvent::BeginRaining, 0.0))
+                .enqueue_client_packet(&CGameEvent::new(GameEvent::BeginRaining, 0.0))
                 .await;
 
             // Calculate rain and thunder levels directly from public fields
@@ -3667,10 +4073,10 @@ impl World {
             drop(weather);
 
             client
-                .enqueue_packet(&CGameEvent::new(GameEvent::RainLevelChange, rain_level))
+                .enqueue_client_packet(&CGameEvent::new(GameEvent::RainLevelChange, rain_level))
                 .await;
             client
-                .enqueue_packet(&CGameEvent::new(
+                .enqueue_client_packet(&CGameEvent::new(
                     GameEvent::ThunderLevelChange,
                     thunder_level,
                 ))
@@ -3694,14 +4100,17 @@ impl World {
 
         if let crate::net::ClientPlatform::Java(java_client) = player.client.as_ref()
             && server.advanced_config.recipe.send_recipes
+            && java_client.version.load() >= JavaMinecraftVersion::V_1_21_2
         {
-            java_client
-                .send_packet_now(&CRecipeBookSettings::default_closed())
-                .await;
+            let settings_packet = CRecipeBookSettings::default_closed();
+            if let Ok(data) = java_client.serialize_packet(&settings_packet) {
+                java_client.send_packet_now(data).await;
+            }
             let dynamic_recipes = server.recipe_manager.get_dynamic_recipes().await;
-            java_client
-                .send_packet_now(&CRecipeBookAdd::new(true, &dynamic_recipes))
-                .await;
+            let add_packet = CRecipeBookAdd::new(true, &dynamic_recipes);
+            if let Ok(data) = java_client.serialize_packet(&add_packet) {
+                java_client.send_packet_now(data).await;
+            }
         }
 
         let msg_comp = TextComponent::translate_cross(
@@ -3729,12 +4138,8 @@ impl World {
     }
 
     async fn send_player_equipment(&self, from: &Player) {
-        let mut equipment_list = Vec::new();
-
-        equipment_list.push((
-            EquipmentSlot::MAIN_HAND.discriminant(),
-            from.inventory.held_item().await,
-        ));
+        let held_item = from.inventory.held_item().await;
+        let mut equipment_list = vec![(EquipmentSlot::MAIN_HAND.discriminant(), held_item.clone())];
 
         let equipment_guard = from.inventory.entity_equipment.lock().await;
         for (slot, item_stack) in &equipment_guard.equipment {
@@ -3745,12 +4150,24 @@ impl World {
             .iter()
             .map(|(slot, stack)| (*slot, ItemStackSerializer::from(stack.clone())))
             .collect();
+        let je_packet = CSetEquipment::new(from.entity_id().into(), equipment);
+
+        let be_mob_equipment = pumpkin_protocol::bedrock::client::CMobEquipment::new(
+            from.entity_id() as u64,
+            NetworkItemStackDescriptor::from(&held_item),
+            0,
+            0,
+            0,
+        );
+
         let chunk_pos = from.get_entity().chunk_pos.load();
-        self.broadcast_to_chunk_except(
+        self.broadcast_to_chunk_except_editioned(
             chunk_pos,
             &[from.get_entity().entity_uuid],
-            &CSetEquipment::new(from.entity_id().into(), equipment),
-        );
+            &je_packet,
+            &be_mob_equipment,
+        )
+        .await;
     }
 
     pub async fn send_world_info(
@@ -3766,10 +4183,13 @@ impl World {
 
         // TODO: World spawn (compass stuff)
 
-        player
-            .client
-            .enqueue_packet(&CGameEvent::new(GameEvent::StartWaitingChunks, 0.0))
-            .await;
+        if let ClientPlatform::Java(client) = player.client.as_ref()
+            && client.version.load() >= JavaMinecraftVersion::V_1_20_2
+        {
+            player
+                .send_client_packet(&CGameEvent::new(GameEvent::StartWaitingChunks, 0.0))
+                .await;
+        }
 
         let entity = &player.get_entity();
 
@@ -3797,17 +4217,84 @@ impl World {
         player.set_health(20.0).await;
     }
 
-    pub async fn explode(self: &Arc<Self>, position: Vector3<f64>, power: f32) {
-        self.explode_with_blocks(position, power, true, false).await;
-    }
-
-    pub async fn explode_without_blocks(self: &Arc<Self>, position: Vector3<f64>, power: f32) {
-        self.explode_with_blocks(position, power, false, false)
+    pub async fn explode(
+        self: &Arc<Self>,
+        position: Vector3<f64>,
+        power: f32,
+        interaction: ExplosionInteraction,
+    ) {
+        self.explode_with_calculator(position, power, interaction, None)
             .await;
     }
 
-    pub async fn explode_with_fire(self: &Arc<Self>, position: Vector3<f64>, power: f32) {
-        self.explode_with_blocks(position, power, true, true).await;
+    pub async fn explode_with_calculator(
+        self: &Arc<Self>,
+        position: Vector3<f64>,
+        power: f32,
+        interaction: ExplosionInteraction,
+        damage_calculator: Option<Arc<dyn ExplosionDamageCalculator>>,
+    ) {
+        let block_interaction = self.get_block_interaction(interaction);
+        let mut explosion = Explosion::new(power, position, block_interaction);
+        if let Some(calc) = damage_calculator {
+            explosion = explosion.with_damage_calculator(calc);
+        }
+        self.run_explosion(explosion, position, power).await;
+    }
+
+    pub async fn explode_tnt_minecart(self: &Arc<Self>, position: Vector3<f64>, power: f32) {
+        let block_interaction = self.get_block_interaction(ExplosionInteraction::Tnt);
+        let explosion = Explosion::new(power, position, block_interaction).preserving_rails();
+        self.run_explosion(explosion, position, power).await;
+    }
+
+    #[must_use]
+    pub fn get_block_interaction(&self, interaction: ExplosionInteraction) -> BlockInteraction {
+        let game_rules = &self.level_info.load().game_rules;
+        match interaction {
+            ExplosionInteraction::None => BlockInteraction::Keep,
+            ExplosionInteraction::Block => {
+                Self::get_destroy_type(game_rules.block_explosion_drop_decay)
+            }
+            ExplosionInteraction::Mob => {
+                if game_rules.mob_griefing {
+                    Self::get_destroy_type(game_rules.mob_explosion_drop_decay)
+                } else {
+                    BlockInteraction::Keep
+                }
+            }
+            ExplosionInteraction::Tnt => {
+                Self::get_destroy_type(game_rules.tnt_explosion_drop_decay)
+            }
+            ExplosionInteraction::Trigger => BlockInteraction::TriggerBlock,
+        }
+    }
+
+    #[must_use]
+    pub const fn get_destroy_type(drop_decay: bool) -> BlockInteraction {
+        if drop_decay {
+            BlockInteraction::DestroyWithDecay
+        } else {
+            BlockInteraction::Destroy
+        }
+    }
+
+    /// `Level.explode(..., fire = true)`: the blast that leaves fires behind (ghast and blaze
+    /// fireballs, a respawn anchor detonating outside the Nether). Vanilla passes the same
+    /// game-rule-derived flag for fire as for block destruction, so a blast that was demoted to
+    /// `Keep` (mob griefing off) also places no fire.
+    pub async fn explode_with_fire(
+        self: &Arc<Self>,
+        position: Vector3<f64>,
+        power: f32,
+        interaction: ExplosionInteraction,
+    ) {
+        let block_interaction = self.get_block_interaction(interaction);
+        let mut explosion = Explosion::new(power, position, block_interaction);
+        if block_interaction != BlockInteraction::Keep {
+            explosion = explosion.creating_fire();
+        }
+        self.run_explosion(explosion, position, power).await;
     }
 
     /// Damage-less, block-preserving knockback used by enchantment effect components
@@ -3839,20 +4326,22 @@ impl World {
         .await;
     }
 
-    async fn explode_with_blocks(
+    async fn run_explosion(
         self: &Arc<Self>,
+        explosion: Explosion,
         position: Vector3<f64>,
         power: f32,
-        destroys_blocks: bool,
-        creates_fire: bool,
     ) {
-        let explosion = if creates_fire {
-            Explosion::new_with_fire(power, position)
-        } else if destroys_blocks {
-            Explosion::new(power, position)
-        } else {
-            Explosion::new_without_blocks(power, position)
-        };
+        let mut event = crate::plugin::api::events::entity::entity_explode::EntityExplodeEvent::new(
+            0, position, power,
+        );
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut event).await;
+        }
+        if event.cancelled {
+            return;
+        }
+
         let block_count = explosion.explode(self).await;
         let particle = if power < 2.0 {
             Particle::Explosion
@@ -3890,8 +4379,7 @@ impl World {
             }
 
             player
-                .client
-                .enqueue_packet(&CExplosion::new(
+                .send_client_packet(&CExplosion::new(
                     position,
                     power,
                     block_count,
@@ -3940,8 +4428,7 @@ impl World {
             } else {
                 // No valid respawn point - send notification and use world spawn
                 player
-                    .client
-                    .send_packet_now(&CGameEvent::new(GameEvent::NoRespawnBlockAvailable, 0.0))
+                    .send_client_packet(&CGameEvent::new(GameEvent::NoRespawnBlockAvailable, 0.0))
                     .await;
 
                 let spawn_pos = spawn_finder::find_safe_world_spawn(
@@ -3952,6 +4439,18 @@ impl World {
 
                 (spawn_pos, spawn_yaw, spawn_pitch, self.dimension.clone())
             };
+
+        let mut spawn_loc_event = crate::plugin::api::events::player::player_spawn_location::PlayerSpawnLocationEvent::new(
+            player.clone(),
+            position,
+        );
+        if let Some(server) = self.server.upgrade() {
+            server
+                .plugin_manager
+                .fire(&server, &mut spawn_loc_event)
+                .await;
+        }
+        let position = spawn_loc_event.spawn_pos;
 
         // Candidate destination world for a cross-dimension respawn.
         let candidate_world = if respawn_dimension == self.dimension {
@@ -4071,8 +4570,7 @@ impl World {
 
         // Send respawn packet with target dimension (using send_packet_now to ensure proper order)
         player
-            .client
-            .send_packet_now(&CRespawn::new(
+            .send_client_packet(&CRespawn::new(
                 PlayerSpawnData::new(
                     target_world.dimension.clone(),
                     biome::hash_seed(target_world.level.seed.0),
@@ -4102,7 +4600,6 @@ impl World {
             _ => 0,
         };
         player
-            .client
             .send_packet_now_editioned(
                 &CPlayerSpawnPosition::new(
                     spawn_block_pos,
@@ -4150,11 +4647,13 @@ impl World {
                 .level
                 .get_or_fetch_chunk(center_chunk, std::clone::Clone::clone)
                 .await;
-            java_client.send_packet_now(&CChunkBatchStart).await;
-            java_client.send_packet_now(&CChunkData(&chunk)).await;
-            java_client
-                .send_packet_now(&CChunkBatchEnd::new(1u16))
-                .await;
+            if java_client.version.load() >= JavaMinecraftVersion::V_1_20_2 {
+                java_client.send_packet(&CChunkBatchStart).await;
+            }
+            java_client.send_packet(&CChunkData(&chunk)).await;
+            if java_client.version.load() >= JavaMinecraftVersion::V_1_20_2 {
+                java_client.send_packet(&CChunkBatchEnd::new(1u16)).await;
+            }
         }
 
         // Send teleport packet after at least the center chunk was delivered
@@ -4295,15 +4794,13 @@ impl World {
                         // stale data.
                         base_entity.velocity.store(Vector3::default());
 
-                        player
-                            .client
-                            .enqueue_packet(&base_entity.create_spawn_packet())
-                            .await;
+                        player.client.enqueue_spawn_packet(&entity).await;
                         // Vanilla's ServerEntity follows the spawn packet with the
                         // entity's tracked data as it enters this player's range;
                         // without it the client keeps its defaults for every field.
                         // Only this player is targeted, never the other viewers.
                         base_entity.send_tracked_data_to(&player.client);
+                        player.try_restore_vehicle(&entity).await;
                         entities_to_add.push(entity);
                     }
 
@@ -4321,11 +4818,9 @@ impl World {
                     for entity in world.entities.load().iter() {
                         let base_entity = entity.get_entity();
                         if base_entity.chunk_pos.load() == position {
-                            player
-                                .client
-                                .enqueue_packet(&base_entity.create_spawn_packet())
-                                .await;
+                            player.client.enqueue_spawn_packet(entity).await;
                             base_entity.send_tracked_data_to(&player.client);
+                            player.try_restore_vehicle(entity).await;
                         }
                     }
                 }
@@ -4744,10 +5239,10 @@ impl World {
         self.players.rcu(|current_list| {
             let mut new_list = (**current_list).clone();
             // Find the player before we filter them out
-            if let Some(pos) = new_list
+            let pos = new_list
                 .iter()
-                .position(|p| p.gameprofile.id == player.gameprofile.id)
-            {
+                .position(|p| p.gameprofile.id == player.gameprofile.id);
+            if let Some(pos) = pos {
                 removed_player = Some(new_list.remove(pos));
             }
             new_list
@@ -4818,7 +5313,20 @@ impl World {
         });
     }
 
-    pub async fn spawn_entity(&self, entity: Arc<dyn EntityBase>) {
+    pub async fn spawn_entity(self: &Arc<Self>, entity: Arc<dyn EntityBase>) {
+        let mut event = crate::plugin::api::events::entity::entity_spawn::EntitySpawnEvent::new(
+            entity.get_entity().entity_id,
+            entity.get_entity().entity_type.id.to_string(),
+            entity.get_entity().pos.load(),
+            self.clone(),
+        );
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut event).await;
+        }
+        if event.cancelled {
+            return;
+        }
+
         self.broadcast_entity_spawn(&entity);
         entity.init_data_tracker().await;
         if let Some(living) = entity.get_living_entity() {
@@ -4890,6 +5398,15 @@ impl World {
         let base_entity = entity.get_entity();
         self.unregister_game_event_listener_for_entity(base_entity.entity_uuid)
             .await;
+        if base_entity
+            .removal_reason
+            .swap(Some(RemovalReason::Discarded))
+            .is_some()
+        {
+            return;
+        }
+        base_entity.removed.store(true, Ordering::Release);
+
         self.spawn_state.load().remove_entity(self, entity);
         self.entities.rcu(|current_entities| {
             let mut new_entities = (**current_entities).clone();
@@ -4936,6 +5453,7 @@ impl World {
         }
 
         for chunk_pos in &chunks_set {
+            self.save_block_entities(chunk_pos).await;
             self.block_entities.remove(chunk_pos);
         }
     }
@@ -4982,7 +5500,7 @@ impl World {
             if let Some(player) = self.get_player_by_uuid(from.entity_uuid)
                 && let ClientPlatform::Bedrock(client) = player.client.as_ref()
             {
-                client.enqueue_packet(&be_packet).await;
+                client.enqueue_client_packet(&be_packet).await;
             }
 
             self.broadcast_to_chunk_except_editioned(
@@ -5034,6 +5552,11 @@ impl World {
 
         let old_block = Block::from_state_id(replaced_block_state_id);
         let new_block = Block::from_state_id(block_state_id);
+
+        self.villager_poi
+            .lock()
+            .await
+            .update_block(*position, new_block);
 
         let block_moved = flags.contains(BlockFlags::MOVED);
 
@@ -5569,7 +6092,7 @@ impl World {
                 match &cause {
                     Some(player) => {
                         if let ClientPlatform::Bedrock(client) = player.client.as_ref() {
-                            client.enqueue_packet(&be_particles_packet).await;
+                            client.enqueue_client_packet(&be_particles_packet).await;
                         }
                         self.broadcast_to_chunk_except_editioned(
                             chunk_pos,
@@ -5643,19 +6166,56 @@ impl World {
         };
 
         let entity = Entity::new(self.clone(), spawn_pos, &EntityType::ITEM);
+        let mut item_event = crate::plugin::api::events::entity::item_spawn::ItemSpawnEvent::new(
+            entity.entity_id,
+            spawn_pos,
+            stack.item.registry_key.to_string(),
+        );
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut item_event).await;
+        }
+        if item_event.cancelled {
+            return;
+        }
+
         let item_entity = Arc::new(ItemEntity::new(entity, stack));
         self.spawn_entity(item_entity).await;
     }
 
-    pub async fn strike_lightning(self: &Arc<Self>, pos: Vector3<f64>, _effect_only: bool) {
+    pub async fn strike_lightning(self: &Arc<Self>, pos: Vector3<f64>, effect_only: bool) {
         use pumpkin_data::entity::EntityType;
         use uuid::Uuid;
+
+        let server_ref = self.server.upgrade();
+        if let Some(server_ref) = server_ref {
+            let mut event =
+                crate::plugin::api::events::world::lightning_strike::LightningStrikeEvent::new(
+                    pos,
+                    effect_only,
+                );
+            server_ref
+                .plugin_manager
+                .fire(&server_ref, &mut event)
+                .await;
+            if event.cancelled {
+                return;
+            }
+        }
+
         let lightning = crate::entity::r#type::from_type(
             &EntityType::LIGHTNING_BOLT,
             pos,
             self,
             Uuid::new_v4(),
         );
+
+        if let Some(bolt) = lightning
+            .cast_any()
+            .downcast_ref::<crate::entity::lightning::LightningBoltEntity>()
+        {
+            bolt.set_visual_only(effect_only);
+        }
+
         self.spawn_entity(lightning).await;
     }
 
@@ -5925,6 +6485,18 @@ impl World {
             let neighbor_pos = block_pos.offset(direction.to_offset());
             let (neighbor_block, neighbor_fluid) = self.get_block_and_fluid(&neighbor_pos);
 
+            let mut event =
+                crate::plugin::api::events::block::block_physics::BlockPhysicsEvent::new(
+                    neighbor_pos,
+                    *block_pos,
+                );
+            if let Some(server) = self.server.upgrade() {
+                server.plugin_manager.fire(&server, &mut event).await;
+            }
+            if event.cancelled {
+                continue;
+            }
+
             if let Some(neighbor_pumpkin_block) =
                 self.block_registry.get_pumpkin_block(neighbor_block.id)
             {
@@ -5955,6 +6527,17 @@ impl World {
         source_block: &Block,
     ) {
         let neighbor_block = self.get_block(neighbor_block_pos);
+
+        let mut event = crate::plugin::api::events::block::block_physics::BlockPhysicsEvent::new(
+            *neighbor_block_pos,
+            *neighbor_block_pos,
+        );
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut event).await;
+        }
+        if event.cancelled {
+            return;
+        }
 
         if let Some(neighbor_pumpkin_block) =
             self.block_registry.get_pumpkin_block(neighbor_block.id)
@@ -6049,7 +6632,8 @@ impl World {
 
         if new_state_id != block_state_id {
             if is_air(new_state_id) {
-                self.break_block(block_pos, None, flags).await;
+                self.break_block(block_pos, None, flags | BlockFlags::NOTIFY_ALL)
+                    .await;
             } else {
                 self.set_block_state(block_pos, new_state_id, flags).await;
             }
@@ -6066,10 +6650,12 @@ impl World {
 
     pub fn get_block_entity(&self, block_pos: &BlockPos) -> Option<Arc<dyn BlockEntity>> {
         let chunk_pos = block_pos.chunk_position();
-        if let Some(chunk_block_entities) = self.block_entities.get(&chunk_pos)
-            && let Some(entity) = chunk_block_entities.get(block_pos)
+        if let Some(entity) = self
+            .block_entities
+            .get(&chunk_pos)
+            .and_then(|m| m.get(block_pos).cloned())
         {
-            return Some(entity.clone());
+            return Some(entity);
         }
 
         let nbt = self
@@ -6082,12 +6668,77 @@ impl World {
                     .remove(block_pos)
             })
             .flatten()?;
+        if let Some(custom_data) = nbt
+            .get_compound("PumpkinCustomData")
+            .or_else(|| nbt.get_compound("BukkitValues"))
+        {
+            self.custom_block_entity_data
+                .insert(*block_pos, custom_data.clone());
+        }
         let entity = block_entity_from_nbt(&nbt)?;
         self.block_entities
             .entry(chunk_pos)
             .or_default()
             .insert(*block_pos, entity.clone());
         Some(entity)
+    }
+
+    fn bedrock_block_entity_data(
+        &self,
+        state_id: BlockStateId,
+        position: BlockPos,
+    ) -> Option<NbtCompound> {
+        self.get_block_entity(&position)?
+            .bedrock_block_actor_data(state_id)
+    }
+
+    /// Builds Bedrock block actor tags that are not represented by Java block states alone.
+    pub fn bedrock_chunk_block_actors(&self, chunk: &ChunkData) -> Vec<NbtCompound> {
+        let chunk_pos = Vector2::new(chunk.x, chunk.z);
+        let live_entities: FxHashMap<_, _> = self
+            .block_entities
+            .get(&chunk_pos)
+            .map(|entities| {
+                entities
+                    .iter()
+                    .map(|(position, entity)| (*position, entity.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let pending = chunk
+            .pending_block_entities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        live_entities
+            .iter()
+            .filter_map(|(position, entity)| {
+                let relative = position.chunk_relative_position();
+                chunk
+                    .section
+                    .get_block_absolute_y(relative.x as usize, relative.y, relative.z as usize)
+                    .and_then(|state_id| {
+                        bedrock_chest_block_actor(state_id, *position)
+                            .or_else(|| entity.bedrock_block_actor_data(state_id))
+                    })
+            })
+            .chain(
+                pending
+                    .iter()
+                    .filter(|(position, _)| !live_entities.contains_key(position))
+                    .filter_map(|(position, nbt)| {
+                        let relative = position.chunk_relative_position();
+                        let state_id = chunk.section.get_block_absolute_y(
+                            relative.x as usize,
+                            relative.y,
+                            relative.z as usize,
+                        )?;
+                        bedrock_chest_block_actor(state_id, *position).or_else(|| {
+                            block_entity_from_nbt(nbt)?.bedrock_block_actor_data(state_id)
+                        })
+                    }),
+            )
+            .collect()
     }
 
     pub fn add_block_entity(&self, block_entity: Arc<dyn BlockEntity>) {
@@ -6149,6 +6800,7 @@ impl World {
                     chunk_block_entities.remove(block_pos).is_some()
                 });
         if removed {
+            self.custom_block_entity_data.remove(block_pos);
             // Drop the chunk's map once its last block entity is gone.
             self.block_entities
                 .remove_if(&chunk_pos, |_, entities| entities.is_empty());
@@ -6282,7 +6934,7 @@ impl World {
             return (true, None);
         }
 
-        let bounding_boxes = state.get_block_outline_shapes();
+        let bounding_boxes = state.get_block_outline_shapes_at(block_pos);
 
         for shape in bounding_boxes {
             let world_min = shape.min.add(&block_pos.0.to_f64());
@@ -6466,6 +7118,25 @@ impl World {
         Self::broadcast_java_grouped(packet, recipients_by_version);
     }
 
+    pub fn broadcast_to_chunk_bedrock<P: BClientPacket>(
+        &self,
+        chunk_pos: Vector2<i32>,
+        packet: &P,
+    ) {
+        let players = self.players.load();
+        let recipients = players.iter().filter_map(|player| {
+            let center = player.get_entity().chunk_pos.load();
+            let view_distance = get_view_distance(player).get() as i32;
+            if is_within_view_distance(chunk_pos, center, view_distance)
+                && let ClientPlatform::Bedrock(client) = player.client.as_ref()
+            {
+                return Some(client);
+            }
+            None
+        });
+        Self::broadcast_bedrock_grouped(packet, recipients);
+    }
+
     pub fn broadcast_to_chunk_editioned_sync<J: ClientPacket, B: BClientPacket>(
         &self,
         chunk_pos: Vector2<i32>,
@@ -6474,6 +7145,7 @@ impl World {
     ) {
         let players = self.players.load();
         let mut java_recipients = Vec::new();
+        let mut bedrock_recipients = Vec::new();
 
         let recipients = players.iter().filter(|p| {
             let center = p.get_entity().chunk_pos.load();
@@ -6484,13 +7156,14 @@ impl World {
         for p in recipients {
             match p.client.as_ref() {
                 ClientPlatform::Java(_) => java_recipients.push(p),
-                ClientPlatform::Bedrock(be_client) => be_client.try_enqueue_packet(be_packet),
+                ClientPlatform::Bedrock(be_client) => bedrock_recipients.push(be_client),
             }
         }
 
         let recipients_by_version =
             Self::collect_java_recipients_by_version(java_recipients.into_iter());
         Self::broadcast_java_grouped(je_packet, recipients_by_version);
+        Self::broadcast_bedrock_grouped(be_packet, bedrock_recipients.into_iter());
     }
 
     /// Broadcasts a packet to chunk watchers, excluding specific players.
@@ -6540,16 +7213,320 @@ impl World {
         for p in recipients {
             match p.client.as_ref() {
                 ClientPlatform::Java(_) => java_recipients.push(p),
-                ClientPlatform::Bedrock(be_client) => bedrock_recipients.push(be_client.clone()),
+                ClientPlatform::Bedrock(be_client) => bedrock_recipients.push(be_client),
             }
         }
 
         let je_recipients_by_version =
             Self::collect_java_recipients_by_version(java_recipients.into_iter());
         Self::broadcast_java_grouped(je_packet, je_recipients_by_version);
+        Self::broadcast_bedrock_grouped_async(be_packet, bedrock_recipients.into_iter()).await;
+    }
 
-        for recipient in bedrock_recipients {
-            recipient.enqueue_packet(be_packet).await;
+    pub async fn emit_game_event(&self, event_key: impl Into<String>, position: Vector3<f64>) {
+        let mut event = crate::plugin::api::events::world::generic_game::GenericGameEvent::new(
+            event_key.into(),
+            position,
+        );
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut event).await;
+        }
+    }
+
+    pub async fn unload(self: &Arc<Self>) {
+        let mut event =
+            crate::plugin::api::events::world::world_load::WorldUnloadEvent::new(self.clone());
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut event).await;
+        }
+    }
+
+    pub async fn save(&self) {
+        for entity in self.entities.load().iter() {
+            self.save_entity(entity).await;
+        }
+
+        let chunks: Vec<Vector2<i32>> = self
+            .block_entities
+            .iter()
+            .map(|chunk_block_entities| *chunk_block_entities.key())
+            .collect();
+        for chunk_pos in chunks {
+            self.save_block_entities(&chunk_pos).await;
+        }
+
+        if let Ok(mut portal_poi) = self.portal_poi.try_lock() {
+            let _ = portal_poi.save_all();
+        }
+
+        {
+            let custom_data = self
+                .custom_data
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !custom_data.is_empty() {
+                let custom_data_path = self
+                    .level
+                    .level_folder
+                    .root_folder
+                    .join("pumpkin_custom_data.nbt");
+                let nbt = pumpkin_nbt::Nbt::from(custom_data.clone());
+                let _ = std::fs::write(custom_data_path, nbt.write());
+            }
+        }
+
+        self.level
+            .should_save
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        self.level.level_channel.notify();
+
+        let mut save_event = crate::plugin::api::events::world::world_save::WorldSaveEvent::new(
+            format!("{:?}", self.dimension),
+        );
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut save_event).await;
+        }
+    }
+
+    pub fn set_custom_data(&self, namespace: &str, key: &str, value: pumpkin_nbt::tag::NbtTag) {
+        let mut custom_data = self
+            .custom_data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let mut namespace_data = custom_data
+            .child_tags
+            .remove(namespace)
+            .and_then(|tag| match tag {
+                pumpkin_nbt::tag::NbtTag::Compound(compound) => Some(compound),
+                _ => None,
+            })
+            .unwrap_or_default();
+
+        namespace_data.child_tags.insert(key.into(), value);
+        custom_data.child_tags.insert(
+            namespace.into(),
+            pumpkin_nbt::tag::NbtTag::Compound(namespace_data),
+        );
+    }
+
+    pub fn get_custom_data(&self, namespace: &str, key: &str) -> Option<pumpkin_nbt::tag::NbtTag> {
+        let custom_data = self
+            .custom_data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        custom_data
+            .get(namespace)?
+            .extract_compound()?
+            .get(key)
+            .cloned()
+    }
+
+    pub fn remove_custom_data(&self, namespace: &str, key: &str) {
+        let mut custom_data = self
+            .custom_data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        let Some(pumpkin_nbt::tag::NbtTag::Compound(mut namespace_data)) =
+            custom_data.child_tags.remove(namespace)
+        else {
+            return;
+        };
+
+        namespace_data.child_tags.remove(key);
+        if !namespace_data.is_empty() {
+            custom_data.child_tags.insert(
+                namespace.into(),
+                pumpkin_nbt::tag::NbtTag::Compound(namespace_data),
+            );
+        }
+    }
+
+    pub fn has_custom_data(&self, namespace: &str, key: &str) -> bool {
+        self.get_custom_data(namespace, key).is_some()
+    }
+
+    pub fn set_block_entity_custom_data(
+        &self,
+        pos: &BlockPos,
+        namespace: &str,
+        key: &str,
+        value: pumpkin_nbt::tag::NbtTag,
+    ) {
+        let mut entry = self.custom_block_entity_data.entry(*pos).or_default();
+        let mut namespace_data = entry
+            .child_tags
+            .remove(namespace)
+            .and_then(|tag| match tag {
+                pumpkin_nbt::tag::NbtTag::Compound(compound) => Some(compound),
+                _ => None,
+            })
+            .unwrap_or_default();
+
+        namespace_data.child_tags.insert(key.into(), value);
+        entry.child_tags.insert(
+            namespace.into(),
+            pumpkin_nbt::tag::NbtTag::Compound(namespace_data),
+        );
+    }
+
+    pub fn get_block_entity_custom_data(
+        &self,
+        pos: &BlockPos,
+        namespace: &str,
+        key: &str,
+    ) -> Option<pumpkin_nbt::tag::NbtTag> {
+        self.custom_block_entity_data
+            .get(pos)?
+            .get(namespace)?
+            .extract_compound()?
+            .get(key)
+            .cloned()
+    }
+
+    pub fn remove_block_entity_custom_data(&self, pos: &BlockPos, namespace: &str, key: &str) {
+        if let Some(mut entry) = self.custom_block_entity_data.get_mut(pos) {
+            let Some(pumpkin_nbt::tag::NbtTag::Compound(mut namespace_data)) =
+                entry.child_tags.remove(namespace)
+            else {
+                return;
+            };
+
+            namespace_data.child_tags.remove(key);
+            if !namespace_data.is_empty() {
+                entry.child_tags.insert(
+                    namespace.into(),
+                    pumpkin_nbt::tag::NbtTag::Compound(namespace_data),
+                );
+            }
+        }
+    }
+
+    pub fn has_block_entity_custom_data(&self, pos: &BlockPos, namespace: &str, key: &str) -> bool {
+        self.get_block_entity_custom_data(pos, namespace, key)
+            .is_some()
+    }
+
+    pub async fn populate_chunk(&self, chunk_pos: Vector2<i32>) {
+        let mut populate_event =
+            crate::plugin::api::events::world::chunk_populate::ChunkPopulateEvent::new(chunk_pos);
+        if let Some(server) = self.server.upgrade() {
+            server
+                .plugin_manager
+                .fire(&server, &mut populate_event)
+                .await;
+        }
+    }
+
+    pub async fn unload_chunk(&self, chunk_pos: Vector2<i32>) {
+        let mut unload_event =
+            crate::plugin::api::events::world::chunk_unload::ChunkUnloadEvent::new(chunk_pos);
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut unload_event).await;
+        }
+    }
+
+    pub async fn load_entities(&self, chunk_pos: Vector2<i32>, entity_count: usize) {
+        let mut load_event =
+            crate::plugin::api::events::world::entities_load::EntitiesLoadEvent::new(
+                chunk_pos,
+                entity_count,
+            );
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut load_event).await;
+        }
+    }
+
+    pub async fn unload_entities(&self, chunk_pos: Vector2<i32>, entity_count: usize) {
+        let mut unload_event =
+            crate::plugin::api::events::world::entities_unload::EntitiesUnloadEvent::new(
+                chunk_pos,
+                entity_count,
+            );
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut unload_event).await;
+        }
+    }
+
+    pub async fn generate_loot(&self, loot_table: String) {
+        let mut loot_event =
+            crate::plugin::api::events::world::loot_generate::LootGenerateEvent::new(loot_table);
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut loot_event).await;
+        }
+    }
+
+    pub async fn skip_time(&self, skip_amount: i64) {
+        let mut time_event =
+            crate::plugin::api::events::world::time_skip::TimeSkipEvent::new(skip_amount);
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut time_event).await;
+        }
+    }
+
+    pub async fn trigger_raid(&self, pos: BlockPos) {
+        let mut raid_event =
+            crate::plugin::api::events::raid::raid_trigger::RaidTriggerEvent::new(pos);
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut raid_event).await;
+        }
+    }
+
+    pub async fn spawn_raid_wave(&self, wave: u32, pos: BlockPos) {
+        let mut wave_event =
+            crate::plugin::api::events::raid::raid_spawn_wave::RaidSpawnWaveEvent::new(wave, pos);
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut wave_event).await;
+        }
+    }
+
+    pub async fn finish_raid(&self, victory: bool) {
+        let mut raid_event =
+            crate::plugin::api::events::raid::raid_finish::RaidFinishEvent::new(victory);
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut raid_event).await;
+        }
+    }
+
+    pub async fn stop_raid(&self, reason: String) {
+        let mut raid_event =
+            crate::plugin::api::events::raid::raid_stop::RaidStopEvent::new(reason);
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut raid_event).await;
+        }
+    }
+
+    pub async fn async_structure_generate(
+        &self,
+        world_name: String,
+        structure_name: String,
+        pos: BlockPos,
+    ) {
+        let mut event = crate::plugin::api::events::world::async_structure_generate::AsyncStructureGenerateEvent::new(
+            world_name,
+            structure_name,
+            pos,
+        );
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut event).await;
+        }
+    }
+
+    pub async fn async_structure_spawn(
+        &self,
+        world_name: String,
+        structure_name: String,
+        pos: BlockPos,
+    ) {
+        let mut event =
+            crate::plugin::api::events::world::async_structure_spawn::AsyncStructureSpawnEvent::new(
+                world_name,
+                structure_name,
+                pos,
+            );
+        if let Some(server) = self.server.upgrade() {
+            server.plugin_manager.fire(&server, &mut event).await;
         }
     }
 }
@@ -6681,6 +7658,14 @@ impl WorldPortalExt for WorldPortal {
 
 #[cfg(test)]
 mod tests {
+    use pumpkin_data::{
+        Block,
+        block_properties::{BlockProperties, ChestLikeProperties, ChestType, HorizontalFacing},
+    };
+    use pumpkin_util::math::position::BlockPos;
+
+    use super::{bedrock_block_breaking_rate, bedrock_chest_block_actor};
+
     use super::*;
 
     #[test]
@@ -6792,5 +7777,57 @@ mod tests {
         assert_eq!(bedrock_block_breaking_rate(0.0), 0);
         assert_eq!(bedrock_block_breaking_rate(1.0 / 30.0), 2_184);
         assert_eq!(bedrock_block_breaking_rate(1.0), 65_535);
+    }
+
+    #[test]
+    fn bedrock_double_chest_block_actor_identifies_pair_and_lead() {
+        let position = BlockPos::new(5, 64, 7);
+        let properties = ChestLikeProperties {
+            facing: HorizontalFacing::North,
+            r#type: ChestType::Right,
+            waterlogged: false,
+        };
+        let actor =
+            bedrock_chest_block_actor(properties.to_state_id(&Block::CHEST), position).unwrap();
+
+        assert_eq!(actor.get_int("pairx"), Some(4));
+        assert_eq!(actor.get_int("pairz"), Some(7));
+        assert_eq!(actor.get_bool("pairlead"), Some(true));
+    }
+
+    #[test]
+    fn game_rules_registry() {
+        use pumpkin_data::game_rules::{GameRule, GameRuleRegistry, GameRuleValue};
+
+        let mut registry = GameRuleRegistry::default();
+        match registry.get(&GameRule::KeepInventory) {
+            GameRuleValue::Bool(v) => assert!(!v),
+            GameRuleValue::Int(_) => panic!("expected bool"),
+        }
+
+        match registry.get_mut(&GameRule::KeepInventory) {
+            GameRuleValue::Bool(v) => *v = true,
+            GameRuleValue::Int(_) => panic!("expected bool"),
+        }
+
+        match registry.get(&GameRule::KeepInventory) {
+            GameRuleValue::Bool(v) => assert!(v),
+            GameRuleValue::Int(_) => panic!("expected bool"),
+        }
+
+        match registry.get(&GameRule::RandomTickSpeed) {
+            GameRuleValue::Int(v) => assert_eq!(*v, 3),
+            GameRuleValue::Bool(_) => panic!("expected int"),
+        }
+
+        match registry.get_mut(&GameRule::RandomTickSpeed) {
+            GameRuleValue::Int(v) => *v = 20,
+            GameRuleValue::Bool(_) => panic!("expected int"),
+        }
+
+        match registry.get(&GameRule::RandomTickSpeed) {
+            GameRuleValue::Int(v) => assert_eq!(*v, 20),
+            GameRuleValue::Bool(_) => panic!("expected int"),
+        }
     }
 }

@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use pumpkin_data::item::Item;
-use pumpkin_data::packet::clientbound::PLAY_PLACE_GHOST_RECIPE;
+use pumpkin_data::packet::clientbound::play::PLACE_GHOST_RECIPE;
 use pumpkin_data::recipes::CraftingRecipeTypes;
 use pumpkin_macros::java_packet;
 use pumpkin_util::version::JavaMinecraftVersion;
@@ -23,7 +23,7 @@ pub enum GhostRecipeSource<'a> {
 /// Tells the client to render a recipe's ingredients as a greyed-out "ghost"
 /// overlay in the crafting grid, because the player doesn't have everything
 /// needed to actually place it.
-#[java_packet(PLAY_PLACE_GHOST_RECIPE)]
+#[java_packet(PLACE_GHOST_RECIPE)]
 pub struct CPlaceGhostRecipe<'a> {
     pub sync_id: VarInt,
     pub recipe: GhostRecipeSource<'a>,

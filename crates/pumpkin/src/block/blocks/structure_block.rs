@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use pumpkin_data::BlockStateId;
+use pumpkin_data::block_properties::{BlockProperties, StructureBlockLikeProperties};
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::PermissionLvl;
 
@@ -7,7 +9,8 @@ use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::entities::structure_block::StructureBlockBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, NormalUseArgs, OnNeighborUpdateArgs, PlacedArgs, PlayerPlacedArgs,
+    BlockBehaviour, BlockFuture, NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs, PlacedArgs,
+    PlayerPlacedArgs,
 };
 
 /// `net.minecraft.world.level.block.StructureBlock`.
@@ -17,9 +20,16 @@ use crate::block::{
 /// needs filesystem-backed template storage that doesn't exist in this codebase yet and is left
 /// as a documented follow-up.
 #[pumpkin_block("minecraft:structure_block")]
-pub struct StructureBlockBlock;
+pub struct StructureBlock;
 
-impl BlockBehaviour for StructureBlockBlock {
+impl BlockBehaviour for StructureBlock {
+    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
+        Box::pin(async move {
+            let props = StructureBlockLikeProperties::default(args.block);
+            props.to_state_id(args.block)
+        })
+    }
+
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             args.world

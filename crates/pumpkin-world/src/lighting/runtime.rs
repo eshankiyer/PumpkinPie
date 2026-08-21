@@ -114,7 +114,8 @@ impl DynamicLightEngine {
         pos: &BlockPos,
         replacement: Option<(&BlockPos, &'static pumpkin_data::BlockState)>,
     ) -> i32 {
-        let dimension = level.world_gen.dimension();
+        let world_gen = level.world_gen.load();
+        let dimension = world_gen.dimension();
         let min_y = dimension.min_y;
         let max_y = min_y + dimension.height;
         let mut top_state = Block::AIR.default_state;
@@ -158,8 +159,8 @@ impl DynamicLightEngine {
 
         let old_source_y = Self::lowest_sky_source_y(level, &pos, Some((&pos, old_state)));
         let new_source_y = Self::lowest_sky_source_y(level, &pos, Some((&pos, new_state)));
-        let min_y = level.world_gen.dimension().min_y;
-        let max_y = min_y + level.world_gen.dimension().height;
+        let min_y = level.world_gen.load().dimension().min_y;
+        let max_y = min_y + level.world_gen.load().dimension().height;
         let old_start = old_source_y.clamp(min_y, max_y);
         let new_start = new_source_y.clamp(min_y, max_y);
 
@@ -184,7 +185,7 @@ impl DynamicLightEngine {
     }
 
     fn has_skylight(level: &Level) -> bool {
-        level.world_gen.dimension().has_skylight
+        level.world_gen.load().dimension().has_skylight
     }
 
     /// Vanilla's `LightEngine.getState` uses bedrock when the lighting source
@@ -202,8 +203,8 @@ impl DynamicLightEngine {
         let (chunk, _) = pos.chunk_and_chunk_relative_position();
         self.dirty_chunks.push(chunk);
 
-        let min_y = level.world_gen.dimension().min_y;
-        let section_count = level.world_gen.dimension().height as usize / BlockPalette::SIZE;
+        let min_y = level.world_gen.load().dimension().min_y;
+        let section_count = level.world_gen.load().dimension().height as usize / BlockPalette::SIZE;
         if pos.0.y >= min_y {
             let section = ((pos.0.y - min_y) as usize) / BlockPalette::SIZE;
             if section < section_count {

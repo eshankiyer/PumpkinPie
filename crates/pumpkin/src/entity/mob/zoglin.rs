@@ -3,8 +3,7 @@ use std::sync::{Arc, Weak};
 
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::entity::EntityType;
-use pumpkin_data::meta_data_type::MetaDataType;
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 
@@ -107,14 +106,7 @@ impl ZoglinEntity {
                 instance.base_value = attack_damage;
             });
 
-        entity.send_meta_data(
-            &[Metadata::new(
-                TrackedData::BABY_ID,
-                MetaDataType::BOOLEAN,
-                baby,
-            )],
-            None,
-        );
+        entity.send_meta_data(&[Metadata::new(tracked_data::zoglin::BABY_ID, baby)], None);
     }
 }
 
@@ -140,14 +132,10 @@ impl Mob for ZoglinEntity {
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             if self.is_baby() {
-                self.mob_entity.living_entity.entity.send_meta_data(
-                    &[Metadata::new(
-                        TrackedData::BABY_ID,
-                        MetaDataType::BOOLEAN,
-                        true,
-                    )],
-                    None,
-                );
+                self.mob_entity
+                    .living_entity
+                    .entity
+                    .send_meta_data(&[Metadata::new(tracked_data::zoglin::BABY_ID, true)], None);
             }
         })
     }

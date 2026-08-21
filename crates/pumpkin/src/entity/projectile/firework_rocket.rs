@@ -8,8 +8,7 @@ use crate::{
 };
 use pumpkin_data::{
     damage::DamageType, data_component_impl::FireworksImpl, entity::EntityStatus, item::Item,
-    item_stack::ItemStack, meta_data_type::MetaDataType, sound::Sound, sound::SoundCategory,
-    tracked_data::TrackedData,
+    item_stack::ItemStack, sound::Sound, sound::SoundCategory,
 };
 use pumpkin_protocol::bedrock::server::actor_event::ActorEventType;
 use pumpkin_protocol::{
@@ -106,8 +105,7 @@ impl FireworkRocketEntity {
         // Set shooter metadata
         rocket.entity.entity.send_meta_data(
             &[Metadata::new(
-                TrackedData::ATTACHED_TO_TARGET,
-                MetaDataType::OPTIONAL_UNSIGNED_INT,
+                pumpkin_data::tracked_data::firework_rocket::ATTACHED_TO_TARGET,
                 OptionalInt(Some(shooter.entity_id)),
             )],
             None,
@@ -265,8 +263,7 @@ impl EntityBase for FireworkRocketEntity {
         Box::pin(async move {
             self.get_entity().send_meta_data(
                 &[Metadata::new(
-                    TrackedData::ID_FIREWORKS_ITEM,
-                    MetaDataType::ITEM_STACK,
+                    pumpkin_data::tracked_data::firework_rocket::ID_FIREWORKS_ITEM,
                     &ItemStackSerializer::from(self.item_stack.clone()),
                 )],
                 None,

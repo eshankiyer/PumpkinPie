@@ -1,4 +1,5 @@
 use pumpkin_data::item::Item;
+use pumpkin_data::translation;
 use pumpkin_data::{
     block_properties::{BlockProperties, RespawnAnchorLikeProperties},
     dimension::Dimension,
@@ -7,7 +8,6 @@ use pumpkin_data::{
 };
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::GameMode;
-use pumpkin_util::text::TextComponent;
 use pumpkin_world::world::BlockFlags;
 use std::sync::Arc;
 
@@ -104,12 +104,16 @@ impl BlockBehaviour for RespawnAnchorBlock {
                 // and `damageSources().badRespawnPointExplosion(pos)` as the explosion's damage
                 // source; neither a per-position resistance override nor a pluggable damage
                 // source exists on `World::explode`/`Explosion` in this codebase (checked:
-                // `explode_with_blocks` in `pumpkin/src/world/mod.rs` takes only
-                // `position`/`power`/`destroys_blocks`/`creates_fire`). Left as a known
+                // `explode_with_fire` in `pumpkin/src/world/mod.rs` takes only
+                // `position`/`power`/`interaction`). Left as a known
                 // divergence pending an `Explosion` API extension. The `creates_fire = true`
                 // half (`explode_with_fire`) is not a gap and is applied below.
                 args.world
-                    .explode_with_fire(args.position.to_centered_f64(), 5.0)
+                    .explode_with_fire(
+                        args.position.to_centered_f64(),
+                        5.0,
+                        crate::world::ExplosionInteraction::Block,
+                    )
                     .await;
                 return BlockActionResult::SuccessServer;
             }
@@ -118,9 +122,9 @@ impl BlockBehaviour for RespawnAnchorBlock {
             let mut props = RespawnAnchorLikeProperties::from_state_id(state_id, args.block);
             if props.charges == 0 {
                 args.player
-                    .send_system_message(&TextComponent::translate(
-                        pumpkin_data::translation::java::BLOCK_MINECRAFT_BED_NO_SLEEP,
-                        &[],
+                    .send_system_message(&pumpkin_macros::translate_cross!(
+                        translation::java::BLOCK_MINECRAFT_BED_NO_SLEEP,
+                        translation::bedrock::TILE_BED_NOSLEEP
                     ))
                     .await;
                 return BlockActionResult::SuccessServer;
@@ -151,10 +155,9 @@ impl BlockBehaviour for RespawnAnchorBlock {
                     &args.position.to_centered_f64(),
                 );
                 args.player
-                    .send_system_message(&TextComponent::translate_cross(
-                        pumpkin_data::translation::java::BLOCK_MINECRAFT_SET_SPAWN,
-                        pumpkin_data::translation::bedrock::TILE_BED_RESPAWNSET,
-                        [],
+                    .send_system_message(&pumpkin_macros::translate_cross!(
+                        translation::java::BLOCK_MINECRAFT_SET_SPAWN,
+                        translation::bedrock::TILE_BED_RESPAWNSET
                     ))
                     .await;
             }

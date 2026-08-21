@@ -35,7 +35,7 @@ pub mod y_offset;
 
 pub mod identifier;
 pub mod jwt;
-pub mod resource_key;
+pub mod resource;
 pub mod uuid;
 
 /// Represents the different types of height maps used for terrain generation and collision checks.
@@ -273,7 +273,7 @@ impl Hand {
     }
 
     /// Decodes the hand field of an *interaction* packet (use item, use item on
-    /// block, swing arm).
+    /// block, swing arm), where `0` is the main hand.
     ///
     /// Two distinct vanilla enums are both spelled `Hand` here, and they use
     /// opposite wire encodings:
@@ -290,12 +290,21 @@ impl Hand {
     ///
     /// # Errors
     /// Returns `InvalidHand` if the value is not 0 or 1.
-    pub const fn from_interaction_id(value: i32) -> Result<Self, InvalidHand> {
+    pub const fn from_packet_id(value: i32) -> Result<Self, InvalidHand> {
         match value {
             0 => Ok(Self::Right),
             1 => Ok(Self::Left),
             _ => Err(InvalidHand),
         }
+    }
+
+    /// Alias for [`Self::from_packet_id`], spelled for interaction-packet call
+    /// sites.
+    ///
+    /// # Errors
+    /// Returns `InvalidHand` if the value is not 0 or 1.
+    pub const fn from_interaction_id(value: i32) -> Result<Self, InvalidHand> {
+        Self::from_packet_id(value)
     }
 }
 

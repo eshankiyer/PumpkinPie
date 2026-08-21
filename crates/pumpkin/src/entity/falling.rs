@@ -6,9 +6,8 @@ use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::world::WorldEvent;
-use pumpkin_data::{Block, tag, tag::Taggable, tracked_data::TrackedData};
+use pumpkin_data::{Block, tag, tag::Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::GameMode;
@@ -471,8 +470,7 @@ impl EntityBase for FallingEntity {
         Box::pin(async move {
             self.entity.send_meta_data(
                 &[Metadata::new(
-                    TrackedData::START_POS,
-                    MetaDataType::BLOCK_POS,
+                    pumpkin_data::tracked_data::falling_block::START_POS,
                     self.entity.block_pos.load(),
                 )],
                 None,

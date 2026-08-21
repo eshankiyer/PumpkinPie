@@ -27,7 +27,22 @@ async fn ring_bell(
     position: BlockPos,
     world: &Arc<World>,
     hit_direction: Option<HorizontalFacing>,
-) {
+    entity: Option<Arc<dyn crate::entity::EntityBase>>,
+) -> bool {
+    let mut event = crate::plugin::block::bell_ring::BellRingEvent {
+        block_pos: position,
+        world: world.clone(),
+        direction: hit_direction.map(|d| d.to_block_direction()),
+        entity,
+        cancelled: false,
+    };
+    if let Some(server) = world.server.upgrade() {
+        server.plugin_manager.fire(&server, &mut event).await;
+    }
+    if event.cancelled {
+        return false;
+    }
+
     let (block, state_id) = world.get_block_and_state_id(&position);
 
     let props = BellLikeProperties::from_state_id(state_id, block);
@@ -54,6 +69,7 @@ async fn ring_bell(
         GameEventContext::none(),
     )
     .await;
+    true
 }
 
 fn is_point_on_bell(
@@ -145,12 +161,16 @@ impl BlockBehaviour for BellBlock {
             if !is_point_on_bell(args.hit, props.attachment, props.facing) {
                 return BlockActionResult::Pass; // Pass if Crosshair wasn't correctly positioned
             }
-            ring_bell(
+            if !ring_bell(
                 *args.position,
                 args.world,
                 args.hit.face.to_horizontal_facing(),
+                Some(args.player.clone()),
             )
-            .await;
+            .await
+            {
+                return BlockActionResult::Pass;
+            }
 
             args.player
                 .increment_stat(
@@ -215,7 +235,7 @@ impl BlockBehaviour for BellBlock {
                     .await;
 
                 if is_receiving_power {
-                    ring_bell(*args.position, args.world, None).await;
+                    ring_bell(*args.position, args.world, None, None).await;
                 }
             }
         })

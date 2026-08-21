@@ -1,16 +1,33 @@
 use std::sync::Arc;
 
+use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BlockProperties, VaultLikeProperties, VaultState};
 use pumpkin_macros::pumpkin_block;
 
 use crate::block::entities::vault::VaultBlockEntity;
 use crate::block::registry::BlockActionResult;
-use crate::block::{BlockBehaviour, BlockFuture, PlacedArgs, UseWithItemArgs};
+use crate::block::{BlockBehaviour, BlockFuture, OnPlaceArgs, PlacedArgs, UseWithItemArgs};
 
 #[pumpkin_block("minecraft:vault")]
 pub struct VaultBlock;
 
 impl BlockBehaviour for VaultBlock {
+    /// `VaultBlock.getStateForPlacement`: `FACING` is the placer's horizontal direction,
+    /// opposite. The remaining properties keep their registered defaults
+    /// (`STATE = INACTIVE`, `OMINOUS = false`).
+    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
+        Box::pin(async move {
+            let mut props = VaultLikeProperties::default(args.block);
+            props.facing = args
+                .player
+                .living_entity
+                .entity
+                .get_horizontal_facing()
+                .opposite();
+            props.to_state_id(args.block)
+        })
+    }
+
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             let block_entity = VaultBlockEntity::new(*args.position);

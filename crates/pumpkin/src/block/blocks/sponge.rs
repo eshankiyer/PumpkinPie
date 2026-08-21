@@ -77,6 +77,15 @@ impl SpongeBlock {
         if water_blocks.is_empty() {
             false
         } else {
+            let mut event =
+                crate::plugin::api::events::block::sponge_absorb::SpongeAbsorbEvent::new(*position);
+            if let Some(server) = world.server.upgrade() {
+                server.plugin_manager.fire(&server, &mut event).await;
+            }
+            if event.cancelled {
+                return false;
+            }
+
             for water_pos in &water_blocks {
                 let (block, state) = world.get_block_and_state_id(water_pos);
                 let new_state = if is_waterlogged(block, state) {

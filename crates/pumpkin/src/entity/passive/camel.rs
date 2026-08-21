@@ -2,8 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering::Relaxed};
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::entity::EntityType;
-use pumpkin_data::meta_data_type::MetaDataType;
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::{
@@ -82,14 +81,8 @@ impl CamelEntity {
     /// `Camel.setDashing` (`Camel.java:323-325`).
     pub fn set_dashing(&self, dashing: bool) {
         self.dashing.store(dashing, Relaxed);
-        self.get_entity().send_meta_data(
-            &[Metadata::new(
-                TrackedData::DASH,
-                MetaDataType::BOOLEAN,
-                dashing,
-            )],
-            None,
-        );
+        self.get_entity()
+            .send_meta_data(&[Metadata::new(tracked_data::camel::DASH, dashing)], None);
     }
 
     /// `Camel.dash` (`Camel.java:312-316`): sets the cooldown and the dashing flag. Nothing
@@ -115,23 +108,9 @@ impl Mob for CamelEntity {
             // blanket `Mob` `EntityBase` impl's default behavior (`mob/mod.rs`) -- same reason
             // `CatEntity` re-sends it manually.
             if entity.age.load(std::sync::atomic::Ordering::Relaxed) < 0 {
-                entity.send_meta_data(
-                    &[Metadata::new(
-                        TrackedData::BABY_ID,
-                        MetaDataType::BOOLEAN,
-                        true,
-                    )],
-                    None,
-                );
+                entity.send_meta_data(&[Metadata::new(tracked_data::camel::BABY_ID, true)], None);
             }
-            entity.send_meta_data(
-                &[Metadata::new(
-                    TrackedData::DASH,
-                    MetaDataType::BOOLEAN,
-                    false,
-                )],
-                None,
-            );
+            entity.send_meta_data(&[Metadata::new(tracked_data::camel::DASH, false)], None);
         })
     }
 

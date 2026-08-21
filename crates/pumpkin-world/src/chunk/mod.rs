@@ -83,6 +83,7 @@ pub struct ChunkData {
     pub unknown_nbt: NbtCompound,
     pub dirty: AtomicBool,
     pub inhabited_time: AtomicU64,
+    pub custom_data: std::sync::Mutex<NbtCompound>,
 }
 
 pub struct ChunkEntityData {
@@ -729,6 +730,7 @@ impl ChunkData {
             unknown_nbt: NbtCompound::new(),
             dirty: std::sync::atomic::AtomicBool::new(false),
             inhabited_time: std::sync::atomic::AtomicU64::new(0),
+            custom_data: std::sync::Mutex::new(NbtCompound::new()),
         }
     }
 
@@ -1174,5 +1176,35 @@ mod tests {
         // Idempotent: an already-correct chunk is untouched.
         chunk.pad_sections_to(16, 15);
         assert_eq!(chunk.section.section_count(), 16);
+    }
+
+    #[test]
+    fn chunk_custom_data() {
+        use pumpkin_nbt::tag::NbtTag;
+
+        let chunk = super::ChunkData::empty(0, 0);
+        assert!(!chunk.has_custom_data("my_plugin", "test_key"));
+        assert_eq!(chunk.get_custom_data("my_plugin", "test_key"), None);
+
+        chunk.set_custom_data(
+            "my_plugin",
+            "test_key",
+            NbtTag::String("hello_pumpkin".into()),
+        );
+        assert!(chunk.has_custom_data("my_plugin", "test_key"));
+        assert_eq!(
+            chunk.get_custom_data("my_plugin", "test_key"),
+            Some(NbtTag::String("hello_pumpkin".into()))
+        );
+
+        chunk.set_custom_data("my_plugin", "number_key", NbtTag::Int(42));
+        assert_eq!(
+            chunk.get_custom_data("my_plugin", "number_key"),
+            Some(NbtTag::Int(42))
+        );
+
+        chunk.remove_custom_data("my_plugin", "test_key");
+        assert!(!chunk.has_custom_data("my_plugin", "test_key"));
+        assert!(chunk.has_custom_data("my_plugin", "number_key"));
     }
 }

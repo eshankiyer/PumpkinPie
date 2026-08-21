@@ -2,10 +2,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering::Relaxed};
 
 use pumpkin_data::damage::DamageType;
-use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::particle::Particle;
 use pumpkin_data::sound::{Sound, SoundCategory};
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
@@ -64,8 +63,7 @@ impl GlowSquidEntity {
     fn send_dark_ticks(&self, ticks: i32) {
         self.mob_entity.living_entity.entity.send_meta_data(
             &[Metadata::new(
-                TrackedData::DARK_TICKS_REMAINING,
-                MetaDataType::INT,
+                tracked_data::glow_squid::DARK_TICKS_REMAINING,
                 VarInt(ticks),
             )],
             None,

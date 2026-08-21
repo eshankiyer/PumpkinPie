@@ -6,12 +6,11 @@ use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
     BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
 };
+use pumpkin_inventory::smithing_screen_handler::SmithingScreenHandler;
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::text::TextComponent;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-
-use pumpkin_inventory::smithing_screen_handler::SmithingScreenHandler;
 
 #[pumpkin_block("minecraft:smithing_table")]
 pub struct SmithingTableBlock;

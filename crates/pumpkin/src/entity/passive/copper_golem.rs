@@ -1,5 +1,6 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
 
 use crossbeam::atomic::AtomicCell;
@@ -10,8 +11,11 @@ use pumpkin_data::block_properties::{
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_protocol::codec::var_int::VarInt;
+use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
@@ -19,7 +23,7 @@ use rand::RngExt;
 use crate::block::entities::copper_golem_statue::CopperGolemStatueBlockEntity;
 use crate::entity::player::Player;
 use crate::entity::{
-    Entity, EntityBase, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
         interact_with_door::InteractWithDoorGoal, look_at_entity::LookAtEntityGoal,
         transport_items::TransportItemsGoal, wander_around::WanderAroundGoal,
@@ -72,6 +76,27 @@ impl CopperWeatherState {
         }
     }
 
+    /// Wire ordinal of `WeatheringCopper.WeatherState`, as sent in `DATA_WEATHER_STATE`.
+    #[must_use]
+    pub const fn id(self) -> i32 {
+        match self {
+            Self::Unaffected => 0,
+            Self::Exposed => 1,
+            Self::Weathered => 2,
+            Self::Oxidized => 3,
+        }
+    }
+
+    #[must_use]
+    pub const fn from_id(id: i32) -> Self {
+        match id {
+            1 => Self::Exposed,
+            2 => Self::Weathered,
+            3 => Self::Oxidized,
+            _ => Self::Unaffected,
+        }
+    }
+
     #[must_use]
     pub fn from_name(s: &str) -> Self {
         match s {
@@ -80,6 +105,36 @@ impl CopperWeatherState {
             "oxidized" => Self::Oxidized,
             _ => Self::Unaffected,
         }
+    }
+}
+
+/// `CopperGolem.CopperGolemState`, the synched animation state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(i32)]
+pub enum CopperGolemState {
+    #[default]
+    Idle = 0,
+    GettingItem = 1,
+    GettingNoItem = 2,
+    DroppingItem = 3,
+    DroppingNoItem = 4,
+}
+
+impl CopperGolemState {
+    #[must_use]
+    pub const fn from_id(id: i32) -> Self {
+        match id {
+            1 => Self::GettingItem,
+            2 => Self::GettingNoItem,
+            3 => Self::DroppingItem,
+            4 => Self::DroppingNoItem,
+            _ => Self::Idle,
+        }
+    }
+
+    #[must_use]
+    pub const fn id(self) -> i32 {
+        self as i32
     }
 }
 
@@ -96,6 +151,7 @@ const TURN_TO_STATUE_CHANCE: f32 = 0.0058;
 pub struct CopperGolemEntity {
     pub mob_entity: MobEntity,
     weather_state: AtomicCell<CopperWeatherState>,
+    state: AtomicI32,
     next_weathering_tick: AtomicCell<i64>,
 }
 
@@ -105,6 +161,7 @@ impl CopperGolemEntity {
         let golem = Self {
             mob_entity,
             weather_state: AtomicCell::new(CopperWeatherState::Unaffected),
+            state: AtomicI32::new(CopperGolemState::Idle.id()),
             next_weathering_tick: AtomicCell::new(UNSET_WEATHERING_TICK),
         };
         let mob_arc = Arc::new(golem);
@@ -150,6 +207,29 @@ impl CopperGolemEntity {
 
     fn set_weather_state(&self, state: CopperWeatherState) {
         self.weather_state.store(state);
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::copper_golem::WEATHER_STATE,
+                VarInt(state.id()),
+            )],
+            None,
+        );
+    }
+
+    #[must_use]
+    pub fn get_state(&self) -> CopperGolemState {
+        CopperGolemState::from_id(self.state.load(Ordering::Relaxed))
+    }
+
+    pub fn set_state(&self, state: CopperGolemState) {
+        self.state.store(state.id(), Ordering::Relaxed);
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::copper_golem::COPPER_GOLEM_STATE,
+                VarInt(state.id()),
+            )],
+            None,
+        );
     }
 
     /// `CopperGolem.updateWeathering`: advances the oxidation stage on a fixed game-time
@@ -233,15 +313,21 @@ impl CopperGolemEntity {
     /// `CopperGolem.mobInteract`: honeycomb waxes (freezes weathering), axe on a waxed golem
     /// un-waxes it, axe on a weathered-but-unwaxed golem scrapes back one stage.
     ///
-    /// Deferred: none of `SoundEvents.COPPER_GOLEM_*`/`AXE_SCRAPE` are wired here -- the
-    /// generated `Sound` enum (`pumpkin-data/src/generated/sound.rs`, off-limits to hand-edit)
-    /// has no `COPPER_GOLEM_*` entries at all, so this is a codegen gap, not a logic gap.
+    fn play_at_self(&self, sound: Sound) {
+        let entity = &self.mob_entity.living_entity.entity;
+        entity
+            .world
+            .load()
+            .play_sound(sound, SoundCategory::Blocks, &entity.pos.load());
+    }
+
     pub fn golem_interact(&self, player: &Player, item_stack: &mut ItemStack) -> bool {
         if item_stack.item.id == Item::HONEYCOMB.id
             && self.next_weathering_tick.load() != IGNORE_WEATHERING_TICK
         {
             self.next_weathering_tick.store(IGNORE_WEATHERING_TICK);
             item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+            self.play_at_self(Sound::ItemHoneycombWaxOn);
             return true;
         }
 
@@ -249,6 +335,7 @@ impl CopperGolemEntity {
             if self.next_weathering_tick.load() == IGNORE_WEATHERING_TICK {
                 self.next_weathering_tick.store(UNSET_WEATHERING_TICK);
                 let _ = item_stack.damage_item(1);
+                self.play_at_self(Sound::ItemAxeScrape);
                 return true;
             }
 
@@ -257,6 +344,7 @@ impl CopperGolemEntity {
                 self.next_weathering_tick.store(UNSET_WEATHERING_TICK);
                 self.set_weather_state(state.previous());
                 let _ = item_stack.damage_item(1);
+                self.play_at_self(Sound::ItemAxeScrape);
                 return true;
             }
         }
@@ -291,6 +379,39 @@ impl NBTStorage for CopperGolemEntity {
 impl Mob for CopperGolemEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `CopperGolem.thunderHit`: a lightning strike scrubs the golem back to unaffected.
+    fn mob_on_lightning_strike<'a>(
+        &'a self,
+        caller: &'a dyn EntityBase,
+        lightning: &'a crate::entity::lightning::LightningBoltEntity,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            self.set_weather_state(CopperWeatherState::Unaffected);
+            self.mob_entity
+                .living_entity
+                .on_lightning_strike(caller, lightning)
+                .await;
+        })
+    }
+
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            self.mob_entity.living_entity.entity.send_meta_data(
+                &[
+                    Metadata::new(
+                        pumpkin_data::tracked_data::copper_golem::WEATHER_STATE,
+                        VarInt(self.weather_state().id()),
+                    ),
+                    Metadata::new(
+                        pumpkin_data::tracked_data::copper_golem::COPPER_GOLEM_STATE,
+                        VarInt(self.get_state().id()),
+                    ),
+                ],
+                None,
+            );
+        })
     }
 
     fn mob_tick<'a>(

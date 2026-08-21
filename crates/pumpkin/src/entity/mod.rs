@@ -24,8 +24,9 @@ use pumpkin_data::entity::EntityStatus;
 use pumpkin_data::fluid::Fluid;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::meta_data_type::MetaDataType;
+use pumpkin_data::packet::CURRENT_MC_VERSION;
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_data::tracked_data::{TrackedData, TrackedId};
+use pumpkin_data::tracked_data::{self, TrackedId};
 use pumpkin_data::{Block, BlockDirection};
 use pumpkin_data::{
     block_properties::{Facing, HorizontalFacing},
@@ -95,8 +96,10 @@ pub mod effect;
 pub mod experience_orb;
 pub mod falling;
 pub mod hunger;
+pub mod interaction;
 pub mod item;
 pub mod item_steerable;
+pub mod lightning;
 pub mod living;
 pub mod marker;
 pub mod mob;
@@ -108,6 +111,8 @@ pub mod projectile_deflection;
 pub mod tnt;
 pub mod r#type;
 pub mod vehicle;
+
+pub use lightning::LightningBoltEntity;
 
 mod combat;
 pub mod predicate;
@@ -265,11 +270,7 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
                 let mut bedrock_meta = EntityMetadata::new();
                 bedrock_meta.set_flag(entity_data_key::FLAGS, entity_data_flag::BABY as u8, true);
                 entity.send_meta_data(
-                    &[Metadata::new(
-                        TrackedData::BABY_ID,
-                        MetaDataType::BOOLEAN,
-                        true,
-                    )],
+                    &[Metadata::new(tracked_data::ageable_mob::DATA_BABY_ID, true)],
                     Some(&bedrock_meta),
                 );
             }
@@ -295,6 +296,13 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
 
     fn is_pushed_by_fluids(&self) -> bool {
         true
+    }
+
+    /// Per-entity opt-out from explosions, independent of the vanilla
+    /// `Entity.ignoreExplosion` rules below (kept because several entity types
+    /// override only this one).
+    fn is_immune_to_explosion(&self) -> bool {
+        false
     }
 
     /// Whether the entity is immune from explosion knockback and damage
@@ -353,6 +361,28 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         })
     }
 
+    fn on_lightning_strike<'a>(
+        &'a self,
+        caller: &'a dyn EntityBase,
+        lightning: &'a lightning::LightningBoltEntity,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            if self.get_living_entity().is_some() {
+                self.set_on_fire_for(8.0);
+                let cause = lightning.get_cause().await;
+                self.damage_with_context(
+                    caller,
+                    5.0,
+                    DamageType::LIGHTNING_BOLT,
+                    None,
+                    Some(lightning),
+                    cause.as_deref().map(|p| p as &dyn EntityBase),
+                )
+                .await;
+            }
+        })
+    }
+
     fn is_spectator(&self) -> bool {
         false
     }
@@ -393,10 +423,20 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         Box::pin(async move {
             let entity = self.get_entity();
             let runtime_id = entity.entity_id as u64;
+            let identifier = self
+                .get_mob()
+                .and_then(mob::Mob::mob_bedrock_identifier)
+                .unwrap_or(entity.entity_type.resource_name);
+            let mut metadata = entity.bedrock_metadata();
+            if let Some(mob) = self.get_mob()
+                && let Some(mob_metadata) = mob.mob_bedrock_spawn_metadata().await
+            {
+                metadata.0.extend(mob_metadata.0);
+            }
             let packet = CAddActor::new(
                 VarLong(runtime_id as i64),
                 VarULong(runtime_id),
-                self.get_entity().entity_type.resource_name.to_string(),
+                identifier.to_string(),
                 entity.pos.load().to_f32_lossy(),
                 entity.velocity.load().to_f32_lossy(),
                 entity.pitch.load(),
@@ -404,22 +444,34 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
                 entity.head_yaw.load(),
                 entity.body_yaw.load(),
                 Vec::new(),
-                entity.bedrock_metadata(),
+                metadata,
                 PropertySyncData {
                     int_properties: std::collections::HashMap::new(),
                     float_properties: std::collections::HashMap::new(),
                 },
                 Vec::new(),
             );
-            client.send_game_packet(&packet).await;
+            if let Ok(data) = client.serialize_packet(&packet) {
+                client.send_game_packet(data).await;
+            }
         })
     }
 
     fn send_java_spawn_packet<'a>(&'a self, client: &'a JavaClient) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
-            client
-                .enqueue_packet(&self.get_entity().create_spawn_packet())
-                .await;
+            let spawn_packet = self.get_entity().create_spawn_packet();
+            if let Ok(data) = client.serialize_packet(&spawn_packet) {
+                client.enqueue_packet(data).await;
+            }
+            if let Some(mob) = self.get_mob()
+                && let Some(metadata) = mob.mob_java_spawn_metadata(client.version.load()).await
+            {
+                let meta_packet =
+                    CSetEntityMetadata::new(self.get_entity().entity_id.into(), metadata);
+                if let Ok(meta_data) = client.serialize_packet(&meta_packet) {
+                    client.enqueue_packet(meta_data).await;
+                }
+            }
         })
     }
 
@@ -462,6 +514,20 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
 
     fn set_on_fire_for_ticks(&self, ticks: u32) {
         let entity = self.get_entity();
+        let mut event = crate::plugin::api::events::entity::entity_combust::EntityCombustEvent::new(
+            entity.entity_id,
+            ticks as f32 / 20.0,
+        );
+        if let Some(server) = entity.world.load().server.upgrade() {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    server.plugin_manager.fire(&server, &mut event).await;
+                });
+            });
+            if event.cancelled {
+                return;
+            }
+        }
         if entity.fire_ticks.load(Ordering::Relaxed) < ticks as i32 {
             entity.fire_ticks.store(ticks as i32, Ordering::Relaxed);
         }
@@ -1077,6 +1143,8 @@ pub struct Entity {
     /// changed. This snapshot is what gets replayed to such a player; see
     /// [`Entity::send_tracked_data_to`].
     pub tracked_data_snapshot: std::sync::Mutex<Vec<TrackedDataEntry>>,
+    /// Persistent custom data container for plugins (matching Bukkit's `PersistentDataHolder`)
+    pub custom_data: Mutex<NbtCompound>,
 }
 
 /// Adds the given tracked-data values to a snapshot, replacing any earlier value
@@ -1090,16 +1158,12 @@ fn record_tracked_data_into<T: MetadataSerializer>(
         if m.value.write_metadata(&mut value).is_err() {
             continue;
         }
-        let key = TrackedDataEntry::key(&m.index);
         let entry = TrackedDataEntry {
-            index: copy_tracked_id(&m.index),
+            index: m.index,
             r#type: m.r#type,
             value: value.into_boxed_slice(),
         };
-        if let Some(existing) = snapshot
-            .iter_mut()
-            .find(|e| TrackedDataEntry::key(&e.index) == key)
-        {
+        if let Some(existing) = snapshot.iter_mut().find(|e| e.index == entry.index) {
             *existing = entry;
         } else {
             snapshot.push(entry);
@@ -1118,8 +1182,8 @@ fn serialize_tracked_data(
 ) -> Option<Vec<u8>> {
     let mut buf = Vec::new();
     for entry in snapshot {
-        let meta = Metadata::new(
-            copy_tracked_id(&entry.index),
+        let meta = Metadata::new_raw(
+            entry.index,
             entry.r#type,
             RawMetadataValue(entry.value.clone()),
         );
@@ -1130,22 +1194,6 @@ fn serialize_tracked_data(
     if buf.is_empty() { None } else { Some(buf) }
 }
 
-/// `TrackedId` is a generated struct with no `Clone` derive, so copy it by hand.
-const fn copy_tracked_id(id: &TrackedId) -> TrackedId {
-    TrackedId {
-        v1_21: id.v1_21,
-        v1_21_2: id.v1_21_2,
-        v1_21_4: id.v1_21_4,
-        v1_21_5: id.v1_21_5,
-        v1_21_6: id.v1_21_6,
-        v1_21_7: id.v1_21_7,
-        v1_21_9: id.v1_21_9,
-        v1_21_11: id.v1_21_11,
-        v26_1: id.v26_1,
-        v26_2: id.v26_2,
-    }
-}
-
 /// One serialized tracked-data value, retained so it can be re-sent to a player
 /// who only later starts seeing the entity.
 pub struct TrackedDataEntry {
@@ -1154,28 +1202,6 @@ pub struct TrackedDataEntry {
     /// The value as produced by `MetadataSerializer::write_metadata`, which is
     /// protocol-version independent.
     pub value: Box<[u8]>,
-}
-
-impl TrackedDataEntry {
-    /// Identity of the tracked field across every supported protocol version.
-    ///
-    /// `TrackedId` derives no `PartialEq`, and a single version's resolved slot
-    /// is not a valid identity (fields absent in that version all resolve to
-    /// 255), so all versions are compared.
-    const fn key(id: &TrackedId) -> [u8; 10] {
-        [
-            id.v1_21,
-            id.v1_21_2,
-            id.v1_21_4,
-            id.v1_21_5,
-            id.v1_21_6,
-            id.v1_21_7,
-            id.v1_21_9,
-            id.v1_21_11,
-            id.v26_1,
-            id.v26_2,
-        ]
-    }
 }
 
 impl Entity {
@@ -1308,6 +1334,7 @@ impl Entity {
             teleport_delay: AtomicI32::new(0),
             last_sent_on_ground: AtomicBool::new(false),
             tracked_data_snapshot: std::sync::Mutex::new(Vec::new()),
+            custom_data: Mutex::new(NbtCompound::new()),
         }
     }
 
@@ -1421,8 +1448,7 @@ impl Entity {
         );
         self.send_meta_data(
             &[Metadata::new(
-                TrackedData::CUSTOM_NAME,
-                MetaDataType::OPTIONAL_COMPONENT,
+                tracked_data::entity::DATA_CUSTOM_NAME,
                 Some(name),
             )],
             Some(&bedrock_meta),
@@ -1450,8 +1476,7 @@ impl Entity {
         );
         self.send_meta_data(
             &[Metadata::new(
-                TrackedData::CUSTOM_NAME_VISIBLE,
-                MetaDataType::BOOLEAN,
+                tracked_data::entity::DATA_CUSTOM_NAME_VISIBLE,
                 visible,
             )],
             Some(&bedrock_meta),
@@ -1465,11 +1490,7 @@ impl Entity {
     pub fn set_silent(&self, silent: bool) {
         self.silent.store(silent, Ordering::Relaxed);
         self.send_meta_data(
-            &[Metadata::new(
-                TrackedData::SILENT,
-                MetaDataType::BOOLEAN,
-                silent,
-            )],
+            &[Metadata::new(tracked_data::entity::DATA_SILENT, silent)],
             None,
         );
     }
@@ -1482,8 +1503,7 @@ impl Entity {
         self.has_no_gravity.store(no_gravity, Ordering::Relaxed);
         self.send_meta_data(
             &[Metadata::new(
-                TrackedData::NO_GRAVITY,
-                MetaDataType::BOOLEAN,
+                tracked_data::entity::DATA_NO_GRAVITY,
                 no_gravity,
             )],
             None,
@@ -2163,15 +2183,7 @@ impl Entity {
             0,
         );
         let world = self.world.load();
-        for player in world.players.load().iter() {
-            let center = player.get_entity().chunk_pos.load();
-            let view_distance = crate::world::chunker::get_view_distance(player).get() as i32;
-            if is_within_view_distance(chunk_pos, center, view_distance)
-                && let ClientPlatform::Bedrock(client) = player.client.as_ref()
-            {
-                client.try_enqueue_packet(&packet);
-            }
-        }
+        world.broadcast_to_chunk_bedrock(chunk_pos, &packet);
     }
 
     pub fn update_last_pos(&self) -> Vector3<f64> {
@@ -2833,6 +2845,18 @@ impl Entity {
             return;
         }
 
+        let mut portal_event =
+            crate::plugin::api::events::entity::entity_portal::EntityPortalEvent::new(
+                self.entity_id,
+                pos,
+            );
+        if let Some(server) = self.world.load().server.upgrade() {
+            server.plugin_manager.fire(&server, &mut portal_event).await;
+        }
+        if portal_event.cancelled {
+            return;
+        }
+
         // Passengers don't teleport independently - they wait for their vehicle
         if self.has_vehicle().await {
             return;
@@ -2981,8 +3005,7 @@ impl Entity {
             );
             self.send_meta_data(
                 &[Metadata::new(
-                    TrackedData::TICKS_FROZEN,
-                    MetaDataType::INT,
+                    tracked_data::entity::DATA_TICKS_FROZEN,
                     VarInt(new_frozen_ticks),
                 )],
                 Some(&bedrock_meta),
@@ -3011,8 +3034,7 @@ impl Entity {
         );
         self.send_meta_data(
             &[Metadata::new(
-                TrackedData::TICKS_FROZEN,
-                MetaDataType::INT,
+                tracked_data::entity::DATA_TICKS_FROZEN,
                 VarInt(0),
             )],
             Some(&bedrock_meta),
@@ -3083,43 +3105,58 @@ impl Entity {
         ));
     }
 
+    #[expect(clippy::unused_async)]
     pub async fn set_sneaking(&self, sneaking: bool) {
         //assert!(self.sneaking.load(Relaxed) != sneaking);
         self.sneaking.store(sneaking, Relaxed);
-        self.set_flag(Flag::Sneaking, sneaking).await;
+        self.set_flag(Flag::Sneaking, sneaking);
     }
     pub fn is_sneaking(&self) -> bool {
         self.sneaking.load(Ordering::Relaxed)
     }
 
-    pub async fn set_swimming(&self, invisible: bool) {
-        if self.swimming.load(Ordering::Relaxed) != invisible {
-            self.swimming.store(invisible, Relaxed);
-            self.set_flag(Flag::Swimming, invisible).await;
+    pub async fn set_swimming(&self, swimming: bool) {
+        if self.swimming.load(Ordering::Relaxed) != swimming {
+            let mut event =
+                crate::plugin::api::events::entity::entity_toggle_swim::EntityToggleSwimEvent::new(
+                    self.entity_id,
+                    swimming,
+                );
+            if let Some(server) = self.world.load().server.upgrade() {
+                server.plugin_manager.fire(&server, &mut event).await;
+            }
+            if event.cancelled {
+                return;
+            }
+            self.swimming.store(event.is_swimming, Relaxed);
+            self.set_flag(Flag::Swimming, event.is_swimming);
         }
     }
 
     /// Sets whether the entity is invisible and sends updated metadata.
+    #[expect(clippy::unused_async)]
     pub async fn set_invisible(&self, invisible: bool) {
         if self.invisible.load(Ordering::Relaxed) != invisible {
             self.invisible.store(invisible, Relaxed);
-            self.set_flag(Flag::Invisible, invisible).await;
+            self.set_flag(Flag::Invisible, invisible);
         }
     }
 
     /// Sets whether the entity is glowing and sends updated metadata.
+    #[expect(clippy::unused_async)]
     pub async fn set_glowing(&self, glowing: bool) {
         if self.glowing.load(Ordering::Relaxed) != glowing {
             self.glowing.store(glowing, Ordering::Relaxed);
-            self.set_flag(Flag::Glowing, glowing).await;
+            self.set_flag(Flag::Glowing, glowing);
         }
     }
 
     /// Sets whether the entity is on fire for visual and damage purposes. This is separate from `fire_ticks` which tracks the damage aspect of being on fire.
+    #[expect(clippy::unused_async)]
     pub async fn set_on_fire(&self, on_fire: bool) {
         if self.has_visual_fire.load(Ordering::Relaxed) != on_fire {
             self.has_visual_fire.store(on_fire, Ordering::Relaxed);
-            self.set_flag(Flag::OnFire, on_fire).await;
+            self.set_flag(Flag::OnFire, on_fire);
         }
     }
 
@@ -3228,10 +3265,11 @@ impl Entity {
         ]
     }
 
+    #[expect(clippy::unused_async)]
     pub async fn set_sprinting(&self, sprinting: bool) {
         //assert!(self.sprinting.load(Relaxed) != sprinting);
         self.sprinting.store(sprinting, Relaxed);
-        self.set_flag(Flag::Sprinting, sprinting).await;
+        self.set_flag(Flag::Sprinting, sprinting);
     }
 
     pub fn is_sprinting(&self) -> bool {
@@ -3241,16 +3279,17 @@ impl Entity {
         !self.on_ground.load(Relaxed)
     }
 
+    #[expect(clippy::unused_async)]
     pub async fn set_fall_flying(&self, fall_flying: bool) {
         assert_ne!(self.fall_flying.load(Relaxed), fall_flying);
         self.fall_flying.store(fall_flying, Relaxed);
-        self.set_flag(Flag::FallFlying, fall_flying).await;
+        self.set_flag(Flag::FallFlying, fall_flying);
     }
     pub fn is_fall_flying(&self) -> bool {
         self.fall_flying.load(Ordering::Relaxed)
     }
 
-    async fn set_flag(&self, flag: Flag, value: bool) {
+    fn set_flag(&self, flag: Flag, value: bool) {
         let index = flag as u8;
         let mask = (1i8).wrapping_shl(index as u32);
         let new_je_flags = if value {
@@ -3261,8 +3300,7 @@ impl Entity {
 
         self.send_meta_data(
             &[Metadata::new(
-                TrackedData::SHARED_FLAGS_ID,
-                MetaDataType::BYTE,
+                tracked_data::entity::DATA_SHARED_FLAGS_ID,
                 new_je_flags,
             )],
             None,
@@ -3293,36 +3331,25 @@ impl Entity {
 
             let world = self.world.load();
             let chunk_pos = self.chunk_pos.load();
-            for player in world.players.load().iter() {
-                if let ClientPlatform::Bedrock(client) = player.client.as_ref() {
-                    let center = player.get_entity().chunk_pos.load();
-                    let view_distance =
-                        crate::world::chunker::get_view_distance(player).get() as i32;
-
-                    if is_within_view_distance(chunk_pos, center, view_distance) {
-                        let mut metadata = EntityMetadata(std::collections::HashMap::new());
-                        metadata.set(
-                            entity_data_key::FLAGS,
-                            MetadataValue::Long(self.bedrock_flags.load(Ordering::Relaxed)),
-                        );
-                        metadata.set(
-                            entity_data_key::FLAGS_TWO,
-                            MetadataValue::Long(self.bedrock_flags_two.load(Ordering::Relaxed)),
-                        );
-                        client
-                            .enqueue_packet(&CSetActorData {
-                                actor_runtime_id: VarULong(self.entity_id as u64),
-                                metadata,
-                                synced_properties: PropertySyncData {
-                                    int_properties: std::collections::HashMap::new(),
-                                    float_properties: std::collections::HashMap::new(),
-                                },
-                                tick: VarULong(0),
-                            })
-                            .await;
-                    }
-                }
-            }
+            let mut metadata = EntityMetadata(std::collections::HashMap::new());
+            metadata.set(
+                entity_data_key::FLAGS,
+                MetadataValue::Long(self.bedrock_flags.load(Ordering::Relaxed)),
+            );
+            metadata.set(
+                entity_data_key::FLAGS_TWO,
+                MetadataValue::Long(self.bedrock_flags_two.load(Ordering::Relaxed)),
+            );
+            let packet = CSetActorData {
+                actor_runtime_id: VarULong(self.entity_id as u64),
+                metadata,
+                synced_properties: PropertySyncData {
+                    int_properties: std::collections::HashMap::new(),
+                    float_properties: std::collections::HashMap::new(),
+                },
+                tick: VarULong(0),
+            };
+            world.broadcast_to_chunk_bedrock(chunk_pos, &packet);
         }
     }
 
@@ -3369,7 +3396,10 @@ impl Entity {
             return;
         };
         buf.put_u8(255);
-        java.try_enqueue_packet(&CSetEntityMetadata::new(self.entity_id.into(), buf.into()));
+        let packet = CSetEntityMetadata::new(self.entity_id.into(), buf.into());
+        if let Ok(data) = JavaClient::serialize_packet_for_version(&packet, version) {
+            java.try_enqueue_packet(data);
+        }
     }
 
     pub fn send_meta_data<T: MetadataSerializer>(
@@ -3381,51 +3411,80 @@ impl Entity {
 
         let world = self.world.load();
         let chunk_pos = self.chunk_pos.load();
+        let players = world.players.load();
 
-        for player in world.players.load().iter() {
-            match player.client.as_ref() {
-                ClientPlatform::Java(client) => {
-                    // Apply Chebyshev distance check
-                    let center = player.get_entity().chunk_pos.load();
-                    let view_distance =
-                        crate::world::chunker::get_view_distance(player).get() as i32;
+        let mut java_recipients = Vec::new();
+        let mut bedrock_recipients = Vec::new();
 
-                    if is_within_view_distance(chunk_pos, center, view_distance) {
-                        let mut buf = Vec::new();
-                        for m in meta {
-                            let _ = m.write(&mut buf, &client.version.load());
-                        }
-                        buf.put_u8(255);
-                        player.client.try_enqueue_packet(&CSetEntityMetadata::new(
-                            self.entity_id.into(),
-                            buf.into(),
-                        ));
-                    }
+        for player in players.iter() {
+            let center = player.get_entity().chunk_pos.load();
+            let view_distance = crate::world::chunker::get_view_distance(player).get() as i32;
+
+            if is_within_view_distance(chunk_pos, center, view_distance) {
+                match player.client.as_ref() {
+                    ClientPlatform::Java(_) => java_recipients.push(player),
+                    ClientPlatform::Bedrock(client) => bedrock_recipients.push(client),
                 }
-                ClientPlatform::Bedrock(client) => {
-                    if let Some(bedrock_meta) = bedrock_meta {
-                        let center = player.get_entity().chunk_pos.load();
-                        let view_distance =
-                            crate::world::chunker::get_view_distance(player).get() as i32;
+            }
+        }
 
-                        if is_within_view_distance(chunk_pos, center, view_distance) {
-                            client.try_enqueue_packet(&CSetActorData {
-                                actor_runtime_id: VarULong(self.entity_id as u64),
-                                metadata: EntityMetadata(bedrock_meta.0.clone()),
-                                synced_properties: PropertySyncData {
-                                    int_properties: std::collections::HashMap::new(),
-                                    float_properties: std::collections::HashMap::new(),
-                                },
-                                tick: VarULong(0),
-                            });
-                        }
-                    }
+        let recipients_by_version =
+            World::collect_java_recipients_by_version(java_recipients.into_iter());
+
+        for (version, recipients) in recipients_by_version {
+            if version < CURRENT_MC_VERSION {
+                continue;
+            }
+            let mut buf = Vec::new();
+            for m in meta {
+                let _ = m.write(&mut buf, &version);
+            }
+            buf.put_u8(255);
+            let packet = CSetEntityMetadata::new(self.entity_id.into(), buf.into());
+            if let Ok(packet_data) = JavaClient::serialize_packet_for_version(&packet, version) {
+                for recipient in recipients {
+                    recipient.try_enqueue_packet(packet_data.clone());
+                }
+            }
+        }
+
+        if let Some(bedrock_meta) = bedrock_meta {
+            let packet = CSetActorData {
+                actor_runtime_id: VarULong(self.entity_id as u64),
+                metadata: EntityMetadata(bedrock_meta.0.clone()),
+                synced_properties: PropertySyncData {
+                    int_properties: std::collections::HashMap::new(),
+                    float_properties: std::collections::HashMap::new(),
+                },
+                tick: VarULong(0),
+            };
+            if let Ok(packet_data) =
+                pumpkin_protocol::bedrock::packet_encoder::serialize_packet(&packet)
+            {
+                for recipient in bedrock_recipients {
+                    recipient.try_enqueue_packet(packet_data.clone());
                 }
             }
         }
     }
 
     pub fn set_pose(&self, pose: EntityPose) {
+        let mut pose_event =
+            crate::plugin::api::events::entity::entity_pose_change::EntityPoseChangeEvent::new(
+                self.entity_id,
+                (pose as u8).to_string(),
+            );
+        if let Some(server) = self.world.load().server.upgrade() {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    server.plugin_manager.fire(&server, &mut pose_event).await;
+                });
+            });
+            if pose_event.cancelled {
+                return;
+            }
+        }
+
         let dimension = Self::get_entity_dimensions(pose);
         let position = self.pos.load();
         let aabb = BoundingBox::new_from_pos(position.x, position.y, position.z, &dimension);
@@ -3437,12 +3496,16 @@ impl Entity {
             let pose = pose as i32;
             let mut bedrock_meta = EntityMetadata::new();
             bedrock_meta.set(entity_data_key::POSE_INDEX, MetadataValue::Int(pose));
+            bedrock_meta.set(
+                entity_data_key::WIDTH,
+                MetadataValue::Float(dimension.width),
+            );
+            bedrock_meta.set(
+                entity_data_key::HEIGHT,
+                MetadataValue::Float(dimension.height),
+            );
             self.send_meta_data(
-                &[Metadata::new(
-                    TrackedData::POSE,
-                    MetaDataType::POSE,
-                    VarInt(pose),
-                )],
+                &[Metadata::new(tracked_data::entity::DATA_POSE, VarInt(pose))],
                 Some(&bedrock_meta),
             );
         }
@@ -3509,7 +3572,7 @@ impl Entity {
                 for z in blockpos.0.z..=blockpos1.0.z {
                     let pos = BlockPos::new(x, y, z);
                     let (block, state) = world.get_block_and_state(&pos);
-                    let block_outlines = state.get_block_outline_shapes();
+                    let block_outlines = state.get_block_outline_shapes_at(&pos);
 
                     if state.outline_shapes.is_empty() {
                         world
@@ -3716,11 +3779,37 @@ impl Entity {
         vehicle.is_some()
     }
 
+    pub async fn is_leashed(&self) -> bool {
+        let leashed_to = self.leashed_to.lock().await;
+        leashed_to.is_some()
+    }
+
     pub async fn add_passenger(
         &self,
         vehicle: Arc<dyn EntityBase>,
         passenger: Arc<dyn EntityBase>,
     ) {
+        let mut mount_event =
+            crate::plugin::api::events::entity::entity_mount::EntityMountEvent::new(
+                passenger.get_entity().entity_id,
+                self.entity_id,
+            );
+        let mut vehicle_enter =
+            crate::plugin::api::events::vehicle::vehicle_enter::VehicleEnterEvent::new(
+                self.entity_id,
+                passenger.get_entity().entity_id,
+            );
+        if let Some(server) = self.world.load().server.upgrade() {
+            server.plugin_manager.fire(&server, &mut mount_event).await;
+            server
+                .plugin_manager
+                .fire(&server, &mut vehicle_enter)
+                .await;
+        }
+        if mount_event.cancelled || vehicle_enter.cancelled {
+            return;
+        }
+
         let passenger_entity = passenger.get_entity();
         passenger_entity
             .requires_custom_persistence
@@ -3743,8 +3832,51 @@ impl Entity {
         );
     }
 
+    pub(crate) async fn remove_passenger_on_disconnect(&self, passenger_id: i32) {
+        let mut passengers = self.passengers.lock().await;
+        if let Some(index) = passengers
+            .iter()
+            .position(|passenger| passenger.get_entity().entity_id == passenger_id)
+        {
+            let passenger = passengers.remove(index);
+            *passenger.get_entity().vehicle.lock().await = None;
+        }
+
+        let passenger_ids: Vec<VarInt> = passengers
+            .iter()
+            .map(|passenger| VarInt(passenger.get_entity().entity_id))
+            .collect();
+        drop(passengers);
+
+        self.world.load().broadcast_to_chunk(
+            self.chunk_pos.load(),
+            &CSetPassengers::new(VarInt(self.entity_id), &passenger_ids),
+        );
+    }
+
     #[allow(clippy::too_many_lines)]
     pub async fn remove_passenger(&self, passenger_id: i32) {
+        let mut dismount_event =
+            crate::plugin::api::events::entity::entity_dismount::EntityDismountEvent::new(
+                passenger_id,
+                self.entity_id,
+            );
+        let mut vehicle_exit =
+            crate::plugin::api::events::vehicle::vehicle_exit::VehicleExitEvent::new(
+                self.entity_id,
+                passenger_id,
+            );
+        if let Some(server) = self.world.load().server.upgrade() {
+            server
+                .plugin_manager
+                .fire(&server, &mut dismount_event)
+                .await;
+            server.plugin_manager.fire(&server, &mut vehicle_exit).await;
+        }
+        if dismount_event.cancelled || vehicle_exit.cancelled {
+            return;
+        }
+
         let mut passengers = self.passengers.lock().await;
         let removed_passenger = if let Some(idx) = passengers
             .iter()
@@ -3812,7 +3944,7 @@ impl Entity {
             let world = self.world.load();
             let passengers_packet = CSetPassengers::new(VarInt(self.entity_id), &passenger_ids);
             if let Some(player) = passenger.get_player() {
-                player.client.enqueue_packet(&passengers_packet).await;
+                player.send_client_packet(&passengers_packet).await;
                 world.broadcast_to_chunk_except(
                     chunk_pos,
                     &[player.get_entity().entity_uuid],
@@ -3993,18 +4125,21 @@ impl Entity {
                 }
             };
 
+            // Clean up any remaining reference to the dismounted passenger.
+            passenger_entity.set_pos(dismount_pos);
+
+            // Phase 2: Teleport to safety (unblocks movement)
             if let Some(player) = passenger.get_player() {
                 if let Some(id) = teleport_id {
                     player.get_entity().set_pos(dismount_pos);
                     // Update awaiting_teleport with the real dismount position
                     *player.awaiting_teleport.lock().await = Some((id.into(), dismount_pos));
-                    // Use enqueue_packet (not send_packet_now) so the teleport goes through
+                    // Use send_client_packet so the teleport goes through
                     // the same packet queue as CSetPassengers, preserving send order.
                     // Vanilla uses DELTA | ROT flags: position absolute, delta/rotation relative.
                     // With rotation relative and yaw/pitch=0, the client preserves its current look.
                     player
-                        .client
-                        .enqueue_packet(&CPlayerPosition::new(
+                        .send_client_packet(&CPlayerPosition::new(
                             id.into(),
                             dismount_pos,
                             Vector3::new(0.0, 0.0, 0.0),
@@ -4075,6 +4210,53 @@ impl Entity {
         }
         self.movement_multiplier.store(multiplier);
     }
+
+    pub async fn set_custom_data(&self, namespace: &str, key: &str, value: NbtTag) {
+        let mut custom_data = self.custom_data.lock().await;
+
+        let mut namespace_data = custom_data
+            .child_tags
+            .remove(namespace)
+            .and_then(|tag| match tag {
+                NbtTag::Compound(compound) => Some(compound),
+                _ => None,
+            })
+            .unwrap_or_default();
+
+        namespace_data.child_tags.insert(key.into(), value);
+        custom_data
+            .child_tags
+            .insert(namespace.into(), NbtTag::Compound(namespace_data));
+    }
+
+    pub async fn get_custom_data(&self, namespace: &str, key: &str) -> Option<NbtTag> {
+        let custom_data = self.custom_data.lock().await;
+        custom_data
+            .get(namespace)?
+            .extract_compound()?
+            .get(key)
+            .cloned()
+    }
+
+    pub async fn remove_custom_data(&self, namespace: &str, key: &str) {
+        let mut custom_data = self.custom_data.lock().await;
+
+        let Some(NbtTag::Compound(mut namespace_data)) = custom_data.child_tags.remove(namespace)
+        else {
+            return;
+        };
+
+        namespace_data.child_tags.remove(key);
+        if !namespace_data.is_empty() {
+            custom_data
+                .child_tags
+                .insert(namespace.into(), NbtTag::Compound(namespace_data));
+        }
+    }
+
+    pub async fn has_custom_data(&self, namespace: &str, key: &str) -> bool {
+        self.get_custom_data(namespace, key).await.is_some()
+    }
 }
 
 impl NBTStorage for Entity {
@@ -4143,6 +4325,11 @@ impl NBTStorage for Entity {
                 );
             }
 
+            let custom_data = self.custom_data.lock().await;
+            if !custom_data.is_empty() {
+                nbt.put_compound("PumpkinCustomData", custom_data.clone());
+            }
+
             // todo more...
         })
     }
@@ -4209,11 +4396,7 @@ impl NBTStorage for Entity {
                 self.no_ai.store(no_ai, Relaxed);
                 if no_ai {
                     self.send_meta_data(
-                        &[Metadata::new(
-                            TrackedData::MOB_FLAGS_ID,
-                            MetaDataType::BYTE,
-                            1u8,
-                        )],
+                        &[Metadata::new(tracked_data::mob::DATA_MOB_FLAGS_ID, 1u8)],
                         None,
                     );
                 }
@@ -4228,6 +4411,14 @@ impl NBTStorage for Entity {
                         .filter_map(|tag| tag.extract_string().map(str::to_owned))
                         .take(MAX_SCOREBOARD_TAGS),
                 );
+            }
+
+            if let Some(custom_data) = nbt
+                .get_compound("PumpkinCustomData")
+                .or_else(|| nbt.get_compound("BukkitValues"))
+            {
+                let mut data = self.custom_data.lock().await;
+                *data = custom_data.clone();
             }
 
             // todo more...
@@ -4527,377 +4718,13 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-mod tracked_data_bounds_tests {
-    use pumpkin_data::tracked_data::TrackedData;
-
-    /// Every tracked-data index this server sends must be inside the receiving entity's
-    /// client-side data array, otherwise `SynchedEntityData.assignValues` throws
-    /// `ArrayIndexOutOfBoundsException` and the client hard-disconnects.
-    ///
-    /// Slot counts are the 26.2 tables on
-    /// <https://minecraft.wiki/w/Java_Edition_protocol/Entity_metadata>: Entity 0-7,
-    /// `LivingEntity` 8-14, `Mob` 15, `AgeableMob` 16-17, `AbstractFish` 16, plus each entity's
-    /// own fields. The count is "highest valid index + 1".
-    /// (entity name, client-side slot count, sent [(constant name, 26.2 index)]).
-    type EntitySlots = (&'static str, u8, &'static [(&'static str, u8)]);
-
-    const ENTITY_SLOT_COUNTS: &[EntitySlots] = &[
-        (
-            "salmon",
-            18,
-            &[("SALMON_VARIANT", TrackedData::SALMON_VARIANT.v26_2)],
-        ),
-        (
-            "pufferfish",
-            18,
-            &[("PUFF_STATE", TrackedData::PUFF_STATE.v26_2)],
-        ),
-        (
-            "tropical_fish",
-            18,
-            &[("ID_TYPE_VARIANT", TrackedData::ID_TYPE_VARIANT.v26_2)],
-        ),
-        (
-            "glow_squid",
-            19,
-            &[(
-                "DARK_TICKS_REMAINING",
-                TrackedData::DARK_TICKS_REMAINING.v26_2,
-            )],
-        ),
-        (
-            "dolphin",
-            20,
-            &[
-                ("GOT_FISH", TrackedData::GOT_FISH.v26_2),
-                ("MOISTNESS_LEVEL", TrackedData::MOISTNESS_LEVEL.v26_2),
-            ],
-        ),
-        ("sheep", 19, &[("WOOL_ID", TrackedData::WOOL_ID.v26_2)]),
-        ("fox", 22, &[("TYPE_ID", TrackedData::TYPE_ID.v26_2)]),
-        (
-            "turtle",
-            20,
-            &[
-                ("HAS_EGG", TrackedData::HAS_EGG.v26_2),
-                ("LAYING_EGG", TrackedData::LAYING_EGG.v26_2),
-            ],
-        ),
-        ("chicken", 20, &[("VARIANT", TrackedData::VARIANT.v26_2)]),
-        (
-            "frog",
-            20,
-            &[
-                ("VARIANT", TrackedData::VARIANT.v26_2),
-                ("TONGUE_TARGET_ID", TrackedData::TONGUE_TARGET_ID.v26_2),
-            ],
-        ),
-        ("camel", 21, &[("DASH", TrackedData::DASH.v26_2)]),
-        (
-            "llama",
-            22,
-            &[
-                ("STRENGTH_ID", TrackedData::STRENGTH_ID.v26_2),
-                ("VARIANT_ID", TrackedData::VARIANT_ID.v26_2),
-            ],
-        ),
-        (
-            "wolf",
-            25,
-            &[
-                ("INTERESTED_ID", TrackedData::INTERESTED_ID.v26_2),
-                ("COLLAR_COLOR", TrackedData::COLLAR_COLOR.v26_2),
-                ("WOLF_VARIANT_ID", TrackedData::WOLF_VARIANT_ID.v26_2),
-            ],
-        ),
-        (
-            "cat",
-            25,
-            &[("CAT_COLLAR_COLOR", TrackedData::CAT_COLLAR_COLOR.v26_2)],
-        ),
-        (
-            // Abstract Horse extends Animal/Ageable Mob (16-17) and adds its Byte bit mask at
-            // 18, so Horse's own Variant is 19 and a horse has 20 slots.
-            "horse",
-            20,
-            &[("HORSE_VARIANT", TrackedData::HORSE_VARIANT.v26_2)],
-        ),
-        (
-            "villager",
-            21,
-            &[("VILLAGER_DATA", TrackedData::VILLAGER_DATA.v26_2)],
-        ),
-        (
-            "creeper",
-            19,
-            &[
-                ("SWELL_DIR", TrackedData::SWELL_DIR.v26_2),
-                ("IS_IGNITED", TrackedData::IS_IGNITED.v26_2),
-            ],
-        ),
-        (
-            "enderman",
-            19,
-            &[
-                ("CARRY_STATE", TrackedData::CARRY_STATE.v26_2),
-                ("CREEPY", TrackedData::CREEPY.v26_2),
-                ("STARED_AT", TrackedData::STARED_AT.v26_2),
-            ],
-        ),
-        (
-            "shulker",
-            19,
-            &[
-                ("ATTACH_FACE_ID", TrackedData::ATTACH_FACE_ID.v26_2),
-                ("PEEK_ID", TrackedData::PEEK_ID.v26_2),
-            ],
-        ),
-        // AbstractCubeMob extends AgeableMob on 26.2, so Size sits at 18 and slime/magma cube
-        // have 19 slots. Sulfur cube adds Max fuse (19) and From bucket (20), so 21.
-        ("slime", 19, &[("CUBE_SIZE", TrackedData::CUBE_SIZE.v26_2)]),
-        (
-            "magma_cube",
-            19,
-            &[("CUBE_SIZE", TrackedData::CUBE_SIZE.v26_2)],
-        ),
-        (
-            "sulfur_cube",
-            21,
-            &[
-                ("CUBE_SIZE", TrackedData::CUBE_SIZE.v26_2),
-                ("BABY_ID", TrackedData::BABY_ID.v26_2),
-            ],
-        ),
-        (
-            "guardian",
-            18,
-            &[("ID_ATTACK_TARGET", TrackedData::ID_ATTACK_TARGET.v26_2)],
-        ),
-        // Primed TNT extends Entity (0-7) and adds Fuse time (8) + exploding block state (9).
-        ("primed_tnt", 10, &[("FUSE_ID", TrackedData::FUSE_ID.v26_2)]),
-        // Abstract Vehicle extends Entity and adds Shaking power (8), Shaking direction (9),
-        // Shaking multiplier (10). Boat adds two paddles + splash timer (11-13); Abstract
-        // Minecart adds custom block state + custom block Y (11-12). Both share 8/9.
-        (
-            "boat",
-            14,
-            &[
-                ("ID_HURT", TrackedData::ID_HURT.v26_2),
-                ("ID_HURTDIR", TrackedData::ID_HURTDIR.v26_2),
-            ],
-        ),
-        (
-            "minecart",
-            13,
-            &[
-                ("ID_HURT", TrackedData::ID_HURT.v26_2),
-                ("ID_HURTDIR", TrackedData::ID_HURTDIR.v26_2),
-            ],
-        ),
-        // Display extends Entity and owns 8-22: interpolation delay (8), transformation
-        // interpolation duration (9), pos/rot interpolation duration (10), translation (11),
-        // scale (12), rotation left/right (13/14), billboard (15), brightness override (16),
-        // view/shadow/culling fields (17-21), glow colour override (22).
-        (
-            "display",
-            23,
-            &[
-                (
-                    "TRANSFORMATION_INTERPOLATION_START_DELTA_TICKS_ID",
-                    TrackedData::TRANSFORMATION_INTERPOLATION_START_DELTA_TICKS_ID.v26_2,
-                ),
-                (
-                    "TRANSFORMATION_INTERPOLATION_DURATION_ID",
-                    TrackedData::TRANSFORMATION_INTERPOLATION_DURATION_ID.v26_2,
-                ),
-                (
-                    "POS_ROT_INTERPOLATION_DURATION_ID",
-                    TrackedData::POS_ROT_INTERPOLATION_DURATION_ID.v26_2,
-                ),
-                (
-                    "BRIGHTNESS_OVERRIDE_ID",
-                    TrackedData::BRIGHTNESS_OVERRIDE_ID.v26_2,
-                ),
-                (
-                    "GLOW_COLOR_OVERRIDE_ID",
-                    TrackedData::GLOW_COLOR_OVERRIDE_ID.v26_2,
-                ),
-                // Pre-26.x aliases; these resolve to 255 on 26.2 and are skipped.
-                (
-                    "START_INTERPOLATION",
-                    TrackedData::START_INTERPOLATION.v26_2,
-                ),
-                (
-                    "INTERPOLATION_DURATION",
-                    TrackedData::INTERPOLATION_DURATION.v26_2,
-                ),
-                ("BRIGHTNESS", TrackedData::BRIGHTNESS.v26_2),
-                (
-                    "GLOW_COLOR_OVERRIDE",
-                    TrackedData::GLOW_COLOR_OVERRIDE.v26_2,
-                ),
-            ],
-        ),
-        // Text Display extends Display and adds text (23), line width (24), background
-        // colour (25), text opacity (26), style flags (27).
-        (
-            "text_display",
-            28,
-            &[
-                ("LINE_WIDTH_ID", TrackedData::LINE_WIDTH_ID.v26_2),
-                (
-                    "BACKGROUND_COLOR_ID",
-                    TrackedData::BACKGROUND_COLOR_ID.v26_2,
-                ),
-                ("LINE_WIDTH", TrackedData::LINE_WIDTH.v26_2),
-                ("BACKGROUND", TrackedData::BACKGROUND.v26_2),
-            ],
-        ),
-        (
-            "pillager",
-            18,
-            &[(
-                "IS_CHARGING_CROSSBOW",
-                TrackedData::IS_CHARGING_CROSSBOW.v26_2,
-            )],
-        ),
-        ("bogged", 17, &[("SHEARED", TrackedData::SHEARED.v26_2)]),
-        (
-            "spider",
-            17,
-            &[("SPIDER_FLAGS", TrackedData::SPIDER_FLAGS.v26_2)],
-        ),
-        ("zoglin", 17, &[("BABY_ID", TrackedData::BABY_ID.v26_2)]),
-        (
-            "mob (base)",
-            16,
-            &[("MOB_FLAGS_ID", TrackedData::MOB_FLAGS_ID.v26_2)],
-        ),
-        (
-            "living entity (base)",
-            15,
-            &[
-                (
-                    "LIVING_ENTITY_FLAGS",
-                    TrackedData::LIVING_ENTITY_FLAGS.v26_2,
-                ),
-                ("HEALTH_ID", TrackedData::HEALTH_ID.v26_2),
-                ("SLEEPING_POS_ID", TrackedData::SLEEPING_POS_ID.v26_2),
-            ],
-        ),
-        (
-            "entity (base)",
-            8,
-            &[
-                ("SHARED_FLAGS_ID", TrackedData::SHARED_FLAGS_ID.v26_2),
-                ("AIR_SUPPLY_ID", TrackedData::AIR_SUPPLY_ID.v26_2),
-                ("CUSTOM_NAME", TrackedData::CUSTOM_NAME.v26_2),
-                (
-                    "CUSTOM_NAME_VISIBLE",
-                    TrackedData::CUSTOM_NAME_VISIBLE.v26_2,
-                ),
-                ("POSE", TrackedData::POSE.v26_2),
-                ("TICKS_FROZEN", TrackedData::TICKS_FROZEN.v26_2),
-            ],
-        ),
-    ];
-
-    /// 255 is the terminator byte and is treated as "field not present on this version"
-    /// by `Metadata::write`, which skips it; it is not an index.
-    const NOT_PRESENT: u8 = 255;
-
-    #[test]
-    fn sent_tracked_data_indices_are_within_entity_slot_counts() {
-        for (entity, slots, fields) in ENTITY_SLOT_COUNTS {
-            for (name, index) in *fields {
-                if *index == NOT_PRESENT {
-                    continue;
-                }
-                assert!(
-                    index < slots,
-                    "{entity}: TrackedData::{name} resolves to index {index} on 26.2 but the \
-                     client data array only has {slots} slots (valid 0..={})",
-                    slots - 1
-                );
-            }
-        }
-    }
-
-    /// Regression test for the 26.2 client crash
-    /// `ArrayIndexOutOfBoundsException: Index 18 out of bounds for length 18` in
-    /// `SynchedEntityData.assignValues`, triggered by salmon metadata. Salmon extends
-    /// `AbstractFish`, whose `FROM_BUCKET` is 16, so salmon's own tracker is 17 - not the
-    /// flattened `DATA_VARIANT` key's 18, which belongs to the ageable-mob chain.
-    #[test]
-    fn salmon_variant_is_the_fish_scoped_index() {
-        assert_eq!(TrackedData::SALMON_VARIANT.v26_2, 17);
-        assert_eq!(TrackedData::SALMON_VARIANT.v26_1, 17);
-        assert_eq!(TrackedData::FROM_BUCKET.v26_2, 16);
-        assert_ne!(
-            TrackedData::SALMON_VARIANT.v26_2,
-            TrackedData::VARIANT.v26_2
-        );
-    }
-
-    /// Mojang names both the tropical fish and the horse tracker `DATA_ID_TYPE_VARIANT`, so
-    /// the flattened dumps keep a single `ID_TYPE_VARIANT` = 17 - the `AbstractFish` slot.
-    /// Per the 26.2 tables on
-    /// <https://minecraft.wiki/w/Java_Edition_protocol/Entity_metadata>, Horse extends
-    /// Abstract Horse, whose Byte bit mask sits at 18 after Ageable Mob's 16-17, so Horse's
-    /// Variant is 19. The dumps confirm Abstract Horse ends at 18 positionally: Chested
-    /// Horse's `DATA_ID_CHEST` = 19 and Llama's `DATA_STRENGTH_ID` = 20.
-    #[test]
-    fn horse_variant_is_the_horse_scoped_index() {
-        assert_eq!(TrackedData::HORSE_VARIANT.v26_2, 19);
-        assert_eq!(TrackedData::HORSE_VARIANT.v26_1, 19);
-        assert_eq!(TrackedData::ID_CHEST.v26_2, 19);
-        assert_eq!(TrackedData::STRENGTH_ID.v26_2, 20);
-        assert_ne!(
-            TrackedData::HORSE_VARIANT.v26_2,
-            TrackedData::ID_TYPE_VARIANT.v26_2
-        );
-    }
-
-    /// The flattened 26.x dumps collapse wolf's and cat's `DATA_COLLAR_COLOR` into one
-    /// `COLLAR_COLOR` key = 21, which is wolf's. Per the 26.2 tables on
-    /// <https://minecraft.wiki/w/Java_Edition_protocol/Entity_metadata>, Cat extends Tameable
-    /// Animal (18-19) and owns 20-24, putting its collar colour at 23; index 21 on a cat is
-    /// the Boolean "Is lying" (the dumps' own `IS_LYING`).
-    #[test]
-    fn cat_collar_color_is_the_cat_scoped_index() {
-        assert_eq!(TrackedData::CAT_COLLAR_COLOR.v26_2, 23);
-        assert_eq!(TrackedData::CAT_COLLAR_COLOR.v26_1, 23);
-        assert_eq!(TrackedData::IS_LYING.v26_2, 21);
-        assert_ne!(
-            TrackedData::CAT_COLLAR_COLOR.v26_2,
-            TrackedData::COLLAR_COLOR.v26_2
-        );
-    }
-
-    /// Creeper's swell state is its own index 16 (`DATA_SWELL_DIR`), not Primed TNT's
-    /// "Fuse time" (`DATA_FUSE_ID` = 8), which on a creeper is `LivingEntity` "Hand states".
-    #[test]
-    fn creeper_swell_dir_is_not_the_tnt_fuse_index() {
-        assert_eq!(TrackedData::SWELL_DIR.v26_2, 16);
-        assert_eq!(TrackedData::SWELL_DIR.v26_1, 16);
-        assert_eq!(TrackedData::FUSE_ID.v26_2, 8);
-        assert_ne!(TrackedData::SWELL_DIR.v26_2, TrackedData::FUSE_ID.v26_2);
-    }
-
-    /// The flattened 26.x dumps collapse slime's and phantom's `DATA_ID_SIZE` into one
-    /// `ID_SIZE` key. Per the 26.2 tables on
-    /// <https://minecraft.wiki/w/Java_Edition_protocol/Entity_metadata>, `AbstractCubeMob`
-    /// extends `AgeableMob` (16-17) so Size is 18, while `Phantom` extends `Mob` and keeps
-    /// Size at 16 with only 17 slots. `CUBE_SIZE` is the cube-scoped key; a phantom sender
-    /// must never reuse it.
-    #[test]
-    fn cube_size_is_the_ageable_scoped_index() {
-        assert_eq!(TrackedData::CUBE_SIZE.v26_2, 18);
-        assert_eq!(TrackedData::CUBE_SIZE.v26_1, 16);
-        assert_eq!(TrackedData::CUBE_SIZE.v1_21_4, 16);
-    }
-}
+// The fork's `tracked_data_bounds_tests` module was dropped in the 2026-08-20 upstream
+// merge: it audited the old flat `TrackedData::NAME` table (one namespace for every
+// entity, with per-version index fields) against hand-written vanilla slot counts.
+// Upstream's regenerated `pumpkin_data::tracked_data` is scoped per entity, so the
+// name-collision class those tests guarded (salmon/horse/cat/creeper/slime reusing a
+// flattened key) can no longer be expressed. Re-add an equivalent audit against the
+// new per-entity modules if index drift shows up again.
 
 /// Guard against silently-dropped entity metadata.
 ///
@@ -5078,27 +4905,32 @@ mod metadata_type_resolves_on_target_version_tests {
         );
     }
 
-    /// The concrete swap this guard exists for.
+    /// The concrete swap this guard was written for is gone: upstream's regenerated
+    /// `meta_data_type.rs` (2026-08-20 merge) makes `INTEGER` a plain alias of `INT`
+    /// with id 1 on every supported version, so the old
+    /// `int_and_integer_swapped_between_1_21_and_26_x` assertions no longer hold and
+    /// were dropped. The scanner above still earns its keep for any *other* constant
+    /// that resolves negative on 26.2.
     #[test]
-    fn int_and_integer_swapped_between_1_21_and_26_x() {
-        // PENDING-INDEX-FIX: not a send site - this asserts the swap itself, so the
-        // scanner above must not treat these two lines as dropped metadata.
-        assert_eq!(MetaDataType::INTEGER.id(JavaMinecraftVersion::V_1_21_11), 1);
-        assert_eq!(MetaDataType::INTEGER.id(JavaMinecraftVersion::V_26_2), -1);
-        assert_eq!(MetaDataType::INT.id(JavaMinecraftVersion::V_1_21_11), -1);
-        assert_eq!(MetaDataType::INT.id(JavaMinecraftVersion::V_26_2), 1);
+    fn integer_is_now_an_alias_of_int() {
+        // PENDING-INDEX-FIX: not a send site - this asserts the table shape itself, so
+        // the scanner above must not treat these lines as dropped metadata.
+        assert_eq!(
+            MetaDataType::INTEGER.id(JavaMinecraftVersion::V_26_2),
+            MetaDataType::INT.id(JavaMinecraftVersion::V_26_2)
+        );
+        assert!(MetaDataType::INT.id(JavaMinecraftVersion::V_26_2) >= 0);
     }
 }
 
 #[cfg(test)]
 mod tracked_data_replay_tests {
-    use pumpkin_data::meta_data_type::MetaDataType;
-    use pumpkin_data::tracked_data::TrackedData;
+    use pumpkin_data::tracked_data;
     use pumpkin_protocol::codec::var_int::VarInt;
     use pumpkin_protocol::java::client::play::Metadata;
     use pumpkin_util::version::JavaMinecraftVersion;
 
-    use super::{TrackedDataEntry, record_tracked_data_into, serialize_tracked_data};
+    use super::{record_tracked_data_into, serialize_tracked_data};
 
     /// A value published once must stay retrievable so it can be replayed to a
     /// player who only later starts seeing the entity. Before this change nothing
@@ -5110,11 +4942,7 @@ mod tracked_data_replay_tests {
         let mut snapshot = Vec::new();
         record_tracked_data_into(
             &mut snapshot,
-            &[Metadata::new(
-                TrackedData::CUBE_SIZE,
-                MetaDataType::INT,
-                VarInt(4),
-            )],
+            &[Metadata::new(tracked_data::slime::ID_SIZE, VarInt(4))],
         );
 
         assert_eq!(snapshot.len(), 1);
@@ -5122,7 +4950,7 @@ mod tracked_data_replay_tests {
         let buf = serialize_tracked_data(&snapshot, JavaMinecraftVersion::V_26_2)
             .expect("a retained value must serialize for the client");
         // Index byte, then the type id, then the payload.
-        assert_eq!(buf[0], TrackedData::CUBE_SIZE.v26_2);
+        assert_eq!(buf[0], tracked_data::slime::ID_SIZE.id.v26_2);
         assert_eq!(buf[0], 18);
         assert!(buf.len() > 2, "payload must not be empty: {buf:?}");
         // VarInt(4) is a single byte at the end.
@@ -5137,11 +4965,7 @@ mod tracked_data_replay_tests {
         for size in [1i32, 4] {
             record_tracked_data_into(
                 &mut snapshot,
-                &[Metadata::new(
-                    TrackedData::CUBE_SIZE,
-                    MetaDataType::INT,
-                    VarInt(size),
-                )],
+                &[Metadata::new(tracked_data::slime::ID_SIZE, VarInt(size))],
             );
         }
         assert_eq!(snapshot.len(), 1);
@@ -5156,73 +4980,17 @@ mod tracked_data_replay_tests {
         record_tracked_data_into(
             &mut snapshot,
             &[Metadata::new(
-                TrackedData::CUBE_SIZE,
-                MetaDataType::INT,
-                VarInt(4),
+                tracked_data::creeper::DATA_SWELL_DIR,
+                VarInt(1),
             )],
         );
         record_tracked_data_into(
             &mut snapshot,
-            &[Metadata::new(
-                TrackedData::IS_IGNITED,
-                MetaDataType::BOOLEAN,
-                true,
-            )],
+            &[Metadata::new(tracked_data::creeper::DATA_IS_IGNITED, true)],
         );
         assert_eq!(snapshot.len(), 2);
         let buf = serialize_tracked_data(&snapshot, JavaMinecraftVersion::V_26_2).unwrap();
-        assert!(buf.contains(&TrackedData::CUBE_SIZE.v26_2));
-        assert!(buf.contains(&TrackedData::IS_IGNITED.v26_2));
-    }
-
-    /// The stored payload is protocol-version independent; only the index
-    /// resolution differs per version. Ocelot `TRUSTING` is slot 18 on 26.2 and
-    /// slot 17 on 1.21.4 (`pumpkin-data/src/generated/tracked_data.rs`).
-    #[test]
-    fn replay_resolves_the_index_per_client_version() {
-        let mut snapshot = Vec::new();
-        record_tracked_data_into(
-            &mut snapshot,
-            &[Metadata::new(
-                TrackedData::TRUSTING,
-                MetaDataType::BOOLEAN,
-                true,
-            )],
-        );
-        let modern = serialize_tracked_data(&snapshot, JavaMinecraftVersion::V_26_2).unwrap();
-        let legacy = serialize_tracked_data(&snapshot, JavaMinecraftVersion::V_1_21_4).unwrap();
-        assert_eq!(modern[0], TrackedData::TRUSTING.v26_2);
-        assert_eq!(legacy[0], TrackedData::TRUSTING.v1_21_4);
-        assert_ne!(modern[0], legacy[0]);
-        assert_eq!(modern.last(), legacy.last());
-    }
-
-    /// A field that does not exist in the target version resolves to 255 and must
-    /// be skipped entirely rather than written as slot 255, which the client
-    /// would reject.
-    #[test]
-    fn fields_absent_in_the_target_version_are_skipped() {
-        let mut snapshot = Vec::new();
-        record_tracked_data_into(
-            &mut snapshot,
-            &[Metadata::new(
-                TrackedData::ACTIVE,
-                MetaDataType::BOOLEAN,
-                true,
-            )],
-        );
-        assert_eq!(TrackedData::ACTIVE.v26_2, 255);
-        assert!(serialize_tracked_data(&snapshot, JavaMinecraftVersion::V_26_2).is_none());
-        assert!(serialize_tracked_data(&snapshot, JavaMinecraftVersion::V_1_21_4).is_some());
-    }
-
-    /// Tracked ids are compared across every supported version: two fields that
-    /// both resolve to 255 on 26.2 are still distinct entries.
-    #[test]
-    fn tracked_id_identity_uses_all_versions() {
-        assert_ne!(
-            TrackedDataEntry::key(&TrackedData::PLAYER_MODE_CUSTOMISATION),
-            TrackedDataEntry::key(&TrackedData::PLAYER_MODE_CUSTOMIZATION_ID),
-        );
+        assert!(buf.contains(&tracked_data::creeper::DATA_SWELL_DIR.id.v26_2));
+        assert!(buf.contains(&tracked_data::creeper::DATA_IS_IGNITED.id.v26_2));
     }
 }

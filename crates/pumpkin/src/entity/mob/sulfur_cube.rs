@@ -9,10 +9,9 @@ use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::{codec::var_int::VarInt, java::client::play::Metadata};
 use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
@@ -156,8 +155,7 @@ impl SulfurCubeEntity {
     fn send_size_meta_data(&self, size: i32) {
         self.entity.living_entity.entity.send_meta_data(
             &[Metadata::new(
-                TrackedData::CUBE_SIZE,
-                MetaDataType::INT,
+                tracked_data::sulfur_cube::ID_SIZE,
                 VarInt(size),
             )],
             None,
@@ -400,11 +398,7 @@ impl Mob for SulfurCubeEntity {
             self.send_size_meta_data(self.get_size());
             if self.is_baby() {
                 self.entity.living_entity.entity.send_meta_data(
-                    &[Metadata::new(
-                        TrackedData::BABY_ID,
-                        MetaDataType::BOOLEAN,
-                        true,
-                    )],
+                    &[Metadata::new(tracked_data::sulfur_cube::BABY_ID, true)],
                     None,
                 );
             }

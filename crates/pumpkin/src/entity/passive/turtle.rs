@@ -4,8 +4,7 @@ use std::sync::{Arc, Weak};
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
-use pumpkin_data::meta_data_type::MetaDataType;
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_protocol::java::client::play::Metadata;
@@ -106,11 +105,7 @@ impl TurtleEntity {
     pub fn set_has_egg(&self, has_egg: bool) {
         self.has_egg.store(has_egg, Relaxed);
         self.mob_entity.living_entity.entity.send_meta_data(
-            &[Metadata::new(
-                TrackedData::HAS_EGG,
-                MetaDataType::BOOLEAN,
-                has_egg,
-            )],
+            &[Metadata::new(tracked_data::turtle::HAS_EGG, has_egg)],
             None,
         );
     }
@@ -132,11 +127,7 @@ impl TurtleEntity {
     pub fn set_laying_egg(&self, laying_egg: bool) {
         self.laying_egg.store(laying_egg, Relaxed);
         self.mob_entity.living_entity.entity.send_meta_data(
-            &[Metadata::new(
-                TrackedData::LAYING_EGG,
-                MetaDataType::BOOLEAN,
-                laying_egg,
-            )],
+            &[Metadata::new(tracked_data::turtle::LAYING_EGG, laying_egg)],
             None,
         );
     }
@@ -218,21 +209,10 @@ impl Mob for TurtleEntity {
         Box::pin(async move {
             let entity = self.get_entity();
             if self.is_baby() {
-                entity.send_meta_data(
-                    &[Metadata::new(
-                        TrackedData::BABY_ID,
-                        MetaDataType::BOOLEAN,
-                        true,
-                    )],
-                    None,
-                );
+                entity.send_meta_data(&[Metadata::new(tracked_data::turtle::BABY_ID, true)], None);
             }
             entity.send_meta_data(
-                &[Metadata::new(
-                    TrackedData::HAS_EGG,
-                    MetaDataType::BOOLEAN,
-                    self.has_egg(),
-                )],
+                &[Metadata::new(tracked_data::turtle::HAS_EGG, self.has_egg())],
                 None,
             );
 

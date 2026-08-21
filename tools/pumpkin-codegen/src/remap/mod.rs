@@ -3,20 +3,26 @@ use pumpkin_nbt::compound::NbtCompound;
 
 use crate::version::JavaMinecraftVersion;
 
+mod argument_type;
 mod block_state;
 mod entity_id;
 mod item_id;
+mod menu_id;
 mod particle_id;
+mod recipe_serializer;
 mod sound_id;
 
 /// Returns the list of remap builder functions paired with their output file names.
 #[allow(clippy::type_complexity)]
 pub fn build() -> Vec<(fn() -> TokenStream, &'static str)> {
     vec![
+        (argument_type::build, "argument_type_id_remap.rs"),
         (block_state::build, "block_state_remap.rs"),
         (entity_id::build, "entity_id_remap.rs"),
         (item_id::build, "item_id_remap.rs"),
+        (menu_id::build, "menu_id_remap.rs"),
         (particle_id::build, "particle_id_remap.rs"),
+        (recipe_serializer::build, "recipe_serializer_id_remap.rs"),
         (sound_id::build, "sound_id_remap.rs"),
     ]
 }
@@ -111,18 +117,40 @@ impl ParsedMappings {
 
         let forward = match strategy {
             // Direct
-            0 => mappings
-                .get_int_array("val")
-                .unwrap_or_else(|| panic!("Missing `{section}.val` for direct mapping in {path}"))
-                .to_vec(),
+            0 => {
+                if let Some(val) = mappings.get_int_array("val") {
+                    val.to_vec()
+                } else if let Some(val_bytes) = mappings.get_byte_array("val") {
+                    let size = mappings.get_int("size").unwrap_or(mapped_size) as usize;
+                    let bytes: &[u8] = unsafe {
+                        std::slice::from_raw_parts(val_bytes.as_ptr().cast::<u8>(), val_bytes.len())
+                    };
+                    let mut cursor = std::io::Cursor::new(bytes);
+                    let mut values = Vec::with_capacity(size);
+                    let mut prev = 0i32;
+                    for _ in 0..size {
+                        prev += Self::read_zigzag_var_int(&mut cursor).unwrap_or(0);
+                        values.push(prev);
+                    }
+                    values
+                } else {
+                    panic!("Missing `{section}.val` for direct mapping in {path}");
+                }
+            }
             // Shifts
             1 => {
-                let shifts_at = mappings.get_int_array("at").unwrap_or_else(|| {
-                    panic!("Missing `{section}.at` for shift mapping in {path}")
-                });
-                let shifts_to = mappings.get_int_array("to").unwrap_or_else(|| {
-                    panic!("Missing `{section}.to` for shift mapping in {path}")
-                });
+                let (shifts_at, shifts_to) = if let (Some(at), Some(to)) =
+                    (mappings.get_int_array("at"), mappings.get_int_array("to"))
+                {
+                    (at.to_vec(), to.to_vec())
+                } else if let Some(val_bytes) = mappings.get_byte_array("val") {
+                    Self::read_at_value_pairs(val_bytes)
+                } else {
+                    panic!(
+                        "Missing `{section}.at`/`to` or `{section}.val` for shift mapping in {path}"
+                    );
+                };
+
                 let size = mappings.get_int("size").unwrap_or_else(|| {
                     panic!("Missing `{section}.size` for shift mapping in {path}")
                 }) as usize;
@@ -156,12 +184,16 @@ impl ParsedMappings {
             }
             // Changes
             2 => {
-                let changes_at = mappings.get_int_array("at").unwrap_or_else(|| {
-                    panic!("Missing `{section}.at` for change mapping in {path}")
-                });
-                let values = mappings.get_int_array("val").unwrap_or_else(|| {
-                    panic!("Missing `{section}.val` for change mapping in {path}")
-                });
+                let (changes_at, values) = if let (Some(at), Some(val)) =
+                    (mappings.get_int_array("at"), mappings.get_int_array("val"))
+                {
+                    (at.to_vec(), val.to_vec())
+                } else if let Some(val_bytes) = mappings.get_byte_array("val") {
+                    Self::read_at_value_pairs(val_bytes)
+                } else {
+                    panic!("Missing `{section}.at`/`val` for change mapping in {path}");
+                };
+
                 let size = mappings.get_int("size").unwrap_or_else(|| {
                     panic!("Missing `{section}.size` for change mapping in {path}")
                 }) as usize;
@@ -186,6 +218,12 @@ impl ParsedMappings {
                     result[*changed_id as usize] = values[index];
                 }
 
+                if fill_between {
+                    for id in next_unhandled_id..size as i32 {
+                        result[id as usize] = id;
+                    }
+                }
+
                 result
             }
             // Identity
@@ -202,6 +240,53 @@ impl ParsedMappings {
             mapped_size: mapped_size as usize,
             forward,
         }
+    }
+
+    fn read_var_int(cursor: &mut std::io::Cursor<&[u8]>) -> Option<i32> {
+        use std::io::Read;
+        let mut num_read = 0;
+        let mut result = 0i32;
+        loop {
+            let mut byte = [0u8; 1];
+            if cursor.read_exact(&mut byte).is_err() {
+                return None;
+            }
+            let b = byte[0];
+            let value = (b & 0b0111_1111) as i32;
+            result |= value << (7 * num_read);
+            num_read += 1;
+            if num_read > 5 {
+                return None;
+            }
+            if (b & 0b1000_0000) == 0 {
+                break;
+            }
+        }
+        Some(result)
+    }
+
+    fn read_zigzag_var_int(cursor: &mut std::io::Cursor<&[u8]>) -> Option<i32> {
+        let value = Self::read_var_int(cursor)?;
+        let unsigned = value as u32;
+        Some(((unsigned >> 1) as i32) ^ (-((unsigned & 1) as i32)))
+    }
+
+    fn read_at_value_pairs(val_bytes: &[i8]) -> (Vec<i32>, Vec<i32>) {
+        let bytes: &[u8] =
+            unsafe { std::slice::from_raw_parts(val_bytes.as_ptr().cast::<u8>(), val_bytes.len()) };
+        let mut cursor = std::io::Cursor::new(bytes);
+        let mut at = Vec::new();
+        let mut values = Vec::new();
+        let mut prev_at = -1i32;
+        let mut prev_val = 0i32;
+        while let Some(diff_at) = Self::read_var_int(&mut cursor) {
+            let diff_val = Self::read_zigzag_var_int(&mut cursor).unwrap_or(0);
+            prev_at = prev_at + 1 + diff_at;
+            prev_val += diff_val;
+            at.push(prev_at);
+            values.push(prev_val);
+        }
+        (at, values)
     }
 
     /// Inverts the forward mapping into a reverse lookup table where index is the new ID and value
@@ -248,6 +333,10 @@ impl ParsedMappings {
             .map(|&id| {
                 if id < 0 {
                     0 // unmapped → air
+                } else if id > 0xFFFF {
+                    // For pre-1.13 mappings where itemId was packed as (id << 16) | data
+                    u16::try_from(id >> 16)
+                        .unwrap_or_else(|_| panic!("{name}: id {id} does not fit in u16"))
                 } else {
                     u16::try_from(id)
                         .unwrap_or_else(|_| panic!("{name}: id {id} does not fit in u16"))

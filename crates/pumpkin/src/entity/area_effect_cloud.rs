@@ -131,8 +131,7 @@ impl AreaEffectCloudEntity {
         *self.radius.lock().await = clamped;
         self.entity.send_meta_data(
             &[pumpkin_protocol::java::client::play::Metadata::new(
-                pumpkin_data::tracked_data::TrackedData::RADIUS,
-                pumpkin_data::meta_data_type::MetaDataType::FLOAT,
+                pumpkin_data::tracked_data::area_effect_cloud::RADIUS,
                 clamped,
             )],
             None,
@@ -211,8 +210,7 @@ impl EntityBase for AreaEffectCloudEntity {
             // Send initial particle and radius
             self.entity.send_meta_data(
                 &[pumpkin_protocol::java::client::play::Metadata::new(
-                    pumpkin_data::tracked_data::TrackedData::PARTICLE,
-                    pumpkin_data::meta_data_type::MetaDataType::PARTICLE,
+                    pumpkin_data::tracked_data::area_effect_cloud::PARTICLE,
                     &meta,
                 )],
                 None,
@@ -220,8 +218,7 @@ impl EntityBase for AreaEffectCloudEntity {
 
             self.entity.send_meta_data(
                 &[pumpkin_protocol::java::client::play::Metadata::new(
-                    pumpkin_data::tracked_data::TrackedData::RADIUS,
-                    pumpkin_data::meta_data_type::MetaDataType::FLOAT,
+                    pumpkin_data::tracked_data::area_effect_cloud::RADIUS,
                     radius,
                 )],
                 None,
@@ -232,8 +229,7 @@ impl EntityBase for AreaEffectCloudEntity {
             let is_waiting = 0 < wait_time;
             self.entity.send_meta_data(
                 &[pumpkin_protocol::java::client::play::Metadata::new(
-                    pumpkin_data::tracked_data::TrackedData::WAITING,
-                    pumpkin_data::meta_data_type::MetaDataType::BOOLEAN,
+                    pumpkin_data::tracked_data::area_effect_cloud::WAITING,
                     is_waiting,
                 )],
                 None,
@@ -268,8 +264,7 @@ impl EntityBase for AreaEffectCloudEntity {
             if age == wait_time && wait_time > 0 {
                 self.entity.send_meta_data(
                     &[pumpkin_protocol::java::client::play::Metadata::new(
-                        pumpkin_data::tracked_data::TrackedData::WAITING,
-                        pumpkin_data::meta_data_type::MetaDataType::BOOLEAN,
+                        pumpkin_data::tracked_data::area_effect_cloud::WAITING,
                         false,
                     )],
                     None,

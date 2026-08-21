@@ -101,7 +101,38 @@ impl BlockBehaviour for FarmlandBlock {
                 || args.world.is_raining_at(&args.position.up()).await
             {
                 if props.moisture < MAX_MOISTURE {
-                    props.moisture = MAX_MOISTURE;
+                    let mut event = crate::plugin::block::moisture_change::MoistureChangeEvent {
+                        block_pos: *args.position,
+                        world: args.world.clone(),
+                        new_moisture: i32::from(MAX_MOISTURE),
+                        cancelled: false,
+                    };
+                    if let Some(server) = args.world.server.upgrade() {
+                        server.plugin_manager.fire(&server, &mut event).await;
+                    }
+                    if !event.cancelled {
+                        props.moisture = event.new_moisture.clamp(0, i32::from(MAX_MOISTURE)) as u8;
+                        args.world
+                            .set_block_state(
+                                args.position,
+                                props.to_state_id(args.block),
+                                BlockFlags::NOTIFY_LISTENERS,
+                            )
+                            .await;
+                    }
+                }
+            } else if props.moisture > 0 {
+                let mut event = crate::plugin::block::moisture_change::MoistureChangeEvent {
+                    block_pos: *args.position,
+                    world: args.world.clone(),
+                    new_moisture: i32::from(props.moisture) - 1,
+                    cancelled: false,
+                };
+                if let Some(server) = args.world.server.upgrade() {
+                    server.plugin_manager.fire(&server, &mut event).await;
+                }
+                if !event.cancelled {
+                    props.moisture = event.new_moisture.clamp(0, i32::from(MAX_MOISTURE)) as u8;
                     args.world
                         .set_block_state(
                             args.position,
@@ -110,20 +141,22 @@ impl BlockBehaviour for FarmlandBlock {
                         )
                         .await;
                 }
-            } else if props.moisture > 0 {
-                props.moisture -= 1;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_LISTENERS,
-                    )
-                    .await;
             } else if !args
                 .world
                 .get_block(&args.position.up())
                 .has_tag(&tag::Block::MINECRAFT_MAINTAINS_FARMLAND)
             {
+                let mut event = crate::plugin::api::events::block::block_fade::BlockFadeEvent::new(
+                    *args.position,
+                    &Block::DIRT,
+                );
+                if let Some(server) = args.world.server.upgrade() {
+                    server.plugin_manager.fire(&server, &mut event).await;
+                }
+                if event.cancelled {
+                    return;
+                }
+
                 turn_to_dirt(args.world, args.position).await;
             }
         })

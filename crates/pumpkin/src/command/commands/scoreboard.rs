@@ -17,7 +17,6 @@ use pumpkin_protocol::java::client::play::RenderType;
 use pumpkin_util::PermissionLvl;
 use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
 use pumpkin_util::text::TextComponent;
-use std::sync::Arc;
 
 const DESCRIPTION: &str = "Manages scoreboard objectives and players.";
 const PERMISSION: &str = "minecraft:command.scoreboard";
@@ -109,14 +108,14 @@ impl CommandExecutor for ObjectivesAddExecutor {
             let render_type =
                 crate::world::scoreboard::default_render_type_for_criterion(criterion);
             let new_objective = ScoreboardObjective::new(
-                Arc::from(objective_name),
+                objective_name,
                 display_name.clone(),
                 render_type,
                 None,
-                Arc::from(criterion),
+                criterion,
             );
 
-            scoreboard.add_objective(world, new_objective);
+            scoreboard.add_objective(world, new_objective).await;
 
             context
                 .source
@@ -173,8 +172,8 @@ impl CommandExecutor for PlayersEnableExecutor {
                     let number_format = current_score.and_then(|s| s.number_format.clone());
 
                     let updated_score = ScoreboardScore {
-                        entity_name: Arc::from(player_name.as_str()),
-                        objective_name: Arc::from(objective_name),
+                        entity_name: player_name.clone(),
+                        objective_name: objective_name.to_string(),
                         value: VarInt(value),
                         display_name,
                         number_format,
@@ -276,7 +275,7 @@ impl CommandExecutor for ObjectivesRemoveExecutor {
                 return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
             }
 
-            scoreboard.remove_objective(world, objective_name);
+            scoreboard.remove_objective(world, objective_name).await;
 
             context
                 .source
@@ -411,11 +410,13 @@ impl CommandExecutor for ObjectivesSetDisplayExecutor {
                     return Err(OBJECTIVE_NOT_FOUND_ERROR.create_without_context());
                 }
 
-                if scoreboard.get_display_objective(&slot) == Some(name.as_str()) {
+                if scoreboard.get_display_objective(slot) == Some(name.as_str()) {
                     return Err(DISPLAY_SLOT_ALREADY_SET_ERROR.create_without_context());
                 }
 
-                scoreboard.set_display_objective(world, slot, Some(name));
+                scoreboard
+                    .set_display_objective(world, slot, Some(name))
+                    .await;
 
                 context
                     .source
@@ -432,11 +433,11 @@ impl CommandExecutor for ObjectivesSetDisplayExecutor {
                     )
                     .await;
             } else {
-                if scoreboard.get_display_objective(&slot).is_none() {
+                if scoreboard.get_display_objective(slot).is_none() {
                     return Err(DISPLAY_SLOT_ALREADY_EMPTY_ERROR.create_without_context());
                 }
 
-                scoreboard.set_display_objective(world, slot, None);
+                scoreboard.set_display_objective(world, slot, None).await;
 
                 context
                     .source
@@ -466,11 +467,11 @@ impl CommandExecutor for ObjectivesClearDisplayExecutor {
             let world = context.world();
             let mut scoreboard = world.scoreboard.lock().await;
 
-            if scoreboard.get_display_objective(&slot).is_none() {
+            if scoreboard.get_display_objective(slot).is_none() {
                 return Err(DISPLAY_SLOT_ALREADY_EMPTY_ERROR.create_without_context());
             }
 
-            scoreboard.set_display_objective(world, slot, None);
+            scoreboard.set_display_objective(world, slot, None).await;
 
             context
                 .source
@@ -507,8 +508,8 @@ impl CommandExecutor for PlayersSetExecutor {
 
             for player in &targets {
                 let score = ScoreboardScore {
-                    entity_name: Arc::from(player.gameprofile.name.as_str()),
-                    objective_name: Arc::from(objective_name),
+                    entity_name: player.gameprofile.name.clone(),
+                    objective_name: objective_name.to_string(),
                     value: VarInt(value),
                     display_name: None,
                     number_format: None,
@@ -633,8 +634,8 @@ impl CommandExecutor for PlayersAddExecutor {
                 let new_value = current + add_value;
 
                 let score = ScoreboardScore {
-                    entity_name: Arc::from(player_name.as_str()),
-                    objective_name: Arc::from(objective_name),
+                    entity_name: player_name.clone(),
+                    objective_name: objective_name.to_string(),
                     value: VarInt(new_value),
                     display_name: existing.and_then(|s| s.display_name.clone()),
                     number_format: existing.and_then(|s| s.number_format.clone()),
@@ -711,8 +712,8 @@ impl CommandExecutor for PlayersRemoveExecutor {
                 let new_value = current - remove_value;
 
                 let score = ScoreboardScore {
-                    entity_name: Arc::from(player_name.as_str()),
-                    objective_name: Arc::from(objective_name),
+                    entity_name: player_name.clone(),
+                    objective_name: objective_name.to_string(),
                     value: VarInt(new_value),
                     display_name: existing.and_then(|s| s.display_name.clone()),
                     number_format: existing.and_then(|s| s.number_format.clone()),
@@ -1122,8 +1123,8 @@ async fn apply_operation(
             last_new_value = new_value;
 
             let score = ScoreboardScore {
-                entity_name: Arc::from(target_name.as_str()),
-                objective_name: Arc::from(objective_name),
+                entity_name: target_name.clone(),
+                objective_name: objective_name.to_string(),
                 value: VarInt(new_value),
                 display_name: None,
                 number_format: None,
@@ -1639,7 +1640,7 @@ const fn display_slot_name(slot: ScoreboardDisplaySlot) -> &'static str {
 }
 
 #[allow(clippy::too_many_lines)]
-pub fn register(dispatcher: &mut CommandDispatcher, registry: &mut PermissionRegistry) {
+pub fn register(dispatcher: &mut CommandDispatcher, registry: &PermissionRegistry) {
     registry.register_permission_or_panic(Permission::new(
         PERMISSION,
         DESCRIPTION,

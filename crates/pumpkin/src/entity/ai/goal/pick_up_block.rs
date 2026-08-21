@@ -85,12 +85,23 @@ impl Goal for PickUpBlockGoal {
 
             let default_state_id = block.default_state.id;
 
+            let mut event = crate::plugin::api::events::entity::entity_change_block::EntityChangeBlockEvent::new(
+                entity.entity_id,
+                target_pos,
+                "minecraft:air".to_string(),
+            );
+            if let Some(server) = world.server.upgrade() {
+                server.plugin_manager.fire(&server, &mut event).await;
+            }
+            if event.cancelled {
+                return;
+            }
+
             // Vanilla EnderMan.java:609 -- emits BLOCK_DESTROY before clearing the block.
             // Vanilla's context carries both the enderman and the block state; Pumpkin's
             // GameEventContext has no block-state variant and no Arc<dyn EntityBase> is
             // available here (mob: &dyn Mob isn't behind an Arc), so this uses none() as a
             // documented simplification, matching the pattern used in eat_grass.rs.
-            let block_center = Vector3::new(bx as f64 + 0.5, by as f64 + 0.5, bz as f64 + 0.5);
             emit_game_event(
                 &world,
                 GameEvent::BlockDestroy,

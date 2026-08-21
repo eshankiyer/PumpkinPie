@@ -1,8 +1,7 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use pumpkin_data::entity::{EntityStatus, EntityType};
-use pumpkin_data::meta_data_type::MetaDataType;
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::Difficulty;
@@ -72,8 +71,7 @@ impl GuardianAttackGoal {
     fn set_active_attack_target(mob: &dyn Mob, entity_id: i32) {
         mob.get_entity().send_meta_data(
             &[Metadata::new(
-                TrackedData::ID_ATTACK_TARGET,
-                MetaDataType::INT,
+                tracked_data::guardian::ID_ATTACK_TARGET,
                 VarInt(entity_id),
             )],
             None,

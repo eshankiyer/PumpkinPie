@@ -19,7 +19,27 @@ pub struct FoodImpl {
     pub saturation: f32,
     pub can_always_eat: bool,
 }
+impl FoodImpl {
+    pub fn read_data(data: &NbtTag) -> Option<Self> {
+        let compound = data.extract_compound()?;
+        let nutrition = compound.get_int("nutrition")?;
+        let saturation = compound.get_float("saturation")?;
+        let can_always_eat = compound.get_bool("can_always_eat").unwrap_or(false);
+        Some(Self {
+            nutrition,
+            saturation,
+            can_always_eat,
+        })
+    }
+}
 impl DataComponentImpl for FoodImpl {
+    fn write_data(&self) -> NbtTag {
+        let mut compound = NbtCompound::new();
+        compound.put_int("nutrition", self.nutrition);
+        compound.put_float("saturation", self.saturation);
+        compound.put_bool("can_always_eat", self.can_always_eat);
+        NbtTag::Compound(compound)
+    }
     default_impl!(Food);
 }
 impl Hash for FoodImpl {
@@ -592,7 +612,7 @@ mod tests {
 /// A single `SuspiciousStewEffects.Entry`: an effect plus its duration in ticks.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct SuspiciousStewEffect {
-    pub effect_id: Cow<'static, str>,
+    pub effect: Cow<'static, str>,
     pub duration: i32,
 }
 
@@ -604,21 +624,18 @@ impl SuspiciousStewEffect {
     #[must_use]
     pub fn read_data(tag: &NbtTag) -> Option<Self> {
         let compound = tag.extract_compound()?;
-        let effect_id = Cow::Owned(compound.get_string("id")?.to_string());
+        let effect = Cow::Owned(compound.get_string("id")?.to_string());
         let duration = compound
             .get_int("duration")
             .or_else(|| compound.get_byte("duration").map(i32::from))
             .unwrap_or(Self::DEFAULT_DURATION);
-        Some(Self {
-            effect_id,
-            duration,
-        })
+        Some(Self { effect, duration })
     }
 
     #[must_use]
     pub fn as_nbt(&self) -> NbtTag {
         let mut compound = NbtCompound::new();
-        compound.put_string("id", self.effect_id.to_string());
+        compound.put_string("id", self.effect.to_string());
         compound.put_int("duration", self.duration);
         NbtTag::Compound(compound)
     }
@@ -626,7 +643,7 @@ impl SuspiciousStewEffect {
     #[must_use]
     pub fn get_hash(&self) -> i32 {
         let mut digest = Digest::new(Crc32Iscsi);
-        digest.update(&get_str_hash(self.effect_id.as_ref()).to_le_bytes());
+        digest.update(&get_str_hash(self.effect.as_ref()).to_le_bytes());
         digest.update(&get_i32_hash(self.duration).to_le_bytes());
         digest.finalize() as i32
     }
@@ -637,6 +654,10 @@ pub struct SuspiciousStewEffectsImpl {
     pub effects: Cow<'static, [SuspiciousStewEffect]>,
 }
 impl SuspiciousStewEffectsImpl {
+    pub const EMPTY: Self = Self {
+        effects: Cow::Borrowed(&[]),
+    };
+
     #[must_use]
     pub fn read_data(tag: &NbtTag) -> Option<Self> {
         let entries = tag.extract_list()?;
@@ -681,7 +702,7 @@ mod suspicious_stew_tests {
     fn suspicious_stew_effects_round_trip_as_a_list() {
         let effects = SuspiciousStewEffectsImpl {
             effects: Cow::Owned(vec![SuspiciousStewEffect {
-                effect_id: Cow::Borrowed("minecraft:blindness"),
+                effect: Cow::Borrowed("minecraft:blindness"),
                 duration: 220,
             }]),
         };

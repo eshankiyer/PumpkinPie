@@ -3,8 +3,7 @@ use std::sync::{Arc, Weak};
 
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::entity::EntityType;
-use pumpkin_data::meta_data_type::MetaDataType;
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data::blaze;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
@@ -100,14 +99,10 @@ impl BlazeEntity {
 
     pub async fn set_charged(&self, charged: bool) {
         self.charged.store(charged, Relaxed);
-        self.entity.living_entity.entity.send_meta_data(
-            &[Metadata::new(
-                TrackedData::BLAZE_FLAGS,
-                MetaDataType::BYTE,
-                i8::from(charged),
-            )],
-            None,
-        );
+        self.entity
+            .living_entity
+            .entity
+            .send_meta_data(&[Metadata::new(blaze::FLAGS_ID, i8::from(charged))], None);
         // `BLAZE_FLAGS` is absent from the generated v26.x protocol mapping. Keep the
         // same client-visible fire state on those versions while retaining the vanilla
         // Blaze-specific flag for versions where it is present.
@@ -179,11 +174,7 @@ impl Mob for BlazeEntity {
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             self.entity.living_entity.entity.send_meta_data(
-                &[Metadata::new(
-                    TrackedData::BLAZE_FLAGS,
-                    MetaDataType::BYTE,
-                    i8::from(self.is_charged()),
-                )],
+                &[Metadata::new(blaze::FLAGS_ID, i8::from(self.is_charged()))],
                 None,
             );
         })

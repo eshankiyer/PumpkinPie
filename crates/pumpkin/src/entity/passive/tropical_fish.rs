@@ -2,8 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering::Relaxed};
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::entity::EntityType;
-use pumpkin_data::meta_data_type::MetaDataType;
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
@@ -273,8 +272,7 @@ impl TropicalFishEntity {
     fn send_packed_variant(&self, packed: i32) {
         self.mob_entity.living_entity.entity.send_meta_data(
             &[Metadata::new(
-                TrackedData::ID_TYPE_VARIANT,
-                MetaDataType::INT,
+                tracked_data::tropical_fish::ID_TYPE_VARIANT,
                 VarInt(packed),
             )],
             None,

@@ -2,9 +2,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::sync::Arc;
 
+use crate::block::entities::calibrated_sculk_sensor::CalibratedSculkSensorBlockEntity;
+use crate::block::entities::sculk_sensor::SculkSensorBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, EmitsRedstonePowerArgs, GetRedstonePowerArgs,
-    OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs,
+    BlockBehaviour, BlockFuture, BlockMetadata, EmitsRedstonePowerArgs, GetComparatorOutputArgs,
+    GetRedstonePowerArgs, OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs,
 };
 use crate::world::World;
 use crate::world::game_event::{
@@ -12,11 +14,11 @@ use crate::world::game_event::{
     redstone_strength_for_distance,
 };
 use pumpkin_data::block_properties::{
-    BlockProperties, CalibratedSculkSensorLikeProperties, SculkSensorLikeProperties,
-    SculkSensorPhase,
+    BlockProperties, CalibratedSculkSensorLikeProperties, HorizontalFacing,
+    SculkSensorLikeProperties, SculkSensorPhase,
 };
 use pumpkin_data::game_event::GameEvent;
-use pumpkin_data::{Block, BlockId, BlockStateId, HorizontalFacingExt};
+use pumpkin_data::{Block, BlockDirection, BlockId, BlockStateId, HorizontalFacingExt};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::tick::TickPriority;
@@ -87,6 +89,15 @@ impl BlockMetadata for SculkSensorBlock {
     }
 }
 
+const fn horizontal_facing_to_dir(facing: HorizontalFacing) -> BlockDirection {
+    match facing {
+        HorizontalFacing::North => BlockDirection::North,
+        HorizontalFacing::South => BlockDirection::South,
+        HorizontalFacing::West => BlockDirection::West,
+        HorizontalFacing::East => BlockDirection::East,
+    }
+}
+
 impl SculkSensorBlock {
     pub async fn trigger(
         world: &Arc<World>,
@@ -99,6 +110,12 @@ impl SculkSensorBlock {
             let state = world.get_block_state(pos);
             let mut props = SculkSensorLikeProperties::from_state_id(state.id, block);
             if props.sculk_sensor_phase == SculkSensorPhase::Inactive {
+                if let Some(be) = world.get_block_entity(pos)
+                    && let Some(sensor_be) = be.as_any().downcast_ref::<SculkSensorBlockEntity>()
+                {
+                    *sensor_be.last_vibration_frequency.lock().await = power as i32;
+                }
+
                 props.sculk_sensor_phase = SculkSensorPhase::Active;
                 props.power = power;
                 world
@@ -118,6 +135,28 @@ impl SculkSensorBlock {
             let state = world.get_block_state(pos);
             let mut props = CalibratedSculkSensorLikeProperties::from_state_id(state.id, block);
             if props.sculk_sensor_phase == SculkSensorPhase::Inactive {
+                let back_dir = horizontal_facing_to_dir(props.facing).opposite();
+                let back_pos = pos.offset(back_dir.to_offset());
+                let back_state = world.get_block_state(&back_pos);
+                let back_block = Block::from_state_id(back_state.id);
+
+                let calibrated_freq = world
+                    .block_registry
+                    .get_weak_redstone_power(back_block, world, &back_pos, back_state, back_dir)
+                    .await;
+
+                if calibrated_freq > 0 && calibrated_freq != power {
+                    return;
+                }
+
+                if let Some(be) = world.get_block_entity(pos)
+                    && let Some(cal_be) = be
+                        .as_any()
+                        .downcast_ref::<CalibratedSculkSensorBlockEntity>()
+                {
+                    *cal_be.last_vibration_frequency.lock().await = power as i32;
+                }
+
                 props.sculk_sensor_phase = SculkSensorPhase::Active;
                 props.power = power;
                 world
@@ -154,6 +193,13 @@ impl BlockBehaviour for SculkSensorBlock {
 
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
+            if args.block.id == BlockId::CALIBRATED_SCULK_SENSOR {
+                let entity = CalibratedSculkSensorBlockEntity::new(*args.position);
+                args.world.add_block_entity(Arc::new(entity));
+            } else if args.block.id == BlockId::SCULK_SENSOR {
+                let entity = SculkSensorBlockEntity::new(*args.position);
+                args.world.add_block_entity(Arc::new(entity));
+            }
             args.world
                 .register_game_event_listener(Arc::new(SculkSensorListener {
                     pos: *args.position,
@@ -202,6 +248,25 @@ impl BlockBehaviour for SculkSensorBlock {
             } else {
                 0
             }
+        })
+    }
+
+    fn get_comparator_output<'a>(
+        &'a self,
+        args: GetComparatorOutputArgs<'a>,
+    ) -> BlockFuture<'a, Option<u8>> {
+        Box::pin(async move {
+            let be = args.world.get_block_entity(args.position)?;
+            if let Some(sensor_be) = be.as_any().downcast_ref::<SculkSensorBlockEntity>() {
+                return Some(*sensor_be.last_vibration_frequency.lock().await as u8);
+            }
+            if let Some(cal_be) = be
+                .as_any()
+                .downcast_ref::<CalibratedSculkSensorBlockEntity>()
+            {
+                return Some(*cal_be.last_vibration_frequency.lock().await as u8);
+            }
+            None
         })
     }
 

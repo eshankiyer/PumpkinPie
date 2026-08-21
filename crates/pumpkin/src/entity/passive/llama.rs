@@ -6,11 +6,10 @@ use std::sync::{Arc, Weak};
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::particle::Particle;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
@@ -60,21 +59,14 @@ pub fn randomize_llama_max_health(mob: &dyn Mob, random: &mut impl RngExt) {
     living.health.store(max_health);
 }
 
-/// Re-sends `TrackedData::BABY_ID`.
+/// Re-sends `tracked_data::llama::BABY_ID`.
 ///
 /// This is the blanket `Mob` `EntityBase` impl's default `init_data_tracker` behavior
 /// (`mob/mod.rs`), which a species-specific `mob_init_data_tracker` override otherwise silently
 /// drops -- the same reason `CatEntity::mob_init_data_tracker` re-sends it manually.
 pub fn send_baby_id_if_baby(entity: &Entity) {
     if entity.age.load(Relaxed) < 0 {
-        entity.send_meta_data(
-            &[Metadata::new(
-                TrackedData::BABY_ID,
-                MetaDataType::BOOLEAN,
-                true,
-            )],
-            None,
-        );
+        entity.send_meta_data(&[Metadata::new(tracked_data::llama::BABY_ID, true)], None);
     }
 }
 
@@ -241,13 +233,11 @@ pub trait LlamaMob: AbstractChestedHorse {
         self.get_entity().send_meta_data(
             &[
                 Metadata::new(
-                    TrackedData::STRENGTH_ID,
-                    MetaDataType::INT,
+                    tracked_data::llama::STRENGTH_ID,
                     VarInt(i32::from(data.strength.load(Relaxed))),
                 ),
                 Metadata::new(
-                    TrackedData::VARIANT_ID,
-                    MetaDataType::INT,
+                    tracked_data::llama::VARIANT_ID,
                     VarInt(i32::from(data.variant.load(Relaxed))),
                 ),
             ],

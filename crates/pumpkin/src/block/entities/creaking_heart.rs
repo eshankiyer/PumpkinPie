@@ -2,16 +2,17 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering};
 
+use crossbeam::atomic::AtomicCell;
 use pumpkin_data::Block;
 use pumpkin_data::block_properties::{
     BlockProperties, CreakingHeartLikeProperties, CreakingHeartState,
 };
+use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::block::blocks::creaking_heart::{creaking_active, has_required_logs};
@@ -31,7 +32,7 @@ use super::BlockEntity;
 pub struct CreakingHeartBlockEntity {
     pub position: BlockPos,
     /// `creakingInfo`, reduced to the persisted UUID arm (`Either.right`).
-    pub creaking_uuid: Mutex<Option<Uuid>>,
+    pub creaking_uuid: AtomicCell<Option<Uuid>>,
     pub ticker: AtomicI32,
     pub output_signal: AtomicI32,
 }
@@ -53,7 +54,7 @@ impl BlockEntity for CreakingHeartBlockEntity {
         let creaking_uuid = nbt.get_int_array("creaking").and_then(uuid_from_int_array);
         Self {
             position,
-            creaking_uuid: Mutex::new(creaking_uuid),
+            creaking_uuid: AtomicCell::new(creaking_uuid),
             ticker: AtomicI32::new(0),
             output_signal: AtomicI32::new(0),
         }
@@ -64,7 +65,7 @@ impl BlockEntity for CreakingHeartBlockEntity {
         nbt: &'a mut NbtCompound,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
-            let creaking_uuid = *self.creaking_uuid.lock().await;
+            let creaking_uuid = self.creaking_uuid.load();
             if let Some(uuid) = creaking_uuid {
                 nbt.put("creaking", uuid_to_int_array(uuid));
             }
@@ -101,7 +102,7 @@ impl BlockEntity for CreakingHeartBlockEntity {
             // updateCreakingState: an uprooted-eligible heart (no logs, no bound creaking)
             // goes UPROOTED, otherwise it tracks the creaking_active environment attribute.
             let new_state = if has_required_logs(world, &self.position, props.axis)
-                || self.creaking_uuid.lock().await.is_some()
+                || self.creaking_uuid.load().is_some()
             {
                 if creaking_active(world).await {
                     CreakingHeartState::Awake
@@ -128,7 +129,7 @@ impl BlockEntity for CreakingHeartBlockEntity {
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
         // getUpdateTag == saveCustomOnly.
         let mut nbt = NbtCompound::new();
-        let creaking_uuid = *self.creaking_uuid.try_lock().ok()?;
+        let creaking_uuid = self.creaking_uuid.load();
         if let Some(uuid) = creaking_uuid {
             nbt.put("creaking", uuid_to_int_array(uuid));
         }
@@ -144,13 +145,17 @@ impl CreakingHeartBlockEntity {
     pub const ID: &'static str = "minecraft:creaking_heart";
 
     #[must_use]
-    pub fn new(position: BlockPos) -> Self {
+    pub const fn new(position: BlockPos) -> Self {
         Self {
             position,
-            creaking_uuid: Mutex::new(None),
+            creaking_uuid: AtomicCell::new(None),
             ticker: AtomicI32::new(0),
             output_signal: AtomicI32::new(0),
         }
+    }
+
+    pub fn set_creaking_uuid(&self, uuid: Option<Uuid>) {
+        self.creaking_uuid.store(uuid);
     }
 
     /// `getAnalogOutputSignal`: the value cached by the last tick, not a fresh compute.
@@ -168,15 +173,21 @@ impl CreakingHeartBlockEntity {
     /// mechanics that would reassign or clear `creaking_uuid` mid-game) aren't ported yet, this
     /// is exactly "is this the creaking whose UUID we're holding" -- there is no live `Creaking`
     /// reference stored here to compare identity against, only the persisted UUID.
-    pub async fn is_protector(&self, creaking_uuid: Uuid) -> bool {
-        *self.creaking_uuid.lock().await == Some(creaking_uuid)
+    pub fn is_protector(&self, creaking_uuid: Uuid) -> bool {
+        self.creaking_uuid.load() == Some(creaking_uuid)
     }
 
     /// `CreakingHeartBlockEntity.creakingHurt`. The particle/resin-spread effects this drives
     /// in vanilla are deliberately not ported here (same scope cut as this file's existing
-    /// doc comment already calls out for `spawnProtector`/`removeProtector`/`spreadResin`) --
-    /// this just gives `CreakingEntity`'s damage gate a real method to call.
-    pub const fn creaking_hurt(&self) {}
+    /// doc comment already calls out for `spawnProtector`/`removeProtector`/`spreadResin`);
+    /// only the hurt sound is played.
+    pub fn creaking_hurt(&self, world: &Arc<World>) {
+        world.play_sound(
+            Sound::BlockCreakingHeartHurt,
+            SoundCategory::Blocks,
+            &self.position.to_f64(),
+        );
+    }
 }
 
 /// `UUIDUtil.CODEC`: four big-endian ints, most-significant first.

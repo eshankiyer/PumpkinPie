@@ -2,10 +2,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering::Relaxed};
 
 use pumpkin_data::damage::DamageType;
-use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_data::world::WorldEvent;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
@@ -88,13 +87,9 @@ impl BatEntity {
     }
 
     fn set_roosting_metadata(&self, roosting: bool) {
-        let flags = if roosting { ROOSTING_FLAG } else { 0 };
+        let flags: u8 = if roosting { ROOSTING_FLAG } else { 0 };
         self.mob_entity.living_entity.entity.send_meta_data(
-            &[Metadata::new(
-                TrackedData::BAT_FLAGS,
-                MetaDataType::BYTE,
-                flags,
-            )],
+            &[Metadata::new(tracked_data::bat::DATA_ID_FLAGS, flags)],
             None,
         );
     }

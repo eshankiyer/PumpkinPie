@@ -12,7 +12,7 @@ use recipe::RecipeConfig;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use std::path::PathBuf;
-use std::{fs, num::NonZeroU8, path::Path};
+use std::{fs, num::NonZero, path::Path};
 use tracing::{debug, error, warn};
 
 /// Fun and experimental configuration options.
@@ -29,15 +29,16 @@ pub mod recipe;
 /// Resource pack configuration options.
 pub mod resource_pack;
 
-pub use chat::ChatConfig;
-pub use commands::CommandsConfig;
+pub use chat::{AntiSpamConfig, ChatConfig};
+pub use commands::{CommandOverride, CommandsConfig};
 pub use networking::auth::AuthenticationConfig;
 pub use networking::bedrock::BedrockConfig;
 pub use networking::compression::CompressionConfig;
 pub use networking::java::JavaConfig;
 pub use networking::lan_broadcast::LANBroadcastConfig;
+pub use networking::packet_limiter::PacketLimiterConfig;
 pub use networking::rcon::RCONConfig;
-pub use plugins::PluginsConfig;
+pub use plugins::{PluginOverride, PluginsConfig};
 pub use pvp::PVPConfig;
 pub use server_links::ServerLinksConfig;
 
@@ -87,8 +88,8 @@ impl LoadConfiguration for PumpkinConfig {
         self.basic.validate();
         self.advanced.validate();
 
-        let min_vd = NonZeroU8::MIN;
-        let Some(max_vd) = NonZeroU8::new(64) else {
+        let min_vd = NonZero::<u8>::MIN;
+        let Some(max_vd) = NonZero::new(64) else {
             return;
         };
 
@@ -96,10 +97,14 @@ impl LoadConfiguration for PumpkinConfig {
         // https://minecraft.wiki/w/Server.properties, https://minecraft.wiki/w/Simulation_distance
         // Out-of-range values are clamped rather than asserted so an existing config
         // doesn't turn into a startup panic now that simulation_distance is read.
-        let min_sd = NonZeroU8::new(3).unwrap_or(NonZeroU8::MIN);
-        let max_sd = NonZeroU8::new(32).unwrap_or(NonZeroU8::MIN);
+        let min_sd = NonZero::new(3).unwrap_or(NonZero::<u8>::MIN);
+        let max_sd = NonZero::new(32).unwrap_or(NonZero::<u8>::MIN);
 
         // Validate Java
+        assert!(
+            self.advanced.networking.java.keep_alive_time > 0,
+            "Java Keep alive time must be greater than 0"
+        );
         assert!(
             self.advanced.networking.java.view_distance >= min_vd,
             "Java View distance must be at least 2"
@@ -155,9 +160,9 @@ impl LoadConfiguration for PumpkinConfig {
 /// the configured value was out of range. See `PumpkinConfig::validate` for why this
 /// clamps instead of asserting.
 fn clamp_simulation_distance(
-    value: &mut NonZeroU8,
-    min: NonZeroU8,
-    max: NonZeroU8,
+    value: &mut NonZero<u8>,
+    min: NonZero<u8>,
+    max: NonZero<u8>,
     platform: &str,
 ) {
     let clamped = (*value).clamp(min, max);

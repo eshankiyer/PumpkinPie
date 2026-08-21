@@ -5,7 +5,7 @@ use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::{EntityStatus, EntityType};
 use pumpkin_util::math::vector3::Vector3;
 
-use crate::entity::{Entity, EntityBase, EntityBaseFuture, NBTStorage};
+use crate::entity::{Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture};
 use crate::server::Server;
 use crate::world::World;
 
@@ -51,6 +51,25 @@ impl EvokerFangsEntity {
         }
     }
 
+    /// Constructor used by `EvokerEntity`'s fang volleys: the entity is built by the
+    /// caller, `yaw_radians` matches vanilla's constructor argument.
+    #[must_use]
+    pub fn new(
+        entity: Entity,
+        warmup_delay_ticks: u32,
+        yaw_radians: f32,
+        owner_id: Option<i32>,
+    ) -> Self {
+        entity.set_rotation(yaw_radians.to_degrees(), 0.0);
+        Self {
+            entity,
+            warmup_delay_ticks: AtomicI32::new(warmup_delay_ticks as i32),
+            life_ticks: AtomicI32::new(22),
+            sent_spike_event: AtomicBool::new(false),
+            owner_id,
+        }
+    }
+
     async fn bite_nearby(&self, caller: &Arc<dyn EntityBase>) {
         let world = self.entity.world.load();
         let bb = self.entity.bounding_box.load().expand(0.2, 0.0, 0.2);
@@ -88,7 +107,28 @@ impl EvokerFangsEntity {
     }
 }
 
-impl NBTStorage for EvokerFangsEntity {}
+impl NBTStorage for EvokerFangsEntity {
+    /// Vanilla `EvokerFangs.addAdditionalSaveData` persists only the warmup counter.
+    fn write_nbt<'a>(
+        &'a self,
+        nbt: &'a mut pumpkin_nbt::compound::NbtCompound,
+    ) -> NbtFuture<'a, ()> {
+        Box::pin(async move {
+            nbt.put_int("Warmup", self.warmup_delay_ticks.load(Relaxed));
+        })
+    }
+
+    fn read_nbt_non_mut<'a>(
+        &'a self,
+        nbt: &'a pumpkin_nbt::compound::NbtCompound,
+    ) -> NbtFuture<'a, ()> {
+        Box::pin(async move {
+            if let Some(warmup) = nbt.get_int("Warmup") {
+                self.warmup_delay_ticks.store(warmup, Relaxed);
+            }
+        })
+    }
+}
 
 impl EntityBase for EvokerFangsEntity {
     fn tick<'a>(

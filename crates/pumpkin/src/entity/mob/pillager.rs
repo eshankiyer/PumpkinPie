@@ -7,8 +7,7 @@ use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::meta_data_type::MetaDataType;
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_protocol::java::client::play::Metadata;
@@ -151,8 +150,7 @@ impl Mob for PillagerEntity {
         if self.is_charging_crossbow.swap(charging, Relaxed) != charging {
             self.mob_entity.living_entity.entity.send_meta_data(
                 &[Metadata::new(
-                    TrackedData::IS_CHARGING_CROSSBOW,
-                    MetaDataType::BOOLEAN,
+                    tracked_data::pillager::IS_CHARGING_CROSSBOW,
                     charging,
                 )],
                 None,

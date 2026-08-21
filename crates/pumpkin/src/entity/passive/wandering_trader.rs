@@ -138,7 +138,7 @@ impl WanderingTraderEntity {
                             b.item,
                         )))
                     }),
-                    is_disabled: false,
+                    reward_exp: true,
                     uses: 0,
                     max_uses: trade.max_uses,
                     xp: trade.xp,
@@ -154,8 +154,7 @@ impl WanderingTraderEntity {
         if let Some(sync_id) = player.open_handled_screen(self, None).await {
             let offers = self.offers.lock().await.clone();
             player
-                .client
-                .enqueue_packet(&CMerchantOffers::new(
+                .send_client_packet(&CMerchantOffers::new(
                     VarInt(sync_id as i32),
                     offers,
                     // Vanilla `WanderingTrader.mobInteract` opens `openTradingScreen(player,
@@ -191,8 +190,9 @@ impl ScreenHandlerFactory for WanderingTraderEntity {
             .await;
 
             handler.on_trade = Some(Box::new(move |offer_index| {
-                if let Some(trader) = self_weak.upgrade() {
-                    tokio::spawn(async move {
+                let self_weak = self_weak.clone();
+                Box::pin(async move {
+                    if let Some(trader) = self_weak.upgrade() {
                         let reward_exp = {
                             let mut offers = trader.offers.lock().await;
                             if offer_index >= offers.len() {
@@ -200,12 +200,12 @@ impl ScreenHandlerFactory for WanderingTraderEntity {
                             }
                             let offer = &mut offers[offer_index];
                             offer.uses += 1;
-                            !offer.is_disabled
+                            offer.reward_exp
                         };
 
-                        // `WanderingTrader::rewardTradeXp` (WanderingTrader.java:157-163): unlike
+                        // `WanderingTrader::rewardTradeXp` (WanderingTrader.java:158-163): unlike
                         // `Villager`, no persisted XP counter or profession leveling, just a flat
-                        // orb.
+                        // orb, and only when `MerchantOffer::shouldRewardExp`.
                         if reward_exp {
                             let entity = trader.get_entity();
                             crate::entity::experience_orb::ExperienceOrbEntity::spawn(
@@ -215,8 +215,8 @@ impl ScreenHandlerFactory for WanderingTraderEntity {
                             )
                             .await;
                         }
-                    });
-                }
+                    }
+                })
             }));
 
             Some(Arc::new(Mutex::new(handler)) as SharedScreenHandler)
@@ -257,7 +257,7 @@ impl NBTStorage for WanderingTraderEntity {
 
                 recipe.put_int("uses", offer.uses);
                 recipe.put_int("maxUses", offer.max_uses);
-                recipe.put_bool("rewardExp", !offer.is_disabled);
+                recipe.put_bool("rewardExp", offer.reward_exp);
                 recipe.put_int("xp", offer.xp);
                 recipe.put_float("priceMultiplier", offer.price_multiplier);
                 recipe.put_int("specialPrice", offer.special_price);
@@ -309,7 +309,7 @@ impl NBTStorage for WanderingTraderEntity {
                                 base_cost_a: buy.into(),
                                 output: sell_item.into(),
                                 cost_b: buy_b.map(Into::into),
-                                is_disabled: !reward_exp,
+                                reward_exp,
                                 uses,
                                 max_uses,
                                 xp,

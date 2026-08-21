@@ -4,10 +4,9 @@ use std::sync::{Arc, Weak};
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::entity::EntityType;
-use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::{codec::var_int::VarInt, java::client::play::Metadata};
 use pumpkin_util::Difficulty;
@@ -203,11 +202,7 @@ impl SlimeEntity {
     /// publish the size at spawn time, when `set_size` ran before the entity had any viewers.
     fn send_size_meta_data(&self, size: i32) {
         self.entity.living_entity.entity.send_meta_data(
-            &[Metadata::new(
-                TrackedData::CUBE_SIZE,
-                MetaDataType::INT,
-                VarInt(size),
-            )],
+            &[Metadata::new(tracked_data::slime::ID_SIZE, VarInt(size))],
             None,
         );
     }

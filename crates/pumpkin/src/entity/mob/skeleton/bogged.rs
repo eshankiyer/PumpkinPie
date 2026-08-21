@@ -6,9 +6,8 @@ use std::sync::{
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::sound::{Sound, SoundCategory};
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::vector3::Vector3;
@@ -46,11 +45,7 @@ impl BoggedSkeletonEntity {
     pub fn set_sheared(&self, sheared: bool) {
         if self.sheared.swap(sheared, Relaxed) != sheared {
             self.entity.mob_entity.living_entity.entity.send_meta_data(
-                &[Metadata::new(
-                    TrackedData::SHEARED,
-                    MetaDataType::BOOLEAN,
-                    sheared,
-                )],
+                &[Metadata::new(tracked_data::bogged::SHEARED, sheared)],
                 None,
             );
         }
@@ -137,21 +132,13 @@ impl Mob for BoggedSkeletonEntity {
 
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
+            // Vanilla `Bogged` is not an `AgeableMob`, so it has no baby tracker; the
+            // per-entity table has no `bogged` baby field to send. (The pre-migration code
+            // sent the flat `BABY_ID`, whose 26.2 id 16 is `Bogged.DATA_SHEARED`.)
             let entity = &self.entity.mob_entity.living_entity.entity;
-            if entity.age.load(Relaxed) < 0 {
-                entity.send_meta_data(
-                    &[Metadata::new(
-                        TrackedData::BABY_ID,
-                        MetaDataType::BOOLEAN,
-                        true,
-                    )],
-                    None,
-                );
-            }
             entity.send_meta_data(
                 &[Metadata::new(
-                    TrackedData::SHEARED,
-                    MetaDataType::BOOLEAN,
+                    tracked_data::bogged::SHEARED,
                     self.is_sheared(),
                 )],
                 None,

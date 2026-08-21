@@ -6,8 +6,7 @@ use crate::entity::{
 };
 use arc_swap::ArcSwap;
 use pumpkin_data::damage::DamageType;
-use pumpkin_data::meta_data_type::MetaDataType;
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::vector3::Vector3;
@@ -439,8 +438,7 @@ impl EntityBase for PaintingEntity {
             let entity = self.get_entity();
             entity.send_meta_data(
                 &[Metadata::new(
-                    TrackedData::PAINTING_VARIANT_ID,
-                    MetaDataType::PAINTING_VARIANT,
+                    tracked_data::painting::PAINTING_VARIANT_ID,
                     self.get_variant(),
                 )],
                 None,

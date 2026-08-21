@@ -5,9 +5,8 @@ use std::sync::{
 
 use pumpkin_data::sound::SoundCategory;
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_data::{
-    entity::EntityType, item::Item, meta_data_type::MetaDataType, tracked_data::TrackedData,
-};
+use pumpkin_data::tracked_data;
+use pumpkin_data::{entity::EntityType, item::Item};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::vector3::Vector3;
@@ -24,6 +23,7 @@ use crate::entity::{
     },
     item::ItemEntity,
     mob::{Mob, MobEntity},
+    passive::animal::Animal,
     player::Player,
 };
 use crate::world::World;
@@ -33,8 +33,7 @@ use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::Sound;
 
-use super::animal::Animal;
-use crate::block::entities::sign::DyeColor;
+use crate::block::entities::sign::{DyeColor, DyeColorExt};
 
 const TEMPT_ITEMS: &[&Item] = &[&Item::WHEAT];
 
@@ -138,7 +137,7 @@ fn wool_item_for_color(color: u8) -> &'static Item {
 pub struct SheepEntity {
     pub mob_entity: MobEntity,
     color_and_sheared: AtomicU8,
-    ageable_data: AgeableData,
+    pub ageable_data: AgeableData,
 }
 
 impl SheepEntity {
@@ -205,8 +204,7 @@ impl SheepEntity {
         self.color_and_sheared.store(byte, Ordering::Relaxed);
         self.mob_entity.living_entity.entity.send_meta_data(
             &[Metadata::new(
-                TrackedData::WOOL_ID,
-                MetaDataType::BYTE,
+                pumpkin_data::tracked_data::sheep::WOOL_ID,
                 byte as i8,
             )],
             None,
@@ -313,6 +311,12 @@ fn shear_drop_velocity(
     Vector3::new(base_dx + jitter_dx, 0.2 + jitter_dy, base_dz + jitter_dz)
 }
 
+impl crate::entity::ageable::AgeableMob for SheepEntity {
+    fn get_ageable_data(&self) -> &crate::entity::ageable::AgeableData {
+        &self.ageable_data
+    }
+}
+
 impl NBTStorage for SheepEntity {
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async {
@@ -329,7 +333,10 @@ impl NBTStorage for SheepEntity {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
             self.read_ageable_nbt(nbt);
             self.read_animal_nbt(nbt);
-            let sheared = nbt.get_bool("Sheared").unwrap_or(false);
+            let sheared = nbt
+                .get_bool("Sheared")
+                .or_else(|| nbt.get_byte("Sheared").map(|b| b == 1))
+                .unwrap_or(false);
             let color = nbt.get_byte("Color").unwrap_or(0) as u8;
             let byte = (color & 0x0F) | if sheared { 0x10 } else { 0 };
             self.color_and_sheared.store(byte, Ordering::Relaxed);
@@ -339,13 +346,11 @@ impl NBTStorage for SheepEntity {
 
 impl super::animal::Animal for SheepEntity {
     fn is_food(&self, item_stack: &ItemStack) -> bool {
-        TEMPT_ITEMS.iter().any(|i| i.id == item_stack.item.id)
-    }
-}
-
-impl AgeableMob for SheepEntity {
-    fn get_ageable_data(&self) -> &AgeableData {
-        &self.ageable_data
+        use pumpkin_data::tag::Taggable;
+        item_stack
+            .item
+            .has_tag(&pumpkin_data::tag::Item::MINECRAFT_SHEEP_FOOD)
+            || TEMPT_ITEMS.iter().any(|i| i.id == item_stack.item.id)
     }
 }
 
@@ -386,8 +391,7 @@ impl Mob for SheepEntity {
             if entity.age.load(Ordering::Relaxed) < 0 {
                 entity.send_meta_data(
                     &[pumpkin_protocol::java::client::play::Metadata::new(
-                        TrackedData::BABY_ID,
-                        MetaDataType::BOOLEAN,
+                        tracked_data::ageable_mob::DATA_BABY_ID,
                         true,
                     )],
                     None,

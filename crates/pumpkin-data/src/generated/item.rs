@@ -13,7 +13,8 @@ use crate::data_component_impl::*;
 use crate::effect::StatusEffect;
 use crate::sound::Sound;
 use crate::tag::{RegistryKey, Taggable};
-use crate::AttributeModifierSlot;
+use crate::{AttributeModifierSlot, tag};
+use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
 use pumpkin_util::text::TextComponent;
 use std::borrow::Cow;
 use std::hash::{Hash, Hasher};
@@ -86,7 +87,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.acacia_boat",
+                    name: Cow::Borrowed("item.minecraft.acacia_boat"),
                 },
             ),
             (
@@ -124,7 +125,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.acacia_button",
+                    name: Cow::Borrowed("block.minecraft.acacia_button"),
                 },
             ),
             (
@@ -162,7 +163,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.acacia_chest_boat",
+                    name: Cow::Borrowed("item.minecraft.acacia_chest_boat"),
                 },
             ),
             (
@@ -200,7 +201,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.acacia_door",
+                    name: Cow::Borrowed("block.minecraft.acacia_door"),
                 },
             ),
             (
@@ -238,7 +239,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.acacia_fence",
+                    name: Cow::Borrowed("block.minecraft.acacia_fence"),
                 },
             ),
             (
@@ -276,7 +277,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.acacia_fence_gate",
+                    name: Cow::Borrowed("block.minecraft.acacia_fence_gate"),
                 },
             ),
             (
@@ -314,7 +315,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.acacia_hanging_sign",
+                    name: Cow::Borrowed("block.minecraft.acacia_hanging_sign"),
                 },
             ),
             (
@@ -352,7 +353,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.acacia_leaves",
+                    name: Cow::Borrowed("block.minecraft.acacia_leaves"),
                 },
             ),
             (
@@ -390,7 +391,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.acacia_log",
+                    name: Cow::Borrowed("block.minecraft.acacia_log"),
                 },
             ),
             (
@@ -428,7 +429,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.acacia_planks",
+                    name: Cow::Borrowed("block.minecraft.acacia_planks"),
                 },
             ),
             (
@@ -466,7 +467,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.acacia_pressure_plate",
+                    name: Cow::Borrowed("block.minecraft.acacia_pressure_plate"),
                 },
             ),
             (
@@ -504,7 +505,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.acacia_sapling",
+                    name: Cow::Borrowed("block.minecraft.acacia_sapling"),
                 },
             ),
             (
@@ -542,7 +543,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.acacia_shelf",
+                    name: Cow::Borrowed("block.minecraft.acacia_shelf"),
                 },
             ),
             (
@@ -581,7 +582,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.acacia_sign",
+                    name: Cow::Borrowed("block.minecraft.acacia_sign"),
                 },
             ),
             (
@@ -619,7 +620,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.acacia_slab",
+                    name: Cow::Borrowed("block.minecraft.acacia_slab"),
                 },
             ),
             (
@@ -657,7 +658,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.acacia_stairs",
+                    name: Cow::Borrowed("block.minecraft.acacia_stairs"),
                 },
             ),
             (
@@ -695,7 +696,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.acacia_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.acacia_trapdoor"),
                 },
             ),
             (
@@ -733,7 +734,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.acacia_wood",
+                    name: Cow::Borrowed("block.minecraft.acacia_wood"),
                 },
             ),
             (
@@ -771,7 +772,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.activator_rail",
+                    name: Cow::Borrowed("block.minecraft.activator_rail"),
                 },
             ),
             (
@@ -809,7 +810,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.air",
+                    name: Cow::Borrowed("block.minecraft.air"),
                 },
             ),
             (
@@ -847,7 +848,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.allay_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.allay_spawn_egg"),
                 },
             ),
             (
@@ -886,7 +887,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.allium",
+                    name: Cow::Borrowed("block.minecraft.allium"),
                 },
             ),
             (
@@ -924,7 +925,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.amethyst_block",
+                    name: Cow::Borrowed("block.minecraft.amethyst_block"),
                 },
             ),
             (
@@ -962,7 +963,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.amethyst_cluster",
+                    name: Cow::Borrowed("block.minecraft.amethyst_cluster"),
                 },
             ),
             (
@@ -1000,7 +1001,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.amethyst_shard",
+                    name: Cow::Borrowed("item.minecraft.amethyst_shard"),
                 },
             ),
             (
@@ -1039,7 +1040,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.ancient_debris",
+                    name: Cow::Borrowed("block.minecraft.ancient_debris"),
                 },
             ),
             (
@@ -1083,7 +1084,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.andesite",
+                    name: Cow::Borrowed("block.minecraft.andesite"),
                 },
             ),
             (
@@ -1121,7 +1122,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.andesite_slab",
+                    name: Cow::Borrowed("block.minecraft.andesite_slab"),
                 },
             ),
             (
@@ -1159,7 +1160,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.andesite_stairs",
+                    name: Cow::Borrowed("block.minecraft.andesite_stairs"),
                 },
             ),
             (
@@ -1197,7 +1198,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.andesite_wall",
+                    name: Cow::Borrowed("block.minecraft.andesite_wall"),
                 },
             ),
             (
@@ -1235,7 +1236,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.angler_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.angler_pottery_sherd"),
                 },
             ),
             (
@@ -1273,7 +1274,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.anvil",
+                    name: Cow::Borrowed("block.minecraft.anvil"),
                 },
             ),
             (
@@ -1311,7 +1312,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.apple",
+                    name: Cow::Borrowed("item.minecraft.apple"),
                 },
             ),
             (
@@ -1367,7 +1368,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.archer_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.archer_pottery_sherd"),
                 },
             ),
             (
@@ -1405,7 +1406,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.armadillo_scute",
+                    name: Cow::Borrowed("item.minecraft.armadillo_scute"),
                 },
             ),
             (
@@ -1443,7 +1444,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.armadillo_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.armadillo_spawn_egg"),
                 },
             ),
             (
@@ -1482,7 +1483,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.armor_stand",
+                    name: Cow::Borrowed("item.minecraft.armor_stand"),
                 },
             ),
             (
@@ -1520,7 +1521,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.arms_up_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.arms_up_pottery_sherd"),
                 },
             ),
             (
@@ -1558,7 +1559,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.arrow",
+                    name: Cow::Borrowed("item.minecraft.arrow"),
                 },
             ),
             (
@@ -1596,7 +1597,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.axolotl_bucket",
+                    name: Cow::Borrowed("item.minecraft.axolotl_bucket"),
                 },
             ),
             (
@@ -1635,7 +1636,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.axolotl_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.axolotl_spawn_egg"),
                 },
             ),
             (
@@ -1674,7 +1675,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.azalea",
+                    name: Cow::Borrowed("block.minecraft.azalea"),
                 },
             ),
             (
@@ -1712,7 +1713,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.azalea_leaves",
+                    name: Cow::Borrowed("block.minecraft.azalea_leaves"),
                 },
             ),
             (
@@ -1750,7 +1751,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.azure_bluet",
+                    name: Cow::Borrowed("block.minecraft.azure_bluet"),
                 },
             ),
             (
@@ -1788,7 +1789,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.baked_potato",
+                    name: Cow::Borrowed("item.minecraft.baked_potato"),
                 },
             ),
             (
@@ -1844,7 +1845,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bamboo",
+                    name: Cow::Borrowed("block.minecraft.bamboo"),
                 },
             ),
             (
@@ -1882,7 +1883,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bamboo_block",
+                    name: Cow::Borrowed("block.minecraft.bamboo_block"),
                 },
             ),
             (
@@ -1920,7 +1921,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bamboo_button",
+                    name: Cow::Borrowed("block.minecraft.bamboo_button"),
                 },
             ),
             (
@@ -1958,7 +1959,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.bamboo_chest_raft",
+                    name: Cow::Borrowed("item.minecraft.bamboo_chest_raft"),
                 },
             ),
             (
@@ -1996,7 +1997,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bamboo_door",
+                    name: Cow::Borrowed("block.minecraft.bamboo_door"),
                 },
             ),
             (
@@ -2034,7 +2035,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bamboo_fence",
+                    name: Cow::Borrowed("block.minecraft.bamboo_fence"),
                 },
             ),
             (
@@ -2072,7 +2073,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bamboo_fence_gate",
+                    name: Cow::Borrowed("block.minecraft.bamboo_fence_gate"),
                 },
             ),
             (
@@ -2110,7 +2111,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bamboo_hanging_sign",
+                    name: Cow::Borrowed("block.minecraft.bamboo_hanging_sign"),
                 },
             ),
             (
@@ -2148,7 +2149,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bamboo_mosaic",
+                    name: Cow::Borrowed("block.minecraft.bamboo_mosaic"),
                 },
             ),
             (
@@ -2186,7 +2187,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bamboo_mosaic_slab",
+                    name: Cow::Borrowed("block.minecraft.bamboo_mosaic_slab"),
                 },
             ),
             (
@@ -2224,7 +2225,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bamboo_mosaic_stairs",
+                    name: Cow::Borrowed("block.minecraft.bamboo_mosaic_stairs"),
                 },
             ),
             (
@@ -2262,7 +2263,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bamboo_planks",
+                    name: Cow::Borrowed("block.minecraft.bamboo_planks"),
                 },
             ),
             (
@@ -2300,7 +2301,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bamboo_pressure_plate",
+                    name: Cow::Borrowed("block.minecraft.bamboo_pressure_plate"),
                 },
             ),
             (
@@ -2338,7 +2339,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.bamboo_raft",
+                    name: Cow::Borrowed("item.minecraft.bamboo_raft"),
                 },
             ),
             (
@@ -2376,7 +2377,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bamboo_shelf",
+                    name: Cow::Borrowed("block.minecraft.bamboo_shelf"),
                 },
             ),
             (
@@ -2415,7 +2416,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bamboo_sign",
+                    name: Cow::Borrowed("block.minecraft.bamboo_sign"),
                 },
             ),
             (
@@ -2453,7 +2454,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bamboo_slab",
+                    name: Cow::Borrowed("block.minecraft.bamboo_slab"),
                 },
             ),
             (
@@ -2491,7 +2492,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bamboo_stairs",
+                    name: Cow::Borrowed("block.minecraft.bamboo_stairs"),
                 },
             ),
             (
@@ -2529,7 +2530,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bamboo_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.bamboo_trapdoor"),
                 },
             ),
             (
@@ -2567,7 +2568,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.barrel",
+                    name: Cow::Borrowed("block.minecraft.barrel"),
                 },
             ),
             (
@@ -2606,7 +2607,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.barrier",
+                    name: Cow::Borrowed("block.minecraft.barrier"),
                 },
             ),
             (
@@ -2644,7 +2645,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.basalt",
+                    name: Cow::Borrowed("block.minecraft.basalt"),
                 },
             ),
             (
@@ -2682,7 +2683,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.bat_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.bat_spawn_egg"),
                 },
             ),
             (
@@ -2721,7 +2722,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.beacon",
+                    name: Cow::Borrowed("block.minecraft.beacon"),
                 },
             ),
             (
@@ -2759,7 +2760,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bedrock",
+                    name: Cow::Borrowed("block.minecraft.bedrock"),
                 },
             ),
             (
@@ -2797,7 +2798,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bee_nest",
+                    name: Cow::Borrowed("block.minecraft.bee_nest"),
                 },
             ),
             (
@@ -2845,7 +2846,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.bee_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.bee_spawn_egg"),
                 },
             ),
             (
@@ -2884,7 +2885,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.beef",
+                    name: Cow::Borrowed("item.minecraft.beef"),
                 },
             ),
             (
@@ -2940,7 +2941,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.beehive",
+                    name: Cow::Borrowed("block.minecraft.beehive"),
                 },
             ),
             (
@@ -2988,7 +2989,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.beetroot",
+                    name: Cow::Borrowed("item.minecraft.beetroot"),
                 },
             ),
             (
@@ -3044,7 +3045,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.beetroot_seeds",
+                    name: Cow::Borrowed("item.minecraft.beetroot_seeds"),
                 },
             ),
             (
@@ -3082,7 +3083,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.beetroot_soup",
+                    name: Cow::Borrowed("item.minecraft.beetroot_soup"),
                 },
             ),
             (
@@ -3139,7 +3140,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bell",
+                    name: Cow::Borrowed("block.minecraft.bell"),
                 },
             ),
             (
@@ -3177,7 +3178,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.big_dripleaf",
+                    name: Cow::Borrowed("block.minecraft.big_dripleaf"),
                 },
             ),
             (
@@ -3215,7 +3216,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.birch_boat",
+                    name: Cow::Borrowed("item.minecraft.birch_boat"),
                 },
             ),
             (
@@ -3253,7 +3254,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.birch_button",
+                    name: Cow::Borrowed("block.minecraft.birch_button"),
                 },
             ),
             (
@@ -3291,7 +3292,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.birch_chest_boat",
+                    name: Cow::Borrowed("item.minecraft.birch_chest_boat"),
                 },
             ),
             (
@@ -3329,7 +3330,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.birch_door",
+                    name: Cow::Borrowed("block.minecraft.birch_door"),
                 },
             ),
             (
@@ -3367,7 +3368,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.birch_fence",
+                    name: Cow::Borrowed("block.minecraft.birch_fence"),
                 },
             ),
             (
@@ -3405,7 +3406,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.birch_fence_gate",
+                    name: Cow::Borrowed("block.minecraft.birch_fence_gate"),
                 },
             ),
             (
@@ -3443,7 +3444,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.birch_hanging_sign",
+                    name: Cow::Borrowed("block.minecraft.birch_hanging_sign"),
                 },
             ),
             (
@@ -3481,7 +3482,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.birch_leaves",
+                    name: Cow::Borrowed("block.minecraft.birch_leaves"),
                 },
             ),
             (
@@ -3519,7 +3520,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.birch_log",
+                    name: Cow::Borrowed("block.minecraft.birch_log"),
                 },
             ),
             (
@@ -3557,7 +3558,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.birch_planks",
+                    name: Cow::Borrowed("block.minecraft.birch_planks"),
                 },
             ),
             (
@@ -3595,7 +3596,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.birch_pressure_plate",
+                    name: Cow::Borrowed("block.minecraft.birch_pressure_plate"),
                 },
             ),
             (
@@ -3633,7 +3634,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.birch_sapling",
+                    name: Cow::Borrowed("block.minecraft.birch_sapling"),
                 },
             ),
             (
@@ -3671,7 +3672,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.birch_shelf",
+                    name: Cow::Borrowed("block.minecraft.birch_shelf"),
                 },
             ),
             (
@@ -3710,7 +3711,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.birch_sign",
+                    name: Cow::Borrowed("block.minecraft.birch_sign"),
                 },
             ),
             (
@@ -3748,7 +3749,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.birch_slab",
+                    name: Cow::Borrowed("block.minecraft.birch_slab"),
                 },
             ),
             (
@@ -3786,7 +3787,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.birch_stairs",
+                    name: Cow::Borrowed("block.minecraft.birch_stairs"),
                 },
             ),
             (
@@ -3824,7 +3825,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.birch_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.birch_trapdoor"),
                 },
             ),
             (
@@ -3862,7 +3863,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.birch_wood",
+                    name: Cow::Borrowed("block.minecraft.birch_wood"),
                 },
             ),
             (
@@ -3900,7 +3901,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.black_banner",
+                    name: Cow::Borrowed("block.minecraft.black_banner"),
                 },
             ),
             (
@@ -3939,7 +3940,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.black_bed",
+                    name: Cow::Borrowed("block.minecraft.black_bed"),
                 },
             ),
             (
@@ -3977,7 +3978,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.black_bundle",
+                    name: Cow::Borrowed("item.minecraft.black_bundle"),
                 },
             ),
             (
@@ -4016,7 +4017,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.black_candle",
+                    name: Cow::Borrowed("block.minecraft.black_candle"),
                 },
             ),
             (
@@ -4054,7 +4055,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.black_carpet",
+                    name: Cow::Borrowed("block.minecraft.black_carpet"),
                 },
             ),
             (
@@ -4111,7 +4112,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.black_concrete",
+                    name: Cow::Borrowed("block.minecraft.black_concrete"),
                 },
             ),
             (
@@ -4149,7 +4150,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.black_concrete_powder",
+                    name: Cow::Borrowed("block.minecraft.black_concrete_powder"),
                 },
             ),
             (
@@ -4187,7 +4188,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.black_dye",
+                    name: Cow::Borrowed("item.minecraft.black_dye"),
                 },
             ),
             (
@@ -4226,7 +4227,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.black_glazed_terracotta",
+                    name: Cow::Borrowed("block.minecraft.black_glazed_terracotta"),
                 },
             ),
             (
@@ -4264,7 +4265,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.black_harness",
+                    name: Cow::Borrowed("item.minecraft.black_harness"),
                 },
             ),
             (
@@ -4318,7 +4319,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.black_shulker_box",
+                    name: Cow::Borrowed("block.minecraft.black_shulker_box"),
                 },
             ),
             (
@@ -4357,7 +4358,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.black_stained_glass",
+                    name: Cow::Borrowed("block.minecraft.black_stained_glass"),
                 },
             ),
             (
@@ -4395,7 +4396,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.black_stained_glass_pane",
+                    name: Cow::Borrowed("block.minecraft.black_stained_glass_pane"),
                 },
             ),
             (
@@ -4433,7 +4434,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.black_terracotta",
+                    name: Cow::Borrowed("block.minecraft.black_terracotta"),
                 },
             ),
             (
@@ -4471,7 +4472,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.black_wool",
+                    name: Cow::Borrowed("block.minecraft.black_wool"),
                 },
             ),
             (
@@ -4509,7 +4510,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blackstone",
+                    name: Cow::Borrowed("block.minecraft.blackstone"),
                 },
             ),
             (
@@ -4547,7 +4548,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blackstone_slab",
+                    name: Cow::Borrowed("block.minecraft.blackstone_slab"),
                 },
             ),
             (
@@ -4585,7 +4586,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blackstone_stairs",
+                    name: Cow::Borrowed("block.minecraft.blackstone_stairs"),
                 },
             ),
             (
@@ -4623,7 +4624,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blackstone_wall",
+                    name: Cow::Borrowed("block.minecraft.blackstone_wall"),
                 },
             ),
             (
@@ -4661,7 +4662,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.blade_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.blade_pottery_sherd"),
                 },
             ),
             (
@@ -4699,7 +4700,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blast_furnace",
+                    name: Cow::Borrowed("block.minecraft.blast_furnace"),
                 },
             ),
             (
@@ -4738,7 +4739,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.blaze_powder",
+                    name: Cow::Borrowed("item.minecraft.blaze_powder"),
                 },
             ),
             (
@@ -4776,7 +4777,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.blaze_rod",
+                    name: Cow::Borrowed("item.minecraft.blaze_rod"),
                 },
             ),
             (
@@ -4814,7 +4815,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.blaze_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.blaze_spawn_egg"),
                 },
             ),
             (
@@ -4853,7 +4854,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blue_banner",
+                    name: Cow::Borrowed("block.minecraft.blue_banner"),
                 },
             ),
             (
@@ -4892,7 +4893,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blue_bed",
+                    name: Cow::Borrowed("block.minecraft.blue_bed"),
                 },
             ),
             (
@@ -4930,7 +4931,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.blue_bundle",
+                    name: Cow::Borrowed("item.minecraft.blue_bundle"),
                 },
             ),
             (
@@ -4969,7 +4970,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blue_candle",
+                    name: Cow::Borrowed("block.minecraft.blue_candle"),
                 },
             ),
             (
@@ -5007,7 +5008,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blue_carpet",
+                    name: Cow::Borrowed("block.minecraft.blue_carpet"),
                 },
             ),
             (
@@ -5064,7 +5065,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blue_concrete",
+                    name: Cow::Borrowed("block.minecraft.blue_concrete"),
                 },
             ),
             (
@@ -5102,7 +5103,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blue_concrete_powder",
+                    name: Cow::Borrowed("block.minecraft.blue_concrete_powder"),
                 },
             ),
             (
@@ -5140,7 +5141,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.blue_dye",
+                    name: Cow::Borrowed("item.minecraft.blue_dye"),
                 },
             ),
             (
@@ -5179,7 +5180,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.blue_egg",
+                    name: Cow::Borrowed("item.minecraft.blue_egg"),
                 },
             ),
             (
@@ -5223,7 +5224,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blue_glazed_terracotta",
+                    name: Cow::Borrowed("block.minecraft.blue_glazed_terracotta"),
                 },
             ),
             (
@@ -5261,7 +5262,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.blue_harness",
+                    name: Cow::Borrowed("item.minecraft.blue_harness"),
                 },
             ),
             (
@@ -5315,7 +5316,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blue_ice",
+                    name: Cow::Borrowed("block.minecraft.blue_ice"),
                 },
             ),
             (
@@ -5353,7 +5354,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blue_orchid",
+                    name: Cow::Borrowed("block.minecraft.blue_orchid"),
                 },
             ),
             (
@@ -5391,7 +5392,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blue_shulker_box",
+                    name: Cow::Borrowed("block.minecraft.blue_shulker_box"),
                 },
             ),
             (
@@ -5430,7 +5431,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blue_stained_glass",
+                    name: Cow::Borrowed("block.minecraft.blue_stained_glass"),
                 },
             ),
             (
@@ -5468,7 +5469,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blue_stained_glass_pane",
+                    name: Cow::Borrowed("block.minecraft.blue_stained_glass_pane"),
                 },
             ),
             (
@@ -5506,7 +5507,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blue_terracotta",
+                    name: Cow::Borrowed("block.minecraft.blue_terracotta"),
                 },
             ),
             (
@@ -5544,7 +5545,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.blue_wool",
+                    name: Cow::Borrowed("block.minecraft.blue_wool"),
                 },
             ),
             (
@@ -5582,7 +5583,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.bogged_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.bogged_spawn_egg"),
                 },
             ),
             (
@@ -5621,7 +5622,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.bolt_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.bolt_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -5659,7 +5660,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.bone",
+                    name: Cow::Borrowed("item.minecraft.bone"),
                 },
             ),
             (
@@ -5697,7 +5698,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bone_block",
+                    name: Cow::Borrowed("block.minecraft.bone_block"),
                 },
             ),
             (
@@ -5735,7 +5736,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.bone_meal",
+                    name: Cow::Borrowed("item.minecraft.bone_meal"),
                 },
             ),
             (
@@ -5773,7 +5774,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.book",
+                    name: Cow::Borrowed("item.minecraft.book"),
                 },
             ),
             (
@@ -5812,7 +5813,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bookshelf",
+                    name: Cow::Borrowed("block.minecraft.bookshelf"),
                 },
             ),
             (
@@ -5850,7 +5851,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.bordure_indented_banner_pattern",
+                    name: Cow::Borrowed("item.minecraft.bordure_indented_banner_pattern"),
                 },
             ),
             (
@@ -5889,7 +5890,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.bow",
+                    name: Cow::Borrowed("item.minecraft.bow"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -5930,7 +5931,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.bowl",
+                    name: Cow::Borrowed("item.minecraft.bowl"),
                 },
             ),
             (
@@ -5968,7 +5969,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brain_coral",
+                    name: Cow::Borrowed("block.minecraft.brain_coral"),
                 },
             ),
             (
@@ -6006,7 +6007,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brain_coral_block",
+                    name: Cow::Borrowed("block.minecraft.brain_coral_block"),
                 },
             ),
             (
@@ -6044,7 +6045,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brain_coral_fan",
+                    name: Cow::Borrowed("block.minecraft.brain_coral_fan"),
                 },
             ),
             (
@@ -6082,7 +6083,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.bread",
+                    name: Cow::Borrowed("item.minecraft.bread"),
                 },
             ),
             (
@@ -6138,7 +6139,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.breeze_rod",
+                    name: Cow::Borrowed("item.minecraft.breeze_rod"),
                 },
             ),
             (
@@ -6176,7 +6177,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.breeze_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.breeze_spawn_egg"),
                 },
             ),
             (
@@ -6215,7 +6216,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.brewer_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.brewer_pottery_sherd"),
                 },
             ),
             (
@@ -6253,7 +6254,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brewing_stand",
+                    name: Cow::Borrowed("block.minecraft.brewing_stand"),
                 },
             ),
             (
@@ -6292,7 +6293,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.brick",
+                    name: Cow::Borrowed("item.minecraft.brick"),
                 },
             ),
             (
@@ -6330,7 +6331,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brick_slab",
+                    name: Cow::Borrowed("block.minecraft.brick_slab"),
                 },
             ),
             (
@@ -6368,7 +6369,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brick_stairs",
+                    name: Cow::Borrowed("block.minecraft.brick_stairs"),
                 },
             ),
             (
@@ -6406,7 +6407,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brick_wall",
+                    name: Cow::Borrowed("block.minecraft.brick_wall"),
                 },
             ),
             (
@@ -6444,7 +6445,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bricks",
+                    name: Cow::Borrowed("block.minecraft.bricks"),
                 },
             ),
             (
@@ -6482,7 +6483,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brown_banner",
+                    name: Cow::Borrowed("block.minecraft.brown_banner"),
                 },
             ),
             (
@@ -6521,7 +6522,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brown_bed",
+                    name: Cow::Borrowed("block.minecraft.brown_bed"),
                 },
             ),
             (
@@ -6559,7 +6560,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.brown_bundle",
+                    name: Cow::Borrowed("item.minecraft.brown_bundle"),
                 },
             ),
             (
@@ -6598,7 +6599,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brown_candle",
+                    name: Cow::Borrowed("block.minecraft.brown_candle"),
                 },
             ),
             (
@@ -6636,7 +6637,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brown_carpet",
+                    name: Cow::Borrowed("block.minecraft.brown_carpet"),
                 },
             ),
             (
@@ -6693,7 +6694,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brown_concrete",
+                    name: Cow::Borrowed("block.minecraft.brown_concrete"),
                 },
             ),
             (
@@ -6731,7 +6732,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brown_concrete_powder",
+                    name: Cow::Borrowed("block.minecraft.brown_concrete_powder"),
                 },
             ),
             (
@@ -6769,7 +6770,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.brown_dye",
+                    name: Cow::Borrowed("item.minecraft.brown_dye"),
                 },
             ),
             (
@@ -6808,7 +6809,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.brown_egg",
+                    name: Cow::Borrowed("item.minecraft.brown_egg"),
                 },
             ),
             (
@@ -6852,7 +6853,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brown_glazed_terracotta",
+                    name: Cow::Borrowed("block.minecraft.brown_glazed_terracotta"),
                 },
             ),
             (
@@ -6890,7 +6891,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.brown_harness",
+                    name: Cow::Borrowed("item.minecraft.brown_harness"),
                 },
             ),
             (
@@ -6944,7 +6945,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brown_mushroom",
+                    name: Cow::Borrowed("block.minecraft.brown_mushroom"),
                 },
             ),
             (
@@ -6982,7 +6983,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brown_mushroom_block",
+                    name: Cow::Borrowed("block.minecraft.brown_mushroom_block"),
                 },
             ),
             (
@@ -7020,7 +7021,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brown_shulker_box",
+                    name: Cow::Borrowed("block.minecraft.brown_shulker_box"),
                 },
             ),
             (
@@ -7059,7 +7060,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brown_stained_glass",
+                    name: Cow::Borrowed("block.minecraft.brown_stained_glass"),
                 },
             ),
             (
@@ -7097,7 +7098,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brown_stained_glass_pane",
+                    name: Cow::Borrowed("block.minecraft.brown_stained_glass_pane"),
                 },
             ),
             (
@@ -7135,7 +7136,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brown_terracotta",
+                    name: Cow::Borrowed("block.minecraft.brown_terracotta"),
                 },
             ),
             (
@@ -7173,7 +7174,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.brown_wool",
+                    name: Cow::Borrowed("block.minecraft.brown_wool"),
                 },
             ),
             (
@@ -7211,7 +7212,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.brush",
+                    name: Cow::Borrowed("item.minecraft.brush"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -7251,7 +7252,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bubble_coral",
+                    name: Cow::Borrowed("block.minecraft.bubble_coral"),
                 },
             ),
             (
@@ -7289,7 +7290,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bubble_coral_block",
+                    name: Cow::Borrowed("block.minecraft.bubble_coral_block"),
                 },
             ),
             (
@@ -7327,7 +7328,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bubble_coral_fan",
+                    name: Cow::Borrowed("block.minecraft.bubble_coral_fan"),
                 },
             ),
             (
@@ -7365,7 +7366,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.bucket",
+                    name: Cow::Borrowed("item.minecraft.bucket"),
                 },
             ),
             (
@@ -7403,7 +7404,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.budding_amethyst",
+                    name: Cow::Borrowed("block.minecraft.budding_amethyst"),
                 },
             ),
             (
@@ -7441,7 +7442,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.bundle",
+                    name: Cow::Borrowed("item.minecraft.bundle"),
                 },
             ),
             (
@@ -7480,7 +7481,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.burn_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.burn_pottery_sherd"),
                 },
             ),
             (
@@ -7518,7 +7519,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.bush",
+                    name: Cow::Borrowed("block.minecraft.bush"),
                 },
             ),
             (
@@ -7556,7 +7557,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cactus",
+                    name: Cow::Borrowed("block.minecraft.cactus"),
                 },
             ),
             (
@@ -7594,7 +7595,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cactus_flower",
+                    name: Cow::Borrowed("block.minecraft.cactus_flower"),
                 },
             ),
             (
@@ -7632,7 +7633,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cake",
+                    name: Cow::Borrowed("block.minecraft.cake"),
                 },
             ),
             (
@@ -7670,7 +7671,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.calcite",
+                    name: Cow::Borrowed("block.minecraft.calcite"),
                 },
             ),
             (
@@ -7708,7 +7709,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.calibrated_sculk_sensor",
+                    name: Cow::Borrowed("block.minecraft.calibrated_sculk_sensor"),
                 },
             ),
             (
@@ -7746,7 +7747,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.camel_husk_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.camel_husk_spawn_egg"),
                 },
             ),
             (
@@ -7785,7 +7786,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.camel_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.camel_spawn_egg"),
                 },
             ),
             (
@@ -7824,7 +7825,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.campfire",
+                    name: Cow::Borrowed("block.minecraft.campfire"),
                 },
             ),
             (
@@ -7863,7 +7864,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.candle",
+                    name: Cow::Borrowed("block.minecraft.candle"),
                 },
             ),
             (
@@ -7901,7 +7902,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.carrot",
+                    name: Cow::Borrowed("item.minecraft.carrot"),
                 },
             ),
             (
@@ -7957,7 +7958,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.carrot_on_a_stick",
+                    name: Cow::Borrowed("item.minecraft.carrot_on_a_stick"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -7997,7 +7998,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cartography_table",
+                    name: Cow::Borrowed("block.minecraft.cartography_table"),
                 },
             ),
             (
@@ -8035,7 +8036,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.carved_pumpkin",
+                    name: Cow::Borrowed("block.minecraft.carved_pumpkin"),
                 },
             ),
             (
@@ -8095,7 +8096,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cat_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.cat_spawn_egg"),
                 },
             ),
             (
@@ -8134,7 +8135,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cauldron",
+                    name: Cow::Borrowed("block.minecraft.cauldron"),
                 },
             ),
             (
@@ -8172,7 +8173,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cave_spider_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.cave_spider_spawn_egg"),
                 },
             ),
             (
@@ -8211,7 +8212,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chain_command_block",
+                    name: Cow::Borrowed("block.minecraft.chain_command_block"),
                 },
             ),
             (
@@ -8249,7 +8250,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.chainmail_boots",
+                    name: Cow::Borrowed("item.minecraft.chainmail_boots"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -8322,7 +8323,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.chainmail_chestplate",
+                    name: Cow::Borrowed("item.minecraft.chainmail_chestplate"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -8395,7 +8396,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.chainmail_helmet",
+                    name: Cow::Borrowed("item.minecraft.chainmail_helmet"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -8468,7 +8469,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.chainmail_leggings",
+                    name: Cow::Borrowed("item.minecraft.chainmail_leggings"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -8541,7 +8542,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.charcoal",
+                    name: Cow::Borrowed("item.minecraft.charcoal"),
                 },
             ),
             (
@@ -8579,7 +8580,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cherry_boat",
+                    name: Cow::Borrowed("item.minecraft.cherry_boat"),
                 },
             ),
             (
@@ -8617,7 +8618,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cherry_button",
+                    name: Cow::Borrowed("block.minecraft.cherry_button"),
                 },
             ),
             (
@@ -8655,7 +8656,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cherry_chest_boat",
+                    name: Cow::Borrowed("item.minecraft.cherry_chest_boat"),
                 },
             ),
             (
@@ -8693,7 +8694,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cherry_door",
+                    name: Cow::Borrowed("block.minecraft.cherry_door"),
                 },
             ),
             (
@@ -8731,7 +8732,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cherry_fence",
+                    name: Cow::Borrowed("block.minecraft.cherry_fence"),
                 },
             ),
             (
@@ -8769,7 +8770,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cherry_fence_gate",
+                    name: Cow::Borrowed("block.minecraft.cherry_fence_gate"),
                 },
             ),
             (
@@ -8807,7 +8808,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cherry_hanging_sign",
+                    name: Cow::Borrowed("block.minecraft.cherry_hanging_sign"),
                 },
             ),
             (
@@ -8845,7 +8846,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cherry_leaves",
+                    name: Cow::Borrowed("block.minecraft.cherry_leaves"),
                 },
             ),
             (
@@ -8883,7 +8884,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cherry_log",
+                    name: Cow::Borrowed("block.minecraft.cherry_log"),
                 },
             ),
             (
@@ -8921,7 +8922,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cherry_planks",
+                    name: Cow::Borrowed("block.minecraft.cherry_planks"),
                 },
             ),
             (
@@ -8959,7 +8960,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cherry_pressure_plate",
+                    name: Cow::Borrowed("block.minecraft.cherry_pressure_plate"),
                 },
             ),
             (
@@ -8997,7 +8998,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cherry_sapling",
+                    name: Cow::Borrowed("block.minecraft.cherry_sapling"),
                 },
             ),
             (
@@ -9035,7 +9036,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cherry_shelf",
+                    name: Cow::Borrowed("block.minecraft.cherry_shelf"),
                 },
             ),
             (
@@ -9074,7 +9075,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cherry_sign",
+                    name: Cow::Borrowed("block.minecraft.cherry_sign"),
                 },
             ),
             (
@@ -9112,7 +9113,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cherry_slab",
+                    name: Cow::Borrowed("block.minecraft.cherry_slab"),
                 },
             ),
             (
@@ -9150,7 +9151,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cherry_stairs",
+                    name: Cow::Borrowed("block.minecraft.cherry_stairs"),
                 },
             ),
             (
@@ -9188,7 +9189,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cherry_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.cherry_trapdoor"),
                 },
             ),
             (
@@ -9226,7 +9227,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cherry_wood",
+                    name: Cow::Borrowed("block.minecraft.cherry_wood"),
                 },
             ),
             (
@@ -9264,7 +9265,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chest",
+                    name: Cow::Borrowed("block.minecraft.chest"),
                 },
             ),
             (
@@ -9303,7 +9304,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.chest_minecart",
+                    name: Cow::Borrowed("item.minecraft.chest_minecart"),
                 },
             ),
             (
@@ -9341,7 +9342,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.chicken",
+                    name: Cow::Borrowed("item.minecraft.chicken"),
                 },
             ),
             (
@@ -9407,7 +9408,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.chicken_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.chicken_spawn_egg"),
                 },
             ),
             (
@@ -9446,7 +9447,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chipped_anvil",
+                    name: Cow::Borrowed("block.minecraft.chipped_anvil"),
                 },
             ),
             (
@@ -9484,7 +9485,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chiseled_bookshelf",
+                    name: Cow::Borrowed("block.minecraft.chiseled_bookshelf"),
                 },
             ),
             (
@@ -9523,7 +9524,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chiseled_cinnabar",
+                    name: Cow::Borrowed("block.minecraft.chiseled_cinnabar"),
                 },
             ),
             (
@@ -9561,7 +9562,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chiseled_copper",
+                    name: Cow::Borrowed("block.minecraft.chiseled_copper"),
                 },
             ),
             (
@@ -9599,7 +9600,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chiseled_deepslate",
+                    name: Cow::Borrowed("block.minecraft.chiseled_deepslate"),
                 },
             ),
             (
@@ -9637,7 +9638,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chiseled_nether_bricks",
+                    name: Cow::Borrowed("block.minecraft.chiseled_nether_bricks"),
                 },
             ),
             (
@@ -9675,7 +9676,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chiseled_polished_blackstone",
+                    name: Cow::Borrowed("block.minecraft.chiseled_polished_blackstone"),
                 },
             ),
             (
@@ -9713,7 +9714,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chiseled_quartz_block",
+                    name: Cow::Borrowed("block.minecraft.chiseled_quartz_block"),
                 },
             ),
             (
@@ -9751,7 +9752,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chiseled_red_sandstone",
+                    name: Cow::Borrowed("block.minecraft.chiseled_red_sandstone"),
                 },
             ),
             (
@@ -9789,7 +9790,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chiseled_resin_bricks",
+                    name: Cow::Borrowed("block.minecraft.chiseled_resin_bricks"),
                 },
             ),
             (
@@ -9827,7 +9828,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chiseled_sandstone",
+                    name: Cow::Borrowed("block.minecraft.chiseled_sandstone"),
                 },
             ),
             (
@@ -9865,7 +9866,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chiseled_stone_bricks",
+                    name: Cow::Borrowed("block.minecraft.chiseled_stone_bricks"),
                 },
             ),
             (
@@ -9903,7 +9904,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chiseled_sulfur",
+                    name: Cow::Borrowed("block.minecraft.chiseled_sulfur"),
                 },
             ),
             (
@@ -9941,7 +9942,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chiseled_tuff",
+                    name: Cow::Borrowed("block.minecraft.chiseled_tuff"),
                 },
             ),
             (
@@ -9979,7 +9980,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chiseled_tuff_bricks",
+                    name: Cow::Borrowed("block.minecraft.chiseled_tuff_bricks"),
                 },
             ),
             (
@@ -10017,7 +10018,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chorus_flower",
+                    name: Cow::Borrowed("block.minecraft.chorus_flower"),
                 },
             ),
             (
@@ -10062,7 +10063,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.chorus_fruit",
+                    name: Cow::Borrowed("item.minecraft.chorus_fruit"),
                 },
             ),
             (
@@ -10118,7 +10119,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.chorus_plant",
+                    name: Cow::Borrowed("block.minecraft.chorus_plant"),
                 },
             ),
             (
@@ -10156,7 +10157,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cinnabar",
+                    name: Cow::Borrowed("block.minecraft.cinnabar"),
                 },
             ),
             (
@@ -10194,7 +10195,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cinnabar_brick_slab",
+                    name: Cow::Borrowed("block.minecraft.cinnabar_brick_slab"),
                 },
             ),
             (
@@ -10232,7 +10233,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cinnabar_brick_stairs",
+                    name: Cow::Borrowed("block.minecraft.cinnabar_brick_stairs"),
                 },
             ),
             (
@@ -10270,7 +10271,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cinnabar_brick_wall",
+                    name: Cow::Borrowed("block.minecraft.cinnabar_brick_wall"),
                 },
             ),
             (
@@ -10308,7 +10309,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cinnabar_bricks",
+                    name: Cow::Borrowed("block.minecraft.cinnabar_bricks"),
                 },
             ),
             (
@@ -10346,7 +10347,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cinnabar_slab",
+                    name: Cow::Borrowed("block.minecraft.cinnabar_slab"),
                 },
             ),
             (
@@ -10384,7 +10385,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cinnabar_stairs",
+                    name: Cow::Borrowed("block.minecraft.cinnabar_stairs"),
                 },
             ),
             (
@@ -10422,7 +10423,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cinnabar_wall",
+                    name: Cow::Borrowed("block.minecraft.cinnabar_wall"),
                 },
             ),
             (
@@ -10460,7 +10461,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.clay",
+                    name: Cow::Borrowed("block.minecraft.clay"),
                 },
             ),
             (
@@ -10498,7 +10499,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.clay_ball",
+                    name: Cow::Borrowed("item.minecraft.clay_ball"),
                 },
             ),
             (
@@ -10536,7 +10537,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.clock",
+                    name: Cow::Borrowed("item.minecraft.clock"),
                 },
             ),
             (
@@ -10574,7 +10575,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.closed_eyeblossom",
+                    name: Cow::Borrowed("block.minecraft.closed_eyeblossom"),
                 },
             ),
             (
@@ -10612,7 +10613,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.coal",
+                    name: Cow::Borrowed("item.minecraft.coal"),
                 },
             ),
             (
@@ -10650,7 +10651,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.coal_block",
+                    name: Cow::Borrowed("block.minecraft.coal_block"),
                 },
             ),
             (
@@ -10688,7 +10689,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.coal_ore",
+                    name: Cow::Borrowed("block.minecraft.coal_ore"),
                 },
             ),
             (
@@ -10726,7 +10727,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.coarse_dirt",
+                    name: Cow::Borrowed("block.minecraft.coarse_dirt"),
                 },
             ),
             (
@@ -10764,7 +10765,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.coast_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.coast_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -10802,7 +10803,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cobbled_deepslate",
+                    name: Cow::Borrowed("block.minecraft.cobbled_deepslate"),
                 },
             ),
             (
@@ -10840,7 +10841,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cobbled_deepslate_slab",
+                    name: Cow::Borrowed("block.minecraft.cobbled_deepslate_slab"),
                 },
             ),
             (
@@ -10878,7 +10879,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cobbled_deepslate_stairs",
+                    name: Cow::Borrowed("block.minecraft.cobbled_deepslate_stairs"),
                 },
             ),
             (
@@ -10916,7 +10917,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cobbled_deepslate_wall",
+                    name: Cow::Borrowed("block.minecraft.cobbled_deepslate_wall"),
                 },
             ),
             (
@@ -10954,7 +10955,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cobblestone",
+                    name: Cow::Borrowed("block.minecraft.cobblestone"),
                 },
             ),
             (
@@ -10992,7 +10993,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cobblestone_slab",
+                    name: Cow::Borrowed("block.minecraft.cobblestone_slab"),
                 },
             ),
             (
@@ -11030,7 +11031,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cobblestone_stairs",
+                    name: Cow::Borrowed("block.minecraft.cobblestone_stairs"),
                 },
             ),
             (
@@ -11068,7 +11069,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cobblestone_wall",
+                    name: Cow::Borrowed("block.minecraft.cobblestone_wall"),
                 },
             ),
             (
@@ -11106,7 +11107,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cobweb",
+                    name: Cow::Borrowed("block.minecraft.cobweb"),
                 },
             ),
             (
@@ -11144,7 +11145,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cocoa_beans",
+                    name: Cow::Borrowed("item.minecraft.cocoa_beans"),
                 },
             ),
             (
@@ -11182,7 +11183,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cod",
+                    name: Cow::Borrowed("item.minecraft.cod"),
                 },
             ),
             (
@@ -11238,7 +11239,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cod_bucket",
+                    name: Cow::Borrowed("item.minecraft.cod_bucket"),
                 },
             ),
             (
@@ -11285,7 +11286,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cod_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.cod_spawn_egg"),
                 },
             ),
             (
@@ -11324,7 +11325,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.command_block",
+                    name: Cow::Borrowed("block.minecraft.command_block"),
                 },
             ),
             (
@@ -11362,7 +11363,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.command_block_minecart",
+                    name: Cow::Borrowed("item.minecraft.command_block_minecart"),
                 },
             ),
             (
@@ -11400,7 +11401,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.comparator",
+                    name: Cow::Borrowed("block.minecraft.comparator"),
                 },
             ),
             (
@@ -11438,7 +11439,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.compass",
+                    name: Cow::Borrowed("item.minecraft.compass"),
                 },
             ),
             (
@@ -11476,7 +11477,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.composter",
+                    name: Cow::Borrowed("block.minecraft.composter"),
                 },
             ),
             (
@@ -11514,7 +11515,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.conduit",
+                    name: Cow::Borrowed("block.minecraft.conduit"),
                 },
             ),
             (
@@ -11552,7 +11553,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cooked_beef",
+                    name: Cow::Borrowed("item.minecraft.cooked_beef"),
                 },
             ),
             (
@@ -11608,7 +11609,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cooked_chicken",
+                    name: Cow::Borrowed("item.minecraft.cooked_chicken"),
                 },
             ),
             (
@@ -11664,7 +11665,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cooked_cod",
+                    name: Cow::Borrowed("item.minecraft.cooked_cod"),
                 },
             ),
             (
@@ -11720,7 +11721,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cooked_mutton",
+                    name: Cow::Borrowed("item.minecraft.cooked_mutton"),
                 },
             ),
             (
@@ -11776,7 +11777,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cooked_porkchop",
+                    name: Cow::Borrowed("item.minecraft.cooked_porkchop"),
                 },
             ),
             (
@@ -11832,7 +11833,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cooked_rabbit",
+                    name: Cow::Borrowed("item.minecraft.cooked_rabbit"),
                 },
             ),
             (
@@ -11888,7 +11889,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cooked_salmon",
+                    name: Cow::Borrowed("item.minecraft.cooked_salmon"),
                 },
             ),
             (
@@ -11944,7 +11945,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cookie",
+                    name: Cow::Borrowed("item.minecraft.cookie"),
                 },
             ),
             (
@@ -12000,7 +12001,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.copper_axe",
+                    name: Cow::Borrowed("item.minecraft.copper_axe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -12083,7 +12084,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.copper_bars",
+                    name: Cow::Borrowed("block.minecraft.copper_bars"),
                 },
             ),
             (
@@ -12121,7 +12122,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.copper_block",
+                    name: Cow::Borrowed("block.minecraft.copper_block"),
                 },
             ),
             (
@@ -12159,7 +12160,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.copper_boots",
+                    name: Cow::Borrowed("item.minecraft.copper_boots"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -12232,7 +12233,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.copper_bulb",
+                    name: Cow::Borrowed("block.minecraft.copper_bulb"),
                 },
             ),
             (
@@ -12270,7 +12271,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.copper_chain",
+                    name: Cow::Borrowed("block.minecraft.copper_chain"),
                 },
             ),
             (
@@ -12308,7 +12309,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.copper_chest",
+                    name: Cow::Borrowed("block.minecraft.copper_chest"),
                 },
             ),
             (
@@ -12346,7 +12347,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.copper_chestplate",
+                    name: Cow::Borrowed("item.minecraft.copper_chestplate"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -12419,7 +12420,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.copper_door",
+                    name: Cow::Borrowed("block.minecraft.copper_door"),
                 },
             ),
             (
@@ -12457,7 +12458,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.copper_golem_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.copper_golem_spawn_egg"),
                 },
             ),
             (
@@ -12496,7 +12497,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.copper_golem_statue",
+                    name: Cow::Borrowed("block.minecraft.copper_golem_statue"),
                 },
             ),
             (
@@ -12543,7 +12544,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.copper_grate",
+                    name: Cow::Borrowed("block.minecraft.copper_grate"),
                 },
             ),
             (
@@ -12581,7 +12582,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.copper_helmet",
+                    name: Cow::Borrowed("item.minecraft.copper_helmet"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -12654,7 +12655,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.copper_hoe",
+                    name: Cow::Borrowed("item.minecraft.copper_hoe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -12737,7 +12738,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.copper_horse_armor",
+                    name: Cow::Borrowed("item.minecraft.copper_horse_armor"),
                 },
             ),
             (
@@ -12806,7 +12807,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.copper_ingot",
+                    name: Cow::Borrowed("item.minecraft.copper_ingot"),
                 },
             ),
             (
@@ -12845,7 +12846,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.copper_lantern",
+                    name: Cow::Borrowed("block.minecraft.copper_lantern"),
                 },
             ),
             (
@@ -12883,7 +12884,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.copper_leggings",
+                    name: Cow::Borrowed("item.minecraft.copper_leggings"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -12956,7 +12957,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.copper_nautilus_armor",
+                    name: Cow::Borrowed("item.minecraft.copper_nautilus_armor"),
                 },
             ),
             (
@@ -13025,7 +13026,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.copper_nugget",
+                    name: Cow::Borrowed("item.minecraft.copper_nugget"),
                 },
             ),
             (
@@ -13063,7 +13064,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.copper_ore",
+                    name: Cow::Borrowed("block.minecraft.copper_ore"),
                 },
             ),
             (
@@ -13101,7 +13102,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.copper_pickaxe",
+                    name: Cow::Borrowed("item.minecraft.copper_pickaxe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -13184,7 +13185,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.copper_shovel",
+                    name: Cow::Borrowed("item.minecraft.copper_shovel"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -13267,7 +13268,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.copper_spear",
+                    name: Cow::Borrowed("item.minecraft.copper_spear"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -13300,14 +13301,17 @@ impl Item {
                 },
             ),
             (Enchantable, &EnchantableImpl { value: 13 }),
-            (AttackRange, &AttackRangeImpl {
-                min_reach: 2.0,
-                max_reach: 4.5,
-                min_creative_reach: 2.0,
-                max_creative_reach: 6.5,
-                hitbox_margin: 0.125,
-                mob_factor: 0.5,
-            }),
+            (
+                AttackRange,
+                &AttackRangeImpl {
+                    min_reach: 2.0,
+                    max_reach: 4.5,
+                    min_creative_reach: 2.0,
+                    max_creative_reach: 6.5,
+                    hitbox_margin: 0.125,
+                    mob_factor: 0.5,
+                },
+            ),
             (BreakSound, &BreakSoundImpl),
             (DamageType, &DamageTypeImpl),
             (
@@ -13342,7 +13346,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.copper_sword",
+                    name: Cow::Borrowed("item.minecraft.copper_sword"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -13430,7 +13434,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.copper_torch",
+                    name: Cow::Borrowed("block.minecraft.copper_torch"),
                 },
             ),
             (
@@ -13468,7 +13472,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.copper_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.copper_trapdoor"),
                 },
             ),
             (
@@ -13506,7 +13510,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cornflower",
+                    name: Cow::Borrowed("block.minecraft.cornflower"),
                 },
             ),
             (
@@ -13544,7 +13548,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cow_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.cow_spawn_egg"),
                 },
             ),
             (
@@ -13583,7 +13587,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cracked_deepslate_bricks",
+                    name: Cow::Borrowed("block.minecraft.cracked_deepslate_bricks"),
                 },
             ),
             (
@@ -13621,7 +13625,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cracked_deepslate_tiles",
+                    name: Cow::Borrowed("block.minecraft.cracked_deepslate_tiles"),
                 },
             ),
             (
@@ -13659,7 +13663,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cracked_nether_bricks",
+                    name: Cow::Borrowed("block.minecraft.cracked_nether_bricks"),
                 },
             ),
             (
@@ -13697,7 +13701,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cracked_polished_blackstone_bricks",
+                    name: Cow::Borrowed("block.minecraft.cracked_polished_blackstone_bricks"),
                 },
             ),
             (
@@ -13735,7 +13739,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cracked_stone_bricks",
+                    name: Cow::Borrowed("block.minecraft.cracked_stone_bricks"),
                 },
             ),
             (
@@ -13773,7 +13777,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crafter",
+                    name: Cow::Borrowed("block.minecraft.crafter"),
                 },
             ),
             (
@@ -13812,7 +13816,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crafting_table",
+                    name: Cow::Borrowed("block.minecraft.crafting_table"),
                 },
             ),
             (
@@ -13850,7 +13854,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.creaking_heart",
+                    name: Cow::Borrowed("block.minecraft.creaking_heart"),
                 },
             ),
             (
@@ -13888,7 +13892,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.creaking_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.creaking_spawn_egg"),
                 },
             ),
             (
@@ -13927,7 +13931,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.creeper_banner_pattern",
+                    name: Cow::Borrowed("item.minecraft.creeper_banner_pattern"),
                 },
             ),
             (
@@ -13966,7 +13970,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.creeper_head",
+                    name: Cow::Borrowed("block.minecraft.creeper_head"),
                 },
             ),
             (
@@ -14026,7 +14030,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.creeper_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.creeper_spawn_egg"),
                 },
             ),
             (
@@ -14065,7 +14069,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crimson_button",
+                    name: Cow::Borrowed("block.minecraft.crimson_button"),
                 },
             ),
             (
@@ -14103,7 +14107,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crimson_door",
+                    name: Cow::Borrowed("block.minecraft.crimson_door"),
                 },
             ),
             (
@@ -14141,7 +14145,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crimson_fence",
+                    name: Cow::Borrowed("block.minecraft.crimson_fence"),
                 },
             ),
             (
@@ -14179,7 +14183,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crimson_fence_gate",
+                    name: Cow::Borrowed("block.minecraft.crimson_fence_gate"),
                 },
             ),
             (
@@ -14217,7 +14221,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crimson_fungus",
+                    name: Cow::Borrowed("block.minecraft.crimson_fungus"),
                 },
             ),
             (
@@ -14255,7 +14259,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crimson_hanging_sign",
+                    name: Cow::Borrowed("block.minecraft.crimson_hanging_sign"),
                 },
             ),
             (
@@ -14293,7 +14297,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crimson_hyphae",
+                    name: Cow::Borrowed("block.minecraft.crimson_hyphae"),
                 },
             ),
             (
@@ -14331,7 +14335,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crimson_nylium",
+                    name: Cow::Borrowed("block.minecraft.crimson_nylium"),
                 },
             ),
             (
@@ -14369,7 +14373,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crimson_planks",
+                    name: Cow::Borrowed("block.minecraft.crimson_planks"),
                 },
             ),
             (
@@ -14407,7 +14411,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crimson_pressure_plate",
+                    name: Cow::Borrowed("block.minecraft.crimson_pressure_plate"),
                 },
             ),
             (
@@ -14445,7 +14449,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crimson_roots",
+                    name: Cow::Borrowed("block.minecraft.crimson_roots"),
                 },
             ),
             (
@@ -14483,7 +14487,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crimson_shelf",
+                    name: Cow::Borrowed("block.minecraft.crimson_shelf"),
                 },
             ),
             (
@@ -14522,7 +14526,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crimson_sign",
+                    name: Cow::Borrowed("block.minecraft.crimson_sign"),
                 },
             ),
             (
@@ -14560,7 +14564,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crimson_slab",
+                    name: Cow::Borrowed("block.minecraft.crimson_slab"),
                 },
             ),
             (
@@ -14598,7 +14602,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crimson_stairs",
+                    name: Cow::Borrowed("block.minecraft.crimson_stairs"),
                 },
             ),
             (
@@ -14636,7 +14640,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crimson_stem",
+                    name: Cow::Borrowed("block.minecraft.crimson_stem"),
                 },
             ),
             (
@@ -14674,7 +14678,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crimson_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.crimson_trapdoor"),
                 },
             ),
             (
@@ -14712,7 +14716,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.crossbow",
+                    name: Cow::Borrowed("item.minecraft.crossbow"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -14759,7 +14763,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.crying_obsidian",
+                    name: Cow::Borrowed("block.minecraft.crying_obsidian"),
                 },
             ),
             (
@@ -14797,7 +14801,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cut_copper",
+                    name: Cow::Borrowed("block.minecraft.cut_copper"),
                 },
             ),
             (
@@ -14835,7 +14839,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cut_copper_slab",
+                    name: Cow::Borrowed("block.minecraft.cut_copper_slab"),
                 },
             ),
             (
@@ -14873,7 +14877,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cut_copper_stairs",
+                    name: Cow::Borrowed("block.minecraft.cut_copper_stairs"),
                 },
             ),
             (
@@ -14911,7 +14915,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cut_red_sandstone",
+                    name: Cow::Borrowed("block.minecraft.cut_red_sandstone"),
                 },
             ),
             (
@@ -14949,7 +14953,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cut_red_sandstone_slab",
+                    name: Cow::Borrowed("block.minecraft.cut_red_sandstone_slab"),
                 },
             ),
             (
@@ -14987,7 +14991,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cut_sandstone",
+                    name: Cow::Borrowed("block.minecraft.cut_sandstone"),
                 },
             ),
             (
@@ -15025,7 +15029,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cut_sandstone_slab",
+                    name: Cow::Borrowed("block.minecraft.cut_sandstone_slab"),
                 },
             ),
             (
@@ -15063,7 +15067,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cyan_banner",
+                    name: Cow::Borrowed("block.minecraft.cyan_banner"),
                 },
             ),
             (
@@ -15102,7 +15106,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cyan_bed",
+                    name: Cow::Borrowed("block.minecraft.cyan_bed"),
                 },
             ),
             (
@@ -15140,7 +15144,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cyan_bundle",
+                    name: Cow::Borrowed("item.minecraft.cyan_bundle"),
                 },
             ),
             (
@@ -15179,7 +15183,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cyan_candle",
+                    name: Cow::Borrowed("block.minecraft.cyan_candle"),
                 },
             ),
             (
@@ -15217,7 +15221,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cyan_carpet",
+                    name: Cow::Borrowed("block.minecraft.cyan_carpet"),
                 },
             ),
             (
@@ -15274,7 +15278,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cyan_concrete",
+                    name: Cow::Borrowed("block.minecraft.cyan_concrete"),
                 },
             ),
             (
@@ -15312,7 +15316,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cyan_concrete_powder",
+                    name: Cow::Borrowed("block.minecraft.cyan_concrete_powder"),
                 },
             ),
             (
@@ -15350,7 +15354,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cyan_dye",
+                    name: Cow::Borrowed("item.minecraft.cyan_dye"),
                 },
             ),
             (
@@ -15389,7 +15393,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cyan_glazed_terracotta",
+                    name: Cow::Borrowed("block.minecraft.cyan_glazed_terracotta"),
                 },
             ),
             (
@@ -15427,7 +15431,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.cyan_harness",
+                    name: Cow::Borrowed("item.minecraft.cyan_harness"),
                 },
             ),
             (
@@ -15481,7 +15485,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cyan_shulker_box",
+                    name: Cow::Borrowed("block.minecraft.cyan_shulker_box"),
                 },
             ),
             (
@@ -15520,7 +15524,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cyan_stained_glass",
+                    name: Cow::Borrowed("block.minecraft.cyan_stained_glass"),
                 },
             ),
             (
@@ -15558,7 +15562,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cyan_stained_glass_pane",
+                    name: Cow::Borrowed("block.minecraft.cyan_stained_glass_pane"),
                 },
             ),
             (
@@ -15596,7 +15600,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cyan_terracotta",
+                    name: Cow::Borrowed("block.minecraft.cyan_terracotta"),
                 },
             ),
             (
@@ -15634,7 +15638,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.cyan_wool",
+                    name: Cow::Borrowed("block.minecraft.cyan_wool"),
                 },
             ),
             (
@@ -15672,7 +15676,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.damaged_anvil",
+                    name: Cow::Borrowed("block.minecraft.damaged_anvil"),
                 },
             ),
             (
@@ -15710,7 +15714,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dandelion",
+                    name: Cow::Borrowed("block.minecraft.dandelion"),
                 },
             ),
             (
@@ -15748,7 +15752,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.danger_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.danger_pottery_sherd"),
                 },
             ),
             (
@@ -15786,7 +15790,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.dark_oak_boat",
+                    name: Cow::Borrowed("item.minecraft.dark_oak_boat"),
                 },
             ),
             (
@@ -15824,7 +15828,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_oak_button",
+                    name: Cow::Borrowed("block.minecraft.dark_oak_button"),
                 },
             ),
             (
@@ -15862,7 +15866,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.dark_oak_chest_boat",
+                    name: Cow::Borrowed("item.minecraft.dark_oak_chest_boat"),
                 },
             ),
             (
@@ -15900,7 +15904,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_oak_door",
+                    name: Cow::Borrowed("block.minecraft.dark_oak_door"),
                 },
             ),
             (
@@ -15938,7 +15942,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_oak_fence",
+                    name: Cow::Borrowed("block.minecraft.dark_oak_fence"),
                 },
             ),
             (
@@ -15976,7 +15980,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_oak_fence_gate",
+                    name: Cow::Borrowed("block.minecraft.dark_oak_fence_gate"),
                 },
             ),
             (
@@ -16014,7 +16018,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_oak_hanging_sign",
+                    name: Cow::Borrowed("block.minecraft.dark_oak_hanging_sign"),
                 },
             ),
             (
@@ -16052,7 +16056,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_oak_leaves",
+                    name: Cow::Borrowed("block.minecraft.dark_oak_leaves"),
                 },
             ),
             (
@@ -16090,7 +16094,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_oak_log",
+                    name: Cow::Borrowed("block.minecraft.dark_oak_log"),
                 },
             ),
             (
@@ -16128,7 +16132,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_oak_planks",
+                    name: Cow::Borrowed("block.minecraft.dark_oak_planks"),
                 },
             ),
             (
@@ -16166,7 +16170,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_oak_pressure_plate",
+                    name: Cow::Borrowed("block.minecraft.dark_oak_pressure_plate"),
                 },
             ),
             (
@@ -16204,7 +16208,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_oak_sapling",
+                    name: Cow::Borrowed("block.minecraft.dark_oak_sapling"),
                 },
             ),
             (
@@ -16242,7 +16246,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_oak_shelf",
+                    name: Cow::Borrowed("block.minecraft.dark_oak_shelf"),
                 },
             ),
             (
@@ -16281,7 +16285,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_oak_sign",
+                    name: Cow::Borrowed("block.minecraft.dark_oak_sign"),
                 },
             ),
             (
@@ -16319,7 +16323,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_oak_slab",
+                    name: Cow::Borrowed("block.minecraft.dark_oak_slab"),
                 },
             ),
             (
@@ -16357,7 +16361,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_oak_stairs",
+                    name: Cow::Borrowed("block.minecraft.dark_oak_stairs"),
                 },
             ),
             (
@@ -16395,7 +16399,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_oak_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.dark_oak_trapdoor"),
                 },
             ),
             (
@@ -16433,7 +16437,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_oak_wood",
+                    name: Cow::Borrowed("block.minecraft.dark_oak_wood"),
                 },
             ),
             (
@@ -16471,7 +16475,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_prismarine",
+                    name: Cow::Borrowed("block.minecraft.dark_prismarine"),
                 },
             ),
             (
@@ -16509,7 +16513,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_prismarine_slab",
+                    name: Cow::Borrowed("block.minecraft.dark_prismarine_slab"),
                 },
             ),
             (
@@ -16547,7 +16551,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dark_prismarine_stairs",
+                    name: Cow::Borrowed("block.minecraft.dark_prismarine_stairs"),
                 },
             ),
             (
@@ -16585,7 +16589,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.daylight_detector",
+                    name: Cow::Borrowed("block.minecraft.daylight_detector"),
                 },
             ),
             (
@@ -16623,7 +16627,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dead_brain_coral",
+                    name: Cow::Borrowed("block.minecraft.dead_brain_coral"),
                 },
             ),
             (
@@ -16661,7 +16665,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dead_brain_coral_block",
+                    name: Cow::Borrowed("block.minecraft.dead_brain_coral_block"),
                 },
             ),
             (
@@ -16699,7 +16703,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dead_brain_coral_fan",
+                    name: Cow::Borrowed("block.minecraft.dead_brain_coral_fan"),
                 },
             ),
             (
@@ -16737,7 +16741,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dead_bubble_coral",
+                    name: Cow::Borrowed("block.minecraft.dead_bubble_coral"),
                 },
             ),
             (
@@ -16775,7 +16779,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dead_bubble_coral_block",
+                    name: Cow::Borrowed("block.minecraft.dead_bubble_coral_block"),
                 },
             ),
             (
@@ -16813,7 +16817,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dead_bubble_coral_fan",
+                    name: Cow::Borrowed("block.minecraft.dead_bubble_coral_fan"),
                 },
             ),
             (
@@ -16851,7 +16855,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dead_bush",
+                    name: Cow::Borrowed("block.minecraft.dead_bush"),
                 },
             ),
             (
@@ -16889,7 +16893,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dead_fire_coral",
+                    name: Cow::Borrowed("block.minecraft.dead_fire_coral"),
                 },
             ),
             (
@@ -16927,7 +16931,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dead_fire_coral_block",
+                    name: Cow::Borrowed("block.minecraft.dead_fire_coral_block"),
                 },
             ),
             (
@@ -16965,7 +16969,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dead_fire_coral_fan",
+                    name: Cow::Borrowed("block.minecraft.dead_fire_coral_fan"),
                 },
             ),
             (
@@ -17003,7 +17007,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dead_horn_coral",
+                    name: Cow::Borrowed("block.minecraft.dead_horn_coral"),
                 },
             ),
             (
@@ -17041,7 +17045,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dead_horn_coral_block",
+                    name: Cow::Borrowed("block.minecraft.dead_horn_coral_block"),
                 },
             ),
             (
@@ -17079,7 +17083,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dead_horn_coral_fan",
+                    name: Cow::Borrowed("block.minecraft.dead_horn_coral_fan"),
                 },
             ),
             (
@@ -17117,7 +17121,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dead_tube_coral",
+                    name: Cow::Borrowed("block.minecraft.dead_tube_coral"),
                 },
             ),
             (
@@ -17155,7 +17159,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dead_tube_coral_block",
+                    name: Cow::Borrowed("block.minecraft.dead_tube_coral_block"),
                 },
             ),
             (
@@ -17193,7 +17197,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dead_tube_coral_fan",
+                    name: Cow::Borrowed("block.minecraft.dead_tube_coral_fan"),
                 },
             ),
             (
@@ -17231,7 +17235,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.debug_stick",
+                    name: Cow::Borrowed("item.minecraft.debug_stick"),
                 },
             ),
             (
@@ -17271,7 +17275,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.decorated_pot",
+                    name: Cow::Borrowed("block.minecraft.decorated_pot"),
                 },
             ),
             (
@@ -17321,7 +17325,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.deepslate",
+                    name: Cow::Borrowed("block.minecraft.deepslate"),
                 },
             ),
             (
@@ -17359,7 +17363,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.deepslate_brick_slab",
+                    name: Cow::Borrowed("block.minecraft.deepslate_brick_slab"),
                 },
             ),
             (
@@ -17397,7 +17401,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.deepslate_brick_stairs",
+                    name: Cow::Borrowed("block.minecraft.deepslate_brick_stairs"),
                 },
             ),
             (
@@ -17435,7 +17439,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.deepslate_brick_wall",
+                    name: Cow::Borrowed("block.minecraft.deepslate_brick_wall"),
                 },
             ),
             (
@@ -17473,7 +17477,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.deepslate_bricks",
+                    name: Cow::Borrowed("block.minecraft.deepslate_bricks"),
                 },
             ),
             (
@@ -17511,7 +17515,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.deepslate_coal_ore",
+                    name: Cow::Borrowed("block.minecraft.deepslate_coal_ore"),
                 },
             ),
             (
@@ -17549,7 +17553,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.deepslate_copper_ore",
+                    name: Cow::Borrowed("block.minecraft.deepslate_copper_ore"),
                 },
             ),
             (
@@ -17587,7 +17591,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.deepslate_diamond_ore",
+                    name: Cow::Borrowed("block.minecraft.deepslate_diamond_ore"),
                 },
             ),
             (
@@ -17625,7 +17629,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.deepslate_emerald_ore",
+                    name: Cow::Borrowed("block.minecraft.deepslate_emerald_ore"),
                 },
             ),
             (
@@ -17663,7 +17667,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.deepslate_gold_ore",
+                    name: Cow::Borrowed("block.minecraft.deepslate_gold_ore"),
                 },
             ),
             (
@@ -17701,7 +17705,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.deepslate_iron_ore",
+                    name: Cow::Borrowed("block.minecraft.deepslate_iron_ore"),
                 },
             ),
             (
@@ -17739,7 +17743,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.deepslate_lapis_ore",
+                    name: Cow::Borrowed("block.minecraft.deepslate_lapis_ore"),
                 },
             ),
             (
@@ -17777,7 +17781,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.deepslate_redstone_ore",
+                    name: Cow::Borrowed("block.minecraft.deepslate_redstone_ore"),
                 },
             ),
             (
@@ -17815,7 +17819,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.deepslate_tile_slab",
+                    name: Cow::Borrowed("block.minecraft.deepslate_tile_slab"),
                 },
             ),
             (
@@ -17853,7 +17857,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.deepslate_tile_stairs",
+                    name: Cow::Borrowed("block.minecraft.deepslate_tile_stairs"),
                 },
             ),
             (
@@ -17891,7 +17895,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.deepslate_tile_wall",
+                    name: Cow::Borrowed("block.minecraft.deepslate_tile_wall"),
                 },
             ),
             (
@@ -17929,7 +17933,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.deepslate_tiles",
+                    name: Cow::Borrowed("block.minecraft.deepslate_tiles"),
                 },
             ),
             (
@@ -17967,7 +17971,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.detector_rail",
+                    name: Cow::Borrowed("block.minecraft.detector_rail"),
                 },
             ),
             (
@@ -18005,7 +18009,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.diamond",
+                    name: Cow::Borrowed("item.minecraft.diamond"),
                 },
             ),
             (
@@ -18044,7 +18048,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.diamond_axe",
+                    name: Cow::Borrowed("item.minecraft.diamond_axe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -18127,7 +18131,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.diamond_block",
+                    name: Cow::Borrowed("block.minecraft.diamond_block"),
                 },
             ),
             (
@@ -18165,7 +18169,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.diamond_boots",
+                    name: Cow::Borrowed("item.minecraft.diamond_boots"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -18238,7 +18242,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.diamond_chestplate",
+                    name: Cow::Borrowed("item.minecraft.diamond_chestplate"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -18311,7 +18315,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.diamond_helmet",
+                    name: Cow::Borrowed("item.minecraft.diamond_helmet"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -18384,7 +18388,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.diamond_hoe",
+                    name: Cow::Borrowed("item.minecraft.diamond_hoe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -18467,7 +18471,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.diamond_horse_armor",
+                    name: Cow::Borrowed("item.minecraft.diamond_horse_armor"),
                 },
             ),
             (
@@ -18536,7 +18540,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.diamond_leggings",
+                    name: Cow::Borrowed("item.minecraft.diamond_leggings"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -18609,7 +18613,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.diamond_nautilus_armor",
+                    name: Cow::Borrowed("item.minecraft.diamond_nautilus_armor"),
                 },
             ),
             (
@@ -18678,7 +18682,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.diamond_ore",
+                    name: Cow::Borrowed("block.minecraft.diamond_ore"),
                 },
             ),
             (
@@ -18716,7 +18720,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.diamond_pickaxe",
+                    name: Cow::Borrowed("item.minecraft.diamond_pickaxe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -18799,7 +18803,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.diamond_shovel",
+                    name: Cow::Borrowed("item.minecraft.diamond_shovel"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -18882,7 +18886,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.diamond_spear",
+                    name: Cow::Borrowed("item.minecraft.diamond_spear"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -18915,14 +18919,17 @@ impl Item {
                 },
             ),
             (Enchantable, &EnchantableImpl { value: 10 }),
-            (AttackRange, &AttackRangeImpl {
-                min_reach: 2.0,
-                max_reach: 4.5,
-                min_creative_reach: 2.0,
-                max_creative_reach: 6.5,
-                hitbox_margin: 0.125,
-                mob_factor: 0.5,
-            }),
+            (
+                AttackRange,
+                &AttackRangeImpl {
+                    min_reach: 2.0,
+                    max_reach: 4.5,
+                    min_creative_reach: 2.0,
+                    max_creative_reach: 6.5,
+                    hitbox_margin: 0.125,
+                    mob_factor: 0.5,
+                },
+            ),
             (BreakSound, &BreakSoundImpl),
             (DamageType, &DamageTypeImpl),
             (
@@ -18957,7 +18964,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.diamond_sword",
+                    name: Cow::Borrowed("item.minecraft.diamond_sword"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -19045,7 +19052,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.diorite",
+                    name: Cow::Borrowed("block.minecraft.diorite"),
                 },
             ),
             (
@@ -19083,7 +19090,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.diorite_slab",
+                    name: Cow::Borrowed("block.minecraft.diorite_slab"),
                 },
             ),
             (
@@ -19121,7 +19128,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.diorite_stairs",
+                    name: Cow::Borrowed("block.minecraft.diorite_stairs"),
                 },
             ),
             (
@@ -19159,7 +19166,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.diorite_wall",
+                    name: Cow::Borrowed("block.minecraft.diorite_wall"),
                 },
             ),
             (
@@ -19197,7 +19204,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dirt",
+                    name: Cow::Borrowed("block.minecraft.dirt"),
                 },
             ),
             (
@@ -19235,7 +19242,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dirt_path",
+                    name: Cow::Borrowed("block.minecraft.dirt_path"),
                 },
             ),
             (
@@ -19273,7 +19280,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.disc_fragment_5",
+                    name: Cow::Borrowed("item.minecraft.disc_fragment_5"),
                 },
             ),
             (
@@ -19311,7 +19318,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dispenser",
+                    name: Cow::Borrowed("block.minecraft.dispenser"),
                 },
             ),
             (
@@ -19350,7 +19357,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.dolphin_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.dolphin_spawn_egg"),
                 },
             ),
             (
@@ -19389,7 +19396,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.donkey_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.donkey_spawn_egg"),
                 },
             ),
             (
@@ -19428,7 +19435,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.dragon_breath",
+                    name: Cow::Borrowed("item.minecraft.dragon_breath"),
                 },
             ),
             (
@@ -19466,7 +19473,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dragon_egg",
+                    name: Cow::Borrowed("block.minecraft.dragon_egg"),
                 },
             ),
             (
@@ -19504,7 +19511,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dragon_head",
+                    name: Cow::Borrowed("block.minecraft.dragon_head"),
                 },
             ),
             (
@@ -19564,7 +19571,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dried_ghast",
+                    name: Cow::Borrowed("block.minecraft.dried_ghast"),
                 },
             ),
             (
@@ -19602,7 +19609,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.dried_kelp",
+                    name: Cow::Borrowed("item.minecraft.dried_kelp"),
                 },
             ),
             (
@@ -19658,7 +19665,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dried_kelp_block",
+                    name: Cow::Borrowed("block.minecraft.dried_kelp_block"),
                 },
             ),
             (
@@ -19696,7 +19703,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dripstone_block",
+                    name: Cow::Borrowed("block.minecraft.dripstone_block"),
                 },
             ),
             (
@@ -19734,7 +19741,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.dropper",
+                    name: Cow::Borrowed("block.minecraft.dropper"),
                 },
             ),
             (
@@ -19773,7 +19780,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.drowned_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.drowned_spawn_egg"),
                 },
             ),
             (
@@ -19812,7 +19819,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.dune_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.dune_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -19850,7 +19857,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.echo_shard",
+                    name: Cow::Borrowed("item.minecraft.echo_shard"),
                 },
             ),
             (
@@ -19888,7 +19895,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.egg",
+                    name: Cow::Borrowed("item.minecraft.egg"),
                 },
             ),
             (
@@ -19932,7 +19939,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.elder_guardian_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.elder_guardian_spawn_egg"),
                 },
             ),
             (
@@ -19971,7 +19978,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.elytra",
+                    name: Cow::Borrowed("item.minecraft.elytra"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -20029,7 +20036,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.emerald",
+                    name: Cow::Borrowed("item.minecraft.emerald"),
                 },
             ),
             (
@@ -20068,7 +20075,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.emerald_block",
+                    name: Cow::Borrowed("block.minecraft.emerald_block"),
                 },
             ),
             (
@@ -20106,7 +20113,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.emerald_ore",
+                    name: Cow::Borrowed("block.minecraft.emerald_ore"),
                 },
             ),
             (
@@ -20144,7 +20151,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.enchanted_book",
+                    name: Cow::Borrowed("item.minecraft.enchanted_book"),
                 },
             ),
             (
@@ -20189,7 +20196,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.enchanted_golden_apple",
+                    name: Cow::Borrowed("item.minecraft.enchanted_golden_apple"),
                 },
             ),
             (
@@ -20282,7 +20289,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.enchanting_table",
+                    name: Cow::Borrowed("block.minecraft.enchanting_table"),
                 },
             ),
             (
@@ -20320,7 +20327,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.end_crystal",
+                    name: Cow::Borrowed("item.minecraft.end_crystal"),
                 },
             ),
             (
@@ -20359,7 +20366,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.end_portal_frame",
+                    name: Cow::Borrowed("block.minecraft.end_portal_frame"),
                 },
             ),
             (
@@ -20397,7 +20404,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.end_rod",
+                    name: Cow::Borrowed("block.minecraft.end_rod"),
                 },
             ),
             (
@@ -20435,7 +20442,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.end_stone",
+                    name: Cow::Borrowed("block.minecraft.end_stone"),
                 },
             ),
             (
@@ -20473,7 +20480,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.end_stone_brick_slab",
+                    name: Cow::Borrowed("block.minecraft.end_stone_brick_slab"),
                 },
             ),
             (
@@ -20511,7 +20518,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.end_stone_brick_stairs",
+                    name: Cow::Borrowed("block.minecraft.end_stone_brick_stairs"),
                 },
             ),
             (
@@ -20549,7 +20556,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.end_stone_brick_wall",
+                    name: Cow::Borrowed("block.minecraft.end_stone_brick_wall"),
                 },
             ),
             (
@@ -20587,7 +20594,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.end_stone_bricks",
+                    name: Cow::Borrowed("block.minecraft.end_stone_bricks"),
                 },
             ),
             (
@@ -20625,7 +20632,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.ender_chest",
+                    name: Cow::Borrowed("block.minecraft.ender_chest"),
                 },
             ),
             (
@@ -20663,7 +20670,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.ender_dragon_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.ender_dragon_spawn_egg"),
                 },
             ),
             (
@@ -20702,7 +20709,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.ender_eye",
+                    name: Cow::Borrowed("item.minecraft.ender_eye"),
                 },
             ),
             (
@@ -20747,7 +20754,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.ender_pearl",
+                    name: Cow::Borrowed("item.minecraft.ender_pearl"),
                 },
             ),
             (
@@ -20785,7 +20792,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.enderman_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.enderman_spawn_egg"),
                 },
             ),
             (
@@ -20824,7 +20831,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.endermite_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.endermite_spawn_egg"),
                 },
             ),
             (
@@ -20863,7 +20870,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.evoker_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.evoker_spawn_egg"),
                 },
             ),
             (
@@ -20902,7 +20909,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.experience_bottle",
+                    name: Cow::Borrowed("item.minecraft.experience_bottle"),
                 },
             ),
             (
@@ -20941,7 +20948,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.explorer_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.explorer_pottery_sherd"),
                 },
             ),
             (
@@ -20979,7 +20986,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.exposed_chiseled_copper",
+                    name: Cow::Borrowed("block.minecraft.exposed_chiseled_copper"),
                 },
             ),
             (
@@ -21017,7 +21024,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.exposed_copper",
+                    name: Cow::Borrowed("block.minecraft.exposed_copper"),
                 },
             ),
             (
@@ -21055,7 +21062,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.exposed_copper_bars",
+                    name: Cow::Borrowed("block.minecraft.exposed_copper_bars"),
                 },
             ),
             (
@@ -21093,7 +21100,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.exposed_copper_bulb",
+                    name: Cow::Borrowed("block.minecraft.exposed_copper_bulb"),
                 },
             ),
             (
@@ -21131,7 +21138,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.exposed_copper_chain",
+                    name: Cow::Borrowed("block.minecraft.exposed_copper_chain"),
                 },
             ),
             (
@@ -21169,7 +21176,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.exposed_copper_chest",
+                    name: Cow::Borrowed("block.minecraft.exposed_copper_chest"),
                 },
             ),
             (
@@ -21207,7 +21214,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.exposed_copper_door",
+                    name: Cow::Borrowed("block.minecraft.exposed_copper_door"),
                 },
             ),
             (
@@ -21245,7 +21252,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.exposed_copper_golem_statue",
+                    name: Cow::Borrowed("block.minecraft.exposed_copper_golem_statue"),
                 },
             ),
             (
@@ -21292,7 +21299,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.exposed_copper_grate",
+                    name: Cow::Borrowed("block.minecraft.exposed_copper_grate"),
                 },
             ),
             (
@@ -21330,7 +21337,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.exposed_copper_lantern",
+                    name: Cow::Borrowed("block.minecraft.exposed_copper_lantern"),
                 },
             ),
             (
@@ -21368,7 +21375,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.exposed_copper_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.exposed_copper_trapdoor"),
                 },
             ),
             (
@@ -21406,7 +21413,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.exposed_cut_copper",
+                    name: Cow::Borrowed("block.minecraft.exposed_cut_copper"),
                 },
             ),
             (
@@ -21444,7 +21451,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.exposed_cut_copper_slab",
+                    name: Cow::Borrowed("block.minecraft.exposed_cut_copper_slab"),
                 },
             ),
             (
@@ -21482,7 +21489,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.exposed_cut_copper_stairs",
+                    name: Cow::Borrowed("block.minecraft.exposed_cut_copper_stairs"),
                 },
             ),
             (
@@ -21520,7 +21527,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.exposed_lightning_rod",
+                    name: Cow::Borrowed("block.minecraft.exposed_lightning_rod"),
                 },
             ),
             (
@@ -21558,7 +21565,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.eye_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.eye_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -21596,7 +21603,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.farmland",
+                    name: Cow::Borrowed("block.minecraft.farmland"),
                 },
             ),
             (
@@ -21634,7 +21641,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.feather",
+                    name: Cow::Borrowed("item.minecraft.feather"),
                 },
             ),
             (
@@ -21672,7 +21679,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.fermented_spider_eye",
+                    name: Cow::Borrowed("item.minecraft.fermented_spider_eye"),
                 },
             ),
             (
@@ -21710,7 +21717,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.fern",
+                    name: Cow::Borrowed("block.minecraft.fern"),
                 },
             ),
             (
@@ -21748,7 +21755,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.field_masoned_banner_pattern",
+                    name: Cow::Borrowed("item.minecraft.field_masoned_banner_pattern"),
                 },
             ),
             (
@@ -21787,7 +21794,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.filled_map",
+                    name: Cow::Borrowed("item.minecraft.filled_map"),
                 },
             ),
             (
@@ -21827,7 +21834,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.fire_charge",
+                    name: Cow::Borrowed("item.minecraft.fire_charge"),
                 },
             ),
             (
@@ -21865,7 +21872,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.fire_coral",
+                    name: Cow::Borrowed("block.minecraft.fire_coral"),
                 },
             ),
             (
@@ -21903,7 +21910,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.fire_coral_block",
+                    name: Cow::Borrowed("block.minecraft.fire_coral_block"),
                 },
             ),
             (
@@ -21941,7 +21948,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.fire_coral_fan",
+                    name: Cow::Borrowed("block.minecraft.fire_coral_fan"),
                 },
             ),
             (
@@ -21979,7 +21986,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.firefly_bush",
+                    name: Cow::Borrowed("block.minecraft.firefly_bush"),
                 },
             ),
             (
@@ -22017,7 +22024,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.firework_rocket",
+                    name: Cow::Borrowed("item.minecraft.firework_rocket"),
                 },
             ),
             (
@@ -22062,7 +22069,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.firework_star",
+                    name: Cow::Borrowed("item.minecraft.firework_star"),
                 },
             ),
             (
@@ -22100,7 +22107,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.fishing_rod",
+                    name: Cow::Borrowed("item.minecraft.fishing_rod"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -22141,7 +22148,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.fletching_table",
+                    name: Cow::Borrowed("block.minecraft.fletching_table"),
                 },
             ),
             (
@@ -22179,7 +22186,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.flint",
+                    name: Cow::Borrowed("item.minecraft.flint"),
                 },
             ),
             (
@@ -22217,7 +22224,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.flint_and_steel",
+                    name: Cow::Borrowed("item.minecraft.flint_and_steel"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -22257,7 +22264,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.flow_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.flow_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -22295,7 +22302,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.flow_banner_pattern",
+                    name: Cow::Borrowed("item.minecraft.flow_banner_pattern"),
                 },
             ),
             (
@@ -22334,7 +22341,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.flow_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.flow_pottery_sherd"),
                 },
             ),
             (
@@ -22372,7 +22379,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.flower_banner_pattern",
+                    name: Cow::Borrowed("item.minecraft.flower_banner_pattern"),
                 },
             ),
             (
@@ -22411,7 +22418,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.flower_pot",
+                    name: Cow::Borrowed("block.minecraft.flower_pot"),
                 },
             ),
             (
@@ -22449,7 +22456,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.flowering_azalea",
+                    name: Cow::Borrowed("block.minecraft.flowering_azalea"),
                 },
             ),
             (
@@ -22487,7 +22494,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.flowering_azalea_leaves",
+                    name: Cow::Borrowed("block.minecraft.flowering_azalea_leaves"),
                 },
             ),
             (
@@ -22525,7 +22532,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.fox_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.fox_spawn_egg"),
                 },
             ),
             (
@@ -22564,7 +22571,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.friend_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.friend_pottery_sherd"),
                 },
             ),
             (
@@ -22602,7 +22609,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.frog_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.frog_spawn_egg"),
                 },
             ),
             (
@@ -22641,7 +22648,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.frogspawn",
+                    name: Cow::Borrowed("block.minecraft.frogspawn"),
                 },
             ),
             (
@@ -22679,7 +22686,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.furnace",
+                    name: Cow::Borrowed("block.minecraft.furnace"),
                 },
             ),
             (
@@ -22718,7 +22725,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.furnace_minecart",
+                    name: Cow::Borrowed("item.minecraft.furnace_minecart"),
                 },
             ),
             (
@@ -22756,7 +22763,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.ghast_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.ghast_spawn_egg"),
                 },
             ),
             (
@@ -22795,7 +22802,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.ghast_tear",
+                    name: Cow::Borrowed("item.minecraft.ghast_tear"),
                 },
             ),
             (
@@ -22833,7 +22840,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.gilded_blackstone",
+                    name: Cow::Borrowed("block.minecraft.gilded_blackstone"),
                 },
             ),
             (
@@ -22871,7 +22878,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.glass",
+                    name: Cow::Borrowed("block.minecraft.glass"),
                 },
             ),
             (
@@ -22909,7 +22916,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.glass_bottle",
+                    name: Cow::Borrowed("item.minecraft.glass_bottle"),
                 },
             ),
             (
@@ -22947,7 +22954,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.glass_pane",
+                    name: Cow::Borrowed("block.minecraft.glass_pane"),
                 },
             ),
             (
@@ -22985,7 +22992,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.glistering_melon_slice",
+                    name: Cow::Borrowed("item.minecraft.glistering_melon_slice"),
                 },
             ),
             (
@@ -23023,7 +23030,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.globe_banner_pattern",
+                    name: Cow::Borrowed("item.minecraft.globe_banner_pattern"),
                 },
             ),
             (
@@ -23062,7 +23069,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.glow_berries",
+                    name: Cow::Borrowed("item.minecraft.glow_berries"),
                 },
             ),
             (
@@ -23118,7 +23125,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.glow_ink_sac",
+                    name: Cow::Borrowed("item.minecraft.glow_ink_sac"),
                 },
             ),
             (
@@ -23156,7 +23163,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.glow_item_frame",
+                    name: Cow::Borrowed("item.minecraft.glow_item_frame"),
                 },
             ),
             (
@@ -23194,7 +23201,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.glow_lichen",
+                    name: Cow::Borrowed("block.minecraft.glow_lichen"),
                 },
             ),
             (
@@ -23232,7 +23239,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.glow_squid_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.glow_squid_spawn_egg"),
                 },
             ),
             (
@@ -23271,7 +23278,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.glowstone",
+                    name: Cow::Borrowed("block.minecraft.glowstone"),
                 },
             ),
             (
@@ -23309,7 +23316,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.glowstone_dust",
+                    name: Cow::Borrowed("item.minecraft.glowstone_dust"),
                 },
             ),
             (
@@ -23347,7 +23354,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.goat_horn",
+                    name: Cow::Borrowed("item.minecraft.goat_horn"),
                 },
             ),
             (
@@ -23386,7 +23393,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.goat_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.goat_spawn_egg"),
                 },
             ),
             (
@@ -23425,7 +23432,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.gold_block",
+                    name: Cow::Borrowed("block.minecraft.gold_block"),
                 },
             ),
             (
@@ -23463,7 +23470,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.gold_ingot",
+                    name: Cow::Borrowed("item.minecraft.gold_ingot"),
                 },
             ),
             (
@@ -23502,7 +23509,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.gold_nugget",
+                    name: Cow::Borrowed("item.minecraft.gold_nugget"),
                 },
             ),
             (
@@ -23540,7 +23547,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.gold_ore",
+                    name: Cow::Borrowed("block.minecraft.gold_ore"),
                 },
             ),
             (
@@ -23578,7 +23585,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.golden_apple",
+                    name: Cow::Borrowed("item.minecraft.golden_apple"),
                 },
             ),
             (
@@ -23654,7 +23661,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.golden_axe",
+                    name: Cow::Borrowed("item.minecraft.golden_axe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -23737,7 +23744,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.golden_boots",
+                    name: Cow::Borrowed("item.minecraft.golden_boots"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -23810,7 +23817,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.golden_carrot",
+                    name: Cow::Borrowed("item.minecraft.golden_carrot"),
                 },
             ),
             (
@@ -23866,7 +23873,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.golden_chestplate",
+                    name: Cow::Borrowed("item.minecraft.golden_chestplate"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -23939,7 +23946,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.golden_dandelion",
+                    name: Cow::Borrowed("block.minecraft.golden_dandelion"),
                 },
             ),
             (
@@ -23977,7 +23984,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.golden_helmet",
+                    name: Cow::Borrowed("item.minecraft.golden_helmet"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -24050,7 +24057,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.golden_hoe",
+                    name: Cow::Borrowed("item.minecraft.golden_hoe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -24133,7 +24140,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.golden_horse_armor",
+                    name: Cow::Borrowed("item.minecraft.golden_horse_armor"),
                 },
             ),
             (
@@ -24202,7 +24209,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.golden_leggings",
+                    name: Cow::Borrowed("item.minecraft.golden_leggings"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -24275,7 +24282,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.golden_nautilus_armor",
+                    name: Cow::Borrowed("item.minecraft.golden_nautilus_armor"),
                 },
             ),
             (
@@ -24344,7 +24351,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.golden_pickaxe",
+                    name: Cow::Borrowed("item.minecraft.golden_pickaxe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -24427,7 +24434,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.golden_shovel",
+                    name: Cow::Borrowed("item.minecraft.golden_shovel"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -24510,7 +24517,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.golden_spear",
+                    name: Cow::Borrowed("item.minecraft.golden_spear"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -24543,14 +24550,17 @@ impl Item {
                 },
             ),
             (Enchantable, &EnchantableImpl { value: 22 }),
-            (AttackRange, &AttackRangeImpl {
-                min_reach: 2.0,
-                max_reach: 4.5,
-                min_creative_reach: 2.0,
-                max_creative_reach: 6.5,
-                hitbox_margin: 0.125,
-                mob_factor: 0.5,
-            }),
+            (
+                AttackRange,
+                &AttackRangeImpl {
+                    min_reach: 2.0,
+                    max_reach: 4.5,
+                    min_creative_reach: 2.0,
+                    max_creative_reach: 6.5,
+                    hitbox_margin: 0.125,
+                    mob_factor: 0.5,
+                },
+            ),
             (BreakSound, &BreakSoundImpl),
             (DamageType, &DamageTypeImpl),
             (
@@ -24585,7 +24595,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.golden_sword",
+                    name: Cow::Borrowed("item.minecraft.golden_sword"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -24673,7 +24683,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.granite",
+                    name: Cow::Borrowed("block.minecraft.granite"),
                 },
             ),
             (
@@ -24711,7 +24721,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.granite_slab",
+                    name: Cow::Borrowed("block.minecraft.granite_slab"),
                 },
             ),
             (
@@ -24749,7 +24759,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.granite_stairs",
+                    name: Cow::Borrowed("block.minecraft.granite_stairs"),
                 },
             ),
             (
@@ -24787,7 +24797,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.granite_wall",
+                    name: Cow::Borrowed("block.minecraft.granite_wall"),
                 },
             ),
             (
@@ -24825,7 +24835,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.grass_block",
+                    name: Cow::Borrowed("block.minecraft.grass_block"),
                 },
             ),
             (
@@ -24863,7 +24873,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.gravel",
+                    name: Cow::Borrowed("block.minecraft.gravel"),
                 },
             ),
             (
@@ -24901,7 +24911,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.gray_banner",
+                    name: Cow::Borrowed("block.minecraft.gray_banner"),
                 },
             ),
             (
@@ -24940,7 +24950,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.gray_bed",
+                    name: Cow::Borrowed("block.minecraft.gray_bed"),
                 },
             ),
             (
@@ -24978,7 +24988,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.gray_bundle",
+                    name: Cow::Borrowed("item.minecraft.gray_bundle"),
                 },
             ),
             (
@@ -25017,7 +25027,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.gray_candle",
+                    name: Cow::Borrowed("block.minecraft.gray_candle"),
                 },
             ),
             (
@@ -25055,7 +25065,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.gray_carpet",
+                    name: Cow::Borrowed("block.minecraft.gray_carpet"),
                 },
             ),
             (
@@ -25112,7 +25122,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.gray_concrete",
+                    name: Cow::Borrowed("block.minecraft.gray_concrete"),
                 },
             ),
             (
@@ -25150,7 +25160,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.gray_concrete_powder",
+                    name: Cow::Borrowed("block.minecraft.gray_concrete_powder"),
                 },
             ),
             (
@@ -25188,7 +25198,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.gray_dye",
+                    name: Cow::Borrowed("item.minecraft.gray_dye"),
                 },
             ),
             (
@@ -25227,7 +25237,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.gray_glazed_terracotta",
+                    name: Cow::Borrowed("block.minecraft.gray_glazed_terracotta"),
                 },
             ),
             (
@@ -25265,7 +25275,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.gray_harness",
+                    name: Cow::Borrowed("item.minecraft.gray_harness"),
                 },
             ),
             (
@@ -25319,7 +25329,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.gray_shulker_box",
+                    name: Cow::Borrowed("block.minecraft.gray_shulker_box"),
                 },
             ),
             (
@@ -25358,7 +25368,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.gray_stained_glass",
+                    name: Cow::Borrowed("block.minecraft.gray_stained_glass"),
                 },
             ),
             (
@@ -25396,7 +25406,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.gray_stained_glass_pane",
+                    name: Cow::Borrowed("block.minecraft.gray_stained_glass_pane"),
                 },
             ),
             (
@@ -25434,7 +25444,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.gray_terracotta",
+                    name: Cow::Borrowed("block.minecraft.gray_terracotta"),
                 },
             ),
             (
@@ -25472,7 +25482,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.gray_wool",
+                    name: Cow::Borrowed("block.minecraft.gray_wool"),
                 },
             ),
             (
@@ -25510,7 +25520,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.green_banner",
+                    name: Cow::Borrowed("block.minecraft.green_banner"),
                 },
             ),
             (
@@ -25549,7 +25559,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.green_bed",
+                    name: Cow::Borrowed("block.minecraft.green_bed"),
                 },
             ),
             (
@@ -25587,7 +25597,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.green_bundle",
+                    name: Cow::Borrowed("item.minecraft.green_bundle"),
                 },
             ),
             (
@@ -25626,7 +25636,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.green_candle",
+                    name: Cow::Borrowed("block.minecraft.green_candle"),
                 },
             ),
             (
@@ -25664,7 +25674,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.green_carpet",
+                    name: Cow::Borrowed("block.minecraft.green_carpet"),
                 },
             ),
             (
@@ -25721,7 +25731,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.green_concrete",
+                    name: Cow::Borrowed("block.minecraft.green_concrete"),
                 },
             ),
             (
@@ -25759,7 +25769,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.green_concrete_powder",
+                    name: Cow::Borrowed("block.minecraft.green_concrete_powder"),
                 },
             ),
             (
@@ -25797,7 +25807,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.green_dye",
+                    name: Cow::Borrowed("item.minecraft.green_dye"),
                 },
             ),
             (
@@ -25836,7 +25846,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.green_glazed_terracotta",
+                    name: Cow::Borrowed("block.minecraft.green_glazed_terracotta"),
                 },
             ),
             (
@@ -25874,7 +25884,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.green_harness",
+                    name: Cow::Borrowed("item.minecraft.green_harness"),
                 },
             ),
             (
@@ -25928,7 +25938,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.green_shulker_box",
+                    name: Cow::Borrowed("block.minecraft.green_shulker_box"),
                 },
             ),
             (
@@ -25967,7 +25977,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.green_stained_glass",
+                    name: Cow::Borrowed("block.minecraft.green_stained_glass"),
                 },
             ),
             (
@@ -26005,7 +26015,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.green_stained_glass_pane",
+                    name: Cow::Borrowed("block.minecraft.green_stained_glass_pane"),
                 },
             ),
             (
@@ -26043,7 +26053,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.green_terracotta",
+                    name: Cow::Borrowed("block.minecraft.green_terracotta"),
                 },
             ),
             (
@@ -26081,7 +26091,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.green_wool",
+                    name: Cow::Borrowed("block.minecraft.green_wool"),
                 },
             ),
             (
@@ -26119,7 +26129,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.grindstone",
+                    name: Cow::Borrowed("block.minecraft.grindstone"),
                 },
             ),
             (
@@ -26157,7 +26167,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.guardian_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.guardian_spawn_egg"),
                 },
             ),
             (
@@ -26196,7 +26206,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.gunpowder",
+                    name: Cow::Borrowed("item.minecraft.gunpowder"),
                 },
             ),
             (
@@ -26234,7 +26244,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.guster_banner_pattern",
+                    name: Cow::Borrowed("item.minecraft.guster_banner_pattern"),
                 },
             ),
             (
@@ -26273,7 +26283,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.guster_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.guster_pottery_sherd"),
                 },
             ),
             (
@@ -26311,7 +26321,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.hanging_roots",
+                    name: Cow::Borrowed("block.minecraft.hanging_roots"),
                 },
             ),
             (
@@ -26349,7 +26359,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.happy_ghast_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.happy_ghast_spawn_egg"),
                 },
             ),
             (
@@ -26388,7 +26398,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.hay_block",
+                    name: Cow::Borrowed("block.minecraft.hay_block"),
                 },
             ),
             (
@@ -26426,7 +26436,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.heart_of_the_sea",
+                    name: Cow::Borrowed("item.minecraft.heart_of_the_sea"),
                 },
             ),
             (
@@ -26464,7 +26474,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.heart_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.heart_pottery_sherd"),
                 },
             ),
             (
@@ -26502,7 +26512,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.heartbreak_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.heartbreak_pottery_sherd"),
                 },
             ),
             (
@@ -26540,7 +26550,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.heavy_core",
+                    name: Cow::Borrowed("block.minecraft.heavy_core"),
                 },
             ),
             (
@@ -26578,7 +26588,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.heavy_weighted_pressure_plate",
+                    name: Cow::Borrowed("block.minecraft.heavy_weighted_pressure_plate"),
                 },
             ),
             (
@@ -26616,7 +26626,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.hoglin_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.hoglin_spawn_egg"),
                 },
             ),
             (
@@ -26655,7 +26665,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.honey_block",
+                    name: Cow::Borrowed("block.minecraft.honey_block"),
                 },
             ),
             (
@@ -26693,7 +26703,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.honey_bottle",
+                    name: Cow::Borrowed("item.minecraft.honey_bottle"),
                 },
             ),
             (
@@ -26752,7 +26762,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.honeycomb",
+                    name: Cow::Borrowed("item.minecraft.honeycomb"),
                 },
             ),
             (
@@ -26790,7 +26800,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.honeycomb_block",
+                    name: Cow::Borrowed("block.minecraft.honeycomb_block"),
                 },
             ),
             (
@@ -26828,7 +26838,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.hopper",
+                    name: Cow::Borrowed("block.minecraft.hopper"),
                 },
             ),
             (
@@ -26867,7 +26877,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.hopper_minecart",
+                    name: Cow::Borrowed("item.minecraft.hopper_minecart"),
                 },
             ),
             (
@@ -26905,7 +26915,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.horn_coral",
+                    name: Cow::Borrowed("block.minecraft.horn_coral"),
                 },
             ),
             (
@@ -26943,7 +26953,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.horn_coral_block",
+                    name: Cow::Borrowed("block.minecraft.horn_coral_block"),
                 },
             ),
             (
@@ -26981,7 +26991,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.horn_coral_fan",
+                    name: Cow::Borrowed("block.minecraft.horn_coral_fan"),
                 },
             ),
             (
@@ -27019,7 +27029,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.horse_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.horse_spawn_egg"),
                 },
             ),
             (
@@ -27058,7 +27068,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.host_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.host_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -27096,7 +27106,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.howl_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.howl_pottery_sherd"),
                 },
             ),
             (
@@ -27134,7 +27144,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.husk_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.husk_spawn_egg"),
                 },
             ),
             (
@@ -27173,7 +27183,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.ice",
+                    name: Cow::Borrowed("block.minecraft.ice"),
                 },
             ),
             (
@@ -27211,7 +27221,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.infested_chiseled_stone_bricks",
+                    name: Cow::Borrowed("block.minecraft.infested_chiseled_stone_bricks"),
                 },
             ),
             (
@@ -27249,7 +27259,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.infested_cobblestone",
+                    name: Cow::Borrowed("block.minecraft.infested_cobblestone"),
                 },
             ),
             (
@@ -27287,7 +27297,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.infested_cracked_stone_bricks",
+                    name: Cow::Borrowed("block.minecraft.infested_cracked_stone_bricks"),
                 },
             ),
             (
@@ -27325,7 +27335,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.infested_deepslate",
+                    name: Cow::Borrowed("block.minecraft.infested_deepslate"),
                 },
             ),
             (
@@ -27363,7 +27373,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.infested_mossy_stone_bricks",
+                    name: Cow::Borrowed("block.minecraft.infested_mossy_stone_bricks"),
                 },
             ),
             (
@@ -27401,7 +27411,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.infested_stone",
+                    name: Cow::Borrowed("block.minecraft.infested_stone"),
                 },
             ),
             (
@@ -27439,7 +27449,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.infested_stone_bricks",
+                    name: Cow::Borrowed("block.minecraft.infested_stone_bricks"),
                 },
             ),
             (
@@ -27477,7 +27487,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.ink_sac",
+                    name: Cow::Borrowed("item.minecraft.ink_sac"),
                 },
             ),
             (
@@ -27515,7 +27525,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.iron_axe",
+                    name: Cow::Borrowed("item.minecraft.iron_axe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -27598,7 +27608,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.iron_bars",
+                    name: Cow::Borrowed("block.minecraft.iron_bars"),
                 },
             ),
             (
@@ -27636,7 +27646,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.iron_block",
+                    name: Cow::Borrowed("block.minecraft.iron_block"),
                 },
             ),
             (
@@ -27674,7 +27684,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.iron_boots",
+                    name: Cow::Borrowed("item.minecraft.iron_boots"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -27747,7 +27757,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.iron_chain",
+                    name: Cow::Borrowed("block.minecraft.iron_chain"),
                 },
             ),
             (
@@ -27785,7 +27795,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.iron_chestplate",
+                    name: Cow::Borrowed("item.minecraft.iron_chestplate"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -27858,7 +27868,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.iron_door",
+                    name: Cow::Borrowed("block.minecraft.iron_door"),
                 },
             ),
             (
@@ -27896,7 +27906,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.iron_golem_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.iron_golem_spawn_egg"),
                 },
             ),
             (
@@ -27935,7 +27945,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.iron_helmet",
+                    name: Cow::Borrowed("item.minecraft.iron_helmet"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -28008,7 +28018,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.iron_hoe",
+                    name: Cow::Borrowed("item.minecraft.iron_hoe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -28091,7 +28101,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.iron_horse_armor",
+                    name: Cow::Borrowed("item.minecraft.iron_horse_armor"),
                 },
             ),
             (
@@ -28160,7 +28170,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.iron_ingot",
+                    name: Cow::Borrowed("item.minecraft.iron_ingot"),
                 },
             ),
             (
@@ -28199,7 +28209,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.iron_leggings",
+                    name: Cow::Borrowed("item.minecraft.iron_leggings"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -28272,7 +28282,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.iron_nautilus_armor",
+                    name: Cow::Borrowed("item.minecraft.iron_nautilus_armor"),
                 },
             ),
             (
@@ -28341,7 +28351,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.iron_nugget",
+                    name: Cow::Borrowed("item.minecraft.iron_nugget"),
                 },
             ),
             (
@@ -28379,7 +28389,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.iron_ore",
+                    name: Cow::Borrowed("block.minecraft.iron_ore"),
                 },
             ),
             (
@@ -28417,7 +28427,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.iron_pickaxe",
+                    name: Cow::Borrowed("item.minecraft.iron_pickaxe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -28500,7 +28510,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.iron_shovel",
+                    name: Cow::Borrowed("item.minecraft.iron_shovel"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -28583,7 +28593,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.iron_spear",
+                    name: Cow::Borrowed("item.minecraft.iron_spear"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -28616,14 +28626,17 @@ impl Item {
                 },
             ),
             (Enchantable, &EnchantableImpl { value: 14 }),
-            (AttackRange, &AttackRangeImpl {
-                min_reach: 2.0,
-                max_reach: 4.5,
-                min_creative_reach: 2.0,
-                max_creative_reach: 6.5,
-                hitbox_margin: 0.125,
-                mob_factor: 0.5,
-            }),
+            (
+                AttackRange,
+                &AttackRangeImpl {
+                    min_reach: 2.0,
+                    max_reach: 4.5,
+                    min_creative_reach: 2.0,
+                    max_creative_reach: 6.5,
+                    hitbox_margin: 0.125,
+                    mob_factor: 0.5,
+                },
+            ),
             (BreakSound, &BreakSoundImpl),
             (DamageType, &DamageTypeImpl),
             (
@@ -28658,7 +28671,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.iron_sword",
+                    name: Cow::Borrowed("item.minecraft.iron_sword"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -28746,7 +28759,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.iron_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.iron_trapdoor"),
                 },
             ),
             (
@@ -28784,7 +28797,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.item_frame",
+                    name: Cow::Borrowed("item.minecraft.item_frame"),
                 },
             ),
             (
@@ -28822,7 +28835,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jack_o_lantern",
+                    name: Cow::Borrowed("block.minecraft.jack_o_lantern"),
                 },
             ),
             (
@@ -28860,7 +28873,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jigsaw",
+                    name: Cow::Borrowed("block.minecraft.jigsaw"),
                 },
             ),
             (
@@ -28898,7 +28911,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jukebox",
+                    name: Cow::Borrowed("block.minecraft.jukebox"),
                 },
             ),
             (
@@ -28936,7 +28949,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.jungle_boat",
+                    name: Cow::Borrowed("item.minecraft.jungle_boat"),
                 },
             ),
             (
@@ -28974,7 +28987,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jungle_button",
+                    name: Cow::Borrowed("block.minecraft.jungle_button"),
                 },
             ),
             (
@@ -29012,7 +29025,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.jungle_chest_boat",
+                    name: Cow::Borrowed("item.minecraft.jungle_chest_boat"),
                 },
             ),
             (
@@ -29050,7 +29063,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jungle_door",
+                    name: Cow::Borrowed("block.minecraft.jungle_door"),
                 },
             ),
             (
@@ -29088,7 +29101,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jungle_fence",
+                    name: Cow::Borrowed("block.minecraft.jungle_fence"),
                 },
             ),
             (
@@ -29126,7 +29139,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jungle_fence_gate",
+                    name: Cow::Borrowed("block.minecraft.jungle_fence_gate"),
                 },
             ),
             (
@@ -29164,7 +29177,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jungle_hanging_sign",
+                    name: Cow::Borrowed("block.minecraft.jungle_hanging_sign"),
                 },
             ),
             (
@@ -29202,7 +29215,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jungle_leaves",
+                    name: Cow::Borrowed("block.minecraft.jungle_leaves"),
                 },
             ),
             (
@@ -29240,7 +29253,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jungle_log",
+                    name: Cow::Borrowed("block.minecraft.jungle_log"),
                 },
             ),
             (
@@ -29278,7 +29291,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jungle_planks",
+                    name: Cow::Borrowed("block.minecraft.jungle_planks"),
                 },
             ),
             (
@@ -29316,7 +29329,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jungle_pressure_plate",
+                    name: Cow::Borrowed("block.minecraft.jungle_pressure_plate"),
                 },
             ),
             (
@@ -29354,7 +29367,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jungle_sapling",
+                    name: Cow::Borrowed("block.minecraft.jungle_sapling"),
                 },
             ),
             (
@@ -29392,7 +29405,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jungle_shelf",
+                    name: Cow::Borrowed("block.minecraft.jungle_shelf"),
                 },
             ),
             (
@@ -29431,7 +29444,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jungle_sign",
+                    name: Cow::Borrowed("block.minecraft.jungle_sign"),
                 },
             ),
             (
@@ -29469,7 +29482,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jungle_slab",
+                    name: Cow::Borrowed("block.minecraft.jungle_slab"),
                 },
             ),
             (
@@ -29507,7 +29520,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jungle_stairs",
+                    name: Cow::Borrowed("block.minecraft.jungle_stairs"),
                 },
             ),
             (
@@ -29545,7 +29558,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jungle_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.jungle_trapdoor"),
                 },
             ),
             (
@@ -29583,7 +29596,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.jungle_wood",
+                    name: Cow::Borrowed("block.minecraft.jungle_wood"),
                 },
             ),
             (
@@ -29621,7 +29634,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.kelp",
+                    name: Cow::Borrowed("block.minecraft.kelp"),
                 },
             ),
             (
@@ -29659,7 +29672,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.knowledge_book",
+                    name: Cow::Borrowed("item.minecraft.knowledge_book"),
                 },
             ),
             (
@@ -29698,7 +29711,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.ladder",
+                    name: Cow::Borrowed("block.minecraft.ladder"),
                 },
             ),
             (
@@ -29736,7 +29749,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lantern",
+                    name: Cow::Borrowed("block.minecraft.lantern"),
                 },
             ),
             (
@@ -29774,7 +29787,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lapis_block",
+                    name: Cow::Borrowed("block.minecraft.lapis_block"),
                 },
             ),
             (
@@ -29812,7 +29825,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.lapis_lazuli",
+                    name: Cow::Borrowed("item.minecraft.lapis_lazuli"),
                 },
             ),
             (
@@ -29851,7 +29864,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lapis_ore",
+                    name: Cow::Borrowed("block.minecraft.lapis_ore"),
                 },
             ),
             (
@@ -29889,7 +29902,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.large_amethyst_bud",
+                    name: Cow::Borrowed("block.minecraft.large_amethyst_bud"),
                 },
             ),
             (
@@ -29927,7 +29940,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.large_fern",
+                    name: Cow::Borrowed("block.minecraft.large_fern"),
                 },
             ),
             (
@@ -29965,7 +29978,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.lava_bucket",
+                    name: Cow::Borrowed("item.minecraft.lava_bucket"),
                 },
             ),
             (
@@ -30003,7 +30016,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.lead",
+                    name: Cow::Borrowed("item.minecraft.lead"),
                 },
             ),
             (
@@ -30041,7 +30054,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.leaf_litter",
+                    name: Cow::Borrowed("block.minecraft.leaf_litter"),
                 },
             ),
             (
@@ -30079,7 +30092,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.leather",
+                    name: Cow::Borrowed("item.minecraft.leather"),
                 },
             ),
             (
@@ -30117,7 +30130,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.leather_boots",
+                    name: Cow::Borrowed("item.minecraft.leather_boots"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -30190,7 +30203,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.leather_chestplate",
+                    name: Cow::Borrowed("item.minecraft.leather_chestplate"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -30263,7 +30276,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.leather_helmet",
+                    name: Cow::Borrowed("item.minecraft.leather_helmet"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -30336,7 +30349,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.leather_horse_armor",
+                    name: Cow::Borrowed("item.minecraft.leather_horse_armor"),
                 },
             ),
             (
@@ -30405,7 +30418,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.leather_leggings",
+                    name: Cow::Borrowed("item.minecraft.leather_leggings"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -30478,7 +30491,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lectern",
+                    name: Cow::Borrowed("block.minecraft.lectern"),
                 },
             ),
             (
@@ -30516,7 +30529,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lever",
+                    name: Cow::Borrowed("block.minecraft.lever"),
                 },
             ),
             (
@@ -30554,7 +30567,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light",
+                    name: Cow::Borrowed("block.minecraft.light"),
                 },
             ),
             (
@@ -30598,7 +30611,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_blue_banner",
+                    name: Cow::Borrowed("block.minecraft.light_blue_banner"),
                 },
             ),
             (
@@ -30637,7 +30650,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_blue_bed",
+                    name: Cow::Borrowed("block.minecraft.light_blue_bed"),
                 },
             ),
             (
@@ -30675,7 +30688,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.light_blue_bundle",
+                    name: Cow::Borrowed("item.minecraft.light_blue_bundle"),
                 },
             ),
             (
@@ -30714,7 +30727,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_blue_candle",
+                    name: Cow::Borrowed("block.minecraft.light_blue_candle"),
                 },
             ),
             (
@@ -30752,7 +30765,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_blue_carpet",
+                    name: Cow::Borrowed("block.minecraft.light_blue_carpet"),
                 },
             ),
             (
@@ -30809,7 +30822,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_blue_concrete",
+                    name: Cow::Borrowed("block.minecraft.light_blue_concrete"),
                 },
             ),
             (
@@ -30847,7 +30860,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_blue_concrete_powder",
+                    name: Cow::Borrowed("block.minecraft.light_blue_concrete_powder"),
                 },
             ),
             (
@@ -30885,7 +30898,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.light_blue_dye",
+                    name: Cow::Borrowed("item.minecraft.light_blue_dye"),
                 },
             ),
             (
@@ -30924,7 +30937,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_blue_glazed_terracotta",
+                    name: Cow::Borrowed("block.minecraft.light_blue_glazed_terracotta"),
                 },
             ),
             (
@@ -30962,7 +30975,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.light_blue_harness",
+                    name: Cow::Borrowed("item.minecraft.light_blue_harness"),
                 },
             ),
             (
@@ -31016,7 +31029,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_blue_shulker_box",
+                    name: Cow::Borrowed("block.minecraft.light_blue_shulker_box"),
                 },
             ),
             (
@@ -31055,7 +31068,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_blue_stained_glass",
+                    name: Cow::Borrowed("block.minecraft.light_blue_stained_glass"),
                 },
             ),
             (
@@ -31093,7 +31106,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_blue_stained_glass_pane",
+                    name: Cow::Borrowed("block.minecraft.light_blue_stained_glass_pane"),
                 },
             ),
             (
@@ -31131,7 +31144,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_blue_terracotta",
+                    name: Cow::Borrowed("block.minecraft.light_blue_terracotta"),
                 },
             ),
             (
@@ -31169,7 +31182,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_blue_wool",
+                    name: Cow::Borrowed("block.minecraft.light_blue_wool"),
                 },
             ),
             (
@@ -31207,7 +31220,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_gray_banner",
+                    name: Cow::Borrowed("block.minecraft.light_gray_banner"),
                 },
             ),
             (
@@ -31246,7 +31259,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_gray_bed",
+                    name: Cow::Borrowed("block.minecraft.light_gray_bed"),
                 },
             ),
             (
@@ -31284,7 +31297,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.light_gray_bundle",
+                    name: Cow::Borrowed("item.minecraft.light_gray_bundle"),
                 },
             ),
             (
@@ -31323,7 +31336,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_gray_candle",
+                    name: Cow::Borrowed("block.minecraft.light_gray_candle"),
                 },
             ),
             (
@@ -31361,7 +31374,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_gray_carpet",
+                    name: Cow::Borrowed("block.minecraft.light_gray_carpet"),
                 },
             ),
             (
@@ -31418,7 +31431,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_gray_concrete",
+                    name: Cow::Borrowed("block.minecraft.light_gray_concrete"),
                 },
             ),
             (
@@ -31456,7 +31469,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_gray_concrete_powder",
+                    name: Cow::Borrowed("block.minecraft.light_gray_concrete_powder"),
                 },
             ),
             (
@@ -31494,7 +31507,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.light_gray_dye",
+                    name: Cow::Borrowed("item.minecraft.light_gray_dye"),
                 },
             ),
             (
@@ -31533,7 +31546,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_gray_glazed_terracotta",
+                    name: Cow::Borrowed("block.minecraft.light_gray_glazed_terracotta"),
                 },
             ),
             (
@@ -31571,7 +31584,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.light_gray_harness",
+                    name: Cow::Borrowed("item.minecraft.light_gray_harness"),
                 },
             ),
             (
@@ -31625,7 +31638,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_gray_shulker_box",
+                    name: Cow::Borrowed("block.minecraft.light_gray_shulker_box"),
                 },
             ),
             (
@@ -31664,7 +31677,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_gray_stained_glass",
+                    name: Cow::Borrowed("block.minecraft.light_gray_stained_glass"),
                 },
             ),
             (
@@ -31702,7 +31715,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_gray_stained_glass_pane",
+                    name: Cow::Borrowed("block.minecraft.light_gray_stained_glass_pane"),
                 },
             ),
             (
@@ -31740,7 +31753,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_gray_terracotta",
+                    name: Cow::Borrowed("block.minecraft.light_gray_terracotta"),
                 },
             ),
             (
@@ -31778,7 +31791,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_gray_wool",
+                    name: Cow::Borrowed("block.minecraft.light_gray_wool"),
                 },
             ),
             (
@@ -31816,7 +31829,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.light_weighted_pressure_plate",
+                    name: Cow::Borrowed("block.minecraft.light_weighted_pressure_plate"),
                 },
             ),
             (
@@ -31854,7 +31867,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lightning_rod",
+                    name: Cow::Borrowed("block.minecraft.lightning_rod"),
                 },
             ),
             (
@@ -31892,7 +31905,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lilac",
+                    name: Cow::Borrowed("block.minecraft.lilac"),
                 },
             ),
             (
@@ -31930,7 +31943,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lily_of_the_valley",
+                    name: Cow::Borrowed("block.minecraft.lily_of_the_valley"),
                 },
             ),
             (
@@ -31968,7 +31981,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lily_pad",
+                    name: Cow::Borrowed("block.minecraft.lily_pad"),
                 },
             ),
             (
@@ -32006,7 +32019,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lime_banner",
+                    name: Cow::Borrowed("block.minecraft.lime_banner"),
                 },
             ),
             (
@@ -32045,7 +32058,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lime_bed",
+                    name: Cow::Borrowed("block.minecraft.lime_bed"),
                 },
             ),
             (
@@ -32083,7 +32096,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.lime_bundle",
+                    name: Cow::Borrowed("item.minecraft.lime_bundle"),
                 },
             ),
             (
@@ -32122,7 +32135,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lime_candle",
+                    name: Cow::Borrowed("block.minecraft.lime_candle"),
                 },
             ),
             (
@@ -32160,7 +32173,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lime_carpet",
+                    name: Cow::Borrowed("block.minecraft.lime_carpet"),
                 },
             ),
             (
@@ -32217,7 +32230,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lime_concrete",
+                    name: Cow::Borrowed("block.minecraft.lime_concrete"),
                 },
             ),
             (
@@ -32255,7 +32268,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lime_concrete_powder",
+                    name: Cow::Borrowed("block.minecraft.lime_concrete_powder"),
                 },
             ),
             (
@@ -32293,7 +32306,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.lime_dye",
+                    name: Cow::Borrowed("item.minecraft.lime_dye"),
                 },
             ),
             (
@@ -32332,7 +32345,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lime_glazed_terracotta",
+                    name: Cow::Borrowed("block.minecraft.lime_glazed_terracotta"),
                 },
             ),
             (
@@ -32370,7 +32383,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.lime_harness",
+                    name: Cow::Borrowed("item.minecraft.lime_harness"),
                 },
             ),
             (
@@ -32424,7 +32437,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lime_shulker_box",
+                    name: Cow::Borrowed("block.minecraft.lime_shulker_box"),
                 },
             ),
             (
@@ -32463,7 +32476,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lime_stained_glass",
+                    name: Cow::Borrowed("block.minecraft.lime_stained_glass"),
                 },
             ),
             (
@@ -32501,7 +32514,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lime_stained_glass_pane",
+                    name: Cow::Borrowed("block.minecraft.lime_stained_glass_pane"),
                 },
             ),
             (
@@ -32539,7 +32552,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lime_terracotta",
+                    name: Cow::Borrowed("block.minecraft.lime_terracotta"),
                 },
             ),
             (
@@ -32577,7 +32590,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lime_wool",
+                    name: Cow::Borrowed("block.minecraft.lime_wool"),
                 },
             ),
             (
@@ -32615,7 +32628,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.lingering_potion",
+                    name: Cow::Borrowed("item.minecraft.lingering_potion"),
                 },
             ),
             (
@@ -32666,7 +32679,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.llama_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.llama_spawn_egg"),
                 },
             ),
             (
@@ -32705,7 +32718,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.lodestone",
+                    name: Cow::Borrowed("block.minecraft.lodestone"),
                 },
             ),
             (
@@ -32743,7 +32756,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.loom",
+                    name: Cow::Borrowed("block.minecraft.loom"),
                 },
             ),
             (
@@ -32781,7 +32794,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.mace",
+                    name: Cow::Borrowed("item.minecraft.mace"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -32853,7 +32866,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.magenta_banner",
+                    name: Cow::Borrowed("block.minecraft.magenta_banner"),
                 },
             ),
             (
@@ -32892,7 +32905,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.magenta_bed",
+                    name: Cow::Borrowed("block.minecraft.magenta_bed"),
                 },
             ),
             (
@@ -32930,7 +32943,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.magenta_bundle",
+                    name: Cow::Borrowed("item.minecraft.magenta_bundle"),
                 },
             ),
             (
@@ -32969,7 +32982,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.magenta_candle",
+                    name: Cow::Borrowed("block.minecraft.magenta_candle"),
                 },
             ),
             (
@@ -33007,7 +33020,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.magenta_carpet",
+                    name: Cow::Borrowed("block.minecraft.magenta_carpet"),
                 },
             ),
             (
@@ -33064,7 +33077,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.magenta_concrete",
+                    name: Cow::Borrowed("block.minecraft.magenta_concrete"),
                 },
             ),
             (
@@ -33102,7 +33115,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.magenta_concrete_powder",
+                    name: Cow::Borrowed("block.minecraft.magenta_concrete_powder"),
                 },
             ),
             (
@@ -33140,7 +33153,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.magenta_dye",
+                    name: Cow::Borrowed("item.minecraft.magenta_dye"),
                 },
             ),
             (
@@ -33179,7 +33192,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.magenta_glazed_terracotta",
+                    name: Cow::Borrowed("block.minecraft.magenta_glazed_terracotta"),
                 },
             ),
             (
@@ -33217,7 +33230,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.magenta_harness",
+                    name: Cow::Borrowed("item.minecraft.magenta_harness"),
                 },
             ),
             (
@@ -33271,7 +33284,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.magenta_shulker_box",
+                    name: Cow::Borrowed("block.minecraft.magenta_shulker_box"),
                 },
             ),
             (
@@ -33310,7 +33323,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.magenta_stained_glass",
+                    name: Cow::Borrowed("block.minecraft.magenta_stained_glass"),
                 },
             ),
             (
@@ -33348,7 +33361,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.magenta_stained_glass_pane",
+                    name: Cow::Borrowed("block.minecraft.magenta_stained_glass_pane"),
                 },
             ),
             (
@@ -33386,7 +33399,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.magenta_terracotta",
+                    name: Cow::Borrowed("block.minecraft.magenta_terracotta"),
                 },
             ),
             (
@@ -33424,7 +33437,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.magenta_wool",
+                    name: Cow::Borrowed("block.minecraft.magenta_wool"),
                 },
             ),
             (
@@ -33462,7 +33475,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.magma_block",
+                    name: Cow::Borrowed("block.minecraft.magma_block"),
                 },
             ),
             (
@@ -33500,7 +33513,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.magma_cream",
+                    name: Cow::Borrowed("item.minecraft.magma_cream"),
                 },
             ),
             (
@@ -33538,7 +33551,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.magma_cube_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.magma_cube_spawn_egg"),
                 },
             ),
             (
@@ -33577,7 +33590,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.mangrove_boat",
+                    name: Cow::Borrowed("item.minecraft.mangrove_boat"),
                 },
             ),
             (
@@ -33615,7 +33628,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mangrove_button",
+                    name: Cow::Borrowed("block.minecraft.mangrove_button"),
                 },
             ),
             (
@@ -33653,7 +33666,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.mangrove_chest_boat",
+                    name: Cow::Borrowed("item.minecraft.mangrove_chest_boat"),
                 },
             ),
             (
@@ -33691,7 +33704,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mangrove_door",
+                    name: Cow::Borrowed("block.minecraft.mangrove_door"),
                 },
             ),
             (
@@ -33729,7 +33742,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mangrove_fence",
+                    name: Cow::Borrowed("block.minecraft.mangrove_fence"),
                 },
             ),
             (
@@ -33767,7 +33780,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mangrove_fence_gate",
+                    name: Cow::Borrowed("block.minecraft.mangrove_fence_gate"),
                 },
             ),
             (
@@ -33805,7 +33818,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mangrove_hanging_sign",
+                    name: Cow::Borrowed("block.minecraft.mangrove_hanging_sign"),
                 },
             ),
             (
@@ -33843,7 +33856,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mangrove_leaves",
+                    name: Cow::Borrowed("block.minecraft.mangrove_leaves"),
                 },
             ),
             (
@@ -33881,7 +33894,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mangrove_log",
+                    name: Cow::Borrowed("block.minecraft.mangrove_log"),
                 },
             ),
             (
@@ -33919,7 +33932,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mangrove_planks",
+                    name: Cow::Borrowed("block.minecraft.mangrove_planks"),
                 },
             ),
             (
@@ -33957,7 +33970,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mangrove_pressure_plate",
+                    name: Cow::Borrowed("block.minecraft.mangrove_pressure_plate"),
                 },
             ),
             (
@@ -33995,7 +34008,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mangrove_propagule",
+                    name: Cow::Borrowed("block.minecraft.mangrove_propagule"),
                 },
             ),
             (
@@ -34033,7 +34046,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mangrove_roots",
+                    name: Cow::Borrowed("block.minecraft.mangrove_roots"),
                 },
             ),
             (
@@ -34071,7 +34084,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mangrove_shelf",
+                    name: Cow::Borrowed("block.minecraft.mangrove_shelf"),
                 },
             ),
             (
@@ -34110,7 +34123,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mangrove_sign",
+                    name: Cow::Borrowed("block.minecraft.mangrove_sign"),
                 },
             ),
             (
@@ -34148,7 +34161,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mangrove_slab",
+                    name: Cow::Borrowed("block.minecraft.mangrove_slab"),
                 },
             ),
             (
@@ -34186,7 +34199,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mangrove_stairs",
+                    name: Cow::Borrowed("block.minecraft.mangrove_stairs"),
                 },
             ),
             (
@@ -34224,7 +34237,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mangrove_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.mangrove_trapdoor"),
                 },
             ),
             (
@@ -34262,7 +34275,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mangrove_wood",
+                    name: Cow::Borrowed("block.minecraft.mangrove_wood"),
                 },
             ),
             (
@@ -34300,7 +34313,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.map",
+                    name: Cow::Borrowed("item.minecraft.map"),
                 },
             ),
             (
@@ -34338,7 +34351,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.medium_amethyst_bud",
+                    name: Cow::Borrowed("block.minecraft.medium_amethyst_bud"),
                 },
             ),
             (
@@ -34376,7 +34389,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.melon",
+                    name: Cow::Borrowed("block.minecraft.melon"),
                 },
             ),
             (
@@ -34414,7 +34427,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.melon_seeds",
+                    name: Cow::Borrowed("item.minecraft.melon_seeds"),
                 },
             ),
             (
@@ -34452,7 +34465,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.melon_slice",
+                    name: Cow::Borrowed("item.minecraft.melon_slice"),
                 },
             ),
             (
@@ -34508,7 +34521,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.milk_bucket",
+                    name: Cow::Borrowed("item.minecraft.milk_bucket"),
                 },
             ),
             (
@@ -34557,7 +34570,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.minecart",
+                    name: Cow::Borrowed("item.minecraft.minecart"),
                 },
             ),
             (
@@ -34595,7 +34608,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.miner_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.miner_pottery_sherd"),
                 },
             ),
             (
@@ -34633,7 +34646,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.mojang_banner_pattern",
+                    name: Cow::Borrowed("item.minecraft.mojang_banner_pattern"),
                 },
             ),
             (
@@ -34672,7 +34685,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.mooshroom_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.mooshroom_spawn_egg"),
                 },
             ),
             (
@@ -34711,7 +34724,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.moss_block",
+                    name: Cow::Borrowed("block.minecraft.moss_block"),
                 },
             ),
             (
@@ -34749,7 +34762,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.moss_carpet",
+                    name: Cow::Borrowed("block.minecraft.moss_carpet"),
                 },
             ),
             (
@@ -34787,7 +34800,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mossy_cobblestone",
+                    name: Cow::Borrowed("block.minecraft.mossy_cobblestone"),
                 },
             ),
             (
@@ -34825,7 +34838,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mossy_cobblestone_slab",
+                    name: Cow::Borrowed("block.minecraft.mossy_cobblestone_slab"),
                 },
             ),
             (
@@ -34863,7 +34876,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mossy_cobblestone_stairs",
+                    name: Cow::Borrowed("block.minecraft.mossy_cobblestone_stairs"),
                 },
             ),
             (
@@ -34901,7 +34914,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mossy_cobblestone_wall",
+                    name: Cow::Borrowed("block.minecraft.mossy_cobblestone_wall"),
                 },
             ),
             (
@@ -34939,7 +34952,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mossy_stone_brick_slab",
+                    name: Cow::Borrowed("block.minecraft.mossy_stone_brick_slab"),
                 },
             ),
             (
@@ -34977,7 +34990,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mossy_stone_brick_stairs",
+                    name: Cow::Borrowed("block.minecraft.mossy_stone_brick_stairs"),
                 },
             ),
             (
@@ -35015,7 +35028,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mossy_stone_brick_wall",
+                    name: Cow::Borrowed("block.minecraft.mossy_stone_brick_wall"),
                 },
             ),
             (
@@ -35053,7 +35066,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mossy_stone_bricks",
+                    name: Cow::Borrowed("block.minecraft.mossy_stone_bricks"),
                 },
             ),
             (
@@ -35091,7 +35104,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.mourner_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.mourner_pottery_sherd"),
                 },
             ),
             (
@@ -35129,7 +35142,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mud",
+                    name: Cow::Borrowed("block.minecraft.mud"),
                 },
             ),
             (
@@ -35167,7 +35180,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mud_brick_slab",
+                    name: Cow::Borrowed("block.minecraft.mud_brick_slab"),
                 },
             ),
             (
@@ -35205,7 +35218,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mud_brick_stairs",
+                    name: Cow::Borrowed("block.minecraft.mud_brick_stairs"),
                 },
             ),
             (
@@ -35243,7 +35256,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mud_brick_wall",
+                    name: Cow::Borrowed("block.minecraft.mud_brick_wall"),
                 },
             ),
             (
@@ -35281,7 +35294,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mud_bricks",
+                    name: Cow::Borrowed("block.minecraft.mud_bricks"),
                 },
             ),
             (
@@ -35319,7 +35332,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.muddy_mangrove_roots",
+                    name: Cow::Borrowed("block.minecraft.muddy_mangrove_roots"),
                 },
             ),
             (
@@ -35357,7 +35370,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.mule_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.mule_spawn_egg"),
                 },
             ),
             (
@@ -35396,7 +35409,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mushroom_stem",
+                    name: Cow::Borrowed("block.minecraft.mushroom_stem"),
                 },
             ),
             (
@@ -35434,7 +35447,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.mushroom_stew",
+                    name: Cow::Borrowed("item.minecraft.mushroom_stew"),
                 },
             ),
             (
@@ -35497,7 +35510,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_11",
+                    name: Cow::Borrowed("item.minecraft.music_disc_11"),
                 },
             ),
             (
@@ -35541,7 +35554,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_13",
+                    name: Cow::Borrowed("item.minecraft.music_disc_13"),
                 },
             ),
             (
@@ -35585,7 +35598,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_5",
+                    name: Cow::Borrowed("item.minecraft.music_disc_5"),
                 },
             ),
             (
@@ -35629,7 +35642,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_blocks",
+                    name: Cow::Borrowed("item.minecraft.music_disc_blocks"),
                 },
             ),
             (
@@ -35673,7 +35686,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_bounce",
+                    name: Cow::Borrowed("item.minecraft.music_disc_bounce"),
                 },
             ),
             (
@@ -35717,7 +35730,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_cat",
+                    name: Cow::Borrowed("item.minecraft.music_disc_cat"),
                 },
             ),
             (
@@ -35761,7 +35774,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_chirp",
+                    name: Cow::Borrowed("item.minecraft.music_disc_chirp"),
                 },
             ),
             (
@@ -35805,7 +35818,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_creator",
+                    name: Cow::Borrowed("item.minecraft.music_disc_creator"),
                 },
             ),
             (
@@ -35849,7 +35862,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_creator_music_box",
+                    name: Cow::Borrowed("item.minecraft.music_disc_creator_music_box"),
                 },
             ),
             (
@@ -35893,7 +35906,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_far",
+                    name: Cow::Borrowed("item.minecraft.music_disc_far"),
                 },
             ),
             (
@@ -35937,7 +35950,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_lava_chicken",
+                    name: Cow::Borrowed("item.minecraft.music_disc_lava_chicken"),
                 },
             ),
             (
@@ -35981,7 +35994,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_mall",
+                    name: Cow::Borrowed("item.minecraft.music_disc_mall"),
                 },
             ),
             (
@@ -36025,7 +36038,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_mellohi",
+                    name: Cow::Borrowed("item.minecraft.music_disc_mellohi"),
                 },
             ),
             (
@@ -36069,7 +36082,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_otherside",
+                    name: Cow::Borrowed("item.minecraft.music_disc_otherside"),
                 },
             ),
             (
@@ -36113,7 +36126,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_pigstep",
+                    name: Cow::Borrowed("item.minecraft.music_disc_pigstep"),
                 },
             ),
             (
@@ -36157,7 +36170,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_precipice",
+                    name: Cow::Borrowed("item.minecraft.music_disc_precipice"),
                 },
             ),
             (
@@ -36201,7 +36214,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_relic",
+                    name: Cow::Borrowed("item.minecraft.music_disc_relic"),
                 },
             ),
             (
@@ -36245,7 +36258,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_stal",
+                    name: Cow::Borrowed("item.minecraft.music_disc_stal"),
                 },
             ),
             (
@@ -36289,7 +36302,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_strad",
+                    name: Cow::Borrowed("item.minecraft.music_disc_strad"),
                 },
             ),
             (
@@ -36333,7 +36346,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_tears",
+                    name: Cow::Borrowed("item.minecraft.music_disc_tears"),
                 },
             ),
             (
@@ -36377,7 +36390,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_wait",
+                    name: Cow::Borrowed("item.minecraft.music_disc_wait"),
                 },
             ),
             (
@@ -36421,7 +36434,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.music_disc_ward",
+                    name: Cow::Borrowed("item.minecraft.music_disc_ward"),
                 },
             ),
             (
@@ -36459,7 +36472,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.mutton",
+                    name: Cow::Borrowed("item.minecraft.mutton"),
                 },
             ),
             (
@@ -36515,7 +36528,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.mycelium",
+                    name: Cow::Borrowed("block.minecraft.mycelium"),
                 },
             ),
             (
@@ -36553,7 +36566,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.name_tag",
+                    name: Cow::Borrowed("item.minecraft.name_tag"),
                 },
             ),
             (
@@ -36591,7 +36604,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.nautilus_shell",
+                    name: Cow::Borrowed("item.minecraft.nautilus_shell"),
                 },
             ),
             (
@@ -36629,7 +36642,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.nautilus_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.nautilus_spawn_egg"),
                 },
             ),
             (
@@ -36668,7 +36681,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.nether_brick",
+                    name: Cow::Borrowed("item.minecraft.nether_brick"),
                 },
             ),
             (
@@ -36706,7 +36719,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.nether_brick_fence",
+                    name: Cow::Borrowed("block.minecraft.nether_brick_fence"),
                 },
             ),
             (
@@ -36744,7 +36757,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.nether_brick_slab",
+                    name: Cow::Borrowed("block.minecraft.nether_brick_slab"),
                 },
             ),
             (
@@ -36782,7 +36795,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.nether_brick_stairs",
+                    name: Cow::Borrowed("block.minecraft.nether_brick_stairs"),
                 },
             ),
             (
@@ -36820,7 +36833,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.nether_brick_wall",
+                    name: Cow::Borrowed("block.minecraft.nether_brick_wall"),
                 },
             ),
             (
@@ -36858,7 +36871,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.nether_bricks",
+                    name: Cow::Borrowed("block.minecraft.nether_bricks"),
                 },
             ),
             (
@@ -36896,7 +36909,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.nether_gold_ore",
+                    name: Cow::Borrowed("block.minecraft.nether_gold_ore"),
                 },
             ),
             (
@@ -36934,7 +36947,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.nether_quartz_ore",
+                    name: Cow::Borrowed("block.minecraft.nether_quartz_ore"),
                 },
             ),
             (
@@ -36972,7 +36985,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.nether_sprouts",
+                    name: Cow::Borrowed("block.minecraft.nether_sprouts"),
                 },
             ),
             (
@@ -37010,7 +37023,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.nether_star",
+                    name: Cow::Borrowed("item.minecraft.nether_star"),
                 },
             ),
             (
@@ -37055,7 +37068,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.nether_wart",
+                    name: Cow::Borrowed("item.minecraft.nether_wart"),
                 },
             ),
             (
@@ -37093,7 +37106,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.nether_wart_block",
+                    name: Cow::Borrowed("block.minecraft.nether_wart_block"),
                 },
             ),
             (
@@ -37131,7 +37144,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.netherite_axe",
+                    name: Cow::Borrowed("item.minecraft.netherite_axe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -37220,7 +37233,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.netherite_block",
+                    name: Cow::Borrowed("block.minecraft.netherite_block"),
                 },
             ),
             (
@@ -37264,7 +37277,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.netherite_boots",
+                    name: Cow::Borrowed("item.minecraft.netherite_boots"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -37350,7 +37363,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.netherite_chestplate",
+                    name: Cow::Borrowed("item.minecraft.netherite_chestplate"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -37436,7 +37449,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.netherite_helmet",
+                    name: Cow::Borrowed("item.minecraft.netherite_helmet"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -37522,7 +37535,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.netherite_hoe",
+                    name: Cow::Borrowed("item.minecraft.netherite_hoe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -37611,7 +37624,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.netherite_horse_armor",
+                    name: Cow::Borrowed("item.minecraft.netherite_horse_armor"),
                 },
             ),
             (
@@ -37693,7 +37706,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.netherite_ingot",
+                    name: Cow::Borrowed("item.minecraft.netherite_ingot"),
                 },
             ),
             (
@@ -37738,7 +37751,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.netherite_leggings",
+                    name: Cow::Borrowed("item.minecraft.netherite_leggings"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -37824,7 +37837,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.netherite_nautilus_armor",
+                    name: Cow::Borrowed("item.minecraft.netherite_nautilus_armor"),
                 },
             ),
             (
@@ -37906,7 +37919,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.netherite_pickaxe",
+                    name: Cow::Borrowed("item.minecraft.netherite_pickaxe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -37995,7 +38008,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.netherite_scrap",
+                    name: Cow::Borrowed("item.minecraft.netherite_scrap"),
                 },
             ),
             (
@@ -38039,7 +38052,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.netherite_shovel",
+                    name: Cow::Borrowed("item.minecraft.netherite_shovel"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -38128,7 +38141,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.netherite_spear",
+                    name: Cow::Borrowed("item.minecraft.netherite_spear"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -38167,14 +38180,17 @@ impl Item {
                 },
             ),
             (Enchantable, &EnchantableImpl { value: 15 }),
-            (AttackRange, &AttackRangeImpl {
-                min_reach: 2.0,
-                max_reach: 4.5,
-                min_creative_reach: 2.0,
-                max_creative_reach: 6.5,
-                hitbox_margin: 0.125,
-                mob_factor: 0.5,
-            }),
+            (
+                AttackRange,
+                &AttackRangeImpl {
+                    min_reach: 2.0,
+                    max_reach: 4.5,
+                    min_creative_reach: 2.0,
+                    max_creative_reach: 6.5,
+                    hitbox_margin: 0.125,
+                    mob_factor: 0.5,
+                },
+            ),
             (BreakSound, &BreakSoundImpl),
             (DamageType, &DamageTypeImpl),
             (
@@ -38209,7 +38225,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.netherite_sword",
+                    name: Cow::Borrowed("item.minecraft.netherite_sword"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -38303,7 +38319,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.netherite_upgrade_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.netherite_upgrade_smithing_template"),
                 },
             ),
             (
@@ -38341,7 +38357,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.netherrack",
+                    name: Cow::Borrowed("block.minecraft.netherrack"),
                 },
             ),
             (
@@ -38379,7 +38395,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.note_block",
+                    name: Cow::Borrowed("block.minecraft.note_block"),
                 },
             ),
             (
@@ -38417,7 +38433,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.oak_boat",
+                    name: Cow::Borrowed("item.minecraft.oak_boat"),
                 },
             ),
             (
@@ -38455,7 +38471,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oak_button",
+                    name: Cow::Borrowed("block.minecraft.oak_button"),
                 },
             ),
             (
@@ -38493,7 +38509,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.oak_chest_boat",
+                    name: Cow::Borrowed("item.minecraft.oak_chest_boat"),
                 },
             ),
             (
@@ -38531,7 +38547,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oak_door",
+                    name: Cow::Borrowed("block.minecraft.oak_door"),
                 },
             ),
             (
@@ -38569,7 +38585,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oak_fence",
+                    name: Cow::Borrowed("block.minecraft.oak_fence"),
                 },
             ),
             (
@@ -38607,7 +38623,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oak_fence_gate",
+                    name: Cow::Borrowed("block.minecraft.oak_fence_gate"),
                 },
             ),
             (
@@ -38645,7 +38661,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oak_hanging_sign",
+                    name: Cow::Borrowed("block.minecraft.oak_hanging_sign"),
                 },
             ),
             (
@@ -38683,7 +38699,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oak_leaves",
+                    name: Cow::Borrowed("block.minecraft.oak_leaves"),
                 },
             ),
             (
@@ -38721,7 +38737,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oak_log",
+                    name: Cow::Borrowed("block.minecraft.oak_log"),
                 },
             ),
             (
@@ -38759,7 +38775,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oak_planks",
+                    name: Cow::Borrowed("block.minecraft.oak_planks"),
                 },
             ),
             (
@@ -38797,7 +38813,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oak_pressure_plate",
+                    name: Cow::Borrowed("block.minecraft.oak_pressure_plate"),
                 },
             ),
             (
@@ -38835,7 +38851,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oak_sapling",
+                    name: Cow::Borrowed("block.minecraft.oak_sapling"),
                 },
             ),
             (
@@ -38873,7 +38889,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oak_shelf",
+                    name: Cow::Borrowed("block.minecraft.oak_shelf"),
                 },
             ),
             (
@@ -38912,7 +38928,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oak_sign",
+                    name: Cow::Borrowed("block.minecraft.oak_sign"),
                 },
             ),
             (
@@ -38950,7 +38966,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oak_slab",
+                    name: Cow::Borrowed("block.minecraft.oak_slab"),
                 },
             ),
             (
@@ -38988,7 +39004,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oak_stairs",
+                    name: Cow::Borrowed("block.minecraft.oak_stairs"),
                 },
             ),
             (
@@ -39026,7 +39042,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oak_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.oak_trapdoor"),
                 },
             ),
             (
@@ -39064,7 +39080,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oak_wood",
+                    name: Cow::Borrowed("block.minecraft.oak_wood"),
                 },
             ),
             (
@@ -39102,7 +39118,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.observer",
+                    name: Cow::Borrowed("block.minecraft.observer"),
                 },
             ),
             (
@@ -39140,7 +39156,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.obsidian",
+                    name: Cow::Borrowed("block.minecraft.obsidian"),
                 },
             ),
             (
@@ -39178,7 +39194,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.ocelot_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.ocelot_spawn_egg"),
                 },
             ),
             (
@@ -39217,7 +39233,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.ochre_froglight",
+                    name: Cow::Borrowed("block.minecraft.ochre_froglight"),
                 },
             ),
             (
@@ -39255,7 +39271,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.ominous_bottle",
+                    name: Cow::Borrowed("item.minecraft.ominous_bottle"),
                 },
             ),
             (
@@ -39309,7 +39325,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.ominous_trial_key",
+                    name: Cow::Borrowed("item.minecraft.ominous_trial_key"),
                 },
             ),
             (
@@ -39347,7 +39363,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.open_eyeblossom",
+                    name: Cow::Borrowed("block.minecraft.open_eyeblossom"),
                 },
             ),
             (
@@ -39385,7 +39401,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.orange_banner",
+                    name: Cow::Borrowed("block.minecraft.orange_banner"),
                 },
             ),
             (
@@ -39424,7 +39440,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.orange_bed",
+                    name: Cow::Borrowed("block.minecraft.orange_bed"),
                 },
             ),
             (
@@ -39462,7 +39478,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.orange_bundle",
+                    name: Cow::Borrowed("item.minecraft.orange_bundle"),
                 },
             ),
             (
@@ -39501,7 +39517,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.orange_candle",
+                    name: Cow::Borrowed("block.minecraft.orange_candle"),
                 },
             ),
             (
@@ -39539,7 +39555,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.orange_carpet",
+                    name: Cow::Borrowed("block.minecraft.orange_carpet"),
                 },
             ),
             (
@@ -39596,7 +39612,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.orange_concrete",
+                    name: Cow::Borrowed("block.minecraft.orange_concrete"),
                 },
             ),
             (
@@ -39634,7 +39650,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.orange_concrete_powder",
+                    name: Cow::Borrowed("block.minecraft.orange_concrete_powder"),
                 },
             ),
             (
@@ -39672,7 +39688,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.orange_dye",
+                    name: Cow::Borrowed("item.minecraft.orange_dye"),
                 },
             ),
             (
@@ -39711,7 +39727,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.orange_glazed_terracotta",
+                    name: Cow::Borrowed("block.minecraft.orange_glazed_terracotta"),
                 },
             ),
             (
@@ -39749,7 +39765,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.orange_harness",
+                    name: Cow::Borrowed("item.minecraft.orange_harness"),
                 },
             ),
             (
@@ -39803,7 +39819,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.orange_shulker_box",
+                    name: Cow::Borrowed("block.minecraft.orange_shulker_box"),
                 },
             ),
             (
@@ -39842,7 +39858,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.orange_stained_glass",
+                    name: Cow::Borrowed("block.minecraft.orange_stained_glass"),
                 },
             ),
             (
@@ -39880,7 +39896,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.orange_stained_glass_pane",
+                    name: Cow::Borrowed("block.minecraft.orange_stained_glass_pane"),
                 },
             ),
             (
@@ -39918,7 +39934,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.orange_terracotta",
+                    name: Cow::Borrowed("block.minecraft.orange_terracotta"),
                 },
             ),
             (
@@ -39956,7 +39972,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.orange_tulip",
+                    name: Cow::Borrowed("block.minecraft.orange_tulip"),
                 },
             ),
             (
@@ -39994,7 +40010,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.orange_wool",
+                    name: Cow::Borrowed("block.minecraft.orange_wool"),
                 },
             ),
             (
@@ -40032,7 +40048,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oxeye_daisy",
+                    name: Cow::Borrowed("block.minecraft.oxeye_daisy"),
                 },
             ),
             (
@@ -40070,7 +40086,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oxidized_chiseled_copper",
+                    name: Cow::Borrowed("block.minecraft.oxidized_chiseled_copper"),
                 },
             ),
             (
@@ -40108,7 +40124,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oxidized_copper",
+                    name: Cow::Borrowed("block.minecraft.oxidized_copper"),
                 },
             ),
             (
@@ -40146,7 +40162,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oxidized_copper_bars",
+                    name: Cow::Borrowed("block.minecraft.oxidized_copper_bars"),
                 },
             ),
             (
@@ -40184,7 +40200,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oxidized_copper_bulb",
+                    name: Cow::Borrowed("block.minecraft.oxidized_copper_bulb"),
                 },
             ),
             (
@@ -40222,7 +40238,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oxidized_copper_chain",
+                    name: Cow::Borrowed("block.minecraft.oxidized_copper_chain"),
                 },
             ),
             (
@@ -40260,7 +40276,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oxidized_copper_chest",
+                    name: Cow::Borrowed("block.minecraft.oxidized_copper_chest"),
                 },
             ),
             (
@@ -40298,7 +40314,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oxidized_copper_door",
+                    name: Cow::Borrowed("block.minecraft.oxidized_copper_door"),
                 },
             ),
             (
@@ -40336,7 +40352,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oxidized_copper_golem_statue",
+                    name: Cow::Borrowed("block.minecraft.oxidized_copper_golem_statue"),
                 },
             ),
             (
@@ -40383,7 +40399,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oxidized_copper_grate",
+                    name: Cow::Borrowed("block.minecraft.oxidized_copper_grate"),
                 },
             ),
             (
@@ -40421,7 +40437,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oxidized_copper_lantern",
+                    name: Cow::Borrowed("block.minecraft.oxidized_copper_lantern"),
                 },
             ),
             (
@@ -40459,7 +40475,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oxidized_copper_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.oxidized_copper_trapdoor"),
                 },
             ),
             (
@@ -40497,7 +40513,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oxidized_cut_copper",
+                    name: Cow::Borrowed("block.minecraft.oxidized_cut_copper"),
                 },
             ),
             (
@@ -40535,7 +40551,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oxidized_cut_copper_slab",
+                    name: Cow::Borrowed("block.minecraft.oxidized_cut_copper_slab"),
                 },
             ),
             (
@@ -40573,7 +40589,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oxidized_cut_copper_stairs",
+                    name: Cow::Borrowed("block.minecraft.oxidized_cut_copper_stairs"),
                 },
             ),
             (
@@ -40611,7 +40627,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.oxidized_lightning_rod",
+                    name: Cow::Borrowed("block.minecraft.oxidized_lightning_rod"),
                 },
             ),
             (
@@ -40649,7 +40665,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.packed_ice",
+                    name: Cow::Borrowed("block.minecraft.packed_ice"),
                 },
             ),
             (
@@ -40687,7 +40703,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.packed_mud",
+                    name: Cow::Borrowed("block.minecraft.packed_mud"),
                 },
             ),
             (
@@ -40725,7 +40741,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.painting",
+                    name: Cow::Borrowed("item.minecraft.painting"),
                 },
             ),
             (
@@ -40763,7 +40779,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_hanging_moss",
+                    name: Cow::Borrowed("block.minecraft.pale_hanging_moss"),
                 },
             ),
             (
@@ -40801,7 +40817,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_moss_block",
+                    name: Cow::Borrowed("block.minecraft.pale_moss_block"),
                 },
             ),
             (
@@ -40839,7 +40855,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_moss_carpet",
+                    name: Cow::Borrowed("block.minecraft.pale_moss_carpet"),
                 },
             ),
             (
@@ -40877,7 +40893,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.pale_oak_boat",
+                    name: Cow::Borrowed("item.minecraft.pale_oak_boat"),
                 },
             ),
             (
@@ -40915,7 +40931,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_oak_button",
+                    name: Cow::Borrowed("block.minecraft.pale_oak_button"),
                 },
             ),
             (
@@ -40953,7 +40969,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.pale_oak_chest_boat",
+                    name: Cow::Borrowed("item.minecraft.pale_oak_chest_boat"),
                 },
             ),
             (
@@ -40991,7 +41007,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_oak_door",
+                    name: Cow::Borrowed("block.minecraft.pale_oak_door"),
                 },
             ),
             (
@@ -41029,7 +41045,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_oak_fence",
+                    name: Cow::Borrowed("block.minecraft.pale_oak_fence"),
                 },
             ),
             (
@@ -41067,7 +41083,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_oak_fence_gate",
+                    name: Cow::Borrowed("block.minecraft.pale_oak_fence_gate"),
                 },
             ),
             (
@@ -41105,7 +41121,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_oak_hanging_sign",
+                    name: Cow::Borrowed("block.minecraft.pale_oak_hanging_sign"),
                 },
             ),
             (
@@ -41143,7 +41159,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_oak_leaves",
+                    name: Cow::Borrowed("block.minecraft.pale_oak_leaves"),
                 },
             ),
             (
@@ -41181,7 +41197,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_oak_log",
+                    name: Cow::Borrowed("block.minecraft.pale_oak_log"),
                 },
             ),
             (
@@ -41219,7 +41235,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_oak_planks",
+                    name: Cow::Borrowed("block.minecraft.pale_oak_planks"),
                 },
             ),
             (
@@ -41257,7 +41273,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_oak_pressure_plate",
+                    name: Cow::Borrowed("block.minecraft.pale_oak_pressure_plate"),
                 },
             ),
             (
@@ -41295,7 +41311,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_oak_sapling",
+                    name: Cow::Borrowed("block.minecraft.pale_oak_sapling"),
                 },
             ),
             (
@@ -41333,7 +41349,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_oak_shelf",
+                    name: Cow::Borrowed("block.minecraft.pale_oak_shelf"),
                 },
             ),
             (
@@ -41372,7 +41388,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_oak_sign",
+                    name: Cow::Borrowed("block.minecraft.pale_oak_sign"),
                 },
             ),
             (
@@ -41410,7 +41426,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_oak_slab",
+                    name: Cow::Borrowed("block.minecraft.pale_oak_slab"),
                 },
             ),
             (
@@ -41448,7 +41464,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_oak_stairs",
+                    name: Cow::Borrowed("block.minecraft.pale_oak_stairs"),
                 },
             ),
             (
@@ -41486,7 +41502,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_oak_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.pale_oak_trapdoor"),
                 },
             ),
             (
@@ -41524,7 +41540,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pale_oak_wood",
+                    name: Cow::Borrowed("block.minecraft.pale_oak_wood"),
                 },
             ),
             (
@@ -41562,7 +41578,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.panda_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.panda_spawn_egg"),
                 },
             ),
             (
@@ -41601,7 +41617,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.paper",
+                    name: Cow::Borrowed("item.minecraft.paper"),
                 },
             ),
             (
@@ -41639,7 +41655,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.parched_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.parched_spawn_egg"),
                 },
             ),
             (
@@ -41678,7 +41694,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.parrot_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.parrot_spawn_egg"),
                 },
             ),
             (
@@ -41717,7 +41733,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pearlescent_froglight",
+                    name: Cow::Borrowed("block.minecraft.pearlescent_froglight"),
                 },
             ),
             (
@@ -41755,7 +41771,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.peony",
+                    name: Cow::Borrowed("block.minecraft.peony"),
                 },
             ),
             (
@@ -41793,7 +41809,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.petrified_oak_slab",
+                    name: Cow::Borrowed("block.minecraft.petrified_oak_slab"),
                 },
             ),
             (
@@ -41831,7 +41847,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.phantom_membrane",
+                    name: Cow::Borrowed("item.minecraft.phantom_membrane"),
                 },
             ),
             (
@@ -41869,7 +41885,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.phantom_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.phantom_spawn_egg"),
                 },
             ),
             (
@@ -41908,7 +41924,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.pig_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.pig_spawn_egg"),
                 },
             ),
             (
@@ -41947,7 +41963,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.piglin_banner_pattern",
+                    name: Cow::Borrowed("item.minecraft.piglin_banner_pattern"),
                 },
             ),
             (
@@ -41986,7 +42002,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.piglin_brute_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.piglin_brute_spawn_egg"),
                 },
             ),
             (
@@ -42025,7 +42041,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.piglin_head",
+                    name: Cow::Borrowed("block.minecraft.piglin_head"),
                 },
             ),
             (
@@ -42085,7 +42101,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.piglin_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.piglin_spawn_egg"),
                 },
             ),
             (
@@ -42124,7 +42140,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.pillager_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.pillager_spawn_egg"),
                 },
             ),
             (
@@ -42163,7 +42179,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pink_banner",
+                    name: Cow::Borrowed("block.minecraft.pink_banner"),
                 },
             ),
             (
@@ -42202,7 +42218,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pink_bed",
+                    name: Cow::Borrowed("block.minecraft.pink_bed"),
                 },
             ),
             (
@@ -42240,7 +42256,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.pink_bundle",
+                    name: Cow::Borrowed("item.minecraft.pink_bundle"),
                 },
             ),
             (
@@ -42279,7 +42295,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pink_candle",
+                    name: Cow::Borrowed("block.minecraft.pink_candle"),
                 },
             ),
             (
@@ -42317,7 +42333,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pink_carpet",
+                    name: Cow::Borrowed("block.minecraft.pink_carpet"),
                 },
             ),
             (
@@ -42374,7 +42390,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pink_concrete",
+                    name: Cow::Borrowed("block.minecraft.pink_concrete"),
                 },
             ),
             (
@@ -42412,7 +42428,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pink_concrete_powder",
+                    name: Cow::Borrowed("block.minecraft.pink_concrete_powder"),
                 },
             ),
             (
@@ -42450,7 +42466,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.pink_dye",
+                    name: Cow::Borrowed("item.minecraft.pink_dye"),
                 },
             ),
             (
@@ -42489,7 +42505,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pink_glazed_terracotta",
+                    name: Cow::Borrowed("block.minecraft.pink_glazed_terracotta"),
                 },
             ),
             (
@@ -42527,7 +42543,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.pink_harness",
+                    name: Cow::Borrowed("item.minecraft.pink_harness"),
                 },
             ),
             (
@@ -42581,7 +42597,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pink_petals",
+                    name: Cow::Borrowed("block.minecraft.pink_petals"),
                 },
             ),
             (
@@ -42619,7 +42635,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pink_shulker_box",
+                    name: Cow::Borrowed("block.minecraft.pink_shulker_box"),
                 },
             ),
             (
@@ -42658,7 +42674,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pink_stained_glass",
+                    name: Cow::Borrowed("block.minecraft.pink_stained_glass"),
                 },
             ),
             (
@@ -42696,7 +42712,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pink_stained_glass_pane",
+                    name: Cow::Borrowed("block.minecraft.pink_stained_glass_pane"),
                 },
             ),
             (
@@ -42734,7 +42750,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pink_terracotta",
+                    name: Cow::Borrowed("block.minecraft.pink_terracotta"),
                 },
             ),
             (
@@ -42772,7 +42788,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pink_tulip",
+                    name: Cow::Borrowed("block.minecraft.pink_tulip"),
                 },
             ),
             (
@@ -42810,7 +42826,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pink_wool",
+                    name: Cow::Borrowed("block.minecraft.pink_wool"),
                 },
             ),
             (
@@ -42848,7 +42864,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.piston",
+                    name: Cow::Borrowed("block.minecraft.piston"),
                 },
             ),
             (
@@ -42886,7 +42902,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pitcher_plant",
+                    name: Cow::Borrowed("block.minecraft.pitcher_plant"),
                 },
             ),
             (
@@ -42924,7 +42940,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.pitcher_pod",
+                    name: Cow::Borrowed("item.minecraft.pitcher_pod"),
                 },
             ),
             (
@@ -42962,7 +42978,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.player_head",
+                    name: Cow::Borrowed("block.minecraft.player_head"),
                 },
             ),
             (
@@ -43022,7 +43038,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.plenty_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.plenty_pottery_sherd"),
                 },
             ),
             (
@@ -43060,7 +43076,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.podzol",
+                    name: Cow::Borrowed("block.minecraft.podzol"),
                 },
             ),
             (
@@ -43098,7 +43114,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pointed_dripstone",
+                    name: Cow::Borrowed("block.minecraft.pointed_dripstone"),
                 },
             ),
             (
@@ -43136,7 +43152,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.poisonous_potato",
+                    name: Cow::Borrowed("item.minecraft.poisonous_potato"),
                 },
             ),
             (
@@ -43202,7 +43218,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.polar_bear_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.polar_bear_spawn_egg"),
                 },
             ),
             (
@@ -43241,7 +43257,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_andesite",
+                    name: Cow::Borrowed("block.minecraft.polished_andesite"),
                 },
             ),
             (
@@ -43279,7 +43295,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_andesite_slab",
+                    name: Cow::Borrowed("block.minecraft.polished_andesite_slab"),
                 },
             ),
             (
@@ -43317,7 +43333,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_andesite_stairs",
+                    name: Cow::Borrowed("block.minecraft.polished_andesite_stairs"),
                 },
             ),
             (
@@ -43355,7 +43371,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_basalt",
+                    name: Cow::Borrowed("block.minecraft.polished_basalt"),
                 },
             ),
             (
@@ -43393,7 +43409,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_blackstone",
+                    name: Cow::Borrowed("block.minecraft.polished_blackstone"),
                 },
             ),
             (
@@ -43431,7 +43447,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_blackstone_brick_slab",
+                    name: Cow::Borrowed("block.minecraft.polished_blackstone_brick_slab"),
                 },
             ),
             (
@@ -43469,7 +43485,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_blackstone_brick_stairs",
+                    name: Cow::Borrowed("block.minecraft.polished_blackstone_brick_stairs"),
                 },
             ),
             (
@@ -43507,7 +43523,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_blackstone_brick_wall",
+                    name: Cow::Borrowed("block.minecraft.polished_blackstone_brick_wall"),
                 },
             ),
             (
@@ -43545,7 +43561,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_blackstone_bricks",
+                    name: Cow::Borrowed("block.minecraft.polished_blackstone_bricks"),
                 },
             ),
             (
@@ -43583,7 +43599,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_blackstone_button",
+                    name: Cow::Borrowed("block.minecraft.polished_blackstone_button"),
                 },
             ),
             (
@@ -43621,7 +43637,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_blackstone_pressure_plate",
+                    name: Cow::Borrowed("block.minecraft.polished_blackstone_pressure_plate"),
                 },
             ),
             (
@@ -43659,7 +43675,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_blackstone_slab",
+                    name: Cow::Borrowed("block.minecraft.polished_blackstone_slab"),
                 },
             ),
             (
@@ -43697,7 +43713,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_blackstone_stairs",
+                    name: Cow::Borrowed("block.minecraft.polished_blackstone_stairs"),
                 },
             ),
             (
@@ -43735,7 +43751,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_blackstone_wall",
+                    name: Cow::Borrowed("block.minecraft.polished_blackstone_wall"),
                 },
             ),
             (
@@ -43773,7 +43789,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_cinnabar",
+                    name: Cow::Borrowed("block.minecraft.polished_cinnabar"),
                 },
             ),
             (
@@ -43811,7 +43827,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_cinnabar_slab",
+                    name: Cow::Borrowed("block.minecraft.polished_cinnabar_slab"),
                 },
             ),
             (
@@ -43849,7 +43865,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_cinnabar_stairs",
+                    name: Cow::Borrowed("block.minecraft.polished_cinnabar_stairs"),
                 },
             ),
             (
@@ -43887,7 +43903,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_cinnabar_wall",
+                    name: Cow::Borrowed("block.minecraft.polished_cinnabar_wall"),
                 },
             ),
             (
@@ -43925,7 +43941,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_deepslate",
+                    name: Cow::Borrowed("block.minecraft.polished_deepslate"),
                 },
             ),
             (
@@ -43963,7 +43979,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_deepslate_slab",
+                    name: Cow::Borrowed("block.minecraft.polished_deepslate_slab"),
                 },
             ),
             (
@@ -44001,7 +44017,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_deepslate_stairs",
+                    name: Cow::Borrowed("block.minecraft.polished_deepslate_stairs"),
                 },
             ),
             (
@@ -44039,7 +44055,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_deepslate_wall",
+                    name: Cow::Borrowed("block.minecraft.polished_deepslate_wall"),
                 },
             ),
             (
@@ -44077,7 +44093,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_diorite",
+                    name: Cow::Borrowed("block.minecraft.polished_diorite"),
                 },
             ),
             (
@@ -44115,7 +44131,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_diorite_slab",
+                    name: Cow::Borrowed("block.minecraft.polished_diorite_slab"),
                 },
             ),
             (
@@ -44153,7 +44169,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_diorite_stairs",
+                    name: Cow::Borrowed("block.minecraft.polished_diorite_stairs"),
                 },
             ),
             (
@@ -44191,7 +44207,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_granite",
+                    name: Cow::Borrowed("block.minecraft.polished_granite"),
                 },
             ),
             (
@@ -44229,7 +44245,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_granite_slab",
+                    name: Cow::Borrowed("block.minecraft.polished_granite_slab"),
                 },
             ),
             (
@@ -44267,7 +44283,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_granite_stairs",
+                    name: Cow::Borrowed("block.minecraft.polished_granite_stairs"),
                 },
             ),
             (
@@ -44305,7 +44321,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_sulfur",
+                    name: Cow::Borrowed("block.minecraft.polished_sulfur"),
                 },
             ),
             (
@@ -44343,7 +44359,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_sulfur_slab",
+                    name: Cow::Borrowed("block.minecraft.polished_sulfur_slab"),
                 },
             ),
             (
@@ -44381,7 +44397,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_sulfur_stairs",
+                    name: Cow::Borrowed("block.minecraft.polished_sulfur_stairs"),
                 },
             ),
             (
@@ -44419,7 +44435,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_sulfur_wall",
+                    name: Cow::Borrowed("block.minecraft.polished_sulfur_wall"),
                 },
             ),
             (
@@ -44457,7 +44473,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_tuff",
+                    name: Cow::Borrowed("block.minecraft.polished_tuff"),
                 },
             ),
             (
@@ -44495,7 +44511,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_tuff_slab",
+                    name: Cow::Borrowed("block.minecraft.polished_tuff_slab"),
                 },
             ),
             (
@@ -44533,7 +44549,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_tuff_stairs",
+                    name: Cow::Borrowed("block.minecraft.polished_tuff_stairs"),
                 },
             ),
             (
@@ -44571,7 +44587,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.polished_tuff_wall",
+                    name: Cow::Borrowed("block.minecraft.polished_tuff_wall"),
                 },
             ),
             (
@@ -44609,7 +44625,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.popped_chorus_fruit",
+                    name: Cow::Borrowed("item.minecraft.popped_chorus_fruit"),
                 },
             ),
             (
@@ -44647,7 +44663,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.poppy",
+                    name: Cow::Borrowed("block.minecraft.poppy"),
                 },
             ),
             (
@@ -44685,7 +44701,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.porkchop",
+                    name: Cow::Borrowed("item.minecraft.porkchop"),
                 },
             ),
             (
@@ -44741,7 +44757,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.potato",
+                    name: Cow::Borrowed("item.minecraft.potato"),
                 },
             ),
             (
@@ -44797,7 +44813,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.potent_sulfur",
+                    name: Cow::Borrowed("block.minecraft.potent_sulfur"),
                 },
             ),
             (
@@ -44835,7 +44851,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.potion",
+                    name: Cow::Borrowed("item.minecraft.potion"),
                 },
             ),
             (
@@ -44893,7 +44909,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.powder_snow_bucket",
+                    name: Cow::Borrowed("item.minecraft.powder_snow_bucket"),
                 },
             ),
             (
@@ -44931,7 +44947,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.powered_rail",
+                    name: Cow::Borrowed("block.minecraft.powered_rail"),
                 },
             ),
             (
@@ -44969,7 +44985,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.prismarine",
+                    name: Cow::Borrowed("block.minecraft.prismarine"),
                 },
             ),
             (
@@ -45007,7 +45023,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.prismarine_brick_slab",
+                    name: Cow::Borrowed("block.minecraft.prismarine_brick_slab"),
                 },
             ),
             (
@@ -45045,7 +45061,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.prismarine_brick_stairs",
+                    name: Cow::Borrowed("block.minecraft.prismarine_brick_stairs"),
                 },
             ),
             (
@@ -45083,7 +45099,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.prismarine_bricks",
+                    name: Cow::Borrowed("block.minecraft.prismarine_bricks"),
                 },
             ),
             (
@@ -45121,7 +45137,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.prismarine_crystals",
+                    name: Cow::Borrowed("item.minecraft.prismarine_crystals"),
                 },
             ),
             (
@@ -45159,7 +45175,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.prismarine_shard",
+                    name: Cow::Borrowed("item.minecraft.prismarine_shard"),
                 },
             ),
             (
@@ -45197,7 +45213,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.prismarine_slab",
+                    name: Cow::Borrowed("block.minecraft.prismarine_slab"),
                 },
             ),
             (
@@ -45235,7 +45251,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.prismarine_stairs",
+                    name: Cow::Borrowed("block.minecraft.prismarine_stairs"),
                 },
             ),
             (
@@ -45273,7 +45289,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.prismarine_wall",
+                    name: Cow::Borrowed("block.minecraft.prismarine_wall"),
                 },
             ),
             (
@@ -45311,7 +45327,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.prize_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.prize_pottery_sherd"),
                 },
             ),
             (
@@ -45349,7 +45365,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.pufferfish",
+                    name: Cow::Borrowed("item.minecraft.pufferfish"),
                 },
             ),
             (
@@ -45433,7 +45449,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.pufferfish_bucket",
+                    name: Cow::Borrowed("item.minecraft.pufferfish_bucket"),
                 },
             ),
             (
@@ -45480,7 +45496,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.pufferfish_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.pufferfish_spawn_egg"),
                 },
             ),
             (
@@ -45519,7 +45535,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.pumpkin",
+                    name: Cow::Borrowed("block.minecraft.pumpkin"),
                 },
             ),
             (
@@ -45557,7 +45573,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.pumpkin_pie",
+                    name: Cow::Borrowed("item.minecraft.pumpkin_pie"),
                 },
             ),
             (
@@ -45613,7 +45629,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.pumpkin_seeds",
+                    name: Cow::Borrowed("item.minecraft.pumpkin_seeds"),
                 },
             ),
             (
@@ -45651,7 +45667,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.purple_banner",
+                    name: Cow::Borrowed("block.minecraft.purple_banner"),
                 },
             ),
             (
@@ -45690,7 +45706,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.purple_bed",
+                    name: Cow::Borrowed("block.minecraft.purple_bed"),
                 },
             ),
             (
@@ -45728,7 +45744,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.purple_bundle",
+                    name: Cow::Borrowed("item.minecraft.purple_bundle"),
                 },
             ),
             (
@@ -45767,7 +45783,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.purple_candle",
+                    name: Cow::Borrowed("block.minecraft.purple_candle"),
                 },
             ),
             (
@@ -45805,7 +45821,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.purple_carpet",
+                    name: Cow::Borrowed("block.minecraft.purple_carpet"),
                 },
             ),
             (
@@ -45862,7 +45878,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.purple_concrete",
+                    name: Cow::Borrowed("block.minecraft.purple_concrete"),
                 },
             ),
             (
@@ -45900,7 +45916,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.purple_concrete_powder",
+                    name: Cow::Borrowed("block.minecraft.purple_concrete_powder"),
                 },
             ),
             (
@@ -45938,7 +45954,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.purple_dye",
+                    name: Cow::Borrowed("item.minecraft.purple_dye"),
                 },
             ),
             (
@@ -45977,7 +45993,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.purple_glazed_terracotta",
+                    name: Cow::Borrowed("block.minecraft.purple_glazed_terracotta"),
                 },
             ),
             (
@@ -46015,7 +46031,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.purple_harness",
+                    name: Cow::Borrowed("item.minecraft.purple_harness"),
                 },
             ),
             (
@@ -46069,7 +46085,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.purple_shulker_box",
+                    name: Cow::Borrowed("block.minecraft.purple_shulker_box"),
                 },
             ),
             (
@@ -46108,7 +46124,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.purple_stained_glass",
+                    name: Cow::Borrowed("block.minecraft.purple_stained_glass"),
                 },
             ),
             (
@@ -46146,7 +46162,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.purple_stained_glass_pane",
+                    name: Cow::Borrowed("block.minecraft.purple_stained_glass_pane"),
                 },
             ),
             (
@@ -46184,7 +46200,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.purple_terracotta",
+                    name: Cow::Borrowed("block.minecraft.purple_terracotta"),
                 },
             ),
             (
@@ -46222,7 +46238,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.purple_wool",
+                    name: Cow::Borrowed("block.minecraft.purple_wool"),
                 },
             ),
             (
@@ -46260,7 +46276,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.purpur_block",
+                    name: Cow::Borrowed("block.minecraft.purpur_block"),
                 },
             ),
             (
@@ -46298,7 +46314,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.purpur_pillar",
+                    name: Cow::Borrowed("block.minecraft.purpur_pillar"),
                 },
             ),
             (
@@ -46336,7 +46352,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.purpur_slab",
+                    name: Cow::Borrowed("block.minecraft.purpur_slab"),
                 },
             ),
             (
@@ -46374,7 +46390,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.purpur_stairs",
+                    name: Cow::Borrowed("block.minecraft.purpur_stairs"),
                 },
             ),
             (
@@ -46412,7 +46428,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.quartz",
+                    name: Cow::Borrowed("item.minecraft.quartz"),
                 },
             ),
             (
@@ -46451,7 +46467,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.quartz_block",
+                    name: Cow::Borrowed("block.minecraft.quartz_block"),
                 },
             ),
             (
@@ -46489,7 +46505,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.quartz_bricks",
+                    name: Cow::Borrowed("block.minecraft.quartz_bricks"),
                 },
             ),
             (
@@ -46527,7 +46543,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.quartz_pillar",
+                    name: Cow::Borrowed("block.minecraft.quartz_pillar"),
                 },
             ),
             (
@@ -46565,7 +46581,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.quartz_slab",
+                    name: Cow::Borrowed("block.minecraft.quartz_slab"),
                 },
             ),
             (
@@ -46603,7 +46619,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.quartz_stairs",
+                    name: Cow::Borrowed("block.minecraft.quartz_stairs"),
                 },
             ),
             (
@@ -46641,7 +46657,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.rabbit",
+                    name: Cow::Borrowed("item.minecraft.rabbit"),
                 },
             ),
             (
@@ -46697,7 +46713,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.rabbit_foot",
+                    name: Cow::Borrowed("item.minecraft.rabbit_foot"),
                 },
             ),
             (
@@ -46735,7 +46751,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.rabbit_hide",
+                    name: Cow::Borrowed("item.minecraft.rabbit_hide"),
                 },
             ),
             (
@@ -46773,7 +46789,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.rabbit_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.rabbit_spawn_egg"),
                 },
             ),
             (
@@ -46812,7 +46828,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.rabbit_stew",
+                    name: Cow::Borrowed("item.minecraft.rabbit_stew"),
                 },
             ),
             (
@@ -46869,7 +46885,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.rail",
+                    name: Cow::Borrowed("block.minecraft.rail"),
                 },
             ),
             (
@@ -46907,7 +46923,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.raiser_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.raiser_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -46945,7 +46961,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.ravager_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.ravager_spawn_egg"),
                 },
             ),
             (
@@ -46984,7 +47000,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.raw_copper",
+                    name: Cow::Borrowed("item.minecraft.raw_copper"),
                 },
             ),
             (
@@ -47022,7 +47038,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.raw_copper_block",
+                    name: Cow::Borrowed("block.minecraft.raw_copper_block"),
                 },
             ),
             (
@@ -47060,7 +47076,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.raw_gold",
+                    name: Cow::Borrowed("item.minecraft.raw_gold"),
                 },
             ),
             (
@@ -47098,7 +47114,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.raw_gold_block",
+                    name: Cow::Borrowed("block.minecraft.raw_gold_block"),
                 },
             ),
             (
@@ -47136,7 +47152,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.raw_iron",
+                    name: Cow::Borrowed("item.minecraft.raw_iron"),
                 },
             ),
             (
@@ -47174,7 +47190,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.raw_iron_block",
+                    name: Cow::Borrowed("block.minecraft.raw_iron_block"),
                 },
             ),
             (
@@ -47212,7 +47228,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.recovery_compass",
+                    name: Cow::Borrowed("item.minecraft.recovery_compass"),
                 },
             ),
             (
@@ -47250,7 +47266,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_banner",
+                    name: Cow::Borrowed("block.minecraft.red_banner"),
                 },
             ),
             (
@@ -47289,7 +47305,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_bed",
+                    name: Cow::Borrowed("block.minecraft.red_bed"),
                 },
             ),
             (
@@ -47327,7 +47343,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.red_bundle",
+                    name: Cow::Borrowed("item.minecraft.red_bundle"),
                 },
             ),
             (
@@ -47366,7 +47382,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_candle",
+                    name: Cow::Borrowed("block.minecraft.red_candle"),
                 },
             ),
             (
@@ -47404,7 +47420,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_carpet",
+                    name: Cow::Borrowed("block.minecraft.red_carpet"),
                 },
             ),
             (
@@ -47461,7 +47477,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_concrete",
+                    name: Cow::Borrowed("block.minecraft.red_concrete"),
                 },
             ),
             (
@@ -47499,7 +47515,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_concrete_powder",
+                    name: Cow::Borrowed("block.minecraft.red_concrete_powder"),
                 },
             ),
             (
@@ -47537,7 +47553,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.red_dye",
+                    name: Cow::Borrowed("item.minecraft.red_dye"),
                 },
             ),
             (
@@ -47576,7 +47592,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_glazed_terracotta",
+                    name: Cow::Borrowed("block.minecraft.red_glazed_terracotta"),
                 },
             ),
             (
@@ -47614,7 +47630,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.red_harness",
+                    name: Cow::Borrowed("item.minecraft.red_harness"),
                 },
             ),
             (
@@ -47668,7 +47684,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_mushroom",
+                    name: Cow::Borrowed("block.minecraft.red_mushroom"),
                 },
             ),
             (
@@ -47706,7 +47722,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_mushroom_block",
+                    name: Cow::Borrowed("block.minecraft.red_mushroom_block"),
                 },
             ),
             (
@@ -47744,7 +47760,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_nether_brick_slab",
+                    name: Cow::Borrowed("block.minecraft.red_nether_brick_slab"),
                 },
             ),
             (
@@ -47782,7 +47798,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_nether_brick_stairs",
+                    name: Cow::Borrowed("block.minecraft.red_nether_brick_stairs"),
                 },
             ),
             (
@@ -47820,7 +47836,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_nether_brick_wall",
+                    name: Cow::Borrowed("block.minecraft.red_nether_brick_wall"),
                 },
             ),
             (
@@ -47858,7 +47874,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_nether_bricks",
+                    name: Cow::Borrowed("block.minecraft.red_nether_bricks"),
                 },
             ),
             (
@@ -47896,7 +47912,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_sand",
+                    name: Cow::Borrowed("block.minecraft.red_sand"),
                 },
             ),
             (
@@ -47934,7 +47950,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_sandstone",
+                    name: Cow::Borrowed("block.minecraft.red_sandstone"),
                 },
             ),
             (
@@ -47972,7 +47988,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_sandstone_slab",
+                    name: Cow::Borrowed("block.minecraft.red_sandstone_slab"),
                 },
             ),
             (
@@ -48010,7 +48026,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_sandstone_stairs",
+                    name: Cow::Borrowed("block.minecraft.red_sandstone_stairs"),
                 },
             ),
             (
@@ -48048,7 +48064,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_sandstone_wall",
+                    name: Cow::Borrowed("block.minecraft.red_sandstone_wall"),
                 },
             ),
             (
@@ -48086,7 +48102,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_shulker_box",
+                    name: Cow::Borrowed("block.minecraft.red_shulker_box"),
                 },
             ),
             (
@@ -48125,7 +48141,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_stained_glass",
+                    name: Cow::Borrowed("block.minecraft.red_stained_glass"),
                 },
             ),
             (
@@ -48163,7 +48179,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_stained_glass_pane",
+                    name: Cow::Borrowed("block.minecraft.red_stained_glass_pane"),
                 },
             ),
             (
@@ -48201,7 +48217,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_terracotta",
+                    name: Cow::Borrowed("block.minecraft.red_terracotta"),
                 },
             ),
             (
@@ -48239,7 +48255,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_tulip",
+                    name: Cow::Borrowed("block.minecraft.red_tulip"),
                 },
             ),
             (
@@ -48277,7 +48293,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.red_wool",
+                    name: Cow::Borrowed("block.minecraft.red_wool"),
                 },
             ),
             (
@@ -48315,7 +48331,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.redstone",
+                    name: Cow::Borrowed("item.minecraft.redstone"),
                 },
             ),
             (
@@ -48354,7 +48370,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.redstone_block",
+                    name: Cow::Borrowed("block.minecraft.redstone_block"),
                 },
             ),
             (
@@ -48392,7 +48408,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.redstone_lamp",
+                    name: Cow::Borrowed("block.minecraft.redstone_lamp"),
                 },
             ),
             (
@@ -48430,7 +48446,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.redstone_ore",
+                    name: Cow::Borrowed("block.minecraft.redstone_ore"),
                 },
             ),
             (
@@ -48468,7 +48484,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.redstone_torch",
+                    name: Cow::Borrowed("block.minecraft.redstone_torch"),
                 },
             ),
             (
@@ -48506,7 +48522,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.reinforced_deepslate",
+                    name: Cow::Borrowed("block.minecraft.reinforced_deepslate"),
                 },
             ),
             (
@@ -48544,7 +48560,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.repeater",
+                    name: Cow::Borrowed("block.minecraft.repeater"),
                 },
             ),
             (
@@ -48582,7 +48598,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.repeating_command_block",
+                    name: Cow::Borrowed("block.minecraft.repeating_command_block"),
                 },
             ),
             (
@@ -48620,7 +48636,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.resin_block",
+                    name: Cow::Borrowed("block.minecraft.resin_block"),
                 },
             ),
             (
@@ -48658,7 +48674,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.resin_brick",
+                    name: Cow::Borrowed("item.minecraft.resin_brick"),
                 },
             ),
             (
@@ -48697,7 +48713,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.resin_brick_slab",
+                    name: Cow::Borrowed("block.minecraft.resin_brick_slab"),
                 },
             ),
             (
@@ -48735,7 +48751,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.resin_brick_stairs",
+                    name: Cow::Borrowed("block.minecraft.resin_brick_stairs"),
                 },
             ),
             (
@@ -48773,7 +48789,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.resin_brick_wall",
+                    name: Cow::Borrowed("block.minecraft.resin_brick_wall"),
                 },
             ),
             (
@@ -48811,7 +48827,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.resin_bricks",
+                    name: Cow::Borrowed("block.minecraft.resin_bricks"),
                 },
             ),
             (
@@ -48849,7 +48865,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.resin_clump",
+                    name: Cow::Borrowed("item.minecraft.resin_clump"),
                 },
             ),
             (
@@ -48887,7 +48903,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.respawn_anchor",
+                    name: Cow::Borrowed("block.minecraft.respawn_anchor"),
                 },
             ),
             (
@@ -48925,7 +48941,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.rib_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.rib_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -48963,7 +48979,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.rooted_dirt",
+                    name: Cow::Borrowed("block.minecraft.rooted_dirt"),
                 },
             ),
             (
@@ -49001,7 +49017,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.rose_bush",
+                    name: Cow::Borrowed("block.minecraft.rose_bush"),
                 },
             ),
             (
@@ -49039,7 +49055,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.rotten_flesh",
+                    name: Cow::Borrowed("item.minecraft.rotten_flesh"),
                 },
             ),
             (
@@ -49105,7 +49121,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.saddle",
+                    name: Cow::Borrowed("item.minecraft.saddle"),
                 },
             ),
             (
@@ -49159,7 +49175,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.salmon",
+                    name: Cow::Borrowed("item.minecraft.salmon"),
                 },
             ),
             (
@@ -49215,7 +49231,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.salmon_bucket",
+                    name: Cow::Borrowed("item.minecraft.salmon_bucket"),
                 },
             ),
             (
@@ -49262,7 +49278,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.salmon_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.salmon_spawn_egg"),
                 },
             ),
             (
@@ -49301,7 +49317,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sand",
+                    name: Cow::Borrowed("block.minecraft.sand"),
                 },
             ),
             (
@@ -49339,7 +49355,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sandstone",
+                    name: Cow::Borrowed("block.minecraft.sandstone"),
                 },
             ),
             (
@@ -49377,7 +49393,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sandstone_slab",
+                    name: Cow::Borrowed("block.minecraft.sandstone_slab"),
                 },
             ),
             (
@@ -49415,7 +49431,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sandstone_stairs",
+                    name: Cow::Borrowed("block.minecraft.sandstone_stairs"),
                 },
             ),
             (
@@ -49453,7 +49469,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sandstone_wall",
+                    name: Cow::Borrowed("block.minecraft.sandstone_wall"),
                 },
             ),
             (
@@ -49491,7 +49507,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.scaffolding",
+                    name: Cow::Borrowed("block.minecraft.scaffolding"),
                 },
             ),
             (
@@ -49529,7 +49545,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.scrape_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.scrape_pottery_sherd"),
                 },
             ),
             (
@@ -49567,7 +49583,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sculk",
+                    name: Cow::Borrowed("block.minecraft.sculk"),
                 },
             ),
             (
@@ -49605,7 +49621,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sculk_catalyst",
+                    name: Cow::Borrowed("block.minecraft.sculk_catalyst"),
                 },
             ),
             (
@@ -49643,7 +49659,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sculk_sensor",
+                    name: Cow::Borrowed("block.minecraft.sculk_sensor"),
                 },
             ),
             (
@@ -49681,7 +49697,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sculk_shrieker",
+                    name: Cow::Borrowed("block.minecraft.sculk_shrieker"),
                 },
             ),
             (
@@ -49719,7 +49735,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sculk_vein",
+                    name: Cow::Borrowed("block.minecraft.sculk_vein"),
                 },
             ),
             (
@@ -49757,7 +49773,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sea_lantern",
+                    name: Cow::Borrowed("block.minecraft.sea_lantern"),
                 },
             ),
             (
@@ -49795,7 +49811,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sea_pickle",
+                    name: Cow::Borrowed("block.minecraft.sea_pickle"),
                 },
             ),
             (
@@ -49833,7 +49849,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.seagrass",
+                    name: Cow::Borrowed("block.minecraft.seagrass"),
                 },
             ),
             (
@@ -49871,7 +49887,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.sentry_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.sentry_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -49909,7 +49925,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.shaper_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.shaper_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -49947,7 +49963,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.sheaf_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.sheaf_pottery_sherd"),
                 },
             ),
             (
@@ -49985,7 +50001,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.shears",
+                    name: Cow::Borrowed("item.minecraft.shears"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -50055,7 +50071,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.sheep_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.sheep_spawn_egg"),
                 },
             ),
             (
@@ -50094,7 +50110,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.shelter_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.shelter_pottery_sherd"),
                 },
             ),
             (
@@ -50132,7 +50148,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.shield",
+                    name: Cow::Borrowed("item.minecraft.shield"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -50191,7 +50207,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.short_dry_grass",
+                    name: Cow::Borrowed("block.minecraft.short_dry_grass"),
                 },
             ),
             (
@@ -50229,7 +50245,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.short_grass",
+                    name: Cow::Borrowed("block.minecraft.short_grass"),
                 },
             ),
             (
@@ -50267,7 +50283,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.shroomlight",
+                    name: Cow::Borrowed("block.minecraft.shroomlight"),
                 },
             ),
             (
@@ -50305,7 +50321,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.shulker_box",
+                    name: Cow::Borrowed("block.minecraft.shulker_box"),
                 },
             ),
             (
@@ -50344,7 +50360,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.shulker_shell",
+                    name: Cow::Borrowed("item.minecraft.shulker_shell"),
                 },
             ),
             (
@@ -50382,7 +50398,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.shulker_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.shulker_spawn_egg"),
                 },
             ),
             (
@@ -50421,7 +50437,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.silence_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.silence_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -50459,7 +50475,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.silverfish_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.silverfish_spawn_egg"),
                 },
             ),
             (
@@ -50498,7 +50514,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.skeleton_horse_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.skeleton_horse_spawn_egg"),
                 },
             ),
             (
@@ -50537,7 +50553,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.skeleton_skull",
+                    name: Cow::Borrowed("block.minecraft.skeleton_skull"),
                 },
             ),
             (
@@ -50597,7 +50613,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.skeleton_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.skeleton_spawn_egg"),
                 },
             ),
             (
@@ -50636,7 +50652,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.skull_banner_pattern",
+                    name: Cow::Borrowed("item.minecraft.skull_banner_pattern"),
                 },
             ),
             (
@@ -50675,7 +50691,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.skull_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.skull_pottery_sherd"),
                 },
             ),
             (
@@ -50713,7 +50729,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.slime_ball",
+                    name: Cow::Borrowed("item.minecraft.slime_ball"),
                 },
             ),
             (
@@ -50751,7 +50767,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.slime_block",
+                    name: Cow::Borrowed("block.minecraft.slime_block"),
                 },
             ),
             (
@@ -50789,7 +50805,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.slime_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.slime_spawn_egg"),
                 },
             ),
             (
@@ -50828,7 +50844,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.small_amethyst_bud",
+                    name: Cow::Borrowed("block.minecraft.small_amethyst_bud"),
                 },
             ),
             (
@@ -50866,7 +50882,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.small_dripleaf",
+                    name: Cow::Borrowed("block.minecraft.small_dripleaf"),
                 },
             ),
             (
@@ -50904,7 +50920,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.smithing_table",
+                    name: Cow::Borrowed("block.minecraft.smithing_table"),
                 },
             ),
             (
@@ -50942,7 +50958,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.smoker",
+                    name: Cow::Borrowed("block.minecraft.smoker"),
                 },
             ),
             (
@@ -50981,7 +50997,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.smooth_basalt",
+                    name: Cow::Borrowed("block.minecraft.smooth_basalt"),
                 },
             ),
             (
@@ -51019,7 +51035,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.smooth_quartz",
+                    name: Cow::Borrowed("block.minecraft.smooth_quartz"),
                 },
             ),
             (
@@ -51057,7 +51073,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.smooth_quartz_slab",
+                    name: Cow::Borrowed("block.minecraft.smooth_quartz_slab"),
                 },
             ),
             (
@@ -51095,7 +51111,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.smooth_quartz_stairs",
+                    name: Cow::Borrowed("block.minecraft.smooth_quartz_stairs"),
                 },
             ),
             (
@@ -51133,7 +51149,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.smooth_red_sandstone",
+                    name: Cow::Borrowed("block.minecraft.smooth_red_sandstone"),
                 },
             ),
             (
@@ -51171,7 +51187,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.smooth_red_sandstone_slab",
+                    name: Cow::Borrowed("block.minecraft.smooth_red_sandstone_slab"),
                 },
             ),
             (
@@ -51209,7 +51225,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.smooth_red_sandstone_stairs",
+                    name: Cow::Borrowed("block.minecraft.smooth_red_sandstone_stairs"),
                 },
             ),
             (
@@ -51247,7 +51263,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.smooth_sandstone",
+                    name: Cow::Borrowed("block.minecraft.smooth_sandstone"),
                 },
             ),
             (
@@ -51285,7 +51301,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.smooth_sandstone_slab",
+                    name: Cow::Borrowed("block.minecraft.smooth_sandstone_slab"),
                 },
             ),
             (
@@ -51323,7 +51339,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.smooth_sandstone_stairs",
+                    name: Cow::Borrowed("block.minecraft.smooth_sandstone_stairs"),
                 },
             ),
             (
@@ -51361,7 +51377,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.smooth_stone",
+                    name: Cow::Borrowed("block.minecraft.smooth_stone"),
                 },
             ),
             (
@@ -51399,7 +51415,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.smooth_stone_slab",
+                    name: Cow::Borrowed("block.minecraft.smooth_stone_slab"),
                 },
             ),
             (
@@ -51437,7 +51453,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sniffer_egg",
+                    name: Cow::Borrowed("block.minecraft.sniffer_egg"),
                 },
             ),
             (
@@ -51475,7 +51491,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.sniffer_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.sniffer_spawn_egg"),
                 },
             ),
             (
@@ -51514,7 +51530,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.snort_pottery_sherd",
+                    name: Cow::Borrowed("item.minecraft.snort_pottery_sherd"),
                 },
             ),
             (
@@ -51552,7 +51568,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.snout_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.snout_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -51590,7 +51606,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.snow",
+                    name: Cow::Borrowed("block.minecraft.snow"),
                 },
             ),
             (
@@ -51628,7 +51644,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.snow_block",
+                    name: Cow::Borrowed("block.minecraft.snow_block"),
                 },
             ),
             (
@@ -51666,7 +51682,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.snow_golem_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.snow_golem_spawn_egg"),
                 },
             ),
             (
@@ -51705,7 +51721,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.snowball",
+                    name: Cow::Borrowed("item.minecraft.snowball"),
                 },
             ),
             (
@@ -51743,7 +51759,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.soul_campfire",
+                    name: Cow::Borrowed("block.minecraft.soul_campfire"),
                 },
             ),
             (
@@ -51782,7 +51798,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.soul_lantern",
+                    name: Cow::Borrowed("block.minecraft.soul_lantern"),
                 },
             ),
             (
@@ -51820,7 +51836,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.soul_sand",
+                    name: Cow::Borrowed("block.minecraft.soul_sand"),
                 },
             ),
             (
@@ -51858,7 +51874,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.soul_soil",
+                    name: Cow::Borrowed("block.minecraft.soul_soil"),
                 },
             ),
             (
@@ -51896,7 +51912,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.soul_torch",
+                    name: Cow::Borrowed("block.minecraft.soul_torch"),
                 },
             ),
             (
@@ -51934,7 +51950,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spawner",
+                    name: Cow::Borrowed("block.minecraft.spawner"),
                 },
             ),
             (
@@ -51972,7 +51988,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.spectral_arrow",
+                    name: Cow::Borrowed("item.minecraft.spectral_arrow"),
                 },
             ),
             (
@@ -52010,7 +52026,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.spider_eye",
+                    name: Cow::Borrowed("item.minecraft.spider_eye"),
                 },
             ),
             (
@@ -52076,7 +52092,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.spider_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.spider_spawn_egg"),
                 },
             ),
             (
@@ -52115,7 +52131,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.spire_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.spire_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -52153,7 +52169,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.splash_potion",
+                    name: Cow::Borrowed("item.minecraft.splash_potion"),
                 },
             ),
             (
@@ -52200,7 +52216,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sponge",
+                    name: Cow::Borrowed("block.minecraft.sponge"),
                 },
             ),
             (
@@ -52238,7 +52254,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spore_blossom",
+                    name: Cow::Borrowed("block.minecraft.spore_blossom"),
                 },
             ),
             (
@@ -52276,7 +52292,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.spruce_boat",
+                    name: Cow::Borrowed("item.minecraft.spruce_boat"),
                 },
             ),
             (
@@ -52314,7 +52330,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spruce_button",
+                    name: Cow::Borrowed("block.minecraft.spruce_button"),
                 },
             ),
             (
@@ -52352,7 +52368,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.spruce_chest_boat",
+                    name: Cow::Borrowed("item.minecraft.spruce_chest_boat"),
                 },
             ),
             (
@@ -52390,7 +52406,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spruce_door",
+                    name: Cow::Borrowed("block.minecraft.spruce_door"),
                 },
             ),
             (
@@ -52428,7 +52444,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spruce_fence",
+                    name: Cow::Borrowed("block.minecraft.spruce_fence"),
                 },
             ),
             (
@@ -52466,7 +52482,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spruce_fence_gate",
+                    name: Cow::Borrowed("block.minecraft.spruce_fence_gate"),
                 },
             ),
             (
@@ -52504,7 +52520,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spruce_hanging_sign",
+                    name: Cow::Borrowed("block.minecraft.spruce_hanging_sign"),
                 },
             ),
             (
@@ -52542,7 +52558,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spruce_leaves",
+                    name: Cow::Borrowed("block.minecraft.spruce_leaves"),
                 },
             ),
             (
@@ -52580,7 +52596,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spruce_log",
+                    name: Cow::Borrowed("block.minecraft.spruce_log"),
                 },
             ),
             (
@@ -52618,7 +52634,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spruce_planks",
+                    name: Cow::Borrowed("block.minecraft.spruce_planks"),
                 },
             ),
             (
@@ -52656,7 +52672,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spruce_pressure_plate",
+                    name: Cow::Borrowed("block.minecraft.spruce_pressure_plate"),
                 },
             ),
             (
@@ -52694,7 +52710,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spruce_sapling",
+                    name: Cow::Borrowed("block.minecraft.spruce_sapling"),
                 },
             ),
             (
@@ -52732,7 +52748,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spruce_shelf",
+                    name: Cow::Borrowed("block.minecraft.spruce_shelf"),
                 },
             ),
             (
@@ -52771,7 +52787,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spruce_sign",
+                    name: Cow::Borrowed("block.minecraft.spruce_sign"),
                 },
             ),
             (
@@ -52809,7 +52825,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spruce_slab",
+                    name: Cow::Borrowed("block.minecraft.spruce_slab"),
                 },
             ),
             (
@@ -52847,7 +52863,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spruce_stairs",
+                    name: Cow::Borrowed("block.minecraft.spruce_stairs"),
                 },
             ),
             (
@@ -52885,7 +52901,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spruce_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.spruce_trapdoor"),
                 },
             ),
             (
@@ -52923,7 +52939,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.spruce_wood",
+                    name: Cow::Borrowed("block.minecraft.spruce_wood"),
                 },
             ),
             (
@@ -52961,7 +52977,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.spyglass",
+                    name: Cow::Borrowed("item.minecraft.spyglass"),
                 },
             ),
             (
@@ -52999,7 +53015,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.squid_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.squid_spawn_egg"),
                 },
             ),
             (
@@ -53038,7 +53054,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.stick",
+                    name: Cow::Borrowed("item.minecraft.stick"),
                 },
             ),
             (
@@ -53076,7 +53092,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sticky_piston",
+                    name: Cow::Borrowed("block.minecraft.sticky_piston"),
                 },
             ),
             (
@@ -53114,7 +53130,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stone",
+                    name: Cow::Borrowed("block.minecraft.stone"),
                 },
             ),
             (
@@ -53152,7 +53168,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.stone_axe",
+                    name: Cow::Borrowed("item.minecraft.stone_axe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -53235,7 +53251,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stone_brick_slab",
+                    name: Cow::Borrowed("block.minecraft.stone_brick_slab"),
                 },
             ),
             (
@@ -53273,7 +53289,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stone_brick_stairs",
+                    name: Cow::Borrowed("block.minecraft.stone_brick_stairs"),
                 },
             ),
             (
@@ -53311,7 +53327,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stone_brick_wall",
+                    name: Cow::Borrowed("block.minecraft.stone_brick_wall"),
                 },
             ),
             (
@@ -53349,7 +53365,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stone_bricks",
+                    name: Cow::Borrowed("block.minecraft.stone_bricks"),
                 },
             ),
             (
@@ -53387,7 +53403,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stone_button",
+                    name: Cow::Borrowed("block.minecraft.stone_button"),
                 },
             ),
             (
@@ -53425,7 +53441,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.stone_hoe",
+                    name: Cow::Borrowed("item.minecraft.stone_hoe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -53508,7 +53524,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.stone_pickaxe",
+                    name: Cow::Borrowed("item.minecraft.stone_pickaxe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -53591,7 +53607,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stone_pressure_plate",
+                    name: Cow::Borrowed("block.minecraft.stone_pressure_plate"),
                 },
             ),
             (
@@ -53629,7 +53645,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.stone_shovel",
+                    name: Cow::Borrowed("item.minecraft.stone_shovel"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -53712,7 +53728,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stone_slab",
+                    name: Cow::Borrowed("block.minecraft.stone_slab"),
                 },
             ),
             (
@@ -53750,7 +53766,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.stone_spear",
+                    name: Cow::Borrowed("item.minecraft.stone_spear"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -53783,14 +53799,17 @@ impl Item {
                 },
             ),
             (Enchantable, &EnchantableImpl { value: 5 }),
-            (AttackRange, &AttackRangeImpl {
-                min_reach: 2.0,
-                max_reach: 4.5,
-                min_creative_reach: 2.0,
-                max_creative_reach: 6.5,
-                hitbox_margin: 0.125,
-                mob_factor: 0.5,
-            }),
+            (
+                AttackRange,
+                &AttackRangeImpl {
+                    min_reach: 2.0,
+                    max_reach: 4.5,
+                    min_creative_reach: 2.0,
+                    max_creative_reach: 6.5,
+                    hitbox_margin: 0.125,
+                    mob_factor: 0.5,
+                },
+            ),
             (BreakSound, &BreakSoundImpl),
             (DamageType, &DamageTypeImpl),
             (
@@ -53825,7 +53844,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stone_stairs",
+                    name: Cow::Borrowed("block.minecraft.stone_stairs"),
                 },
             ),
             (
@@ -53863,7 +53882,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.stone_sword",
+                    name: Cow::Borrowed("item.minecraft.stone_sword"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -53951,7 +53970,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stonecutter",
+                    name: Cow::Borrowed("block.minecraft.stonecutter"),
                 },
             ),
             (
@@ -53989,7 +54008,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.stray_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.stray_spawn_egg"),
                 },
             ),
             (
@@ -54028,7 +54047,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.strider_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.strider_spawn_egg"),
                 },
             ),
             (
@@ -54067,7 +54086,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.string",
+                    name: Cow::Borrowed("item.minecraft.string"),
                 },
             ),
             (
@@ -54105,7 +54124,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_acacia_log",
+                    name: Cow::Borrowed("block.minecraft.stripped_acacia_log"),
                 },
             ),
             (
@@ -54143,7 +54162,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_acacia_wood",
+                    name: Cow::Borrowed("block.minecraft.stripped_acacia_wood"),
                 },
             ),
             (
@@ -54181,7 +54200,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_bamboo_block",
+                    name: Cow::Borrowed("block.minecraft.stripped_bamboo_block"),
                 },
             ),
             (
@@ -54219,7 +54238,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_birch_log",
+                    name: Cow::Borrowed("block.minecraft.stripped_birch_log"),
                 },
             ),
             (
@@ -54257,7 +54276,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_birch_wood",
+                    name: Cow::Borrowed("block.minecraft.stripped_birch_wood"),
                 },
             ),
             (
@@ -54295,7 +54314,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_cherry_log",
+                    name: Cow::Borrowed("block.minecraft.stripped_cherry_log"),
                 },
             ),
             (
@@ -54333,7 +54352,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_cherry_wood",
+                    name: Cow::Borrowed("block.minecraft.stripped_cherry_wood"),
                 },
             ),
             (
@@ -54371,7 +54390,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_crimson_hyphae",
+                    name: Cow::Borrowed("block.minecraft.stripped_crimson_hyphae"),
                 },
             ),
             (
@@ -54409,7 +54428,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_crimson_stem",
+                    name: Cow::Borrowed("block.minecraft.stripped_crimson_stem"),
                 },
             ),
             (
@@ -54447,7 +54466,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_dark_oak_log",
+                    name: Cow::Borrowed("block.minecraft.stripped_dark_oak_log"),
                 },
             ),
             (
@@ -54485,7 +54504,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_dark_oak_wood",
+                    name: Cow::Borrowed("block.minecraft.stripped_dark_oak_wood"),
                 },
             ),
             (
@@ -54523,7 +54542,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_jungle_log",
+                    name: Cow::Borrowed("block.minecraft.stripped_jungle_log"),
                 },
             ),
             (
@@ -54561,7 +54580,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_jungle_wood",
+                    name: Cow::Borrowed("block.minecraft.stripped_jungle_wood"),
                 },
             ),
             (
@@ -54599,7 +54618,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_mangrove_log",
+                    name: Cow::Borrowed("block.minecraft.stripped_mangrove_log"),
                 },
             ),
             (
@@ -54637,7 +54656,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_mangrove_wood",
+                    name: Cow::Borrowed("block.minecraft.stripped_mangrove_wood"),
                 },
             ),
             (
@@ -54675,7 +54694,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_oak_log",
+                    name: Cow::Borrowed("block.minecraft.stripped_oak_log"),
                 },
             ),
             (
@@ -54713,7 +54732,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_oak_wood",
+                    name: Cow::Borrowed("block.minecraft.stripped_oak_wood"),
                 },
             ),
             (
@@ -54751,7 +54770,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_pale_oak_log",
+                    name: Cow::Borrowed("block.minecraft.stripped_pale_oak_log"),
                 },
             ),
             (
@@ -54789,7 +54808,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_pale_oak_wood",
+                    name: Cow::Borrowed("block.minecraft.stripped_pale_oak_wood"),
                 },
             ),
             (
@@ -54827,7 +54846,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_spruce_log",
+                    name: Cow::Borrowed("block.minecraft.stripped_spruce_log"),
                 },
             ),
             (
@@ -54865,7 +54884,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_spruce_wood",
+                    name: Cow::Borrowed("block.minecraft.stripped_spruce_wood"),
                 },
             ),
             (
@@ -54903,7 +54922,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_warped_hyphae",
+                    name: Cow::Borrowed("block.minecraft.stripped_warped_hyphae"),
                 },
             ),
             (
@@ -54941,7 +54960,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.stripped_warped_stem",
+                    name: Cow::Borrowed("block.minecraft.stripped_warped_stem"),
                 },
             ),
             (
@@ -54979,7 +54998,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.structure_block",
+                    name: Cow::Borrowed("block.minecraft.structure_block"),
                 },
             ),
             (
@@ -55017,7 +55036,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.structure_void",
+                    name: Cow::Borrowed("block.minecraft.structure_void"),
                 },
             ),
             (
@@ -55055,7 +55074,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.sugar",
+                    name: Cow::Borrowed("item.minecraft.sugar"),
                 },
             ),
             (
@@ -55093,7 +55112,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sugar_cane",
+                    name: Cow::Borrowed("block.minecraft.sugar_cane"),
                 },
             ),
             (
@@ -55131,7 +55150,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sulfur",
+                    name: Cow::Borrowed("block.minecraft.sulfur"),
                 },
             ),
             (
@@ -55169,7 +55188,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sulfur_brick_slab",
+                    name: Cow::Borrowed("block.minecraft.sulfur_brick_slab"),
                 },
             ),
             (
@@ -55207,7 +55226,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sulfur_brick_stairs",
+                    name: Cow::Borrowed("block.minecraft.sulfur_brick_stairs"),
                 },
             ),
             (
@@ -55245,7 +55264,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sulfur_brick_wall",
+                    name: Cow::Borrowed("block.minecraft.sulfur_brick_wall"),
                 },
             ),
             (
@@ -55283,7 +55302,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sulfur_bricks",
+                    name: Cow::Borrowed("block.minecraft.sulfur_bricks"),
                 },
             ),
             (
@@ -55321,7 +55340,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.sulfur_cube_bucket",
+                    name: Cow::Borrowed("item.minecraft.sulfur_cube_bucket"),
                 },
             ),
             (
@@ -55360,7 +55379,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.sulfur_cube_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.sulfur_cube_spawn_egg"),
                 },
             ),
             (
@@ -55399,7 +55418,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sulfur_slab",
+                    name: Cow::Borrowed("block.minecraft.sulfur_slab"),
                 },
             ),
             (
@@ -55437,7 +55456,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sulfur_spike",
+                    name: Cow::Borrowed("block.minecraft.sulfur_spike"),
                 },
             ),
             (
@@ -55475,7 +55494,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sulfur_stairs",
+                    name: Cow::Borrowed("block.minecraft.sulfur_stairs"),
                 },
             ),
             (
@@ -55513,7 +55532,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sulfur_wall",
+                    name: Cow::Borrowed("block.minecraft.sulfur_wall"),
                 },
             ),
             (
@@ -55551,7 +55570,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.sunflower",
+                    name: Cow::Borrowed("block.minecraft.sunflower"),
                 },
             ),
             (
@@ -55589,7 +55608,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.suspicious_gravel",
+                    name: Cow::Borrowed("block.minecraft.suspicious_gravel"),
                 },
             ),
             (
@@ -55627,7 +55646,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.suspicious_sand",
+                    name: Cow::Borrowed("block.minecraft.suspicious_sand"),
                 },
             ),
             (
@@ -55665,7 +55684,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.suspicious_stew",
+                    name: Cow::Borrowed("item.minecraft.suspicious_stew"),
                 },
             ),
             (
@@ -55708,7 +55727,7 @@ impl Item {
             (Lore, &LoreImpl),
             (Rarity, &RarityImpl),
             (RepairCost, &RepairCostImpl),
-            (SuspiciousStewEffects, &SuspiciousStewEffectsImpl { effects: Cow::Borrowed(&[]) }),
+            (SuspiciousStewEffects, &SuspiciousStewEffectsImpl::EMPTY),
             (SwingAnimation, &SwingAnimationImpl),
             (TooltipDisplay, &TooltipDisplayImpl),
             (UseEffects, &UseEffectsImpl),
@@ -55723,7 +55742,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.sweet_berries",
+                    name: Cow::Borrowed("item.minecraft.sweet_berries"),
                 },
             ),
             (
@@ -55779,7 +55798,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.tadpole_bucket",
+                    name: Cow::Borrowed("item.minecraft.tadpole_bucket"),
                 },
             ),
             (
@@ -55818,7 +55837,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.tadpole_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.tadpole_spawn_egg"),
                 },
             ),
             (
@@ -55857,7 +55876,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.tall_dry_grass",
+                    name: Cow::Borrowed("block.minecraft.tall_dry_grass"),
                 },
             ),
             (
@@ -55895,7 +55914,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.tall_grass",
+                    name: Cow::Borrowed("block.minecraft.tall_grass"),
                 },
             ),
             (
@@ -55933,7 +55952,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.target",
+                    name: Cow::Borrowed("block.minecraft.target"),
                 },
             ),
             (
@@ -55971,7 +55990,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.terracotta",
+                    name: Cow::Borrowed("block.minecraft.terracotta"),
                 },
             ),
             (
@@ -56009,7 +56028,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.test_block",
+                    name: Cow::Borrowed("block.minecraft.test_block"),
                 },
             ),
             (
@@ -56053,7 +56072,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.test_instance_block",
+                    name: Cow::Borrowed("block.minecraft.test_instance_block"),
                 },
             ),
             (
@@ -56091,7 +56110,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.tide_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.tide_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -56129,7 +56148,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.tinted_glass",
+                    name: Cow::Borrowed("block.minecraft.tinted_glass"),
                 },
             ),
             (
@@ -56167,7 +56186,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.tipped_arrow",
+                    name: Cow::Borrowed("item.minecraft.tipped_arrow"),
                 },
             ),
             (
@@ -56218,7 +56237,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.tnt",
+                    name: Cow::Borrowed("block.minecraft.tnt"),
                 },
             ),
             (
@@ -56256,7 +56275,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.tnt_minecart",
+                    name: Cow::Borrowed("item.minecraft.tnt_minecart"),
                 },
             ),
             (
@@ -56294,7 +56313,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.torch",
+                    name: Cow::Borrowed("block.minecraft.torch"),
                 },
             ),
             (
@@ -56332,7 +56351,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.torchflower",
+                    name: Cow::Borrowed("block.minecraft.torchflower"),
                 },
             ),
             (
@@ -56370,7 +56389,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.torchflower_seeds",
+                    name: Cow::Borrowed("item.minecraft.torchflower_seeds"),
                 },
             ),
             (
@@ -56408,7 +56427,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.totem_of_undying",
+                    name: Cow::Borrowed("item.minecraft.totem_of_undying"),
                 },
             ),
             (
@@ -56447,7 +56466,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.trader_llama_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.trader_llama_spawn_egg"),
                 },
             ),
             (
@@ -56486,7 +56505,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.trapped_chest",
+                    name: Cow::Borrowed("block.minecraft.trapped_chest"),
                 },
             ),
             (
@@ -56525,7 +56544,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.trial_key",
+                    name: Cow::Borrowed("item.minecraft.trial_key"),
                 },
             ),
             (
@@ -56563,7 +56582,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.trial_spawner",
+                    name: Cow::Borrowed("block.minecraft.trial_spawner"),
                 },
             ),
             (
@@ -56601,7 +56620,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.trident",
+                    name: Cow::Borrowed("item.minecraft.trident"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -56672,7 +56691,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.tripwire_hook",
+                    name: Cow::Borrowed("block.minecraft.tripwire_hook"),
                 },
             ),
             (
@@ -56710,7 +56729,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.tropical_fish",
+                    name: Cow::Borrowed("item.minecraft.tropical_fish"),
                 },
             ),
             (
@@ -56766,7 +56785,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.tropical_fish_bucket",
+                    name: Cow::Borrowed("item.minecraft.tropical_fish_bucket"),
                 },
             ),
             (
@@ -56813,7 +56832,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.tropical_fish_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.tropical_fish_spawn_egg"),
                 },
             ),
             (
@@ -56852,7 +56871,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.tube_coral",
+                    name: Cow::Borrowed("block.minecraft.tube_coral"),
                 },
             ),
             (
@@ -56890,7 +56909,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.tube_coral_block",
+                    name: Cow::Borrowed("block.minecraft.tube_coral_block"),
                 },
             ),
             (
@@ -56928,7 +56947,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.tube_coral_fan",
+                    name: Cow::Borrowed("block.minecraft.tube_coral_fan"),
                 },
             ),
             (
@@ -56966,7 +56985,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.tuff",
+                    name: Cow::Borrowed("block.minecraft.tuff"),
                 },
             ),
             (
@@ -57004,7 +57023,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.tuff_brick_slab",
+                    name: Cow::Borrowed("block.minecraft.tuff_brick_slab"),
                 },
             ),
             (
@@ -57042,7 +57061,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.tuff_brick_stairs",
+                    name: Cow::Borrowed("block.minecraft.tuff_brick_stairs"),
                 },
             ),
             (
@@ -57080,7 +57099,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.tuff_brick_wall",
+                    name: Cow::Borrowed("block.minecraft.tuff_brick_wall"),
                 },
             ),
             (
@@ -57118,7 +57137,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.tuff_bricks",
+                    name: Cow::Borrowed("block.minecraft.tuff_bricks"),
                 },
             ),
             (
@@ -57156,7 +57175,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.tuff_slab",
+                    name: Cow::Borrowed("block.minecraft.tuff_slab"),
                 },
             ),
             (
@@ -57194,7 +57213,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.tuff_stairs",
+                    name: Cow::Borrowed("block.minecraft.tuff_stairs"),
                 },
             ),
             (
@@ -57232,7 +57251,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.tuff_wall",
+                    name: Cow::Borrowed("block.minecraft.tuff_wall"),
                 },
             ),
             (
@@ -57270,7 +57289,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.turtle_egg",
+                    name: Cow::Borrowed("block.minecraft.turtle_egg"),
                 },
             ),
             (
@@ -57308,7 +57327,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.turtle_helmet",
+                    name: Cow::Borrowed("item.minecraft.turtle_helmet"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -57381,7 +57400,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.turtle_scute",
+                    name: Cow::Borrowed("item.minecraft.turtle_scute"),
                 },
             ),
             (
@@ -57419,7 +57438,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.turtle_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.turtle_spawn_egg"),
                 },
             ),
             (
@@ -57458,7 +57477,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.twisting_vines",
+                    name: Cow::Borrowed("block.minecraft.twisting_vines"),
                 },
             ),
             (
@@ -57496,7 +57515,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.vault",
+                    name: Cow::Borrowed("block.minecraft.vault"),
                 },
             ),
             (
@@ -57534,7 +57553,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.verdant_froglight",
+                    name: Cow::Borrowed("block.minecraft.verdant_froglight"),
                 },
             ),
             (
@@ -57572,7 +57591,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.vex_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.vex_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -57610,7 +57629,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.vex_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.vex_spawn_egg"),
                 },
             ),
             (
@@ -57649,7 +57668,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.villager_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.villager_spawn_egg"),
                 },
             ),
             (
@@ -57688,7 +57707,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.vindicator_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.vindicator_spawn_egg"),
                 },
             ),
             (
@@ -57727,7 +57746,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.vine",
+                    name: Cow::Borrowed("block.minecraft.vine"),
                 },
             ),
             (
@@ -57765,7 +57784,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.wandering_trader_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.wandering_trader_spawn_egg"),
                 },
             ),
             (
@@ -57804,7 +57823,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.ward_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.ward_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -57842,7 +57861,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.warden_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.warden_spawn_egg"),
                 },
             ),
             (
@@ -57881,7 +57900,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_button",
+                    name: Cow::Borrowed("block.minecraft.warped_button"),
                 },
             ),
             (
@@ -57919,7 +57938,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_door",
+                    name: Cow::Borrowed("block.minecraft.warped_door"),
                 },
             ),
             (
@@ -57957,7 +57976,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_fence",
+                    name: Cow::Borrowed("block.minecraft.warped_fence"),
                 },
             ),
             (
@@ -57995,7 +58014,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_fence_gate",
+                    name: Cow::Borrowed("block.minecraft.warped_fence_gate"),
                 },
             ),
             (
@@ -58033,7 +58052,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_fungus",
+                    name: Cow::Borrowed("block.minecraft.warped_fungus"),
                 },
             ),
             (
@@ -58071,7 +58090,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.warped_fungus_on_a_stick",
+                    name: Cow::Borrowed("item.minecraft.warped_fungus_on_a_stick"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -58111,7 +58130,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_hanging_sign",
+                    name: Cow::Borrowed("block.minecraft.warped_hanging_sign"),
                 },
             ),
             (
@@ -58149,7 +58168,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_hyphae",
+                    name: Cow::Borrowed("block.minecraft.warped_hyphae"),
                 },
             ),
             (
@@ -58187,7 +58206,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_nylium",
+                    name: Cow::Borrowed("block.minecraft.warped_nylium"),
                 },
             ),
             (
@@ -58225,7 +58244,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_planks",
+                    name: Cow::Borrowed("block.minecraft.warped_planks"),
                 },
             ),
             (
@@ -58263,7 +58282,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_pressure_plate",
+                    name: Cow::Borrowed("block.minecraft.warped_pressure_plate"),
                 },
             ),
             (
@@ -58301,7 +58320,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_roots",
+                    name: Cow::Borrowed("block.minecraft.warped_roots"),
                 },
             ),
             (
@@ -58339,7 +58358,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_shelf",
+                    name: Cow::Borrowed("block.minecraft.warped_shelf"),
                 },
             ),
             (
@@ -58378,7 +58397,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_sign",
+                    name: Cow::Borrowed("block.minecraft.warped_sign"),
                 },
             ),
             (
@@ -58416,7 +58435,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_slab",
+                    name: Cow::Borrowed("block.minecraft.warped_slab"),
                 },
             ),
             (
@@ -58454,7 +58473,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_stairs",
+                    name: Cow::Borrowed("block.minecraft.warped_stairs"),
                 },
             ),
             (
@@ -58492,7 +58511,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_stem",
+                    name: Cow::Borrowed("block.minecraft.warped_stem"),
                 },
             ),
             (
@@ -58530,7 +58549,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.warped_trapdoor"),
                 },
             ),
             (
@@ -58568,7 +58587,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.warped_wart_block",
+                    name: Cow::Borrowed("block.minecraft.warped_wart_block"),
                 },
             ),
             (
@@ -58606,7 +58625,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.water_bucket",
+                    name: Cow::Borrowed("item.minecraft.water_bucket"),
                 },
             ),
             (
@@ -58644,7 +58663,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_chiseled_copper",
+                    name: Cow::Borrowed("block.minecraft.waxed_chiseled_copper"),
                 },
             ),
             (
@@ -58682,7 +58701,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_copper_bars",
+                    name: Cow::Borrowed("block.minecraft.waxed_copper_bars"),
                 },
             ),
             (
@@ -58720,7 +58739,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_copper_block",
+                    name: Cow::Borrowed("block.minecraft.waxed_copper_block"),
                 },
             ),
             (
@@ -58758,7 +58777,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_copper_bulb",
+                    name: Cow::Borrowed("block.minecraft.waxed_copper_bulb"),
                 },
             ),
             (
@@ -58796,7 +58815,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_copper_chain",
+                    name: Cow::Borrowed("block.minecraft.waxed_copper_chain"),
                 },
             ),
             (
@@ -58834,7 +58853,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_copper_chest",
+                    name: Cow::Borrowed("block.minecraft.waxed_copper_chest"),
                 },
             ),
             (
@@ -58872,7 +58891,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_copper_door",
+                    name: Cow::Borrowed("block.minecraft.waxed_copper_door"),
                 },
             ),
             (
@@ -58910,7 +58929,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_copper_golem_statue",
+                    name: Cow::Borrowed("block.minecraft.waxed_copper_golem_statue"),
                 },
             ),
             (
@@ -58957,7 +58976,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_copper_grate",
+                    name: Cow::Borrowed("block.minecraft.waxed_copper_grate"),
                 },
             ),
             (
@@ -58995,7 +59014,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_copper_lantern",
+                    name: Cow::Borrowed("block.minecraft.waxed_copper_lantern"),
                 },
             ),
             (
@@ -59033,7 +59052,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_copper_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.waxed_copper_trapdoor"),
                 },
             ),
             (
@@ -59071,7 +59090,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_cut_copper",
+                    name: Cow::Borrowed("block.minecraft.waxed_cut_copper"),
                 },
             ),
             (
@@ -59109,7 +59128,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_cut_copper_slab",
+                    name: Cow::Borrowed("block.minecraft.waxed_cut_copper_slab"),
                 },
             ),
             (
@@ -59147,7 +59166,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_cut_copper_stairs",
+                    name: Cow::Borrowed("block.minecraft.waxed_cut_copper_stairs"),
                 },
             ),
             (
@@ -59185,7 +59204,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_exposed_chiseled_copper",
+                    name: Cow::Borrowed("block.minecraft.waxed_exposed_chiseled_copper"),
                 },
             ),
             (
@@ -59223,7 +59242,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_exposed_copper",
+                    name: Cow::Borrowed("block.minecraft.waxed_exposed_copper"),
                 },
             ),
             (
@@ -59261,7 +59280,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_exposed_copper_bars",
+                    name: Cow::Borrowed("block.minecraft.waxed_exposed_copper_bars"),
                 },
             ),
             (
@@ -59299,7 +59318,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_exposed_copper_bulb",
+                    name: Cow::Borrowed("block.minecraft.waxed_exposed_copper_bulb"),
                 },
             ),
             (
@@ -59337,7 +59356,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_exposed_copper_chain",
+                    name: Cow::Borrowed("block.minecraft.waxed_exposed_copper_chain"),
                 },
             ),
             (
@@ -59375,7 +59394,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_exposed_copper_chest",
+                    name: Cow::Borrowed("block.minecraft.waxed_exposed_copper_chest"),
                 },
             ),
             (
@@ -59413,7 +59432,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_exposed_copper_door",
+                    name: Cow::Borrowed("block.minecraft.waxed_exposed_copper_door"),
                 },
             ),
             (
@@ -59451,7 +59470,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_exposed_copper_golem_statue",
+                    name: Cow::Borrowed("block.minecraft.waxed_exposed_copper_golem_statue"),
                 },
             ),
             (
@@ -59498,7 +59517,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_exposed_copper_grate",
+                    name: Cow::Borrowed("block.minecraft.waxed_exposed_copper_grate"),
                 },
             ),
             (
@@ -59536,7 +59555,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_exposed_copper_lantern",
+                    name: Cow::Borrowed("block.minecraft.waxed_exposed_copper_lantern"),
                 },
             ),
             (
@@ -59574,7 +59593,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_exposed_copper_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.waxed_exposed_copper_trapdoor"),
                 },
             ),
             (
@@ -59612,7 +59631,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_exposed_cut_copper",
+                    name: Cow::Borrowed("block.minecraft.waxed_exposed_cut_copper"),
                 },
             ),
             (
@@ -59650,7 +59669,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_exposed_cut_copper_slab",
+                    name: Cow::Borrowed("block.minecraft.waxed_exposed_cut_copper_slab"),
                 },
             ),
             (
@@ -59688,7 +59707,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_exposed_cut_copper_stairs",
+                    name: Cow::Borrowed("block.minecraft.waxed_exposed_cut_copper_stairs"),
                 },
             ),
             (
@@ -59726,7 +59745,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_exposed_lightning_rod",
+                    name: Cow::Borrowed("block.minecraft.waxed_exposed_lightning_rod"),
                 },
             ),
             (
@@ -59764,7 +59783,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_lightning_rod",
+                    name: Cow::Borrowed("block.minecraft.waxed_lightning_rod"),
                 },
             ),
             (
@@ -59802,7 +59821,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_oxidized_chiseled_copper",
+                    name: Cow::Borrowed("block.minecraft.waxed_oxidized_chiseled_copper"),
                 },
             ),
             (
@@ -59840,7 +59859,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_oxidized_copper",
+                    name: Cow::Borrowed("block.minecraft.waxed_oxidized_copper"),
                 },
             ),
             (
@@ -59878,7 +59897,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_oxidized_copper_bars",
+                    name: Cow::Borrowed("block.minecraft.waxed_oxidized_copper_bars"),
                 },
             ),
             (
@@ -59916,7 +59935,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_oxidized_copper_bulb",
+                    name: Cow::Borrowed("block.minecraft.waxed_oxidized_copper_bulb"),
                 },
             ),
             (
@@ -59954,7 +59973,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_oxidized_copper_chain",
+                    name: Cow::Borrowed("block.minecraft.waxed_oxidized_copper_chain"),
                 },
             ),
             (
@@ -59992,7 +60011,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_oxidized_copper_chest",
+                    name: Cow::Borrowed("block.minecraft.waxed_oxidized_copper_chest"),
                 },
             ),
             (
@@ -60030,7 +60049,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_oxidized_copper_door",
+                    name: Cow::Borrowed("block.minecraft.waxed_oxidized_copper_door"),
                 },
             ),
             (
@@ -60068,7 +60087,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_oxidized_copper_golem_statue",
+                    name: Cow::Borrowed("block.minecraft.waxed_oxidized_copper_golem_statue"),
                 },
             ),
             (
@@ -60115,7 +60134,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_oxidized_copper_grate",
+                    name: Cow::Borrowed("block.minecraft.waxed_oxidized_copper_grate"),
                 },
             ),
             (
@@ -60153,7 +60172,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_oxidized_copper_lantern",
+                    name: Cow::Borrowed("block.minecraft.waxed_oxidized_copper_lantern"),
                 },
             ),
             (
@@ -60191,7 +60210,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_oxidized_copper_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.waxed_oxidized_copper_trapdoor"),
                 },
             ),
             (
@@ -60229,7 +60248,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_oxidized_cut_copper",
+                    name: Cow::Borrowed("block.minecraft.waxed_oxidized_cut_copper"),
                 },
             ),
             (
@@ -60267,7 +60286,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_oxidized_cut_copper_slab",
+                    name: Cow::Borrowed("block.minecraft.waxed_oxidized_cut_copper_slab"),
                 },
             ),
             (
@@ -60305,7 +60324,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_oxidized_cut_copper_stairs",
+                    name: Cow::Borrowed("block.minecraft.waxed_oxidized_cut_copper_stairs"),
                 },
             ),
             (
@@ -60343,7 +60362,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_oxidized_lightning_rod",
+                    name: Cow::Borrowed("block.minecraft.waxed_oxidized_lightning_rod"),
                 },
             ),
             (
@@ -60381,7 +60400,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_weathered_chiseled_copper",
+                    name: Cow::Borrowed("block.minecraft.waxed_weathered_chiseled_copper"),
                 },
             ),
             (
@@ -60419,7 +60438,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_weathered_copper",
+                    name: Cow::Borrowed("block.minecraft.waxed_weathered_copper"),
                 },
             ),
             (
@@ -60457,7 +60476,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_weathered_copper_bars",
+                    name: Cow::Borrowed("block.minecraft.waxed_weathered_copper_bars"),
                 },
             ),
             (
@@ -60495,7 +60514,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_weathered_copper_bulb",
+                    name: Cow::Borrowed("block.minecraft.waxed_weathered_copper_bulb"),
                 },
             ),
             (
@@ -60533,7 +60552,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_weathered_copper_chain",
+                    name: Cow::Borrowed("block.minecraft.waxed_weathered_copper_chain"),
                 },
             ),
             (
@@ -60571,7 +60590,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_weathered_copper_chest",
+                    name: Cow::Borrowed("block.minecraft.waxed_weathered_copper_chest"),
                 },
             ),
             (
@@ -60609,7 +60628,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_weathered_copper_door",
+                    name: Cow::Borrowed("block.minecraft.waxed_weathered_copper_door"),
                 },
             ),
             (
@@ -60647,7 +60666,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_weathered_copper_golem_statue",
+                    name: Cow::Borrowed("block.minecraft.waxed_weathered_copper_golem_statue"),
                 },
             ),
             (
@@ -60694,7 +60713,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_weathered_copper_grate",
+                    name: Cow::Borrowed("block.minecraft.waxed_weathered_copper_grate"),
                 },
             ),
             (
@@ -60732,7 +60751,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_weathered_copper_lantern",
+                    name: Cow::Borrowed("block.minecraft.waxed_weathered_copper_lantern"),
                 },
             ),
             (
@@ -60770,7 +60789,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_weathered_copper_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.waxed_weathered_copper_trapdoor"),
                 },
             ),
             (
@@ -60808,7 +60827,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_weathered_cut_copper",
+                    name: Cow::Borrowed("block.minecraft.waxed_weathered_cut_copper"),
                 },
             ),
             (
@@ -60846,7 +60865,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_weathered_cut_copper_slab",
+                    name: Cow::Borrowed("block.minecraft.waxed_weathered_cut_copper_slab"),
                 },
             ),
             (
@@ -60884,7 +60903,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_weathered_cut_copper_stairs",
+                    name: Cow::Borrowed("block.minecraft.waxed_weathered_cut_copper_stairs"),
                 },
             ),
             (
@@ -60922,7 +60941,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.waxed_weathered_lightning_rod",
+                    name: Cow::Borrowed("block.minecraft.waxed_weathered_lightning_rod"),
                 },
             ),
             (
@@ -60960,7 +60979,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.wayfinder_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.wayfinder_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -60998,7 +61017,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.weathered_chiseled_copper",
+                    name: Cow::Borrowed("block.minecraft.weathered_chiseled_copper"),
                 },
             ),
             (
@@ -61036,7 +61055,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.weathered_copper",
+                    name: Cow::Borrowed("block.minecraft.weathered_copper"),
                 },
             ),
             (
@@ -61074,7 +61093,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.weathered_copper_bars",
+                    name: Cow::Borrowed("block.minecraft.weathered_copper_bars"),
                 },
             ),
             (
@@ -61112,7 +61131,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.weathered_copper_bulb",
+                    name: Cow::Borrowed("block.minecraft.weathered_copper_bulb"),
                 },
             ),
             (
@@ -61150,7 +61169,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.weathered_copper_chain",
+                    name: Cow::Borrowed("block.minecraft.weathered_copper_chain"),
                 },
             ),
             (
@@ -61188,7 +61207,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.weathered_copper_chest",
+                    name: Cow::Borrowed("block.minecraft.weathered_copper_chest"),
                 },
             ),
             (
@@ -61226,7 +61245,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.weathered_copper_door",
+                    name: Cow::Borrowed("block.minecraft.weathered_copper_door"),
                 },
             ),
             (
@@ -61264,7 +61283,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.weathered_copper_golem_statue",
+                    name: Cow::Borrowed("block.minecraft.weathered_copper_golem_statue"),
                 },
             ),
             (
@@ -61311,7 +61330,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.weathered_copper_grate",
+                    name: Cow::Borrowed("block.minecraft.weathered_copper_grate"),
                 },
             ),
             (
@@ -61349,7 +61368,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.weathered_copper_lantern",
+                    name: Cow::Borrowed("block.minecraft.weathered_copper_lantern"),
                 },
             ),
             (
@@ -61387,7 +61406,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.weathered_copper_trapdoor",
+                    name: Cow::Borrowed("block.minecraft.weathered_copper_trapdoor"),
                 },
             ),
             (
@@ -61425,7 +61444,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.weathered_cut_copper",
+                    name: Cow::Borrowed("block.minecraft.weathered_cut_copper"),
                 },
             ),
             (
@@ -61463,7 +61482,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.weathered_cut_copper_slab",
+                    name: Cow::Borrowed("block.minecraft.weathered_cut_copper_slab"),
                 },
             ),
             (
@@ -61501,7 +61520,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.weathered_cut_copper_stairs",
+                    name: Cow::Borrowed("block.minecraft.weathered_cut_copper_stairs"),
                 },
             ),
             (
@@ -61539,7 +61558,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.weathered_lightning_rod",
+                    name: Cow::Borrowed("block.minecraft.weathered_lightning_rod"),
                 },
             ),
             (
@@ -61577,7 +61596,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.weeping_vines",
+                    name: Cow::Borrowed("block.minecraft.weeping_vines"),
                 },
             ),
             (
@@ -61615,7 +61634,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.wet_sponge",
+                    name: Cow::Borrowed("block.minecraft.wet_sponge"),
                 },
             ),
             (
@@ -61653,7 +61672,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.wheat",
+                    name: Cow::Borrowed("item.minecraft.wheat"),
                 },
             ),
             (
@@ -61691,7 +61710,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.wheat_seeds",
+                    name: Cow::Borrowed("item.minecraft.wheat_seeds"),
                 },
             ),
             (
@@ -61729,7 +61748,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.white_banner",
+                    name: Cow::Borrowed("block.minecraft.white_banner"),
                 },
             ),
             (
@@ -61768,7 +61787,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.white_bed",
+                    name: Cow::Borrowed("block.minecraft.white_bed"),
                 },
             ),
             (
@@ -61806,7 +61825,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.white_bundle",
+                    name: Cow::Borrowed("item.minecraft.white_bundle"),
                 },
             ),
             (
@@ -61845,7 +61864,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.white_candle",
+                    name: Cow::Borrowed("block.minecraft.white_candle"),
                 },
             ),
             (
@@ -61883,7 +61902,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.white_carpet",
+                    name: Cow::Borrowed("block.minecraft.white_carpet"),
                 },
             ),
             (
@@ -61940,7 +61959,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.white_concrete",
+                    name: Cow::Borrowed("block.minecraft.white_concrete"),
                 },
             ),
             (
@@ -61978,7 +61997,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.white_concrete_powder",
+                    name: Cow::Borrowed("block.minecraft.white_concrete_powder"),
                 },
             ),
             (
@@ -62016,7 +62035,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.white_dye",
+                    name: Cow::Borrowed("item.minecraft.white_dye"),
                 },
             ),
             (
@@ -62055,7 +62074,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.white_glazed_terracotta",
+                    name: Cow::Borrowed("block.minecraft.white_glazed_terracotta"),
                 },
             ),
             (
@@ -62093,7 +62112,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.white_harness",
+                    name: Cow::Borrowed("item.minecraft.white_harness"),
                 },
             ),
             (
@@ -62147,7 +62166,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.white_shulker_box",
+                    name: Cow::Borrowed("block.minecraft.white_shulker_box"),
                 },
             ),
             (
@@ -62186,7 +62205,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.white_stained_glass",
+                    name: Cow::Borrowed("block.minecraft.white_stained_glass"),
                 },
             ),
             (
@@ -62224,7 +62243,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.white_stained_glass_pane",
+                    name: Cow::Borrowed("block.minecraft.white_stained_glass_pane"),
                 },
             ),
             (
@@ -62262,7 +62281,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.white_terracotta",
+                    name: Cow::Borrowed("block.minecraft.white_terracotta"),
                 },
             ),
             (
@@ -62300,7 +62319,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.white_tulip",
+                    name: Cow::Borrowed("block.minecraft.white_tulip"),
                 },
             ),
             (
@@ -62338,7 +62357,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.white_wool",
+                    name: Cow::Borrowed("block.minecraft.white_wool"),
                 },
             ),
             (
@@ -62376,7 +62395,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.wild_armor_trim_smithing_template",
+                    name: Cow::Borrowed("item.minecraft.wild_armor_trim_smithing_template"),
                 },
             ),
             (
@@ -62414,7 +62433,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.wildflowers",
+                    name: Cow::Borrowed("block.minecraft.wildflowers"),
                 },
             ),
             (
@@ -62459,7 +62478,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.wind_charge",
+                    name: Cow::Borrowed("item.minecraft.wind_charge"),
                 },
             ),
             (
@@ -62497,7 +62516,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.witch_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.witch_spawn_egg"),
                 },
             ),
             (
@@ -62536,7 +62555,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.wither_rose",
+                    name: Cow::Borrowed("block.minecraft.wither_rose"),
                 },
             ),
             (
@@ -62574,7 +62593,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.wither_skeleton_skull",
+                    name: Cow::Borrowed("block.minecraft.wither_skeleton_skull"),
                 },
             ),
             (
@@ -62634,7 +62653,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.wither_skeleton_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.wither_skeleton_spawn_egg"),
                 },
             ),
             (
@@ -62673,7 +62692,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.wither_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.wither_spawn_egg"),
                 },
             ),
             (
@@ -62712,7 +62731,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.wolf_armor",
+                    name: Cow::Borrowed("item.minecraft.wolf_armor"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -62786,7 +62805,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.wolf_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.wolf_spawn_egg"),
                 },
             ),
             (
@@ -62825,7 +62844,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.wooden_axe",
+                    name: Cow::Borrowed("item.minecraft.wooden_axe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -62908,7 +62927,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.wooden_hoe",
+                    name: Cow::Borrowed("item.minecraft.wooden_hoe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -62991,7 +63010,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.wooden_pickaxe",
+                    name: Cow::Borrowed("item.minecraft.wooden_pickaxe"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -63074,7 +63093,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.wooden_shovel",
+                    name: Cow::Borrowed("item.minecraft.wooden_shovel"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -63157,7 +63176,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.wooden_spear",
+                    name: Cow::Borrowed("item.minecraft.wooden_spear"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -63190,14 +63209,17 @@ impl Item {
                 },
             ),
             (Enchantable, &EnchantableImpl { value: 15 }),
-            (AttackRange, &AttackRangeImpl {
-                min_reach: 2.0,
-                max_reach: 4.5,
-                min_creative_reach: 2.0,
-                max_creative_reach: 6.5,
-                hitbox_margin: 0.125,
-                mob_factor: 0.5,
-            }),
+            (
+                AttackRange,
+                &AttackRangeImpl {
+                    min_reach: 2.0,
+                    max_reach: 4.5,
+                    min_creative_reach: 2.0,
+                    max_creative_reach: 6.5,
+                    hitbox_margin: 0.125,
+                    mob_factor: 0.5,
+                },
+            ),
             (BreakSound, &BreakSoundImpl),
             (DamageType, &DamageTypeImpl),
             (
@@ -63232,7 +63254,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.wooden_sword",
+                    name: Cow::Borrowed("item.minecraft.wooden_sword"),
                 },
             ),
             (Damage, &DamageImpl { damage: 0 }),
@@ -63320,7 +63342,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.writable_book",
+                    name: Cow::Borrowed("item.minecraft.writable_book"),
                 },
             ),
             (
@@ -63362,7 +63384,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.written_book",
+                    name: Cow::Borrowed("item.minecraft.written_book"),
                 },
             ),
             (
@@ -63401,7 +63423,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.yellow_banner",
+                    name: Cow::Borrowed("block.minecraft.yellow_banner"),
                 },
             ),
             (
@@ -63440,7 +63462,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.yellow_bed",
+                    name: Cow::Borrowed("block.minecraft.yellow_bed"),
                 },
             ),
             (
@@ -63478,7 +63500,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.yellow_bundle",
+                    name: Cow::Borrowed("item.minecraft.yellow_bundle"),
                 },
             ),
             (
@@ -63517,7 +63539,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.yellow_candle",
+                    name: Cow::Borrowed("block.minecraft.yellow_candle"),
                 },
             ),
             (
@@ -63555,7 +63577,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.yellow_carpet",
+                    name: Cow::Borrowed("block.minecraft.yellow_carpet"),
                 },
             ),
             (
@@ -63612,7 +63634,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.yellow_concrete",
+                    name: Cow::Borrowed("block.minecraft.yellow_concrete"),
                 },
             ),
             (
@@ -63650,7 +63672,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.yellow_concrete_powder",
+                    name: Cow::Borrowed("block.minecraft.yellow_concrete_powder"),
                 },
             ),
             (
@@ -63688,7 +63710,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.yellow_dye",
+                    name: Cow::Borrowed("item.minecraft.yellow_dye"),
                 },
             ),
             (
@@ -63727,7 +63749,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.yellow_glazed_terracotta",
+                    name: Cow::Borrowed("block.minecraft.yellow_glazed_terracotta"),
                 },
             ),
             (
@@ -63765,7 +63787,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.yellow_harness",
+                    name: Cow::Borrowed("item.minecraft.yellow_harness"),
                 },
             ),
             (
@@ -63819,7 +63841,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.yellow_shulker_box",
+                    name: Cow::Borrowed("block.minecraft.yellow_shulker_box"),
                 },
             ),
             (
@@ -63858,7 +63880,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.yellow_stained_glass",
+                    name: Cow::Borrowed("block.minecraft.yellow_stained_glass"),
                 },
             ),
             (
@@ -63896,7 +63918,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.yellow_stained_glass_pane",
+                    name: Cow::Borrowed("block.minecraft.yellow_stained_glass_pane"),
                 },
             ),
             (
@@ -63934,7 +63956,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.yellow_terracotta",
+                    name: Cow::Borrowed("block.minecraft.yellow_terracotta"),
                 },
             ),
             (
@@ -63972,7 +63994,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.yellow_wool",
+                    name: Cow::Borrowed("block.minecraft.yellow_wool"),
                 },
             ),
             (
@@ -64010,7 +64032,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.zoglin_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.zoglin_spawn_egg"),
                 },
             ),
             (
@@ -64049,7 +64071,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "block.minecraft.zombie_head",
+                    name: Cow::Borrowed("block.minecraft.zombie_head"),
                 },
             ),
             (
@@ -64109,7 +64131,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.zombie_horse_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.zombie_horse_spawn_egg"),
                 },
             ),
             (
@@ -64148,7 +64170,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.zombie_nautilus_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.zombie_nautilus_spawn_egg"),
                 },
             ),
             (
@@ -64187,7 +64209,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.zombie_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.zombie_spawn_egg"),
                 },
             ),
             (
@@ -64226,7 +64248,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.zombie_villager_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.zombie_villager_spawn_egg"),
                 },
             ),
             (
@@ -64265,7 +64287,7 @@ impl Item {
             (
                 ItemName,
                 &ItemNameImpl {
-                    name: "item.minecraft.zombified_piglin_spawn_egg",
+                    name: Cow::Borrowed("item.minecraft.zombified_piglin_spawn_egg"),
                 },
             ),
             (
@@ -64297,13 +64319,16 @@ impl Item {
         ],
     };
     #[must_use]
+    #[allow(deprecated)]
     pub fn translated_name(&self) -> TextComponent {
         let name = self
             .components
             .iter()
             .find_map(|(id, data)| {
                 if id == &ItemName {
-                    data.as_any().downcast_ref::<ItemNameImpl>().map(|n| n.name)
+                    data.as_any()
+                        .downcast_ref::<ItemNameImpl>()
+                        .map(|name| name.name.as_ref())
                 } else {
                     None
                 }
@@ -67696,7 +67721,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const APPLE : Self = Self { id : 878 , registry_key : "minecraft:apple" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x03\tnutrition\x08\n\x11using_converts_to\0\x05\x13saturation_modifier\x9A\x99\x99>\x01\x0Ecan_always_eat\0\0\n\x17minecraft:use_animation\x08\x05value\x03eat\0\n\x0Eminecraft:tags\t\x04tags\x08\x02\x11minecraft:is_food\0\n\x17minecraft:use_modifiers\x08\x0Bstart_using\x06always\x01\x0Femit_vibrations\x01\x05\x0Cuse_duration\xCD\xCC\xCC?\x05\x11movement_modifier33\xB3>\0\n\x16minecraft:display_name\x08\x05value\x0Fitem.apple.name\0\n\x0Fitem_properties\x03\x11creative_category\x04\x08\x0Ecreative_group\0\x01\x04foil\0\x01\x0Eliquid_clipped\0\x01\x17can_destroy_in_creative\x01\x05\x0Cmining_speed\0\0\x80?\x03\x06damage\0\x01\x0Fstacked_by_data\0\x03\ruse_animation\x02\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x05apple\0\0\x03\x0Cuse_duration@\x01\x12hidden_in_commands\x02\x01\x0Eallow_off_hand\0\x03\x11enchantable_value\0\x03\x0Bframe_count\x02\x01\rhand_equipped\0\x03\x0Emax_stack_size\x80\x01\x01\x0Eshould_despawn\x01\x08\x10enchantable_slot\x04none\0\t\titem_tags\x08\x02\x11minecraft:is_food\0\0" } ;
+    pub const APPLE : Self = Self { id : 878 , registry_key : "minecraft:apple" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\t\titem_tags\x08\x02\x11minecraft:is_food\n\x17minecraft:use_animation\x08\x05value\x03eat\0\n\x17minecraft:use_modifiers\x05\x0Cuse_duration\xCD\xCC\xCC?\x01\x0Femit_vibrations\x01\x08\x0Bstart_using\x06always\x05\x11movement_modifier33\xB3>\0\n\x0Eminecraft:food\x03\tnutrition\x08\n\x11using_converts_to\0\x05\x13saturation_modifier\x9A\x99\x99>\x01\x0Ecan_always_eat\0\0\n\x16minecraft:display_name\x08\x05value\x0Fitem.apple.name\0\n\x0Fitem_properties\x01\x17can_destroy_in_creative\x01\x01\x04foil\0\x01\x12hidden_in_commands\x02\x03\x0Emax_stack_size\x80\x01\x03\x11creative_category\x04\x01\x0Eshould_despawn\x01\x01\x0Eliquid_clipped\0\x01\x0Eallow_off_hand\0\x03\x06damage\0\x03\ruse_animation\x02\x03\x0Bframe_count\x02\x05\x0Cmining_speed\0\0\x80?\x08\x0Ecreative_group\0\x01\x0Fstacked_by_data\0\x03\x11enchantable_value\0\x01\rhand_equipped\0\x03\x0Cuse_duration@\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x05apple\0\0\x08\x10enchantable_slot\x04none\0\n\x0Eminecraft:tags\t\x04tags\x08\x02\x11minecraft:is_food\0\0\0" } ;
     pub const ARCHER_POTTERY_SHERD: Self = Self {
         id: 671,
         registry_key: "minecraft:archer_pottery_sherd",
@@ -67781,7 +67806,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const BAKED_POTATO : Self = Self { id : 281 , registry_key : "minecraft:baked_potato" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x01\x0Ecan_always_eat\0\x08\x11using_converts_to\0\x03\rcooldown_time\0\x08\rcooldown_type\0\x03\ron_use_action\x01\x03\tnutrition\n\x05\x13saturation_modifier\x9A\x99\x19?\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\0\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const BAKED_POTATO : Self = Self { id : 281 , registry_key : "minecraft:baked_potato" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x03\rcooldown_time\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x05\x13saturation_modifier\x9A\x99\x19?\x03\ron_use_action\x01\x03\tnutrition\n\x08\rcooldown_type\0\x08\x11using_converts_to\0\x01\x0Ecan_always_eat\0\0\x03\x16minecraft:use_duration@\0\0" } ;
     pub const BALLOON: Self = Self {
         id: 612,
         registry_key: "minecraft:balloon",
@@ -68034,7 +68059,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const BEEF : Self = Self { id : 273 , registry_key : "minecraft:beef" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x03\ron_use_action\x01\x05\x13saturation_modifier\x9A\x99\x99>\x03\tnutrition\x06\x08\x11using_converts_to\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\rcooldown_time\0\x01\x0Ecan_always_eat\0\x08\rcooldown_type\0\0\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const BEEF : Self = Self { id : 273 , registry_key : "minecraft:beef" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x05\x13saturation_modifier\x9A\x99\x99>\x03\tnutrition\x06\x08\x11using_converts_to\0\x03\rcooldown_time\0\x08\rcooldown_type\0\x03\ron_use_action\x01\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x01\x0Ecan_always_eat\0\0\0\0" } ;
     pub const BEEHIVE: Self = Self {
         id: -219,
         registry_key: "minecraft:beehive",
@@ -68042,9 +68067,9 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const BEETROOT : Self = Self { id : 285 , registry_key : "minecraft:beetroot" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x05\x13saturation_modifier\x9A\x99\x19?\x03\rcooldown_time\0\x08\rcooldown_type\0\x03\tnutrition\x02\x03\ron_use_action\x01\x01\x0Ecan_always_eat\0\x08\x11using_converts_to\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\0\x03\x16minecraft:use_duration@\0\0" } ;
-    pub const BEETROOT_SEEDS : Self = Self { id : 295 , registry_key : "minecraft:beetroot_seeds" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:seed\x08\rplant_at_face\x02up\t\x08plant_at\x08\x02\x12minecraft:farmland\x08\x0Bcrop_result\x12minecraft:beetroot\x01\x1Aplant_at_any_solid_surface\0\0\0\0" } ;
-    pub const BEETROOT_SOUP : Self = Self { id : 286 , registry_key : "minecraft:beetroot_soup" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x08\x11using_converts_to\x04bowl\x05\x13saturation_modifier\x9A\x99\x19?\x03\tnutrition\x0C\x08\rcooldown_type\0\x03\ron_use_action\x01\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\rcooldown_time\0\x01\x0Ecan_always_eat\0\0\x03\x16minecraft:use_duration@\x03\x18minecraft:max_stack_size\x02\0\0" } ;
+    pub const BEETROOT : Self = Self { id : 285 , registry_key : "minecraft:beetroot" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x03\tnutrition\x02\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x01\x0Ecan_always_eat\0\x05\x13saturation_modifier\x9A\x99\x19?\x03\rcooldown_time\0\x03\ron_use_action\x01\x08\x11using_converts_to\0\x08\rcooldown_type\0\0\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const BEETROOT_SEEDS : Self = Self { id : 295 , registry_key : "minecraft:beetroot_seeds" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:seed\x08\rplant_at_face\x02up\x08\x0Bcrop_result\x12minecraft:beetroot\t\x08plant_at\x08\x02\x12minecraft:farmland\x01\x1Aplant_at_any_solid_surface\0\0\0\0" } ;
+    pub const BEETROOT_SOUP : Self = Self { id : 286 , registry_key : "minecraft:beetroot_soup" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x03\tnutrition\x0C\x01\x0Ecan_always_eat\0\x03\ron_use_action\x01\x05\x13saturation_modifier\x9A\x99\x19?\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x08\rcooldown_type\0\x03\rcooldown_time\0\x08\x11using_converts_to\x04bowl\0\x03\x16minecraft:use_duration@\x03\x18minecraft:max_stack_size\x02\0\0" } ;
     pub const BELL: Self = Self {
         id: -206,
         registry_key: "minecraft:bell",
@@ -68206,7 +68231,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const BLACK_BUNDLE : Self = Self { id : 857 , registry_key : "minecraft:black_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\t\titem_tags\0\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x0Fitem_properties\x01\x04foil\0\n\x0Eminecraft:icon\n\x08textures\x08\x11bundle_open_front\x17bundle_black_open_front\x08\x10bundle_open_back\x16bundle_black_open_back\x08\x07default\x0Cbundle_black\0\0\x03\x06damage\0\x01\x0Fstacked_by_data\0\x01\x12hidden_in_commands\x02\x01\x0Eshould_despawn\x01\x03\x11creative_category\x06\x03\ruse_animation\0\x01\x17can_destroy_in_creative\x01\x08\x0Ecreative_group\0\x03\x0Bframe_count\x02\x01\rhand_equipped\0\x03\x11enchantable_value\0\x03\x0Emax_stack_size\x02\x01\x0Eallow_off_hand\0\x08\x10enchantable_slot\x04none\x05\x0Cmining_speed\0\0\x80?\x03\x0Cuse_duration\0\x01\x0Eliquid_clipped\0\0\n\x16minecraft:storage_item\t\rallowed_items\0\0\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x03\tmax_slots\x80\x01\x01\x1Aallow_nested_storage_items\x01\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\0\0" } ;
+    pub const BLACK_BUNDLE : Self = Self { id : 857 , registry_key : "minecraft:black_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x0Fitem_properties\x03\x06damage\0\x03\ruse_animation\0\x01\x12hidden_in_commands\x02\x01\x0Eshould_despawn\x01\x03\x0Emax_stack_size\x02\x01\x0Fstacked_by_data\0\x05\x0Cmining_speed\0\0\x80?\x03\x11enchantable_value\0\x03\x0Cuse_duration\0\x08\x0Ecreative_group\0\x01\x0Eallow_off_hand\0\x01\x0Eliquid_clipped\0\x03\x11creative_category\x06\x08\x10enchantable_slot\x04none\x03\x0Bframe_count\x02\x01\x17can_destroy_in_creative\x01\n\x0Eminecraft:icon\n\x08textures\x08\x10bundle_open_back\x16bundle_black_open_back\x08\x11bundle_open_front\x17bundle_black_open_front\x08\x07default\x0Cbundle_black\0\0\x01\x04foil\0\x01\rhand_equipped\0\0\n\x16minecraft:storage_item\x03\tmax_slots\x80\x01\x01\x1Aallow_nested_storage_items\x01\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\t\rallowed_items\0\0\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\t\titem_tags\0\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\0\0" } ;
     pub const BLACK_CANDLE: Self = Self {
         id: -428,
         registry_key: "minecraft:black_candle",
@@ -68382,7 +68407,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const BLUE_BUNDLE : Self = Self { id : 858 , registry_key : "minecraft:blue_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\t\titem_tags\0\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n\x16minecraft:storage_item\x03\tmax_slots\x80\x01\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\t\rallowed_items\0\0\x01\x1Aallow_nested_storage_items\x01\0\n\x0Fitem_properties\x03\x0Bframe_count\x02\x03\x06damage\0\n\x0Eminecraft:icon\n\x08textures\x08\x11bundle_open_front\x16bundle_blue_open_front\x08\x07default\x0Bbundle_blue\x08\x10bundle_open_back\x15bundle_blue_open_back\0\0\x03\x11enchantable_value\0\x01\x17can_destroy_in_creative\x01\x08\x10enchantable_slot\x04none\x01\x0Eshould_despawn\x01\x03\x11creative_category\x06\x01\rhand_equipped\0\x05\x0Cmining_speed\0\0\x80?\x08\x0Ecreative_group\0\x01\x0Fstacked_by_data\0\x03\x0Emax_stack_size\x02\x01\x0Eallow_off_hand\0\x01\x04foil\0\x01\x12hidden_in_commands\x02\x03\x0Cuse_duration\0\x01\x0Eliquid_clipped\0\x03\ruse_animation\0\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\0\0" } ;
+    pub const BLUE_BUNDLE : Self = Self { id : 858 , registry_key : "minecraft:blue_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x16minecraft:storage_item\x01\x1Aallow_nested_storage_items\x01\t\rallowed_items\0\0\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x03\tmax_slots\x80\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n\x0Fitem_properties\x03\x06damage\0\x03\x11enchantable_value\0\x01\x0Eallow_off_hand\0\x03\x0Emax_stack_size\x02\n\x0Eminecraft:icon\n\x08textures\x08\x11bundle_open_front\x16bundle_blue_open_front\x08\x10bundle_open_back\x15bundle_blue_open_back\x08\x07default\x0Bbundle_blue\0\0\x01\x17can_destroy_in_creative\x01\x03\ruse_animation\0\x01\x0Fstacked_by_data\0\x03\x0Bframe_count\x02\x08\x0Ecreative_group\0\x01\rhand_equipped\0\x01\x0Eliquid_clipped\0\x03\x0Cuse_duration\0\x01\x0Eshould_despawn\x01\x05\x0Cmining_speed\0\0\x80?\x01\x04foil\0\x08\x10enchantable_slot\x04none\x01\x12hidden_in_commands\x02\x03\x11creative_category\x06\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\t\titem_tags\0\0\0\0" } ;
     pub const BLUE_CANDLE: Self = Self {
         id: -424,
         registry_key: "minecraft:blue_candle",
@@ -68621,8 +68646,8 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const BREAD : Self = Self { id : 261 , registry_key : "minecraft:bread" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x01\x0Ecan_always_eat\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\rcooldown_time\0\x08\rcooldown_type\0\x03\tnutrition\n\x03\ron_use_action\x01\x05\x13saturation_modifier\x9A\x99\x19?\x08\x11using_converts_to\0\0\x03\x16minecraft:use_duration@\0\0" } ;
-    pub const BREEZE_ROD : Self = Self { id : 874 , registry_key : "minecraft:breeze_rod" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x17minecraft:hand_equipped\x01\x05value\x01\0\n\x16minecraft:display_name\x08\x05value\x14item.breeze_rod.name\0\n\x0Fitem_properties\x01\x0Eliquid_clipped\0\x01\x0Eshould_despawn\x01\x01\rhand_equipped\x01\n\x0Eminecraft:icon\n\x08textures\x08\x07default\nbreeze_rod\0\0\x03\x11creative_category\x08\x03\ruse_animation\0\x03\x0Cuse_duration\0\x03\x0Emax_stack_size\x80\x01\x03\x06damage\0\x05\x0Cmining_speed\0\0\x80?\x03\x0Bframe_count\x02\x08\x10enchantable_slot\x04none\x01\x17can_destroy_in_creative\x01\x01\x04foil\0\x08\x0Ecreative_group\0\x01\x12hidden_in_commands\x02\x01\x0Fstacked_by_data\0\x03\x11enchantable_value\0\x01\x0Eallow_off_hand\0\0\t\titem_tags\0\0\0\0" } ;
+    pub const BREAD : Self = Self { id : 261 , registry_key : "minecraft:bread" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x01\x0Ecan_always_eat\0\x08\x11using_converts_to\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\ron_use_action\x01\x03\tnutrition\n\x05\x13saturation_modifier\x9A\x99\x19?\x03\rcooldown_time\0\x08\rcooldown_type\0\0\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const BREEZE_ROD : Self = Self { id : 874 , registry_key : "minecraft:breeze_rod" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\t\titem_tags\0\0\n\x16minecraft:display_name\x08\x05value\x14item.breeze_rod.name\0\n\x17minecraft:hand_equipped\x01\x05value\x01\0\n\x0Fitem_properties\x01\rhand_equipped\x01\x01\x0Eallow_off_hand\0\x03\x06damage\0\x01\x0Fstacked_by_data\0\x03\x11creative_category\x08\x08\x10enchantable_slot\x04none\x03\x0Emax_stack_size\x80\x01\x01\x12hidden_in_commands\x02\x01\x17can_destroy_in_creative\x01\n\x0Eminecraft:icon\n\x08textures\x08\x07default\nbreeze_rod\0\0\x01\x0Eliquid_clipped\0\x08\x0Ecreative_group\0\x05\x0Cmining_speed\0\0\x80?\x03\ruse_animation\0\x01\x04foil\0\x03\x11enchantable_value\0\x01\x0Eshould_despawn\x01\x03\x0Cuse_duration\0\x03\x0Bframe_count\x02\0\0\0" } ;
     pub const BREEZE_SPAWN_EGG: Self = Self {
         id: 506,
         registry_key: "minecraft:breeze_spawn_egg",
@@ -68686,7 +68711,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const BROWN_BUNDLE : Self = Self { id : 859 , registry_key : "minecraft:brown_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\t\titem_tags\0\0\n\x0Fitem_properties\x01\x0Eallow_off_hand\0\x01\x04foil\0\x01\x0Eshould_despawn\x01\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x0Cbundle_brown\x08\x10bundle_open_back\x16bundle_brown_open_back\x08\x11bundle_open_front\x17bundle_brown_open_front\0\0\x03\x11creative_category\x06\x03\x0Emax_stack_size\x02\x05\x0Cmining_speed\0\0\x80?\x01\x0Fstacked_by_data\0\x08\x0Ecreative_group\0\x03\ruse_animation\0\x01\x17can_destroy_in_creative\x01\x03\x0Cuse_duration\0\x01\rhand_equipped\0\x03\x11enchantable_value\0\x01\x12hidden_in_commands\x02\x08\x10enchantable_slot\x04none\x03\x06damage\0\x03\x0Bframe_count\x02\x01\x0Eliquid_clipped\0\0\n\x16minecraft:storage_item\t\rallowed_items\0\0\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x03\tmax_slots\x80\x01\x01\x1Aallow_nested_storage_items\x01\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\0\0" } ;
+    pub const BROWN_BUNDLE : Self = Self { id : 859 , registry_key : "minecraft:brown_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x0Fitem_properties\x03\x11creative_category\x06\x01\rhand_equipped\0\x01\x12hidden_in_commands\x02\x03\x06damage\0\x03\x0Emax_stack_size\x02\x01\x0Eallow_off_hand\0\x01\x0Eshould_despawn\x01\x08\x0Ecreative_group\0\x03\x0Cuse_duration\0\x08\x10enchantable_slot\x04none\x01\x17can_destroy_in_creative\x01\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x0Cbundle_brown\x08\x11bundle_open_front\x17bundle_brown_open_front\x08\x10bundle_open_back\x16bundle_brown_open_back\0\0\x05\x0Cmining_speed\0\0\x80?\x03\ruse_animation\0\x01\x0Fstacked_by_data\0\x01\x0Eliquid_clipped\0\x01\x04foil\0\x03\x11enchantable_value\0\x03\x0Bframe_count\x02\0\t\titem_tags\0\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x16minecraft:storage_item\x01\x1Aallow_nested_storage_items\x01\t\rallowed_items\0\0\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x03\tmax_slots\x80\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\0\0" } ;
     pub const BROWN_CANDLE: Self = Self {
         id: -425,
         registry_key: "minecraft:brown_candle",
@@ -68862,7 +68887,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const BUNDLE : Self = Self { id : 860 , registry_key : "minecraft:bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x0Fitem_properties\x03\x11enchantable_value\0\x01\x0Eallow_off_hand\0\x01\x0Fstacked_by_data\0\x01\x17can_destroy_in_creative\x01\x03\x0Cuse_duration\0\x03\x0Bframe_count\x02\x01\rhand_equipped\0\x01\x04foil\0\x03\x06damage\0\x01\x0Eshould_despawn\x01\x03\x0Emax_stack_size\x02\x08\x0Ecreative_group\0\x01\x0Eliquid_clipped\0\x05\x0Cmining_speed\0\0\x80?\x03\x11creative_category\x06\x08\x10enchantable_slot\x04none\n\x0Eminecraft:icon\n\x08textures\x08\x10bundle_open_back\x10bundle_open_back\x08\x07default\x06bundle\x08\x11bundle_open_front\x11bundle_open_front\0\0\x03\ruse_animation\0\x01\x12hidden_in_commands\x02\0\t\titem_tags\0\0\n\x16minecraft:storage_item\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\t\rallowed_items\0\0\x01\x1Aallow_nested_storage_items\x01\x03\tmax_slots\x80\x01\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\0\0" } ;
+    pub const BUNDLE : Self = Self { id : 860 , registry_key : "minecraft:bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x0Fitem_properties\x03\x06damage\0\x03\x0Emax_stack_size\x02\x01\x0Fstacked_by_data\0\x03\x0Cuse_duration\0\x03\x11enchantable_value\0\x01\x0Eliquid_clipped\0\x03\x11creative_category\x06\x08\x0Ecreative_group\0\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x06bundle\x08\x10bundle_open_back\x10bundle_open_back\x08\x11bundle_open_front\x11bundle_open_front\0\0\x03\ruse_animation\0\x03\x0Bframe_count\x02\x01\x12hidden_in_commands\x02\x01\x17can_destroy_in_creative\x01\x01\x0Eallow_off_hand\0\x01\x04foil\0\x08\x10enchantable_slot\x04none\x05\x0Cmining_speed\0\0\x80?\x01\x0Eshould_despawn\x01\x01\rhand_equipped\0\0\t\titem_tags\0\0\n\x16minecraft:storage_item\x01\x1Aallow_nested_storage_items\x01\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x03\tmax_slots\x80\x01\t\rallowed_items\0\0\0\0\0" } ;
     pub const BURN_POTTERY_SHERD: Self = Self {
         id: 675,
         registry_key: "minecraft:burn_pottery_sherd",
@@ -68926,7 +68951,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const CAMERA : Self = Self { id : 607 , registry_key : "minecraft:camera" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x10minecraft:camera\x05\x13black_bars_duration\xCD\xCCL>\x05\x13slide_away_duration\xCD\xCCL>\x05\x17black_bars_screen_ratio\n\xD7\xA3=\x05\x14shutter_screen_ratio\0\0\0?\x05\x10shutter_duration\xCD\xCCL>\x05\x10picture_duration\0\0\x80?\0\x03\x16minecraft:use_duration\xC0\x9A\x0C\x08\x0Fminecraft:block\x10minecraft:camera\0\0" } ;
+    pub const CAMERA : Self = Self { id : 607 , registry_key : "minecraft:camera" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x08\x0Fminecraft:block\x10minecraft:camera\n\x10minecraft:camera\x05\x13black_bars_duration\xCD\xCCL>\x05\x17black_bars_screen_ratio\n\xD7\xA3=\x05\x10picture_duration\0\0\x80?\x05\x14shutter_screen_ratio\0\0\0?\x05\x13slide_away_duration\xCD\xCCL>\x05\x10shutter_duration\xCD\xCCL>\0\x03\x16minecraft:use_duration\xC0\x9A\x0C\0\0" } ;
     pub const CAMPFIRE: Self = Self {
         id: 601,
         registry_key: "minecraft:campfire",
@@ -68955,7 +68980,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const CARROT : Self = Self { id : 279 , registry_key : "minecraft:carrot" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:seed\x01\x1Aplant_at_any_solid_surface\0\x08\x0Bcrop_result\x11minecraft:carrots\x08\rplant_at_face\x02up\t\x08plant_at\x08\x02\x12minecraft:farmland\0\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x08\rcooldown_type\0\x08\x11using_converts_to\0\x03\tnutrition\x06\x03\ron_use_action\x01\x03\rcooldown_time\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x05\x13saturation_modifier\x9A\x99\x19?\x01\x0Ecan_always_eat\0\0\0\0" } ;
+    pub const CARROT : Self = Self { id : 279 , registry_key : "minecraft:carrot" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\tnutrition\x06\x03\rcooldown_time\0\x05\x13saturation_modifier\x9A\x99\x19?\x03\ron_use_action\x01\x08\x11using_converts_to\0\x01\x0Ecan_always_eat\0\x08\rcooldown_type\0\0\x03\x16minecraft:use_duration@\n\x0Eminecraft:seed\x08\rplant_at_face\x02up\x08\x0Bcrop_result\x11minecraft:carrots\x01\x1Aplant_at_any_solid_surface\0\t\x08plant_at\x08\x02\x12minecraft:farmland\0\0\0" } ;
     pub const CARROT_ON_A_STICK: Self = Self {
         id: 527,
         registry_key: "minecraft:carrot_on_a_stick",
@@ -69257,7 +69282,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const CHICKEN : Self = Self { id : 275 , registry_key : "minecraft:chicken" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x03\tnutrition\x04\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x05\x13saturation_modifier\x9A\x99\x99>\x08\x11using_converts_to\0\x03\ron_use_action\x01\t\x07effects\n\x02\x03\x02id\"\x08\x04name\x06hunger\x03\tamplifier\0\x05\x06chance\x9A\x99\x99>\x08\rdescriptionId\rpotion.hunger\x03\x08duration<\0\x08\rcooldown_type\0\x01\x0Ecan_always_eat\0\x03\rcooldown_time\0\0\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const CHICKEN : Self = Self { id : 275 , registry_key : "minecraft:chicken" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x03\rcooldown_time\0\t\x07effects\n\x02\x03\tamplifier\0\x03\x08duration<\x03\x02id\"\x08\x04name\x06hunger\x05\x06chance\x9A\x99\x99>\x08\rdescriptionId\rpotion.hunger\0\x05\x13saturation_modifier\x9A\x99\x99>\x03\tnutrition\x04\x01\x0Ecan_always_eat\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x08\x11using_converts_to\0\x03\ron_use_action\x01\x08\rcooldown_type\0\0\x03\x16minecraft:use_duration@\0\0" } ;
     pub const CHICKEN_SPAWN_EGG: Self = Self {
         id: 439,
         registry_key: "minecraft:chicken_spawn_egg",
@@ -69377,7 +69402,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const CHORUS_FRUIT : Self = Self { id : 568 , registry_key : "minecraft:chorus_fruit" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x08\rcooldown_type\x0Bchorusfruit\x03\ron_use_action\0\x03\rcooldown_time(\x01\x0Ecan_always_eat\x01\x08\x11using_converts_to\0\x05\x13saturation_modifier\x9A\x99\x99>\x03\tnutrition\x08\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\0\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const CHORUS_FRUIT : Self = Self { id : 568 , registry_key : "minecraft:chorus_fruit" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x08\rcooldown_type\x0Bchorusfruit\x03\tnutrition\x08\x03\ron_use_action\0\x01\x0Ecan_always_eat\x01\x03\rcooldown_time(\x08\x11using_converts_to\0\x05\x13saturation_modifier\x9A\x99\x99>\0\0\0" } ;
     pub const CHORUS_PLANT: Self = Self {
         id: 240,
         registry_key: "minecraft:chorus_plant",
@@ -69602,7 +69627,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const COD : Self = Self { id : 264 , registry_key : "minecraft:cod" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x01\x0Ecan_always_eat\0\x05\x13saturation_modifier\xCD\xCC\xCC=\x03\rcooldown_time\0\x03\ron_use_action\x01\x08\x11using_converts_to\0\x08\rcooldown_type\0\x03\tnutrition\x04\0\x01\x19minecraft:stacked_by_data\x01\0\0" } ;
+    pub const COD : Self = Self { id : 264 , registry_key : "minecraft:cod" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\x01\x19minecraft:stacked_by_data\x01\n\x0Eminecraft:food\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x08\x11using_converts_to\0\x03\rcooldown_time\0\x03\tnutrition\x04\x08\rcooldown_type\0\x05\x13saturation_modifier\xCD\xCC\xCC=\x01\x0Ecan_always_eat\0\x03\ron_use_action\x01\0\0\0" } ;
     pub const COD_BUCKET: Self = Self {
         id: 367,
         registry_key: "minecraft:cod_bucket",
@@ -69729,14 +69754,14 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const COOKED_BEEF : Self = Self { id : 274 , registry_key : "minecraft:cooked_beef" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x03\rcooldown_time\0\x01\x0Ecan_always_eat\0\x03\tnutrition\x10\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x08\rcooldown_type\0\x05\x13saturation_modifier\xCD\xCCL?\x08\x11using_converts_to\0\x03\ron_use_action\x01\0\0\0" } ;
-    pub const COOKED_CHICKEN : Self = Self { id : 276 , registry_key : "minecraft:cooked_chicken" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x03\ron_use_action\x01\x03\rcooldown_time\0\x03\tnutrition\x0C\x08\x11using_converts_to\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x08\rcooldown_type\0\x01\x0Ecan_always_eat\0\x05\x13saturation_modifier\x9A\x99\x19?\0\x03\x16minecraft:use_duration@\0\0" } ;
-    pub const COOKED_COD : Self = Self { id : 268 , registry_key : "minecraft:cooked_cod" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x05\x13saturation_modifier\x9A\x99\x19?\x08\x11using_converts_to\0\x08\rcooldown_type\0\x01\x0Ecan_always_eat\0\x03\rcooldown_time\0\x03\tnutrition\n\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\ron_use_action\x01\0\x01\x19minecraft:stacked_by_data\x01\0\0" } ;
-    pub const COOKED_MUTTON : Self = Self { id : 561 , registry_key : "minecraft:cooked_mutton" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x08\x11using_converts_to\0\x05\x13saturation_modifier\xCD\xCCL?\x01\x0Ecan_always_eat\0\x03\rcooldown_time\0\x03\ron_use_action\x01\x08\rcooldown_type\0\x03\tnutrition\x0C\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\0\x03\x16minecraft:use_duration@\0\0" } ;
-    pub const COOKED_PORKCHOP : Self = Self { id : 263 , registry_key : "minecraft:cooked_porkchop" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x01\x0Ecan_always_eat\0\x03\rcooldown_time\0\x08\rcooldown_type\0\x03\tnutrition\x10\x03\ron_use_action\x01\x08\x11using_converts_to\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x05\x13saturation_modifier\xCD\xCCL?\0\x03\x16minecraft:use_duration@\0\0" } ;
-    pub const COOKED_RABBIT : Self = Self { id : 289 , registry_key : "minecraft:cooked_rabbit" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x03\tnutrition\n\x03\ron_use_action\x01\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x01\x0Ecan_always_eat\0\x03\rcooldown_time\0\x08\rcooldown_type\0\x05\x13saturation_modifier\x9A\x99\x19?\x08\x11using_converts_to\0\0\x03\x16minecraft:use_duration@\0\0" } ;
-    pub const COOKED_SALMON : Self = Self { id : 269 , registry_key : "minecraft:cooked_salmon" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\x01\x19minecraft:stacked_by_data\x01\n\x0Eminecraft:food\x01\x0Ecan_always_eat\0\x08\x11using_converts_to\0\x03\ron_use_action\x01\x08\rcooldown_type\0\x03\tnutrition\x0C\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x05\x13saturation_modifier\xCD\xCCL?\x03\rcooldown_time\0\0\0\0" } ;
-    pub const COOKIE : Self = Self { id : 271 , registry_key : "minecraft:cookie" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x08\rcooldown_type\0\x03\tnutrition\x04\x03\ron_use_action\x01\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x08\x11using_converts_to\0\x01\x0Ecan_always_eat\0\x03\rcooldown_time\0\x05\x13saturation_modifier\xCD\xCC\xCC=\0\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const COOKED_BEEF : Self = Self { id : 274 , registry_key : "minecraft:cooked_beef" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x03\ron_use_action\x01\x03\tnutrition\x10\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x01\x0Ecan_always_eat\0\x08\rcooldown_type\0\x05\x13saturation_modifier\xCD\xCCL?\x08\x11using_converts_to\0\x03\rcooldown_time\0\0\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const COOKED_CHICKEN : Self = Self { id : 276 , registry_key : "minecraft:cooked_chicken" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x03\tnutrition\x0C\x05\x13saturation_modifier\x9A\x99\x19?\x01\x0Ecan_always_eat\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\rcooldown_time\0\x03\ron_use_action\x01\x08\rcooldown_type\0\x08\x11using_converts_to\0\0\0\0" } ;
+    pub const COOKED_COD : Self = Self { id : 268 , registry_key : "minecraft:cooked_cod" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\x01\x19minecraft:stacked_by_data\x01\n\x0Eminecraft:food\x05\x13saturation_modifier\x9A\x99\x19?\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\rcooldown_time\0\x01\x0Ecan_always_eat\0\x03\tnutrition\n\x08\rcooldown_type\0\x03\ron_use_action\x01\x08\x11using_converts_to\0\0\0\0" } ;
+    pub const COOKED_MUTTON : Self = Self { id : 561 , registry_key : "minecraft:cooked_mutton" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x03\rcooldown_time\0\x08\x11using_converts_to\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x05\x13saturation_modifier\xCD\xCCL?\x08\rcooldown_type\0\x01\x0Ecan_always_eat\0\x03\ron_use_action\x01\x03\tnutrition\x0C\0\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const COOKED_PORKCHOP : Self = Self { id : 263 , registry_key : "minecraft:cooked_porkchop" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x01\x0Ecan_always_eat\0\x03\rcooldown_time\0\x08\x11using_converts_to\0\x08\rcooldown_type\0\x03\tnutrition\x10\x03\ron_use_action\x01\x05\x13saturation_modifier\xCD\xCCL?\0\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const COOKED_RABBIT : Self = Self { id : 289 , registry_key : "minecraft:cooked_rabbit" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x03\rcooldown_time\0\x03\ron_use_action\x01\x03\tnutrition\n\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x08\x11using_converts_to\0\x05\x13saturation_modifier\x9A\x99\x19?\x01\x0Ecan_always_eat\0\x08\rcooldown_type\0\0\0\0" } ;
+    pub const COOKED_SALMON : Self = Self { id : 269 , registry_key : "minecraft:cooked_salmon" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x01\x19minecraft:stacked_by_data\x01\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x03\tnutrition\x0C\x03\rcooldown_time\0\x03\ron_use_action\x01\x01\x0Ecan_always_eat\0\x08\rcooldown_type\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x05\x13saturation_modifier\xCD\xCCL?\x08\x11using_converts_to\0\0\0\0" } ;
+    pub const COOKIE : Self = Self { id : 271 , registry_key : "minecraft:cookie" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x08\rcooldown_type\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x08\x11using_converts_to\0\x01\x0Ecan_always_eat\0\x05\x13saturation_modifier\xCD\xCC\xCC=\x03\tnutrition\x04\x03\ron_use_action\x01\x03\rcooldown_time\0\0\x03\x16minecraft:use_duration@\0\0" } ;
     pub const COPPER_AXE: Self = Self {
         id: 750,
         registry_key: "minecraft:copper_axe",
@@ -69898,7 +69923,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const COPPER_SPEAR : Self = Self { id : 850 , registry_key : "minecraft:copper_spear" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x14minecraft:repairable\t\x0Crepair_items\n\x04\x08\rrepair_amount)context.other->query.remaining_durability\t\x05items\n\x02\x08\x04name\x16minecraft:copper_spear\0\0\t\x05items\n\x02\x08\x04name\x16minecraft:copper_ingot\0\x08\rrepair_amount\x1Bquery.max_durability * 0.25\0\0\n\x14minecraft:durability\n\rdamage_chance\x03\x03max\xC8\x01\x03\x03min\0\0\x03\x0Emax_durability\xFC\x02\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x18minecraft:swing_duration\x05\x05value\x9A\x99Y?\0\n\x12minecraft:cooldown\x05\x08duration\x9A\x99Y?\x08\x08category\x05spear\x08\x04type\x06attack\0\n\x17minecraft:use_modifiers\x01\x0Femit_vibrations\0\x05\x0Cuse_duration\0\xA0\x8CG\x05\x11movement_modifier\0\0\x80?\x08\x0Bstart_sound\x15item.copper_spear.use\x08\x0Bstart_using\x06always\0\n\x15minecraft:enchantable\x08\x04slot\x0Bmelee_spear\x01\x05value\r\0\n\x0Fitem_properties\x03\x11enchantable_value\x1A\x03\ruse_animation\0\x01\rhand_equipped\x01\x08\x0Ecreative_group\0\x01\x04foil\0\x08\x10enchantable_slot\x0Bmelee_spear\x01\x0Eliquid_clipped\0\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x0Ccopper_spear\0\0\x01\x0Fstacked_by_data\0\x03\x0Cuse_duration\x80\xE4\xAF\x01\x03\x06damage\x04\x01\x12hidden_in_commands\x02\x03\x0Bframe_count\x02\x05\x0Cmining_speed\0\0\x80?\x03\x11creative_category\x06\x01\x0Eshould_despawn\x01\x01\x0Eallow_off_hand\0\x01\x17can_destroy_in_creative\x01\x03\x0Emax_stack_size\x02\0\n\x16minecraft:display_name\x08\x05value\x16item.copper_spear.name\0\n\x0Eminecraft:tags\t\x04tags\x08\x04\x15minecraft:copper_tier\x12minecraft:is_spear\0\n\x19minecraft:piercing_weapon\x05\rhitbox_margin\0\0\x80>\n\x05reach\x05\x03min\0\0\0@\x05\x03max\0\0\x90@\0\n\x0Ecreative_reach\x05\x03max\0\0\xF0@\x05\x03min\0\0\0@\0\0\n\x18minecraft:kinetic_weapon\n\x18minecraft:kinetic_weapon\x05\x0Fdamage_modifier\0\0\0\0\n\x05reach\x05\x03min\0\0\0@\x05\x03max\0\0\x90@\0\x05\rhitbox_margin\0\0\x80>\n\x14knockback_conditions\x05\tmin_speed33\xA3@\x02\x0Cmax_duration\xA5\0\x05\x12min_relative_speed\0\0\0\0\0\n\x0Ecreative_reach\x05\x03max\0\0\xF0@\x05\x03min\0\0\0@\0\n\x13dismount_conditions\x02\x0Cmax_durationP\0\x05\x12min_relative_speed\0\0\0\0\x05\tmin_speed\0\0@A\0\x02\x05delay\r\0\n\x11damage_conditions\x02\x0Cmax_duration\xFA\0\x05\tmin_speed\0\0\0\0\x05\x12min_relative_speed33\x93@\0\x05\x11damage_multiplier\x85\xEBQ?\0\0\n\x10minecraft:damage\x02\x05value\x02\0\0\n\x16minecraft:swing_sounds\x08\nattack_hit\x1Citem.copper_spear.attack_hit\x08\x0Battack_miss\x1Ditem.copper_spear.attack_miss\0\n\x17minecraft:hand_equipped\x01\x05value\x01\0\t\titem_tags\x08\x04\x15minecraft:copper_tier\x12minecraft:is_spear\0\0" } ;
+    pub const COPPER_SPEAR : Self = Self { id : 850 , registry_key : "minecraft:copper_spear" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x19minecraft:piercing_weapon\x05\rhitbox_margin\0\0\x80>\n\x0Ecreative_reach\x05\x03max\0\0\xF0@\x05\x03min\0\0\0@\0\n\x05reach\x05\x03max\0\0\x90@\x05\x03min\0\0\0@\0\0\n\x18minecraft:swing_duration\x05\x05value\x9A\x99Y?\0\n\x12minecraft:cooldown\x05\x08duration\x9A\x99Y?\x08\x04type\x06attack\x08\x08category\x05spear\0\t\titem_tags\x08\x04\x15minecraft:copper_tier\x12minecraft:is_spear\n\x15minecraft:enchantable\x08\x04slot\x0Bmelee_spear\x01\x05value\r\0\n\x10minecraft:damage\x02\x05value\x02\0\0\n\x17minecraft:hand_equipped\x01\x05value\x01\0\n\x0Fitem_properties\x01\x0Fstacked_by_data\0\x01\x0Eshould_despawn\x01\x03\x0Bframe_count\x02\x01\x17can_destroy_in_creative\x01\x05\x0Cmining_speed\0\0\x80?\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x0Ccopper_spear\0\0\x01\x0Eallow_off_hand\0\x03\x0Emax_stack_size\x02\x08\x10enchantable_slot\x0Bmelee_spear\x01\x0Eliquid_clipped\0\x03\x11creative_category\x06\x08\x0Ecreative_group\0\x03\x06damage\x04\x01\x04foil\0\x03\x11enchantable_value\x1A\x01\rhand_equipped\x01\x01\x12hidden_in_commands\x02\x03\ruse_animation\0\x03\x0Cuse_duration\x80\xE4\xAF\x01\0\n\x14minecraft:repairable\t\x0Crepair_items\n\x04\x08\rrepair_amount)context.other->query.remaining_durability\t\x05items\n\x02\x08\x04name\x16minecraft:copper_spear\0\0\t\x05items\n\x02\x08\x04name\x16minecraft:copper_ingot\0\x08\rrepair_amount\x1Bquery.max_durability * 0.25\0\0\n\x14minecraft:durability\n\rdamage_chance\x03\x03max\xC8\x01\x03\x03min\0\0\x03\x0Emax_durability\xFC\x02\0\n\x18minecraft:kinetic_weapon\n\x18minecraft:kinetic_weapon\n\x13dismount_conditions\x05\x12min_relative_speed\0\0\0\0\x05\tmin_speed\0\0@A\x02\x0Cmax_durationP\0\0\n\x0Ecreative_reach\x05\x03min\0\0\0@\x05\x03max\0\0\xF0@\0\n\x14knockback_conditions\x05\tmin_speed33\xA3@\x02\x0Cmax_duration\xA5\0\x05\x12min_relative_speed\0\0\0\0\0\n\x11damage_conditions\x05\x12min_relative_speed33\x93@\x05\tmin_speed\0\0\0\0\x02\x0Cmax_duration\xFA\0\0\x05\rhitbox_margin\0\0\x80>\x05\x0Fdamage_modifier\0\0\0\0\x05\x11damage_multiplier\x85\xEBQ?\x02\x05delay\r\0\n\x05reach\x05\x03max\0\0\x90@\x05\x03min\0\0\0@\0\0\0\n\x0Eminecraft:tags\t\x04tags\x08\x04\x15minecraft:copper_tier\x12minecraft:is_spear\0\n\x16minecraft:display_name\x08\x05value\x16item.copper_spear.name\0\n\x16minecraft:swing_sounds\x08\nattack_hit\x1Citem.copper_spear.attack_hit\x08\x0Battack_miss\x1Ditem.copper_spear.attack_miss\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x17minecraft:use_modifiers\x01\x0Femit_vibrations\0\x05\x11movement_modifier\0\0\x80?\x05\x0Cuse_duration\0\xA0\x8CG\x08\x0Bstart_sound\x15item.copper_spear.use\x08\x0Bstart_using\x06always\0\0\0" } ;
     pub const COPPER_SWORD: Self = Self {
         id: 747,
         registry_key: "minecraft:copper_sword",
@@ -70263,7 +70288,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const CYAN_BUNDLE : Self = Self { id : 861 , registry_key : "minecraft:cyan_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x0Fitem_properties\x01\x0Eshould_despawn\x01\x01\x17can_destroy_in_creative\x01\x08\x0Ecreative_group\0\x03\x0Bframe_count\x02\x01\x12hidden_in_commands\x02\n\x0Eminecraft:icon\n\x08textures\x08\x11bundle_open_front\x16bundle_cyan_open_front\x08\x07default\x0Bbundle_cyan\x08\x10bundle_open_back\x15bundle_cyan_open_back\0\0\x03\x11enchantable_value\0\x01\x04foil\0\x01\rhand_equipped\0\x01\x0Fstacked_by_data\0\x03\ruse_animation\0\x03\x0Cuse_duration\0\x01\x0Eallow_off_hand\0\x01\x0Eliquid_clipped\0\x08\x10enchantable_slot\x04none\x03\x11creative_category\x06\x03\x06damage\0\x05\x0Cmining_speed\0\0\x80?\x03\x0Emax_stack_size\x02\0\t\titem_tags\0\0\n\x16minecraft:storage_item\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x03\tmax_slots\x80\x01\x01\x1Aallow_nested_storage_items\x01\t\rallowed_items\0\0\0\0\0" } ;
+    pub const CYAN_BUNDLE : Self = Self { id : 861 , registry_key : "minecraft:cyan_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\t\titem_tags\0\0\n\x16minecraft:storage_item\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x01\x1Aallow_nested_storage_items\x01\x03\tmax_slots\x80\x01\t\rallowed_items\0\0\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n\x0Fitem_properties\x01\x0Fstacked_by_data\0\x03\x0Cuse_duration\0\x01\x17can_destroy_in_creative\x01\x01\rhand_equipped\0\x01\x0Eshould_despawn\x01\x03\ruse_animation\0\x05\x0Cmining_speed\0\0\x80?\x08\x0Ecreative_group\0\x01\x12hidden_in_commands\x02\x03\x11creative_category\x06\x03\x0Bframe_count\x02\x03\x11enchantable_value\0\x03\x06damage\0\x01\x04foil\0\x08\x10enchantable_slot\x04none\x01\x0Eliquid_clipped\0\x03\x0Emax_stack_size\x02\x01\x0Eallow_off_hand\0\n\x0Eminecraft:icon\n\x08textures\x08\x11bundle_open_front\x16bundle_cyan_open_front\x08\x07default\x0Bbundle_cyan\x08\x10bundle_open_back\x15bundle_cyan_open_back\0\0\0\0\0" } ;
     pub const CYAN_CANDLE: Self = Self {
         id: -422,
         registry_key: "minecraft:cyan_candle",
@@ -70985,7 +71010,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const DIAMOND_SPEAR : Self = Self { id : 851 , registry_key : "minecraft:diamond_spear" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x16minecraft:swing_sounds\x08\x0Battack_miss\x1Eitem.diamond_spear.attack_miss\x08\nattack_hit\x1Ditem.diamond_spear.attack_hit\0\t\titem_tags\x08\x06\x16minecraft:diamond_tier\x1Dminecraft:transformable_items\x12minecraft:is_spear\n\x17minecraft:use_modifiers\x08\x0Bstart_sound\x16item.diamond_spear.use\x01\x0Femit_vibrations\0\x05\x11movement_modifier\0\0\x80?\x05\x0Cuse_duration\0\xA0\x8CG\x08\x0Bstart_using\x06always\0\n\x0Fitem_properties\x01\x17can_destroy_in_creative\x01\x08\x0Ecreative_group\0\x01\x0Fstacked_by_data\0\x03\x0Emax_stack_size\x02\x01\x0Eallow_off_hand\0\x01\x12hidden_in_commands\x02\x01\x04foil\0\x03\x0Bframe_count\x02\x08\x10enchantable_slot\x0Bmelee_spear\x03\x0Cuse_duration\x80\xE4\xAF\x01\x01\x0Eshould_despawn\x01\x01\x0Eliquid_clipped\0\x03\x11creative_category\x06\x03\ruse_animation\0\x01\rhand_equipped\x01\x05\x0Cmining_speed\0\0\x80?\x03\x11enchantable_value\x14\x03\x06damage\x08\n\x0Eminecraft:icon\n\x08textures\x08\x07default\rdiamond_spear\0\0\0\n\x19minecraft:piercing_weapon\x05\rhitbox_margin\0\0\x80>\n\x05reach\x05\x03max\0\0\x90@\x05\x03min\0\0\0@\0\n\x0Ecreative_reach\x05\x03max\0\0\xF0@\x05\x03min\0\0\0@\0\0\n\x15minecraft:enchantable\x08\x04slot\x0Bmelee_spear\x01\x05value\n\0\n\x17minecraft:hand_equipped\x01\x05value\x01\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x18minecraft:swing_duration\x05\x05valueff\x86?\0\n\x14minecraft:repairable\t\x0Crepair_items\n\x04\x08\rrepair_amount)context.other->query.remaining_durability\t\x05items\n\x02\x08\x04name\x17minecraft:diamond_spear\0\0\x08\rrepair_amount\x1Bquery.max_durability * 0.25\t\x05items\n\x02\x08\x04name\x11minecraft:diamond\0\0\0\n\x16minecraft:display_name\x08\x05value\x17item.diamond_spear.name\0\n\x14minecraft:durability\x03\x0Emax_durability\xB0\x18\n\rdamage_chance\x03\x03min\0\x03\x03max\xC8\x01\0\0\n\x12minecraft:cooldown\x05\x08durationff\x86?\x08\x08category\x05spear\x08\x04type\x06attack\0\n\x18minecraft:kinetic_weapon\n\x18minecraft:kinetic_weapon\n\x14knockback_conditions\x02\x0Cmax_duration\x82\0\x05\x12min_relative_speed\0\0\0\0\x05\tmin_speed33\xA3@\0\x02\x05delay\n\0\n\x13dismount_conditions\x05\tmin_speed\0\0 A\x05\x12min_relative_speed\0\0\0\0\x02\x0Cmax_duration<\0\0\x05\x11damage_multiplier\x9A\x99\x89?\x05\rhitbox_margin\0\0\x80>\n\x05reach\x05\x03max\0\0\x90@\x05\x03min\0\0\0@\0\n\x11damage_conditions\x05\tmin_speed\0\0\0\0\x05\x12min_relative_speed33\x93@\x02\x0Cmax_duration\xC8\0\0\x05\x0Fdamage_modifier\0\0\0\0\n\x0Ecreative_reach\x05\x03max\0\0\xF0@\x05\x03min\0\0\0@\0\0\0\n\x0Eminecraft:tags\t\x04tags\x08\x06\x16minecraft:diamond_tier\x1Dminecraft:transformable_items\x12minecraft:is_spear\0\n\x10minecraft:damage\x02\x05value\x04\0\0\0\0" } ;
+    pub const DIAMOND_SPEAR : Self = Self { id : 851 , registry_key : "minecraft:diamond_spear" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x18minecraft:kinetic_weapon\n\x18minecraft:kinetic_weapon\n\x0Ecreative_reach\x05\x03max\0\0\xF0@\x05\x03min\0\0\0@\0\n\x05reach\x05\x03max\0\0\x90@\x05\x03min\0\0\0@\0\x05\rhitbox_margin\0\0\x80>\n\x11damage_conditions\x05\tmin_speed\0\0\0\0\x02\x0Cmax_duration\xC8\0\x05\x12min_relative_speed33\x93@\0\x05\x11damage_multiplier\x9A\x99\x89?\x05\x0Fdamage_modifier\0\0\0\0\n\x14knockback_conditions\x02\x0Cmax_duration\x82\0\x05\tmin_speed33\xA3@\x05\x12min_relative_speed\0\0\0\0\0\x02\x05delay\n\0\n\x13dismount_conditions\x05\x12min_relative_speed\0\0\0\0\x02\x0Cmax_duration<\0\x05\tmin_speed\0\0 A\0\0\0\n\x15minecraft:enchantable\x08\x04slot\x0Bmelee_spear\x01\x05value\n\0\n\x17minecraft:use_modifiers\x05\x11movement_modifier\0\0\x80?\x01\x0Femit_vibrations\0\x08\x0Bstart_sound\x16item.diamond_spear.use\x05\x0Cuse_duration\0\xA0\x8CG\x08\x0Bstart_using\x06always\0\n\x14minecraft:repairable\t\x0Crepair_items\n\x04\x08\rrepair_amount)context.other->query.remaining_durability\t\x05items\n\x02\x08\x04name\x17minecraft:diamond_spear\0\0\x08\rrepair_amount\x1Bquery.max_durability * 0.25\t\x05items\n\x02\x08\x04name\x11minecraft:diamond\0\0\0\t\titem_tags\x08\x06\x16minecraft:diamond_tier\x1Dminecraft:transformable_items\x12minecraft:is_spear\n\x14minecraft:durability\x03\x0Emax_durability\xB0\x18\n\rdamage_chance\x03\x03min\0\x03\x03max\xC8\x01\0\0\n\x16minecraft:swing_sounds\x08\x0Battack_miss\x1Eitem.diamond_spear.attack_miss\x08\nattack_hit\x1Ditem.diamond_spear.attack_hit\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x12minecraft:cooldown\x08\x08category\x05spear\x05\x08durationff\x86?\x08\x04type\x06attack\0\n\x0Fitem_properties\x03\x0Bframe_count\x02\x01\rhand_equipped\x01\n\x0Eminecraft:icon\n\x08textures\x08\x07default\rdiamond_spear\0\0\x03\x11creative_category\x06\x01\x04foil\0\x03\x0Cuse_duration\x80\xE4\xAF\x01\x01\x0Eliquid_clipped\0\x08\x0Ecreative_group\0\x01\x0Eshould_despawn\x01\x08\x10enchantable_slot\x0Bmelee_spear\x03\x11enchantable_value\x14\x01\x17can_destroy_in_creative\x01\x05\x0Cmining_speed\0\0\x80?\x03\x0Emax_stack_size\x02\x01\x0Fstacked_by_data\0\x01\x0Eallow_off_hand\0\x01\x12hidden_in_commands\x02\x03\x06damage\x08\x03\ruse_animation\0\0\n\x19minecraft:piercing_weapon\n\x05reach\x05\x03min\0\0\0@\x05\x03max\0\0\x90@\0\n\x0Ecreative_reach\x05\x03min\0\0\0@\x05\x03max\0\0\xF0@\0\x05\rhitbox_margin\0\0\x80>\0\n\x18minecraft:swing_duration\x05\x05valueff\x86?\0\n\x10minecraft:damage\x02\x05value\x04\0\0\n\x16minecraft:display_name\x08\x05value\x17item.diamond_spear.name\0\n\x0Eminecraft:tags\t\x04tags\x08\x06\x16minecraft:diamond_tier\x1Dminecraft:transformable_items\x12minecraft:is_spear\0\n\x17minecraft:hand_equipped\x01\x05value\x01\0\0\0" } ;
     pub const DIAMOND_SWORD: Self = Self {
         id: 318,
         registry_key: "minecraft:diamond_sword",
@@ -71140,7 +71165,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const DRIED_KELP : Self = Self { id : 270 , registry_key : "minecraft:dried_kelp" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration \n\x0Eminecraft:food\x03\tnutrition\x02\x01\x0Ecan_always_eat\0\x03\ron_use_action\x01\x03\rcooldown_time\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x05\x13saturation_modifier\xCD\xCC\xCC=\x08\rcooldown_type\0\x08\x11using_converts_to\0\0\0\0" } ;
+    pub const DRIED_KELP : Self = Self { id : 270 , registry_key : "minecraft:dried_kelp" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration \n\x0Eminecraft:food\x08\rcooldown_type\0\x05\x13saturation_modifier\xCD\xCC\xCC=\x01\x0Ecan_always_eat\0\x03\tnutrition\x02\x03\ron_use_action\x01\x03\rcooldown_time\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x08\x11using_converts_to\0\0\0\0" } ;
     pub const DRIED_KELP_BLOCK: Self = Self {
         id: -139,
         registry_key: "minecraft:dried_kelp_block",
@@ -72086,7 +72111,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const ENCHANTED_GOLDEN_APPLE : Self = Self { id : 259 , registry_key : "minecraft:enchanted_golden_apple" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x01\x0Eminecraft:foil\x01\x01\x19minecraft:stacked_by_data\x01\n\x0Eminecraft:food\x05\x13saturation_modifier\x9A\x99\x99?\x03\rcooldown_time\0\x08\rcooldown_type\0\x08\x11using_converts_to\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x01\x0Ecan_always_eat\x01\t\x07effects\n\x08\x03\x02id\x14\x08\x04name\x0Cregeneration\x03\tamplifier\x02\x05\x06chance\0\0\x80?\x08\rdescriptionId\x13potion.regeneration\x03\x08duration<\0\x03\tamplifier\x06\x05\x06chance\0\0\x80?\x03\x08duration\xF0\x01\x08\rdescriptionId\x11potion.absorption\x03\x02id,\x08\x04name\nabsorption\0\x08\x04name\nresistance\x05\x06chance\0\0\x80?\x08\rdescriptionId\x11potion.resistance\x03\tamplifier\0\x03\x02id\x16\x03\x08duration\xD8\x04\0\x05\x06chance\0\0\x80?\x08\x04name\x0Ffire_resistance\x08\rdescriptionId\x15potion.fireResistance\x03\tamplifier\0\x03\x08duration\xD8\x04\x03\x02id\x18\0\x03\tnutrition\x08\x03\ron_use_action\x01\0\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const ENCHANTED_GOLDEN_APPLE : Self = Self { id : 259 , registry_key : "minecraft:enchanted_golden_apple" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x01\x0Eminecraft:foil\x01\x01\x19minecraft:stacked_by_data\x01\n\x0Eminecraft:food\x08\x11using_converts_to\0\x03\tnutrition\x08\x03\ron_use_action\x01\x05\x13saturation_modifier\x9A\x99\x99?\x01\x0Ecan_always_eat\x01\x03\rcooldown_time\0\x08\rcooldown_type\0\t\x07effects\n\x08\x03\x02id\x14\x08\x04name\x0Cregeneration\x03\x08duration<\x05\x06chance\0\0\x80?\x03\tamplifier\x02\x08\rdescriptionId\x13potion.regeneration\0\x08\rdescriptionId\x11potion.absorption\x03\x02id,\x03\tamplifier\x06\x03\x08duration\xF0\x01\x08\x04name\nabsorption\x05\x06chance\0\0\x80?\0\x03\x08duration\xD8\x04\x03\tamplifier\0\x08\x04name\nresistance\x05\x06chance\0\0\x80?\x08\rdescriptionId\x11potion.resistance\x03\x02id\x16\0\x08\rdescriptionId\x15potion.fireResistance\x03\x02id\x18\x08\x04name\x0Ffire_resistance\x05\x06chance\0\0\x80?\x03\tamplifier\0\x03\x08duration\xD8\x04\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\0\x03\x16minecraft:use_duration@\0\0" } ;
     pub const ENCHANTING_TABLE: Self = Self {
         id: 116,
         registry_key: "minecraft:enchanting_table",
@@ -72661,7 +72686,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const GLOW_BERRIES : Self = Self { id : 879 , registry_key : "minecraft:glow_berries" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x08\x11using_converts_to\0\x08\rcooldown_type\0\x01\x0Ecan_always_eat\0\x03\rcooldown_time\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x05\x13saturation_modifier\x9A\x99\x99>\x03\tnutrition\x04\x03\ron_use_action\x01\0\n\x0Eminecraft:seed\x01\x1Aplant_at_any_solid_surface\x01\x08\rplant_at_face\x04down\x08\x0Bcrop_result\x14minecraft:cave_vines\t\x08plant_at\x08\x04\ncave_vines\x1Ccave_vines_head_with_berries\0\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const GLOW_BERRIES : Self = Self { id : 879 , registry_key : "minecraft:glow_berries" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:seed\x08\rplant_at_face\x04down\t\x08plant_at\x08\x04\ncave_vines\x1Ccave_vines_head_with_berries\x01\x1Aplant_at_any_solid_surface\x01\x08\x0Bcrop_result\x14minecraft:cave_vines\0\n\x0Eminecraft:food\x01\x0Ecan_always_eat\0\x08\x11using_converts_to\0\x03\rcooldown_time\0\x03\ron_use_action\x01\x08\rcooldown_type\0\x03\tnutrition\x04\x05\x13saturation_modifier\x9A\x99\x99>\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\0\0\0" } ;
     pub const GLOW_FRAME: Self = Self {
         id: 636,
         registry_key: "minecraft:glow_frame",
@@ -72760,7 +72785,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const GOLDEN_APPLE : Self = Self { id : 258 , registry_key : "minecraft:golden_apple" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\x01\x19minecraft:stacked_by_data\x01\n\x0Eminecraft:food\t\x07effects\n\x04\x08\x04name\x0Cregeneration\x05\x06chance\0\0\x80?\x03\tamplifier\x02\x08\rdescriptionId\x13potion.regeneration\x03\x08duration\n\x03\x02id\x14\0\x05\x06chance\0\0\x80?\x03\x08duration\xF0\x01\x03\x02id,\x08\x04name\nabsorption\x03\tamplifier\0\x08\rdescriptionId\x11potion.absorption\0\x03\ron_use_action\x01\x05\x13saturation_modifier\x9A\x99\x99?\x08\x11using_converts_to\0\x01\x0Ecan_always_eat\x01\x03\rcooldown_time\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\tnutrition\x08\x08\rcooldown_type\0\0\0\0" } ;
+    pub const GOLDEN_APPLE : Self = Self { id : 258 , registry_key : "minecraft:golden_apple" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\t\x07effects\n\x04\x05\x06chance\0\0\x80?\x03\x02id\x14\x08\x04name\x0Cregeneration\x03\x08duration\n\x03\tamplifier\x02\x08\rdescriptionId\x13potion.regeneration\0\x08\x04name\nabsorption\x05\x06chance\0\0\x80?\x03\x02id,\x08\rdescriptionId\x11potion.absorption\x03\x08duration\xF0\x01\x03\tamplifier\0\0\x03\tnutrition\x08\x08\x11using_converts_to\0\x08\rcooldown_type\0\x01\x0Ecan_always_eat\x01\x03\ron_use_action\x01\x05\x13saturation_modifier\x9A\x99\x99?\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\rcooldown_time\0\0\x01\x19minecraft:stacked_by_data\x01\x03\x16minecraft:use_duration@\0\0" } ;
     pub const GOLDEN_AXE: Self = Self {
         id: 328,
         registry_key: "minecraft:golden_axe",
@@ -72775,7 +72800,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const GOLDEN_CARROT : Self = Self { id : 283 , registry_key : "minecraft:golden_carrot" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x08\rcooldown_type\0\x05\x13saturation_modifier\x9A\x99\x99?\x01\x0Ecan_always_eat\0\x03\ron_use_action\x01\x08\x11using_converts_to\0\x03\tnutrition\x0C\x03\rcooldown_time\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\0\0\0" } ;
+    pub const GOLDEN_CARROT : Self = Self { id : 283 , registry_key : "minecraft:golden_carrot" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x03\rcooldown_time\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x08\rcooldown_type\0\x05\x13saturation_modifier\x9A\x99\x99?\x03\ron_use_action\x01\x08\x11using_converts_to\0\x03\tnutrition\x0C\x01\x0Ecan_always_eat\0\0\x03\x16minecraft:use_duration@\0\0" } ;
     pub const GOLDEN_CHESTPLATE: Self = Self {
         id: 355,
         registry_key: "minecraft:golden_chestplate",
@@ -72846,7 +72871,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const GOLDEN_SPEAR : Self = Self { id : 852 , registry_key : "minecraft:golden_spear" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x0Fitem_properties\x01\x0Eshould_despawn\x01\x03\x0Emax_stack_size\x02\n\x0Eminecraft:icon\n\x08textures\x08\x07default\ngold_spear\0\0\x01\x17can_destroy_in_creative\x01\x03\x0Bframe_count\x02\x01\rhand_equipped\x01\x01\x12hidden_in_commands\x02\x01\x0Fstacked_by_data\0\x08\x10enchantable_slot\x0Bmelee_spear\x03\ruse_animation\0\x03\x06damage\x02\x08\x0Ecreative_group\0\x03\x11creative_category\x06\x05\x0Cmining_speed\0\0\x80?\x01\x0Eallow_off_hand\0\x01\x0Eliquid_clipped\0\x03\x11enchantable_value,\x01\x04foil\0\x03\x0Cuse_duration\x80\xE4\xAF\x01\0\n\x15minecraft:enchantable\x08\x04slot\x0Bmelee_spear\x01\x05value\x16\0\n\x18minecraft:swing_duration\x05\x05value33s?\0\n\x16minecraft:swing_sounds\x08\nattack_hit\x1Citem.golden_spear.attack_hit\x08\x0Battack_miss\x1Ditem.golden_spear.attack_miss\0\n\x14minecraft:durability\n\rdamage_chance\x03\x03min\0\x03\x03max\xC8\x01\0\x03\x0Emax_durability<\0\n\x18minecraft:kinetic_weapon\n\x18minecraft:kinetic_weapon\n\x13dismount_conditions\x02\x0Cmax_durationF\0\x05\x12min_relative_speed\0\0\0\0\x05\tmin_speed\0\0PA\0\x05\rhitbox_margin\0\0\x80>\n\x0Ecreative_reach\x05\x03min\0\0\0@\x05\x03max\0\0\xF0@\0\n\x11damage_conditions\x02\x0Cmax_duration\x13\x01\x05\x12min_relative_speed33\x93@\x05\tmin_speed\0\0\0\0\0\x05\x11damage_multiplier333?\x02\x05delay\x0E\0\x05\x0Fdamage_modifier\0\0\0\0\n\x14knockback_conditions\x02\x0Cmax_duration\xAA\0\x05\tmin_speed33\xA3@\x05\x12min_relative_speed\0\0\0\0\0\n\x05reach\x05\x03max\0\0\x90@\x05\x03min\0\0\0@\0\0\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x12minecraft:cooldown\x08\x08category\x05spear\x05\x08duration33s?\x08\x04type\x06attack\0\n\x0Eminecraft:tags\t\x04tags\x08\x04\x15minecraft:golden_tier\x12minecraft:is_spear\0\n\x16minecraft:display_name\x08\x05value\x16item.golden_spear.name\0\t\titem_tags\x08\x04\x15minecraft:golden_tier\x12minecraft:is_spear\n\x17minecraft:hand_equipped\x01\x05value\x01\0\n\x19minecraft:piercing_weapon\x05\rhitbox_margin\0\0\x80>\n\x05reach\x05\x03max\0\0\x90@\x05\x03min\0\0\0@\0\n\x0Ecreative_reach\x05\x03max\0\0\xF0@\x05\x03min\0\0\0@\0\0\n\x14minecraft:repairable\t\x0Crepair_items\n\x04\t\x05items\n\x02\x08\x04name\x16minecraft:golden_spear\0\x08\rrepair_amount)context.other->query.remaining_durability\0\t\x05items\n\x02\x08\x04name\x14minecraft:gold_ingot\0\x08\rrepair_amount\x1Bquery.max_durability * 0.25\0\0\n\x17minecraft:use_modifiers\x08\x0Bstart_sound\x15item.golden_spear.use\x05\x0Cuse_duration\0\xA0\x8CG\x08\x0Bstart_using\x06always\x01\x0Femit_vibrations\0\x05\x11movement_modifier\0\0\x80?\0\n\x10minecraft:damage\x02\x05value\x01\0\0\0\0" } ;
+    pub const GOLDEN_SPEAR : Self = Self { id : 852 , registry_key : "minecraft:golden_spear" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x10minecraft:damage\x02\x05value\x01\0\0\n\x14minecraft:repairable\t\x0Crepair_items\n\x04\t\x05items\n\x02\x08\x04name\x16minecraft:golden_spear\0\x08\rrepair_amount)context.other->query.remaining_durability\0\t\x05items\n\x02\x08\x04name\x14minecraft:gold_ingot\0\x08\rrepair_amount\x1Bquery.max_durability * 0.25\0\0\n\x18minecraft:kinetic_weapon\n\x18minecraft:kinetic_weapon\x05\rhitbox_margin\0\0\x80>\x05\x11damage_multiplier333?\x05\x0Fdamage_modifier\0\0\0\0\x02\x05delay\x0E\0\n\x11damage_conditions\x05\x12min_relative_speed33\x93@\x05\tmin_speed\0\0\0\0\x02\x0Cmax_duration\x13\x01\0\n\x05reach\x05\x03min\0\0\0@\x05\x03max\0\0\x90@\0\n\x0Ecreative_reach\x05\x03max\0\0\xF0@\x05\x03min\0\0\0@\0\n\x14knockback_conditions\x02\x0Cmax_duration\xAA\0\x05\x12min_relative_speed\0\0\0\0\x05\tmin_speed33\xA3@\0\n\x13dismount_conditions\x02\x0Cmax_durationF\0\x05\tmin_speed\0\0PA\x05\x12min_relative_speed\0\0\0\0\0\0\0\n\x17minecraft:hand_equipped\x01\x05value\x01\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x14minecraft:durability\x03\x0Emax_durability<\n\rdamage_chance\x03\x03max\xC8\x01\x03\x03min\0\0\0\n\x15minecraft:enchantable\x08\x04slot\x0Bmelee_spear\x01\x05value\x16\0\n\x16minecraft:display_name\x08\x05value\x16item.golden_spear.name\0\n\x0Eminecraft:tags\t\x04tags\x08\x04\x15minecraft:golden_tier\x12minecraft:is_spear\0\n\x12minecraft:cooldown\x05\x08duration33s?\x08\x08category\x05spear\x08\x04type\x06attack\0\n\x19minecraft:piercing_weapon\n\x05reach\x05\x03min\0\0\0@\x05\x03max\0\0\x90@\0\x05\rhitbox_margin\0\0\x80>\n\x0Ecreative_reach\x05\x03min\0\0\0@\x05\x03max\0\0\xF0@\0\0\n\x17minecraft:use_modifiers\x08\x0Bstart_using\x06always\x05\x0Cuse_duration\0\xA0\x8CG\x01\x0Femit_vibrations\0\x05\x11movement_modifier\0\0\x80?\x08\x0Bstart_sound\x15item.golden_spear.use\0\n\x0Fitem_properties\x03\x11creative_category\x06\x01\rhand_equipped\x01\x01\x12hidden_in_commands\x02\n\x0Eminecraft:icon\n\x08textures\x08\x07default\ngold_spear\0\0\x01\x0Fstacked_by_data\0\x01\x0Eallow_off_hand\0\x08\x0Ecreative_group\0\x03\x0Bframe_count\x02\x01\x17can_destroy_in_creative\x01\x03\x06damage\x02\x05\x0Cmining_speed\0\0\x80?\x01\x0Eshould_despawn\x01\x01\x04foil\0\x01\x0Eliquid_clipped\0\x08\x10enchantable_slot\x0Bmelee_spear\x03\x0Cuse_duration\x80\xE4\xAF\x01\x03\x11enchantable_value,\x03\ruse_animation\0\x03\x0Emax_stack_size\x02\0\n\x18minecraft:swing_duration\x05\x05value33s?\0\n\x16minecraft:swing_sounds\x08\nattack_hit\x1Citem.golden_spear.attack_hit\x08\x0Battack_miss\x1Ditem.golden_spear.attack_miss\0\t\titem_tags\x08\x04\x15minecraft:golden_tier\x12minecraft:is_spear\0\0" } ;
     pub const GOLDEN_SWORD: Self = Self {
         id: 325,
         registry_key: "minecraft:golden_sword",
@@ -72910,7 +72935,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const GRAY_BUNDLE : Self = Self { id : 862 , registry_key : "minecraft:gray_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x0Fitem_properties\x03\x0Emax_stack_size\x02\x01\x04foil\0\x01\x0Eshould_despawn\x01\x01\x0Eallow_off_hand\0\x01\x12hidden_in_commands\x02\x01\rhand_equipped\0\x03\ruse_animation\0\x08\x10enchantable_slot\x04none\x03\x11creative_category\x06\x01\x17can_destroy_in_creative\x01\x08\x0Ecreative_group\0\x03\x06damage\0\x03\x0Cuse_duration\0\x01\x0Eliquid_clipped\0\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x0Bbundle_gray\x08\x11bundle_open_front\x16bundle_gray_open_front\x08\x10bundle_open_back\x15bundle_gray_open_back\0\0\x05\x0Cmining_speed\0\0\x80?\x03\x0Bframe_count\x02\x01\x0Fstacked_by_data\0\x03\x11enchantable_value\0\0\t\titem_tags\0\0\n\x16minecraft:storage_item\x03\tmax_slots\x80\x01\t\rallowed_items\0\0\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x01\x1Aallow_nested_storage_items\x01\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\0\0" } ;
+    pub const GRAY_BUNDLE : Self = Self { id : 862 , registry_key : "minecraft:gray_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x16minecraft:storage_item\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x03\tmax_slots\x80\x01\x01\x1Aallow_nested_storage_items\x01\t\rallowed_items\0\0\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n\x0Fitem_properties\x03\x11enchantable_value\0\x03\ruse_animation\0\x03\x06damage\0\x01\x04foil\0\x01\rhand_equipped\0\x03\x0Bframe_count\x02\x03\x0Emax_stack_size\x02\x03\x0Cuse_duration\0\x08\x0Ecreative_group\0\x01\x17can_destroy_in_creative\x01\x01\x0Eliquid_clipped\0\x03\x11creative_category\x06\n\x0Eminecraft:icon\n\x08textures\x08\x10bundle_open_back\x15bundle_gray_open_back\x08\x11bundle_open_front\x16bundle_gray_open_front\x08\x07default\x0Bbundle_gray\0\0\x08\x10enchantable_slot\x04none\x01\x12hidden_in_commands\x02\x01\x0Fstacked_by_data\0\x01\x0Eallow_off_hand\0\x01\x0Eshould_despawn\x01\x05\x0Cmining_speed\0\0\x80?\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\t\titem_tags\0\0\0\0" } ;
     pub const GRAY_CANDLE: Self = Self {
         id: -420,
         registry_key: "minecraft:gray_candle",
@@ -73009,7 +73034,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const GREEN_BUNDLE : Self = Self { id : 863 , registry_key : "minecraft:green_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x16minecraft:storage_item\t\rallowed_items\0\0\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x01\x1Aallow_nested_storage_items\x01\x03\tmax_slots\x80\x01\0\t\titem_tags\0\0\n\x0Fitem_properties\x03\x0Emax_stack_size\x02\x05\x0Cmining_speed\0\0\x80?\x01\x0Fstacked_by_data\0\x01\rhand_equipped\0\x01\x12hidden_in_commands\x02\x03\x06damage\0\x01\x0Eallow_off_hand\0\x03\ruse_animation\0\x01\x17can_destroy_in_creative\x01\x03\x0Cuse_duration\0\x01\x0Eliquid_clipped\0\x01\x04foil\0\x03\x11creative_category\x06\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x0Cbundle_green\x08\x11bundle_open_front\x17bundle_green_open_front\x08\x10bundle_open_back\x16bundle_green_open_back\0\0\x08\x10enchantable_slot\x04none\x03\x11enchantable_value\0\x08\x0Ecreative_group\0\x03\x0Bframe_count\x02\x01\x0Eshould_despawn\x01\0\0\0" } ;
+    pub const GREEN_BUNDLE : Self = Self { id : 863 , registry_key : "minecraft:green_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x0Fitem_properties\x05\x0Cmining_speed\0\0\x80?\x01\x0Fstacked_by_data\0\x03\x0Emax_stack_size\x02\x01\rhand_equipped\0\x01\x12hidden_in_commands\x02\x03\x0Bframe_count\x02\x08\x10enchantable_slot\x04none\x01\x0Eallow_off_hand\0\x03\x11enchantable_value\0\x08\x0Ecreative_group\0\x03\x0Cuse_duration\0\n\x0Eminecraft:icon\n\x08textures\x08\x10bundle_open_back\x16bundle_green_open_back\x08\x11bundle_open_front\x17bundle_green_open_front\x08\x07default\x0Cbundle_green\0\0\x01\x17can_destroy_in_creative\x01\x03\x06damage\0\x03\x11creative_category\x06\x01\x04foil\0\x01\x0Eliquid_clipped\0\x01\x0Eshould_despawn\x01\x03\ruse_animation\0\0\n\x16minecraft:storage_item\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\t\rallowed_items\0\0\x03\tmax_slots\x80\x01\x01\x1Aallow_nested_storage_items\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\t\titem_tags\0\0\0\0" } ;
     pub const GREEN_CANDLE: Self = Self {
         id: -426,
         registry_key: "minecraft:green_candle",
@@ -73472,7 +73497,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const HONEY_BOTTLE : Self = Self { id : 604 , registry_key : "minecraft:honey_bottle" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_durationP\n\x0Eminecraft:food\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\tnutrition\x0C\x03\rcooldown_time\0\x01\x0Ecan_always_eat\x01\x08\x11using_converts_to\x0Cglass_bottle\x03\ron_use_action\x01\x08\rcooldown_type\0\x05\x13saturation_modifier\xCD\xCC\xCC=\t\x0Eremove_effects\x03\x02&\0\x03\x18minecraft:max_stack_size \0\0" } ;
+    pub const HONEY_BOTTLE : Self = Self { id : 604 , registry_key : "minecraft:honey_bottle" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x05\x13saturation_modifier\xCD\xCC\xCC=\x03\rcooldown_time\0\x01\x0Ecan_always_eat\x01\x08\x11using_converts_to\x0Cglass_bottle\x03\ron_use_action\x01\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\t\x0Eremove_effects\x03\x02&\x08\rcooldown_type\0\x03\tnutrition\x0C\0\x03\x18minecraft:max_stack_size \x03\x16minecraft:use_durationP\0\0" } ;
     pub const HONEYCOMB: Self = Self {
         id: 603,
         registry_key: "minecraft:honeycomb",
@@ -73774,7 +73799,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const IRON_SPEAR : Self = Self { id : 853 , registry_key : "minecraft:iron_spear" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x14minecraft:repairable\t\x0Crepair_items\n\x04\x08\rrepair_amount)context.other->query.remaining_durability\t\x05items\n\x02\x08\x04name\x14minecraft:iron_spear\0\0\t\x05items\n\x02\x08\x04name\x14minecraft:iron_ingot\0\x08\rrepair_amount\x1Bquery.max_durability * 0.25\0\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x17minecraft:hand_equipped\x01\x05value\x01\0\n\x19minecraft:piercing_weapon\n\x05reach\x05\x03min\0\0\0@\x05\x03max\0\0\x90@\0\x05\rhitbox_margin\0\0\x80>\n\x0Ecreative_reach\x05\x03min\0\0\0@\x05\x03max\0\0\xF0@\0\0\n\x10minecraft:damage\x02\x05value\x03\0\0\n\x18minecraft:kinetic_weapon\n\x18minecraft:kinetic_weapon\x05\x11damage_multiplier33s?\n\x05reach\x05\x03max\0\0\x90@\x05\x03min\0\0\0@\0\n\x11damage_conditions\x05\tmin_speed\0\0\0\0\x05\x12min_relative_speed33\x93@\x02\x0Cmax_duration\xE1\0\0\x05\x0Fdamage_modifier\0\0\0\0\n\x13dismount_conditions\x05\x12min_relative_speed\0\0\0\0\x05\tmin_speed\0\x000A\x02\x0Cmax_duration2\0\0\x02\x05delay\x0C\0\n\x14knockback_conditions\x02\x0Cmax_duration\x87\0\x05\x12min_relative_speed\0\0\0\0\x05\tmin_speed33\xA3@\0\n\x0Ecreative_reach\x05\x03min\0\0\0@\x05\x03max\0\0\xF0@\0\x05\rhitbox_margin\0\0\x80>\0\0\n\x0Fitem_properties\x03\x11creative_category\x06\x08\x0Ecreative_group\0\x01\x04foil\0\x01\x0Eliquid_clipped\0\x03\x0Bframe_count\x02\x08\x10enchantable_slot\x0Bmelee_spear\x05\x0Cmining_speed\0\0\x80?\x01\x12hidden_in_commands\x02\x01\x0Fstacked_by_data\0\x03\x0Cuse_duration\x80\xE4\xAF\x01\n\x0Eminecraft:icon\n\x08textures\x08\x07default\niron_spear\0\0\x01\x0Eallow_off_hand\0\x01\x17can_destroy_in_creative\x01\x03\x06damage\x06\x03\ruse_animation\0\x03\x0Emax_stack_size\x02\x03\x11enchantable_value\x1C\x01\x0Eshould_despawn\x01\x01\rhand_equipped\x01\0\n\x16minecraft:swing_sounds\x08\x0Battack_miss\x1Bitem.iron_spear.attack_miss\x08\nattack_hit\x1Aitem.iron_spear.attack_hit\0\n\x16minecraft:display_name\x08\x05value\x14item.iron_spear.name\0\n\x12minecraft:cooldown\x08\x04type\x06attack\x08\x08category\x05spear\x05\x08duration33s?\0\n\x0Eminecraft:tags\t\x04tags\x08\x04\x13minecraft:iron_tier\x12minecraft:is_spear\0\n\x18minecraft:swing_duration\x05\x05value33s?\0\n\x17minecraft:use_modifiers\x01\x0Femit_vibrations\0\x05\x11movement_modifier\0\0\x80?\x08\x0Bstart_sound\x13item.iron_spear.use\x08\x0Bstart_using\x06always\x05\x0Cuse_duration\0\xA0\x8CG\0\n\x15minecraft:enchantable\x08\x04slot\x0Bmelee_spear\x01\x05value\x0E\0\t\titem_tags\x08\x04\x13minecraft:iron_tier\x12minecraft:is_spear\n\x14minecraft:durability\x03\x0Emax_durability\xF4\x03\n\rdamage_chance\x03\x03max\xC8\x01\x03\x03min\0\0\0\0\0" } ;
+    pub const IRON_SPEAR : Self = Self { id : 853 , registry_key : "minecraft:iron_spear" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x19minecraft:piercing_weapon\x05\rhitbox_margin\0\0\x80>\n\x0Ecreative_reach\x05\x03min\0\0\0@\x05\x03max\0\0\xF0@\0\n\x05reach\x05\x03min\0\0\0@\x05\x03max\0\0\x90@\0\0\n\x0Eminecraft:tags\t\x04tags\x08\x04\x13minecraft:iron_tier\x12minecraft:is_spear\0\n\x12minecraft:cooldown\x08\x08category\x05spear\x05\x08duration33s?\x08\x04type\x06attack\0\n\x0Fitem_properties\x03\x0Bframe_count\x02\x08\x10enchantable_slot\x0Bmelee_spear\n\x0Eminecraft:icon\n\x08textures\x08\x07default\niron_spear\0\0\x01\x0Eshould_despawn\x01\x03\ruse_animation\0\x05\x0Cmining_speed\0\0\x80?\x01\x17can_destroy_in_creative\x01\x08\x0Ecreative_group\0\x01\x12hidden_in_commands\x02\x01\x0Eallow_off_hand\0\x01\rhand_equipped\x01\x03\x06damage\x06\x01\x04foil\0\x01\x0Eliquid_clipped\0\x03\x0Emax_stack_size\x02\x03\x11enchantable_value\x1C\x03\x0Cuse_duration\x80\xE4\xAF\x01\x03\x11creative_category\x06\x01\x0Fstacked_by_data\0\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x17minecraft:hand_equipped\x01\x05value\x01\0\n\x15minecraft:enchantable\x01\x05value\x0E\x08\x04slot\x0Bmelee_spear\0\n\x10minecraft:damage\x02\x05value\x03\0\0\n\x14minecraft:durability\n\rdamage_chance\x03\x03max\xC8\x01\x03\x03min\0\0\x03\x0Emax_durability\xF4\x03\0\n\x18minecraft:swing_duration\x05\x05value33s?\0\t\titem_tags\x08\x04\x13minecraft:iron_tier\x12minecraft:is_spear\n\x16minecraft:display_name\x08\x05value\x14item.iron_spear.name\0\n\x16minecraft:swing_sounds\x08\nattack_hit\x1Aitem.iron_spear.attack_hit\x08\x0Battack_miss\x1Bitem.iron_spear.attack_miss\0\n\x14minecraft:repairable\t\x0Crepair_items\n\x04\t\x05items\n\x02\x08\x04name\x14minecraft:iron_spear\0\x08\rrepair_amount)context.other->query.remaining_durability\0\x08\rrepair_amount\x1Bquery.max_durability * 0.25\t\x05items\n\x02\x08\x04name\x14minecraft:iron_ingot\0\0\0\n\x18minecraft:kinetic_weapon\n\x18minecraft:kinetic_weapon\x05\rhitbox_margin\0\0\x80>\n\x0Ecreative_reach\x05\x03max\0\0\xF0@\x05\x03min\0\0\0@\0\n\x14knockback_conditions\x05\x12min_relative_speed\0\0\0\0\x05\tmin_speed33\xA3@\x02\x0Cmax_duration\x87\0\0\n\x11damage_conditions\x05\tmin_speed\0\0\0\0\x05\x12min_relative_speed33\x93@\x02\x0Cmax_duration\xE1\0\0\x05\x11damage_multiplier33s?\x02\x05delay\x0C\0\n\x05reach\x05\x03min\0\0\0@\x05\x03max\0\0\x90@\0\x05\x0Fdamage_modifier\0\0\0\0\n\x13dismount_conditions\x02\x0Cmax_duration2\0\x05\tmin_speed\0\x000A\x05\x12min_relative_speed\0\0\0\0\0\0\0\n\x17minecraft:use_modifiers\x08\x0Bstart_sound\x13item.iron_spear.use\x01\x0Femit_vibrations\0\x08\x0Bstart_using\x06always\x05\x11movement_modifier\0\0\x80?\x05\x0Cuse_duration\0\xA0\x8CG\0\0\0" } ;
     pub const IRON_SWORD: Self = Self {
         id: 309,
         registry_key: "minecraft:iron_sword",
@@ -74356,7 +74381,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const LIGHT_BLUE_BUNDLE : Self = Self { id : 864 , registry_key : "minecraft:light_blue_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x16minecraft:storage_item\x01\x1Aallow_nested_storage_items\x01\t\rallowed_items\0\0\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x03\tmax_slots\x80\x01\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\t\titem_tags\0\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x0Fitem_properties\x03\x0Cuse_duration\0\x01\x17can_destroy_in_creative\x01\x01\x0Eliquid_clipped\0\x03\x06damage\0\n\x0Eminecraft:icon\n\x08textures\x08\x10bundle_open_back\x1Bbundle_light_blue_open_back\x08\x11bundle_open_front\x1Cbundle_light_blue_open_front\x08\x07default\x11bundle_light_blue\0\0\x01\x0Eallow_off_hand\0\x01\x04foil\0\x03\x0Bframe_count\x02\x08\x0Ecreative_group\0\x08\x10enchantable_slot\x04none\x01\rhand_equipped\0\x03\x11enchantable_value\0\x01\x0Eshould_despawn\x01\x01\x12hidden_in_commands\x02\x03\x11creative_category\x06\x03\x0Emax_stack_size\x02\x01\x0Fstacked_by_data\0\x05\x0Cmining_speed\0\0\x80?\x03\ruse_animation\0\0\0\0" } ;
+    pub const LIGHT_BLUE_BUNDLE : Self = Self { id : 864 , registry_key : "minecraft:light_blue_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\t\titem_tags\0\0\n\x0Fitem_properties\x03\x0Emax_stack_size\x02\x01\x12hidden_in_commands\x02\x03\x0Cuse_duration\0\x03\x0Bframe_count\x02\n\x0Eminecraft:icon\n\x08textures\x08\x10bundle_open_back\x1Bbundle_light_blue_open_back\x08\x11bundle_open_front\x1Cbundle_light_blue_open_front\x08\x07default\x11bundle_light_blue\0\0\x01\x17can_destroy_in_creative\x01\x01\x0Eallow_off_hand\0\x03\x11creative_category\x06\x03\x06damage\0\x03\x11enchantable_value\0\x01\x04foil\0\x01\x0Eliquid_clipped\0\x05\x0Cmining_speed\0\0\x80?\x08\x0Ecreative_group\0\x08\x10enchantable_slot\x04none\x01\x0Eshould_despawn\x01\x01\x0Fstacked_by_data\0\x01\rhand_equipped\0\x03\ruse_animation\0\0\n\x16minecraft:storage_item\x01\x1Aallow_nested_storage_items\x01\t\rallowed_items\0\0\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x03\tmax_slots\x80\x01\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\0\0" } ;
     pub const LIGHT_BLUE_CANDLE: Self = Self {
         id: -416,
         registry_key: "minecraft:light_blue_candle",
@@ -74455,7 +74480,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const LIGHT_GRAY_BUNDLE : Self = Self { id : 865 , registry_key : "minecraft:light_gray_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x16minecraft:storage_item\t\rallowed_items\0\0\x03\tmax_slots\x80\x01\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x01\x1Aallow_nested_storage_items\x01\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x0Fitem_properties\x08\x0Ecreative_group\0\x03\x11creative_category\x06\x01\x0Eallow_off_hand\0\x03\x11enchantable_value\0\x01\x12hidden_in_commands\x02\x01\rhand_equipped\0\x08\x10enchantable_slot\x04none\x01\x04foil\0\x01\x0Fstacked_by_data\0\x03\ruse_animation\0\x05\x0Cmining_speed\0\0\x80?\x01\x0Eliquid_clipped\0\x01\x0Eshould_despawn\x01\n\x0Eminecraft:icon\n\x08textures\x08\x11bundle_open_front\x1Cbundle_light_gray_open_front\x08\x07default\x11bundle_light_gray\x08\x10bundle_open_back\x1Bbundle_light_gray_open_back\0\0\x03\x0Cuse_duration\0\x03\x06damage\0\x01\x17can_destroy_in_creative\x01\x03\x0Bframe_count\x02\x03\x0Emax_stack_size\x02\0\t\titem_tags\0\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\0\0" } ;
+    pub const LIGHT_GRAY_BUNDLE : Self = Self { id : 865 , registry_key : "minecraft:light_gray_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n\x16minecraft:storage_item\t\rallowed_items\0\0\x01\x1Aallow_nested_storage_items\x01\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x03\tmax_slots\x80\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x0Fitem_properties\x03\x06damage\0\x01\x0Fstacked_by_data\0\x03\x0Emax_stack_size\x02\x01\x0Eallow_off_hand\0\x01\rhand_equipped\0\x08\x0Ecreative_group\0\x08\x10enchantable_slot\x04none\x05\x0Cmining_speed\0\0\x80?\x03\ruse_animation\0\x01\x04foil\0\x03\x11enchantable_value\0\n\x0Eminecraft:icon\n\x08textures\x08\x10bundle_open_back\x1Bbundle_light_gray_open_back\x08\x11bundle_open_front\x1Cbundle_light_gray_open_front\x08\x07default\x11bundle_light_gray\0\0\x03\x0Cuse_duration\0\x03\x0Bframe_count\x02\x01\x0Eliquid_clipped\0\x03\x11creative_category\x06\x01\x17can_destroy_in_creative\x01\x01\x0Eshould_despawn\x01\x01\x12hidden_in_commands\x02\0\t\titem_tags\0\0\0\0" } ;
     pub const LIGHT_GRAY_CANDLE: Self = Self {
         id: -421,
         registry_key: "minecraft:light_gray_candle",
@@ -74575,7 +74600,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const LIME_BUNDLE : Self = Self { id : 866 , registry_key : "minecraft:lime_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x0Fitem_properties\x03\x0Emax_stack_size\x02\x08\x10enchantable_slot\x04none\x01\x0Eliquid_clipped\0\x01\x0Eallow_off_hand\0\x03\x06damage\0\x03\ruse_animation\0\x01\x17can_destroy_in_creative\x01\x08\x0Ecreative_group\0\x05\x0Cmining_speed\0\0\x80?\x01\x0Eshould_despawn\x01\x03\x0Cuse_duration\0\x03\x11creative_category\x06\x03\x11enchantable_value\0\x01\x04foil\0\x01\rhand_equipped\0\x03\x0Bframe_count\x02\x01\x12hidden_in_commands\x02\n\x0Eminecraft:icon\n\x08textures\x08\x11bundle_open_front\x16bundle_lime_open_front\x08\x07default\x0Bbundle_lime\x08\x10bundle_open_back\x15bundle_lime_open_back\0\0\x01\x0Fstacked_by_data\0\0\t\titem_tags\0\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x16minecraft:storage_item\t\rallowed_items\0\0\x03\tmax_slots\x80\x01\x01\x1Aallow_nested_storage_items\x01\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\0\0" } ;
+    pub const LIME_BUNDLE : Self = Self { id : 866 , registry_key : "minecraft:lime_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\t\titem_tags\0\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x16minecraft:storage_item\t\rallowed_items\0\0\x03\tmax_slots\x80\x01\x01\x1Aallow_nested_storage_items\x01\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\0\n\x0Fitem_properties\x03\x0Emax_stack_size\x02\x01\x0Eallow_off_hand\0\x01\x0Fstacked_by_data\0\x01\x17can_destroy_in_creative\x01\x05\x0Cmining_speed\0\0\x80?\x01\x04foil\0\x08\x10enchantable_slot\x04none\x01\rhand_equipped\0\x01\x0Eliquid_clipped\0\x03\x06damage\0\x03\x0Cuse_duration\0\x03\x11enchantable_value\0\x08\x0Ecreative_group\0\x03\x0Bframe_count\x02\n\x0Eminecraft:icon\n\x08textures\x08\x11bundle_open_front\x16bundle_lime_open_front\x08\x10bundle_open_back\x15bundle_lime_open_back\x08\x07default\x0Bbundle_lime\0\0\x01\x12hidden_in_commands\x02\x01\x0Eshould_despawn\x01\x03\x11creative_category\x06\x03\ruse_animation\0\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\0\0" } ;
     pub const LIME_CANDLE: Self = Self {
         id: -418,
         registry_key: "minecraft:lime_candle",
@@ -74779,7 +74804,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const MAGENTA_BUNDLE : Self = Self { id : 867 , registry_key : "minecraft:magenta_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\t\titem_tags\0\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x0Fitem_properties\x01\x04foil\0\x03\ruse_animation\0\x01\x17can_destroy_in_creative\x01\x01\x0Eliquid_clipped\0\x01\x0Fstacked_by_data\0\x01\rhand_equipped\0\x03\x11creative_category\x06\x03\x06damage\0\x03\x0Emax_stack_size\x02\x08\x0Ecreative_group\0\x03\x11enchantable_value\0\x01\x0Eallow_off_hand\0\x08\x10enchantable_slot\x04none\x03\x0Bframe_count\x02\x01\x0Eshould_despawn\x01\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x0Ebundle_magenta\x08\x10bundle_open_back\x18bundle_magenta_open_back\x08\x11bundle_open_front\x19bundle_magenta_open_front\0\0\x05\x0Cmining_speed\0\0\x80?\x01\x12hidden_in_commands\x02\x03\x0Cuse_duration\0\0\n\x16minecraft:storage_item\t\rallowed_items\0\0\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x01\x1Aallow_nested_storage_items\x01\x03\tmax_slots\x80\x01\0\0\0" } ;
+    pub const MAGENTA_BUNDLE : Self = Self { id : 867 , registry_key : "minecraft:magenta_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\t\titem_tags\0\0\n\x0Fitem_properties\x01\x0Eliquid_clipped\0\x03\x0Cuse_duration\0\x01\x04foil\0\x03\x06damage\0\x03\x11enchantable_value\0\x08\x10enchantable_slot\x04none\x01\x0Fstacked_by_data\0\x01\x17can_destroy_in_creative\x01\n\x0Eminecraft:icon\n\x08textures\x08\x11bundle_open_front\x19bundle_magenta_open_front\x08\x10bundle_open_back\x18bundle_magenta_open_back\x08\x07default\x0Ebundle_magenta\0\0\x03\x11creative_category\x06\x01\x12hidden_in_commands\x02\x01\x0Eshould_despawn\x01\x01\rhand_equipped\0\x05\x0Cmining_speed\0\0\x80?\x08\x0Ecreative_group\0\x03\ruse_animation\0\x03\x0Emax_stack_size\x02\x01\x0Eallow_off_hand\0\x03\x0Bframe_count\x02\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x16minecraft:storage_item\t\rallowed_items\0\0\x03\tmax_slots\x80\x01\x01\x1Aallow_nested_storage_items\x01\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\0\0" } ;
     pub const MAGENTA_CANDLE: Self = Self {
         id: -415,
         registry_key: "minecraft:magenta_candle",
@@ -75081,8 +75106,8 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const MELON_SEEDS : Self = Self { id : 293 , registry_key : "minecraft:melon_seeds" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:seed\x08\x0Bcrop_result\x14minecraft:melon_stem\x01\x1Aplant_at_any_solid_surface\0\t\x08plant_at\x08\x02\x12minecraft:farmland\x08\rplant_at_face\x02up\0\0\0" } ;
-    pub const MELON_SLICE : Self = Self { id : 272 , registry_key : "minecraft:melon_slice" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x08\rcooldown_type\0\x03\rcooldown_time\0\x05\x13saturation_modifier\x9A\x99\x99>\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x01\x0Ecan_always_eat\0\x03\tnutrition\x04\x03\ron_use_action\x01\x08\x11using_converts_to\0\0\0\0" } ;
+    pub const MELON_SEEDS : Self = Self { id : 293 , registry_key : "minecraft:melon_seeds" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:seed\t\x08plant_at\x08\x02\x12minecraft:farmland\x01\x1Aplant_at_any_solid_surface\0\x08\x0Bcrop_result\x14minecraft:melon_stem\x08\rplant_at_face\x02up\0\0\0" } ;
+    pub const MELON_SLICE : Self = Self { id : 272 , registry_key : "minecraft:melon_slice" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x08\x11using_converts_to\0\x08\rcooldown_type\0\x03\tnutrition\x04\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\rcooldown_time\0\x01\x0Ecan_always_eat\0\x05\x13saturation_modifier\x9A\x99\x99>\x03\ron_use_action\x01\0\0\0" } ;
     pub const MELON_STEM: Self = Self {
         id: 105,
         registry_key: "minecraft:melon_stem",
@@ -75300,7 +75325,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const MUSHROOM_STEW : Self = Self { id : 260 , registry_key : "minecraft:mushroom_stew" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x01\x0Ecan_always_eat\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\rcooldown_time\0\x03\tnutrition\x0C\x08\x11using_converts_to\x04bowl\x05\x13saturation_modifier\x9A\x99\x19?\x03\ron_use_action\x01\x08\rcooldown_type\0\0\x03\x18minecraft:max_stack_size\x02\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const MUSHROOM_STEW : Self = Self { id : 260 , registry_key : "minecraft:mushroom_stew" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\ron_use_action\x01\x01\x0Ecan_always_eat\0\x05\x13saturation_modifier\x9A\x99\x19?\x03\tnutrition\x0C\x03\rcooldown_time\0\x08\rcooldown_type\0\x08\x11using_converts_to\x04bowl\0\x03\x18minecraft:max_stack_size\x02\0\0" } ;
     pub const MUSIC_DISC_11: Self = Self {
         id: 554,
         registry_key: "minecraft:music_disc_11",
@@ -75455,7 +75480,7 @@ impl BedrockItem {
         component_based: true,
         definition_components: b"\n\0\0",
     };
-    pub const MUTTON : Self = Self { id : 560 , registry_key : "minecraft:mutton" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x08\x11using_converts_to\0\x03\tnutrition\x04\x03\ron_use_action\x01\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x08\rcooldown_type\0\x01\x0Ecan_always_eat\0\x03\rcooldown_time\0\x05\x13saturation_modifier\x9A\x99\x99>\0\0\0" } ;
+    pub const MUTTON : Self = Self { id : 560 , registry_key : "minecraft:mutton" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x03\tnutrition\x04\x03\rcooldown_time\0\x08\rcooldown_type\0\x05\x13saturation_modifier\x9A\x99\x99>\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\ron_use_action\x01\x01\x0Ecan_always_eat\0\x08\x11using_converts_to\0\0\x03\x16minecraft:use_duration@\0\0" } ;
     pub const MYCELIUM: Self = Self {
         id: 110,
         registry_key: "minecraft:mycelium",
@@ -75547,7 +75572,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const NETHER_WART : Self = Self { id : 294 , registry_key : "minecraft:nether_wart" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:seed\x08\rplant_at_face\x02up\x08\x0Bcrop_result\x15minecraft:nether_wart\t\x08plant_at\x08\x02\tsoul_sand\x01\x1Aplant_at_any_solid_surface\0\0\0\0" } ;
+    pub const NETHER_WART : Self = Self { id : 294 , registry_key : "minecraft:nether_wart" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:seed\x08\rplant_at_face\x02up\x01\x1Aplant_at_any_solid_surface\0\x08\x0Bcrop_result\x15minecraft:nether_wart\t\x08plant_at\x08\x02\tsoul_sand\0\0\0" } ;
     pub const NETHER_WART_BLOCK: Self = Self {
         id: 214,
         registry_key: "minecraft:nether_wart_block",
@@ -75653,7 +75678,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const NETHERITE_SPEAR : Self = Self { id : 854 , registry_key : "minecraft:netherite_spear" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x14minecraft:repairable\t\x0Crepair_items\n\x04\x08\rrepair_amount)context.other->query.remaining_durability\t\x05items\n\x02\x08\x04name\x19minecraft:netherite_spear\0\0\t\x05items\n\x02\x08\x04name\x19minecraft:netherite_ingot\0\x08\rrepair_amount\x1Bquery.max_durability * 0.25\0\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x10minecraft:damage\x02\x05value\x05\0\0\n\x19minecraft:piercing_weapon\n\x0Ecreative_reach\x05\x03min\0\0\0@\x05\x03max\0\0\xF0@\0\n\x05reach\x05\x03min\0\0\0@\x05\x03max\0\0\x90@\0\x05\rhitbox_margin\0\0\x80>\0\n\x17minecraft:use_modifiers\x08\x0Bstart_sound\x18item.netherite_spear.use\x01\x0Femit_vibrations\0\x05\x11movement_modifier\0\0\x80?\x08\x0Bstart_using\x06always\x05\x0Cuse_duration\0\xA0\x8CG\0\n\x0Eminecraft:tags\t\x04tags\x08\x04\x18minecraft:netherite_tier\x12minecraft:is_spear\0\n\x18minecraft:fire_resistant\x01\x05value\x01\0\n\x0Fitem_properties\x03\x0Cuse_duration\x80\xE4\xAF\x01\x01\x17can_destroy_in_creative\x01\x03\x0Emax_stack_size\x02\x08\x10enchantable_slot\x0Bmelee_spear\x01\x0Eliquid_clipped\0\x03\ruse_animation\0\x01\x0Fstacked_by_data\0\x01\x0Eshould_despawn\x01\x08\x0Ecreative_group\0\x05\x0Cmining_speed\0\0\x80?\x03\x06damage\n\x01\x04foil\0\x03\x0Bframe_count\x02\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x0Fnetherite_spear\0\0\x01\x0Eallow_off_hand\0\x03\x11creative_category\x06\x03\x11enchantable_value\x1E\x01\x12hidden_in_commands\x02\x01\rhand_equipped\x01\0\n\x16minecraft:display_name\x08\x05value\x19item.netherite_spear.name\0\n\x15minecraft:enchantable\x01\x05value\x0F\x08\x04slot\x0Bmelee_spear\0\t\titem_tags\x08\x04\x18minecraft:netherite_tier\x12minecraft:is_spear\n\x18minecraft:swing_duration\x05\x05value33\x93?\0\n\x18minecraft:kinetic_weapon\n\x18minecraft:kinetic_weapon\x05\rhitbox_margin\0\0\x80>\x05\x11damage_multiplier\x9A\x99\x99?\x05\x0Fdamage_modifier\0\0\0\0\n\x0Ecreative_reach\x05\x03min\0\0\0@\x05\x03max\0\0\xF0@\0\n\x13dismount_conditions\x05\tmin_speed\0\0\x10A\x02\x0Cmax_duration2\0\x05\x12min_relative_speed\0\0\0\0\0\n\x05reach\x05\x03min\0\0\0@\x05\x03max\0\0\x90@\0\n\x11damage_conditions\x05\x12min_relative_speed33\x93@\x05\tmin_speed\0\0\0\0\x02\x0Cmax_duration\xAF\0\0\n\x14knockback_conditions\x05\x12min_relative_speed\0\0\0\0\x05\tmin_speed33\xA3@\x02\x0Cmax_durationn\0\0\x02\x05delay\x08\0\0\0\n\x16minecraft:swing_sounds\x08\nattack_hit\x1Fitem.netherite_spear.attack_hit\x08\x0Battack_miss item.netherite_spear.attack_miss\0\n\x14minecraft:durability\n\rdamage_chance\x03\x03max\xC8\x01\x03\x03min\0\0\x03\x0Emax_durability\xDC\x1F\0\n\x17minecraft:hand_equipped\x01\x05value\x01\0\n\x12minecraft:cooldown\x08\x08category\x05spear\x05\x08duration33\x93?\x08\x04type\x06attack\0\0\0" } ;
+    pub const NETHERITE_SPEAR : Self = Self { id : 854 , registry_key : "minecraft:netherite_spear" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x12minecraft:cooldown\x05\x08duration33\x93?\x08\x04type\x06attack\x08\x08category\x05spear\0\t\titem_tags\x08\x04\x18minecraft:netherite_tier\x12minecraft:is_spear\n\x0Fitem_properties\x03\ruse_animation\0\x03\x0Cuse_duration\x80\xE4\xAF\x01\x01\rhand_equipped\x01\x01\x0Eliquid_clipped\0\x03\x11creative_category\x06\x08\x0Ecreative_group\0\x03\x11enchantable_value\x1E\x03\x06damage\n\x01\x0Eshould_despawn\x01\x08\x10enchantable_slot\x0Bmelee_spear\x01\x17can_destroy_in_creative\x01\x01\x04foil\0\x01\x0Fstacked_by_data\0\x03\x0Bframe_count\x02\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x0Fnetherite_spear\0\0\x01\x12hidden_in_commands\x02\x01\x0Eallow_off_hand\0\x03\x0Emax_stack_size\x02\x05\x0Cmining_speed\0\0\x80?\0\n\x15minecraft:enchantable\x01\x05value\x0F\x08\x04slot\x0Bmelee_spear\0\n\x17minecraft:hand_equipped\x01\x05value\x01\0\n\x19minecraft:piercing_weapon\n\x0Ecreative_reach\x05\x03min\0\0\0@\x05\x03max\0\0\xF0@\0\x05\rhitbox_margin\0\0\x80>\n\x05reach\x05\x03min\0\0\0@\x05\x03max\0\0\x90@\0\0\n\x14minecraft:repairable\t\x0Crepair_items\n\x04\x08\rrepair_amount)context.other->query.remaining_durability\t\x05items\n\x02\x08\x04name\x19minecraft:netherite_spear\0\0\t\x05items\n\x02\x08\x04name\x19minecraft:netherite_ingot\0\x08\rrepair_amount\x1Bquery.max_durability * 0.25\0\0\n\x18minecraft:fire_resistant\x01\x05value\x01\0\n\x0Eminecraft:tags\t\x04tags\x08\x04\x18minecraft:netherite_tier\x12minecraft:is_spear\0\n\x14minecraft:durability\n\rdamage_chance\x03\x03max\xC8\x01\x03\x03min\0\0\x03\x0Emax_durability\xDC\x1F\0\n\x10minecraft:damage\x02\x05value\x05\0\0\n\x18minecraft:kinetic_weapon\n\x18minecraft:kinetic_weapon\x05\x0Fdamage_modifier\0\0\0\0\n\x11damage_conditions\x05\x12min_relative_speed33\x93@\x05\tmin_speed\0\0\0\0\x02\x0Cmax_duration\xAF\0\0\x02\x05delay\x08\0\n\x14knockback_conditions\x05\x12min_relative_speed\0\0\0\0\x05\tmin_speed33\xA3@\x02\x0Cmax_durationn\0\0\n\x0Ecreative_reach\x05\x03max\0\0\xF0@\x05\x03min\0\0\0@\0\x05\rhitbox_margin\0\0\x80>\n\x05reach\x05\x03min\0\0\0@\x05\x03max\0\0\x90@\0\n\x13dismount_conditions\x02\x0Cmax_duration2\0\x05\x12min_relative_speed\0\0\0\0\x05\tmin_speed\0\0\x10A\0\x05\x11damage_multiplier\x9A\x99\x99?\0\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x18minecraft:swing_duration\x05\x05value33\x93?\0\n\x17minecraft:use_modifiers\x08\x0Bstart_sound\x18item.netherite_spear.use\x05\x11movement_modifier\0\0\x80?\x05\x0Cuse_duration\0\xA0\x8CG\x01\x0Femit_vibrations\0\x08\x0Bstart_using\x06always\0\n\x16minecraft:display_name\x08\x05value\x19item.netherite_spear.name\0\n\x16minecraft:swing_sounds\x08\x0Battack_miss item.netherite_spear.attack_miss\x08\nattack_hit\x1Fitem.netherite_spear.attack_hit\0\0\0" } ;
     pub const NETHERITE_SWORD: Self = Self {
         id: 617,
         registry_key: "minecraft:netherite_sword",
@@ -75850,7 +75875,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const OMINOUS_TRIAL_KEY : Self = Self { id : 875 , registry_key : "minecraft:ominous_trial_key" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\t\titem_tags\0\0\n\x0Fitem_properties\x01\x04foil\0\x03\x06damage\0\x03\x11creative_category\x08\x05\x0Cmining_speed\0\0\x80?\x08\x0Ecreative_group\0\x01\x0Eshould_despawn\x01\x01\x0Fstacked_by_data\0\x03\x0Cuse_duration\0\x03\ruse_animation\0\x01\x0Eallow_off_hand\0\x03\x11enchantable_value\0\x03\x0Emax_stack_size\x80\x01\x03\x0Bframe_count\x02\x08\x10enchantable_slot\x04none\x01\x17can_destroy_in_creative\x01\x01\rhand_equipped\0\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x11ominous_trial_key\0\0\x01\x12hidden_in_commands\x02\x01\x0Eliquid_clipped\0\0\n\x16minecraft:display_name\x08\x05value\x1Bitem.ominous_trial_key.name\0\0\0" } ;
+    pub const OMINOUS_TRIAL_KEY : Self = Self { id : 875 , registry_key : "minecraft:ominous_trial_key" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x0Fitem_properties\x08\x10enchantable_slot\x04none\x03\x0Cuse_duration\0\x03\x06damage\0\x03\x11creative_category\x08\x01\x0Eliquid_clipped\0\x01\x12hidden_in_commands\x02\x03\x0Emax_stack_size\x80\x01\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x11ominous_trial_key\0\0\x08\x0Ecreative_group\0\x05\x0Cmining_speed\0\0\x80?\x01\x0Eallow_off_hand\0\x01\x04foil\0\x03\x0Bframe_count\x02\x03\x11enchantable_value\0\x01\x0Eshould_despawn\x01\x01\x0Fstacked_by_data\0\x03\ruse_animation\0\x01\x17can_destroy_in_creative\x01\x01\rhand_equipped\0\0\t\titem_tags\0\0\n\x16minecraft:display_name\x08\x05value\x1Bitem.ominous_trial_key.name\0\0\0" } ;
     pub const OPEN_EYEBLOSSOM: Self = Self {
         id: -1018,
         registry_key: "minecraft:open_eyeblossom",
@@ -75858,7 +75883,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const ORANGE_BUNDLE : Self = Self { id : 868 , registry_key : "minecraft:orange_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x18minecraft:max_stack_size\x01\x05value\x01\0\t\titem_tags\0\0\n\x16minecraft:storage_item\t\rallowed_items\0\0\x03\tmax_slots\x80\x01\x01\x1Aallow_nested_storage_items\x01\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\0\n\x0Fitem_properties\x03\x0Cuse_duration\0\x03\x11enchantable_value\0\x08\x10enchantable_slot\x04none\x01\x17can_destroy_in_creative\x01\x01\x04foil\0\x01\rhand_equipped\0\x01\x0Eallow_off_hand\0\x03\x0Bframe_count\x02\x01\x0Eliquid_clipped\0\x05\x0Cmining_speed\0\0\x80?\x01\x12hidden_in_commands\x02\x03\x11creative_category\x06\n\x0Eminecraft:icon\n\x08textures\x08\x10bundle_open_back\x17bundle_orange_open_back\x08\x11bundle_open_front\x18bundle_orange_open_front\x08\x07default\rbundle_orange\0\0\x01\x0Fstacked_by_data\0\x01\x0Eshould_despawn\x01\x03\x0Emax_stack_size\x02\x03\x06damage\0\x08\x0Ecreative_group\0\x03\ruse_animation\0\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\0\0" } ;
+    pub const ORANGE_BUNDLE : Self = Self { id : 868 , registry_key : "minecraft:orange_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x0Fitem_properties\x03\x11creative_category\x06\x01\x12hidden_in_commands\x02\x03\x0Bframe_count\x02\x01\x0Fstacked_by_data\0\x01\x0Eallow_off_hand\0\x08\x0Ecreative_group\0\x01\rhand_equipped\0\x01\x0Eshould_despawn\x01\x08\x10enchantable_slot\x04none\x03\ruse_animation\0\x01\x17can_destroy_in_creative\x01\x03\x11enchantable_value\0\x03\x06damage\0\x01\x0Eliquid_clipped\0\x03\x0Cuse_duration\0\n\x0Eminecraft:icon\n\x08textures\x08\x07default\rbundle_orange\x08\x10bundle_open_back\x17bundle_orange_open_back\x08\x11bundle_open_front\x18bundle_orange_open_front\0\0\x01\x04foil\0\x05\x0Cmining_speed\0\0\x80?\x03\x0Emax_stack_size\x02\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n\x16minecraft:storage_item\t\rallowed_items\0\0\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x03\tmax_slots\x80\x01\x01\x1Aallow_nested_storage_items\x01\0\t\titem_tags\0\0\0\0" } ;
     pub const ORANGE_CANDLE: Self = Self {
         id: -414,
         registry_key: "minecraft:orange_candle",
@@ -76391,7 +76416,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const PINK_BUNDLE : Self = Self { id : 869 , registry_key : "minecraft:pink_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\t\titem_tags\0\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x0Fitem_properties\x05\x0Cmining_speed\0\0\x80?\x01\x0Eallow_off_hand\0\x03\x0Emax_stack_size\x02\x01\x0Eshould_despawn\x01\x01\x12hidden_in_commands\x02\x08\x0Ecreative_group\0\x03\x11creative_category\x06\x01\x17can_destroy_in_creative\x01\x03\x0Bframe_count\x02\x01\x04foil\0\x08\x10enchantable_slot\x04none\x01\rhand_equipped\0\n\x0Eminecraft:icon\n\x08textures\x08\x10bundle_open_back\x15bundle_pink_open_back\x08\x11bundle_open_front\x16bundle_pink_open_front\x08\x07default\x0Bbundle_pink\0\0\x03\x11enchantable_value\0\x01\x0Fstacked_by_data\0\x03\x06damage\0\x03\ruse_animation\0\x03\x0Cuse_duration\0\x01\x0Eliquid_clipped\0\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x16minecraft:storage_item\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x01\x1Aallow_nested_storage_items\x01\x03\tmax_slots\x80\x01\t\rallowed_items\0\0\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\0\0" } ;
+    pub const PINK_BUNDLE : Self = Self { id : 869 , registry_key : "minecraft:pink_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x0Fitem_properties\x01\rhand_equipped\0\x03\x11enchantable_value\0\n\x0Eminecraft:icon\n\x08textures\x08\x11bundle_open_front\x16bundle_pink_open_front\x08\x07default\x0Bbundle_pink\x08\x10bundle_open_back\x15bundle_pink_open_back\0\0\x03\x11creative_category\x06\x01\x12hidden_in_commands\x02\x01\x0Eliquid_clipped\0\x01\x0Eallow_off_hand\0\x03\x0Bframe_count\x02\x08\x0Ecreative_group\0\x08\x10enchantable_slot\x04none\x01\x17can_destroy_in_creative\x01\x03\x06damage\0\x03\x0Cuse_duration\0\x05\x0Cmining_speed\0\0\x80?\x01\x0Fstacked_by_data\0\x03\x0Emax_stack_size\x02\x03\ruse_animation\0\x01\x04foil\0\x01\x0Eshould_despawn\x01\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x16minecraft:storage_item\x01\x1Aallow_nested_storage_items\x01\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x03\tmax_slots\x80\x01\t\rallowed_items\0\0\0\t\titem_tags\0\0\0\0" } ;
     pub const PINK_CANDLE: Self = Self {
         id: -419,
         registry_key: "minecraft:pink_candle",
@@ -76532,7 +76557,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const PITCHER_POD : Self = Self { id : 297 , registry_key : "minecraft:pitcher_pod" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:seed\x01\x1Aplant_at_any_solid_surface\0\x08\x0Bcrop_result\x16minecraft:pitcher_crop\t\x08plant_at\x08\x02\x12minecraft:farmland\x08\rplant_at_face\x02up\0\0\0" } ;
+    pub const PITCHER_POD : Self = Self { id : 297 , registry_key : "minecraft:pitcher_pod" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:seed\t\x08plant_at\x08\x02\x12minecraft:farmland\x08\x0Bcrop_result\x16minecraft:pitcher_crop\x01\x1Aplant_at_any_solid_surface\0\x08\rplant_at_face\x02up\0\0\0" } ;
     pub const PLANKS: Self = Self {
         id: 814,
         registry_key: "minecraft:planks",
@@ -76568,7 +76593,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const POISONOUS_POTATO : Self = Self { id : 282 , registry_key : "minecraft:poisonous_potato" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x08\rcooldown_type\0\x05\x13saturation_modifier\x9A\x99\x99>\t\x07effects\n\x02\x08\x04name\x06poison\x08\rdescriptionId\rpotion.poison\x05\x06chance\x9A\x99\x19?\x03\tamplifier\0\x03\x08duration\n\x03\x02id&\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\ron_use_action\x01\x08\x11using_converts_to\0\x03\tnutrition\x04\x01\x0Ecan_always_eat\0\x03\rcooldown_time\0\0\0\0" } ;
+    pub const POISONOUS_POTATO : Self = Self { id : 282 , registry_key : "minecraft:poisonous_potato" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x08\rcooldown_type\0\t\x07effects\n\x02\x03\x08duration\n\x03\x02id&\x03\tamplifier\0\x08\x04name\x06poison\x08\rdescriptionId\rpotion.poison\x05\x06chance\x9A\x99\x19?\0\x01\x0Ecan_always_eat\0\x03\tnutrition\x04\x03\ron_use_action\x01\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x05\x13saturation_modifier\x9A\x99\x99>\x08\x11using_converts_to\0\x03\rcooldown_time\0\0\0\0" } ;
     pub const POLAR_BEAR_SPAWN_EGG: Self = Self {
         id: 477,
         registry_key: "minecraft:polar_bear_spawn_egg",
@@ -77045,7 +77070,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const PORKCHOP : Self = Self { id : 262 , registry_key : "minecraft:porkchop" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x01\x0Ecan_always_eat\0\x03\tnutrition\x06\x03\rcooldown_time\0\x05\x13saturation_modifier\x9A\x99\x99>\x08\x11using_converts_to\0\x03\ron_use_action\x01\x08\rcooldown_type\0\0\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const PORKCHOP : Self = Self { id : 262 , registry_key : "minecraft:porkchop" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x03\rcooldown_time\0\x01\x0Ecan_always_eat\0\x03\tnutrition\x06\x03\ron_use_action\x01\x05\x13saturation_modifier\x9A\x99\x99>\x08\rcooldown_type\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x08\x11using_converts_to\0\0\0\0" } ;
     pub const PORTAL: Self = Self {
         id: 90,
         registry_key: "minecraft:portal",
@@ -77053,7 +77078,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const POTATO : Self = Self { id : 280 , registry_key : "minecraft:potato" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x03\tnutrition\x02\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x05\x13saturation_modifier\x9A\x99\x99>\x03\ron_use_action\x01\x01\x0Ecan_always_eat\0\x08\x11using_converts_to\0\x03\rcooldown_time\0\x08\rcooldown_type\0\0\n\x0Eminecraft:seed\x08\x0Bcrop_result\x12minecraft:potatoes\t\x08plant_at\x08\x02\x12minecraft:farmland\x08\rplant_at_face\x02up\x01\x1Aplant_at_any_solid_surface\0\0\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const POTATO : Self = Self { id : 280 , registry_key : "minecraft:potato" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x08\x11using_converts_to\0\x03\tnutrition\x02\x05\x13saturation_modifier\x9A\x99\x99>\x01\x0Ecan_always_eat\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\ron_use_action\x01\x08\rcooldown_type\0\x03\rcooldown_time\0\0\n\x0Eminecraft:seed\x01\x1Aplant_at_any_solid_surface\0\x08\x0Bcrop_result\x12minecraft:potatoes\t\x08plant_at\x08\x02\x12minecraft:farmland\x08\rplant_at_face\x02up\0\x03\x16minecraft:use_duration@\0\0" } ;
     pub const POTATOES: Self = Self {
         id: 142,
         registry_key: "minecraft:potatoes",
@@ -77187,7 +77212,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const PUFFERFISH : Self = Self { id : 267 , registry_key : "minecraft:pufferfish" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x01\x19minecraft:stacked_by_data\x01\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x08\rcooldown_type\0\x03\ron_use_action\x01\x08\x11using_converts_to\0\x03\rcooldown_time\0\x05\x13saturation_modifier\xCD\xCC\xCC=\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x01\x0Ecan_always_eat\0\t\x07effects\n\x06\x03\tamplifier\x02\x05\x06chance\0\0\x80?\x08\rdescriptionId\rpotion.poison\x03\x08durationx\x03\x02id&\x08\x04name\x06poison\0\x05\x06chance\0\0\x80?\x03\tamplifier\0\x08\x04name\x06nausea\x03\x02id\x12\x03\x08duration\x1E\x08\rdescriptionId\x10potion.confusion\0\x03\tamplifier\x04\x08\rdescriptionId\rpotion.hunger\x03\x02id\"\x03\x08duration\x1E\x08\x04name\x06hunger\x05\x06chance\0\0\x80?\0\x03\tnutrition\x02\0\0\0" } ;
+    pub const PUFFERFISH : Self = Self { id : 267 , registry_key : "minecraft:pufferfish" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x03\tnutrition\x02\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\rcooldown_time\0\x05\x13saturation_modifier\xCD\xCC\xCC=\x01\x0Ecan_always_eat\0\x08\x11using_converts_to\0\x03\ron_use_action\x01\x08\rcooldown_type\0\t\x07effects\n\x06\x08\rdescriptionId\rpotion.poison\x03\x02id&\x05\x06chance\0\0\x80?\x08\x04name\x06poison\x03\tamplifier\x02\x03\x08durationx\0\x08\rdescriptionId\x10potion.confusion\x03\tamplifier\0\x03\x02id\x12\x08\x04name\x06nausea\x05\x06chance\0\0\x80?\x03\x08duration\x1E\0\x08\x04name\x06hunger\x03\x02id\"\x05\x06chance\0\0\x80?\x03\tamplifier\x04\x08\rdescriptionId\rpotion.hunger\x03\x08duration\x1E\0\0\x03\x16minecraft:use_duration@\x01\x19minecraft:stacked_by_data\x01\0\0" } ;
     pub const PUFFERFISH_BUCKET: Self = Self {
         id: 370,
         registry_key: "minecraft:pufferfish_bucket",
@@ -77209,8 +77234,8 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const PUMPKIN_PIE : Self = Self { id : 284 , registry_key : "minecraft:pumpkin_pie" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x03\tnutrition\x10\x08\x11using_converts_to\0\x05\x13saturation_modifier\x9A\x99\x99>\x01\x0Ecan_always_eat\0\x03\rcooldown_time\0\x08\rcooldown_type\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\ron_use_action\x01\0\x03\x16minecraft:use_duration@\0\0" } ;
-    pub const PUMPKIN_SEEDS : Self = Self { id : 292 , registry_key : "minecraft:pumpkin_seeds" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:seed\x08\x0Bcrop_result\x16minecraft:pumpkin_stem\x01\x1Aplant_at_any_solid_surface\0\x08\rplant_at_face\x02up\t\x08plant_at\x08\x02\x12minecraft:farmland\0\0\0" } ;
+    pub const PUMPKIN_PIE : Self = Self { id : 284 , registry_key : "minecraft:pumpkin_pie" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x08\rcooldown_type\0\x03\tnutrition\x10\x03\rcooldown_time\0\x03\ron_use_action\x01\x05\x13saturation_modifier\x9A\x99\x99>\x01\x0Ecan_always_eat\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x08\x11using_converts_to\0\0\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const PUMPKIN_SEEDS : Self = Self { id : 292 , registry_key : "minecraft:pumpkin_seeds" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:seed\x01\x1Aplant_at_any_solid_surface\0\x08\rplant_at_face\x02up\x08\x0Bcrop_result\x16minecraft:pumpkin_stem\t\x08plant_at\x08\x02\x12minecraft:farmland\0\0\0" } ;
     pub const PUMPKIN_STEM: Self = Self {
         id: 104,
         registry_key: "minecraft:pumpkin_stem",
@@ -77218,7 +77243,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const PURPLE_BUNDLE : Self = Self { id : 870 , registry_key : "minecraft:purple_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\t\titem_tags\0\0\n\x16minecraft:storage_item\x01\x1Aallow_nested_storage_items\x01\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x03\tmax_slots\x80\x01\t\rallowed_items\0\0\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x0Fitem_properties\x08\x10enchantable_slot\x04none\x01\x12hidden_in_commands\x02\n\x0Eminecraft:icon\n\x08textures\x08\x07default\rbundle_purple\x08\x11bundle_open_front\x18bundle_purple_open_front\x08\x10bundle_open_back\x17bundle_purple_open_back\0\0\x08\x0Ecreative_group\0\x01\x04foil\0\x03\x0Bframe_count\x02\x03\x0Cuse_duration\0\x03\x06damage\0\x01\x0Fstacked_by_data\0\x03\x11creative_category\x06\x05\x0Cmining_speed\0\0\x80?\x03\ruse_animation\0\x03\x11enchantable_value\0\x01\x0Eliquid_clipped\0\x01\x0Eshould_despawn\x01\x01\x17can_destroy_in_creative\x01\x03\x0Emax_stack_size\x02\x01\rhand_equipped\0\x01\x0Eallow_off_hand\0\0\0\0" } ;
+    pub const PURPLE_BUNDLE : Self = Self { id : 870 , registry_key : "minecraft:purple_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\t\titem_tags\0\0\n\x0Fitem_properties\x01\x04foil\0\x01\x0Eallow_off_hand\0\n\x0Eminecraft:icon\n\x08textures\x08\x10bundle_open_back\x17bundle_purple_open_back\x08\x07default\rbundle_purple\x08\x11bundle_open_front\x18bundle_purple_open_front\0\0\x05\x0Cmining_speed\0\0\x80?\x01\x17can_destroy_in_creative\x01\x01\x12hidden_in_commands\x02\x03\x06damage\0\x03\x0Emax_stack_size\x02\x01\x0Eshould_despawn\x01\x01\x0Eliquid_clipped\0\x08\x0Ecreative_group\0\x03\ruse_animation\0\x01\rhand_equipped\0\x03\x11creative_category\x06\x03\x0Cuse_duration\0\x03\x11enchantable_value\0\x08\x10enchantable_slot\x04none\x01\x0Fstacked_by_data\0\x03\x0Bframe_count\x02\0\n\x16minecraft:storage_item\x03\tmax_slots\x80\x01\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x01\x1Aallow_nested_storage_items\x01\t\rallowed_items\0\0\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\0\0" } ;
     pub const PURPLE_CANDLE: Self = Self {
         id: -423,
         registry_key: "minecraft:purple_candle",
@@ -77408,7 +77433,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const RABBIT : Self = Self { id : 288 , registry_key : "minecraft:rabbit" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x01\x0Ecan_always_eat\0\x08\rcooldown_type\0\x05\x13saturation_modifier\x9A\x99\x99>\x03\ron_use_action\x01\x08\x11using_converts_to\0\x03\tnutrition\x06\x03\rcooldown_time\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\0\0\0" } ;
+    pub const RABBIT : Self = Self { id : 288 , registry_key : "minecraft:rabbit" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x01\x0Ecan_always_eat\0\x03\rcooldown_time\0\x08\x11using_converts_to\0\x05\x13saturation_modifier\x9A\x99\x99>\x08\rcooldown_type\0\x03\ron_use_action\x01\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\tnutrition\x06\0\x03\x16minecraft:use_duration@\0\0" } ;
     pub const RABBIT_FOOT: Self = Self {
         id: 538,
         registry_key: "minecraft:rabbit_foot",
@@ -77430,7 +77455,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const RABBIT_STEW : Self = Self { id : 290 , registry_key : "minecraft:rabbit_stew" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x03\tnutrition\x14\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x01\x0Ecan_always_eat\0\x05\x13saturation_modifier\x9A\x99\x19?\x08\x11using_converts_to\x04bowl\x08\rcooldown_type\0\x03\rcooldown_time\0\x03\ron_use_action\x01\0\x03\x18minecraft:max_stack_size\x02\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const RABBIT_STEW : Self = Self { id : 290 , registry_key : "minecraft:rabbit_stew" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x18minecraft:max_stack_size\x02\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x03\tnutrition\x14\x03\ron_use_action\x01\x03\rcooldown_time\0\x05\x13saturation_modifier\x9A\x99\x19?\x08\x11using_converts_to\x04bowl\x08\rcooldown_type\0\x01\x0Ecan_always_eat\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\0\0\0" } ;
     pub const RAIL: Self = Self {
         id: 66,
         registry_key: "minecraft:rail",
@@ -77508,7 +77533,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const RED_BUNDLE : Self = Self { id : 871 , registry_key : "minecraft:red_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x0Fitem_properties\x03\x0Bframe_count\x02\x01\x17can_destroy_in_creative\x01\x01\x0Eliquid_clipped\0\x08\x0Ecreative_group\0\x01\x0Eshould_despawn\x01\x01\x04foil\0\x01\rhand_equipped\0\x05\x0Cmining_speed\0\0\x80?\n\x0Eminecraft:icon\n\x08textures\x08\x10bundle_open_back\x14bundle_red_open_back\x08\x11bundle_open_front\x15bundle_red_open_front\x08\x07default\nbundle_red\0\0\x08\x10enchantable_slot\x04none\x03\x11creative_category\x06\x03\x11enchantable_value\0\x03\x0Emax_stack_size\x02\x01\x12hidden_in_commands\x02\x01\x0Fstacked_by_data\0\x01\x0Eallow_off_hand\0\x03\x0Cuse_duration\0\x03\ruse_animation\0\x03\x06damage\0\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\t\titem_tags\0\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x16minecraft:storage_item\x03\tmax_slots\x80\x01\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\t\rallowed_items\0\0\x01\x1Aallow_nested_storage_items\x01\0\0\0" } ;
+    pub const RED_BUNDLE : Self = Self { id : 871 , registry_key : "minecraft:red_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\t\titem_tags\0\0\n\x0Fitem_properties\x03\ruse_animation\0\x01\x12hidden_in_commands\x02\x03\x11creative_category\x06\x08\x0Ecreative_group\0\x01\x0Eallow_off_hand\0\x03\x0Bframe_count\x02\x01\x0Eliquid_clipped\0\n\x0Eminecraft:icon\n\x08textures\x08\x11bundle_open_front\x15bundle_red_open_front\x08\x10bundle_open_back\x14bundle_red_open_back\x08\x07default\nbundle_red\0\0\x03\x11enchantable_value\0\x01\x17can_destroy_in_creative\x01\x01\rhand_equipped\0\x05\x0Cmining_speed\0\0\x80?\x01\x0Fstacked_by_data\0\x01\x0Eshould_despawn\x01\x08\x10enchantable_slot\x04none\x01\x04foil\0\x03\x0Emax_stack_size\x02\x03\x0Cuse_duration\0\x03\x06damage\0\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n\x16minecraft:storage_item\x03\tmax_slots\x80\x01\t\rallowed_items\0\0\x01\x1Aallow_nested_storage_items\x01\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\0\0\0" } ;
     pub const RED_CANDLE: Self = Self {
         id: -427,
         registry_key: "minecraft:red_candle",
@@ -77866,7 +77891,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const ROTTEN_FLESH : Self = Self { id : 277 , registry_key : "minecraft:rotten_flesh" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x05\x13saturation_modifier\xCD\xCC\xCC=\x08\rcooldown_type\0\x03\rcooldown_time\0\x03\tnutrition\x08\x08\x11using_converts_to\0\t\x07effects\n\x02\x05\x06chance\xCD\xCCL?\x03\x08duration<\x08\rdescriptionId\rpotion.hunger\x03\tamplifier\0\x03\x02id\"\x08\x04name\x06hunger\0\x01\x0Ecan_always_eat\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\ron_use_action\x01\0\0\0" } ;
+    pub const ROTTEN_FLESH : Self = Self { id : 277 , registry_key : "minecraft:rotten_flesh" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x05\x13saturation_modifier\xCD\xCC\xCC=\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\tnutrition\x08\x03\rcooldown_time\0\t\x07effects\n\x02\x08\rdescriptionId\rpotion.hunger\x08\x04name\x06hunger\x03\tamplifier\0\x05\x06chance\xCD\xCCL?\x03\x02id\"\x03\x08duration<\0\x08\x11using_converts_to\0\x08\rcooldown_type\0\x03\ron_use_action\x01\x01\x0Ecan_always_eat\0\0\x03\x16minecraft:use_duration@\0\0" } ;
     pub const SADDLE: Self = Self {
         id: 374,
         registry_key: "minecraft:saddle",
@@ -77874,7 +77899,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const SALMON : Self = Self { id : 265 , registry_key : "minecraft:salmon" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x08\x11using_converts_to\0\x03\ron_use_action\x01\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x08\rcooldown_type\0\x03\rcooldown_time\0\x01\x0Ecan_always_eat\0\x03\tnutrition\x04\x05\x13saturation_modifier\xCD\xCC\xCC=\0\x01\x19minecraft:stacked_by_data\x01\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const SALMON : Self = Self { id : 265 , registry_key : "minecraft:salmon" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x08\x11using_converts_to\0\x08\rcooldown_type\0\x03\ron_use_action\x01\x05\x13saturation_modifier\xCD\xCC\xCC=\x01\x0Ecan_always_eat\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\rcooldown_time\0\x03\tnutrition\x04\0\x01\x19minecraft:stacked_by_data\x01\0\0" } ;
     pub const SALMON_BUCKET: Self = Self {
         id: 368,
         registry_key: "minecraft:salmon_bucket",
@@ -78435,7 +78460,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const SPIDER_EYE : Self = Self { id : 278 , registry_key : "minecraft:spider_eye" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:food\x08\x11using_converts_to\0\t\x07effects\n\x02\x08\rdescriptionId\rpotion.poison\x08\x04name\x06poison\x03\tamplifier\0\x03\x08duration\n\x03\x02id&\x05\x06chance\0\0\x80?\0\x03\rcooldown_time\0\x05\x13saturation_modifier\xCD\xCCL?\x03\ron_use_action\x01\x08\rcooldown_type\0\x03\tnutrition\x04\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x01\x0Ecan_always_eat\0\0\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const SPIDER_EYE : Self = Self { id : 278 , registry_key : "minecraft:spider_eye" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x05\x13saturation_modifier\xCD\xCCL?\x03\rcooldown_time\0\x01\x0Ecan_always_eat\0\t\x07effects\n\x02\x03\tamplifier\0\x05\x06chance\0\0\x80?\x08\rdescriptionId\rpotion.poison\x08\x04name\x06poison\x03\x08duration\n\x03\x02id&\0\x03\tnutrition\x04\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\ron_use_action\x01\x08\x11using_converts_to\0\x08\rcooldown_type\0\0\0\0" } ;
     pub const SPIDER_SPAWN_EGG: Self = Self {
         id: 450,
         registry_key: "minecraft:spider_spawn_egg",
@@ -78800,7 +78825,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const STONE_SPEAR : Self = Self { id : 855 , registry_key : "minecraft:stone_spear" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x15minecraft:enchantable\x08\x04slot\x0Bmelee_spear\x01\x05value\x05\0\n\x14minecraft:durability\n\rdamage_chance\x03\x03max\xC8\x01\x03\x03min\0\0\x03\x0Emax_durability\x84\x02\0\n\x19minecraft:piercing_weapon\n\x05reach\x05\x03max\0\0\x90@\x05\x03min\0\0\0@\0\x05\rhitbox_margin\0\0\x80>\n\x0Ecreative_reach\x05\x03min\0\0\0@\x05\x03max\0\0\xF0@\0\0\t\titem_tags\x08\x04\x14minecraft:stone_tier\x12minecraft:is_spear\n\x18minecraft:kinetic_weapon\n\x18minecraft:kinetic_weapon\n\x0Ecreative_reach\x05\x03min\0\0\0@\x05\x03max\0\0\xF0@\0\n\x11damage_conditions\x02\x0Cmax_duration\x13\x01\x05\x12min_relative_speed33\x93@\x05\tmin_speed\0\0\0\0\0\x05\x0Fdamage_modifier\0\0\0\0\x05\x11damage_multiplier\x85\xEBQ?\x02\x05delay\x0E\0\n\x13dismount_conditions\x02\x0Cmax_durationZ\0\x05\x12min_relative_speed\0\0\0\0\x05\tmin_speed\0\0PA\0\x05\rhitbox_margin\0\0\x80>\n\x05reach\x05\x03max\0\0\x90@\x05\x03min\0\0\0@\0\n\x14knockback_conditions\x05\tmin_speed33\xA3@\x02\x0Cmax_duration\xB4\0\x05\x12min_relative_speed\0\0\0\0\0\0\0\n\x10minecraft:damage\x02\x05value\x02\0\0\n\x17minecraft:use_modifiers\x05\x11movement_modifier\0\0\x80?\x08\x0Bstart_sound\x14item.stone_spear.use\x08\x0Bstart_using\x06always\x01\x0Femit_vibrations\0\x05\x0Cuse_duration\0\xA0\x8CG\0\n\x0Fitem_properties\x05\x0Cmining_speed\0\0\x80?\x08\x0Ecreative_group\0\x03\x06damage\x04\x01\x0Eallow_off_hand\0\x01\x12hidden_in_commands\x02\x08\x10enchantable_slot\x0Bmelee_spear\x03\x11creative_category\x06\x03\x0Bframe_count\x02\x03\x0Emax_stack_size\x02\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x0Bstone_spear\0\0\x01\rhand_equipped\x01\x03\x0Cuse_duration\x80\xE4\xAF\x01\x03\ruse_animation\0\x03\x11enchantable_value\n\x01\x17can_destroy_in_creative\x01\x01\x04foil\0\x01\x0Eliquid_clipped\0\x01\x0Eshould_despawn\x01\x01\x0Fstacked_by_data\0\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x12minecraft:cooldown\x08\x04type\x06attack\x05\x08duration\0\0@?\x08\x08category\x05spear\0\n\x14minecraft:repairable\t\x0Crepair_items\n\x04\x08\rrepair_amount)context.other->query.remaining_durability\t\x05items\n\x02\x08\x04name\x15minecraft:stone_spear\0\0\x08\rrepair_amount\x1Bquery.max_durability * 0.25\t\x05items\n\x02\x08\x04tags,q.all_tags('minecraft:stone_tool_materials')\0\0\0\n\x18minecraft:swing_duration\x05\x05value\0\0@?\0\n\x16minecraft:swing_sounds\x08\nattack_hit\x1Bitem.stone_spear.attack_hit\x08\x0Battack_miss\x1Citem.stone_spear.attack_miss\0\n\x0Eminecraft:tags\t\x04tags\x08\x04\x14minecraft:stone_tier\x12minecraft:is_spear\0\n\x17minecraft:hand_equipped\x01\x05value\x01\0\n\x16minecraft:display_name\x08\x05value\x15item.stone_spear.name\0\0\0" } ;
+    pub const STONE_SPEAR : Self = Self { id : 855 , registry_key : "minecraft:stone_spear" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x0Fitem_properties\x08\x0Ecreative_group\0\x01\x12hidden_in_commands\x02\x01\x17can_destroy_in_creative\x01\x03\x11enchantable_value\n\x03\x0Bframe_count\x02\x08\x10enchantable_slot\x0Bmelee_spear\x01\x0Fstacked_by_data\0\x01\x0Eallow_off_hand\0\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x0Bstone_spear\0\0\x03\ruse_animation\0\x01\x0Eliquid_clipped\0\x03\x06damage\x04\x01\x04foil\0\x01\rhand_equipped\x01\x05\x0Cmining_speed\0\0\x80?\x03\x0Cuse_duration\x80\xE4\xAF\x01\x03\x11creative_category\x06\x01\x0Eshould_despawn\x01\x03\x0Emax_stack_size\x02\0\n\x12minecraft:cooldown\x05\x08duration\0\0@?\x08\x04type\x06attack\x08\x08category\x05spear\0\n\x14minecraft:durability\n\rdamage_chance\x03\x03min\0\x03\x03max\xC8\x01\0\x03\x0Emax_durability\x84\x02\0\n\x16minecraft:display_name\x08\x05value\x15item.stone_spear.name\0\n\x17minecraft:hand_equipped\x01\x05value\x01\0\n\x16minecraft:swing_sounds\x08\nattack_hit\x1Bitem.stone_spear.attack_hit\x08\x0Battack_miss\x1Citem.stone_spear.attack_miss\0\n\x17minecraft:use_modifiers\x05\x0Cuse_duration\0\xA0\x8CG\x05\x11movement_modifier\0\0\x80?\x08\x0Bstart_sound\x14item.stone_spear.use\x01\x0Femit_vibrations\0\x08\x0Bstart_using\x06always\0\n\x18minecraft:swing_duration\x05\x05value\0\0@?\0\n\x10minecraft:damage\x02\x05value\x02\0\0\n\x18minecraft:kinetic_weapon\n\x18minecraft:kinetic_weapon\n\x11damage_conditions\x05\tmin_speed\0\0\0\0\x02\x0Cmax_duration\x13\x01\x05\x12min_relative_speed33\x93@\0\x05\x11damage_multiplier\x85\xEBQ?\n\x14knockback_conditions\x05\tmin_speed33\xA3@\x05\x12min_relative_speed\0\0\0\0\x02\x0Cmax_duration\xB4\0\0\n\x05reach\x05\x03max\0\0\x90@\x05\x03min\0\0\0@\0\x05\x0Fdamage_modifier\0\0\0\0\n\x13dismount_conditions\x02\x0Cmax_durationZ\0\x05\tmin_speed\0\0PA\x05\x12min_relative_speed\0\0\0\0\0\n\x0Ecreative_reach\x05\x03max\0\0\xF0@\x05\x03min\0\0\0@\0\x05\rhitbox_margin\0\0\x80>\x02\x05delay\x0E\0\0\0\n\x19minecraft:piercing_weapon\n\x05reach\x05\x03min\0\0\0@\x05\x03max\0\0\x90@\0\x05\rhitbox_margin\0\0\x80>\n\x0Ecreative_reach\x05\x03max\0\0\xF0@\x05\x03min\0\0\0@\0\0\n\x14minecraft:repairable\t\x0Crepair_items\n\x04\x08\rrepair_amount)context.other->query.remaining_durability\t\x05items\n\x02\x08\x04name\x15minecraft:stone_spear\0\0\t\x05items\n\x02\x08\x04tags,q.all_tags('minecraft:stone_tool_materials')\0\x08\rrepair_amount\x1Bquery.max_durability * 0.25\0\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x15minecraft:enchantable\x01\x05value\x05\x08\x04slot\x0Bmelee_spear\0\t\titem_tags\x08\x04\x14minecraft:stone_tier\x12minecraft:is_spear\n\x0Eminecraft:tags\t\x04tags\x08\x04\x14minecraft:stone_tier\x12minecraft:is_spear\0\0\0" } ;
     pub const STONE_STAIRS: Self = Self {
         id: 67,
         registry_key: "minecraft:stone_stairs",
@@ -79179,8 +79204,8 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const SUSPICIOUS_STEW : Self = Self { id : 602 , registry_key : "minecraft:suspicious_stew" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x08\rcooldown_type\0\x01\x0Ecan_always_eat\x01\x03\tnutrition\x0C\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\ron_use_action\x02\x03\rcooldown_time\0\x08\x11using_converts_to\x04bowl\x05\x13saturation_modifier\x9A\x99\x19?\0\x03\x18minecraft:max_stack_size\x02\0\0" } ;
-    pub const SWEET_BERRIES : Self = Self { id : 287 , registry_key : "minecraft:sweet_berries" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:seed\x08\rplant_at_face\x02up\x08\x0Bcrop_result\x1Aminecraft:sweet_berry_bush\x01\x1Aplant_at_any_solid_surface\0\t\x08plant_at\x08\x14\x08farmland\x05grass\x04dirt\x0Bcoarse_dirt\x06podzol\nmoss_block\x08mycelium\x03mud\x14muddy_mangrove_roots\x0Fdirt_with_roots\0\n\x0Eminecraft:food\x08\x11using_converts_to\0\x03\tnutrition\x04\x05\x13saturation_modifier\x9A\x99\x99>\x01\x0Ecan_always_eat\0\x03\rcooldown_time\0\x03\ron_use_action\x01\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x08\rcooldown_type\0\0\0\0" } ;
+    pub const SUSPICIOUS_STEW : Self = Self { id : 602 , registry_key : "minecraft:suspicious_stew" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\x03\x18minecraft:max_stack_size\x02\n\x0Eminecraft:food\x05\x13saturation_modifier\x9A\x99\x19?\x01\x0Ecan_always_eat\x01\x08\rcooldown_type\0\x03\ron_use_action\x02\x03\rcooldown_time\0\x08\x11using_converts_to\x04bowl\x03\tnutrition\x0C\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\0\0\0" } ;
+    pub const SWEET_BERRIES : Self = Self { id : 287 , registry_key : "minecraft:sweet_berries" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x03\x16minecraft:use_duration@\n\x0Eminecraft:food\x05\x13saturation_modifier\x9A\x99\x99>\x03\rcooldown_time\0\x03\ron_use_action\x01\x08\x11using_converts_to\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\tnutrition\x04\x01\x0Ecan_always_eat\0\x08\rcooldown_type\0\0\n\x0Eminecraft:seed\t\x08plant_at\x08\x14\x08farmland\x05grass\x04dirt\x0Bcoarse_dirt\x06podzol\nmoss_block\x08mycelium\x03mud\x14muddy_mangrove_roots\x0Fdirt_with_roots\x08\rplant_at_face\x02up\x08\x0Bcrop_result\x1Aminecraft:sweet_berry_bush\x01\x1Aplant_at_any_solid_surface\0\0\0\0" } ;
     pub const SWEET_BERRY_BUSH: Self = Self {
         id: -207,
         registry_key: "minecraft:sweet_berry_bush",
@@ -79279,7 +79304,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const TORCHFLOWER_SEEDS : Self = Self { id : 296 , registry_key : "minecraft:torchflower_seeds" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:seed\x08\x0Bcrop_result\x1Aminecraft:torchflower_crop\t\x08plant_at\x08\x02\x12minecraft:farmland\x01\x1Aplant_at_any_solid_surface\0\x08\rplant_at_face\x02up\0\0\0" } ;
+    pub const TORCHFLOWER_SEEDS : Self = Self { id : 296 , registry_key : "minecraft:torchflower_seeds" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:seed\x08\x0Bcrop_result\x1Aminecraft:torchflower_crop\x01\x1Aplant_at_any_solid_surface\0\t\x08plant_at\x08\x02\x12minecraft:farmland\x08\rplant_at_face\x02up\0\0\0" } ;
     pub const TOTEM_OF_UNDYING: Self = Self {
         id: 578,
         registry_key: "minecraft:totem_of_undying",
@@ -79308,7 +79333,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const TRIAL_KEY : Self = Self { id : 876 , registry_key : "minecraft:trial_key" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x0Fitem_properties\x03\x0Cuse_duration\0\x01\x0Eallow_off_hand\0\x03\x11enchantable_value\0\x01\x12hidden_in_commands\x02\x08\x10enchantable_slot\x04none\n\x0Eminecraft:icon\n\x08textures\x08\x07default\ttrial_key\0\0\x03\ruse_animation\0\x03\x06damage\0\x05\x0Cmining_speed\0\0\x80?\x01\x0Fstacked_by_data\0\x01\x17can_destroy_in_creative\x01\x01\x04foil\0\x08\x0Ecreative_group\0\x01\rhand_equipped\0\x03\x11creative_category\x08\x03\x0Bframe_count\x02\x01\x0Eliquid_clipped\0\x01\x0Eshould_despawn\x01\x03\x0Emax_stack_size\x80\x01\0\n\x16minecraft:display_name\x08\x05value\x13item.trial_key.name\0\t\titem_tags\0\0\0\0" } ;
+    pub const TRIAL_KEY : Self = Self { id : 876 , registry_key : "minecraft:trial_key" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x0Fitem_properties\x01\x17can_destroy_in_creative\x01\x03\x11creative_category\x08\x03\x11enchantable_value\0\x01\x0Eallow_off_hand\0\x01\x0Eliquid_clipped\0\x03\x0Emax_stack_size\x80\x01\x03\x06damage\0\x03\x0Bframe_count\x02\x08\x0Ecreative_group\0\x08\x10enchantable_slot\x04none\x03\ruse_animation\0\x01\rhand_equipped\0\x01\x0Eshould_despawn\x01\x01\x12hidden_in_commands\x02\x05\x0Cmining_speed\0\0\x80?\x01\x0Fstacked_by_data\0\x01\x04foil\0\x03\x0Cuse_duration\0\n\x0Eminecraft:icon\n\x08textures\x08\x07default\ttrial_key\0\0\0\t\titem_tags\0\0\n\x16minecraft:display_name\x08\x05value\x13item.trial_key.name\0\0\0" } ;
     pub const TRIAL_SPAWNER: Self = Self {
         id: -315,
         registry_key: "minecraft:trial_spawner",
@@ -79337,7 +79362,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const TROPICAL_FISH : Self = Self { id : 266 , registry_key : "minecraft:tropical_fish" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x01\x19minecraft:stacked_by_data\x01\n\x0Eminecraft:food\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\rcooldown_time\0\x05\x13saturation_modifier\xCD\xCC\xCC=\x08\rcooldown_type\0\x08\x11using_converts_to\0\x01\x0Ecan_always_eat\0\x03\tnutrition\x02\x03\ron_use_action\x01\0\x03\x16minecraft:use_duration@\0\0" } ;
+    pub const TROPICAL_FISH : Self = Self { id : 266 , registry_key : "minecraft:tropical_fish" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\x01\x19minecraft:stacked_by_data\x01\n\x0Eminecraft:food\x08\x11using_converts_to\0\x05\x13saturation_modifier\xCD\xCC\xCC=\x01\x0Ecan_always_eat\0\t\x0Con_use_range\x05\x06\0\0\0A\0\0\0A\0\0\0A\x03\tnutrition\x02\x08\rcooldown_type\0\x03\ron_use_action\x01\x03\rcooldown_time\0\0\x03\x16minecraft:use_duration@\0\0" } ;
     pub const TROPICAL_FISH_BUCKET: Self = Self {
         id: 369,
         registry_key: "minecraft:tropical_fish_bucket",
@@ -80388,8 +80413,8 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const WHEAT_SEEDS : Self = Self { id : 291 , registry_key : "minecraft:wheat_seeds" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:seed\x08\rplant_at_face\x02up\x01\x1Aplant_at_any_solid_surface\0\x08\x0Bcrop_result\x0Fminecraft:wheat\t\x08plant_at\x08\x02\x12minecraft:farmland\0\0\0" } ;
-    pub const WHITE_BUNDLE : Self = Self { id : 872 , registry_key : "minecraft:white_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x16minecraft:storage_item\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x03\tmax_slots\x80\x01\x01\x1Aallow_nested_storage_items\x01\t\rallowed_items\0\0\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\t\titem_tags\0\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x0Fitem_properties\x01\x0Fstacked_by_data\0\x01\x0Eallow_off_hand\0\x01\x04foil\0\x05\x0Cmining_speed\0\0\x80?\x03\x0Bframe_count\x02\x03\x06damage\0\x03\x0Cuse_duration\0\x01\x12hidden_in_commands\x02\x01\x17can_destroy_in_creative\x01\x08\x0Ecreative_group\0\x01\x0Eliquid_clipped\0\x03\x11creative_category\x06\x01\rhand_equipped\0\n\x0Eminecraft:icon\n\x08textures\x08\x10bundle_open_back\x16bundle_white_open_back\x08\x11bundle_open_front\x17bundle_white_open_front\x08\x07default\x0Cbundle_white\0\0\x03\ruse_animation\0\x03\x11enchantable_value\0\x01\x0Eshould_despawn\x01\x08\x10enchantable_slot\x04none\x03\x0Emax_stack_size\x02\0\0\0" } ;
+    pub const WHEAT_SEEDS : Self = Self { id : 291 , registry_key : "minecraft:wheat_seeds" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:seed\x08\x0Bcrop_result\x0Fminecraft:wheat\x08\rplant_at_face\x02up\x01\x1Aplant_at_any_solid_surface\0\t\x08plant_at\x08\x02\x12minecraft:farmland\0\0\0" } ;
+    pub const WHITE_BUNDLE : Self = Self { id : 872 , registry_key : "minecraft:white_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n\x0Fitem_properties\x01\x0Eallow_off_hand\0\x01\x17can_destroy_in_creative\x01\x03\x11creative_category\x06\x03\x11enchantable_value\0\x01\x0Eliquid_clipped\0\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x0Cbundle_white\x08\x10bundle_open_back\x16bundle_white_open_back\x08\x11bundle_open_front\x17bundle_white_open_front\0\0\x01\rhand_equipped\0\x01\x0Eshould_despawn\x01\x03\x0Bframe_count\x02\x03\x0Cuse_duration\0\x03\x06damage\0\x05\x0Cmining_speed\0\0\x80?\x01\x04foil\0\x03\x0Emax_stack_size\x02\x01\x0Fstacked_by_data\0\x08\x0Ecreative_group\0\x03\ruse_animation\0\x01\x12hidden_in_commands\x02\x08\x10enchantable_slot\x04none\0\n\x16minecraft:storage_item\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x03\tmax_slots\x80\x01\x01\x1Aallow_nested_storage_items\x01\t\rallowed_items\0\0\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\t\titem_tags\0\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\0\0" } ;
     pub const WHITE_CANDLE: Self = Self {
         id: -413,
         registry_key: "minecraft:white_candle",
@@ -80509,7 +80534,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const WIND_CHARGE : Self = Self { id : 877 , registry_key : "minecraft:wind_charge" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x13minecraft:throwable\x05\x11max_draw_duration\0\0\0\0\x01\x12do_swing_animation\x01\x05\x10max_launch_power\0\0\xC0?\x05\x11min_draw_duration\0\0\0\0\x01\x1Cscale_power_by_draw_duration\0\x05\x12launch_power_scale\0\0\xC0?\0\n\x16minecraft:display_name\x08\x05value\x15item.wind_charge.name\0\n\x0Fitem_properties\x03\x0Emax_stack_size\x80\x01\x01\x0Eallow_off_hand\0\x01\x0Fstacked_by_data\0\x01\x04foil\0\x01\rhand_equipped\0\x03\ruse_animation\0\x03\x0Cuse_duration\0\x01\x0Eshould_despawn\x01\x03\x11creative_category\x06\x08\x10enchantable_slot\x04none\x05\x0Cmining_speed\0\0\x80?\x08\x0Ecreative_group\0\x03\x0Bframe_count\x02\x03\x11enchantable_value\0\x01\x12hidden_in_commands\x02\x01\x0Eliquid_clipped\0\x03\x06damage\0\x01\x17can_destroy_in_creative\x01\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x0Bwind_charge\0\0\0\n\x14minecraft:projectile\x05\x16minimum_critical_power\0\0\0\0\x08\x11projectile_entity\"minecraft:wind_charge_projectile<>\0\n\x12minecraft:cooldown\x08\x08category\x0Bwind_charge\x05\x08duration\0\0\0?\x08\x04type\x03use\0\t\titem_tags\0\0\0\0" } ;
+    pub const WIND_CHARGE : Self = Self { id : 877 , registry_key : "minecraft:wind_charge" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x14minecraft:projectile\x08\x11projectile_entity\"minecraft:wind_charge_projectile<>\x05\x16minimum_critical_power\0\0\0\0\0\n\x13minecraft:throwable\x05\x12launch_power_scale\0\0\xC0?\x01\x12do_swing_animation\x01\x05\x11min_draw_duration\0\0\0\0\x05\x11max_draw_duration\0\0\0\0\x01\x1Cscale_power_by_draw_duration\0\x05\x10max_launch_power\0\0\xC0?\0\t\titem_tags\0\0\n\x16minecraft:display_name\x08\x05value\x15item.wind_charge.name\0\n\x12minecraft:cooldown\x08\x08category\x0Bwind_charge\x05\x08duration\0\0\0?\x08\x04type\x03use\0\n\x0Fitem_properties\x01\rhand_equipped\0\x01\x0Eliquid_clipped\0\x01\x04foil\0\x01\x0Eshould_despawn\x01\x03\x0Cuse_duration\0\x08\x0Ecreative_group\0\x03\x0Bframe_count\x02\x03\ruse_animation\0\n\x0Eminecraft:icon\n\x08textures\x08\x07default\x0Bwind_charge\0\0\x05\x0Cmining_speed\0\0\x80?\x03\x06damage\0\x08\x10enchantable_slot\x04none\x03\x0Emax_stack_size\x80\x01\x01\x0Fstacked_by_data\0\x01\x0Eallow_off_hand\0\x01\x12hidden_in_commands\x02\x01\x17can_destroy_in_creative\x01\x03\x11creative_category\x06\x03\x11enchantable_value\0\0\0\0" } ;
     pub const WITCH_SPAWN_EGG: Self = Self {
         id: 456,
         registry_key: "minecraft:witch_spawn_egg",
@@ -80622,7 +80647,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const WOODEN_SPEAR : Self = Self { id : 856 , registry_key : "minecraft:wooden_spear" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x16minecraft:swing_sounds\x08\nattack_hit\x1Citem.wooden_spear.attack_hit\x08\x0Battack_miss\x1Ditem.wooden_spear.attack_miss\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x0Fitem_properties\x01\x04foil\0\x03\x11creative_category\x06\x03\x0Bframe_count\x02\x01\x0Eshould_despawn\x01\x03\x06damage\x02\x08\x10enchantable_slot\x0Bmelee_spear\x01\rhand_equipped\x01\x03\x11enchantable_value\x1E\x01\x0Eliquid_clipped\0\x01\x12hidden_in_commands\x02\x03\x0Emax_stack_size\x02\n\x0Eminecraft:icon\n\x08textures\x08\x07default\nwood_spear\0\0\x01\x17can_destroy_in_creative\x01\x08\x0Ecreative_group\0\x01\x0Fstacked_by_data\0\x03\x0Cuse_duration\x80\xE4\xAF\x01\x05\x0Cmining_speed\0\0\x80?\x01\x0Eallow_off_hand\0\x03\ruse_animation\0\0\n\x19minecraft:piercing_weapon\x05\rhitbox_margin\0\0\x80>\n\x05reach\x05\x03min\0\0\0@\x05\x03max\0\0\x90@\0\n\x0Ecreative_reach\x05\x03min\0\0\0@\x05\x03max\0\0\xF0@\0\0\n\x16minecraft:display_name\x08\x05value\x16item.wooden_spear.name\0\t\titem_tags\x08\x04\x15minecraft:wooden_tier\x12minecraft:is_spear\n\x0Eminecraft:tags\t\x04tags\x08\x04\x15minecraft:wooden_tier\x12minecraft:is_spear\0\n\x14minecraft:repairable\t\x0Crepair_items\n\x04\t\x05items\n\x02\x08\x04name\x16minecraft:wooden_spear\0\x08\rrepair_amount)context.other->query.remaining_durability\0\x08\rrepair_amount\x1Bquery.max_durability * 0.25\t\x05items\n\x02\x08\x04tags\x1Eq.all_tags('minecraft:planks')\0\0\0\n\x12minecraft:cooldown\x05\x08durationff&?\x08\x04type\x06attack\x08\x08category\x05spear\0\n\x14minecraft:durability\n\rdamage_chance\x03\x03min\0\x03\x03max\xC8\x01\0\x03\x0Emax_durabilityx\0\n\x17minecraft:hand_equipped\x01\x05value\x01\0\n\x15minecraft:enchantable\x08\x04slot\x0Bmelee_spear\x01\x05value\x0F\0\n\x18minecraft:kinetic_weapon\n\x18minecraft:kinetic_weapon\n\x14knockback_conditions\x02\x0Cmax_duration\xC8\0\x05\x12min_relative_speed\0\0\0\0\x05\tmin_speed33\xA3@\0\x05\rhitbox_margin\0\0\x80>\n\x05reach\x05\x03max\0\0\x90@\x05\x03min\0\0\0@\0\x05\x11damage_multiplier333?\n\x13dismount_conditions\x02\x0Cmax_durationd\0\x05\x12min_relative_speed\0\0\0\0\x05\tmin_speed\0\0`A\0\n\x0Ecreative_reach\x05\x03max\0\0\xF0@\x05\x03min\0\0\0@\0\x02\x05delay\x0F\0\n\x11damage_conditions\x05\x12min_relative_speed33\x93@\x02\x0Cmax_duration,\x01\x05\tmin_speed\0\0\0\0\0\x05\x0Fdamage_modifier\0\0\0\0\0\0\n\x17minecraft:use_modifiers\x08\x0Bstart_sound\x15item.wooden_spear.use\x05\x0Cuse_duration\0\xA0\x8CG\x01\x0Femit_vibrations\0\x05\x11movement_modifier\0\0\x80?\x08\x0Bstart_using\x06always\0\n\x10minecraft:damage\x02\x05value\x01\0\0\n\x18minecraft:swing_duration\x05\x05valueff&?\0\n\x0Eminecraft:fuel\x05\x08duration\0\0 A\0\0\0" } ;
+    pub const WOODEN_SPEAR : Self = Self { id : 856 , registry_key : "minecraft:wooden_spear" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x14minecraft:repairable\t\x0Crepair_items\n\x04\t\x05items\n\x02\x08\x04name\x16minecraft:wooden_spear\0\x08\rrepair_amount)context.other->query.remaining_durability\0\t\x05items\n\x02\x08\x04tags\x1Eq.all_tags('minecraft:planks')\0\x08\rrepair_amount\x1Bquery.max_durability * 0.25\0\0\n\x18minecraft:swing_duration\x05\x05valueff&?\0\n\x19minecraft:piercing_weapon\x05\rhitbox_margin\0\0\x80>\n\x0Ecreative_reach\x05\x03min\0\0\0@\x05\x03max\0\0\xF0@\0\n\x05reach\x05\x03max\0\0\x90@\x05\x03min\0\0\0@\0\0\n\x16minecraft:swing_sounds\x08\x0Battack_miss\x1Ditem.wooden_spear.attack_miss\x08\nattack_hit\x1Citem.wooden_spear.attack_hit\0\n\x0Eminecraft:tags\t\x04tags\x08\x04\x15minecraft:wooden_tier\x12minecraft:is_spear\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x18minecraft:kinetic_weapon\n\x18minecraft:kinetic_weapon\n\x13dismount_conditions\x05\x12min_relative_speed\0\0\0\0\x05\tmin_speed\0\0`A\x02\x0Cmax_durationd\0\0\n\x05reach\x05\x03max\0\0\x90@\x05\x03min\0\0\0@\0\x05\rhitbox_margin\0\0\x80>\x05\x0Fdamage_modifier\0\0\0\0\x02\x05delay\x0F\0\n\x11damage_conditions\x05\x12min_relative_speed33\x93@\x05\tmin_speed\0\0\0\0\x02\x0Cmax_duration,\x01\0\n\x0Ecreative_reach\x05\x03max\0\0\xF0@\x05\x03min\0\0\0@\0\x05\x11damage_multiplier333?\n\x14knockback_conditions\x05\x12min_relative_speed\0\0\0\0\x05\tmin_speed33\xA3@\x02\x0Cmax_duration\xC8\0\0\0\0\n\x12minecraft:cooldown\x08\x08category\x05spear\x08\x04type\x06attack\x05\x08durationff&?\0\n\x10minecraft:damage\x02\x05value\x01\0\0\n\x0Fitem_properties\x01\x04foil\0\x03\x11enchantable_value\x1E\x05\x0Cmining_speed\0\0\x80?\x08\x0Ecreative_group\0\x03\x0Cuse_duration\x80\xE4\xAF\x01\x01\x0Eallow_off_hand\0\x01\x17can_destroy_in_creative\x01\x01\x12hidden_in_commands\x02\x03\x11creative_category\x06\x08\x10enchantable_slot\x0Bmelee_spear\x03\x0Emax_stack_size\x02\x03\x0Bframe_count\x02\x01\x0Eliquid_clipped\0\n\x0Eminecraft:icon\n\x08textures\x08\x07default\nwood_spear\0\0\x03\x06damage\x02\x01\rhand_equipped\x01\x01\x0Eshould_despawn\x01\x01\x0Fstacked_by_data\0\x03\ruse_animation\0\0\n\x0Eminecraft:fuel\x05\x08duration\0\0 A\0\n\x16minecraft:display_name\x08\x05value\x16item.wooden_spear.name\0\n\x15minecraft:enchantable\x01\x05value\x0F\x08\x04slot\x0Bmelee_spear\0\t\titem_tags\x08\x04\x15minecraft:wooden_tier\x12minecraft:is_spear\n\x14minecraft:durability\x03\x0Emax_durabilityx\n\rdamage_chance\x03\x03max\xC8\x01\x03\x03min\0\0\0\n\x17minecraft:hand_equipped\x01\x05value\x01\0\n\x17minecraft:use_modifiers\x05\x0Cuse_duration\0\xA0\x8CG\x05\x11movement_modifier\0\0\x80?\x08\x0Bstart_using\x06always\x08\x0Bstart_sound\x15item.wooden_spear.use\x01\x0Femit_vibrations\0\0\0\0" } ;
     pub const WOODEN_SWORD: Self = Self {
         id: 310,
         registry_key: "minecraft:wooden_sword",
@@ -80651,7 +80676,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const YELLOW_BUNDLE : Self = Self { id : 873 , registry_key : "minecraft:yellow_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x0Fitem_properties\x03\x11creative_category\x06\x03\x06damage\0\x01\x0Eallow_off_hand\0\x08\x0Ecreative_group\0\x08\x10enchantable_slot\x04none\x05\x0Cmining_speed\0\0\x80?\x01\x0Eliquid_clipped\0\x03\x0Emax_stack_size\x02\x01\x04foil\0\x01\x17can_destroy_in_creative\x01\n\x0Eminecraft:icon\n\x08textures\x08\x11bundle_open_front\x18bundle_yellow_open_front\x08\x10bundle_open_back\x17bundle_yellow_open_back\x08\x07default\rbundle_yellow\0\0\x03\x0Bframe_count\x02\x01\x0Eshould_despawn\x01\x01\rhand_equipped\0\x03\x0Cuse_duration\0\x03\ruse_animation\0\x03\x11enchantable_value\0\x01\x0Fstacked_by_data\0\x01\x12hidden_in_commands\x02\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\t\titem_tags\0\0\n\x16minecraft:storage_item\x03\tmax_slots\x80\x01\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x01\x1Aallow_nested_storage_items\x01\t\rallowed_items\0\0\0\0\0" } ;
+    pub const YELLOW_BUNDLE : Self = Self { id : 873 , registry_key : "minecraft:yellow_bundle" , version : BedrockItemVersion :: DataDriven , component_based : true , definition_components : b"\n\0\n\ncomponents\n\x0Fitem_properties\x01\x0Eliquid_clipped\0\x01\x12hidden_in_commands\x02\x01\x0Fstacked_by_data\0\x03\x11enchantable_value\0\x03\x11creative_category\x06\x03\x0Bframe_count\x02\x03\x0Cuse_duration\0\x03\x06damage\0\x03\x0Emax_stack_size\x02\x01\rhand_equipped\0\n\x0Eminecraft:icon\n\x08textures\x08\x11bundle_open_front\x18bundle_yellow_open_front\x08\x07default\rbundle_yellow\x08\x10bundle_open_back\x17bundle_yellow_open_back\0\0\x05\x0Cmining_speed\0\0\x80?\x08\x10enchantable_slot\x04none\x01\x04foil\0\x01\x17can_destroy_in_creative\x01\x08\x0Ecreative_group\0\x01\x0Eallow_off_hand\0\x03\ruse_animation\0\x01\x0Eshould_despawn\x01\0\n\x16minecraft:storage_item\x01\x1Aallow_nested_storage_items\x01\t\x0Cbanned_items\n\x04\x08\x04name\x15minecraft:shulker_box\0\x08\x04name\x1Cminecraft:undyed_shulker_box\0\x03\tmax_slots\x80\x01\t\rallowed_items\0\0\0\n\x18minecraft:max_stack_size\x01\x05value\x01\0\n\x1Cminecraft:bundle_interaction\x03\x12num_viewable_slots\x18\0\n\x1Eminecraft:storage_weight_limit\x03\x10max_weight_limit\x80\x01\0\n!minecraft:storage_weight_modifier\x03\x16weight_in_storage_item\x08\0\t\titem_tags\0\0\0\0" } ;
     pub const YELLOW_CANDLE: Self = Self {
         id: -417,
         registry_key: "minecraft:yellow_candle",

@@ -6,10 +6,9 @@ use std::sync::{Arc, Weak};
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::meta_data_type::MetaDataType;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_data::tracked_data::TrackedData;
+use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
@@ -121,11 +120,7 @@ impl DolphinEntity {
     pub fn set_got_fish(&self, got_fish: bool) {
         self.got_fish.store(got_fish, Relaxed);
         self.mob_entity.living_entity.entity.send_meta_data(
-            &[Metadata::new(
-                TrackedData::GOT_FISH,
-                MetaDataType::BOOLEAN,
-                got_fish,
-            )],
+            &[Metadata::new(tracked_data::dolphin::GOT_FISH, got_fish)],
             None,
         );
     }
@@ -133,8 +128,7 @@ impl DolphinEntity {
     fn send_moistness(&self, level: i32) {
         self.mob_entity.living_entity.entity.send_meta_data(
             &[Metadata::new(
-                TrackedData::MOISTNESS_LEVEL,
-                MetaDataType::INT,
+                tracked_data::dolphin::MOISTNESS_LEVEL,
                 VarInt(level),
             )],
             None,
@@ -226,8 +220,7 @@ impl Mob for DolphinEntity {
             self.send_moistness(self.moistness_level.load(Relaxed));
             self.mob_entity.living_entity.entity.send_meta_data(
                 &[Metadata::new(
-                    TrackedData::GOT_FISH,
-                    MetaDataType::BOOLEAN,
+                    tracked_data::dolphin::GOT_FISH,
                     self.got_fish(),
                 )],
                 None,

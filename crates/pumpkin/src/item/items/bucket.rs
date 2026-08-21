@@ -164,15 +164,12 @@ async fn give_player_bucket_item(
     }
 }
 
-/// Returns the bucket item obtained and the position of the block actually acted on
-/// (needed for `GameEvent::FluidPickup`, which vanilla emits at that exact position --
-/// `BucketItem.java:77` -- not always `block_pos` itself, since the waterlogged-neighbor
-/// branch below acts on `target_pos` instead).
-async fn try_pickup_bucket_item(
+/// Tries to pick up powder snow, a waterlogged block, or a fluid source block at `block_pos`,
+/// returning the matching filled bucket item on success.
+pub(crate) async fn try_pickup_fluid_at(
     world: &Arc<World>,
     block_pos: BlockPos,
-    direction: BlockDirection,
-) -> Option<(&'static Item, BlockPos)> {
+) -> Option<&'static Item> {
     let (block, state) = world.get_block_and_state_id(&block_pos);
 
     if block == &Block::POWDER_SNOW {
@@ -183,7 +180,7 @@ async fn try_pickup_bucket_item(
                 BlockFlags::NOTIFY_ALL | BlockFlags::SKIP_DROPS,
             )
             .await;
-        return Some((&Item::POWDER_SNOW_BUCKET, block_pos));
+        return Some(&Item::POWDER_SNOW_BUCKET);
     }
 
     if is_waterlogged(block, state) {
@@ -192,7 +189,7 @@ async fn try_pickup_bucket_item(
             .set_block_state(&block_pos, state_id, BlockFlags::NOTIFY_NEIGHBORS)
             .await;
         world.schedule_fluid_tick(&Fluid::WATER, block_pos, 5, TickPriority::Normal);
-        return Some((&Item::WATER_BUCKET, block_pos));
+        return Some(&Item::WATER_BUCKET);
     }
 
     if state == Block::LAVA.default_state.id || state == Block::WATER.default_state.id {
@@ -206,14 +203,27 @@ async fn try_pickup_bucket_item(
                 BlockFlags::NOTIFY_NEIGHBORS,
             )
             .await;
-        return Some((
-            if state == Block::LAVA.default_state.id {
-                &Item::LAVA_BUCKET
-            } else {
-                &Item::WATER_BUCKET
-            },
-            block_pos,
-        ));
+        return Some(if state == Block::LAVA.default_state.id {
+            &Item::LAVA_BUCKET
+        } else {
+            &Item::WATER_BUCKET
+        });
+    }
+
+    None
+}
+
+/// Returns the bucket item obtained and the position of the block actually acted on
+/// (needed for `GameEvent::FluidPickup`, which vanilla emits at that exact position --
+/// `BucketItem.java:77` -- not always `block_pos` itself, since the waterlogged-neighbor
+/// branch below acts on `target_pos` instead).
+async fn try_pickup_bucket_item(
+    world: &Arc<World>,
+    block_pos: BlockPos,
+    direction: BlockDirection,
+) -> Option<(&'static Item, BlockPos)> {
+    if let Some(item) = try_pickup_fluid_at(world, block_pos).await {
+        return Some((item, block_pos));
     }
 
     let target_pos = block_pos.offset(direction.to_offset());
@@ -230,7 +240,7 @@ async fn try_pickup_bucket_item(
     None
 }
 
-fn should_evaporate_in_nether(item: &Item, world: &World) -> bool {
+pub(crate) fn should_evaporate_in_nether(item: &Item, world: &World) -> bool {
     item.id != Item::LAVA_BUCKET.id
         && item.id != Item::POWDER_SNOW_BUCKET.id
         && world.dimension == Dimension::THE_NETHER
@@ -303,12 +313,23 @@ const fn mob_bucket_empty_sound(item: &Item) -> Option<Sound> {
 /// Vanilla `BucketItem#emptyContents` evaporation branch:
 /// `level.playSound(user, pos, FIRE_EXTINGUISH, BLOCKS, 0.5F, 2.6F + (rnd - rnd) * 0.8F)`,
 /// i.e. at the target block, for everyone nearby except the acting player.
-fn play_bucket_evaporation(world: &Arc<World>, player: &Player, pos: BlockPos) {
+fn play_bucket_evaporation_by_player(world: &Arc<World>, player: &Player, pos: BlockPos) {
     world.play_sound_raw_expect(
         player,
         Sound::BlockFireExtinguish as u16,
         SoundCategory::Blocks,
         &block_center(pos),
+        0.5,
+        (rand::random::<f32>() - rand::random::<f32>()).mul_add(0.8, 2.6),
+    );
+}
+
+/// Same sound without an acting player, for dispensers.
+pub(crate) fn play_bucket_evaporation(world: &Arc<World>, position: &Vector3<f64>) {
+    world.play_sound_raw(
+        Sound::BlockFireExtinguish as u16,
+        SoundCategory::Blocks,
+        position,
         0.5,
         (rand::random::<f32>() - rand::random::<f32>()).mul_add(0.8, 2.6),
     );
@@ -397,7 +418,7 @@ async fn try_place_powder_snow(
     true
 }
 
-async fn try_place_filled_bucket(
+pub(crate) async fn try_place_filled_bucket(
     world: &Arc<World>,
     item: &Item,
     pos: BlockPos,
@@ -705,7 +726,7 @@ impl ItemBehaviour for FilledBucketItem {
             // in the Nether.
             let evaporated = should_evaporate_in_nether(item, &world);
             let placed_pos = if evaporated {
-                play_bucket_evaporation(&world, player, pos);
+                play_bucket_evaporation_by_player(&world, player, pos);
                 pos
             } else {
                 let Some(placed_pos) = try_place_filled_bucket(&world, item, pos, direction).await

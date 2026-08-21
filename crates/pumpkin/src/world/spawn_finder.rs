@@ -104,11 +104,14 @@ const fn get_coprime(possible_origins: i64) -> i64 {
 fn get_level_respawn_pos(world: &World, x: i32, z: i32) -> Option<BlockPos> {
     let min_y = world.dimension.min_y;
 
-    // ChunkGenerator.getSpawnHeight: noise generators return 64, while flat
-    // generators return minY plus the number of configured layers.
+    // ChunkGenerator.getSpawnHeight: the base implementation returns 64, and only
+    // FlatLevelSource overrides it with minY plus the number of configured layers.
+    // A plugin-supplied custom generator has no override, so it gets the base 64.
     let top_y = if world.dimension.has_ceiling {
-        match world.level.world_gen.as_ref() {
-            pumpkin_world::generation::generator::WorldGenerator::Noise(_) => 64,
+        let world_gen = world.level.world_gen.load();
+        match &**world_gen {
+            pumpkin_world::generation::generator::WorldGenerator::Noise(_)
+            | pumpkin_world::generation::generator::WorldGenerator::Custom(_) => 64,
             pumpkin_world::generation::generator::WorldGenerator::Flat(generator) => {
                 min_y
                     + generator
