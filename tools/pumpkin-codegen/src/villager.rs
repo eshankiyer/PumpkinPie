@@ -10,8 +10,6 @@ use std::fs;
 struct VillagerDataJson {
     professions: IndexMap<String, ProfessionJson>,
     types: IndexMap<String, String>,
-    trade_sets: IndexMap<String, TradeSetJson>,
-    villager_trades: IndexMap<String, TradeJson>,
 }
 
 #[derive(Deserialize)]
@@ -19,6 +17,7 @@ struct ProfessionJson {
     name: NameJson,
     requested_items: Vec<String>,
     work_sound: Option<String>,
+    #[serde(default)]
     trade_sets: IndexMap<String, String>,
 }
 
@@ -27,13 +26,18 @@ struct NameJson {
     translate: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct TradeSetJson {
     trades: String, // Tag like "#minecraft:armorer/level_1"
+    #[serde(default = "default_amount")]
     amount: f32,
 }
 
-#[derive(Deserialize)]
+fn default_amount() -> f32 {
+    1.0
+}
+
+#[derive(Deserialize, Clone)]
 struct TradeJson {
     wants: TradeItemJson,
     #[serde(alias = "wants_b")]
@@ -48,130 +52,122 @@ struct TradeJson {
     merchant_predicate: Option<Value>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct TradeItemJson {
     id: String,
     count: Option<f32>,
 }
 
-/// `data/minecraft/tags/villager_trade/wandering_trader/buying.json` (vanilla 26.2 decompiled
-/// source). Unlike profession trade sets, whose vanilla trade keys are named
-/// `<profession>/level_<n>/<trade>` (so a simple key-prefix match recovers tag membership),
-/// wandering trader trade keys are flat (`wandering_trader/<trade>`) with no level/category
-/// segment -- the buying/common/uncommon split is a tag, not derivable from the key name, so
-/// membership must be listed explicitly from the actual tag file.
-const WANDERING_TRADER_BUYING_KEYS: &[&str] = &[
-    "wandering_trader/water_bottle_emerald",
-    "wandering_trader/water_bucket_emerald",
-    "wandering_trader/milk_bucket_emerald",
-    "wandering_trader/fermented_spider_eye_emerald",
-    "wandering_trader/baked_potato_emerald",
-    "wandering_trader/hay_block_emerald",
-];
-
-/// `data/minecraft/tags/villager_trade/wandering_trader/common.json`.
-const WANDERING_TRADER_COMMON_KEYS: &[&str] = &[
-    "wandering_trader/emerald_white_dye",
-    "wandering_trader/emerald_orange_dye",
-    "wandering_trader/emerald_magenta_dye",
-    "wandering_trader/emerald_light_blue_dye",
-    "wandering_trader/emerald_yellow_dye",
-    "wandering_trader/emerald_lime_dye",
-    "wandering_trader/emerald_pink_dye",
-    "wandering_trader/emerald_gray_dye",
-    "wandering_trader/emerald_light_gray_dye",
-    "wandering_trader/emerald_cyan_dye",
-    "wandering_trader/emerald_purple_dye",
-    "wandering_trader/emerald_blue_dye",
-    "wandering_trader/emerald_brown_dye",
-    "wandering_trader/emerald_green_dye",
-    "wandering_trader/emerald_red_dye",
-    "wandering_trader/emerald_black_dye",
-    "wandering_trader/emerald_fish_bucket",
-    "wandering_trader/emerald_pufferfish_bucket",
-    "wandering_trader/emerald_sea_pickle",
-    "wandering_trader/emerald_slime_ball",
-    "wandering_trader/emerald_glowstone",
-    "wandering_trader/emerald_nautilus_shell",
-    "wandering_trader/emerald_fern",
-    "wandering_trader/emerald_sugar_cane",
-    "wandering_trader/emerald_pumpkin",
-    "wandering_trader/emerald_kelp",
-    "wandering_trader/emerald_cactus",
-    "wandering_trader/emerald_dandelion",
-    "wandering_trader/emerald_poppy",
-    "wandering_trader/emerald_blue_orchid",
-    "wandering_trader/emerald_allium",
-    "wandering_trader/emerald_azure_bluet",
-    "wandering_trader/emerald_red_tulip",
-    "wandering_trader/emerald_orange_tulip",
-    "wandering_trader/emerald_white_tulip",
-    "wandering_trader/emerald_pink_tulip",
-    "wandering_trader/emerald_oxeye_daisy",
-    "wandering_trader/emerald_cornflower",
-    "wandering_trader/emerald_lily_of_the_valley",
-    "wandering_trader/emerald_open_eyeblossom",
-    "wandering_trader/emerald_wheat_seeds",
-    "wandering_trader/emerald_beetroot_seeds",
-    "wandering_trader/emerald_pumpkin_seeds",
-    "wandering_trader/emerald_melon_seeds",
-    "wandering_trader/emerald_acacia_sapling",
-    "wandering_trader/emerald_birch_sapling",
-    "wandering_trader/emerald_dark_oak_sapling",
-    "wandering_trader/emerald_jungle_sapling",
-    "wandering_trader/emerald_oak_sapling",
-    "wandering_trader/emerald_spruce_sapling",
-    "wandering_trader/emerald_cherry_sapling",
-    "wandering_trader/emerald_pale_oak_sapling",
-    "wandering_trader/emerald_mangrove_propagule",
-    "wandering_trader/emerald_brain_coral_block",
-    "wandering_trader/emerald_bubble_coral_block",
-    "wandering_trader/emerald_fire_coral_block",
-    "wandering_trader/emerald_horn_coral_block",
-    "wandering_trader/emerald_tube_coral_block",
-    "wandering_trader/emerald_vine",
-    "wandering_trader/emerald_pale_hanging_moss",
-    "wandering_trader/emerald_brown_mushroom",
-    "wandering_trader/emerald_red_mushroom",
-    "wandering_trader/emerald_lily_pad",
-    "wandering_trader/emerald_small_dripleaf",
-    "wandering_trader/emerald_sand",
-    "wandering_trader/emerald_red_sand",
-    "wandering_trader/emerald_pointed_dripstone",
-    "wandering_trader/emerald_sulfur_spike",
-    "wandering_trader/emerald_rooted_dirt",
-    "wandering_trader/emerald_moss_block",
-    "wandering_trader/emerald_pale_moss_block",
-    "wandering_trader/emerald_wildflowers",
-    "wandering_trader/emerald_dry_tall_grass",
-    "wandering_trader/emerald_firefly_bush",
-    "wandering_trader/emerald_golden_dandelion",
-    "wandering_trader/emerald_name_tag",
-];
-
-/// `data/minecraft/tags/villager_trade/wandering_trader/uncommon.json`.
-const WANDERING_TRADER_UNCOMMON_KEYS: &[&str] = &[
-    "wandering_trader/emerald_packed_ice",
-    "wandering_trader/emerald_blue_ice",
-    "wandering_trader/emerald_gunpowder",
-    "wandering_trader/emerald_podzol",
-    "wandering_trader/emerald_acacia_log",
-    "wandering_trader/emerald_birch_log",
-    "wandering_trader/emerald_dark_oak_log",
-    "wandering_trader/emerald_jungle_log",
-    "wandering_trader/emerald_oak_log",
-    "wandering_trader/emerald_spruce_log",
-    "wandering_trader/emerald_cherry_log",
-    "wandering_trader/emerald_mangrove_log",
-    "wandering_trader/emerald_pale_oak_log",
-    "wandering_trader/emerald_enchanted_iron_pickaxe",
-    "wandering_trader/emerald_long_invisibility_potion",
-];
+fn walk_json_files<F>(dir: &std::path::Path, base_dir: &std::path::Path, callback: &mut F)
+where
+    F: FnMut(String, String),
+{
+    if let Ok(entries) = fs::read_dir(dir) {
+        let mut entries: Vec<_> = entries.flatten().collect();
+        entries.sort_by_key(|e| e.path());
+        for entry in entries {
+            let path = entry.path();
+            if path.is_dir() {
+                walk_json_files(&path, base_dir, callback);
+            } else if path.extension().is_some_and(|ext| ext == "json") {
+                let rel = path.strip_prefix(base_dir).unwrap();
+                let stem = rel.with_extension("");
+                let key = stem.to_string_lossy().replace('\\', "/");
+                let content = fs::read_to_string(&path).expect("Failed to read JSON file");
+                callback(key, content);
+            }
+        }
+    }
+}
 
 pub fn build() -> TokenStream {
     let data: VillagerDataJson =
         serde_json::from_str(&fs::read_to_string("../../assets/villager_data.json").unwrap())
             .expect("Failed to parse villager_data.json");
+
+    // Load trade sets from datapack
+    let trade_set_dir =
+        std::path::Path::new("../../assets/datapacks/26_2/data/minecraft/trade_set");
+    let mut trade_sets: IndexMap<String, TradeSetJson> = IndexMap::new();
+    walk_json_files(trade_set_dir, trade_set_dir, &mut |key, content| {
+        if let Ok(trade_set) = serde_json::from_str::<TradeSetJson>(&content) {
+            trade_sets.insert(format!("minecraft:{key}"), trade_set.clone());
+            trade_sets.insert(key, trade_set);
+        }
+    });
+
+    // Load trade tags from datapack
+    let trade_tags_dir =
+        std::path::Path::new("../../assets/datapacks/26_2/data/minecraft/tags/villager_trade");
+    let mut raw_trade_tags: IndexMap<String, Vec<String>> = IndexMap::new();
+    walk_json_files(trade_tags_dir, trade_tags_dir, &mut |key, content| {
+        #[derive(Deserialize)]
+        struct TagFile {
+            values: Vec<Value>,
+        }
+        if let Ok(tag_file) = serde_json::from_str::<TagFile>(&content) {
+            let values = tag_file
+                .values
+                .into_iter()
+                .filter_map(|v| match v {
+                    Value::String(s) => Some(s),
+                    Value::Object(obj) => obj.get("id").and_then(Value::as_str).map(String::from),
+                    _ => None,
+                })
+                .collect();
+            raw_trade_tags.insert(format!("minecraft:{key}"), values);
+        }
+    });
+
+    fn resolve_trade_tag(
+        tag: &str,
+        raw_tags: &IndexMap<String, Vec<String>>,
+        visited: &mut std::collections::HashSet<String>,
+    ) -> Vec<String> {
+        if visited.contains(tag) {
+            return Vec::new();
+        }
+        visited.insert(tag.to_string());
+        let mut result = Vec::new();
+        let full_tag = if tag.starts_with("minecraft:") {
+            tag.to_string()
+        } else {
+            format!("minecraft:{tag}")
+        };
+        if let Some(values) = raw_tags.get(&full_tag) {
+            for v in values {
+                if let Some(sub) = v.strip_prefix('#') {
+                    let mut sub_visited = visited.clone();
+                    for child in resolve_trade_tag(sub, raw_tags, &mut sub_visited) {
+                        if !result.contains(&child) {
+                            result.push(child);
+                        }
+                    }
+                } else {
+                    let full_v = if v.starts_with("minecraft:") {
+                        v.clone()
+                    } else {
+                        format!("minecraft:{v}")
+                    };
+                    if !result.contains(&full_v) {
+                        result.push(full_v);
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    // Load individual villager trades from datapack
+    let trades_dir =
+        std::path::Path::new("../../assets/datapacks/26_2/data/minecraft/villager_trade");
+    let mut villager_trades: IndexMap<String, TradeJson> = IndexMap::new();
+    walk_json_files(trades_dir, trades_dir, &mut |key, content| {
+        if let Ok(trade) = serde_json::from_str::<TradeJson>(&content) {
+            villager_trades.insert(format!("minecraft:{key}"), trade.clone());
+            villager_trades.insert(key, trade);
+        }
+    });
 
     let mut profession_variants = Vec::new();
     let mut type_variants = Vec::new();
@@ -301,68 +297,32 @@ pub fn build() -> TokenStream {
     };
 
     // Pre-process all trade sets mentioned in trade_sets map
-    for (_set_key, set_data) in &data.trade_sets {
+    for (_set_key, set_data) in &trade_sets {
         let tag = &set_data.trades;
-        if !tag.starts_with("#minecraft:") {
+        if generated_trade_sets.contains_key(tag) {
             continue;
         }
-        let tag_content = tag.strip_prefix("#minecraft:").unwrap();
-        let parts: Vec<&str> = tag_content.split('/').collect();
-        if parts.len() < 2 {
-            continue;
-        }
-        let prof = parts[0];
-        let level_str = parts[1].strip_prefix("level_").unwrap_or(parts[1]);
+        let tag_content = tag.strip_prefix('#').unwrap_or(tag);
+        let tag_clean = tag_content
+            .strip_prefix("minecraft:")
+            .unwrap_or(tag_content);
+
+        // Wandering-trader sets are keyed `wandering_trader/<category>`; the profession
+        // and category are the two halves of the tag path.
+        let (prof, level_str) = tag_clean.split_once('/').unwrap_or((tag_clean, ""));
+
+        let mut visited = std::collections::HashSet::new();
+        let trade_ids = resolve_trade_tag(tag_clean, &raw_trade_tags, &mut visited);
 
         let mut matching_trades = Vec::new();
-
-        // The vanilla tags share a small number of smith trades between professions.
-        let includes_common_smith = matches!(
-            (prof, level_str),
-            ("armorer", "1" | "2") | ("toolsmith" | "weaponsmith", "1")
-        );
-        if prof == "wandering_trader" {
-            let keys: &[&str] = match level_str {
-                "buying" => WANDERING_TRADER_BUYING_KEYS,
-                "common" => WANDERING_TRADER_COMMON_KEYS,
-                "uncommon" => WANDERING_TRADER_UNCOMMON_KEYS,
-                _ => &[],
-            };
-            for key in keys {
-                if let Some(trade) = data.villager_trades.get(*key) {
-                    matching_trades.push(format_trade(trade));
-                }
-            }
-        } else if includes_common_smith {
-            let smith_prefix = format!("smith/{level_str}/");
-            for (key, trade) in &data.villager_trades {
-                if key.starts_with(&smith_prefix) {
-                    matching_trades.push(format_trade(trade));
-                }
-            }
-        } else {
-            let prefix = format!("{prof}/{level_str}/");
-            for (key, trade) in &data.villager_trades {
-                if key.starts_with(&prefix) {
-                    matching_trades.push(format_trade(trade));
-                }
-            }
-
-            // Fallback for smiths
-            if matching_trades.is_empty()
-                && (prof == "armorer" || prof == "toolsmith" || prof == "weaponsmith")
-            {
-                let smith_prefix = format!("smith/{level_str}/");
-                for (key, trade) in &data.villager_trades {
-                    if key.starts_with(&smith_prefix) {
-                        matching_trades.push(format_trade(trade));
-                    }
-                }
+        for trade_id in trade_ids {
+            if let Some(trade) = villager_trades.get(&trade_id) {
+                matching_trades.push(format_trade(trade));
             }
         }
 
         if !matching_trades.is_empty() {
-            let ident_name = tag_content.replace('/', "_").to_shouty_snake_case();
+            let ident_name = tag_clean.replace('/', "_").to_shouty_snake_case();
             let ident = format_ident!("TRADES_{}", ident_name);
             trade_set_data.push(quote! {
                 pub const #ident: &[VillagerTrade] = &[
@@ -433,12 +393,11 @@ pub fn build() -> TokenStream {
         for (level_str, set_key) in &prof_data.trade_sets {
             let level = level_str.parse::<i32>().unwrap();
             let set_key_clean = set_key.strip_prefix("minecraft:").unwrap_or(set_key);
-            if let Some(trades_ident) = data
-                .trade_sets
+            if let Some(trades_ident) = trade_sets
                 .get(set_key_clean)
                 .and_then(|set| generated_trade_sets.get(&set.trades))
             {
-                let set = data.trade_sets.get(set_key_clean).unwrap();
+                let set = trade_sets.get(set_key_clean).unwrap();
                 let amount = set.amount as i32;
                 level_matches.push(quote! { #level => Some(VillagerTradeSet { trades: #trades_ident, amount: #amount }) });
             }

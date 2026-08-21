@@ -1191,7 +1191,12 @@ fn record_tracked_data_into<T: MetadataSerializer>(
 ) {
     for m in meta {
         let mut value = Vec::new();
-        if m.value.write_metadata(&mut value).is_err() {
+        // The payload is recorded once at the server's native version; `Metadata::write`
+        // does the per-client index and type-id remapping when the snapshot is replayed.
+        if m.value
+            .write_metadata(&mut value, &JavaMinecraftVersion::V_26_2)
+            .is_err()
+        {
             continue;
         }
         let entry = TrackedDataEntry {
@@ -1235,8 +1240,8 @@ fn serialize_tracked_data(
 pub struct TrackedDataEntry {
     pub index: TrackedId,
     pub r#type: MetaDataType,
-    /// The value as produced by `MetadataSerializer::write_metadata`, which is
-    /// protocol-version independent.
+    /// The value as produced by `MetadataSerializer::write_metadata` at the
+    /// server's native version.
     pub value: Box<[u8]>,
 }
 

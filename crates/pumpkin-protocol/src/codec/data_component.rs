@@ -959,7 +959,9 @@ impl DataComponentCodec<Self> for LodestoneTrackerImpl {
     fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
         seq.write_option(&self.target, |seq, target| {
             seq.write_string(&target.dimension)?;
-            seq.write_block_pos(&BlockPos::new(target.x, target.y, target.z))
+            // Data components exist only on 1.20.5+, so the modern (1.14+) packing is
+            // the only one reachable here and no version needs threading in.
+            seq.write_i64_be(BlockPos::new(target.x, target.y, target.z).as_long())
         })?;
         seq.write_bool(self.tracked)
     }

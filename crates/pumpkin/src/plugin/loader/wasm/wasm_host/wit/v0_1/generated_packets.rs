@@ -726,16 +726,6 @@ pub fn serialize_java_packet(
             crate::net::java::JavaClient::write_packet_for_version(&p, version, &mut buf).unwrap();
             Some(buf.into())
         }
-        ClientboundPacket::CSystemChatMessage(data) => {
-            let component_content = pumpkin_util::text::TextComponent::text(data.content.clone());
-            let p = pumpkin_protocol::java::client::play::CSystemChatMessage {
-                content: &component_content,
-                overlay: data.overlay.try_into().unwrap(),
-            };
-            let mut buf = Vec::new();
-            crate::net::java::JavaClient::write_packet_for_version(&p, version, &mut buf).unwrap();
-            Some(buf.into())
-        }
         ClientboundPacket::CTabList(data) => {
             let component_header = pumpkin_util::text::TextComponent::text(data.header.clone());
             let component_footer = pumpkin_util::text::TextComponent::text(data.footer.clone());
@@ -794,8 +784,8 @@ pub fn serialize_java_packet(
         }
         ClientboundPacket::CUnloadChunk(data) => {
             let p = pumpkin_protocol::java::client::play::CUnloadChunk {
-                z: data.z.try_into().unwrap(),
                 x: data.x.try_into().unwrap(),
+                z: data.z.try_into().unwrap(),
             };
             let mut buf = Vec::new();
             crate::net::java::JavaClient::write_packet_for_version(&p, version, &mut buf).unwrap();
@@ -2033,15 +2023,6 @@ impl ToWitClientboundJava for pumpkin_protocol::java::client::play::CSubtitle<'_
     }
 }
 
-impl ToWitClientboundJava for pumpkin_protocol::java::client::play::CSystemChatMessage<'_> {
-    fn to_wit(&self) -> ClientboundPacket {
-        ClientboundPacket::CSystemChatMessage(crate::plugin::loader::wasm::wasm_host::wit::v0_1::pumpkin::plugin::java_packets::CSystemChatMessage {
-                content: serde_json::to_string(&self.content).unwrap_or_default(),
-                overlay: self.overlay.try_into().unwrap(),
-        })
-    }
-}
-
 impl ToWitClientboundJava for pumpkin_protocol::java::client::play::CTabList<'_> {
     fn to_wit(&self) -> ClientboundPacket {
         ClientboundPacket::CTabList(crate::plugin::loader::wasm::wasm_host::wit::v0_1::pumpkin::plugin::java_packets::CTabList {
@@ -2099,8 +2080,8 @@ impl ToWitClientboundJava for pumpkin_protocol::java::client::play::CTransfer<'_
 impl ToWitClientboundJava for pumpkin_protocol::java::client::play::CUnloadChunk {
     fn to_wit(&self) -> ClientboundPacket {
         ClientboundPacket::CUnloadChunk(crate::plugin::loader::wasm::wasm_host::wit::v0_1::pumpkin::plugin::java_packets::CUnloadChunk {
-                z: self.z.try_into().unwrap(),
                 x: self.x.try_into().unwrap(),
+                z: self.z.try_into().unwrap(),
         })
     }
 }
@@ -2400,10 +2381,6 @@ pub fn clientbound_java_any_to_wit(any: &dyn Any) -> Option<ClientboundPacket> {
         return Some(p.to_wit());
     }
     if let Some(p) = any.downcast_ref::<pumpkin_protocol::java::client::play::CSubtitle>() {
-        return Some(p.to_wit());
-    }
-    if let Some(p) = any.downcast_ref::<pumpkin_protocol::java::client::play::CSystemChatMessage>()
-    {
         return Some(p.to_wit());
     }
     if let Some(p) = any.downcast_ref::<pumpkin_protocol::java::client::play::CTabList>() {

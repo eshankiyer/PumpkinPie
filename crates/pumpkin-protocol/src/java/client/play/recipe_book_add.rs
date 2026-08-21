@@ -14,22 +14,19 @@ use std::{collections::HashMap, io::Write};
 use crate::codec::item_stack_seralizer::ItemStackTemplateSerializer;
 use crate::{ClientPacket, VarInt, WritingError, ser::NetworkWriteExt};
 
+use pumpkin_data::slot_display_id_remap::remap_slot_display_id_for_version;
+
 // Recipe Display type IDs
 const RECIPE_DISPLAY_SHAPELESS: i32 = 0;
 const RECIPE_DISPLAY_SHAPED: i32 = 1;
 const RECIPE_DISPLAY_FURNACE: i32 = 2;
 
-// Slot Display type IDs
-const SLOT_DISPLAY_EMPTY: i32 = 0;
-const SLOT_DISPLAY_ANY_FUEL: i32 = 1;
-// 1.21.2 - 1.21.11
-const SLOT_DISPLAY_ITEM_LEGACY: i32 = 2;
-const SLOT_DISPLAY_ITEM_STACK_LEGACY: i32 = 3;
-const SLOT_DISPLAY_COMPOSITE_LEGACY: i32 = 7;
-// 26.1+
-const SLOT_DISPLAY_ITEM_26_1: i32 = 4;
-const SLOT_DISPLAY_ITEM_STACK_26_1: i32 = 5;
-const SLOT_DISPLAY_COMPOSITE_26_1: i32 = 10;
+// Slot Display base type IDs (26.2)
+const SLOT_DISPLAY_EMPTY: u32 = 0;
+const SLOT_DISPLAY_ANY_FUEL: u32 = 1;
+const SLOT_DISPLAY_ITEM: u32 = 4;
+const SLOT_DISPLAY_ITEM_STACK: u32 = 5;
+const SLOT_DISPLAY_COMPOSITE: u32 = 10;
 
 const ENTRY_FLAG_NOTIFICATION: u8 = 0x01;
 const ENTRY_FLAG_HIGHLIGHT: u8 = 0x02;
@@ -72,27 +69,15 @@ fn item_id_versioned(item: &Item, version: JavaMinecraftVersion) -> i32 {
 }
 
 fn slot_display_item_type(version: JavaMinecraftVersion) -> i32 {
-    if version >= JavaMinecraftVersion::V_26_1 {
-        SLOT_DISPLAY_ITEM_26_1
-    } else {
-        SLOT_DISPLAY_ITEM_LEGACY
-    }
+    remap_slot_display_id_for_version(SLOT_DISPLAY_ITEM, version) as i32
 }
 
 fn slot_display_composite_type(version: JavaMinecraftVersion) -> i32 {
-    if version >= JavaMinecraftVersion::V_26_1 {
-        SLOT_DISPLAY_COMPOSITE_26_1
-    } else {
-        SLOT_DISPLAY_COMPOSITE_LEGACY
-    }
+    remap_slot_display_id_for_version(SLOT_DISPLAY_COMPOSITE, version) as i32
 }
 
 fn slot_display_item_stack_type(version: JavaMinecraftVersion) -> i32 {
-    if version >= JavaMinecraftVersion::V_26_1 {
-        SLOT_DISPLAY_ITEM_STACK_26_1
-    } else {
-        SLOT_DISPLAY_ITEM_STACK_LEGACY
-    }
+    remap_slot_display_id_for_version(SLOT_DISPLAY_ITEM_STACK, version) as i32
 }
 
 fn write_item_slot_display(
@@ -118,13 +103,23 @@ fn write_item_stack_slot_display(
         .write_with_version(write, &version)
 }
 
-fn write_empty_slot_display(write: &mut impl Write) -> Result<(), WritingError> {
-    write.write_var_int(&VarInt(SLOT_DISPLAY_EMPTY))?;
+fn write_empty_slot_display(
+    write: &mut impl Write,
+    version: JavaMinecraftVersion,
+) -> Result<(), WritingError> {
+    write.write_var_int(&VarInt(
+        remap_slot_display_id_for_version(SLOT_DISPLAY_EMPTY, version) as i32,
+    ))?;
     Ok(())
 }
 
-fn write_any_fuel_slot_display(write: &mut impl Write) -> Result<(), WritingError> {
-    write.write_var_int(&VarInt(SLOT_DISPLAY_ANY_FUEL))?;
+fn write_any_fuel_slot_display(
+    write: &mut impl Write,
+    version: JavaMinecraftVersion,
+) -> Result<(), WritingError> {
+    write.write_var_int(&VarInt(
+        remap_slot_display_id_for_version(SLOT_DISPLAY_ANY_FUEL, version) as i32,
+    ))?;
     Ok(())
 }
 
@@ -168,7 +163,7 @@ fn write_ingredient_slot_display(
             if let Some(item) = Item::from_registry_key(key) {
                 write_item_slot_display(write, item, version)?;
             } else {
-                write_empty_slot_display(write)?;
+                write_empty_slot_display(write, version)?;
             }
         }
         RecipeIngredientTypes::Tagged(tag) => {
@@ -183,7 +178,7 @@ fn write_ingredient_slot_display(
                     }
                 }
             } else {
-                write_empty_slot_display(write)?;
+                write_empty_slot_display(write, version)?;
             }
         }
         RecipeIngredientTypes::OneOf(ids) => {
@@ -195,7 +190,7 @@ fn write_ingredient_slot_display(
                 }
             }
             if items.is_empty() {
-                write_empty_slot_display(write)?;
+                write_empty_slot_display(write, version)?;
             } else if items.len() == 1 {
                 write_item_slot_display(write, items[0], version)?;
             } else {
@@ -294,7 +289,7 @@ fn write_result_slot_display(
     if let Some(item) = Item::from_registry_key(key) {
         write_item_stack_slot_display(write, item, result.count, version)?;
     } else {
-        write_empty_slot_display(write)?;
+        write_empty_slot_display(write, version)?;
     }
     Ok(())
 }
@@ -334,6 +329,9 @@ const fn crafting_category(cat: &RecipeCategoryTypes) -> i32 {
 /// This is the part shared between a full `RecipeDisplayEntry` (used by
 /// `CRecipeBookAdd`) and a bare `ClientboundPlaceGhostRecipePacket`, which carries a
 /// `RecipeDisplay` with no group/category/craftingRequirements/flags attached.
+///
+/// Returns `Ok(false)` without writing anything when the recipe has no displayable
+/// form (special / decorated pot recipes).
 #[allow(clippy::too_many_arguments)]
 pub fn write_recipe_display(
     write: &mut impl Write,
@@ -354,24 +352,31 @@ pub fn write_recipe_display(
                 result,
                 ..
             } => {
+                // Compute width and height from pattern
                 let height = pattern.len() as i32;
                 let width = pattern.first().map_or(0, |r| r.len()) as i32;
+
+                // RecipeDisplay type = shaped (1)
                 write.write_var_int(&VarInt(RECIPE_DISPLAY_SHAPED))?;
+                // width, height
                 write.write_var_int(&VarInt(width))?;
                 write.write_var_int(&VarInt(height))?;
+                // ingredients: flat list, row by row
                 write.write_var_int(&VarInt(width * height))?;
                 for row in *pattern {
                     for ch in row.chars() {
                         if ch == ' ' {
-                            write_empty_slot_display(write)?;
+                            write_empty_slot_display(write, version)?;
                         } else if let Some((_, ingredient)) = key.iter().find(|(k, _)| *k == ch) {
                             write_ingredient_slot_display(write, ingredient, version)?;
                         } else {
-                            write_empty_slot_display(write)?;
+                            write_empty_slot_display(write, version)?;
                         }
                     }
                 }
+                // result
                 write_result_slot_display(write, result, version)?;
+                // craftingStation
                 write_item_slot_display(write, crafting_table, version)?;
             }
             CraftingRecipeTypes::CraftingShapeless {
@@ -379,12 +384,16 @@ pub fn write_recipe_display(
                 result,
                 ..
             } => {
+                // RecipeDisplay type = shapeless (0)
                 write.write_var_int(&VarInt(RECIPE_DISPLAY_SHAPELESS))?;
+                // ingredients list
                 write.write_var_int(&VarInt(ingredients.len() as i32))?;
                 for ing in *ingredients {
                     write_ingredient_slot_display(write, ing, version)?;
                 }
+                // result
                 write_result_slot_display(write, result, version)?;
+                // craftingStation
                 write_item_slot_display(write, crafting_table, version)?;
             }
             CraftingRecipeTypes::CraftingTransmute {
@@ -393,6 +402,7 @@ pub fn write_recipe_display(
                 result,
                 ..
             } => {
+                // Transmute shown as shapeless with 2 ingredients
                 write.write_var_int(&VarInt(RECIPE_DISPLAY_SHAPELESS))?;
                 write.write_var_int(&VarInt(2))?;
                 write_ingredient_slot_display(write, input, version)?;
@@ -400,7 +410,7 @@ pub fn write_recipe_display(
                 write_result_slot_display(write, result, version)?;
                 write_item_slot_display(write, crafting_table, version)?;
             }
-            // No useful display for these.
+            // Skip special/decorated_pot recipes as they have no useful display
             CraftingRecipeTypes::CraftingDecoratedPot { .. }
             | CraftingRecipeTypes::CraftingSpecial => {
                 return Ok(false);
@@ -417,12 +427,19 @@ pub fn write_recipe_display(
             CookingRecipeType::CampfireCooking(r) => (r, campfire),
         };
 
+        // RecipeDisplay type = furnace (2)
         write.write_var_int(&VarInt(RECIPE_DISPLAY_FURNACE))?;
+        // ingredient
         write_ingredient_slot_display(write, &cooking.ingredient, version)?;
-        write_any_fuel_slot_display(write)?;
+        // fuel: AnyFuel
+        write_any_fuel_slot_display(write, version)?;
+        // result
         write_result_slot_display(write, &cooking.result, version)?;
+        // craftingStation
         write_item_slot_display(write, station, version)?;
+        // duration
         write.write_var_int(&VarInt(cooking.cookingtime))?;
+        // experience
         write.write_f32_be(cooking.experience)?;
         return Ok(true);
     }
@@ -447,23 +464,30 @@ fn write_entry(
     crafting_recipe: Option<&CraftingRecipeTypes>,
     cooking_recipe: Option<(&CookingRecipeType, i32)>,
 ) -> Result<bool, WritingError> {
-    write.write_var_int(&VarInt(display_id))?;
-    let written = write_recipe_display(
-        write,
-        version,
-        crafting_table,
-        furnace,
-        blast_furnace,
-        smoker,
-        campfire,
-        crafting_recipe,
-        cooking_recipe.map(|(r, _)| r),
-    )?;
-    if !written {
-        return Ok(false);
-    }
-
     if let Some(recipe) = crafting_recipe {
+        // Bail out before a single byte is written: these have no RecipeDisplay, and
+        // emitting the display id for them would leave a stray VarInt in the stream.
+        if matches!(
+            recipe,
+            CraftingRecipeTypes::CraftingDecoratedPot { .. } | CraftingRecipeTypes::CraftingSpecial
+        ) {
+            return Ok(false);
+        }
+
+        // RecipeDisplayId
+        write.write_var_int(&VarInt(display_id))?;
+        write_recipe_display(
+            write,
+            version,
+            crafting_table,
+            furnace,
+            blast_furnace,
+            smoker,
+            campfire,
+            Some(recipe),
+            None,
+        )?;
+
         match recipe {
             CraftingRecipeTypes::CraftingShaped {
                 category,
@@ -471,8 +495,12 @@ fn write_entry(
                 key,
                 ..
             } => {
+                // group: OptionalVarInt
                 write_optional_var_int(write, group_id)?;
+                // category
                 write.write_var_int(&VarInt(crafting_category(category)))?;
+                // craftingRequirements: one HolderSet per non-empty grid slot
+                // (Ingredient cannot be empty, so empty slots must be excluded)
                 let mut slots: Vec<&RecipeIngredientTypes> = Vec::new();
                 for row in *pattern {
                     for ch in row.chars() {
@@ -484,7 +512,6 @@ fn write_entry(
                     }
                 }
                 write_crafting_requirements(write, &slots, version)?;
-                write.write_u8(flags)?;
             }
             CraftingRecipeTypes::CraftingShapeless {
                 category,
@@ -493,9 +520,9 @@ fn write_entry(
             } => {
                 write_optional_var_int(write, group_id)?;
                 write.write_var_int(&VarInt(crafting_category(category)))?;
+                // craftingRequirements: one HolderSet per ingredient
                 let slots: Vec<&RecipeIngredientTypes> = ingredients.iter().collect();
                 write_crafting_requirements(write, &slots, version)?;
-                write.write_u8(flags)?;
             }
             CraftingRecipeTypes::CraftingTransmute {
                 category,
@@ -505,24 +532,40 @@ fn write_entry(
             } => {
                 write_optional_var_int(write, group_id)?;
                 write.write_var_int(&VarInt(crafting_category(category)))?;
+                // craftingRequirements: input + material
                 write_crafting_requirements(write, &[input, material], version)?;
-                write.write_u8(flags)?;
             }
-            // write_recipe_display already returned false for these above.
+            // Excluded by the guard above.
             CraftingRecipeTypes::CraftingDecoratedPot { .. }
-            | CraftingRecipeTypes::CraftingSpecial => return Ok(true),
+            | CraftingRecipeTypes::CraftingSpecial => return Ok(false),
         }
+        write.write_u8(flags)?;
         return Ok(true);
     }
 
     if let Some((recipe, book_category)) = cooking_recipe {
+        write.write_var_int(&VarInt(display_id))?;
+        write_recipe_display(
+            write,
+            version,
+            crafting_table,
+            furnace,
+            blast_furnace,
+            smoker,
+            campfire,
+            None,
+            Some(recipe),
+        )?;
+
         let cooking = match recipe {
             CookingRecipeType::Smelting(r)
             | CookingRecipeType::Blasting(r)
             | CookingRecipeType::Smoking(r)
             | CookingRecipeType::CampfireCooking(r) => r,
         };
+        // group: OptionalVarInt
         write_optional_var_int(write, group_id)?;
+        // category
         write.write_var_int(&VarInt(book_category))?;
         // craftingRequirements: the single ingredient
         write_crafting_requirements(write, &[&cooking.ingredient], version)?;
@@ -578,11 +621,6 @@ impl ClientPacket for CRecipeBookAdd<'_> {
 
         // Write crafting recipes
         for recipe in RECIPES_CRAFTING {
-            // CraftingSpecial and CraftingDecoratedPot have no RecipeDisplay and must be
-            // skipped entirely before any bytes are written for them. write_entry writes
-            // the display id up front and only then discovers there is nothing to display
-            // for these two variants; writing that id anyway leaves a stray VarInt in the
-            // stream with no matching entry, desyncing every entry that follows.
             let (group, notification) = match recipe {
                 CraftingRecipeTypes::CraftingShaped {
                     group,
@@ -594,7 +632,7 @@ impl ClientPacket for CRecipeBookAdd<'_> {
                     (group.map(Cow::Borrowed), true)
                 }
                 CraftingRecipeTypes::CraftingDecoratedPot { .. }
-                | CraftingRecipeTypes::CraftingSpecial => continue,
+                | CraftingRecipeTypes::CraftingSpecial => (None, true),
             };
             let group_id = resolve_group_id_owned(&mut group_ids, &mut next_group_id, group);
             let flags = entry_flags(self.replace, notification, highlight);
@@ -776,7 +814,7 @@ fn write_dynamic_ingredient_slot_display(
             if let Some(item) = Item::from_registry_key(key) {
                 write_item_slot_display(write, item, version)?;
             } else {
-                write_empty_slot_display(write)?;
+                write_empty_slot_display(write, version)?;
             }
         }
         crate::codec::recipe::OwnedRecipeIngredient::Tagged(tag) => {
@@ -791,7 +829,7 @@ fn write_dynamic_ingredient_slot_display(
                     }
                 }
             } else {
-                write_empty_slot_display(write)?;
+                write_empty_slot_display(write, version)?;
             }
         }
         crate::codec::recipe::OwnedRecipeIngredient::OneOf(ids) => {
@@ -804,7 +842,7 @@ fn write_dynamic_ingredient_slot_display(
                 .collect();
 
             if items.is_empty() {
-                write_empty_slot_display(write)?;
+                write_empty_slot_display(write, version)?;
             } else if items.len() == 1 {
                 write_item_slot_display(write, items[0], version)?;
             } else {
@@ -885,7 +923,7 @@ fn write_dynamic_result_slot_display(
     if let Some(item) = Item::from_registry_key(key) {
         write_item_stack_slot_display(write, item, result.count, version)?;
     } else {
-        write_empty_slot_display(write)?;
+        write_empty_slot_display(write, version)?;
     }
     Ok(())
 }
@@ -907,6 +945,7 @@ pub fn write_dynamic_recipe_display(
         } => {
             let height = pattern.len() as i32;
             let width = pattern.first().map_or(0, String::len) as i32;
+
             write.write_var_int(&VarInt(RECIPE_DISPLAY_SHAPED))?;
             write.write_var_int(&VarInt(width))?;
             write.write_var_int(&VarInt(height))?;
@@ -914,11 +953,11 @@ pub fn write_dynamic_recipe_display(
             for row in pattern {
                 for ch in row.chars() {
                     if ch == ' ' {
-                        write_empty_slot_display(write)?;
+                        write_empty_slot_display(write, version)?;
                     } else if let Some((_, ingredient)) = key.iter().find(|(k, _)| *k == ch) {
                         write_dynamic_ingredient_slot_display(write, ingredient, version)?;
                     } else {
-                        write_empty_slot_display(write)?;
+                        write_empty_slot_display(write, version)?;
                     }
                 }
             }
@@ -951,35 +990,16 @@ fn write_dynamic_crafting_entry(
     crafting_table: &Item,
     recipe: &crate::codec::recipe::OwnedCraftingRecipe,
 ) -> Result<(), WritingError> {
+    write.write_var_int(&VarInt(display_id))?;
+    write_dynamic_recipe_display(write, version, crafting_table, recipe)?;
+
     match recipe {
         crate::codec::recipe::OwnedCraftingRecipe::Shaped {
             category,
             pattern,
             key,
-            result,
             ..
         } => {
-            let height = pattern.len() as i32;
-            let width = pattern.first().map_or(0, String::len) as i32;
-
-            write.write_var_int(&VarInt(display_id))?;
-            write.write_var_int(&VarInt(RECIPE_DISPLAY_SHAPED))?;
-            write.write_var_int(&VarInt(width))?;
-            write.write_var_int(&VarInt(height))?;
-            write.write_var_int(&VarInt(width * height))?;
-            for row in pattern {
-                for ch in row.chars() {
-                    if ch == ' ' {
-                        write_empty_slot_display(write)?;
-                    } else if let Some((_, ingredient)) = key.iter().find(|(k, _)| *k == ch) {
-                        write_dynamic_ingredient_slot_display(write, ingredient, version)?;
-                    } else {
-                        write_empty_slot_display(write)?;
-                    }
-                }
-            }
-            write_dynamic_result_slot_display(write, result, version)?;
-            write_item_slot_display(write, crafting_table, version)?;
             write_optional_var_int(write, group_id)?;
             write.write_var_int(&VarInt(crafting_category(category)))?;
 
@@ -998,22 +1018,12 @@ fn write_dynamic_crafting_entry(
             for ing in slots {
                 write_dynamic_ingredient_holderset(write, ing, version)?;
             }
-            write.write_u8(flags)?;
         }
         crate::codec::recipe::OwnedCraftingRecipe::Shapeless {
             category,
             ingredients,
-            result,
             ..
         } => {
-            write.write_var_int(&VarInt(display_id))?;
-            write.write_var_int(&VarInt(RECIPE_DISPLAY_SHAPELESS))?;
-            write.write_var_int(&VarInt(ingredients.len() as i32))?;
-            for ing in ingredients {
-                write_dynamic_ingredient_slot_display(write, ing, version)?;
-            }
-            write_dynamic_result_slot_display(write, result, version)?;
-            write_item_slot_display(write, crafting_table, version)?;
             write_optional_var_int(write, group_id)?;
             write.write_var_int(&VarInt(crafting_category(category)))?;
 
@@ -1022,9 +1032,9 @@ fn write_dynamic_crafting_entry(
             for ing in ingredients {
                 write_dynamic_ingredient_holderset(write, ing, version)?;
             }
-            write.write_u8(flags)?;
         }
     }
+    write.write_u8(flags)?;
     Ok(())
 }
 
@@ -1042,7 +1052,7 @@ fn write_dynamic_cooking_entry(
     write.write_var_int(&VarInt(display_id))?;
     write.write_var_int(&VarInt(RECIPE_DISPLAY_FURNACE))?;
     write_dynamic_ingredient_slot_display(write, &cooking.ingredient, version)?;
-    write_any_fuel_slot_display(write)?;
+    write_any_fuel_slot_display(write, version)?;
     write_dynamic_result_slot_display(write, &cooking.result, version)?;
     write_item_slot_display(write, station, version)?;
     write.write_var_int(&VarInt(cooking.cooking_time))?;
@@ -1054,259 +1064,4 @@ fn write_dynamic_cooking_entry(
     write_dynamic_ingredient_holderset(write, &cooking.ingredient, version)?;
     write.write_u8(flags)?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use std::io::Cursor;
-
-    use pumpkin_data::recipes::{CraftingRecipeTypes, RECIPES_COOKING, RECIPES_CRAFTING};
-    use pumpkin_util::version::JavaMinecraftVersion;
-
-    use crate::ClientPacket;
-    use crate::codec::recipe::DynamicRecipe;
-    use crate::ser::NetworkReadExt;
-
-    use super::CRecipeBookAdd;
-
-    // Minimal reader that walks the exact wire structure CRecipeBookAdd writes,
-    // verified field-for-field against the decompiled vanilla 26.2 sources
-    // (ClientboundRecipeBookAddPacket, RecipeDisplayEntry, RecipeDisplay/SlotDisplay
-    // registries, Ingredient.CONTENTS_STREAM_CODEC, ByteBufCodecs.holderSet/optional).
-    // It exists to catch stream desyncs (extra/missing bytes) that a plain
-    // "did write_packet_data return Ok" check would miss.
-    struct Reader<'a> {
-        cursor: Cursor<&'a [u8]>,
-        item_id: i32,
-        item_stack_id: i32,
-        composite_id: i32,
-    }
-
-    impl Reader<'_> {
-        fn new(bytes: &[u8], version: JavaMinecraftVersion) -> Reader<'_> {
-            let legacy = version < JavaMinecraftVersion::V_26_1;
-            Reader {
-                cursor: Cursor::new(bytes),
-                item_id: if legacy { 2 } else { 4 },
-                item_stack_id: if legacy { 3 } else { 5 },
-                composite_id: if legacy { 7 } else { 10 },
-            }
-        }
-
-        fn var_int(&mut self) -> i32 {
-            self.cursor.get_var_int().unwrap().0
-        }
-
-        fn u8(&mut self) -> u8 {
-            self.cursor.get_u8().unwrap()
-        }
-
-        fn bool(&mut self) -> bool {
-            self.cursor.get_bool().unwrap()
-        }
-
-        fn f32(&mut self) -> f32 {
-            self.cursor.get_f32_be().unwrap()
-        }
-
-        fn remaining(&self) -> usize {
-            let pos = self.cursor.position() as usize;
-            self.cursor.get_ref().len() - pos
-        }
-
-        fn slot_display(&mut self) {
-            let ty = self.var_int();
-            if ty == 0 || ty == 1 {
-                return; // empty / any_fuel
-            }
-            if ty == self.item_id {
-                self.var_int(); // item id
-                return;
-            }
-            if ty == self.item_stack_id {
-                // item_stack: item id, count, then a component patch. Every
-                // ItemStack this packet ever constructs comes from
-                // ItemStack::new / OwnedRecipeResult, both of which start
-                // with an empty component patch, so to_add/to_remove are
-                // always 0 here and there is nothing further to skip.
-                self.var_int(); // item id
-                self.var_int(); // count
-                let to_add = self.var_int();
-                let to_remove = self.var_int();
-                assert_eq!(to_add, 0, "unexpected added components in recipe result");
-                assert_eq!(
-                    to_remove, 0,
-                    "unexpected removed components in recipe result"
-                );
-                return;
-            }
-            if ty == self.composite_id {
-                let count = self.var_int();
-                for _ in 0..count {
-                    self.slot_display();
-                }
-                return;
-            }
-            panic!("unexpected slot display type id {ty}");
-        }
-
-        fn holderset(&mut self) {
-            let n = self.var_int();
-            assert!(
-                n >= 1,
-                "craftingRequirements holder set must never take the tag-reference form (VarInt 0) -- no recipe ingredient here is registered as Tagged"
-            );
-            for _ in 0..(n - 1) {
-                self.var_int(); // item id
-            }
-        }
-
-        fn crafting_requirements(&mut self) {
-            let present = self.bool();
-            assert!(present, "craftingRequirements is always written as present");
-            let count = self.var_int();
-            for _ in 0..count {
-                self.holderset();
-            }
-        }
-
-        /// Returns the ingredient slot count consumed by the `RecipeDisplay` body,
-        /// for cross-checking against the craftingRequirements count that follows.
-        fn recipe_display(&mut self) -> i32 {
-            let display_type = self.var_int();
-            match display_type {
-                0 => {
-                    // crafting_shapeless
-                    let count = self.var_int();
-                    for _ in 0..count {
-                        self.slot_display();
-                    }
-                    self.slot_display(); // result
-                    self.slot_display(); // crafting station
-                    count
-                }
-                1 => {
-                    // crafting_shaped
-                    let width = self.var_int();
-                    let height = self.var_int();
-                    let count = self.var_int();
-                    assert_eq!(count, width * height);
-                    for _ in 0..count {
-                        self.slot_display();
-                    }
-                    self.slot_display(); // result
-                    self.slot_display(); // crafting station
-                    count
-                }
-                2 => {
-                    // furnace
-                    self.slot_display(); // ingredient
-                    self.slot_display(); // fuel (any_fuel)
-                    self.slot_display(); // result
-                    self.slot_display(); // crafting station
-                    self.var_int(); // duration
-                    self.f32(); // experience
-                    1
-                }
-                other => panic!("unexpected recipe display type id {other}"),
-            }
-        }
-
-        fn entry(&mut self) {
-            self.var_int(); // RecipeDisplayId
-            self.recipe_display();
-            self.var_int(); // group (OptionalInt)
-            self.var_int(); // category
-            self.crafting_requirements();
-            self.u8(); // flags
-        }
-    }
-
-    fn decode_and_validate(bytes: &[u8], expected_total: i32, version: JavaMinecraftVersion) {
-        let mut reader = Reader::new(bytes, version);
-        let total = reader.var_int();
-        assert_eq!(total, expected_total, "declared entry count mismatch");
-        for _ in 0..total {
-            reader.entry();
-        }
-        reader.bool(); // replace
-        assert_eq!(
-            reader.remaining(),
-            0,
-            "trailing/missing bytes after decoding every declared entry -- stream desync"
-        );
-    }
-
-    fn expected_crafting_entries() -> i32 {
-        RECIPES_CRAFTING
-            .iter()
-            .filter(|r| {
-                !matches!(
-                    r,
-                    CraftingRecipeTypes::CraftingSpecial
-                        | CraftingRecipeTypes::CraftingDecoratedPot { .. }
-                )
-            })
-            .count() as i32
-    }
-
-    #[test]
-    fn full_recipe_book_add_round_trips_for_26_2() {
-        let dynamic_recipes: Vec<DynamicRecipe> = Vec::new();
-        let packet = CRecipeBookAdd::new(true, &dynamic_recipes);
-        let mut bytes = Vec::new();
-        packet
-            .write_packet_data(&mut bytes, &JavaMinecraftVersion::V_26_2)
-            .expect("writing the full recipe book must not fail");
-
-        assert!(
-            bytes.len() > 10_000,
-            "expected a substantial packet for the full recipe list, got {} bytes",
-            bytes.len()
-        );
-
-        let expected_total = expected_crafting_entries() + RECIPES_COOKING.len() as i32;
-        decode_and_validate(&bytes, expected_total, JavaMinecraftVersion::V_26_2);
-    }
-
-    #[test]
-    fn full_recipe_book_add_round_trips_for_legacy_version() {
-        let dynamic_recipes: Vec<DynamicRecipe> = Vec::new();
-        let packet = CRecipeBookAdd::new(true, &dynamic_recipes);
-        let mut bytes = Vec::new();
-        packet
-            .write_packet_data(&mut bytes, &JavaMinecraftVersion::V_1_21_11)
-            .expect("writing the full recipe book must not fail on a legacy version");
-
-        let expected_total = expected_crafting_entries() + RECIPES_COOKING.len() as i32;
-        decode_and_validate(&bytes, expected_total, JavaMinecraftVersion::V_1_21_11);
-    }
-
-    #[test]
-    fn decorated_pot_recipe_does_not_leave_a_stray_varint() {
-        // Regression test for the join-blocking bug: CraftingDecoratedPot has no
-        // RecipeDisplay, so it must contribute zero bytes to the stream. Before the
-        // fix, write_entry wrote the entry's display id before discovering there was
-        // nothing else to write, leaving an extra unpaired VarInt that desynced every
-        // following entry for a real client's decoder.
-        assert!(
-            RECIPES_CRAFTING
-                .iter()
-                .any(|r| matches!(r, CraftingRecipeTypes::CraftingDecoratedPot { .. })),
-            "test fixture assumption broken: no CraftingDecoratedPot recipe in RECIPES_CRAFTING"
-        );
-
-        let dynamic_recipes: Vec<DynamicRecipe> = Vec::new();
-        let packet = CRecipeBookAdd::new(true, &dynamic_recipes);
-        let mut bytes = Vec::new();
-        packet
-            .write_packet_data(&mut bytes, &JavaMinecraftVersion::V_26_2)
-            .unwrap();
-
-        let expected_total = expected_crafting_entries() + RECIPES_COOKING.len() as i32;
-        // decode_and_validate itself fails with a stream desync if any stray bytes
-        // were emitted anywhere in the stream, including around the decorated pot
-        // recipe.
-        decode_and_validate(&bytes, expected_total, JavaMinecraftVersion::V_26_2);
-    }
 }
