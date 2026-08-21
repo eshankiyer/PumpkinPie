@@ -244,7 +244,7 @@ impl AllayEntity {
         )
     }
 
-    fn brain(&self) -> &Brain {
+    const fn brain(&self) -> &Brain {
         self.mob_entity
             .brain
             .as_ref()

@@ -8,6 +8,7 @@ use crate::entity::ai::brain::memory::{
 use crate::entity::mob::Mob;
 
 /// Vanilla's `Function<LivingEntity, Optional<PositionTracker>> targetPositionGetter`
+///
 /// (`StayCloseToTarget.java:13`). A plain `fn` pointer rather than a boxed closure: every
 /// caller in vanilla passes a static method reference.
 pub type TargetPositionGetter = fn(&dyn Mob, &Brain) -> Option<PositionTracker>;

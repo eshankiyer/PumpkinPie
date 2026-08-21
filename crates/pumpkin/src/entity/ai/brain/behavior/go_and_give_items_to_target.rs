@@ -32,6 +32,7 @@ const DEFAULT_PICKUP_DELAY: u8 = 10;
 
 pub type TargetPositionGetter = fn(&dyn Mob, &Brain) -> Option<PositionTracker>;
 /// `GoAndGiveItemsToTarget.ItemThrower<E>` (`:88-91`).
+///
 /// The trailing `i64` is the brain tick's `game_time`; vanilla reads it back off the level
 /// inside the callback (`AllayAi.java:160`), which is not reachable synchronously here.
 pub type ItemThrower = fn(&dyn Mob, &ItemStack, BlockPos, i64);

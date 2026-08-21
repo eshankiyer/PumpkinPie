@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::block::{
     BlockFuture, EmitsRedstonePowerArgs, GetRedstonePowerArgs, GetStateForNeighborUpdateArgs,
-    OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs,
+    OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs,
 };
 use crate::entity::EntityBase;
 use pumpkin_data::{
@@ -55,6 +55,33 @@ impl BlockBehaviour for ObserverBlock {
             }
 
             Self::update_neighbors(args.world, args.block, args.position, &props).await;
+        })
+    }
+
+    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // `ObserverBlock.onPlace` (ObserverBlock.java:115-123): an observer that arrives
+            // already POWERED with no pending tick (piston move, /setblock, chunk edit) is reset
+            // to unpowered, otherwise it emits 15 forever with nothing left to turn it off.
+            if Block::from_state_id(args.old_state_id) == args.block {
+                return;
+            }
+            let mut props = ObserverLikeProperties::from_state_id(args.state_id, args.block);
+            if props.powered
+                && !args
+                    .world
+                    .is_block_tick_scheduled(args.position, &Block::OBSERVER)
+            {
+                props.powered = false;
+                args.world
+                    .set_block_state(
+                        args.position,
+                        props.to_state_id(args.block),
+                        BlockFlags::NOTIFY_LISTENERS,
+                    )
+                    .await;
+                Self::update_neighbors(args.world, args.block, args.position, &props).await;
+            }
         })
     }
 

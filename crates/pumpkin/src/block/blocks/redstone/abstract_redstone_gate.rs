@@ -86,12 +86,11 @@ pub trait RedstoneGateBlock<T: Send + Sync + BlockProperties + RedstoneGateBlock
                     .await;
                 return;
             }
+            // `DiodeBlock.neighborChanged` (DiodeBlock.java:77-79) calls `dropResources` before
+            // `removeBlock`, so a repeater or comparator whose support is broken drops as an item.
+            // Writing AIR straight into the world skipped the drop and destroyed the gate.
             args.world
-                .set_block_state(
-                    args.position,
-                    Block::AIR.default_state.id,
-                    BlockFlags::NOTIFY_ALL,
-                )
+                .break_block(args.position, None, BlockFlags::NOTIFY_ALL)
                 .await;
             for dir in BlockDirection::all() {
                 args.world

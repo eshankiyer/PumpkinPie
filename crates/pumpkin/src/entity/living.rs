@@ -399,7 +399,7 @@ impl LivingEntity {
 
     /// The slots vanilla's `collectEquipmentChanges` walks (`EquipmentSlot.VALUES`,
     /// `LivingEntity.java:2951`).
-    fn attribute_equipment_slots() -> [EquipmentSlot; 8] {
+    const fn attribute_equipment_slots() -> [EquipmentSlot; 8] {
         [
             EquipmentSlot::MAIN_HAND,
             EquipmentSlot::OFF_HAND,
@@ -412,20 +412,30 @@ impl LivingEntity {
         ]
     }
 
-    /// `LivingEntity.getItemBySlot`. The main hand is special-cased because a player's held
-    /// item lives in `PlayerInventory.main_inventory[selected]`, not in `entity_equipment` --
-    /// which also means scrolling the hotbar counts as an equipment change, exactly as in
-    /// vanilla.
-    async fn item_by_equipment_slot(
+    /// `LivingEntity.getItemBySlot` for every slot at once. The main hand is special-cased
+    /// because a player's held item lives in `PlayerInventory.main_inventory[selected]`, not in
+    /// `entity_equipment` -- which also means scrolling the hotbar counts as an equipment
+    /// change, exactly as in vanilla.
+    ///
+    /// The main hand is resolved *before* the equipment lock is taken: for a non-player
+    /// `held_item` reads `entity_equipment` itself, so doing it under the lock would deadlock.
+    async fn items_by_equipment_slot(
         &self,
         caller: &dyn EntityBase,
-        slot: &EquipmentSlot,
-    ) -> ItemStack {
-        if matches!(slot, EquipmentSlot::MainHand(_)) {
-            self.held_item(caller).await
-        } else {
-            self.entity_equipment.lock().await.get(slot)
-        }
+    ) -> Vec<(EquipmentSlot, ItemStack)> {
+        let main_hand = self.held_item(caller).await;
+        let equipment = self.entity_equipment.lock().await;
+        Self::attribute_equipment_slots()
+            .into_iter()
+            .map(|slot| {
+                let stack = if matches!(slot, EquipmentSlot::MainHand(_)) {
+                    main_hand.clone()
+                } else {
+                    equipment.get(&slot)
+                };
+                (slot, stack)
+            })
+            .collect()
     }
 
     /// Applies `modifiers` to this entity's attributes, recording every attribute touched so
@@ -459,11 +469,11 @@ impl LivingEntity {
     /// Recomputing only on change -- rather than every tick -- is what vanilla does and what
     /// keeps `add_or_replace_modifier` from thrashing the attribute cache.
     pub async fn tick_equipment_attributes(&self, caller: &dyn EntityBase) {
+        let current_items = self.items_by_equipment_slot(caller).await;
         let mut changes: Vec<(EquipmentSlot, ItemStack, ItemStack)> = Vec::new();
         {
             let mut last = self.last_equipment_items.lock().await;
-            for slot in Self::attribute_equipment_slots() {
-                let current = self.item_by_equipment_slot(caller, &slot).await;
+            for (slot, current) in current_items {
                 let previous = last
                     .get(&slot)
                     .cloned()

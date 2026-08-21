@@ -130,6 +130,7 @@ impl AttributeOperation {
 }
 
 /// Resolves a vanilla attribute id (without the `minecraft:` prefix) to Pumpkin's generated
+///
 /// attribute constant. Only the ids reachable from an enchantment's `minecraft:attributes`
 /// component are listed; anything else returns `None` rather than silently applying to the
 /// wrong attribute.
@@ -151,10 +152,11 @@ pub fn attribute_by_key(key: &str) -> Option<&'static Attributes> {
 }
 
 /// Mirrors `EquipmentSlotGroup.test` (`net/minecraft/world/entity/EquipmentSlotGroup.java:15-25`),
+///
 /// the predicate `Enchantment.matchingSlot` folds over an enchantment's declared slots
 /// (`Enchantment.java:126`).
 #[must_use]
-pub fn slot_group_matches(group: &AttributeModifierSlot, slot: &EquipmentSlot) -> bool {
+pub const fn slot_group_matches(group: &AttributeModifierSlot, slot: &EquipmentSlot) -> bool {
     match group {
         AttributeModifierSlot::Any => true,
         AttributeModifierSlot::MainHand => matches!(slot, EquipmentSlot::MainHand(_)),
@@ -173,6 +175,7 @@ pub fn slot_group_matches(group: &AttributeModifierSlot, slot: &EquipmentSlot) -
 }
 
 /// Mirrors `EnchantmentAttributeEffect.idForSlot` (`effects/EnchantmentAttributeEffect.java:31`):
+///
 /// the JSON `id` (always `minecraft:enchantment.<registry key>`) suffixed with
 /// `"/" + slot.getSerializedName()`.
 ///
@@ -243,6 +246,7 @@ pub fn attribute_modifiers_for_slot(
 }
 
 /// The `minecraft:location_changed` attribute modifiers Soul Speed contributes while active,
+///
 /// scoped to the slot the enchanted boots occupy (`soul_speed.json` -> `minecraft:attribute`
 /// effects nested under `minecraft:all_of`).
 #[must_use]
@@ -532,6 +536,7 @@ const UNBREAKING_OTHER_CHANCE: LevelBasedValue = LevelBasedValue::Fraction {
 /// stable registry key (not `id`, which is a generated ordinal that shifts as Mojang adds
 /// enchantments).
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn effects_for(enchantment: &'static Enchantment) -> &'static [EnchantmentEffect] {
     use EnchantmentEffect as E;
     match enchantment.registry_key {
@@ -814,7 +819,7 @@ mod tests {
 
         assert_eq!(ids[0], "minecraft:enchantment.blast_protection/head");
         assert_eq!(ids[3], "minecraft:enchantment.blast_protection/feet");
-        let mut unique = ids.clone();
+        let mut unique = ids;
         unique.sort_unstable();
         unique.dedup();
         assert_eq!(
