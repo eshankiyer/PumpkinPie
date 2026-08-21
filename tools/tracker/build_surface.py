@@ -37,7 +37,7 @@ def block_tag_members() -> dict[str, list[str]]:
     text = read(ROOT / "crates/pumpkin-data/src/generated/tag.rs")
     members: dict[str, list[str]] = {}
     for match in re.finditer(
-        r"pub const (MINECRAFT_[A-Z0-9_]+): super::Tag = \(\s*&\[(.*?)\]", text, re.S
+        r"pub const ((?:MINECRAFT|C)_[A-Z0-9_]+): super::Tag = \(\s*&\[(.*?)\]", text, re.S
     ):
         members[match.group(1)] = re.findall(r'"([a-z0-9_/]+)"', match.group(2))
     return members
@@ -50,8 +50,10 @@ def covered_blocks() -> set[str]:
         text = read(path)
         for name in re.findall(r'#\[pumpkin_block\("minecraft:([a-z0-9_]+)"\)\]', text):
             covered.add(name)
-        for tag in re.findall(r'#\[pumpkin_block_from_tag\("minecraft:([a-z0-9_/]+)"\)\]', text):
-            key = "MINECRAFT_" + tag.upper().replace("/", "_")
+        for namespace, tag in re.findall(
+            r'#\[pumpkin_block_from_tag\("([a-z]+):([a-z0-9_/]+)"\)\]', text
+        ):
+            key = namespace.upper() + "_" + tag.upper().replace("/", "_")
             covered.update(tags.get(key, []))
     return covered
 
