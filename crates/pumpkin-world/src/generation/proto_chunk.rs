@@ -69,16 +69,18 @@ enum ActiveSupplier {
     End(TheEndBiomeSupplier),
 }
 
+/// The block-level surface every worldgen feature actually uses.
+///
+/// Vanilla features run against a `WorldGenLevel` (`Feature.place` takes a
+/// `FeaturePlaceContext` whose `level()` is one), an interface a live `ServerLevel`
+/// implements just as `WorldGenRegion` does; no feature reaches for a chunk object. This
+/// trait mirrors that split deliberately: it mentions no [`ProtoChunk`], so a runtime
+/// adapter backed by a live world can implement it and drive feature placement -
+/// bone-mealed moss and nylium, sapling growth - without synthesising proto chunks.
+///
+/// Chunk-graph access, which exists only while a chunk is being generated, lives in
+/// [`ProtoChunkCache`].
 pub trait GenerationCache: HeightLimitView + BlockAccessor {
-    fn get_center_chunk_mut(&mut self) -> &mut ProtoChunk;
-    fn get_center_chunk(&self) -> &ProtoChunk;
-
-    fn get_chunk_mut(&mut self, chunk_x: i32, chunk_z: i32) -> Option<&mut ProtoChunk>;
-    fn get_chunk(&self, chunk_x: i32, chunk_z: i32) -> Option<&ProtoChunk>;
-    fn get_chunk_biomes(&self, chunk_x: i32, chunk_z: i32) -> Option<Vec<u8>>;
-
-    fn try_get_proto_chunk(&self, chunk_x: i32, chunk_z: i32) -> Option<&ProtoChunk>;
-
     fn get_block_state(&self, pos: &Vector3<i32>) -> BlockStateId;
     fn get_fluid_and_fluid_state(&self, position: &Vector3<i32>) -> (Fluid, FluidState);
     fn set_block_state(&mut self, pos: &Vector3<i32>, block_state: &BlockState);
@@ -90,6 +92,23 @@ pub trait GenerationCache: HeightLimitView + BlockAccessor {
     fn ocean_floor_height_exclusive(&self, x: i32, z: i32) -> i32;
     fn is_air(&self, local_pos: &Vector3<i32>) -> bool;
     fn get_biome_for_terrain_gen(&self, x: i32, y: i32, z: i32) -> &'static Biome;
+}
+
+/// Access to the chunk graph a generation pass is working over.
+///
+/// Only meaningful mid-generation: the structure, blending and mob-spawn steps read the
+/// centre chunk's stage and its neighbours' proto chunks. Runtime callers implement
+/// [`GenerationCache`] alone.
+pub trait ProtoChunkCache: GenerationCache {
+    fn get_center_chunk_mut(&mut self) -> &mut ProtoChunk;
+    fn get_center_chunk(&self) -> &ProtoChunk;
+
+    fn get_chunk_mut(&mut self, chunk_x: i32, chunk_z: i32) -> Option<&mut ProtoChunk>;
+    fn get_chunk(&self, chunk_x: i32, chunk_z: i32) -> Option<&ProtoChunk>;
+    fn get_chunk_biomes(&self, chunk_x: i32, chunk_z: i32) -> Option<Vec<u8>>;
+
+    fn try_get_proto_chunk(&self, chunk_x: i32, chunk_z: i32) -> Option<&ProtoChunk>;
+
     fn get_blending_data(
         &self,
         chunk_x: i32,
@@ -1317,7 +1336,7 @@ impl ProtoChunk {
         }
     }
 
-    pub fn spawn_mobs<T: GenerationCache>(cache: &mut T, block_registry: &dyn WorldPortalExt) {
+    pub fn spawn_mobs<T: ProtoChunkCache>(cache: &mut T, block_registry: &dyn WorldPortalExt) {
         let chunk = cache.get_center_chunk();
         if chunk.stage >= StagedChunkEnum::Spawn {
             return;
@@ -1536,7 +1555,7 @@ impl ProtoChunk {
         }
     }
 
-    pub fn generate_features_and_structure<T: GenerationCache>(
+    pub fn generate_features_and_structure<T: ProtoChunkCache>(
         cache: &mut T,
         block_registry: &dyn WorldPortalExt,
         random_config: &GlobalRandomConfig,
@@ -1612,7 +1631,7 @@ impl ProtoChunk {
         cache.get_center_chunk_mut().stage = StagedChunkEnum::Features;
     }
 
-    fn generate_structure_step<T: GenerationCache>(
+    fn generate_structure_step<T: ProtoChunkCache>(
         cache: &mut T,
         block_registry: &dyn WorldPortalExt,
         step: usize,
@@ -2062,7 +2081,7 @@ impl BlockPlacer for ProtoChunk {
     }
 }
 
-impl GenerationCache for ProtoChunk {
+impl ProtoChunkCache for ProtoChunk {
     fn get_center_chunk_mut(&mut self) -> &mut ProtoChunk {
         self
     }
@@ -2089,8 +2108,18 @@ impl GenerationCache for ProtoChunk {
         })
     }
     fn try_get_proto_chunk(&self, cx: i32, cz: i32) -> Option<&ProtoChunk> {
-        self.get_chunk(cx, cz)
+        ProtoChunkCache::get_chunk(self, cx, cz)
     }
+    fn get_blending_data(
+        &self,
+        _cx: i32,
+        _cz: i32,
+    ) -> Option<&crate::generation::blender::blending_data::BlendingData> {
+        None
+    }
+}
+
+impl GenerationCache for ProtoChunk {
     fn get_block_state(&self, pos: &Vector3<i32>) -> BlockStateId {
         Self::get_block_state(self, pos)
     }
@@ -2135,13 +2164,6 @@ impl GenerationCache for ProtoChunk {
     }
     fn get_biome_for_terrain_gen(&self, x: i32, y: i32, z: i32) -> &'static Biome {
         Self::get_biome(self, x, y, z)
-    }
-    fn get_blending_data(
-        &self,
-        _cx: i32,
-        _cz: i32,
-    ) -> Option<&crate::generation::blender::blending_data::BlendingData> {
-        None
     }
 }
 
@@ -2289,5 +2311,122 @@ mod tests {
                 Biome::DEEP_DARK.id,
             ]
         );
+    }
+}
+
+/// A [`GenerationCache`] with no [`ProtoChunk`] behind it: a flat block store keyed by
+/// absolute position, the shape a live-world runtime adapter would take.
+///
+/// Shared by the tests that check features and structure helpers run against a chunkless
+/// cache.
+#[cfg(test)]
+pub mod test_cache {
+    use std::collections::HashMap;
+
+    use pumpkin_data::chunk::Biome;
+    use pumpkin_data::fluid::{Fluid, FluidState};
+    use pumpkin_data::{Block, BlockState, BlockStateId};
+    use pumpkin_nbt::compound::NbtCompound;
+    use pumpkin_util::HeightMap;
+    use pumpkin_util::math::position::BlockPos;
+    use pumpkin_util::math::vector3::Vector3;
+
+    use super::GenerationCache;
+    use crate::generation::height_limit::HeightLimitView;
+    use crate::world::BlockAccessor;
+
+    #[derive(Default)]
+    pub struct FlatWorld {
+        pub blocks: HashMap<(i32, i32, i32), BlockStateId>,
+        pub block_entities: usize,
+    }
+
+    impl FlatWorld {
+        #[must_use]
+        pub fn raw(&self, pos: &Vector3<i32>) -> BlockStateId {
+            self.blocks
+                .get(&(pos.x, pos.y, pos.z))
+                .copied()
+                .unwrap_or(BlockStateId::AIR)
+        }
+    }
+
+    impl HeightLimitView for FlatWorld {
+        fn height(&self) -> u16 {
+            384
+        }
+        fn bottom_y(&self) -> i8 {
+            -64
+        }
+        fn sea_level(&self) -> i32 {
+            63
+        }
+    }
+
+    impl BlockAccessor for FlatWorld {
+        fn get_block(&self, position: &BlockPos) -> &'static Block {
+            self.raw(&position.0).to_block()
+        }
+        fn get_block_state(&self, position: &BlockPos) -> &'static BlockState {
+            self.raw(&position.0).to_state()
+        }
+        fn get_block_state_id(&self, position: &BlockPos) -> BlockStateId {
+            self.raw(&position.0)
+        }
+        fn get_block_and_state(
+            &self,
+            position: &BlockPos,
+        ) -> (&'static Block, &'static BlockState) {
+            let id = self.raw(&position.0);
+            (id.to_block(), id.to_state())
+        }
+        fn get_fluid(&self, _position: &BlockPos) -> Fluid {
+            Fluid::EMPTY
+        }
+    }
+
+    impl GenerationCache for FlatWorld {
+        fn get_block_state(&self, pos: &Vector3<i32>) -> BlockStateId {
+            self.raw(pos)
+        }
+        fn get_fluid_and_fluid_state(&self, _pos: &Vector3<i32>) -> (Fluid, FluidState) {
+            let fluid = Fluid::EMPTY;
+            let state = fluid.states[0].clone();
+            (fluid, state)
+        }
+        fn set_block_state(&mut self, pos: &Vector3<i32>, block_state: &BlockState) {
+            self.blocks.insert((pos.x, pos.y, pos.z), block_state.id);
+        }
+        fn add_block_entity(&mut self, _pos: &Vector3<i32>, _nbt: NbtCompound) {
+            self.block_entities += 1;
+        }
+        fn top_motion_blocking_block_height_exclusive(&self, _x: i32, _z: i32) -> i32 {
+            self.sea_level()
+        }
+        fn top_motion_blocking_block_no_leaves_height_exclusive(&self, _x: i32, _z: i32) -> i32 {
+            self.sea_level()
+        }
+        fn get_top_y(&self, _heightmap: &HeightMap, _x: i32, _z: i32) -> i32 {
+            self.sea_level()
+        }
+        fn top_block_height_exclusive(&self, _x: i32, _z: i32) -> i32 {
+            self.sea_level()
+        }
+        fn ocean_floor_height_exclusive(&self, _x: i32, _z: i32) -> i32 {
+            self.sea_level()
+        }
+        fn is_air(&self, local_pos: &Vector3<i32>) -> bool {
+            self.raw(local_pos) == BlockStateId::AIR
+        }
+        fn get_biome_for_terrain_gen(&self, _x: i32, _y: i32, _z: i32) -> &'static Biome {
+            &Biome::PLAINS
+        }
+    }
+
+    impl FlatWorld {
+        /// Writes a block by absolute position, for setting up a test scene.
+        pub fn put(&mut self, x: i32, y: i32, z: i32, state: &BlockState) {
+            self.blocks.insert((x, y, z), state.id);
+        }
     }
 }

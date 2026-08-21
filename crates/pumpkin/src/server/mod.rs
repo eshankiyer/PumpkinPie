@@ -776,6 +776,9 @@ impl Server {
         {
             let day_time = overworld.get_time_of_day().await;
             let weather = overworld.weather.lock().await.clone();
+            // Vanilla `WorldBorder.Settings(WorldBorder)` (`WorldBorder.java:475-487`);
+            // `write_world_info` puts these in `data/minecraft/world_border.dat`.
+            let border = overworld.worldborder.lock().await.to_settings();
             self.level_info.rcu(|level_info| {
                 let mut snapshot = (**level_info).clone();
                 snapshot.day_time = day_time;
@@ -784,6 +787,15 @@ impl Server {
                 snapshot.raining = weather.raining;
                 snapshot.thundering = weather.thundering;
                 snapshot.thunder_time = weather.thunder_time;
+                snapshot.border_center_x = border.center_x;
+                snapshot.border_center_z = border.center_z;
+                snapshot.border_damage_per_block = border.damage_per_block;
+                snapshot.border_safe_zone = border.safe_zone;
+                snapshot.border_size = border.size;
+                snapshot.border_size_lerp_target = border.lerp_target;
+                snapshot.border_size_lerp_time = border.lerp_time;
+                snapshot.border_warning_blocks = f64::from(border.warning_blocks);
+                snapshot.border_warning_time = f64::from(border.warning_time);
                 snapshot
             });
         }

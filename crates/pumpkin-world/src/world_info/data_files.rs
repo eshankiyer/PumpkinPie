@@ -128,6 +128,204 @@ pub fn ensure_minecraft_data_dir(level_folder: &Path) -> Result<PathBuf, WorldIn
     Ok(dir)
 }
 
+/// Root of the `<world>/data/` tree, vanilla `SavedDataStorage.dataFolder`.
+#[must_use]
+pub fn saved_data_dir(level_folder: &Path) -> PathBuf {
+    level_folder.join("data")
+}
+
+/// Resolves a `SavedDataType` id to `<world>/data/<namespace>/<path>.dat`.
+///
+/// Mirrors vanilla `SavedDataStorage.getDataFile` (`SavedDataStorage.java:57-64`),
+/// which appends `.dat` and calls `Identifier.resolveAgainst`
+/// (`Identifier.java:152-163`). Both sides reject an id that escapes the data folder.
+pub fn saved_data_file(level_folder: &Path, id: &str) -> Result<PathBuf, WorldInfoError> {
+    let (namespace, path) = id.split_once(':').unwrap_or(("minecraft", id));
+    if namespace.is_empty() || path.is_empty() {
+        return Err(WorldInfoError::SerializationError(format!(
+            "invalid saved data id {id:?}"
+        )));
+    }
+    let root = saved_data_dir(level_folder);
+    let mut resolved = root.clone();
+    // `PathBuf::starts_with` compares components without normalising, so a `..`
+    // anywhere would slip past the containment check below. Reject those segments
+    // outright, on the namespace as well as the path.
+    for segment in std::iter::once(namespace).chain(path.split('/')) {
+        if segment.is_empty()
+            || segment == "."
+            || segment == ".."
+            || segment.contains(std::path::MAIN_SEPARATOR)
+        {
+            return Err(WorldInfoError::SerializationError(format!(
+                "saved data id {id:?} tried to escape the data directory"
+            )));
+        }
+        resolved.push(segment);
+    }
+    let mut file = resolved.into_os_string();
+    file.push(".dat");
+    let file = PathBuf::from(file);
+    if !file.starts_with(&root) {
+        return Err(WorldInfoError::SerializationError(format!(
+            "saved data id {id:?} tried to escape the data directory"
+        )));
+    }
+    Ok(file)
+}
+
+/// Reads the inner `data` compound of a saved-data file.
+///
+/// `None` when the file is absent or unreadable. Vanilla
+/// `SavedDataStorage.readSavedData` parses `tag.get("data")`
+/// (`SavedDataStorage.java:84-100`).
+#[must_use]
+pub fn read_saved_data(level_folder: &Path, id: &str) -> Option<NbtCompound> {
+    let path = saved_data_file(level_folder, id).ok()?;
+    if !path.exists() {
+        return None;
+    }
+    match File::open(&path) {
+        Ok(f) => match read_gzip_compound_tag(f) {
+            Ok(root) => root.get_compound("data").cloned(),
+            Err(e) => {
+                warn!("Failed to deserialize saved data {id}: {e}");
+                None
+            }
+        },
+        Err(e) => {
+            warn!("Failed to open saved data {id}: {e}");
+            None
+        }
+    }
+}
+
+/// Writes a saved-data file in vanilla's envelope.
+///
+/// A root compound holds the payload under `data` with `DataVersion` as its
+/// *sibling*, not nested inside (vanilla `SavedDataStorage.encodeUnchecked`,
+/// `SavedDataStorage.java:190-196`).
+pub fn write_saved_data(
+    level_folder: &Path,
+    id: &str,
+    data: NbtCompound,
+    data_version: i32,
+) -> Result<(), WorldInfoError> {
+    let path = saved_data_file(level_folder, id)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let file = File::create(&path)?;
+    let mut root = NbtCompound::new();
+    root.put_compound("data", data);
+    root.put_int("DataVersion", data_version);
+    pumpkin_nbt::nbt_compress::write_gzip_compound_tag(root, BufWriter::new(file))
+        .map_err(|e| WorldInfoError::SerializationError(e.to_string()))
+}
+
+/// Vanilla `WorldBorder.Settings` (`WorldBorder.java:456-473`).
+///
+/// Persisted as the `minecraft:world_border` saved data (`WorldBorder.java:25-27`);
+/// before 26.2 these lived in level.dat as `Border*`.
+#[derive(Clone, PartialEq, Debug)]
+pub struct WorldBorderData {
+    pub center_x: f64,
+    pub center_z: f64,
+    pub damage_per_block: f64,
+    pub safe_zone: f64,
+    pub warning_blocks: i32,
+    pub warning_time: i32,
+    pub size: f64,
+    pub lerp_time: i64,
+    pub lerp_target: f64,
+}
+
+impl Default for WorldBorderData {
+    /// Vanilla `WorldBorder.Settings.DEFAULT` (`WorldBorder.java:459`).
+    fn default() -> Self {
+        Self {
+            center_x: 0.0,
+            center_z: 0.0,
+            damage_per_block: 0.2,
+            safe_zone: 5.0,
+            warning_blocks: 5,
+            warning_time: 300,
+            size: 5.999_997E7,
+            lerp_time: 0,
+            lerp_target: 0.0,
+        }
+    }
+}
+
+pub const WORLD_BORDER_ID: &str = "world_border";
+
+/// Reads `data/minecraft/world_border.dat`, or `None` when it is absent so the
+/// caller can fall back to the legacy level.dat `Border*` keys.
+#[must_use]
+pub fn read_world_border(level_folder: &Path) -> Option<WorldBorderData> {
+    let c = read_saved_data(level_folder, WORLD_BORDER_ID)?;
+    let d = WorldBorderData::default();
+    Some(WorldBorderData {
+        center_x: c.get_double("center_x").unwrap_or(d.center_x),
+        center_z: c.get_double("center_z").unwrap_or(d.center_z),
+        damage_per_block: c
+            .get_double("damage_per_block")
+            .unwrap_or(d.damage_per_block),
+        safe_zone: c.get_double("safe_zone").unwrap_or(d.safe_zone),
+        warning_blocks: c.get_int("warning_blocks").unwrap_or(d.warning_blocks),
+        warning_time: c.get_int("warning_time").unwrap_or(d.warning_time),
+        size: c.get_double("size").unwrap_or(d.size),
+        lerp_time: c.get_long("lerp_time").unwrap_or(d.lerp_time),
+        lerp_target: c.get_double("lerp_target").unwrap_or(d.lerp_target),
+    })
+}
+
+pub fn write_world_border(
+    level_folder: &Path,
+    border: &WorldBorderData,
+    data_version: i32,
+) -> Result<(), WorldInfoError> {
+    let mut c = NbtCompound::new();
+    c.put_double("center_x", border.center_x);
+    c.put_double("center_z", border.center_z);
+    c.put_double("damage_per_block", border.damage_per_block);
+    c.put_double("safe_zone", border.safe_zone);
+    c.put_int("warning_blocks", border.warning_blocks);
+    c.put_int("warning_time", border.warning_time);
+    c.put_double("size", border.size);
+    c.put_long("lerp_time", border.lerp_time);
+    c.put_double("lerp_target", border.lerp_target);
+    write_saved_data(level_folder, WORLD_BORDER_ID, c, data_version)
+}
+
+/// Vanilla `MapIndex` (`MapIndex.java`).
+///
+/// Stored as `minecraft:maps/last_id` (`MapIndex.java:15-17`), i.e.
+/// `data/minecraft/maps/last_id.dat`.
+pub const MAP_INDEX_ID: &str = "maps/last_id";
+
+/// Reads the next map id to hand out.
+///
+/// Vanilla `MapIndex` stores the LAST issued map id, defaulting to -1, and
+/// `getNextMapId` pre-increments (`MapIndex.java:12,27-31`), so the first map on a
+/// fresh world is 0. Pumpkin's `LevelData::map_id` is the NEXT id to hand out, hence
+/// the +1 here and the -1 on write.
+#[must_use]
+pub fn read_next_map_id(level_folder: &Path) -> Option<i32> {
+    let c = read_saved_data(level_folder, MAP_INDEX_ID)?;
+    Some(c.get_int("map").unwrap_or(-1).saturating_add(1))
+}
+
+pub fn write_next_map_id(
+    level_folder: &Path,
+    next_map_id: i32,
+    data_version: i32,
+) -> Result<(), WorldInfoError> {
+    let mut c = NbtCompound::new();
+    c.put_int("map", next_map_id.saturating_sub(1));
+    write_saved_data(level_folder, MAP_INDEX_ID, c, data_version)
+}
+
 pub fn read_weather(level_folder: &Path) -> WeatherData {
     let path = minecraft_data_dir(level_folder).join("weather.dat");
     if !path.exists() {
@@ -1089,5 +1287,132 @@ mod scoreboard_test {
         assert!(inner.get_list("PlayerScores").is_some());
         assert!(inner.get_compound("DisplaySlots").is_some());
         assert!(inner.get_list("Teams").is_some());
+    }
+}
+
+#[cfg(test)]
+mod saved_data_tests {
+    use super::{
+        MAP_INDEX_ID, WORLD_BORDER_ID, WorldBorderData, read_next_map_id, read_saved_data,
+        read_world_border, saved_data_file, write_next_map_id, write_saved_data,
+        write_world_border,
+    };
+    use pumpkin_nbt::compound::NbtCompound;
+    use tempfile::TempDir;
+
+    #[test]
+    fn ids_resolve_like_identifier_resolve_against() {
+        let root = std::path::Path::new("/w");
+        assert_eq!(
+            saved_data_file(root, "world_border").unwrap(),
+            root.join("data/minecraft/world_border.dat")
+        );
+        assert_eq!(
+            saved_data_file(root, "maps/last_id").unwrap(),
+            root.join("data/minecraft/maps/last_id.dat")
+        );
+        assert_eq!(
+            saved_data_file(root, "mypack:sub/thing").unwrap(),
+            root.join("data/mypack/sub/thing.dat")
+        );
+    }
+
+    #[test]
+    fn ids_cannot_escape_the_data_directory() {
+        let root = std::path::Path::new("/w");
+        assert!(saved_data_file(root, "../../etc/passwd").is_err());
+        assert!(saved_data_file(root, "maps/../../escape").is_err());
+        assert!(saved_data_file(root, "..:escape").is_err());
+        assert!(saved_data_file(root, "minecraft:.").is_err());
+        assert!(saved_data_file(root, "").is_err());
+    }
+
+    /// Vanilla `SavedDataStorage.encodeUnchecked` puts the payload under `data`
+    /// and `DataVersion` beside it at the root, not inside the payload.
+    #[test]
+    fn envelope_has_data_version_as_a_sibling_of_data() {
+        let dir = TempDir::new().unwrap();
+        let mut payload = NbtCompound::new();
+        payload.put_int("x", 7);
+        write_saved_data(dir.path(), "test/thing", payload, 4567).unwrap();
+
+        let path = saved_data_file(dir.path(), "test/thing").unwrap();
+        let root =
+            pumpkin_nbt::nbt_compress::read_gzip_compound_tag(std::fs::File::open(path).unwrap())
+                .unwrap();
+        assert_eq!(root.get_int("DataVersion"), Some(4567));
+        let data = root.get_compound("data").unwrap();
+        assert_eq!(data.get_int("x"), Some(7));
+        assert_eq!(data.get_int("DataVersion"), None);
+
+        assert_eq!(
+            read_saved_data(dir.path(), "test/thing")
+                .unwrap()
+                .get_int("x"),
+            Some(7)
+        );
+    }
+
+    #[test]
+    fn missing_saved_data_reads_as_none() {
+        let dir = TempDir::new().unwrap();
+        assert!(read_saved_data(dir.path(), "world_border").is_none());
+        assert!(read_world_border(dir.path()).is_none());
+        assert!(read_next_map_id(dir.path()).is_none());
+    }
+
+    /// Field names come from `WorldBorder.Settings.CODEC` (`WorldBorder.java:460-473`).
+    #[test]
+    fn world_border_round_trip_uses_vanilla_field_names() {
+        let dir = TempDir::new().unwrap();
+        let border = WorldBorderData {
+            center_x: 12.5,
+            center_z: -8.25,
+            damage_per_block: 0.4,
+            safe_zone: 3.0,
+            warning_blocks: 9,
+            warning_time: 42,
+            size: 2048.0,
+            lerp_time: 1234,
+            lerp_target: 4096.0,
+        };
+        write_world_border(dir.path(), &border, 4567).unwrap();
+        assert_eq!(read_world_border(dir.path()).unwrap(), border);
+
+        let root = pumpkin_nbt::nbt_compress::read_gzip_compound_tag(
+            std::fs::File::open(saved_data_file(dir.path(), WORLD_BORDER_ID).unwrap()).unwrap(),
+        )
+        .unwrap();
+        let d = root.get_compound("data").unwrap();
+        for key in [
+            "center_x",
+            "center_z",
+            "damage_per_block",
+            "safe_zone",
+            "size",
+            "lerp_target",
+        ] {
+            assert!(d.get_double(key).is_some(), "missing double {key}");
+        }
+        assert_eq!(d.get_int("warning_blocks"), Some(9));
+        assert_eq!(d.get_int("warning_time"), Some(42));
+        assert_eq!(d.get_long("lerp_time"), Some(1234));
+    }
+
+    /// `MapIndex` stores the LAST issued id and defaults to -1, so a fresh world
+    /// hands out 0 first (`MapIndex.java:12,27-31`).
+    #[test]
+    fn map_index_stores_last_id_not_next_id() {
+        let dir = TempDir::new().unwrap();
+        write_next_map_id(dir.path(), 0, 4567).unwrap();
+        let root = pumpkin_nbt::nbt_compress::read_gzip_compound_tag(
+            std::fs::File::open(saved_data_file(dir.path(), MAP_INDEX_ID).unwrap()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(root.get_compound("data").unwrap().get_int("map"), Some(-1));
+        assert_eq!(read_next_map_id(dir.path()), Some(0));
+
+        write_next_map_id(dir.path(), 5, 4567).unwrap();
+        assert_eq!(read_next_map_id(dir.path()), Some(5));
     }
 }

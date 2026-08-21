@@ -1,16 +1,23 @@
+use pumpkin_data::configured_feature::ConfiguredFeature;
 use pumpkin_data::{Block, BlockId};
+use pumpkin_util::math::position::BlockPos;
+use pumpkin_util::random::RandomGenerator;
+use pumpkin_util::random::xoroshiro128::Xoroshiro;
 use pumpkin_world::world::BlockFlags;
+use rand::RngExt;
+use std::sync::Arc;
 
-use crate::block::{BlockBehaviour, BlockFuture, BlockMetadata, RandomTickArgs};
+use crate::block::{BlockBehaviour, BlockFuture, BlockMetadata, BonemealArgs, RandomTickArgs};
+use crate::world::World;
+use crate::world::feature_placer::place_configured_feature;
 
 /// Above this light dampening, nylium is considered covered and reverts to netherrack.
 const MAX_LIGHT_LEVEL: u8 = 15;
 
 /// `NyliumBlock`: nylium dies back to netherrack once the block above it blocks all light.
 ///
-/// Bone-mealing nylium into nether vegetation is NOT implemented. `NyliumBlock.performBonemeal`
-/// places a configured feature, and nothing here bridges a live world to feature placement -
-/// the same gap that leaves moss bone meal and sapling growth unported.
+/// Bone meal grows nether vegetation on it by placing configured features
+/// (`NyliumBlock.performBonemeal`, `NyliumBlock.java:56-71`).
 pub struct NyliumBlock;
 
 impl BlockMetadata for NyliumBlock {
@@ -33,6 +40,68 @@ impl BlockBehaviour for NyliumBlock {
                 )
                 .await;
         })
+    }
+
+    /// `NyliumBlock.isValidBonemealTarget` (`NyliumBlock.java:46-49`): air above, inside the
+    /// build height. The loaded check is additional; an unloaded read reports air.
+    fn is_valid_bonemeal_target(&self, args: BonemealArgs<'_>) -> bool {
+        let above = args.position.up();
+        args.world.is_in_build_limit(above)
+            && args.world.is_loaded(&above)
+            && args.world.get_block_state(&above).is_air()
+    }
+
+    /// `NyliumBlock.performBonemeal` (`NyliumBlock.java:56-71`).
+    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            let above = args.position.up();
+            let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(rand::rng().random()));
+            if args.block == &Block::CRIMSON_NYLIUM {
+                place(
+                    args.world,
+                    ConfiguredFeature::CrimsonForestVegetationBonemeal,
+                    above,
+                    &mut random,
+                )
+                .await;
+            } else if args.block == &Block::WARPED_NYLIUM {
+                place(
+                    args.world,
+                    ConfiguredFeature::WarpedForestVegetationBonemeal,
+                    above,
+                    &mut random,
+                )
+                .await;
+                place(
+                    args.world,
+                    ConfiguredFeature::NetherSproutsBonemeal,
+                    above,
+                    &mut random,
+                )
+                .await;
+                if rand::rng().random_range(0..8) == 0 {
+                    place(
+                        args.world,
+                        ConfiguredFeature::TwistingVinesBonemeal,
+                        above,
+                        &mut random,
+                    )
+                    .await;
+                }
+            }
+        })
+    }
+}
+
+/// `NyliumBlock.place` (`NyliumBlock.java:73-84`): the build-height guard each placement repeats.
+async fn place(
+    world: &Arc<World>,
+    feature: ConfiguredFeature,
+    pos: BlockPos,
+    random: &mut RandomGenerator,
+) {
+    if world.is_in_build_limit(pos) {
+        place_configured_feature(world, feature, pos, random).await;
     }
 }
 

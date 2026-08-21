@@ -6,7 +6,7 @@ use crate::biome::BiomeSupplier;
 use crate::generation::biome_coords;
 use crate::generation::noise::perlin::DoublePerlinNoiseSampler;
 use crate::generation::noise::router::multi_noise_sampler::MultiNoiseSampler;
-use crate::generation::proto_chunk::GenerationCache;
+use crate::generation::proto_chunk::ProtoChunkCache;
 use blending_data::BlendingData;
 use pumpkin_data::chunk::Biome;
 use pumpkin_data::noise_parameter::DoublePerlinNoiseParameters;
@@ -38,7 +38,7 @@ impl Blender {
         }
     }
 
-    pub fn of<C: GenerationCache>(cache: &C) -> Self {
+    pub fn of<C: ProtoChunkCache>(cache: &C) -> Self {
         let center_chunk = cache.get_center_chunk();
         let center_x = center_chunk.x;
         let center_z = center_chunk.z;

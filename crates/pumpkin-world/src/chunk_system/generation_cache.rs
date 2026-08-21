@@ -4,7 +4,7 @@ use crate::chunk::ChunkHeightmapType;
 use crate::generation::biome_coords;
 use crate::generation::generator;
 use crate::generation::height_limit::HeightLimitView;
-use crate::generation::proto_chunk::{BiomeNeighborhood, GenerationCache};
+use crate::generation::proto_chunk::{BiomeNeighborhood, GenerationCache, ProtoChunkCache};
 use crate::world::{BlockAccessor, WorldPortalExt};
 use pumpkin_config::lighting::LightingEngineConfig;
 use pumpkin_data::biome::Biome;
@@ -73,7 +73,7 @@ impl BlockAccessor for Cache {
     }
 }
 
-impl GenerationCache for Cache {
+impl ProtoChunkCache for Cache {
     fn get_chunk_mut(&mut self, chunk_x: i32, chunk_z: i32) -> Option<&mut ProtoChunk> {
         let dx = chunk_x - self.x;
         let dz = chunk_z - self.z;
@@ -148,6 +148,26 @@ impl GenerationCache for Cache {
         self.chunks[mid].get_proto_chunk_mut()
     }
 
+    fn get_blending_data(
+        &self,
+        chunk_x: i32,
+        chunk_z: i32,
+    ) -> Option<&crate::generation::blender::blending_data::BlendingData> {
+        let dx = chunk_x - self.x;
+        let dz = chunk_z - self.z;
+
+        if dx < 0 || dx >= self.size || dz < 0 || dz >= self.size {
+            return None;
+        }
+
+        match &self.chunks[(dx * self.size + dz) as usize] {
+            Chunk::Proto(chunk) => chunk.blending_data.as_ref(),
+            Chunk::Level(data) => data.blending_data.as_ref(),
+        }
+    }
+}
+
+impl GenerationCache for Cache {
     fn get_fluid_and_fluid_state(&self, pos: &Vector3<i32>) -> (Fluid, FluidState) {
         let id = GenerationCache::get_block_state(self, pos);
 
@@ -353,24 +373,6 @@ impl GenerationCache for Cache {
             .biome_id_at_cell(cell.x, cell.y, cell.z)
             .unwrap_or_else(|| center.get_biome_id(cell.x, cell.y, cell.z));
         Biome::from_id(id).unwrap()
-    }
-
-    fn get_blending_data(
-        &self,
-        chunk_x: i32,
-        chunk_z: i32,
-    ) -> Option<&crate::generation::blender::blending_data::BlendingData> {
-        let dx = chunk_x - self.x;
-        let dz = chunk_z - self.z;
-
-        if dx < 0 || dx >= self.size || dz < 0 || dz >= self.size {
-            return None;
-        }
-
-        match &self.chunks[(dx * self.size + dz) as usize] {
-            Chunk::Proto(chunk) => chunk.blending_data.as_ref(),
-            Chunk::Level(data) => data.blending_data.as_ref(),
-        }
     }
 
     fn is_air(&self, local_pos: &Vector3<i32>) -> bool {

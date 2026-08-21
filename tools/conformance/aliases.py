@@ -63,6 +63,37 @@ SUFFIX_REWRITES = [
 NOISE_CLASSES = {"package-info"}
 
 # ---------------------------------------------------------------------------
+# class -> extra Rust files
+# ---------------------------------------------------------------------------
+
+# A vanilla class may be implemented across SEVERAL Rust files, and several vanilla
+# classes may share ONE Rust file. Name matching alone cannot see either case, so these
+# are hand-verified additions layered ON TOP of whatever the automatic mapping finds.
+# Keys are exact class names or fnmatch patterns. Paths that do not exist in the repo
+# being measured are silently dropped, which is what keeps the table portable to Steel.
+# Every entry must name the read that justifies it.
+CLASS_FILE_HINTS = {
+    # vanilla Item is a behaviour base class; Pumpkin splits it into the generated data
+    # table (which the automatic mapping already finds), the ItemBehaviour trait, and
+    # ItemStack, which carries hurtAndBreak/getDestroySpeed/isCorrectToolForDrops.
+    # Verified 2026-08-21: item_stack/mod.rs:325 damage_item, :614 get_speed,
+    # :644 is_correct_for_drops.
+    "Item": [
+        "crates/pumpkin/src/item/mod.rs",
+        "crates/pumpkin-data/src/item_stack/mod.rs",
+    ],
+    # MaceItem's smash attack is not in the item file at all: entity/combat.rs:82-231
+    # carries canSmashAttack (inlined into AttackType::new:82), mace_smash_damage_bonus:168
+    # and mace_smash_knockback:242. Verified 2026-08-21 by reading both files.
+    "MaceItem": ["crates/pumpkin/src/entity/combat.rs"],
+    # copper_weathering.rs declares no type at all (it is tables plus free functions), so
+    # no struct or filename rule can reach it. All ten WeatheringCopper*Block classes and
+    # the WeatheringCopper interface share it. Read 2026-08-21.
+    "WeatheringCopper*": ["crates/pumpkin/src/block/blocks/copper_weathering.rs"],
+    "*SignBlock": ["crates/pumpkin/src/block/blocks/signs.rs"],
+}
+
+# ---------------------------------------------------------------------------
 # method-level renames
 # ---------------------------------------------------------------------------
 
@@ -180,7 +211,40 @@ METHOD_ALIASES = {
     "entityInside": {"on_entity_collision"},   # block/mod.rs:97
     "affectNeighborsAfterRemoval": {"on_state_replaced"},  # block/mod.rs:207
     "getAnalogOutputSignal": {"get_comparator_output"},    # block/mod.rs:237
+    # --- inventory Slot, all read off pumpkin-inventory/src/slot.rs 2026-08-21 against
+    # world/inventory/Slot.java. Yarn naming throughout; 9 of Slot's 13 leads were renames.
+    "mayPlace": {"can_insert"},                     # slot.rs:97
+    "tryRemove": {"try_take_stack_range"},          # slot.rs:208
+    "hasItem": {"has_stack"},                       # slot.rs:115
+    "setChanged": {"mark_dirty"},                   # slot.rs:154
+    "safeInsert": {"insert_stack_count"},           # slot.rs:277
+    "setByPlayer": {"set_stack_prev"},              # slot.rs:134
+    "safeClone": {"get_cloned_stack"},              # slot.rs:109
+    "getContainerSlot": {"get_index"},              # slot.rs:51
+    "onQuickCraft": {"on_quick_move_crafted"},      # slot.rs:66, same (stack, stack) shape
+    "safeTake": {"safe_take"},                      # slot.rs:246
+    # --- ItemStack, read off pumpkin-data/src/item_stack/mod.rs 2026-08-21
+    "hurtAndBreak": {"damage_item"},                # item_stack/mod.rs:325
+    "getDestroySpeed": {"get_speed"},               # item_stack/mod.rs:614
+    "isCorrectToolForDrops": {"is_correct_for_drops"},  # item_stack/mod.rs:644
 }
+
+# Renames that are true only for ONE vanilla class. Kept separate from METHOD_ALIASES so a
+# narrow read cannot silently credit an unrelated class: `getAttackDamageBonus` is a base
+# Item method, and only the mace's version is implemented in entity/combat.rs.
+CLASS_METHOD_ALIASES = {
+    "MaceItem": {
+        # entity/combat.rs, read 2026-08-21
+        "canSmashAttack": {"new"},                  # inlined into AttackType::new:82
+        "getAttackDamageBonus": {"mace_smash_damage_bonus"},   # combat.rs:168
+        "postHurtEnemy": {"mace_smash_knockback"},  # combat.rs:242
+    },
+    "PotionContents": {
+        # item/potion.rs:140 apply_effects_to is PotionContents.applyToLivingEntity
+        "applyToLivingEntity": {"apply_effects_to"},
+    },
+}
+
 
 # Vanilla methods that exist only for the client/renderer, so a dedicated server can
 # never call them. Each verified by reading vanilla: the body is isClientSide-gated, or
@@ -206,6 +270,14 @@ CLIENT_ONLY_METHODS = {
 #   getMinX/getMinZ/getMaxX/getMaxZ -> world/border.rs bounds()
 #   doHurtTarget       -> try_attack            (entity/mob/mod.rs:735)
 #   createMenu         -> the *ScreenHandlerFactory impls
+# Added to that pending list by the 2026-08-21 seed-2108 sample, same reason - they were
+# FOUND by that sample, so adding them would invalidate the 5/15 figure it produced:
+#   use                -> normal_use   (Item.use; item/items/bow.rs:26)
+#   doHurtTarget       -> try_attack   (entity/mob/mod.rs:735)
+# And from the task brief rather than the sample, so equally unverified here and equally
+# pending: Slot.isFake / Slot.isHighlightable as CLIENT_ONLY_METHODS. Slot's other 2
+# remaining leads, checkTakeAchievements and onSwapCraft, were read this session and have
+# no Rust analogue at all - they are real gaps, not table entries.
 DATA_MODELED_METHODS = {
     # DarkOakTrunkPlacer.type():25 just returns TrunkPlacerType.DARK_OAK_TRUNK_PLACER; the
     # dispatch it feeds is a serde-tagged enum here. 177 leads, all of this shape.

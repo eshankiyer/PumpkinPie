@@ -24,12 +24,20 @@ pub enum WaypointTarget {
     Empty,
 }
 
+/// Vanilla `Waypoint.Icon` (`Waypoint.java:34-60`). `style` defaults to
+/// `minecraft:default` (`WaypointStyleAssets.java:9`) and is always written;
+/// `color` is an `Optional<RGB>`.
 #[derive(Clone, Debug)]
 pub struct WaypointIcon<'a> {
     pub style: Option<&'a str>,
-    pub color: i32,
+    pub color: Option<i32>,
 }
 
+/// Vanilla `WaypointStyleAssets.DEFAULT` (`WaypointStyleAssets.java:9`).
+pub const DEFAULT_WAYPOINT_STYLE: &str = "minecraft:default";
+
+/// Vanilla `TrackedWaypoint` (`TrackedWaypoint.java`). `icon: None` encodes
+/// `Waypoint.Icon.NULL`, which the wire format still writes in full.
 #[derive(Clone, Debug)]
 pub struct TrackedWaypoint<'a> {
     pub identifier: Uuid,
@@ -111,57 +119,169 @@ impl<'a> CWaypoint<'a> {
 }
 
 impl ClientPacket for CWaypoint<'_> {
+    /// Vanilla `ClientboundTrackedWaypointPacket.STREAM_CODEC`
+    /// (`ClientboundTrackedWaypointPacket.java:22-28`) then
+    /// `TrackedWaypoint.write` (`TrackedWaypoint.java:38-44`).
     fn write_packet_data(
         &self,
         mut write: impl Write,
         _version: &JavaMinecraftVersion,
     ) -> Result<(), WritingError> {
-        // 1. Operation (TRACK = 0, UNTRACK = 1, UPDATE = 2)
+        // Operation ordinal (TRACK = 0, UNTRACK = 1, UPDATE = 2).
         write.write_var_int(&VarInt(self.operation as i32))?;
 
-        // 2. TrackedWaypoint Identifier (UUID)
+        // `byteBuf.writeEither(identifier, UUIDUtil.STREAM_CODEC, writeUtf)`:
+        // `writeEither` prefixes a boolean, `true` for the left (UUID) side
+        // (`FriendlyByteBuf.java:237-247`). The server only ever sends UUIDs.
+        write.write_bool(true)?;
         write.write_uuid(&self.waypoint.identifier)?;
 
-        // 3. Waypoint Icon (Optional)
-        if let Some(ref icon) = self.waypoint.icon {
+        // `Waypoint.Icon.STREAM_CODEC`: a non-optional style ResourceKey followed
+        // by an `Optional<RGB_COLOR>` (`Waypoint.java:42-49`).
+        let (style, color) = self
+            .waypoint
+            .icon
+            .as_ref()
+            .map_or((DEFAULT_WAYPOINT_STYLE, None), |icon| {
+                (icon.style.unwrap_or(DEFAULT_WAYPOINT_STYLE), icon.color)
+            });
+        if style.contains(':') {
+            write.write_string(style)?;
+        } else {
+            write.write_string(&format!("minecraft:{style}"))?;
+        }
+        if let Some(color) = color {
             write.write_bool(true)?;
-            if let Some(style_str) = icon.style {
-                write.write_bool(true)?;
-                // Format style as a valid ResourceLocation (e.g., "minecraft:red" or "red")
-                if style_str.contains(':') {
-                    write.write_string(style_str)?;
-                } else {
-                    let formatted = format!("minecraft:{style_str}");
-                    write.write_string(&formatted)?;
-                }
-            } else {
-                write.write_bool(false)?;
-            }
-            write.write_i32_be(icon.color)?;
+            // `ByteBufCodecs.RGB_COLOR` is three raw bytes, not an int
+            // (`ByteBufCodecs.java:239-249`).
+            write.write_u8(((color >> 16) & 0xFF) as u8)?;
+            write.write_u8(((color >> 8) & 0xFF) as u8)?;
+            write.write_u8((color & 0xFF) as u8)?;
         } else {
             write.write_bool(false)?;
         }
 
-        // 4. Waypoint Target Payload
+        // `TrackedWaypoint.Type` ordinal: EMPTY, VEC3I, CHUNK, AZIMUTH
+        // (`TrackedWaypoint.java:246-250`), then `writeContents`.
         match &self.waypoint.target {
-            WaypointTarget::Position(pos) => {
+            WaypointTarget::Empty => {
                 write.write_var_int(&VarInt(0))?;
-                write.write_block_pos(pos)?;
+            }
+            WaypointTarget::Position(pos) => {
+                write.write_var_int(&VarInt(1))?;
+                // `Vec3iWaypoint.writeContents` writes three VarInts, not a
+                // packed BlockPos long.
+                write.write_var_int(&VarInt(pos.0.x))?;
+                write.write_var_int(&VarInt(pos.0.y))?;
+                write.write_var_int(&VarInt(pos.0.z))?;
             }
             WaypointTarget::Chunk { x, z } => {
-                write.write_var_int(&VarInt(1))?;
-                write.write_i32_be(*x)?;
-                write.write_i32_be(*z)?;
+                write.write_var_int(&VarInt(2))?;
+                // `ChunkWaypoint.writeContents`: two VarInts.
+                write.write_var_int(&VarInt(*x))?;
+                write.write_var_int(&VarInt(*z))?;
             }
             WaypointTarget::Azimuth(angle) => {
-                write.write_var_int(&VarInt(2))?;
-                write.write_f32_be(*angle)?;
-            }
-            WaypointTarget::Empty => {
                 write.write_var_int(&VarInt(3))?;
+                write.write_f32_be(*angle)?;
             }
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CWaypoint, TrackedWaypoint, WaypointIcon, WaypointOperation, WaypointTarget};
+    use crate::ClientPacket;
+    use pumpkin_util::math::position::BlockPos;
+    use pumpkin_util::version::JavaMinecraftVersion;
+    use uuid::Uuid;
+
+    fn encode(packet: &CWaypoint<'_>) -> Vec<u8> {
+        let mut buf = Vec::new();
+        packet
+            .write_packet_data(&mut buf, &JavaMinecraftVersion::V_26_2)
+            .unwrap();
+        buf
+    }
+
+    const ID: Uuid = Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10);
+
+    /// `TrackedWaypoint.write` prefixes the identifier with the `writeEither`
+    /// boolean and always writes a full `Waypoint.Icon`.
+    #[test]
+    fn untrack_writes_either_flag_and_the_null_icon() {
+        let bytes = encode(&CWaypoint::remove(ID));
+        let mut expected = vec![1u8]; // operation UNTRACK
+        expected.push(1); // writeEither -> left
+        expected.extend_from_slice(ID.as_bytes());
+        expected.push(17); // string length of "minecraft:default"
+        expected.extend_from_slice(b"minecraft:default");
+        expected.push(0); // Optional<RGB> absent
+        expected.push(0); // Type EMPTY
+        assert_eq!(bytes, expected);
+    }
+
+    /// `Vec3iWaypoint.writeContents` writes three `VarInt`s, and
+    /// `ByteBufCodecs.RGB_COLOR` writes three raw bytes.
+    #[test]
+    fn position_writes_three_var_ints_and_a_three_byte_color() {
+        let packet = CWaypoint::add_position(
+            ID,
+            Some(WaypointIcon {
+                style: Some("bowtie"),
+                color: Some(0x00FF_8000),
+            }),
+            BlockPos::new(1, 2, 3),
+        );
+        let bytes = encode(&packet);
+        let mut expected = vec![0u8]; // operation TRACK
+        expected.push(1);
+        expected.extend_from_slice(ID.as_bytes());
+        expected.push(16);
+        expected.extend_from_slice(b"minecraft:bowtie");
+        expected.push(1); // Optional<RGB> present
+        expected.extend_from_slice(&[0xFF, 0x80, 0x00]);
+        expected.push(1); // Type VEC3I
+        expected.extend_from_slice(&[1, 2, 3]);
+        assert_eq!(bytes, expected);
+    }
+
+    /// `ChunkWaypoint.writeContents` writes two `VarInt`s, and CHUNK is ordinal 2.
+    #[test]
+    fn chunk_writes_two_var_ints_under_ordinal_two() {
+        let packet = CWaypoint::new(
+            WaypointOperation::Update,
+            TrackedWaypoint {
+                identifier: ID,
+                icon: None,
+                target: WaypointTarget::Chunk { x: 5, z: -1 },
+            },
+        );
+        let bytes = encode(&packet);
+        let tail = &bytes[bytes.len() - 7..];
+        assert_eq!(tail[0], 2); // Type CHUNK
+        assert_eq!(tail[1], 5); // VarInt 5
+        assert_eq!(&tail[2..7], &[0xFF, 0xFF, 0xFF, 0xFF, 0x0F]); // VarInt -1
+        assert_eq!(bytes[0], 2); // operation UPDATE
+    }
+
+    /// AZIMUTH is ordinal 3 and its payload is a big-endian float.
+    #[test]
+    fn azimuth_writes_a_big_endian_float_under_ordinal_three() {
+        let packet = CWaypoint::new(
+            WaypointOperation::Track,
+            TrackedWaypoint {
+                identifier: ID,
+                icon: None,
+                target: WaypointTarget::Azimuth(1.5),
+            },
+        );
+        let bytes = encode(&packet);
+        let tail = &bytes[bytes.len() - 5..];
+        assert_eq!(tail[0], 3);
+        assert_eq!(&tail[1..], &1.5f32.to_be_bytes());
     }
 }

@@ -6,6 +6,7 @@ use pumpkin_util::{
 };
 
 use crate::generation::proto_chunk::GenerationCache;
+use crate::generation::structure::structures::reorient;
 
 /// The three mob types that can appear in a dungeon spawner.
 ///
@@ -129,29 +130,21 @@ impl DungeonFeature {
                     continue;
                 }
 
-                // Count solid horizontal neighbours
+                // `MonsterRoomFeature.java:99-104` counts neighbours with `isSolid()`, not
+                // "not air": water, torches and cave vines beside the chest are not walls.
                 let wall_count = BlockDirection::horizontal()
                     .iter()
-                    .filter(|d| !chunk.is_air(&chest_pos.add(&d.to_offset())))
+                    .filter(|d| {
+                        GenerationCache::get_block_state(chunk, &chest_pos.add(&d.to_offset()))
+                            .to_state()
+                            .is_solid()
+                    })
                     .count();
 
                 if wall_count == 1 {
-                    // Orient the chest toward its single solid neighbor.
-                    let facing_dir = BlockDirection::horizontal()
-                        .iter()
-                        .find(|d| !chunk.is_air(&chest_pos.add(&d.to_offset())))
-                        .copied();
-
-                    // Build the chest state: face away from the wall.
-                    let chest_state = facing_dir.map_or(Block::CHEST.default_state, |dir| {
-                        use pumpkin_data::block_properties::{
-                            BlockProperties, ChestLikeProperties,
-                        };
-                        let mut props = ChestLikeProperties::default(&Block::CHEST);
-                        props.facing = dir.opposite();
-                        let state_id = props.to_state_id(&Block::CHEST);
-                        pumpkin_data::BlockState::from_id(state_id)
-                    });
+                    // `MonsterRoomFeature.java:106` -> `StructurePiece.reorient`.
+                    let chest_state =
+                        reorient(chunk, &chest_pos, &Block::CHEST, Block::CHEST.default_state);
 
                     chunk.set_block_state(&chest_pos, chest_state);
 

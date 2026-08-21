@@ -74,10 +74,14 @@ impl CommandExecutor for ColorExecutor {
                 ColorAction::Named => {
                     let color = TeamColorArgumentConsumer::find_arg(args, ARG_COLOR)?;
                     let rgb = color.to_rgb();
-                    i32::from_be_bytes([0, rgb.red, rgb.green, rgb.blue])
+                    Some(i32::from_be_bytes([0, rgb.red, rgb.green, rgb.blue]))
                 }
-                ColorAction::Hex => HexColorArgumentConsumer::find_arg(args, ARG_COLOR)? as i32,
-                ColorAction::Reset => 0xFFFFFF,
+                ColorAction::Hex => {
+                    Some(HexColorArgumentConsumer::find_arg(args, ARG_COLOR)? as i32)
+                }
+                // Vanilla `WaypointCommand.resetWaypointColor` sets
+                // `icon.color = Optional.empty()` (`WaypointCommand.java:116`).
+                ColorAction::Reset => None,
             };
 
             let packet = CWaypoint::update_position(
@@ -167,7 +171,10 @@ impl CommandExecutor for StyleExecutor {
                 uuid,
                 Some(WaypointIcon {
                     style: style_str,
-                    color: 0xFFFFFF,
+                    // Vanilla mutates only `icon.style` here
+                    // (`WaypointCommand.java:91`); with no stored icon state the
+                    // faithful stand-in is `Waypoint.Icon.NULL`'s empty color.
+                    color: None,
                 }),
                 block_pos,
             );

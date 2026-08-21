@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex};
 use pumpkin_data::Block;
 use pumpkin_data::BlockState;
 use pumpkin_data::BlockStateId;
-use pumpkin_data::block_properties::{BlockProperties, DispenserLikeProperties, Facing};
+use pumpkin_data::block_properties::{
+    BlockProperties, DispenserLikeProperties, Facing, HorizontalFacing,
+};
 use pumpkin_data::fluid::Fluid;
 use pumpkin_data::{Mirror, Rotation};
 use pumpkin_util::HeightMap;
@@ -14,6 +16,7 @@ use pumpkin_util::{
 };
 use tracing::trace;
 
+use crate::generation::proto_chunk::GenerationCache;
 use crate::generation::structure::structures::stronghold::StrongholdPieceType;
 pub use crate::world::WorldPortalExt;
 use crate::{
@@ -798,5 +801,219 @@ mod structure_random_tests {
                 372_718_864
             ]
         );
+    }
+}
+
+/// `StructurePiece.reorient` (`world/level/levelgen/structure/StructurePiece.java:406-448`).
+///
+/// Turns a horizontally-facing block (in practice a dungeon chest) so its front points away
+/// from the one wall beside it. Vanilla's rules, in order:
+///
+/// * a chest in any horizontal neighbour leaves the state untouched, so a double chest keeps
+///   the facing its first half already chose;
+/// * exactly one solid-render neighbour means face the opposite way;
+/// * anything else falls back to the state's own facing, flipped away from whichever
+///   neighbours are solid (opposite, then clockwise, then opposite again).
+///
+/// Note this is `isSolidRender`, not "not air": water, torches and cave vines are not walls.
+pub fn reorient<T: GenerationCache>(
+    cache: &T,
+    pos: &Vector3<i32>,
+    block: &'static Block,
+    state: &'static BlockState,
+) -> &'static BlockState {
+    let solid_at = |dir: HorizontalFacing| {
+        GenerationCache::get_block_state(cache, &pos.add(&dir.to_offset()))
+            .to_state()
+            .is_solid_render()
+    };
+
+    let mut solid_neighbor = None;
+    for dir in pumpkin_data::BlockDirection::horizontal_worldgen() {
+        let neighbor = GenerationCache::get_block_state(cache, &pos.add(&dir.to_offset()));
+        if neighbor.to_block() == &Block::CHEST {
+            return state;
+        }
+        if neighbor.to_state().is_solid_render() {
+            if solid_neighbor.is_some() {
+                solid_neighbor = None;
+                break;
+            }
+            solid_neighbor = Some(dir);
+        }
+    }
+
+    if let Some(dir) = solid_neighbor {
+        return with_facing(block, state, dir.opposite());
+    }
+
+    let Some(mut lock) = facing_of(block, state) else {
+        return state;
+    };
+    if solid_at(lock) {
+        lock = lock.opposite();
+    }
+    if solid_at(lock) {
+        lock = horizontal_clockwise(lock);
+    }
+    if solid_at(lock) {
+        lock = lock.opposite();
+    }
+    with_facing(block, state, lock)
+}
+
+const fn horizontal_clockwise(facing: HorizontalFacing) -> HorizontalFacing {
+    match facing {
+        HorizontalFacing::North => HorizontalFacing::East,
+        HorizontalFacing::East => HorizontalFacing::South,
+        HorizontalFacing::South => HorizontalFacing::West,
+        HorizontalFacing::West => HorizontalFacing::North,
+    }
+}
+
+const fn facing_name(facing: HorizontalFacing) -> &'static str {
+    match facing {
+        HorizontalFacing::North => "north",
+        HorizontalFacing::East => "east",
+        HorizontalFacing::South => "south",
+        HorizontalFacing::West => "west",
+    }
+}
+
+fn facing_of(block: &'static Block, state: &'static BlockState) -> Option<HorizontalFacing> {
+    block
+        .properties(state.id)?
+        .to_props()
+        .into_iter()
+        .find(|(name, _)| *name == "facing")
+        .and_then(|(_, value)| match value {
+            "north" => Some(HorizontalFacing::North),
+            "east" => Some(HorizontalFacing::East),
+            "south" => Some(HorizontalFacing::South),
+            "west" => Some(HorizontalFacing::West),
+            _ => None,
+        })
+}
+
+fn with_facing(
+    block: &'static Block,
+    state: &'static BlockState,
+    facing: HorizontalFacing,
+) -> &'static BlockState {
+    let Some(properties) = block.properties(state.id) else {
+        return state;
+    };
+    let mut props = properties.to_props();
+    let Some(slot) = props.iter_mut().find(|(name, _)| *name == "facing") else {
+        return state;
+    };
+    slot.1 = facing_name(facing);
+    BlockState::from_id(block.from_properties(&props).to_state_id(block))
+}
+
+#[cfg(test)]
+mod reorient_tests {
+    use pumpkin_data::block_properties::{BlockProperties, ChestLikeProperties, HorizontalFacing};
+    use pumpkin_data::{Block, BlockState};
+    use pumpkin_util::math::vector3::Vector3;
+
+    use super::reorient;
+    use crate::generation::proto_chunk::test_cache::FlatWorld;
+
+    const ORIGIN: Vector3<i32> = Vector3::new(0, 0, 0);
+
+    fn facing(state: &'static BlockState) -> HorizontalFacing {
+        ChestLikeProperties::from_state_id(state.id, &Block::CHEST).facing
+    }
+
+    fn chest_facing(dir: HorizontalFacing) -> &'static BlockState {
+        let mut props = ChestLikeProperties::default(&Block::CHEST);
+        props.facing = dir;
+        BlockState::from_id(props.to_state_id(&Block::CHEST))
+    }
+
+    #[test]
+    fn a_single_wall_makes_the_chest_face_away_from_it() {
+        let mut world = FlatWorld::default();
+        // Stone to the north: the chest must open south.
+        world.put(0, 0, -1, Block::STONE.default_state);
+
+        let state = reorient(&world, &ORIGIN, &Block::CHEST, Block::CHEST.default_state);
+        assert_eq!(facing(state), HorizontalFacing::South);
+    }
+
+    #[test]
+    fn each_wall_direction_orients_the_chest_opposite() {
+        for (offset, expected) in [
+            ((0, 0, -1), HorizontalFacing::South),
+            ((0, 0, 1), HorizontalFacing::North),
+            ((-1, 0, 0), HorizontalFacing::East),
+            ((1, 0, 0), HorizontalFacing::West),
+        ] {
+            let mut world = FlatWorld::default();
+            world.put(offset.0, offset.1, offset.2, Block::STONE.default_state);
+            let state = reorient(&world, &ORIGIN, &Block::CHEST, Block::CHEST.default_state);
+            assert_eq!(facing(state), expected, "wall at {offset:?}");
+        }
+    }
+
+    #[test]
+    fn a_neighbouring_chest_leaves_the_state_untouched() {
+        let mut world = FlatWorld::default();
+        world.put(0, 0, -1, Block::STONE.default_state);
+        world.put(1, 0, 0, chest_facing(HorizontalFacing::North));
+
+        let input = chest_facing(HorizontalFacing::West);
+        let state = reorient(&world, &ORIGIN, &Block::CHEST, input);
+        assert_eq!(state.id, input.id);
+    }
+
+    #[test]
+    fn two_walls_fall_back_to_the_states_own_facing() {
+        let mut world = FlatWorld::default();
+        world.put(0, 0, -1, Block::STONE.default_state);
+        world.put(0, 0, 1, Block::STONE.default_state);
+
+        // Facing east is clear, so the fallback keeps it.
+        let state = reorient(
+            &world,
+            &ORIGIN,
+            &Block::CHEST,
+            chest_facing(HorizontalFacing::East),
+        );
+        assert_eq!(facing(state), HorizontalFacing::East);
+
+        // Facing north is blocked, so is its opposite south; the clockwise step lands on
+        // the clear west (`StructurePiece.java:430-445`).
+        let state = reorient(
+            &world,
+            &ORIGIN,
+            &Block::CHEST,
+            chest_facing(HorizontalFacing::North),
+        );
+        assert_eq!(facing(state), HorizontalFacing::West);
+    }
+
+    #[test]
+    fn water_beside_the_chest_is_not_a_wall() {
+        let mut world = FlatWorld::default();
+        world.put(0, 0, -1, Block::STONE.default_state);
+        world.put(1, 0, 0, Block::WATER.default_state);
+
+        // Only the stone counts, so this is still the single-wall case.
+        let state = reorient(&world, &ORIGIN, &Block::CHEST, Block::CHEST.default_state);
+        assert_eq!(facing(state), HorizontalFacing::South);
+    }
+
+    #[test]
+    fn an_open_room_keeps_the_incoming_facing() {
+        let world = FlatWorld::default();
+        let state = reorient(
+            &world,
+            &ORIGIN,
+            &Block::CHEST,
+            chest_facing(HorizontalFacing::West),
+        );
+        assert_eq!(facing(state), HorizontalFacing::West);
     }
 }

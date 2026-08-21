@@ -133,6 +133,7 @@ use pumpkin_protocol::{
         server::play::SChatMessage,
     },
 };
+use pumpkin_world::world_info::data_files::WorldBorderData;
 
 type RayShapeCheck =
     fn(&World, &BlockPos, Vector3<f64>, Vector3<f64>) -> (bool, Option<BlockDirection>);
@@ -179,6 +180,7 @@ pub mod custom_bossbar;
 pub mod custom_spawners;
 pub mod dragon_fight;
 pub mod end_podium;
+pub mod feature_placer;
 pub mod natural_spawner;
 pub mod raid;
 pub mod scoreboard;
@@ -451,6 +453,19 @@ impl World {
             persisted_level_info.thunder_time,
             persisted_level_info.thundering,
         );
+        // Vanilla stores the border as the `minecraft:world_border` saved data
+        // (`WorldBorder.java:25-27`); `LevelData` carries it in from there.
+        let worldborder = Worldborder::from_settings(&WorldBorderData {
+            center_x: persisted_level_info.border_center_x,
+            center_z: persisted_level_info.border_center_z,
+            damage_per_block: persisted_level_info.border_damage_per_block,
+            safe_zone: persisted_level_info.border_safe_zone,
+            warning_blocks: persisted_level_info.border_warning_blocks as i32,
+            warning_time: persisted_level_info.border_warning_time as i32,
+            size: persisted_level_info.border_size,
+            lerp_time: persisted_level_info.border_size_lerp_time,
+            lerp_target: persisted_level_info.border_size_lerp_target,
+        });
         drop(persisted_level_info);
 
         // Load portal POI from disk (PoiStorage::new automatically loads from disk if files exist)
@@ -481,7 +496,7 @@ impl World {
             players: ArcSwap::new(Arc::new(Vec::new())),
             entities: ArcSwap::new(Arc::new(Vec::new())),
             scoreboard,
-            worldborder: Mutex::new(Worldborder::new(0.0, 0.0, 5.999_996_8E7, 0, 5, 300)),
+            worldborder: Mutex::new(worldborder),
             level_time: Mutex::new(level_time),
             sky_darken: AtomicU8::new(0),
             dimension,

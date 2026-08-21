@@ -36,24 +36,26 @@ LEAD, not a proven defect. Known false-positive sources, in order of measured we
   * The method is client/render-only and unreachable on a dedicated server. Mitigated by
     CLIENT_ONLY_METHODS.
   * The behaviour is expressed as generated data in pumpkin-data, not as a fn.
+  * The method belongs to a nested Builder/codec class; enumerate() attributes nested-class
+    methods to the outer class (LootTable.setParamSet is really LootTable.Builder's).
 
-MEASURED PRECISION (2026-08-21, this instrument, sample recorded in sample_verdicts.json)
+MEASURED PRECISION (2026-08-21, AFTER the many-to-many mapper fix)
 -----------------------------------------------------------------------------------------
-15 leads drawn with `--sample 15 --seed 815` and verified by reading BOTH sides:
+15 leads drawn with `--sample 15 --seed 2108` and verified by reading BOTH sides. Full
+verdicts with evidence in sample_verdicts_2108.json:
 
-    REAL_GAP        4   LootTable.createStackSplitter, LivingEntity.setStingerCount,
-                        StonecutterMenu.removed, SideChainPartBlock.connectToTheLeft
-    RENAME          4   ignoreExplosion, getMinZ, doHurtTarget, createMenu
-    DATA/INLINED    5   modeled as a struct field, a registry entry or a component
-    CLIENT/DEBUG    2   displayFireAnimation, GateBehavior.debugString
+    REAL_GAP        5   StructureTemplate.placeInWorld, AbstractHorse.positionRider,
+                        Drowned.canReplaceCurrentItem, ShelfBlockEntity.applyImplicitComponents,
+                        Piglin.playStepSound
+    RENAME          2   Zoglin.doHurtTarget, BowItem.use
+    INLINED         4   the behaviour exists but as a field or at the call site
+    DATA_MODELED    3   generated tables / codec-builder plumbing
+    CLIENT_ONLY     1   Display.getTeamColor
 
-So about ONE IN FOUR flagged leads is a real gap (4/15 = 27%, and with n=15 the interval
-around that is wide - roughly 9-55%). Scale the lead count by ~0.27 for an expected
-backlog, never read it as a defect count.
-
-An earlier 18-lead sample of this same run BEFORE the 2026-08-21 alias and data-modeled
-additions scored 2/18 = 11%; the additions raised it. The two samples come from different
-runs, so treat that as directional, not a controlled comparison.
+So about ONE IN THREE flagged leads is a real gap (5/15 = 33%; with n=15 the interval is
+roughly 12-62%). Scale the lead count by ~0.33 for an expected backlog, never read it as a
+defect count. Earlier samples of earlier runs scored 2/18 = 11% and 4/15 = 27%; the three
+come from different instrument revisions, so treat the trend as directional only.
 
 Re-measure with --sample after changing the tables rather than quoting a stale figure.
 
@@ -66,11 +68,16 @@ BLIND SPOTS (state these whenever the number is quoted)
    this instrument would have called it present.
 3. The loose tier credits trait defaults. `normal_use` is declared once on the Block
    trait, so every block class matches `useWithoutItem` whether or not it overrides it.
-4. One class maps to one file. Pumpkin splits Entity behaviour across mod.rs, living.rs
-   and player.rs, so the strict tier under-credits large classes badly.
-5. 126 covered classes resolve to no readable Rust file and are dropped entirely, and
-   some mappings are simply wrong (LevelChunk lands on a bedrock packet file). A wrong
+4. FIXED 2026-08-21: a class may now map to SEVERAL Rust files and several classes may
+   share one file. The new risk runs the other way - `stems` can attach a same-named but
+   unrelated file (Slime picks up block/blocks/slime.rs beside entity/mob/slime.rs), which
+   over-credits the strict tier slightly. Bounded by MAX_STEM_FILES.
+5. 30 covered classes still resolve to no readable Rust file and are dropped entirely (126
+   before the fix; the list is emitted as `unresolved_classes`). Some mappings are still
+   simply wrong - Attribute lands on a bedrock update_attributes packet file. A wrong
    mapping moves methods between the two present tiers; it does not create absences.
+   Steel drops 135 classes this way, so its denominator is shrunk far harder than
+   PumpkinPie's and the two loose percentages are NOT comparable head to head.
 6. Client-only and data-modeled exclusions are curated lists, not analysis. They are
    certainly incomplete, which makes the number pessimistic rather than optimistic.
 7. Denominator scope is the 17 gameplay packages in SUBSYSTEMS. util/datafix is excluded
@@ -86,6 +93,7 @@ third silently indexed 0 Rust structs after crates/ moved and scored everything 
 """
 
 import argparse
+import fnmatch
 import json
 import os
 import pathlib
@@ -98,6 +106,8 @@ from collections import defaultdict
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from aliases import (  # noqa: E402
+    CLASS_FILE_HINTS,
+    CLASS_METHOD_ALIASES,
     CLIENT_ONLY_METHODS,
     DATA_MODELED_METHODS,
     KNOWN_ALIASES,
@@ -317,12 +327,19 @@ def build_indexes() -> dict:
     # that Pumpkin models as generated data rather than as a type.
     structs = set(best) | set(rg(r"^\s*pub (?:const|static) (\w+)", "$1", False))
 
-    stems: dict[str, str] = {}
+    # One stem can name several files (entity/passive/pig.rs and a plugin-api pig_zap.rs
+    # sibling, pumpkin-data/item.rs and pumpkin/item/mod.rs). Keeping only the first, as
+    # this did, silently preferred whichever crate sorted first - usually the generated
+    # data table over the behaviour. Keep them all, main crate first.
+    stems: dict[str, list[str]] = defaultdict(list)
     all_rs = [q for root in SRC_ROOTS for q in (REPO_ROOT / root).rglob("*.rs")]
     for path in sorted(all_rs):
         rel = str(path.relative_to(REPO_ROOT))
         stem = path.stem if path.stem != "mod" else path.parent.name
-        stems.setdefault(stem, rel)
+        stems[stem].append(rel)
+    for stem, paths in stems.items():
+        paths.sort(key=lambda x: (not (MAIN_CRATE and x.startswith(f"{MAIN_CRATE}/")),
+                                  "/generated/" in x, len(x), x))
 
     cmd_dirs = [d for d in (REPO_ROOT / r for r in SRC_ROOTS)
                 if (d / "src/command/commands").is_dir()]
@@ -364,33 +381,100 @@ def candidate_names(class_name: str):
             yield name
 
 
-def map_class(class_name: str, idx: dict) -> tuple[str, str | None, str | None]:
-    """-> (match kind, matched Rust name, Rust file if known)."""
+# A stem shared by more than this many files is ambiguous rather than informative
+# (`mod`-style names), so it is not used as evidence.
+MAX_STEM_FILES = 3
+
+
+def hint_files(class_name: str) -> list[str]:
+    """Hand-verified extra files for a class. Missing paths drop out silently."""
+    out: list[str] = []
+    for pattern, paths in CLASS_FILE_HINTS.items():
+        if pattern == class_name or ("*" in pattern and fnmatch.fnmatchcase(class_name, pattern)):
+            for path in paths:
+                if path not in out and (REPO_ROOT / path).is_file():
+                    out.append(path)
+    return out
+
+
+def map_class(class_name: str, idx: dict) -> tuple[str, str | None, list[str]]:
+    """-> (match kind, matched Rust name, every Rust file believed to implement it).
+
+    MANY-TO-MANY (2026-08-21). This used to return one file and stop at the first stage
+    that produced a NAME, which caused two measured defects:
+
+      * a stage that matched a name but resolved no file killed the chain. 112 of the 126
+        "unresolved" classes were `struct_match_ci` landing on a generated `pub const PIG`
+        while `pig` sat in the stem index pointing at entity/passive/pig.rs. Every stage
+        now contributes, and only the KIND is taken from the first stage that fired.
+      * one class could not span two files, so vanilla Item (a behaviour base class split
+        here across the data table, the ItemBehaviour trait and ItemStack) scored all 72
+        of its behavioural methods absent by construction.
+
+    Nothing here forbids two classes sharing a file - that direction always worked, it
+    just had no way to reach a file like copper_weathering.rs that declares no type.
+    """
+    files: list[str] = []
+    kind: str | None = None
+    matched: str | None = None
+
+    def add(*paths) -> bool:
+        hit = False
+        for path in paths:
+            if path and path not in files:
+                files.append(path)
+            hit = hit or bool(path)
+        return hit
+
+    def note(new_kind: str, name: str | None) -> None:
+        nonlocal kind, matched
+        if kind is None:
+            kind, matched = new_kind, name
+
+    hints = hint_files(class_name)
+    if hints:
+        note("file_hint", class_name)
+        add(*hints)
+
     if class_name in KNOWN_ALIASES and KNOWN_ALIASES[class_name] in idx["structs"]:
         alias = KNOWN_ALIASES[class_name]
-        return "known_alias", alias, idx["decls"].get(alias)
+        note("known_alias", alias)
+        add(idx["decls"].get(alias))
+        return kind, matched, files
 
     flat = command_flatten(class_name)
     if flat is not None:
         alias = KNOWN_COMMAND_ALIASES.get(class_name)
         if alias and alias in idx["commands"]:
-            return "known_alias", alias, idx["commands"][alias]
-        if flat in idx["commands"]:
-            return "command_file_match", flat, idx["commands"][flat]
-        return "none", None, None
+            note("known_alias", alias)
+            add(idx["commands"][alias])
+        elif flat in idx["commands"]:
+            note("command_file_match", flat)
+            add(idx["commands"][flat])
+        return kind or "none", matched, files
 
-    for cand in candidate_names(class_name):
+    cands = list(candidate_names(class_name))
+    for cand in cands:
         if cand in idx["structs"]:
-            return "struct_match", cand, idx["decls"].get(cand)
-    for cand in candidate_names(class_name):
+            note("struct_match", cand)
+            add(idx["decls"].get(cand))
+            break
+    for cand in cands:
         if cand.lower() in idx["structs_ci"]:
             hit = idx["structs_ci"][cand.lower()]
-            return "struct_match_ci", hit, idx["decls"].get(hit)
-    for cand in candidate_names(class_name):
-        snake = camel_to_snake(cand)
-        if snake in idx["stems"]:
-            return "filename_match", cand, idx["stems"][snake]
-    return "none", None, None
+            note("struct_match_ci", hit)
+            add(idx["decls"].get(hit))
+            break
+    for cand in cands:
+        paths = idx["stems"].get(camel_to_snake(cand), [])
+        if not paths:
+            continue
+        if len(paths) <= MAX_STEM_FILES:
+            note("filename_match", cand)
+            add(*paths)
+        break
+
+    return kind or "none", matched, files
 
 
 # ---------------------------------------------------------------------------
@@ -398,12 +482,13 @@ def map_class(class_name: str, idx: dict) -> tuple[str, str | None, str | None]:
 # ---------------------------------------------------------------------------
 
 
-def method_spellings(java_name: str) -> set[str]:
+def method_spellings(java_name: str, vanilla_class: str = "") -> set[str]:
     out = {camel_to_snake(java_name)}
     m = GETTER_RE.match(java_name)
     if m:  # getShape -> shape as well as get_shape
         out.add(camel_to_snake(m.group(1)))
     out |= METHOD_ALIASES.get(java_name, set())
+    out |= CLASS_METHOD_ALIASES.get(vanilla_class, {}).get(java_name, set())
     return out
 
 
@@ -416,22 +501,25 @@ def fns_in_file(rel: str) -> set[str]:
 
 
 def classify(units: list[dict], idx: dict) -> dict:
-    rows, unresolved = [], 0
+    rows: list[dict] = []
+    unresolved: list[str] = []
     covered_classes = 0
     for unit in units:
-        kind, matched, ref = map_class(unit["vanilla_class"], idx)
+        kind, matched, refs = map_class(unit["vanilla_class"], idx)
         unit["coverage_match_kind"] = kind
-        unit["rust_file"] = ref
+        unit["rust_files"] = refs
         unit["matched_name"] = matched
         if kind == "none":
             continue
         covered_classes += 1
-        if not ref:
-            unresolved += 1
+        if not refs:
+            unresolved.append(unit["vanilla_class"])
             continue
-        local = fns_in_file(ref)
+        local: set[str] = set()
+        for ref in refs:
+            local |= fns_in_file(ref)
         if not local:
-            unresolved += 1
+            unresolved.append(unit["vanilla_class"])
             continue
 
         in_file, elsewhere, absent, client_only, data_modeled = [], [], [], [], []
@@ -442,7 +530,7 @@ def classify(units: list[dict], idx: dict) -> dict:
             if method in DATA_MODELED_METHODS:
                 data_modeled.append(method)
                 continue
-            spellings = method_spellings(method)
+            spellings = method_spellings(method, unit["vanilla_class"])
             if spellings & local:
                 in_file.append(method)
             elif spellings & idx["fns"]:
@@ -455,7 +543,8 @@ def classify(units: list[dict], idx: dict) -> dict:
                 "subsystem": unit["subsystem"],
                 "vanilla_class": unit["vanilla_class"],
                 "vanilla_path": unit["vanilla_path"],
-                "rust_file": ref,
+                "rust_file": refs[0],
+                "rust_files": refs,
                 "match_kind": kind,
                 "total_methods": len(unit["methods"]),
                 "in_declaring_file": len(in_file),
@@ -495,7 +584,9 @@ def classify(units: list[dict], idx: dict) -> dict:
         "vanilla_classes_total": len(units),
         "vanilla_classes_covered": covered_classes,
         "classes_analysed": len(rows),
-        "classes_unresolved": unresolved,
+        "classes_unresolved": len(unresolved),
+        "unresolved_classes": sorted(unresolved),
+        "classes_multi_file": sum(1 for r in rows if len(r["rust_files"]) > 1),
         "methods_scored": scored,
         "methods_name_matched": present,
         "methods_absent_workspace_wide": absent,
@@ -569,17 +660,51 @@ def run_probes(units: list[dict], idx: dict, report: dict) -> list[str]:
     # known-true renames that plain name matching cannot recover.
     kind, matched, _ = map_class("FoodData", idx)
     probe("FoodData -> HungerManager", matched == "HungerManager", f"got {kind}/{matched}")
-    kind, matched, ref = map_class("ListPlayersCommand", idx)
+    kind, matched, refs = map_class("ListPlayersCommand", idx)
     probe(
         "ListPlayersCommand -> list.rs",
-        ref is not None and ref.endswith("commands/list.rs"),
-        f"got {kind}/{ref}",
+        any(r.endswith("commands/list.rs") for r in refs),
+        f"got {kind}/{refs}",
     )
     # NB the packet rewrite recovers the C/S prefix but not a changed noun: this fork
     # names ClientboundAddEntityPacket CSpawnEntity (Yarn), so that class does NOT match.
     kind, matched, _ = map_class("ClientboundBlockUpdatePacket", idx)
     probe("Clientbound* -> C*", matched == "CBlockUpdate", f"got {kind}/{matched}")
     passed.append("rename probes: FoodData, ListPlayersCommand, ClientboundBlockUpdatePacket")
+
+    # -- stage 2b: many-to-many, added 2026-08-21 with the mapper fix ------------
+    # known-true: a name-but-no-file stage must not terminate the chain. `Pig` matches a
+    # generated `pub const PIG` (no declaring file); entity/passive/pig.rs must still be
+    # reached. This was 112 of the 126 silently-dropped classes.
+    kind, _, refs = map_class("Pig", idx)
+    probe(
+        "Pig falls through a fileless name match to passive/pig.rs",
+        any(r.endswith("entity/passive/pig.rs") for r in refs),
+        f"got {kind}/{refs}",
+    )
+    # known-true: one class, several files.
+    _, _, refs = map_class("Item", idx)
+    probe("Item maps to more than one file", len(refs) >= 2, f"got {refs}")
+    probe(
+        "Item reaches item_stack, where hurtAndBreak/getDestroySpeed live",
+        any(r.endswith("item_stack/mod.rs") for r in refs),
+        f"got {refs}",
+    )
+    # known-true: several classes, one file - and a file that declares no type at all, so
+    # only the hint table can reach it.
+    _, _, slab = map_class("WeatheringCopperSlabBlock", idx)
+    _, _, door = map_class("WeatheringCopperDoorBlock", idx)
+    probe(
+        "WeatheringCopper* classes share copper_weathering.rs",
+        slab and slab == door and slab[0].endswith("copper_weathering.rs"),
+        f"got {slab} / {door}",
+    )
+    # known-false: hints must not invent files. A pattern whose paths are absent (which is
+    # every Pumpkin path when measuring Steel) contributes nothing.
+    probe("hints never yield a nonexistent path", all((REPO_ROOT / h).is_file()
+                                                      for c in ("Item", "MaceItem")
+                                                      for h in hint_files(c)))
+    passed.append("many-to-many: Pig falls through, Item spans files, WeatheringCopper* share one")
 
     # known-false: an invented class must not match anything.
     kind, matched, _ = map_class("ZzzNotARealVanillaClass", idx)
@@ -635,6 +760,23 @@ def run_probes(units: list[dict], idx: dict, report: dict) -> list[str]:
     passed.append("CopperGolem.thunderHit flagged absent (known real gap)")
 
     # arithmetic sanity: the failure mode that once printed 220.9%.
+    # The unresolved count is the mapper's own dropout rate: 126 before the many-to-many
+    # fix, and each dropped class removes its whole method set from the denominator.
+    probe(
+        "unresolved dropout stays small",
+        report["classes_unresolved"] < 40,  # 30 at the 2026-08-21 fix, 126 before it
+        f"got {report['classes_unresolved']} - the fall-through in map_class regressed",
+    )
+    probe(
+        "multi-file classes actually exist in the report",
+        report["classes_multi_file"] >= 20,
+        f"got {report['classes_multi_file']}",
+    )
+    passed.append(
+        f"{report['classes_unresolved']} unresolved (<30), "
+        f"{report['classes_multi_file']} classes span >1 file"
+    )
+
     probe("no percentage over 100", report["name_match_pct"] <= 100)
     probe("class coverage <= 100", report["class_coverage_pct"] <= 100)
     probe(

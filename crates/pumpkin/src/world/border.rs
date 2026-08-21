@@ -3,6 +3,8 @@ use pumpkin_protocol::java::client::play::{
     CSetBorderWarningDelay, CSetBorderWarningDistance,
 };
 
+use pumpkin_world::world_info::data_files::WorldBorderData;
+
 use crate::net::java::JavaClient;
 
 use super::World;
@@ -51,6 +53,58 @@ impl Worldborder {
             warning_time,
             damage_per_block: 0.2,
             buffer: 5.0,
+        }
+    }
+
+    /// Restores a border from its persisted `WorldBorder.Settings`.
+    ///
+    /// Vanilla `WorldBorder.applyInitialSettings` (`WorldBorder.java:285-299`)
+    /// resumes an in-flight interpolation when the stored `lerp_time` is positive
+    /// and otherwise makes the border static at `size`. The stored `lerp_time` is
+    /// the *remaining* tick count (`MovingBorderExtent.getLerpTime` returns
+    /// `lerpProgress`, `WorldBorder.java:408-410`), so it becomes the full
+    /// duration of the resumed lerp.
+    #[must_use]
+    pub const fn from_settings(settings: &WorldBorderData) -> Self {
+        let lerping = settings.lerp_time > 0;
+        Self {
+            center_x: settings.center_x,
+            center_z: settings.center_z,
+            old_diameter: settings.size,
+            new_diameter: if lerping {
+                settings.lerp_target
+            } else {
+                settings.size
+            },
+            current_diameter: settings.size,
+            lerp_ticks_total: if lerping { settings.lerp_time } else { 0 },
+            lerp_ticks_remaining: if lerping { settings.lerp_time } else { 0 },
+            speed: settings.lerp_time,
+            portal_teleport_boundary: 29_999_984,
+            warning_blocks: settings.warning_blocks,
+            warning_time: settings.warning_time,
+            damage_per_block: settings.damage_per_block as f32,
+            buffer: settings.safe_zone as f32,
+        }
+    }
+
+    /// Snapshots the border for persistence.
+    ///
+    /// Mirrors the `WorldBorder.Settings(WorldBorder)` constructor
+    /// (`WorldBorder.java:475-487`), which stores the *current* size along with the
+    /// remaining lerp time and its target.
+    #[must_use]
+    pub fn to_settings(&self) -> WorldBorderData {
+        WorldBorderData {
+            center_x: self.center_x,
+            center_z: self.center_z,
+            damage_per_block: f64::from(self.damage_per_block),
+            safe_zone: f64::from(self.buffer),
+            warning_blocks: self.warning_blocks,
+            warning_time: self.warning_time,
+            size: self.current_diameter,
+            lerp_time: self.lerp_ticks_remaining,
+            lerp_target: self.new_diameter,
         }
     }
 
@@ -250,5 +304,51 @@ mod tests {
         // max = 2e7 + 1.5e7 = 3.5e7, clamped down to 29_999_984.
         assert!(!border.contains(3.0e7, 2.0e7));
         assert!(border.contains(2.999_998_3E7, 2.0e7));
+    }
+
+    /// `WorldBorder.applyInitialSettings` (`WorldBorder.java:285-299`) resumes an
+    /// in-flight lerp: the saved `size` is where the border is *now* and
+    /// `lerp_time` is what is left of the interpolation.
+    #[test]
+    fn settings_round_trip_preserves_an_in_flight_lerp() {
+        let mut border = Worldborder::new(1.0, -2.0, 100.0, 0, 7, 30);
+        border.old_diameter = 100.0;
+        border.new_diameter = 20.0;
+        border.lerp_ticks_total = 200;
+        border.lerp_ticks_remaining = 120;
+        border.damage_per_block = 0.35;
+        border.buffer = 4.0;
+
+        let settings = border.to_settings();
+        assert_eq!(settings.size, 100.0);
+        assert_eq!(settings.lerp_target, 20.0);
+        assert_eq!(settings.lerp_time, 120);
+        assert_eq!(settings.warning_blocks, 7);
+        assert_eq!(settings.warning_time, 30);
+
+        let restored = Worldborder::from_settings(&settings);
+        assert_eq!(restored.size(), 100.0);
+        assert_eq!(restored.new_diameter, 20.0);
+        assert_eq!(restored.lerp_time(), 120);
+        assert_eq!(restored.center_x, 1.0);
+        assert_eq!(restored.center_z, -2.0);
+        assert!((restored.damage_per_block - 0.35).abs() < 1.0e-6);
+        assert!((restored.buffer - 4.0).abs() < 1.0e-6);
+    }
+
+    /// A finished (or never started) lerp saves as `lerp_time == 0` and reloads
+    /// static, vanilla `setSize` rather than `lerpSizeBetween`.
+    #[test]
+    fn settings_round_trip_of_a_static_border_stays_static() {
+        let border = Worldborder::new(0.0, 0.0, 512.0, 0, 5, 300);
+        let settings = border.to_settings();
+        assert_eq!(settings.lerp_time, 0);
+        assert_eq!(settings.lerp_target, 512.0);
+
+        let restored = Worldborder::from_settings(&settings);
+        assert_eq!(restored.size(), 512.0);
+        assert_eq!(restored.lerp_time(), 0);
+        assert_eq!(restored.old_diameter, 512.0);
+        assert_eq!(restored.new_diameter, 512.0);
     }
 }

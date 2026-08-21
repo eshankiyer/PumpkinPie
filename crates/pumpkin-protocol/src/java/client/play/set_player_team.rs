@@ -38,6 +38,29 @@ pub struct CSetPlayerTeam<'a> {
     pub players: Box<[String]>,
 }
 
+/// `Team.Visibility` ids (`Team.java:66-70`). Unknown names fall back to
+/// `ALWAYS`, matching `ByIdMap.OutOfBoundsStrategy.ZERO` on decode.
+#[must_use]
+fn nametag_visibility_id(name: &str) -> i32 {
+    match name {
+        "never" => 1,
+        "hideForOtherTeams" => 2,
+        "hideForOwnTeam" => 3,
+        _ => 0,
+    }
+}
+
+/// `Team.CollisionRule` ids (`Team.java:39-43`).
+#[must_use]
+fn collision_rule_id(name: &str) -> i32 {
+    match name {
+        "never" => 1,
+        "pushOtherTeams" => 2,
+        "pushOwnTeam" => 3,
+        _ => 0,
+    }
+}
+
 impl ClientPacket for CSetPlayerTeam<'_> {
     fn write_packet_data(
         &self,
@@ -51,12 +74,36 @@ impl ClientPacket for CSetPlayerTeam<'_> {
             TeamMethod::Create | TeamMethod::Update => {
                 if let Some(params) = &self.parameters {
                     write.write_component(params.display_name, version)?;
-                    write.write_i8(params.options)?;
-                    write.write_string(params.nametag_visibility)?;
-                    write.write_string(params.collision_rule)?;
-                    write.write_var_int(&VarInt(params.color))?;
-                    write.write_component(params.player_prefix, version)?;
-                    write.write_component(params.player_suffix, version)?;
+                    if *version >= JavaMinecraftVersion::V_26_2 {
+                        // 26.2 `ClientboundSetPlayerTeamPacket.Parameters.STREAM_CODEC`
+                        // (`ClientboundSetPlayerTeamPacket.java:151-166`): the three
+                        // components come first, the visibility and collision rule are
+                        // id VarInts rather than strings, the color became an
+                        // `Optional<TeamColor>`, and the option flags moved last.
+                        write.write_component(params.player_prefix, version)?;
+                        write.write_component(params.player_suffix, version)?;
+                        write.write_var_int(&VarInt(nametag_visibility_id(
+                            params.nametag_visibility,
+                        )))?;
+                        write.write_var_int(&VarInt(collision_rule_id(params.collision_rule)))?;
+                        // `TeamColor` ids run 0..=15 (`TeamColor.java:14-29`); anything
+                        // outside that has no team colour, i.e. `Optional.empty()`.
+                        if (0..=15).contains(&params.color) {
+                            write.write_bool(true)?;
+                            write.write_var_int(&VarInt(params.color))?;
+                        } else {
+                            write.write_bool(false)?;
+                        }
+                        write.write_i8(params.options)?;
+                    } else {
+                        // Pre-26.2 layout.
+                        write.write_i8(params.options)?;
+                        write.write_string(params.nametag_visibility)?;
+                        write.write_string(params.collision_rule)?;
+                        write.write_var_int(&VarInt(params.color))?;
+                        write.write_component(params.player_prefix, version)?;
+                        write.write_component(params.player_suffix, version)?;
+                    }
                 } else {
                     return Err(WritingError::Message(
                         "Parameters missing for Create/Update".into(),
@@ -77,5 +124,103 @@ impl ClientPacket for CSetPlayerTeam<'_> {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CSetPlayerTeam, TeamMethod, TeamParameters};
+    use crate::ClientPacket;
+    use pumpkin_util::text::TextComponent;
+    use pumpkin_util::version::JavaMinecraftVersion;
+
+    fn encode(packet: &CSetPlayerTeam<'_>, version: JavaMinecraftVersion) -> Vec<u8> {
+        let mut buf = Vec::new();
+        packet.write_packet_data(&mut buf, &version).unwrap();
+        buf
+    }
+
+    /// The 26.2 field order is display/prefix/suffix, visibility id, collision id,
+    /// `Optional<TeamColor>`, flags (`ClientboundSetPlayerTeamPacket.java:151-166`).
+    #[test]
+    fn create_uses_the_26_2_parameter_order() {
+        let empty = TextComponent::text("");
+        let packet = CSetPlayerTeam {
+            team_name: "t".to_string(),
+            method: TeamMethod::Create,
+            parameters: Some(TeamParameters {
+                display_name: &empty,
+                options: 3,
+                nametag_visibility: "hideForOwnTeam",
+                collision_rule: "pushOtherTeams",
+                color: 12,
+                player_prefix: &empty,
+                player_suffix: &empty,
+            }),
+            players: Box::new([]),
+        };
+        let bytes = encode(&packet, JavaMinecraftVersion::V_26_2);
+
+        // team name, method, then the three components; find the tail after them.
+        let tail = &bytes[bytes.len() - 6..];
+        assert_eq!(tail[0], 3); // Visibility HIDE_FOR_OWN_TEAM
+        assert_eq!(tail[1], 2); // CollisionRule PUSH_OTHER_TEAMS
+        assert_eq!(tail[2], 1); // Optional<TeamColor> present
+        assert_eq!(tail[3], 12); // TeamColor RED
+        assert_eq!(tail[4], 3); // option flags
+        assert_eq!(tail[5], 0); // empty player list
+        assert_eq!(bytes[0], 1); // string length of "t"
+        assert_eq!(bytes[2], TeamMethod::Create as u8);
+    }
+
+    /// A colour outside `TeamColor`'s 0..=15 id range encodes as `Optional.empty()`.
+    #[test]
+    fn out_of_range_color_encodes_as_absent() {
+        let empty = TextComponent::text("");
+        let packet = CSetPlayerTeam {
+            team_name: "t".to_string(),
+            method: TeamMethod::Update,
+            parameters: Some(TeamParameters {
+                display_name: &empty,
+                options: 0,
+                nametag_visibility: "always",
+                collision_rule: "always",
+                color: 21,
+                player_prefix: &empty,
+                player_suffix: &empty,
+            }),
+            players: Box::new([]),
+        };
+        let bytes = encode(&packet, JavaMinecraftVersion::V_26_2);
+        let tail = &bytes[bytes.len() - 4..];
+        assert_eq!(tail[0], 0); // Visibility ALWAYS
+        assert_eq!(tail[1], 0); // CollisionRule ALWAYS
+        assert_eq!(tail[2], 0); // Optional<TeamColor> absent
+        assert_eq!(tail[3], 0); // option flags
+    }
+
+    /// Older clients keep the pre-26.2 layout, whose flags byte comes second.
+    #[test]
+    fn legacy_layout_still_puts_flags_after_the_display_name() {
+        let empty = TextComponent::text("");
+        let packet = CSetPlayerTeam {
+            team_name: "t".to_string(),
+            method: TeamMethod::Update,
+            parameters: Some(TeamParameters {
+                display_name: &empty,
+                options: 3,
+                nametag_visibility: "always",
+                collision_rule: "always",
+                color: 12,
+                player_prefix: &empty,
+                player_suffix: &empty,
+            }),
+            players: Box::new([]),
+        };
+        let bytes = encode(&packet, JavaMinecraftVersion::V_1_21_5);
+        assert!(
+            bytes.windows(2).any(|w| w == *b"al"),
+            "legacy layout writes the rule names as strings"
+        );
     }
 }

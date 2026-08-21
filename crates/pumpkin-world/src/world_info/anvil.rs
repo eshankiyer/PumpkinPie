@@ -19,10 +19,11 @@ use crate::world_info::{
     DataPacks, MAXIMUM_SUPPORTED_LEVEL_VERSION, MAXIMUM_SUPPORTED_WORLD_DATA_VERSION,
     MINIMUM_SUPPORTED_LEVEL_VERSION, MINIMUM_SUPPORTED_WORLD_DATA_VERSION, WorldVersion,
     data_files::{
-        minecraft_data_dir, read_game_rules, read_scoreboard, read_wandering_trader, read_weather,
-        read_world_clocks, read_world_gen_settings, write_custom_boss_events_stub,
-        write_game_rules, write_scheduled_events_stub, write_scoreboard, write_wandering_trader,
-        write_weather, write_world_clocks, write_world_gen_settings,
+        WorldBorderData, minecraft_data_dir, read_game_rules, read_next_map_id, read_scoreboard,
+        read_wandering_trader, read_weather, read_world_border, read_world_clocks,
+        read_world_gen_settings, write_custom_boss_events_stub, write_game_rules,
+        write_next_map_id, write_scheduled_events_stub, write_scoreboard, write_wandering_trader,
+        write_weather, write_world_border, write_world_clocks, write_world_gen_settings,
     },
     default_data_packs,
 };
@@ -590,6 +591,26 @@ impl WorldInfoReader for AnvilLevelInfo {
         // scoreboard.dat
         level_data.scoreboard_data = read_scoreboard(level_folder);
 
+        // world_border.dat - vanilla `WorldBorder.TYPE` (`WorldBorder.java:25-27`).
+        // Absent means a pre-26.2 world, whose `Border*` keys were already read
+        // out of level.dat above, so leave those in place.
+        if let Some(border) = read_world_border(level_folder) {
+            level_data.border_center_x = border.center_x;
+            level_data.border_center_z = border.center_z;
+            level_data.border_damage_per_block = border.damage_per_block;
+            level_data.border_safe_zone = border.safe_zone;
+            level_data.border_size = border.size;
+            level_data.border_size_lerp_target = border.lerp_target;
+            level_data.border_size_lerp_time = border.lerp_time;
+            level_data.border_warning_blocks = f64::from(border.warning_blocks);
+            level_data.border_warning_time = f64::from(border.warning_time);
+        }
+
+        // maps/last_id.dat - vanilla `MapIndex.TYPE` (`MapIndex.java:15-17`).
+        if let Some(next_map_id) = read_next_map_id(level_folder) {
+            level_data.map_id = next_map_id;
+        }
+
         // (wandering_trader.dat is not part of LevelData; stored separately when needed)
 
         Ok(level_data)
@@ -632,8 +653,11 @@ impl WorldInfoWriter for AnvilLevelInfo {
         level_data_to_nbt(&level_data, &mut data_comp);
         data_comp.put_compound("difficulty_settings", write_difficulty(&level_data));
         data_comp.put_compound("spawn", write_spawn(&level_data));
-        // `WorldBorder` and `map_id` are deliberately not written: vanilla keeps them in
-        // separate SavedData files, not level.dat (see the comment in read_world_info).
+        // 26.2 moved the world border and the map-id counter out of level.dat into
+        // saved data (`WorldBorder.java:25-27`, `MapIndex.java:15-17`); those files are
+        // written below. The legacy `Border*`/`map_id` keys are still emitted here so a
+        // world written by this server stays readable by pre-26.2 tooling, and so they
+        // remain as the fallback when the saved-data files are missing.
 
         data_comp.put_compound("DataPacks", write_data_packs(&level_data));
         root.put_compound(LEVEL_DATA_TAG, data_comp);
@@ -662,70 +686,96 @@ impl WorldInfoWriter for AnvilLevelInfo {
         let data_version = level_data.data_version;
 
         // ── Write data/minecraft/*.dat files ─────────────────────────────────
-
-        // game_rules.dat
-        if let Err(e) = write_game_rules(level_folder, &info.game_rules, data_version) {
-            error!("Failed to write game_rules.dat: {e}");
-        }
-
-        // world_gen_settings.dat
-        if let Err(e) =
-            write_world_gen_settings(level_folder, &info.world_gen_settings, data_version)
-        {
-            error!("Failed to write world_gen_settings.dat: {e}");
-        }
-
-        // world_clocks.dat – persist the overworld day_time; preserve other
-        let mut clocks = read_world_clocks(level_folder);
-        clocks.data_version = data_version;
-        clocks
-            .clocks
-            .entry("minecraft:overworld".to_string())
-            .and_modify(|c| c.total_ticks = info.day_time)
-            .or_insert(crate::world_info::data_files::DimensionClock {
-                total_ticks: info.day_time,
-            });
-
-        if let Err(e) = write_world_clocks(level_folder, &clocks) {
-            error!("Failed to write world_clocks.dat: {e}");
-        }
-
-        // weather.dat
-        let weather = crate::world_info::data_files::WeatherData {
-            rain_time: info.rain_time,
-            raining: info.raining,
-            thundering: info.thundering,
-            thunder_time: info.thunder_time,
-            clear_weather_time: info.clear_weather_time,
-            data_version,
-        };
-        if let Err(e) = write_weather(level_folder, &weather) {
-            error!("Failed to write weather.dat: {e}");
-        }
-
-        // scoreboard.dat
-        if let Err(e) = write_scoreboard(level_folder, &info.scoreboard_data) {
-            error!("Failed to write scoreboard.dat: {e}");
-        }
-
-        // wandering_trader.dat (stub / load-save)
-        let mut wandering_trader = read_wandering_trader(level_folder);
-        wandering_trader.data_version = data_version;
-        if let Err(e) = write_wandering_trader(level_folder, &wandering_trader) {
-            error!("Failed to write wandering_trader.dat: {e}");
-        }
-
-        // custom_boss_events.dat
-        if let Err(e) = write_custom_boss_events_stub(level_folder, data_version) {
-            error!("Failed to write custom_boss_events.dat: {e}");
-        }
-
-        // scheduled_events.dat
-        if let Err(e) = write_scheduled_events_stub(level_folder, data_version) {
-            error!("Failed to write scheduled_events.dat: {e}");
-        }
+        write_data_files(info, level_folder, data_version);
 
         Ok(())
+    }
+}
+
+/// Writes the per-feature saved-data files that live beside level.dat.
+///
+/// Vanilla keeps each of these as its own `SavedDataType` under `<world>/data/`
+/// (`SavedDataStorage.java:57-64`).
+fn write_data_files(info: &LevelData, level_folder: &Path, data_version: i32) {
+    // game_rules.dat
+    if let Err(e) = write_game_rules(level_folder, &info.game_rules, data_version) {
+        error!("Failed to write game_rules.dat: {e}");
+    }
+
+    // world_gen_settings.dat
+    if let Err(e) = write_world_gen_settings(level_folder, &info.world_gen_settings, data_version) {
+        error!("Failed to write world_gen_settings.dat: {e}");
+    }
+
+    // world_clocks.dat – persist the overworld day_time; preserve other
+    let mut clocks = read_world_clocks(level_folder);
+    clocks.data_version = data_version;
+    clocks
+        .clocks
+        .entry("minecraft:overworld".to_string())
+        .and_modify(|c| c.total_ticks = info.day_time)
+        .or_insert(crate::world_info::data_files::DimensionClock {
+            total_ticks: info.day_time,
+        });
+
+    if let Err(e) = write_world_clocks(level_folder, &clocks) {
+        error!("Failed to write world_clocks.dat: {e}");
+    }
+
+    // weather.dat
+    let weather = crate::world_info::data_files::WeatherData {
+        rain_time: info.rain_time,
+        raining: info.raining,
+        thundering: info.thundering,
+        thunder_time: info.thunder_time,
+        clear_weather_time: info.clear_weather_time,
+        data_version,
+    };
+    if let Err(e) = write_weather(level_folder, &weather) {
+        error!("Failed to write weather.dat: {e}");
+    }
+
+    // scoreboard.dat
+    if let Err(e) = write_scoreboard(level_folder, &info.scoreboard_data) {
+        error!("Failed to write scoreboard.dat: {e}");
+    }
+
+    // world_border.dat
+    let border = WorldBorderData {
+        center_x: info.border_center_x,
+        center_z: info.border_center_z,
+        damage_per_block: info.border_damage_per_block,
+        safe_zone: info.border_safe_zone,
+        warning_blocks: info.border_warning_blocks as i32,
+        warning_time: info.border_warning_time as i32,
+        size: info.border_size,
+        lerp_time: info.border_size_lerp_time,
+        lerp_target: info.border_size_lerp_target,
+    };
+    if let Err(e) = write_world_border(level_folder, &border, data_version) {
+        error!("Failed to write world_border.dat: {e}");
+    }
+
+    // maps/last_id.dat
+    if let Err(e) = write_next_map_id(level_folder, info.map_id, data_version) {
+        error!("Failed to write maps/last_id.dat: {e}");
+    }
+
+    // wandering_trader.dat (stub / load-save)
+    let mut wandering_trader = read_wandering_trader(level_folder);
+    wandering_trader.data_version = data_version;
+    if let Err(e) = write_wandering_trader(level_folder, &wandering_trader) {
+        error!("Failed to write wandering_trader.dat: {e}");
+    }
+
+    // custom_boss_events.dat
+    if let Err(e) = write_custom_boss_events_stub(level_folder, data_version) {
+        error!("Failed to write custom_boss_events.dat: {e}");
+    }
+
+    // scheduled_events.dat
+    if let Err(e) = write_scheduled_events_stub(level_folder, data_version) {
+        error!("Failed to write scheduled_events.dat: {e}");
     }
 }
 
