@@ -1220,7 +1220,7 @@ mod tests {
     fn suspicious_stew_effects_round_trip() {
         let value = SuspiciousStewEffectsImpl {
             effects: Cow::Owned(vec![SuspiciousStewEffect {
-                effect_id: Cow::Borrowed("minecraft:fire_resistance"),
+                effect: Cow::Borrowed("minecraft:fire_resistance"),
                 duration: 60,
             }]),
         };

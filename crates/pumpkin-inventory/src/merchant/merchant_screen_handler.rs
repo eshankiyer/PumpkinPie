@@ -614,6 +614,10 @@ mod tests {
             Box::pin(async {})
         }
 
+        fn play_sound(&self, _sound: pumpkin_data::sound::Sound) -> PlayerFuture<'_, ()> {
+            Box::pin(async {})
+        }
+
         fn get_inventory(&self) -> Arc<PlayerInventory> {
             self.inventory.clone()
         }

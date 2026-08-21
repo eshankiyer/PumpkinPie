@@ -1124,6 +1124,7 @@ mod tests {
         let chunk = ChunkData {
             section: ChunkSections::new(8, 0),
             heightmap: std::sync::Mutex::default(),
+            custom_data: std::sync::Mutex::default(),
             x: 0,
             z: 0,
             block_ticks: ChunkTickScheduler::default(),

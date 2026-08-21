@@ -155,8 +155,10 @@ const fn whole_grid(size: [u32; 3]) -> ([u32; 3], [u32; 3]) {
 
 fn spv_words(bytes: &[u8]) -> Vec<u32> {
     bytes
-        .chunks_exact(4)
-        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| u32::from_le_bytes(*c))
         .collect()
 }
 

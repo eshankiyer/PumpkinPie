@@ -121,6 +121,7 @@ mod tests {
         Arc::new(ChunkData {
             section: ChunkSections::new(1, 0),
             heightmap: std::sync::Mutex::default(),
+            custom_data: std::sync::Mutex::default(),
             x,
             z,
             block_ticks: ChunkTickScheduler::default(),

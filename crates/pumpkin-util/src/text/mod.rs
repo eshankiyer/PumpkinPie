@@ -1431,6 +1431,7 @@ mod test {
                 Some(TextComponent::text("Steve")),
             ));
 
+        #[allow(deprecated)]
         let message = TextComponent::translate(
             "chat.type.advancement.task",
             [display_name, TextComponent::text("[We Need to Go Deeper]")],
