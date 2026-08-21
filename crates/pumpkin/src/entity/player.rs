@@ -351,6 +351,20 @@ fn block_name_matches_predicate(name: &str, block: &'static Block) -> bool {
     name.strip_prefix("minecraft:").unwrap_or(name) == block.name
 }
 
+/// Whether `stack` is destroyed rather than dropped when its owner dies - the predicate
+/// behind [`Player::destroy_vanishing_cursed_items`]. See that method for the vanilla
+/// citation and the deviation from `PREVENT_EQUIPMENT_DROP`.
+pub(crate) fn is_vanishing_cursed(stack: &ItemStack) -> bool {
+    !stack.is_empty()
+        && stack
+            .get_data_component::<EnchantmentsImpl>()
+            .is_some_and(|e| {
+                e.enchantment
+                    .iter()
+                    .any(|(ench, level)| *level > 0 && ench.id == Enchantment::VANISHING_CURSE.id)
+            })
+}
+
 pub(crate) fn adventure_predicate_matches_block(
     predicate: &NbtTag,
     block: &'static Block,
@@ -4567,28 +4581,19 @@ impl Player {
     /// Vanilla's `inventory` covers the hotbar/main grid *and* the armour and off-hand slots,
     /// so both `main_inventory` and `entity_equipment` are swept here.
     async fn destroy_vanishing_cursed_items(&self) {
-        fn is_cursed(stack: &ItemStack) -> bool {
-            !stack.is_empty()
-                && stack
-                    .get_data_component::<EnchantmentsImpl>()
-                    .is_some_and(|e| {
-                        e.enchantment.iter().any(|(ench, level)| {
-                            *level > 0 && ench.id == Enchantment::VANISHING_CURSE.id
-                        })
-                    })
-        }
-
         {
             let mut main_inv = self.inventory().main_inventory.write().await;
             for item in main_inv.iter_mut() {
-                if is_cursed(item) {
+                if is_vanishing_cursed(item) {
                     *item = ItemStack::EMPTY.clone();
                 }
             }
         }
 
         let mut equipment = self.inventory().entity_equipment.lock().await;
-        equipment.equipment.retain(|_, stack| !is_cursed(stack));
+        equipment
+            .equipment
+            .retain(|_, stack| !is_vanishing_cursed(stack));
     }
 
     async fn handle_killed(&self, death_msg: TextComponent) {
@@ -7622,12 +7627,63 @@ fn is_valid_for_forced_respawn(state: &BlockState) -> bool {
 mod tests {
     use super::{
         Player, ability_invulnerability_blocks, bedrock_inventory_slot,
-        is_valid_for_forced_respawn, read_root_vehicle, write_root_vehicle,
+        is_valid_for_forced_respawn, is_vanishing_cursed, read_root_vehicle, write_root_vehicle,
     };
     use pumpkin_data::Block;
     use pumpkin_data::damage::DamageType;
     use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
     use uuid::Uuid;
+
+    fn stack_with_enchantment(
+        item: &'static pumpkin_data::item::Item,
+        enchantment: &'static pumpkin_data::Enchantment,
+        level: i32,
+    ) -> pumpkin_data::item_stack::ItemStack {
+        use pumpkin_data::data_component::DataComponent;
+        use pumpkin_data::data_component_impl::EnchantmentsImpl;
+
+        let mut stack = pumpkin_data::item_stack::ItemStack::new(1, item);
+        stack.patch.push((
+            DataComponent::Enchantments,
+            Some(Box::new(EnchantmentsImpl {
+                enchantment: std::borrow::Cow::from(vec![(enchantment, level)]),
+            })),
+        ));
+        stack
+    }
+
+    /// `Player.destroyVanishingCursedItems` (`world/entity/player/Player.java:560-567`) erases
+    /// only the stacks carrying Curse of Vanishing; everything else drops normally.
+    #[test]
+    fn only_vanishing_cursed_stacks_are_destroyed_on_death() {
+        use pumpkin_data::Enchantment;
+        use pumpkin_data::item::Item;
+
+        assert!(is_vanishing_cursed(&stack_with_enchantment(
+            &Item::DIAMOND_HELMET,
+            &Enchantment::VANISHING_CURSE,
+            1
+        )));
+        // A different curse must not be swept up with it.
+        assert!(!is_vanishing_cursed(&stack_with_enchantment(
+            &Item::DIAMOND_HELMET,
+            &Enchantment::BINDING_CURSE,
+            1
+        )));
+        // Unenchanted and empty stacks are untouched.
+        assert!(!is_vanishing_cursed(
+            &pumpkin_data::item_stack::ItemStack::new(1, &Item::DIAMOND_HELMET)
+        ));
+        assert!(!is_vanishing_cursed(
+            &pumpkin_data::item_stack::ItemStack::EMPTY.clone()
+        ));
+        // Level 0 is "not enchanted" in vanilla's helper.
+        assert!(!is_vanishing_cursed(&stack_with_enchantment(
+            &Item::DIAMOND_HELMET,
+            &Enchantment::VANISHING_CURSE,
+            0
+        )));
+    }
 
     #[test]
     fn mining_efficiency_bonus_is_level_squared_plus_one() {

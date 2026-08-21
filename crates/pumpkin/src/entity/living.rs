@@ -2465,6 +2465,16 @@ impl LivingEntity {
     ///
     /// Deviation: vanilla spawns the `ItemEntity` at the victim's exact `getX/Y/Z`; this uses
     /// `World::drop_stack`, which is block-position based, matching every other drop path here.
+    ///
+    /// KNOWN LIMITATION - only the wither's *melee* kills reach this today. Vanilla passes
+    /// `getKillCredit()`, which resolves a projectile to its shooter; Pumpkin has no such
+    /// resolution, and `cause` is whatever the damage call site supplies. `Mob::attack`
+    /// (`entity/mob/mod.rs:784`) supplies the attacking mob, so melee works. Wither skulls do
+    /// not: `entity/projectile/wither_skull.rs:130` uses the bare `EntityBase::damage`, whose
+    /// default (`entity/mod.rs:352-363`) passes `cause: None`, so a skull kill plants no rose.
+    /// Closing that needs the shooter plumbed through as `cause` in `entity/projectile/`
+    /// (arrows already do this at `arrow.rs:617`, but pass the *arrow* rather than the
+    /// shooter, so owner resolution is still missing there too).
     async fn create_wither_rose(&self, killer: Option<&dyn EntityBase>) {
         let is_wither =
             killer.is_some_and(|k| k.get_entity().entity_type.id == EntityType::WITHER.id);

@@ -54,9 +54,9 @@ use pumpkin_world::{
     block::entities::PropertyDelegate,
     inventory::{ComparableInventory, Inventory},
 };
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::{any::Any, collections::HashMap, sync::Arc};
-use std::{cmp::max, pin::Pin};
 use tokio::sync::Mutex;
 use tracing::warn;
 
@@ -965,13 +965,19 @@ pub trait ScreenHandler: Send + Sync {
                                 }
                                 _ => 0,
                             };
-                            inserting_count = inserting_count
-                                .min(max(
-                                    0,
-                                    slot.get_max_item_count_for_stack(&stack).await
-                                        - stack.item_count,
-                                ))
-                                .min(cursor_stack.item_count);
+                            // `AbstractContainerMenu.java:384-386` caps against
+                            // `min(source.getMaxStackSize(), slot.getMaxStackSize(source))`,
+                            // i.e. the CARRIED stack's limit, and does the headroom
+                            // subtraction on a signed int. Using the slot's own (possibly
+                            // empty) stack and a `u8` subtraction both diverge: the latter
+                            // underflows whenever the slot already holds more than the
+                            // carried stack's max size permits.
+                            let headroom = slot
+                                .get_max_item_count_for_stack(&cursor_stack)
+                                .await
+                                .saturating_sub(stack.item_count);
+                            inserting_count =
+                                inserting_count.min(headroom).min(cursor_stack.item_count);
                             if inserting_count > 0 {
                                 let mut new_stack = stack.clone();
                                 if new_stack.is_empty() {
