@@ -24,12 +24,18 @@
 //     `entity.generic.hurt`.
 //   - dash-ready: wired, played from `mob_tick` when the cooldown hits zero.
 //   - eat: wired, played by the taming branch of `mob_interact`.
-//   - ambient: wired only through the `animal_interact` love-mode fallback. Pumpkin has no
-//     periodic ambient-sound tick, so a zombie nautilus is silent when idle.
-//   - death and swim: NOT reachable. There is no death-sound or swim-sound path anywhere in
-//     `entity/living.rs` or `entity/mod.rs` for any mob, so `get_death_sound` /
-//     `get_swim_sound` exist as tested pure functions with no caller. The sibling
-//     `nautilus.rs` has the identical gap.
+//   - ambient: wired, through the shared `Mob::tick_ambient_sound` cadence
+//     (`entity/mob/mod.rs`, from `Mob.baseTick`) as well as the `animal_interact`
+//     love-mode fallback.
+//   - swim: wired, through `LivingEntity::tick_swim_sound` (`entity/living.rs`, from
+//     `Entity.applyMovementEmissionAndPlaySound`).
+//   - death: not played by the server. Pumpkin broadcasts `EntityStatus::Death` from
+//     `LivingEntity::on_death`, and a vanilla client plays `getDeathSound` itself on that
+//     entity event (LivingEntity.java:1477 broadcast, LivingEntity.java:2063-2067 handler),
+//     so the sound does reach players. Vanilla additionally plays it server-side
+//     (LivingEntity.java:1255); that second play is not replicated, because the generated
+//     `EntityType` carries no `death_sound` field and doing it only for the mobs with a
+//     hand-written death sound would make those alone double-play.
 // - `sunProtectionSlot` = BODY (ZombieNautilus.java:59-62). This is live: `zombie_nautilus`
 //   is in the `minecraft:burn_in_daylight` entity-type tag, which is what
 //   `Mob::tick_sun_burn` gates on. Nothing overrode `Mob::sun_protection_slot` before this
@@ -388,7 +394,7 @@ impl ZombieNautilusEntity {
     }
 
     #[must_use]
-    pub fn get_ambient_sound(&self) -> Sound {
+    pub fn ambient_sound(&self) -> Sound {
         ambient_sound_for(self.is_underwater())
     }
 
@@ -485,6 +491,12 @@ impl Animal for ZombieNautilusEntity {
 impl Mob for ZombieNautilusEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `ZombieNautilus.getAmbientSound` (ZombieNautilus.java:87-89), reached through the shared
+    /// `Mob.baseTick` idle-sound cadence.
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(self.ambient_sound())
     }
 
     /// `ZombieNautilus.sunProtectionSlot` (ZombieNautilus.java:59-62).
@@ -660,7 +672,7 @@ impl Mob for ZombieNautilusEntity {
                 }
             }
 
-            self.animal_interact(player, item_stack, self.get_ambient_sound())
+            self.animal_interact(player, item_stack, self.ambient_sound())
                 .await
         })
     }

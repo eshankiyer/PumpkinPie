@@ -166,6 +166,12 @@ pub struct LivingEntity {
     pub auto_spin_attack_damage: AtomicCell<f32>,
     pub auto_spin_attack_item_stack: Mutex<Option<ItemStack>>,
     pub death_time: AtomicU8,
+    /// Vanilla `Entity.moveDist` (Entity.java:238): the scaled distance walked, accumulated by
+    /// `Entity.applyMovementEmissionAndPlaySound` (Entity.java:867-901).
+    move_dist: AtomicCell<f32>,
+    /// Vanilla `Entity.nextStep` (Entity.java:241): the `moveDist` value at which the next step
+    /// or swim sound fires, advanced by `Entity.nextStep` (Entity.java:1259-1261).
+    next_step: AtomicCell<f32>,
     /// Indicates whether the entity is dead. (`on_death` called)
     pub dead: AtomicBool,
     /// The distance the entity has been falling.
@@ -343,6 +349,8 @@ impl LivingEntity {
             absorption: AtomicCell::new(0.0),
             fall_distance: AtomicCell::new(0.0),
             death_time: AtomicU8::new(0),
+            move_dist: AtomicCell::new(0.0),
+            next_step: AtomicCell::new(1.0),
             dead: AtomicBool::new(false),
             item_use_time: AtomicI32::new(0),
             item_in_use: Mutex::new(None),
@@ -914,11 +922,11 @@ impl LivingEntity {
         let is_instant = effect.effect_type.id == StatusEffect::INSTANT_HEALTH.id
             || effect.effect_type.id == StatusEffect::INSTANT_DAMAGE.id;
         if !Self::instant_effect_is_damage(effect.effect_type, inverted) && is_instant {
-            let heal_amount = 4.0 * (1 << effect.amplifier) as f32;
+            let heal_amount = instant_effect_amount(4, effect.amplifier).max(0.0);
             self.heal(heal_amount);
             return true;
         } else if is_instant {
-            let damage_amount = 6.0 * (1 << effect.amplifier) as f32;
+            let damage_amount = instant_effect_amount(6, effect.amplifier);
             let dyn_self = self
                 .entity
                 .world
@@ -955,8 +963,12 @@ impl LivingEntity {
             };
 
             // Vanilla runs `MobEffectInstance.onEffectStarted` on every application, including
-            // one that loses the merge, so absorption is granted before that check.
-            self.start_absorption(applied_amplifier).await;
+            // one that loses the merge, so absorption is granted before that check. It dispatches
+            // to the added effect's own `MobEffect`, and only `AbsorptionMobEffect` overrides it,
+            // so no other effect may touch the absorption amount.
+            if effect.effect_type == &StatusEffect::ABSORPTION {
+                self.start_absorption(applied_amplifier).await;
+            }
 
             if !did_apply {
                 return false;
@@ -2367,6 +2379,27 @@ impl LivingEntity {
         self.set_absorption(granted).await;
     }
 
+    /// Re-applies an effect's `MobEffect.AttributeTemplate` modifiers (`base * (amplifier + 1)`,
+    /// `MobEffect.java:200-204`) into the local attribute map. Used when effects come back from
+    /// disk, where vanilla instead restores the saved permanent modifiers.
+    fn restore_effect_attribute_modifiers(&self, effect: &Effect) {
+        for m in effect.effect_type.attribute_modifiers {
+            let operation = match m.operation {
+                Operation::AddValue => ModifierOperation::Add,
+                Operation::AddMultipliedBase => ModifierOperation::MultiplyBase,
+                Operation::AddMultipliedTotal => ModifierOperation::MultiplyTotal,
+            };
+            let modifier = Modifier {
+                id: m.id.to_string(),
+                amount: m.base_value * (f64::from(effect.amplifier) + 1.0),
+                operation,
+            };
+            self.update_attribute(m.attribute, |inst| {
+                inst.add_or_replace_modifier(modifier.clone());
+            });
+        }
+    }
+
     /// Vanilla `MobEffectInstance.downgradeToHiddenEffect`: when the active instance runs out the
     /// nearest hidden one takes its place. If that one has run out as well the whole chain goes
     /// with it, matching vanilla's `hasRemainingDuration` check right after the downgrade.
@@ -2495,12 +2528,10 @@ impl LivingEntity {
                     .load()
                     .get_entity_by_id(self.entity.entity_id)
             {
-                let damage_amount = (current_health - 1.0).min(1.0);
-                if damage_amount > 0.0 {
-                    dyn_self
-                        .damage(&*dyn_self, damage_amount, DamageType::MAGIC)
-                        .await;
-                }
+                // `PoisonMobEffect.applyEffectTick` deals a flat point of magic damage once the
+                // carrier is above one health, so it can take them below a single heart even
+                // though it never lands the killing blow itself.
+                dyn_self.damage(&*dyn_self, 1.0, DamageType::MAGIC).await;
             }
         } else if effect_type == &StatusEffect::ABSORPTION {
             // `AbsorptionMobEffect.applyEffectTick` returns false once the hearts are gone, which
@@ -3177,6 +3208,94 @@ impl LivingEntity {
         false
     }
 
+    /// `Entity.getMovementEmission` (Entity.java:1533-1535) is `ALL` by default, but these
+    /// living types downgrade it to `EVENTS` or `NONE` and so make no movement sound at all:
+    /// Bat.java:183-186, Squid.java:96-99 (inherited by GlowSquid.java:26), Breeze.java:282-285,
+    /// Endermite.java:55-58, Guardian.java:169-172 (inherited by ElderGuardian.java:19),
+    /// Shulker.java:105-108, Silverfish.java:56-59.
+    fn movement_emits_sounds(entity_type: &'static EntityType) -> bool {
+        entity_type != &EntityType::BAT
+            && entity_type != &EntityType::SQUID
+            && entity_type != &EntityType::GLOW_SQUID
+            && entity_type != &EntityType::BREEZE
+            && entity_type != &EntityType::ENDERMITE
+            && entity_type != &EntityType::GUARDIAN
+            && entity_type != &EntityType::ELDER_GUARDIAN
+            && entity_type != &EntityType::SHULKER
+            && entity_type != &EntityType::SILVERFISH
+    }
+
+    /// `Entity.getSwimSound` (Entity.java:1263-1265) returns `entity.generic.swim` for every
+    /// entity; the two nautilus species override it.
+    fn swim_sound(caller: &Arc<dyn EntityBase>) -> Sound {
+        if let Some(nautilus) = caller
+            .cast_any()
+            .downcast_ref::<crate::entity::passive::nautilus::NautilusEntity>()
+        {
+            return nautilus.get_swim_sound();
+        }
+        if let Some(zombie_nautilus) = caller
+            .cast_any()
+            .downcast_ref::<crate::entity::passive::zombie_nautilus::ZombieNautilusEntity>(
+        ) {
+            return zombie_nautilus.get_swim_sound();
+        }
+        Sound::EntityGenericSwim
+    }
+
+    /// `Entity.applyMovementEmissionAndPlaySound` (Entity.java:867-901): the horizontal distance
+    /// moved is accumulated into `moveDist`, and each time it passes `nextStep` the entity emits
+    /// either a step sound or, when it is in water and produced no step side effects, the swim
+    /// sound (Entity.java:889-893). Pumpkin has no step-sound path, so only the water branch
+    /// plays; `nextStep` still advances in the other case (`Entity.nextStep`,
+    /// Entity.java:1259-1261) so a mob that walks ashore does not fire the instant it gets back
+    /// in. Volume comes from `Entity.waterSwimSound` (Entity.java:1428-1437) and the pitch
+    /// spread from `Entity.playSwimSound` (Entity.java:1475-1477).
+    ///
+    /// Players are skipped: their client simulates its own movement and plays this sound
+    /// locally, which vanilla accounts for by excluding the player from its own
+    /// `Player.playSound` broadcast, a distinction `World::play_sound` here does not draw.
+    fn tick_swim_sound(&self, caller: &Arc<dyn EntityBase>) {
+        if self.entity.entity_type == &EntityType::PLAYER {
+            return;
+        }
+        let moved = self.entity.pos.load() - self.entity.last_pos.load();
+        let horizontal = moved.x.hypot(moved.z) as f32 * 0.6;
+        let move_dist = self.move_dist.load() + horizontal;
+        self.move_dist.store(move_dist);
+        if move_dist <= self.next_step.load() {
+            return;
+        }
+        self.next_step.store(move_dist.floor() + 1.0);
+        if !self.entity.touching_water.load(Relaxed)
+            || self.entity.on_ground.load(Relaxed)
+            || self.entity.is_silent()
+            || !Self::movement_emits_sounds(self.entity.entity_type)
+        {
+            return;
+        }
+        let velocity = self.entity.velocity.load();
+        let volume = ((velocity.x * velocity.x)
+            .mul_add(
+                0.2,
+                velocity
+                    .y
+                    .mul_add(velocity.y, velocity.z * velocity.z * 0.2),
+            )
+            .sqrt() as f32
+            * 0.35)
+            .min(1.0);
+        let mut rng = rand::rng();
+        let pitch = (rng.random::<f32>() - rng.random::<f32>()).mul_add(0.4, 1.0);
+        self.entity.world.load().play_sound_fine(
+            Self::swim_sound(caller),
+            SoundCategory::Neutral,
+            &self.entity.pos.load(),
+            volume,
+            pitch,
+        );
+    }
+
     fn hurt_sound(&self) -> Sound {
         if self.entity.entity_type == &EntityType::SLIME {
             SlimeEntity::hurt_sound_for_size(self.entity.data.load(Relaxed))
@@ -3306,6 +3425,7 @@ impl NBTStorage for LivingEntity {
             } else {
                 self.fall_distance.store(fd);
             }
+            let mut loaded_effects: Vec<Effect> = Vec::new();
             {
                 let mut active_effects = self.active_effects.lock().await;
                 let mut hidden_effects = self.hidden_effects.lock().await;
@@ -3334,6 +3454,7 @@ impl NBTStorage for LivingEntity {
                                 if !chain.is_empty() {
                                     hidden_effects.insert(effect.effect_type, chain);
                                 }
+                                loaded_effects.push(effect.clone());
                                 active_effects.insert(effect.effect_type, effect);
                             } else {
                                 warn!("Unable to read effect from nbt");
@@ -3342,6 +3463,20 @@ impl NBTStorage for LivingEntity {
                     }
                 }
             }
+            // Vanilla saves the effects' permanent attribute modifiers alongside the effects
+            // themselves (`LivingEntity.readAdditionalSaveData`: the `attributes` tag is applied
+            // right before `active_effects`), so a reloaded Speed or Strength still moves the
+            // attribute. Pumpkin does not persist attributes, so the modifiers are rebuilt from
+            // the effects that were just loaded instead of silently going missing.
+            for effect in loaded_effects {
+                self.restore_effect_attribute_modifiers(&effect);
+                if effect.effect_type == &StatusEffect::INVISIBILITY {
+                    self.entity.set_invisible(true).await;
+                } else if effect.effect_type == &StatusEffect::GLOWING {
+                    self.entity.set_glowing(true).await;
+                }
+            }
+
             let mut equipment = self.entity_equipment.lock().await;
             for (key, slot) in [
                 (
@@ -3969,6 +4104,13 @@ impl EntityBase for LivingEntity {
             self.try_spawn_infested_silverfish().await;
 
             if play_sound {
+                // `Mob.playHurtSound` (Mob.java:295-299) resets the idle-sound timer, so a mob
+                // that was just hit does not chirp immediately afterwards.
+                if let Some(mob) = caller.get_mob() {
+                    mob.get_mob_entity()
+                        .ambient_sound_time
+                        .store(-mob.get_ambient_sound_interval(), Relaxed);
+                }
                 world.play_sound(
                     self.hurt_sound(),
                     SoundCategory::Players,
@@ -4235,6 +4377,7 @@ impl EntityBase for LivingEntity {
                 self.tick_auto_spin_attack(caller, previous_bounding_box)
                     .await;
                 self.push_entities(caller).await;
+                self.tick_swim_sound(caller);
             }
 
             // TODO
@@ -4857,6 +5000,14 @@ fn oozing_slimes_to_spawn(max_entity_cramming: i64, nearby_slimes: usize, reques
     room.clamp(0, requested)
 }
 
+/// Vanilla `HealOrHarmMobEffect.applyEffectTick`: `4 << amplification` hearts of healing or
+/// `6 << amplification` of magic damage. Java shifts an `int` by the low five bits of the
+/// amplifier, so a large amplifier wraps (and can overflow into a negative amount, which the
+/// heal branch clamps away with its own `Math.max`).
+fn instant_effect_amount(base: i32, amplifier: u8) -> f32 {
+    (base.wrapping_shl(u32::from(amplifier) & 31)) as f32
+}
+
 /// Vanilla `AbsorptionMobEffect.onEffectStarted` combined with the clamp in
 /// `LivingEntity.setAbsorptionAmount`.
 fn absorption_after_application(current: f32, amplifier: u8, max_absorption: f32) -> f32 {
@@ -4914,6 +5065,28 @@ fn update_effect_chain(chain: &mut Vec<Effect>, index: usize, take_over: &Effect
     }
 
     changed
+}
+
+#[cfg(test)]
+mod instant_effect_amount_tests {
+    use super::instant_effect_amount;
+
+    #[test]
+    fn the_amount_doubles_with_every_level() {
+        assert!((instant_effect_amount(4, 0) - 4.0).abs() < f32::EPSILON);
+        assert!((instant_effect_amount(4, 1) - 8.0).abs() < f32::EPSILON);
+        assert!((instant_effect_amount(6, 0) - 6.0).abs() < f32::EPSILON);
+        assert!((instant_effect_amount(6, 2) - 24.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn the_shift_wraps_the_way_java_does() {
+        // Java shifts an int by the low five bits of the amplifier, so 32 behaves like 0 and an
+        // amplifier that overflows the sign bit comes back negative rather than panicking.
+        assert!((instant_effect_amount(4, 32) - 4.0).abs() < f32::EPSILON);
+        assert!(instant_effect_amount(4, 29) < 0.0);
+        assert!(instant_effect_amount(4, 29).max(0.0).abs() < f32::EPSILON);
+    }
 }
 
 #[cfg(test)]
@@ -5583,6 +5756,26 @@ mod tests {
                 dt.message_id
             );
         }
+    }
+
+    #[test]
+    fn silent_movers_emit_no_swim_sound() {
+        for entity_type in [
+            &EntityType::BAT,
+            &EntityType::SQUID,
+            &EntityType::GLOW_SQUID,
+            &EntityType::GUARDIAN,
+            &EntityType::ELDER_GUARDIAN,
+            &EntityType::SILVERFISH,
+        ] {
+            assert!(!LivingEntity::movement_emits_sounds(entity_type));
+        }
+    }
+
+    #[test]
+    fn ordinary_mobs_emit_movement_sounds() {
+        assert!(LivingEntity::movement_emits_sounds(&EntityType::COD));
+        assert!(LivingEntity::movement_emits_sounds(&EntityType::ZOMBIE));
     }
 
     #[test]

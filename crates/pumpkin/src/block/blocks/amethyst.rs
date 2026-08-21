@@ -4,6 +4,7 @@ use crate::block::BlockMetadata;
 use crate::block::CanPlaceAtArgs;
 use crate::block::GetStateForNeighborUpdateArgs;
 use crate::block::OnPlaceArgs;
+use crate::block::OnProjectileHitArgs;
 use crate::block::RandomTickArgs;
 use crate::block::blocks::abstract_wall_mounting::WallMountedBlock;
 use pumpkin_data::Block;
@@ -14,6 +15,7 @@ use pumpkin_data::FacingExt;
 use pumpkin_data::block_properties::AmethystClusterLikeProperties;
 use pumpkin_data::block_properties::BlockProperties;
 use pumpkin_data::block_properties::WaterLikeProperties;
+use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
 
@@ -53,6 +55,10 @@ impl BlockBehaviour for AmethystBlock {
         WallMountedBlock::can_place_at(self, args.block_accessor, args.position, direction)
     }
 
+    fn on_projectile_hit<'a>(&'a self, args: OnProjectileHitArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move { play_chime(&args) })
+    }
+
     fn get_state_for_neighbor_update<'a>(
         &'a self,
         args: GetStateForNeighborUpdateArgs<'a>,
@@ -65,6 +71,39 @@ impl WallMountedBlock for AmethystBlock {
     fn get_direction(&self, state_id: BlockStateId, block: &Block) -> BlockDirection {
         let props = AmethystClusterLikeProperties::from_state_id(state_id, block);
         props.facing.to_block_direction()
+    }
+}
+
+/// `AmethystBlock#onProjectileHit` (`net/minecraft/world/level/block/AmethystBlock.java:25-31`):
+/// a projectile striking any amethyst block rings the chime at a random pitch. The guard there is
+/// `!level.isClientSide()`, so this is server-side behaviour, not a client particle effect.
+///
+/// `AmethystClusterBlock` and `BuddingAmethystBlock` both extend `AmethystBlock`, so every bud,
+/// cluster, budding block and plain amethyst block shares it.
+fn play_chime(args: &OnProjectileHitArgs<'_>) {
+    let pitch = 0.5 + rand::rng().random::<f32>() * 1.2;
+    args.world.play_sound_fine(
+        Sound::BlockAmethystBlockChime,
+        SoundCategory::Blocks,
+        &args.position.to_f64().add_raw(0.5, 0.5, 0.5),
+        1.0,
+        pitch,
+    );
+}
+
+/// `amethyst_block`, registered straight as `AmethystBlock` in `Blocks.java`. The chime is its
+/// only behaviour; the wall-mounting in `AmethystBlock` above belongs to `AmethystClusterBlock`.
+pub struct SolidAmethystBlock;
+
+impl BlockMetadata for SolidAmethystBlock {
+    fn ids() -> Box<[BlockId]> {
+        [BlockId::AMETHYST_BLOCK].into()
+    }
+}
+
+impl BlockBehaviour for SolidAmethystBlock {
+    fn on_projectile_hit<'a>(&'a self, args: OnProjectileHitArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move { play_chime(&args) })
     }
 }
 
@@ -155,6 +194,10 @@ impl BlockBehaviour for BuddingAmethystBlock {
                     .await;
             }
         })
+    }
+
+    fn on_projectile_hit<'a>(&'a self, args: OnProjectileHitArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move { play_chime(&args) })
     }
 }
 

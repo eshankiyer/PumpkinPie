@@ -9,6 +9,7 @@ use crate::entity::projectile::arrow::{ArrowEntity, ArrowPickup};
 use crate::entity::projectile::firework_rocket::FireworkRocketEntity;
 use crate::entity::{Entity, EntityBase};
 use crate::item::{ItemBehaviour, ItemMetadata};
+use pumpkin_data::Enchantment;
 use pumpkin_data::data_component::DataComponent;
 use pumpkin_data::data_component_impl::{ChargedProjectilesImpl, EnchantmentsImpl};
 use pumpkin_data::entity::EntityType;
@@ -179,6 +180,28 @@ fn crossbow_shot_pitch(index: u32, random_value: f32) -> f32 {
     1.0 / random_value.mul_add(0.5, 1.8) + range_decider
 }
 
+/// Piercing's `minecraft:projectile_piercing` value, clamped to the byte an arrow stores.
+///
+/// `piercing.json`: `add` of `linear(base = 1.0, per_level_above_first = 1.0)` onto a base of 0,
+/// so level N pierces N extra entities (`AbstractArrow` discards once it has hit
+/// `pierceLevel + 1`).
+fn piercing_count(level: i32) -> u8 {
+    if level <= 0 {
+        return 0;
+    }
+    let value = crate::enchantment::effects_for(&Enchantment::PIERCING)
+        .iter()
+        .filter_map(|effect| match effect {
+            crate::enchantment::EnchantmentEffect::ProjectilePiercing(value) => {
+                Some(value.calculate(level))
+            }
+            _ => None,
+        })
+        .sum::<f32>();
+    // Vanilla truncates the accumulated float to an int (`MutableFloat.intValue()`).
+    value.clamp(0.0, f32::from(u8::MAX)) as u8
+}
+
 impl CrossbowItem {
     async fn fire_projectiles(player: &Player) {
         let mut held = player.inventory().held_item().await;
@@ -191,6 +214,10 @@ impl CrossbowItem {
                         .iter()
                         .any(|(e, _)| **e == pumpkin_data::Enchantment::MULTISHOT)
                 });
+        // `AbstractArrow` ctor (AbstractArrow.java:111-114): an arrow fired from a weapon takes
+        // its pierce level from `EnchantmentHelper.getPiercingCount(weapon, ammo)`, i.e.
+        // piercing.json's `minecraft:projectile_piercing` -> linear(1, 1).
+        let pierce_level = piercing_count(held.get_enchantment_level(&Enchantment::PIERCING));
 
         if let Some(charged) = projectiles {
             let world = player.world();
@@ -258,6 +285,9 @@ impl CrossbowItem {
                             pickup,
                         );
                         arrow.set_velocity_from_rotation(pitch, t_yaw, 0.0, power, 1.0);
+                        if pierce_level > 0 {
+                            arrow.set_pierce_level(pierce_level);
+                        }
                         let arrow_arc: Arc<dyn EntityBase> = Arc::new(arrow);
                         world.spawn_entity(arrow_arc).await;
                     }
@@ -285,7 +315,17 @@ impl CrossbowItem {
 
 #[cfg(test)]
 mod tests {
-    use super::crossbow_shot_pitch;
+    use super::{crossbow_shot_pitch, piercing_count};
+
+    #[test]
+    fn piercing_count_is_one_per_level() {
+        // piercing.json: linear(base = 1.0, per_level_above_first = 1.0), max_level 4.
+        assert_eq!(piercing_count(0), 0);
+        assert_eq!(piercing_count(1), 1);
+        assert_eq!(piercing_count(2), 2);
+        assert_eq!(piercing_count(3), 3);
+        assert_eq!(piercing_count(4), 4);
+    }
 
     #[test]
     fn crossbow_shot_pitch_matches_vanilla_shot_indices() {

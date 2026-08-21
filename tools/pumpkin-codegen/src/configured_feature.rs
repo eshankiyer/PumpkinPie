@@ -218,6 +218,16 @@ pub fn build() -> TokenStream {
     }
 }
 
+/// Maps a vanilla `Rotation` codec name (`Rotation.java:18-21`) to `pumpkin_data::Rotation`.
+fn value_to_rotation(name: &str) -> TokenStream {
+    match name {
+        "clockwise_90" => quote! { pumpkin_data::Rotation::Clockwise90 },
+        "180" => quote! { pumpkin_data::Rotation::Rotate180 },
+        "counterclockwise_90" => quote! { pumpkin_data::Rotation::CounterClockwise90 },
+        _ => quote! { pumpkin_data::Rotation::None },
+    }
+}
+
 fn value_to_fossil_processor(value: &Value) -> TokenStream {
     let variant = match value
         .as_str()
@@ -862,8 +872,85 @@ pub fn value_to_configured_feature(v: &Value) -> TokenStream {
         "minecraft:dripstone_cluster" | "minecraft:speleothem_cluster" => {
             quote! { ConfiguredFeature::DripstoneCluster(crate::generation::feature::features::drip_stone::cluster::DripstoneClusterFeature {}) }
         }
-        "minecraft:sequence" | "minecraft:weighted_random_selector" => {
-            quote! { ConfiguredFeature::NoOp }
+        // `SequenceFeature` places every entry in order, short-circuiting on the first
+        // failure (`SequenceFeature.java:15-21`).
+        "minecraft:sequence" => {
+            let features: Vec<TokenStream> = config["features"]
+                .as_array()
+                .map(|arr| arr.iter().map(value_to_placed_feature_wrapper).collect())
+                .unwrap_or_default();
+            quote! {
+                ConfiguredFeature::Sequence(crate::generation::feature::features::sequence::SequenceFeature {
+                    features: vec![#(#features),*],
+                })
+            }
+        }
+        // `WeightedRandomSelectorFeature` draws one entry from a `WeightedList`
+        // (`WeightedRandomSelectorFeature.java:25-26`).
+        "minecraft:weighted_random_selector" => {
+            let entries: Vec<TokenStream> = config["features"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .map(|e| {
+                            let feat = value_to_placed_feature_wrapper(&e["data"]);
+                            let weight = e["weight"].as_i64().unwrap_or(1) as i32;
+                            quote! {
+                                crate::generation::feature::features::weighted_random_selector::WeightedFeatureEntry {
+                                    feature: #feat,
+                                    weight: #weight,
+                                }
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            quote! {
+                ConfiguredFeature::WeightedRandomSelector(crate::generation::feature::features::weighted_random_selector::WeightedRandomFeature {
+                    features: vec![#(#entries),*],
+                })
+            }
+        }
+        // `TemplateFeature` draws a weighted template entry then a rotation from it
+        // (`TemplateFeature.java:22-35`).
+        "minecraft:template" => {
+            let entries: Vec<TokenStream> = config["templates"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .map(|e| {
+                            let data = &e["data"];
+                            let id = data["id"].as_str().unwrap_or("minecraft:empty");
+                            let weight = e["weight"].as_i64().unwrap_or(1) as i32;
+                            let rotations: Vec<TokenStream> = data["rotations"]
+                                .as_array()
+                                .map(|rots| rots.iter().map(|r| value_to_rotation(r.as_str().unwrap_or("none"))).collect())
+                                .unwrap_or_else(|| {
+                                    // `Rotation.CODEC.listOf().optionalFieldOf("rotations", List.of(Rotation.values()))`
+                                    // (`TemplateFeatureConfiguration.java:20-23`).
+                                    vec![
+                                        quote! { pumpkin_data::Rotation::None },
+                                        quote! { pumpkin_data::Rotation::Clockwise90 },
+                                        quote! { pumpkin_data::Rotation::Rotate180 },
+                                        quote! { pumpkin_data::Rotation::CounterClockwise90 },
+                                    ]
+                                });
+                            quote! {
+                                crate::generation::feature::features::template::TemplateEntry {
+                                    id: #id,
+                                    rotations: vec![#(#rotations),*],
+                                    weight: #weight,
+                                }
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            quote! {
+                ConfiguredFeature::Template(crate::generation::feature::features::template::TemplateFeature {
+                    templates: vec![#(#entries),*],
+                })
+            }
         }
         "minecraft:large_dripstone" => {
             quote! { ConfiguredFeature::LargeDripstone(crate::generation::feature::features::drip_stone::large::LargeDripstoneFeature {}) }

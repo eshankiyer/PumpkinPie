@@ -26,6 +26,7 @@ use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::entity_from_egg;
 use pumpkin_data::entity::{EntityType, MobCategory};
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data;
 use pumpkin_protocol::java::client::play::{CHeadRot, CUpdateEntityRot, Metadata};
@@ -82,7 +83,11 @@ pub mod warden_anger;
 pub mod witch;
 pub mod zoglin;
 pub mod zombie;
+pub mod zombification;
 pub mod zombified_piglin;
+
+/// Vanilla `Mob.getAmbientSoundInterval` (Mob.java:274-276).
+pub const DEFAULT_AMBIENT_SOUND_INTERVAL: i32 = 80;
 
 pub struct MobEntity {
     pub living_entity: LivingEntity,
@@ -124,6 +129,10 @@ pub struct MobEntity {
     pub owner: AtomicCell<Option<Uuid>>,
     pub ordered_to_sit: AtomicBool,
     mob_flags: AtomicU8,
+    /// Vanilla `Mob.ambientSoundTime` (Mob.java:127): counted up in `Mob.baseTick`
+    /// (Mob.java:283-292) and reset to `-getAmbientSoundInterval()` by
+    /// `Mob.resetAmbientSoundTime` (Mob.java:301-303).
+    pub ambient_sound_time: AtomicI32,
     last_sent_yaw: AtomicU8,
     last_sent_pitch: AtomicU8,
     last_sent_head_yaw: AtomicU8,
@@ -216,6 +225,7 @@ impl MobEntity {
             owner: AtomicCell::new(None),
             ordered_to_sit: AtomicBool::new(false),
             mob_flags: AtomicU8::new(0),
+            ambient_sound_time: AtomicI32::new(-DEFAULT_AMBIENT_SOUND_INTERVAL),
             last_sent_yaw: AtomicU8::new(0),
             last_sent_pitch: AtomicU8::new(0),
             last_sent_head_yaw: AtomicU8::new(0),
@@ -1030,6 +1040,40 @@ pub trait Mob: EntityBase + Send + Sync {
 
     fn get_random(&self) -> rand::rngs::ThreadRng {
         rand::rng()
+    }
+
+    /// Vanilla `Mob.getAmbientSound` (Mob.java:363-365), which returns null for a mob with no
+    /// idle sound. The base `Mob.baseTick` roll still happens for those mobs; it just makes no
+    /// sound, so a mob without an entry here stays silent rather than borrowing another's.
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        None
+    }
+
+    /// Vanilla `Mob.getAmbientSoundInterval` (Mob.java:274-276).
+    fn get_ambient_sound_interval(&self) -> i32 {
+        DEFAULT_AMBIENT_SOUND_INTERVAL
+    }
+
+    /// `Mob.baseTick` (Mob.java:282-292): while alive, `ambientSoundTime` counts up once per
+    /// tick and a `nextInt(1000)` roll below it fires `playAmbientSound` (Mob.java:278-280).
+    /// The timer is reset by `resetAmbientSoundTime` (Mob.java:301-303) whenever the roll wins,
+    /// including when `getAmbientSound` is null -- `makeSound` (LivingEntity.java:1431-1435)
+    /// simply does nothing for a null sound.
+    fn tick_ambient_sound(&self) {
+        let mob_entity = self.get_mob_entity();
+        let entity = &mob_entity.living_entity.entity;
+        if !entity.is_alive() {
+            return;
+        }
+        let ambient_time = mob_entity.ambient_sound_time.fetch_add(1, Relaxed);
+        if self.get_random().random_range(0..1000) < ambient_time {
+            mob_entity
+                .ambient_sound_time
+                .store(-self.get_ambient_sound_interval(), Relaxed);
+            if let Some(sound) = self.get_ambient_sound() {
+                entity.play_sound(sound);
+            }
+        }
     }
 
     /// Vanilla `Mob.isMaxGroupSizeReached`; most mobs accept the configured group size.
@@ -2237,6 +2281,7 @@ impl<T: Mob + Send + 'static> EntityBase for T {
             }
 
             mob_entity.living_entity.tick(caller, server).await;
+            self.tick_ambient_sound();
             self.tick_sun_burn().await;
             self.mob_try_pick_up_items().await;
             mob_entity.reset_schooling_if_isolated(self.get_random().random_range(0..200));

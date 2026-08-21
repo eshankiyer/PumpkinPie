@@ -4266,7 +4266,78 @@ fn build_configured_features()
     );
     map.insert(
         pumpkin_data::configured_feature::ConfiguredFeature::SulfurPool,
-        ConfiguredFeature::NoOp,
+        ConfiguredFeature::Sequence(
+            crate::generation::feature::features::sequence::SequenceFeature {
+                features: vec![
+                    PlacedFeatureWrapper::Direct(PlacedFeature {
+                        feature: Feature::Inlined(Box::new(ConfiguredFeature::Lake(
+                            crate::generation::feature::features::lake::LakeFeature {
+                                fluid: BlockStateProvider::Simple(SimpleStateProvider {
+                                    state: {
+                                        let mut props = std::collections::HashMap::new();
+                                        props.insert("level".to_string(), "0".to_string());
+                                        BlockStateCodec {
+                                            name: &pumpkin_data::Block::WATER,
+                                            properties: Some(props),
+                                        }
+                                        .get_state()
+                                    },
+                                }),
+                                barrier: BlockStateProvider::Simple(SimpleStateProvider {
+                                    state: pumpkin_data::Block::SULFUR.default_state,
+                                }),
+                            },
+                        ))),
+                        placement: vec![],
+                    }),
+                    PlacedFeatureWrapper::Direct(PlacedFeature {
+                        feature: Feature::Inlined(Box::new(ConfiguredFeature::SimpleBlock(
+                            SimpleBlockFeature {
+                                to_place: BlockStateProvider::Simple(SimpleStateProvider {
+                                    state: {
+                                        let mut props = std::collections::HashMap::new();
+                                        props.insert(
+                                            "potent_sulfur_state".to_string(),
+                                            "wet".to_string(),
+                                        );
+                                        BlockStateCodec {
+                                            name: &pumpkin_data::Block::POTENT_SULFUR,
+                                            properties: Some(props),
+                                        }
+                                        .get_state()
+                                    },
+                                }),
+                                schedule_tick: None,
+                            },
+                        ))),
+                        placement: vec![PlacementModifier::EnvironmentScan(
+                            EnvironmentScanPlacementModifier {
+                                direction_of_search: BlockDirection::Down,
+                                target_condition: BlockPredicate::AllOf(AllOfBlockPredicate {
+                                    predicates: vec![
+                                        BlockPredicate::Solid(SolidBlockPredicate {
+                                            offset: OffsetBlocksBlockPredicate { offset: None },
+                                        }),
+                                        BlockPredicate::MatchingFluids(
+                                            MatchingFluidsBlockPredicate {
+                                                offset: OffsetBlocksBlockPredicate {
+                                                    offset: Some(Vector3::new(0i32, 1i32, 0i32)),
+                                                },
+                                                fluids: MatchingBlocksWrapper::Single(
+                                                    "minecraft:water".to_string(),
+                                                ),
+                                            },
+                                        ),
+                                    ],
+                                }),
+                                allowed_search_condition: None,
+                                max_steps: 4i32,
+                            },
+                        )],
+                    }),
+                ],
+            },
+        ),
     );
     map.insert(
         pumpkin_data::configured_feature::ConfiguredFeature::SulfurSpike,
@@ -4367,10 +4438,7 @@ fn build_configured_features()
             crate::generation::feature::features::drip_stone::cluster::DripstoneClusterFeature {},
         ),
     );
-    map.insert(
-        pumpkin_data::configured_feature::ConfiguredFeature::SulfurSpring,
-        ConfiguredFeature::NoOp,
-    );
+    map . insert (pumpkin_data :: configured_feature :: ConfiguredFeature :: SulfurSpring , ConfiguredFeature :: WeightedRandomSelector (crate :: generation :: feature :: features :: weighted_random_selector :: WeightedRandomFeature { features : vec ! [crate :: generation :: feature :: features :: weighted_random_selector :: WeightedFeatureEntry { feature : PlacedFeatureWrapper :: Direct (PlacedFeature { feature : Feature :: Inlined (Box :: new (ConfiguredFeature :: Sequence (crate :: generation :: feature :: features :: sequence :: SequenceFeature { features : vec ! [PlacedFeatureWrapper :: Direct (PlacedFeature { feature : Feature :: Inlined (Box :: new (ConfiguredFeature :: SimpleBlock (SimpleBlockFeature { to_place : BlockStateProvider :: Simple (SimpleStateProvider { state : pumpkin_data :: Block :: TUFF . default_state }) , schedule_tick : None , }))) , placement : vec ! [PlacementModifier :: Count (CountPlacementModifier { count : IntProvider :: Constant (64i32) }) , PlacementModifier :: RandomOffset (RandomOffsetPlacementModifier { xz_spread : IntProvider :: Object (NormalIntProvider :: Trapezoid (TrapezoidIntProvider { min_inclusive : - 7i32 , max_inclusive : 7i32 , plateau : 0i32 })) , y_spread : IntProvider :: Object (NormalIntProvider :: Trapezoid (TrapezoidIntProvider { min_inclusive : - 3i32 , max_inclusive : 3i32 , plateau : 0i32 })) }) , PlacementModifier :: EnvironmentScan (EnvironmentScanPlacementModifier { direction_of_search : BlockDirection :: Down , target_condition : BlockPredicate :: Solid (SolidBlockPredicate { offset : OffsetBlocksBlockPredicate { offset : None } }) , allowed_search_condition : None , max_steps : 4i32 }) , PlacementModifier :: BlockPredicateFilter (BlockFilterPlacementModifier { predicate : BlockPredicate :: Solid (SolidBlockPredicate { offset : OffsetBlocksBlockPredicate { offset : None } }) })] , }) , PlacedFeatureWrapper :: Direct (PlacedFeature { feature : Feature :: Inlined (Box :: new (ConfiguredFeature :: Template (crate :: generation :: feature :: features :: template :: TemplateFeature { templates : vec ! [crate :: generation :: feature :: features :: template :: TemplateEntry { id : "minecraft:spring/sulfur_spring_small_1" , rotations : vec ! [pumpkin_data :: Rotation :: None , pumpkin_data :: Rotation :: Clockwise90 , pumpkin_data :: Rotation :: Rotate180 , pumpkin_data :: Rotation :: CounterClockwise90] , weight : 1i32 , } , crate :: generation :: feature :: features :: template :: TemplateEntry { id : "minecraft:spring/sulfur_spring_small_2" , rotations : vec ! [pumpkin_data :: Rotation :: None , pumpkin_data :: Rotation :: Clockwise90 , pumpkin_data :: Rotation :: Rotate180 , pumpkin_data :: Rotation :: CounterClockwise90] , weight : 1i32 , } , crate :: generation :: feature :: features :: template :: TemplateEntry { id : "minecraft:spring/sulfur_spring_small_3" , rotations : vec ! [pumpkin_data :: Rotation :: None , pumpkin_data :: Rotation :: Clockwise90 , pumpkin_data :: Rotation :: Rotate180 , pumpkin_data :: Rotation :: CounterClockwise90] , weight : 1i32 , } , crate :: generation :: feature :: features :: template :: TemplateEntry { id : "minecraft:spring/sulfur_spring_small_4" , rotations : vec ! [pumpkin_data :: Rotation :: None , pumpkin_data :: Rotation :: Clockwise90 , pumpkin_data :: Rotation :: Rotate180 , pumpkin_data :: Rotation :: CounterClockwise90] , weight : 1i32 , }] , }))) , placement : vec ! [PlacementModifier :: RandomOffset (RandomOffsetPlacementModifier { xz_spread : IntProvider :: Constant (0i32) , y_spread : IntProvider :: Constant (- 7i32) })] , })] , }))) , placement : vec ! [] , }) , weight : 200i32 , } , crate :: generation :: feature :: features :: weighted_random_selector :: WeightedFeatureEntry { feature : PlacedFeatureWrapper :: Direct (PlacedFeature { feature : Feature :: Inlined (Box :: new (ConfiguredFeature :: Sequence (crate :: generation :: feature :: features :: sequence :: SequenceFeature { features : vec ! [PlacedFeatureWrapper :: Direct (PlacedFeature { feature : Feature :: Inlined (Box :: new (ConfiguredFeature :: SimpleBlock (SimpleBlockFeature { to_place : BlockStateProvider :: Simple (SimpleStateProvider { state : pumpkin_data :: Block :: TUFF . default_state }) , schedule_tick : None , }))) , placement : vec ! [PlacementModifier :: Count (CountPlacementModifier { count : IntProvider :: Constant (80i32) }) , PlacementModifier :: RandomOffset (RandomOffsetPlacementModifier { xz_spread : IntProvider :: Object (NormalIntProvider :: Trapezoid (TrapezoidIntProvider { min_inclusive : - 8i32 , max_inclusive : 8i32 , plateau : 0i32 })) , y_spread : IntProvider :: Object (NormalIntProvider :: Trapezoid (TrapezoidIntProvider { min_inclusive : - 3i32 , max_inclusive : 3i32 , plateau : 0i32 })) }) , PlacementModifier :: EnvironmentScan (EnvironmentScanPlacementModifier { direction_of_search : BlockDirection :: Down , target_condition : BlockPredicate :: Solid (SolidBlockPredicate { offset : OffsetBlocksBlockPredicate { offset : None } }) , allowed_search_condition : None , max_steps : 4i32 }) , PlacementModifier :: BlockPredicateFilter (BlockFilterPlacementModifier { predicate : BlockPredicate :: Solid (SolidBlockPredicate { offset : OffsetBlocksBlockPredicate { offset : None } }) })] , }) , PlacedFeatureWrapper :: Direct (PlacedFeature { feature : Feature :: Inlined (Box :: new (ConfiguredFeature :: Template (crate :: generation :: feature :: features :: template :: TemplateFeature { templates : vec ! [crate :: generation :: feature :: features :: template :: TemplateEntry { id : "minecraft:spring/sulfur_spring_medium_1" , rotations : vec ! [pumpkin_data :: Rotation :: None , pumpkin_data :: Rotation :: Clockwise90 , pumpkin_data :: Rotation :: Rotate180 , pumpkin_data :: Rotation :: CounterClockwise90] , weight : 1i32 , } , crate :: generation :: feature :: features :: template :: TemplateEntry { id : "minecraft:spring/sulfur_spring_medium_2" , rotations : vec ! [pumpkin_data :: Rotation :: None , pumpkin_data :: Rotation :: Clockwise90 , pumpkin_data :: Rotation :: Rotate180 , pumpkin_data :: Rotation :: CounterClockwise90] , weight : 1i32 , } , crate :: generation :: feature :: features :: template :: TemplateEntry { id : "minecraft:spring/sulfur_spring_medium_3" , rotations : vec ! [pumpkin_data :: Rotation :: None , pumpkin_data :: Rotation :: Clockwise90 , pumpkin_data :: Rotation :: Rotate180 , pumpkin_data :: Rotation :: CounterClockwise90] , weight : 1i32 , }] , }))) , placement : vec ! [PlacementModifier :: RandomOffset (RandomOffsetPlacementModifier { xz_spread : IntProvider :: Constant (0i32) , y_spread : IntProvider :: Constant (- 7i32) })] , })] , }))) , placement : vec ! [] , }) , weight : 90i32 , } , crate :: generation :: feature :: features :: weighted_random_selector :: WeightedFeatureEntry { feature : PlacedFeatureWrapper :: Direct (PlacedFeature { feature : Feature :: Inlined (Box :: new (ConfiguredFeature :: Sequence (crate :: generation :: feature :: features :: sequence :: SequenceFeature { features : vec ! [PlacedFeatureWrapper :: Direct (PlacedFeature { feature : Feature :: Inlined (Box :: new (ConfiguredFeature :: SimpleBlock (SimpleBlockFeature { to_place : BlockStateProvider :: Simple (SimpleStateProvider { state : pumpkin_data :: Block :: TUFF . default_state }) , schedule_tick : None , }))) , placement : vec ! [PlacementModifier :: Count (CountPlacementModifier { count : IntProvider :: Constant (96i32) }) , PlacementModifier :: RandomOffset (RandomOffsetPlacementModifier { xz_spread : IntProvider :: Object (NormalIntProvider :: Trapezoid (TrapezoidIntProvider { min_inclusive : - 9i32 , max_inclusive : 9i32 , plateau : 0i32 })) , y_spread : IntProvider :: Object (NormalIntProvider :: Trapezoid (TrapezoidIntProvider { min_inclusive : - 3i32 , max_inclusive : 3i32 , plateau : 0i32 })) }) , PlacementModifier :: EnvironmentScan (EnvironmentScanPlacementModifier { direction_of_search : BlockDirection :: Down , target_condition : BlockPredicate :: Solid (SolidBlockPredicate { offset : OffsetBlocksBlockPredicate { offset : None } }) , allowed_search_condition : None , max_steps : 4i32 }) , PlacementModifier :: BlockPredicateFilter (BlockFilterPlacementModifier { predicate : BlockPredicate :: Solid (SolidBlockPredicate { offset : OffsetBlocksBlockPredicate { offset : None } }) })] , }) , PlacedFeatureWrapper :: Direct (PlacedFeature { feature : Feature :: Inlined (Box :: new (ConfiguredFeature :: Template (crate :: generation :: feature :: features :: template :: TemplateFeature { templates : vec ! [crate :: generation :: feature :: features :: template :: TemplateEntry { id : "minecraft:spring/sulfur_spring_large_1" , rotations : vec ! [pumpkin_data :: Rotation :: None , pumpkin_data :: Rotation :: Clockwise90 , pumpkin_data :: Rotation :: Rotate180 , pumpkin_data :: Rotation :: CounterClockwise90] , weight : 1i32 , } , crate :: generation :: feature :: features :: template :: TemplateEntry { id : "minecraft:spring/sulfur_spring_large_2" , rotations : vec ! [pumpkin_data :: Rotation :: None , pumpkin_data :: Rotation :: Clockwise90 , pumpkin_data :: Rotation :: Rotate180 , pumpkin_data :: Rotation :: CounterClockwise90] , weight : 1i32 , }] , }))) , placement : vec ! [PlacementModifier :: RandomOffset (RandomOffsetPlacementModifier { xz_spread : IntProvider :: Constant (0i32) , y_spread : IntProvider :: Constant (- 7i32) })] , })] , }))) , placement : vec ! [] , }) , weight : 20i32 , } , crate :: generation :: feature :: features :: weighted_random_selector :: WeightedFeatureEntry { feature : PlacedFeatureWrapper :: Direct (PlacedFeature { feature : Feature :: Inlined (Box :: new (ConfiguredFeature :: Sequence (crate :: generation :: feature :: features :: sequence :: SequenceFeature { features : vec ! [PlacedFeatureWrapper :: Direct (PlacedFeature { feature : Feature :: Inlined (Box :: new (ConfiguredFeature :: SimpleBlock (SimpleBlockFeature { to_place : BlockStateProvider :: Simple (SimpleStateProvider { state : pumpkin_data :: Block :: TUFF . default_state }) , schedule_tick : None , }))) , placement : vec ! [PlacementModifier :: Count (CountPlacementModifier { count : IntProvider :: Constant (128i32) }) , PlacementModifier :: RandomOffset (RandomOffsetPlacementModifier { xz_spread : IntProvider :: Object (NormalIntProvider :: Trapezoid (TrapezoidIntProvider { min_inclusive : - 10i32 , max_inclusive : 10i32 , plateau : 0i32 })) , y_spread : IntProvider :: Object (NormalIntProvider :: Trapezoid (TrapezoidIntProvider { min_inclusive : - 3i32 , max_inclusive : 3i32 , plateau : 0i32 })) }) , PlacementModifier :: EnvironmentScan (EnvironmentScanPlacementModifier { direction_of_search : BlockDirection :: Down , target_condition : BlockPredicate :: Solid (SolidBlockPredicate { offset : OffsetBlocksBlockPredicate { offset : None } }) , allowed_search_condition : None , max_steps : 4i32 }) , PlacementModifier :: BlockPredicateFilter (BlockFilterPlacementModifier { predicate : BlockPredicate :: Solid (SolidBlockPredicate { offset : OffsetBlocksBlockPredicate { offset : None } }) })] , }) , PlacedFeatureWrapper :: Direct (PlacedFeature { feature : Feature :: Inlined (Box :: new (ConfiguredFeature :: Template (crate :: generation :: feature :: features :: template :: TemplateFeature { templates : vec ! [crate :: generation :: feature :: features :: template :: TemplateEntry { id : "minecraft:spring/sulfur_spring_extra_large_1" , rotations : vec ! [pumpkin_data :: Rotation :: None , pumpkin_data :: Rotation :: Clockwise90 , pumpkin_data :: Rotation :: Rotate180 , pumpkin_data :: Rotation :: CounterClockwise90] , weight : 1i32 , }] , }))) , placement : vec ! [PlacementModifier :: RandomOffset (RandomOffsetPlacementModifier { xz_spread : IntProvider :: Constant (0i32) , y_spread : IntProvider :: Constant (- 7i32) })] , })] , }))) , placement : vec ! [] , }) , weight : 5i32 , }] , })) ;
     map.insert(
         pumpkin_data::configured_feature::ConfiguredFeature::Sunflower,
         ConfiguredFeature::SimpleBlock(SimpleBlockFeature {

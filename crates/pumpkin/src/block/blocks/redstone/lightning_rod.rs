@@ -8,12 +8,22 @@ use crate::block::{
 use crate::world::World;
 use pumpkin_data::block_properties::{BlockProperties, LightningRodLikeProperties};
 use pumpkin_data::{BlockStateId, FacingExt};
-use pumpkin_macros::pumpkin_block;
+use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockFlags;
 
-#[pumpkin_block("minecraft:lightning_rod")]
+/// `LightningRodBlock` (`net/minecraft/world/level/block/LightningRodBlock.java:26`).
+///
+/// `Blocks.java:5303-5315` registers this as a `WeatheringCopperCollection`, so all eight ids
+/// exist: the four weathering stages are `WeatheringLightningRodBlock` and the four waxed ones are
+/// plain `LightningRodBlock`. Both extend `LightningRodBlock`, which is what
+/// `LightningBolt.java:70` instance-checks and what `PoiTypes.java:54-58` collects into the
+/// `lightning_rod` POI, so every variant conducts lightning and emits redstone. Registering only
+/// `minecraft:lightning_rod` left the other seven with no behaviour at all.
+///
+/// `minecraft:lightning_rods` is the same set vanilla itself uses in `ServerLevel.java:552`.
+#[pumpkin_block_from_tag("minecraft:lightning_rods")]
 pub struct LightningRodBlock;
 
 impl LightningRodBlock {
@@ -48,8 +58,10 @@ impl LightningRodBlock {
 impl BlockBehaviour for LightningRodBlock {
     fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
         Box::pin(async move {
+            // `LightningRodBlock#getStateForPlacement` (LightningRodBlock.java:45-49).
             let mut props = LightningRodLikeProperties::default(args.block);
             props.facing = args.direction.to_facing().opposite();
+            props.waterlogged = args.replacing.water_source();
             props.to_state_id(args.block)
         })
     }
@@ -104,6 +116,10 @@ impl BlockBehaviour for LightningRodBlock {
         })
     }
 
+    /// Only the four non-waxed rods oxidize. A waxed rod also reaches this hook, but it is absent
+    /// from `oxidation_stages` below, so `try_oxidize_copper` finds no level for it and returns
+    /// without changing the block - the same outcome as vanilla, where a waxed rod is a plain
+    /// `LightningRodBlock` and never implements `WeatheringCopper` (`Blocks.java:5306-5307`).
     fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             let oxidation_stages = [

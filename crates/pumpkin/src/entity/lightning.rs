@@ -4,8 +4,9 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering};
 use tokio::sync::Mutex;
 
 use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::world::WorldEvent;
-use pumpkin_data::{Block, BlockId, BlockStateId};
+use pumpkin_data::{BlockId, BlockStateId};
 use pumpkin_util::Difficulty;
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
@@ -82,7 +83,9 @@ impl LightningBoltEntity {
     async fn power_lightning_rod(&self, world: &Arc<World>) {
         let strike_pos = self.get_strike_position();
         let block = world.get_block(&strike_pos);
-        if block == &Block::LIGHTNING_ROD {
+        // `LightningBolt.java:70` dispatches on `instanceof LightningRodBlock`, which every
+        // weathered and waxed rod is (`Blocks.java:5303-5315`), not on the unaffected rod alone.
+        if block.has_tag(&tag::Block::MINECRAFT_LIGHTNING_RODS) {
             crate::block::blocks::redstone::lightning_rod::LightningRodBlock::trigger(
                 world,
                 &strike_pos,

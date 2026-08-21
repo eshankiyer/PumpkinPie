@@ -85,7 +85,7 @@ use pumpkin_data::{
 use pumpkin_data::{
     BlockDirection, BlockState, HorizontalFacingExt,
     block_properties::{ChestLikeProperties, ChestType},
-    tag::Taggable,
+    tag::{self, Taggable},
     translation,
 };
 use pumpkin_inventory::crafting::recipe_provider::RecipeProvider;
@@ -183,6 +183,7 @@ pub mod natural_spawner;
 pub mod raid;
 pub mod scoreboard;
 pub mod spawn_finder;
+pub mod stopwatch;
 pub mod village_poi;
 pub mod weather;
 
@@ -2510,7 +2511,10 @@ impl World {
                 if lightning_trap_allowed(
                     spawn_mobs,
                     rng().random::<f32>() < 0.0675,
-                    self.get_block(&target.down()) == &Block::LIGHTNING_ROD,
+                    // `ServerLevel.java:552` tests `BlockTags.LIGHTNING_RODS`, so any weathered or
+                    // waxed rod suppresses the skeleton-horse trap, not just the unaffected one.
+                    self.get_block(&target.down())
+                        .has_tag(&tag::Block::MINECRAFT_LIGHTNING_RODS),
                 ) {
                     let entity =
                         Entity::new(self.clone(), target.to_f64(), &EntityType::SKELETON_HORSE);

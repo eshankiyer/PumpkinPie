@@ -1553,20 +1553,10 @@ impl Player {
         // Modify the added damage based on the multiplier.
         let mut damage = (base_damage + add_damage) * damage_multiplier;
 
-        if let Some(strength) = self
-            .living_entity
-            .get_effect(&pumpkin_data::effect::StatusEffect::STRENGTH)
-            .await
-        {
-            damage += 3.0 * (f64::from(strength.amplifier) + 1.0);
-        }
-        if let Some(weakness) = self
-            .living_entity
-            .get_effect(&pumpkin_data::effect::StatusEffect::WEAKNESS)
-            .await
-        {
-            damage -= 4.0 * (f64::from(weakness.amplifier) + 1.0);
-        }
+        // Strength and Weakness are `ATTACK_DAMAGE` modifiers registered on the effects
+        // themselves (`MobEffects.STRENGTH` / `MobEffects.WEAKNESS`), and `Player.attack`
+        // (Player.java:953) reads the attribute rather than re-adding them, so `base_damage`
+        // already carries both.
         damage = damage.max(0.0);
 
         let pos = victim_entity.pos.load();
@@ -1623,9 +1613,46 @@ impl Player {
         if let Some(enchantments) = item_stack.get_data_component::<EnchantmentsImpl>() {
             for (enchantment, level) in enchantments.enchantment.iter() {
                 for effect in crate::enchantment::effects_for(enchantment) {
-                    if let crate::enchantment::EnchantmentEffect::IgniteOnHit(value) = effect {
-                        let ticks = (value.calculate(*level) * 20.0) as u32;
-                        victim_entity.set_on_fire_for_ticks(ticks);
+                    match effect {
+                        crate::enchantment::EnchantmentEffect::IgniteOnHit(value) => {
+                            let ticks = (value.calculate(*level) * 20.0) as u32;
+                            victim_entity.set_on_fire_for_ticks(ticks);
+                        }
+                        // `bane_of_arthropods.json` post_attack: Slowness on a victim tagged
+                        // `#minecraft:sensitive_to_bane_of_arthropods`, applied by the attacker
+                        // on a direct hit (this melee path is always direct).
+                        crate::enchantment::EnchantmentEffect::ApplyMobEffectOnHit {
+                            condition,
+                            min_duration_seconds,
+                            max_duration_seconds,
+                            min_amplifier,
+                            max_amplifier,
+                        } if condition.applies(victim_entity.entity_type) => {
+                            if let Some(living) = victim.get_living_entity() {
+                                let (duration, amplifier) =
+                                    crate::enchantment::apply_mob_effect_on_hit(
+                                        *min_duration_seconds,
+                                        *max_duration_seconds,
+                                        *min_amplifier,
+                                        *max_amplifier,
+                                        *level,
+                                        rand::random::<f32>(),
+                                        rand::random::<f32>(),
+                                    );
+                                living
+                                    .add_effect(Effect {
+                                        effect_type: &StatusEffect::SLOWNESS,
+                                        duration,
+                                        amplifier,
+                                        ambient: false,
+                                        show_particles: true,
+                                        show_icon: true,
+                                        blend: false,
+                                    })
+                                    .await;
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -4712,7 +4739,16 @@ impl Player {
     }
 
     pub async fn get_mining_speed(&self, block: &'static Block) -> f32 {
-        let mut speed = self.inventory().held_item().await.get_speed(block);
+        let held = self.inventory().held_item().await;
+        let mut speed = held.get_speed(block);
+        // `Player.getDestroySpeed` (Player.java:586-590): the Efficiency bonus is added to the
+        // raw tool speed *before* Haste/Fatigue scale it, and only when the tool is already
+        // effective against the block (`speed > 1.0`).
+        if speed > 1.0 {
+            speed +=
+                Self::mining_efficiency_bonus(held.get_enchantment_level(&Enchantment::EFFICIENCY));
+        }
+        drop(held);
         // Haste
         if self.living_entity.has_effect(&StatusEffect::HASTE).await
             || self
@@ -4761,6 +4797,29 @@ impl Player {
             speed /= 5.0;
         }
         speed
+    }
+
+    /// Efficiency's contribution to `minecraft:mining_efficiency`.
+    ///
+    /// Vanilla feeds this through an equip-time attribute modifier
+    /// (`efficiency.json` -> `minecraft:attributes`, `levels_squared` with `added: 1.0`,
+    /// operation `add_value`), which Pumpkin has no generic evaluator for yet; the value is
+    /// read straight off the held tool instead. Formula lives in
+    /// [`crate::enchantment::effects_for`] so it stays pinned to the vanilla JSON.
+    fn mining_efficiency_bonus(level: i32) -> f32 {
+        if level <= 0 {
+            return 0.0;
+        }
+        crate::enchantment::effects_for(&Enchantment::EFFICIENCY)
+            .iter()
+            .filter_map(|effect| match effect {
+                crate::enchantment::EnchantmentEffect::AttributeBonus(
+                    "mining_efficiency",
+                    value,
+                ) => Some(value.calculate(level)),
+                _ => None,
+            })
+            .sum()
     }
 
     fn submerged_mining_speed(
@@ -7522,6 +7581,17 @@ mod tests {
     use pumpkin_data::damage::DamageType;
     use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
     use uuid::Uuid;
+
+    #[test]
+    fn mining_efficiency_bonus_is_level_squared_plus_one() {
+        // efficiency.json: `levels_squared`, `added: 1.0` -> level^2 + 1.
+        assert_eq!(Player::mining_efficiency_bonus(0), 0.0);
+        assert_eq!(Player::mining_efficiency_bonus(1), 2.0);
+        assert_eq!(Player::mining_efficiency_bonus(2), 5.0);
+        assert_eq!(Player::mining_efficiency_bonus(3), 10.0);
+        assert_eq!(Player::mining_efficiency_bonus(4), 17.0);
+        assert_eq!(Player::mining_efficiency_bonus(5), 26.0);
+    }
 
     #[test]
     fn submerged_mining_speed_requires_aqua_affinity_to_skip_penalty() {

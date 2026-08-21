@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::sound::Sound;
@@ -20,8 +20,6 @@ use crate::world::World;
 
 const ROOSTING_FLAG: u8 = 1;
 const CLOSE_PLAYER_DISTANCE: f64 = 4.0;
-/// Vanilla: `getMinAmbientSoundDelay()` returns 80 for most mobs
-const MIN_AMBIENT_SOUND_DELAY: i32 = 80;
 
 const fn bat_spawn_random_allows(sample: u8) -> bool {
     sample == 0
@@ -35,7 +33,6 @@ pub struct BatEntity {
     pub mob_entity: MobEntity,
     hanging_position: Mutex<Option<BlockPos>>,
     roosting: AtomicBool,
-    ambient_sound_time: AtomicI32,
 }
 
 impl BatEntity {
@@ -45,7 +42,6 @@ impl BatEntity {
             mob_entity,
             hanging_position: Mutex::new(None),
             roosting: AtomicBool::new(true),
-            ambient_sound_time: AtomicI32::new(-MIN_AMBIENT_SOUND_DELAY),
         };
         let mob_arc = Arc::new(bat);
 
@@ -132,24 +128,21 @@ impl Mob for BatEntity {
         })
     }
 
+    /// `Bat.getAmbientSound` (Bat.java:71-73): silent on three out of four rolls while resting.
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        if self.is_roosting() && rand::rng().random_range(0..4) != 0 {
+            None
+        } else {
+            Some(Sound::EntityBatAmbient)
+        }
+    }
+
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             let entity = &self.mob_entity.living_entity.entity;
             let block_pos = entity.block_pos.load();
             let above_pos = BlockPos::new(block_pos.0.x, block_pos.0.y + 1, block_pos.0.z);
             let world = entity.world.load();
-
-            // `Mob.baseTick`: ambientSoundTime starts at -getAmbientSoundInterval(), then
-            // increments until a 1/1000 roll triggers the sound. Bat.getAmbientSound returns
-            // null while roosting on three out of four trigger rolls.
-            let ambient_time = self.ambient_sound_time.fetch_add(1, Relaxed);
-            if entity.is_alive() && rand::rng().random_range(0..1000) < ambient_time {
-                self.ambient_sound_time
-                    .store(-MIN_AMBIENT_SOUND_DELAY, Relaxed);
-                if !self.is_roosting() || rand::rng().random_range(0..4) == 0 {
-                    entity.play_sound(Sound::EntityBatAmbient);
-                }
-            }
 
             if self.is_roosting() {
                 let above_state = world.get_block_state(&above_pos);

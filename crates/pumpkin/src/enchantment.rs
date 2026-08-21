@@ -204,6 +204,20 @@ pub enum EnchantmentEffect {
     /// at `calculate()` call sites the same way vanilla's `EnchantmentEntityEffects.Ignite`
     /// converts `duration` seconds to ticks).
     IgniteOnHit(LevelBasedValue),
+    /// A `post_attack` `minecraft:apply_mob_effect` on the victim, gated by the same
+    /// entity-type requirement the enchantment's `damage` component uses.
+    ///
+    /// Only Bane of Arthropods carries one today (`bane_of_arthropods.json`: Slowness,
+    /// amplifier 3, duration `randomBetween(min, max)` seconds). Durations are in *seconds*,
+    /// exactly as the JSON stores them; [`apply_mob_effect_on_hit`] does the ×20 and the
+    /// rounding vanilla's `ApplyMobEffect.apply` does.
+    ApplyMobEffectOnHit {
+        condition: DamageCondition,
+        min_duration_seconds: LevelBasedValue,
+        max_duration_seconds: LevelBasedValue,
+        min_amplifier: LevelBasedValue,
+        max_amplifier: LevelBasedValue,
+    },
 
     // --- modeled, not yet wired (see enum doc) ---
     ProjectileCount(LevelBasedValue),
@@ -261,6 +275,10 @@ const WIND_BURST_VALUE: LevelBasedValue = LevelBasedValue::Lookup {
 
 const FIRE_ASPECT_DURATION_SECONDS: LevelBasedValue = LevelBasedValue::linear(4.0, 4.0);
 
+const BANE_SLOWNESS_MIN_DURATION: LevelBasedValue = LevelBasedValue::Constant(1.5);
+const BANE_SLOWNESS_MAX_DURATION: LevelBasedValue = LevelBasedValue::linear(1.5, 0.5);
+const BANE_SLOWNESS_AMPLIFIER: LevelBasedValue = LevelBasedValue::Constant(3.0);
+
 const LOOTING_VALUE: LevelBasedValue = LevelBasedValue::linear(0.01, 0.01);
 const MULTISHOT_COUNT: LevelBasedValue = LevelBasedValue::Constant(2.0);
 const MULTISHOT_SPREAD: LevelBasedValue = LevelBasedValue::Constant(10.0);
@@ -313,10 +331,16 @@ pub fn effects_for(enchantment: &'static Enchantment) -> &'static [EnchantmentEf
             "submerged_mining_speed",
             AQUA_AFFINITY_ATTR,
         )],
-        "bane_of_arthropods" => &[E::Damage(
-            DamageCondition::SensitiveToBaneOfArthropods,
-            BANE_DAMAGE,
-        )],
+        "bane_of_arthropods" => &[
+            E::Damage(DamageCondition::SensitiveToBaneOfArthropods, BANE_DAMAGE),
+            E::ApplyMobEffectOnHit {
+                condition: DamageCondition::SensitiveToBaneOfArthropods,
+                min_duration_seconds: BANE_SLOWNESS_MIN_DURATION,
+                max_duration_seconds: BANE_SLOWNESS_MAX_DURATION,
+                min_amplifier: BANE_SLOWNESS_AMPLIFIER,
+                max_amplifier: BANE_SLOWNESS_AMPLIFIER,
+            },
+        ],
         "binding_curse" => &[E::PreventArmorChange],
         "blast_protection" => &[
             E::DamageProtection(ProtectionCondition::IsExplosion, BLAST_PROTECTION_VALUE),
@@ -420,6 +444,35 @@ pub fn damage_bonus(
             _ => 0.0,
         })
         .sum()
+}
+
+/// Resolves an [`EnchantmentEffect::ApplyMobEffectOnHit`] into `(duration_ticks, amplifier)`.
+///
+/// Mirrors `ApplyMobEffect.apply` (`effects/ApplyMobEffect.java:36-49`): both duration and
+/// amplifier are `Mth.randomBetween(min, max)`, duration is converted seconds -> ticks by ×20
+/// and `Math.round`ed, and the amplifier is `Math.round`ed then floored at 0. `duration_roll`
+/// and `amplifier_roll` stand in for `random.nextFloat()` and must be in `[0, 1)`.
+#[must_use]
+pub fn apply_mob_effect_on_hit(
+    min_duration_seconds: LevelBasedValue,
+    max_duration_seconds: LevelBasedValue,
+    min_amplifier: LevelBasedValue,
+    max_amplifier: LevelBasedValue,
+    level: i32,
+    duration_roll: f32,
+    amplifier_roll: f32,
+) -> (i32, u8) {
+    let min_d = min_duration_seconds.calculate(level);
+    let max_d = max_duration_seconds.calculate(level);
+    let seconds = duration_roll.mul_add(max_d - min_d, min_d);
+    let ticks = (seconds * 20.0).round() as i32;
+
+    let min_a = min_amplifier.calculate(level);
+    let max_a = max_amplifier.calculate(level);
+    let amplifier = amplifier_roll.mul_add(max_a - min_a, min_a).round();
+    let amplifier = amplifier.clamp(0.0, f32::from(u8::MAX)) as u8;
+
+    (ticks.max(0), amplifier)
 }
 
 #[cfg(test)]
@@ -554,6 +607,49 @@ mod tests {
         assert!((UNBREAKING_ARMOR_CHANCE.calculate(1) - 0.2).abs() < 1e-6);
         // Other tools: numerator linear(1,1), denominator linear(2,1) -> level1: 1/2=0.5
         assert!((UNBREAKING_OTHER_CHANCE.calculate(1) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn bane_of_arthropods_slowness_matches_json() {
+        // bane_of_arthropods.json post_attack: slowness, min/max_amplifier 3.0,
+        // min_duration 1.5s, max_duration linear(1.5, 0.5).
+        let roll = |level, duration_roll| {
+            apply_mob_effect_on_hit(
+                BANE_SLOWNESS_MIN_DURATION,
+                BANE_SLOWNESS_MAX_DURATION,
+                BANE_SLOWNESS_AMPLIFIER,
+                BANE_SLOWNESS_AMPLIFIER,
+                level,
+                duration_roll,
+                0.0,
+            )
+        };
+        // Level 1: min == max == 1.5s, so the roll cannot matter -> 30 ticks.
+        assert_eq!(roll(1, 0.0), (30, 3));
+        assert_eq!(roll(1, 0.999), (30, 3));
+        // Level 5: max duration is 1.5 + 0.5*4 = 3.5s -> 30..=70 ticks.
+        assert_eq!(roll(5, 0.0), (30, 3));
+        assert_eq!(roll(5, 1.0), (70, 3));
+        assert_eq!(roll(5, 0.5), (50, 3));
+    }
+
+    #[test]
+    fn bane_of_arthropods_effect_is_gated_on_the_same_tag_as_its_damage() {
+        let effects = effects_for(&Enchantment::BANE_OF_ARTHROPODS);
+        let gated = effects.iter().any(|effect| {
+            matches!(
+                effect,
+                EnchantmentEffect::ApplyMobEffectOnHit {
+                    condition: DamageCondition::SensitiveToBaneOfArthropods,
+                    ..
+                }
+            )
+        });
+        assert!(gated, "bane must carry a tag-gated post_attack effect");
+        let spider = &pumpkin_data::entity::EntityType::SPIDER;
+        let cow = &pumpkin_data::entity::EntityType::COW;
+        assert!(DamageCondition::SensitiveToBaneOfArthropods.applies(spider));
+        assert!(!DamageCondition::SensitiveToBaneOfArthropods.applies(cow));
     }
 
     #[test]

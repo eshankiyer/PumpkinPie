@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
         active_target::ActiveTargetGoal,
         look_around::RandomLookAroundGoal,
@@ -14,17 +14,66 @@ use crate::entity::{
         swim::SwimGoal,
         wander_around::WanderAroundGoal,
     },
-    mob::{Mob, MobEntity, piglin_shared},
+    mob::{
+        Mob, MobEntity, piglin_shared,
+        zombification::{self, ZombificationTimer},
+        zombified_piglin::ZombifiedPiglinEntity,
+    },
     player::Player,
 };
+use crate::world::World;
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{
     damage::DamageType, data_component_impl::EquipmentSlot, entity::EntityType, item::Item,
-    item_stack::ItemStack,
+    item_stack::ItemStack, sound::Sound,
 };
+use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::Difficulty;
+
+use crate::entity::ai::target_predicate::TargetData;
 
 /// `PiglinAi.ADMIRING_DISABLED` lockout: `wasHurtBy` (PiglinAi.java:567) sets a
 /// 400-tick expiry when the attacker is a player, blocking `canAdmire` for that long.
 const ADMIRING_DISABLED_TICKS: i32 = 400;
+
+/// `PiglinAi.isWearingSafeArmor` (PiglinAi.java:648-656): true when ANY of the four armor
+/// slots holds an item in the `minecraft:piglin_safe_armor` tag (the four gold pieces).
+pub(crate) async fn is_wearing_safe_armor(living: &crate::entity::living::LivingEntity) -> bool {
+    const ARMOR_SLOTS: [EquipmentSlot; 4] = [
+        EquipmentSlot::HEAD,
+        EquipmentSlot::CHEST,
+        EquipmentSlot::LEGS,
+        EquipmentSlot::FEET,
+    ];
+    let equipment = living.entity_equipment.lock().await;
+    ARMOR_SLOTS.iter().any(|slot| {
+        equipment
+            .get(slot)
+            .item
+            .has_tag(&tag::Item::MINECRAFT_PIGLIN_SAFE_ARMOR)
+    })
+}
+
+/// The `NEAREST_TARGETABLE_PLAYER_NOT_WEARING_GOLD` half of `PiglinSpecificSensor.doTick`
+/// (PiglinSpecificSensor.java:82-85), which is the only player memory
+/// `PiglinAi.findNearestValidAttackTarget` falls back on for an unprovoked piglin
+/// (PiglinAi.java:531-532).
+///
+/// Anger is deliberately NOT routed through this predicate: vanilla checks the `ANGRY_AT`
+/// memory first (PiglinAi.java:515-518), so a piglin that has been hit still retaliates
+/// against a fully gold-armoured player. Here that path is `on_damage` ->
+/// `piglin_shared::retaliate_and_alert_piglins`, which sets the target directly and never
+/// consults this goal.
+async fn player_not_wearing_gold(target: TargetData, world: Arc<World>) -> bool {
+    let Some(entity) = world.get_entity_by_id(target.entity_id) else {
+        return false;
+    };
+    let Some(living) = entity.get_living_entity() else {
+        return false;
+    };
+    !is_wearing_safe_armor(living).await
+}
 
 pub struct PiglinEntity {
     pub mob_entity: MobEntity,
@@ -33,6 +82,9 @@ pub struct PiglinEntity {
     pub admiring_ticks: Arc<AtomicI32>,
     /// Mirrors vanilla's `ADMIRING_DISABLED` memory expiry (see `ADMIRING_DISABLED_TICKS`).
     admiring_disabled_ticks: AtomicI32,
+    /// `AbstractPiglin.timeInOverworld`/`IsImmuneToZombification`
+    /// (`AbstractPiglin.java:26-33`).
+    zombification: ZombificationTimer,
 }
 
 impl PiglinEntity {
@@ -43,6 +95,7 @@ impl PiglinEntity {
             mob_entity,
             admiring_ticks: admiring_ticks.clone(),
             admiring_disabled_ticks: AtomicI32::new(0),
+            zombification: ZombificationTimer::new(),
         };
         let mob_arc = Arc::new(piglin);
         let mob_weak: Weak<dyn Mob> = {
@@ -75,7 +128,14 @@ impl PiglinEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             target_selector.add_goal(
                 1,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),
+                Box::new(ActiveTargetGoal::new(
+                    &mob_arc.mob_entity,
+                    &EntityType::PLAYER,
+                    10,
+                    true,
+                    false,
+                    Some(player_not_wearing_gold),
+                )),
             );
             target_selector.add_goal(
                 2,
@@ -104,7 +164,32 @@ impl PiglinEntity {
     }
 }
 
-impl NBTStorage for PiglinEntity {}
+impl NBTStorage for PiglinEntity {
+    /// `AbstractPiglin.addAdditionalSaveData` (`AbstractPiglin.java:65-70`).
+    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
+        Box::pin(async {
+            self.mob_entity.living_entity.write_nbt(nbt).await;
+            self.zombification.write_nbt(nbt);
+        })
+    }
+
+    /// `AbstractPiglin.readAdditionalSaveData` (`AbstractPiglin.java:72-78`). The
+    /// immunity flag is synced because vanilla holds it in `DATA_IMMUNE_TO_ZOMBIFICATION`
+    /// (`AbstractPiglin.java:26-28`), which `setImmuneToZombification` writes through.
+    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
+        Box::pin(async {
+            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
+            self.zombification.read_nbt(nbt);
+            self.mob_entity.living_entity.entity.send_meta_data(
+                &[Metadata::new(
+                    pumpkin_data::tracked_data::piglin::DATA_IMMUNE_TO_ZOMBIFICATION,
+                    self.zombification.is_immune(),
+                )],
+                None,
+            );
+        })
+    }
+}
 
 impl Mob for PiglinEntity {
     fn get_mob_entity(&self) -> &MobEntity {
@@ -222,6 +307,32 @@ impl Mob for PiglinEntity {
             if remaining > 0 {
                 self.admiring_disabled_ticks
                     .store(remaining - 1, Ordering::Relaxed);
+            }
+
+            // `AbstractPiglin.customServerAiStep` (`AbstractPiglin.java:80-96`).
+            if self.zombification.tick(&self.mob_entity) {
+                if self
+                    .mob_entity
+                    .living_entity
+                    .entity
+                    .world
+                    .load()
+                    .level_info
+                    .load()
+                    .difficulty
+                    != Difficulty::Peaceful
+                {
+                    zombification::play_converted_sound(
+                        &self.mob_entity,
+                        Sound::EntityPiglinConvertedToZombified,
+                    );
+                }
+                zombification::convert_to(
+                    &self.mob_entity,
+                    &EntityType::ZOMBIFIED_PIGLIN,
+                    ZombifiedPiglinEntity::new,
+                )
+                .await;
             }
         })
     }

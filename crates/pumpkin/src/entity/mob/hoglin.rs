@@ -4,18 +4,25 @@ use std::sync::{
 };
 
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
         melee_attack::MeleeAttackGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
     },
-    mob::{Mob, MobEntity, hoglin_gore},
+    mob::{
+        Mob, MobEntity, hoglin_gore,
+        zoglin::ZoglinEntity,
+        zombification::{self, ZombificationTimer},
+    },
 };
 use crate::world::World;
 
@@ -53,6 +60,8 @@ pub struct HoglinEntity {
     /// Ticks left pacified by a nearby repellent block (`HoglinAi.isPacified`).
     pacify_ticks: Arc<AtomicI32>,
     repellent_scan_countdown: AtomicI32,
+    /// `Hoglin.timeInOverworld`/`IsImmuneToZombification` (`Hoglin.java:69-71`).
+    zombification: ZombificationTimer,
 }
 
 impl HoglinEntity {
@@ -63,6 +72,7 @@ impl HoglinEntity {
             mob_entity,
             pacify_ticks: pacify_ticks.clone(),
             repellent_scan_countdown: AtomicI32::new(0),
+            zombification: ZombificationTimer::new(),
         };
         let mob_arc = Arc::new(hoglin);
         let mob_weak: Weak<dyn Mob> = {
@@ -138,7 +148,32 @@ impl HoglinEntity {
     }
 }
 
-impl NBTStorage for HoglinEntity {}
+impl NBTStorage for HoglinEntity {
+    /// `Hoglin.addAdditionalSaveData` (`Hoglin.java:273-277`). `CannotBeHunted`
+    /// (`Hoglin.java:275`) is not persisted: nothing in this codebase sets it, because the
+    /// piglin hunting behaviour it gates is not ported (see `PiglinAi.StartHuntingHoglin`).
+    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
+        Box::pin(async {
+            self.mob_entity.living_entity.write_nbt(nbt).await;
+            self.zombification.write_nbt(nbt);
+        })
+    }
+
+    /// `Hoglin.readAdditionalSaveData` (`Hoglin.java:280-285`).
+    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
+        Box::pin(async {
+            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
+            self.zombification.read_nbt(nbt);
+            self.mob_entity.living_entity.entity.send_meta_data(
+                &[Metadata::new(
+                    pumpkin_data::tracked_data::hoglin::DATA_IMMUNE_TO_ZOMBIFICATION,
+                    self.zombification.is_immune(),
+                )],
+                None,
+            );
+        })
+    }
+}
 
 impl Mob for HoglinEntity {
     fn get_mob_entity(&self) -> &MobEntity {
@@ -156,6 +191,19 @@ impl Mob for HoglinEntity {
     /// timer and clearing the current attack target when one is found.
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
+            // `Hoglin.customServerAiStep` (`Hoglin.java:149-157`). Unlike `AbstractPiglin`,
+            // the hoglin plays its converted sound unconditionally -- there is no
+            // peaceful-difficulty guard on this branch.
+            if self.zombification.tick(&self.mob_entity) {
+                zombification::play_converted_sound(
+                    &self.mob_entity,
+                    Sound::EntityHoglinConvertedToZombified,
+                );
+                zombification::convert_to(&self.mob_entity, &EntityType::ZOGLIN, ZoglinEntity::new)
+                    .await;
+                return;
+            }
+
             let countdown = self.repellent_scan_countdown.fetch_sub(1, Relaxed);
             if countdown > 0 {
                 if self.pacify_ticks.load(Relaxed) > 0 {

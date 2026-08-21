@@ -53,6 +53,7 @@ impl ItemMetadata for FilledBucketItem {
             Item::TROPICAL_FISH_BUCKET.id,
             Item::PUFFERFISH_BUCKET.id,
             Item::TADPOLE_BUCKET.id,
+            Item::SULFUR_CUBE_BUCKET.id,
         ]
         .into()
     }
@@ -243,7 +244,19 @@ async fn try_pickup_bucket_item(
 pub(crate) fn should_evaporate_in_nether(item: &Item, world: &World) -> bool {
     item.id != Item::LAVA_BUCKET.id
         && item.id != Item::POWDER_SNOW_BUCKET.id
+        && !holds_no_fluid(item)
         && world.dimension == Dimension::THE_NETHER
+}
+
+/// Whether this bucket's `content` is `Fluids.EMPTY`, which so far is true only of the sulfur
+/// cube bucket (`Items.java:1275-1279`).
+///
+/// `MobBucketItem.emptyContents` (`MobBucketItem.java:61-68`) short-circuits for such a bucket:
+/// it plays the empty sound and reports success without ever reaching `BucketItem.emptyContents`,
+/// so no fluid is placed and the water-evaporates branch is never taken either. The mob is still
+/// spawned afterwards by `checkExtraContent` (`BucketItem.java:60-61`).
+pub(crate) const fn holds_no_fluid(item: &Item) -> bool {
+    item.id == Item::SULFUR_CUBE_BUCKET.id
 }
 
 /// Returns the aquatic entity carried by a vanilla mob bucket.
@@ -260,6 +273,8 @@ const fn mob_bucket_entity_type(item: &Item) -> Option<&'static EntityType> {
         id if id == Item::TROPICAL_FISH_BUCKET.id => Some(&EntityType::TROPICAL_FISH),
         id if id == Item::PUFFERFISH_BUCKET.id => Some(&EntityType::PUFFERFISH),
         id if id == Item::TADPOLE_BUCKET.id => Some(&EntityType::TADPOLE),
+        // `Items.java:1275-1279`: `MobBucketItem(EntityTypes.SULFUR_CUBE, Fluids.EMPTY, ...)`.
+        id if id == Item::SULFUR_CUBE_BUCKET.id => Some(&EntityType::SULFUR_CUBE),
         _ => None,
     }
 }
@@ -274,6 +289,10 @@ const fn bucket_item_for_entity_type(entity_type: &EntityType) -> Option<&'stati
         id if id == EntityType::TROPICAL_FISH.id => Some(&Item::TROPICAL_FISH_BUCKET),
         id if id == EntityType::PUFFERFISH.id => Some(&Item::PUFFERFISH_BUCKET),
         id if id == EntityType::TADPOLE.id => Some(&Item::TADPOLE_BUCKET),
+        // `SulfurCube.getBucketItemStack` (`SulfurCube.java:207-210`); the mob implements
+        // `Bucketable` (`SulfurCube.java:80`) and is caught through the shared
+        // `Bucketable.bucketMobPickup` path (`SulfurCube.java:474`).
+        id if id == EntityType::SULFUR_CUBE.id => Some(&Item::SULFUR_CUBE_BUCKET),
         _ => None,
     }
 }
@@ -291,6 +310,8 @@ const fn pickup_sound_for_entity_type(entity_type: &EntityType) -> Option<Sound>
         {
             Some(Sound::ItemBucketFillFish)
         }
+        // `SulfurCube.getPickupSound` (`SulfurCube.java:163-166`).
+        id if id == EntityType::SULFUR_CUBE.id => Some(Sound::ItemBucketFillSulfurCube),
         _ => None,
     }
 }
@@ -306,6 +327,8 @@ const fn mob_bucket_empty_sound(item: &Item) -> Option<Sound> {
         {
             Some(Sound::ItemBucketEmptyFish)
         }
+        // `Items.java:1275-1279`: `SoundEvents.BUCKET_EMPTY_SULFUR_CUBE`.
+        id if id == Item::SULFUR_CUBE_BUCKET.id => Some(Sound::ItemBucketEmptySulfurCube),
         _ => None,
     }
 }
@@ -731,7 +754,13 @@ impl ItemBehaviour for FilledBucketItem {
             // early here, silently losing both the water AND the mob for a mob bucket used
             // in the Nether.
             let evaporated = should_evaporate_in_nether(item, &world);
-            let placed_pos = if evaporated {
+            let placed_pos = if holds_no_fluid(item) {
+                // `MobBucketItem.emptyContents` (`MobBucketItem.java:61-68`) returns before any
+                // placement for a `Fluids.EMPTY` bucket. `BucketItem.use` (`BucketItem.java:59`)
+                // only prefers the clicked block itself for a water bucket in a liquid
+                // container, so the mob lands on the face that was clicked.
+                pos.offset(direction.to_offset())
+            } else if evaporated {
                 play_bucket_evaporation_by_player(&world, player, pos);
                 pos
             } else {
@@ -859,6 +888,7 @@ mod tests {
             (&Item::TROPICAL_FISH_BUCKET, &EntityType::TROPICAL_FISH),
             (&Item::PUFFERFISH_BUCKET, &EntityType::PUFFERFISH),
             (&Item::TADPOLE_BUCKET, &EntityType::TADPOLE),
+            (&Item::SULFUR_CUBE_BUCKET, &EntityType::SULFUR_CUBE),
         ];
 
         for (bucket, entity_type) in cases {
@@ -866,6 +896,24 @@ mod tests {
         }
         assert_eq!(mob_bucket_entity_type(&Item::WATER_BUCKET), None);
         assert_eq!(mob_bucket_entity_type(&Item::LAVA_BUCKET), None);
+    }
+
+    #[test]
+    fn sulfur_cube_bucket_round_trips_and_holds_no_fluid() {
+        // `SulfurCube.getBucketItemStack` (`SulfurCube.java:207-210`).
+        assert_eq!(
+            bucket_item_for_entity_type(&EntityType::SULFUR_CUBE).map(|item| item.id),
+            Some(Item::SULFUR_CUBE_BUCKET.id)
+        );
+        // `SulfurCube.getPickupSound` (`SulfurCube.java:163-166`).
+        assert_eq!(
+            pickup_sound_for_entity_type(&EntityType::SULFUR_CUBE),
+            Some(Sound::ItemBucketFillSulfurCube)
+        );
+        // `Items.java:1275-1279`: the only mob bucket built with `Fluids.EMPTY`.
+        assert!(holds_no_fluid(&Item::SULFUR_CUBE_BUCKET));
+        assert!(!holds_no_fluid(&Item::AXOLOTL_BUCKET));
+        assert!(!holds_no_fluid(&Item::WATER_BUCKET));
     }
 
     #[test]

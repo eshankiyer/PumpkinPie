@@ -25,6 +25,7 @@ pub mod smoker;
 pub mod stonecutter;
 
 // Redstone & mechanisms
+pub mod cocoa;
 pub mod command; // command block / redstone control
 pub mod jigsaw;
 pub mod note;
@@ -76,6 +77,7 @@ pub mod amethyst;
 pub mod carved_pumpkin;
 pub mod dripstone;
 pub mod farmland;
+pub mod hanging_roots;
 pub mod hay;
 pub mod logs;
 pub mod mangrove_roots;
@@ -97,7 +99,9 @@ pub mod ice;
 pub mod infested;
 pub mod leaves;
 pub mod mycelium;
+pub mod netherrack;
 pub mod nylium;
+pub mod podzol;
 pub mod potent_sulfur;
 pub mod powder_snow;
 pub mod rooted_dirt;

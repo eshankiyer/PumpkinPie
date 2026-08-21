@@ -16,6 +16,7 @@ use crate::server::tick_rate_manager::ServerTickRateManager;
 use crate::world::WorldPortal;
 use crate::world::custom_bossbar::CustomBossbars;
 use crate::world::scoreboard::Scoreboard;
+use crate::world::stopwatch::Stopwatches;
 use crate::{
     command::node::dispatcher::CommandDispatcher, entity::player::Player, world::World,
     world::map::MapManager,
@@ -119,6 +120,8 @@ pub struct Server {
     pub mojang_public_keys: ArcSwap<Vec<RsaPublicKey>>,
     /// The server's custom bossbars
     pub bossbars: Mutex<CustomBossbars>,
+    /// The server's named stopwatches (`Stopwatches.java`), driven by the /stopwatch command
+    pub stopwatches: Mutex<Stopwatches>,
     /// Manages all maps on the server
     pub map_manager: MapManager,
     /// The default gamemode when a player joins the server (reset every restart)
@@ -294,6 +297,7 @@ impl Server {
             listing,
             branding: CachedBranding::new(),
             bossbars: Mutex::new(CustomBossbars::new()),
+            stopwatches: Mutex::new(Stopwatches::default()),
             map_manager: MapManager::new(),
             defaultgamemode,
             player_data_storage,

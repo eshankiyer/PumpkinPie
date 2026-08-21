@@ -112,7 +112,7 @@ impl NautilusEntity {
         self.owner.store(owner);
     }
 
-    pub fn get_ambient_sound(&self) -> Sound {
+    pub fn ambient_sound(&self) -> Sound {
         let is_baby = self
             .mob_entity
             .living_entity
@@ -301,6 +301,12 @@ impl Mob for NautilusEntity {
         &self.mob_entity
     }
 
+    /// `Nautilus.getAmbientSound` (Nautilus.java:78-84), reached through the shared
+    /// `Mob.baseTick` idle-sound cadence.
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(self.ambient_sound())
+    }
+
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             self.mob_entity.living_entity.entity.send_meta_data(
@@ -430,7 +436,7 @@ impl Mob for NautilusEntity {
                 }
             }
 
-            self.animal_interact(player, item_stack, self.get_ambient_sound())
+            self.animal_interact(player, item_stack, self.ambient_sound())
                 .await
         })
     }

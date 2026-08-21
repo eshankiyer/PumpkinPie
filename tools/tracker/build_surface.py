@@ -32,7 +32,37 @@ def read(path: pathlib.Path) -> str:
     return path.read_text(errors="ignore")
 
 
-def tag_members() -> dict[str, list[str]]:
+def tag_members(namespace: str = "Block") -> dict[str, list[str]]:
+    """Members of every tag in one `pub mod <namespace>` block of the generated tag table.
+
+    tag.rs namespaces tags by registry - `pub mod Block`, `pub mod Item` - and the same tag name
+    exists in several. Flattening them let the Item definition of MINECRAFT_BANNERS (16 members)
+    overwrite the Block one (32), so the 16 wall banners read as uncovered while banners.rs had
+    always claimed them. Any block tag sharing a name with an item tag was under-credited.
+    """
+    whole = read(ROOT / "crates/pumpkin-data/src/generated/tag.rs")
+    start = whole.find(f"pub mod {namespace} {{")
+    if start < 0:
+        return {}
+    depth, end = 0, start
+    for index in range(whole.find("{", start), len(whole)):
+        if whole[index] == "{":
+            depth += 1
+        elif whole[index] == "}":
+            depth -= 1
+            if depth == 0:
+                end = index
+                break
+    text = whole[start:end]
+    members: dict[str, list[str]] = {}
+    for match in re.finditer(
+        r"pub const ((?:MINECRAFT|C)_[A-Z0-9_]+): super::Tag = \(\s*&\[(.*?)\]", text, re.S
+    ):
+        members[match.group(1)] = re.findall(r'"([a-z0-9_/]+)"', match.group(2))
+    return members
+
+
+def _unused_tag_members() -> dict[str, list[str]]:
     """Map `MINECRAFT_FOO` -> the block names in that tag, from the generated tag table."""
     text = read(ROOT / "crates/pumpkin-data/src/generated/tag.rs")
     members: dict[str, list[str]] = {}
@@ -250,7 +280,7 @@ def data_driven_items() -> set[str]:
 def covered_items() -> set[str]:
     """Every `Item::X.id` named in an `ItemMetadata::ids` body, however it is formatted."""
     covered: set[str] = placeable_block_items() | data_driven_items()
-    item_tags = tag_members()
+    item_tags = tag_members("Item")
     for path in (ROOT / "crates/pumpkin/src/item").rglob("*.rs"):
         text = read(path)
         for match in re.finditer(r"fn ids\(\)[^{]*\{", text):

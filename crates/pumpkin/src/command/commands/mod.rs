@@ -68,6 +68,7 @@ mod spectate;
 mod spreadplayers;
 mod stop;
 mod stopsound;
+mod stopwatch;
 mod summon;
 mod swing;
 mod tag;
@@ -81,6 +82,7 @@ mod title;
 mod tps;
 mod transfer;
 mod trigger;
+mod version;
 mod waypoint;
 mod weather;
 mod whitelist;
@@ -210,6 +212,8 @@ pub fn default_dispatcher(
     attribute::register(&mut dispatcher, registry);
     swing::register(&mut dispatcher, registry);
     fetchprofile::register(&mut dispatcher, registry);
+    version::register(&mut dispatcher, registry);
+    stopwatch::register(&mut dispatcher, registry);
 
     apply_command_overrides(&mut dispatcher, registry, commands_config);
 

@@ -57,9 +57,11 @@ use super::features::{
     sculk_patch::SculkPatchFeature,
     sea_pickle::SeaPickleFeature,
     seagrass::SeagrassFeature,
+    sequence::SequenceFeature,
     simple_block::SimpleBlockFeature,
     simple_random_selector::SimpleRandomFeature,
     spring_feature::SpringFeatureFeature,
+    template::TemplateFeature,
     tree::TreeFeature,
     twisting_vines::TwistingVinesFeature,
     underwater_magma::UnderwaterMagmaFeature,
@@ -70,6 +72,7 @@ use super::features::{
     waterlogged_vegetation_patch,
     waterlogged_vegetation_patch::WaterloggedVegetationPatchFeature,
     weeping_vines::WeepingVinesFeature,
+    weighted_random_selector::WeightedRandomFeature,
 };
 use crate::generation::proto_chunk::GenerationCache;
 use crate::world::WorldPortalExt;
@@ -164,6 +167,9 @@ pub enum ConfiguredFeature {
     LargeDripstone(LargeDripstoneFeature),
     PointedDripstone(SmallDripstoneFeature),
     SculkPatch(SculkPatchFeature),
+    Sequence(SequenceFeature),
+    WeightedRandomSelector(WeightedRandomFeature),
+    Template(TemplateFeature),
 }
 
 // Yes this may look ugly and you wonder why this is hard coded, but it makes sense to hardcode since we have to add logic for these in code
@@ -492,6 +498,33 @@ impl ConfiguredFeature {
             Self::WeepingVines(feature) => {
                 feature.generate(chunk, min_y, height, feature_name, random, pos)
             }
+            Self::Sequence(feature) => feature.generate(
+                chunk,
+                block_registry,
+                min_y,
+                height,
+                feature_name,
+                random,
+                pos,
+            ),
+            Self::WeightedRandomSelector(feature) => feature.generate(
+                chunk,
+                block_registry,
+                min_y,
+                height,
+                feature_name,
+                random,
+                pos,
+            ),
+            Self::Template(feature) => feature.generate(
+                chunk,
+                block_registry,
+                min_y,
+                height,
+                feature_name,
+                random,
+                pos,
+            ),
             Self::NoOp => false,
         }
     }
@@ -526,6 +559,30 @@ mod tests {
                     .is_some()
             );
         }
+    }
+
+    /// `sulfur_pool` and `sulfur_spring` were the only two 26.2 configured features that
+    /// fell through to `NoOp`, because `minecraft:sequence`,
+    /// `minecraft:weighted_random_selector` and `minecraft:template` had no handler.
+    #[test]
+    fn sulfur_features_resolve_to_real_features() {
+        use pumpkin_data::configured_feature::ConfiguredFeature as Key;
+
+        let Some(ConfiguredFeature::Sequence(sequence)) = CONFIGURED_FEATURES.get(&Key::SulfurPool)
+        else {
+            panic!("sulfur_pool must be a sequence feature");
+        };
+        assert_eq!(sequence.features.len(), 2);
+
+        let Some(ConfiguredFeature::WeightedRandomSelector(selector)) =
+            CONFIGURED_FEATURES.get(&Key::SulfurSpring)
+        else {
+            panic!("sulfur_spring must be a weighted random selector");
+        };
+        // Weights 200 + 90 + 20 + 5 in
+        // `assets/datapacks/26_2/data/minecraft/worldgen/configured_feature/sulfur_spring.json`.
+        assert_eq!(selector.features.len(), 4);
+        assert_eq!(selector.total_weight(), 315);
     }
 
     #[test]
