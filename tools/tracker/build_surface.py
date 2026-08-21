@@ -110,8 +110,27 @@ def total_items() -> int:
 
 
 def covered_entities() -> set[str]:
+    """Entity types this server implements.
+
+    Most are reachable through the generic `from_type` dispatch in `entity/type.rs`, but some
+    are only ever constructed by the system that owns them - a player by the login path, a
+    fishing bobber by the fishing rod, a leash knot by leashing - so they never appear there
+    despite having a dedicated module. Counting a module whose file name is the entity picks
+    those up without crediting the many types that are merely *referenced* by goals and
+    targeting code.
+    """
     text = read(ROOT / "crates/pumpkin/src/entity/type.rs")
-    return {name.lower() for name in re.findall(r"EntityType::([A-Z0-9_]+)", text)}
+    covered = {name.lower() for name in re.findall(r"EntityType::([A-Z0-9_]+)", text)}
+    # Intersect with real entity names: the tree is full of modules like `mod`, `ai` and
+    # `living` that are not entity types, and crediting those took the figure over 100%.
+    real = {name.lower() for name in re.findall(
+        r"pub const ([A-Z0-9_]+): EntityType = EntityType \{",
+        read(ROOT / "crates/pumpkin-data/src/generated/entity_type.rs"),
+    )}
+    for path in (ROOT / "crates/pumpkin/src/entity").rglob("*.rs"):
+        if path.stem.lower() in real:
+            covered.add(path.stem.lower())
+    return covered & real
 
 
 def total_entities() -> int:
