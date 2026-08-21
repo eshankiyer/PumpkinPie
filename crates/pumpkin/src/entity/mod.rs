@@ -103,6 +103,7 @@ pub mod lightning;
 pub mod living;
 pub mod marker;
 pub mod mob;
+pub mod ominous_item_spawner;
 pub mod passive;
 pub mod persistent_anger;
 pub mod player;
