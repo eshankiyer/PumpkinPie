@@ -240,12 +240,12 @@ use pumpkin_protocol::java::client::play::{
     Animation, CActionBar, CAwardStats, CBlockUpdate, CChangeDifficulty, CCloseContainer,
     CCombatDeath, CCustomPayload, CDisguisedChatMessage, CEntityAnimation, CEntityPositionSync,
     CGameEvent, CItemCooldown, CMapItemData, COpenScreen, CParticle, CPlayerAbilities,
-    CPlayerInfoUpdate, CPlayerPosition, CPlayerSpawnPosition, CRespawn, CSetCamera,
-    CSetContainerContent, CSetContainerProperty, CSetContainerSlot, CSetCursorItem, CSetExperience,
-    CSetHealth, CSetPlayerInventory, CSetSelectedSlot, CSoundEffect, CStopSound, CSubtitle,
-    CSystemChatMessage, CTabList, CTitleAnimation, CTitleText, CUnloadChunk, CUpdateMobEffect,
-    CUpdateTime, GameEvent, MapIcon, MapPatch, Metadata, PlayerAction, PlayerInfoFlags,
-    PlayerSpawnData, PreviousMessage, Statistic,
+    CPlayerInfoUpdate, CPlayerPosition, CPlayerSpawnPosition, CRecipeBookSettings, CRespawn,
+    CSetCamera, CSetContainerContent, CSetContainerProperty, CSetContainerSlot, CSetCursorItem,
+    CSetExperience, CSetHealth, CSetPlayerInventory, CSetSelectedSlot, CSoundEffect, CStopSound,
+    CSubtitle, CSystemChatMessage, CTabList, CTitleAnimation, CTitleText, CUnloadChunk,
+    CUpdateMobEffect, CUpdateTime, GameEvent, MapIcon, MapPatch, Metadata, PlayerAction,
+    PlayerInfoFlags, PlayerSpawnData, PreviousMessage, Statistic,
 };
 use pumpkin_protocol::java::server::play::{
     SClickSlot, SContainerButtonClick, SRenameItem, SSetBeacon, SlotActionType,
@@ -269,6 +269,7 @@ use crate::command::context::command_source::CommandSource;
 use crate::command::node::dispatcher::CommandDispatcher;
 use crate::command::{CommandSender, client_suggestions};
 use crate::data::SaveJSONConfiguration;
+use crate::data::recipe_book::{RecipeBookSettings, RecipeBookType, ServerRecipeBook};
 use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::entity::{EntityBaseFuture, NbtFuture, TeleportFuture};
 use crate::net::{ClientPlatform, GameProfile};
@@ -853,6 +854,11 @@ pub struct Player {
     pub abilities: Mutex<Abilities>,
     /// Player statistics
     pub stats: Mutex<statistics::Statistics>,
+    /// The player's recipe book: which recipes are unlocked, which are still
+    /// highlighted as new, and the per-tab open/filter settings.
+    ///
+    /// Vanilla's `ServerPlayer.recipeBook` (`ServerPlayer.java:253`).
+    pub recipe_book: Mutex<ServerRecipeBook>,
     /// The current stage of block destruction of the block the player is breaking.
     pub current_block_destroy_stage: AtomicI32,
     /// The per-tick block destruction progress last sent to Bedrock clients.
@@ -1140,6 +1146,7 @@ impl Player {
             mining_action_lock: Mutex::new(()),
             abilities: Mutex::new(abilities),
             stats: Mutex::new(statistics::Statistics::default()),
+            recipe_book: Mutex::new(ServerRecipeBook::new()),
             gamemode: AtomicCell::new(gamemode),
             previous_gamemode: AtomicCell::new(None),
             camera_target_id: AtomicCell::new(None),
@@ -3316,6 +3323,141 @@ impl Player {
         amount: i32,
     ) {
         self.stats.lock().await.increment(category, stat, amount);
+        // Recipe-book unlock triggers. Vanilla drives these from the generated
+        // `recipes/...` advancements, whose criteria are an `inventory_changed`
+        // `has_item` on the recipe's ingredients plus a `recipe_unlocked`, with
+        // `AdvancementRewards.grant` calling `awardRecipesByKey`
+        // (`AdvancementRewards.java:77-79`). Pumpkin has no advancement criteria
+        // engine, so the same two obtain-an-item paths are hooked off the statistic
+        // vanilla increments at that moment.
+        if amount > 0 {
+            match category {
+                statistics::StatisticCategory::PickedUp => {
+                    self.unlock_recipes_using_item(stat).await;
+                }
+                statistics::StatisticCategory::Crafted => {
+                    // `RecipeCraftingHolder.awardUsedRecipes` awards the recipe that
+                    // was just used (`RecipeCraftingHolder.java:17-23`); the crafted
+                    // item is all this hook knows, so every recipe producing it is
+                    // awarded.
+                    self.award_recipes_producing_item(stat).await;
+                    self.unlock_recipes_using_item(stat).await;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// `ServerPlayer.awardRecipes` (`ServerPlayer.java:1524-1526`), delegating to
+    /// `ServerRecipeBook.addRecipes` (`ServerRecipeBook.java:61-80`).
+    ///
+    /// Returns the number of recipes newly unlocked.
+    ///
+    /// Vanilla also sends a `ClientboundRecipeBookAddPacket` naming exactly the new
+    /// recipes. `CRecipeBookAdd` in this codebase cannot express that: its writer
+    /// always emits every entry of `RECIPES_CRAFTING` and `RECIPES_COOKING`, and its
+    /// per-entry writer is private to `pumpkin-protocol`, so a per-player subset is
+    /// not representable on the wire yet. The unlocked set is therefore
+    /// server-authoritative and persisted, but unlocks are not pushed to the client.
+    pub async fn award_recipes<'a>(&self, ids: impl IntoIterator<Item = &'a str>) -> usize {
+        self.recipe_book.lock().await.add_recipes(ids).len()
+    }
+
+    /// `ServerPlayer.awardRecipesByKey` (`ServerPlayer.java:1534-1539`): ids no recipe
+    /// exists for are dropped, exactly as vanilla's `byKey(...).stream()` drops them.
+    pub async fn award_recipes_by_key(&self, ids: &[String]) -> usize {
+        let registry = crate::data::recipe_book::registry();
+        let known: Vec<&str> = ids
+            .iter()
+            .filter_map(|id| registry.by_id(id).map(|entry| entry.id.as_str()))
+            .collect();
+        self.award_recipes(known).await
+    }
+
+    /// `ServerPlayer.resetRecipes` (`ServerPlayer.java:1541-1544`).
+    pub async fn reset_recipes<'a>(&self, ids: impl IntoIterator<Item = &'a str>) -> usize {
+        self.recipe_book.lock().await.remove_recipes(ids).len()
+    }
+
+    /// Unlocks every recipe that takes `item_id` as an ingredient.
+    ///
+    /// Stands in for the `has_item` criterion of vanilla's generated recipe
+    /// advancements, which is what makes the book fill up as a player picks things up.
+    async fn unlock_recipes_using_item(&self, item_id: i32) {
+        let Ok(item_id) = u16::try_from(item_id) else {
+            return;
+        };
+        let registry = crate::data::recipe_book::registry();
+        let indices = registry.consuming(item_id);
+        if indices.is_empty() {
+            return;
+        }
+        let ids: Vec<&str> = indices.iter().map(|index| registry.id_of(*index)).collect();
+        self.award_recipes(ids).await;
+    }
+
+    /// Unlocks every recipe whose result is `item_id`.
+    async fn award_recipes_producing_item(&self, item_id: i32) {
+        let Ok(item_id) = u16::try_from(item_id) else {
+            return;
+        };
+        let registry = crate::data::recipe_book::registry();
+        let indices = registry.producing(item_id);
+        if indices.is_empty() {
+            return;
+        }
+        let ids: Vec<&str> = indices.iter().map(|index| registry.id_of(*index)).collect();
+        self.award_recipes(ids).await;
+    }
+
+    /// Applies one `ServerboundRecipeBookChangeSettingsPacket`,
+    /// `RecipeBook.setBookSetting` (`RecipeBook.java:32-35`).
+    pub async fn set_recipe_book_setting(
+        &self,
+        book_type: RecipeBookType,
+        open: bool,
+        filtering: bool,
+    ) {
+        self.recipe_book
+            .lock()
+            .await
+            .settings_mut()
+            .set_book_setting(book_type, open, filtering);
+    }
+
+    /// `ServerboundRecipeBookSeenRecipePacket`: the client reports it has displayed a
+    /// recipe, so it stops being highlighted (`ServerRecipeBook.removeHighlight`,
+    /// `ServerRecipeBook.java:53-55`).
+    pub async fn mark_recipe_seen(&self, display_id: i32) {
+        let Some(entry) = crate::data::recipe_book::registry().by_display_id(display_id) else {
+            return;
+        };
+        self.recipe_book.lock().await.remove_highlight(&entry.id);
+    }
+
+    pub async fn recipe_book_settings(&self) -> RecipeBookSettings {
+        self.recipe_book.lock().await.settings()
+    }
+
+    /// `ServerRecipeBook.sendInitialRecipeBook` (`ServerRecipeBook.java:112-121`),
+    /// called from `PlayerList.placeNewPlayer` (`PlayerList.java:191`) and on a
+    /// datapack reload (`PlayerList.java:861`).
+    ///
+    /// Only the settings half is sent; see `Player::award_recipes` for why the add
+    /// packet cannot carry a per-player set yet.
+    pub async fn send_initial_recipe_book(&self) {
+        let wire = self.recipe_book_settings().await.to_wire();
+        self.send_client_packet(&CRecipeBookSettings {
+            crafting_open: wire[0],
+            crafting_filtering: wire[1],
+            furnace_open: wire[2],
+            furnace_filtering: wire[3],
+            blast_furnace_open: wire[4],
+            blast_furnace_filtering: wire[5],
+            smoker_open: wire[6],
+            smoker_filtering: wire[7],
+        })
+        .await;
     }
 
     pub async fn increment_interaction_stat(
@@ -6465,6 +6607,7 @@ impl NBTStorage for Player {
                 write_root_vehicle(nbt, vehicle_uuid);
             }
             self.stats.lock().await.write_nbt(nbt);
+            self.recipe_book.lock().await.write_nbt(nbt);
         })
     }
 
@@ -6536,6 +6679,7 @@ impl NBTStorage for Player {
             );
             self.root_vehicle_uuid.store(read_root_vehicle(nbt));
             self.stats.lock().await.read_nbt(nbt);
+            self.recipe_book.lock().await.read_nbt(nbt);
         })
     }
 }

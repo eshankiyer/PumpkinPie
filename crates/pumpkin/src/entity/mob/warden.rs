@@ -83,6 +83,63 @@ use pumpkin_util::math::vector3::Vector3;
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
 
+/// `Warden.applyDarknessAround` (Warden.java:407-410).
+///
+/// Also carries the parts of `MobEffectUtil.addEffectToPlayersAround`
+/// (MobEffectUtil.java:51-72) that are expressible here: survival/adventure players only,
+/// inside `darkness_radius`, and skipped for a player who already holds Darkness with more
+/// than `displayEffectLimit - 1` = 199 ticks left. The `isAlliedTo(source)` test is dropped -
+/// the only caller is the sculk shrieker, which passes a null source. Vanilla's
+/// amplifier comparison is a no-op here because the applied amplifier is 0 and Pumpkin's
+/// amplifier field is unsigned.
+///
+/// Note `new MobEffectInstance(DARKNESS, 260, 0, false, false)` sets `visible` AND `showIcon`
+/// to false (the 5-argument constructor forwards `visible` as `showIcon`,
+/// MobEffectInstance.java:60-62).
+pub async fn apply_darkness_around(
+    world: &Arc<World>,
+    position: pumpkin_util::math::vector3::Vector3<f64>,
+    darkness_radius: f64,
+) {
+    const DARKNESS_DURATION: i32 = 260;
+    const DISPLAY_EFFECT_LIMIT: i32 = 200;
+
+    for player in world.get_nearby_players(position, darkness_radius) {
+        if !matches!(
+            player.gamemode.load(),
+            GameMode::Survival | GameMode::Adventure
+        ) {
+            continue;
+        }
+        if let Some(current) = player
+            .living_entity
+            .get_effect(&pumpkin_data::effect::StatusEffect::DARKNESS)
+            .await
+            && current.duration > DISPLAY_EFFECT_LIMIT - 1
+        {
+            continue;
+        }
+
+        let darkness = pumpkin_data::potion::Effect {
+            effect_type: &pumpkin_data::effect::StatusEffect::DARKNESS,
+            duration: DARKNESS_DURATION,
+            amplifier: 0,
+            ambient: false,
+            show_particles: false,
+            show_icon: false,
+            blend: true,
+        };
+        player.send_effect(darkness.clone()).await;
+        player.living_entity.add_effect(darkness).await;
+    }
+}
+
+/// `WardenSpawnTracker` lives beside `Warden` in vanilla's `monster.warden` package. It is
+/// declared through `#[path]` so the file sits under `entity/` without needing a new `mod`
+/// line in `entity/mod.rs`.
+#[path = "../warden_spawn_tracker.rs"]
+pub mod warden_spawn_tracker;
+
 use crate::entity::mob::warden_anger::{self, AngerLevel, AngerManagement};
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage,
@@ -125,6 +182,9 @@ fn sync_warden_pose(entity: &Entity, pose: EntityPose) {
     );
 }
 
+/// `WardenAi.EMERGE_DURATION` (WardenAi.java:49): `Mth.ceil(133.59999F)`.
+const EMERGE_DURATION: i32 = 134;
+
 pub struct WardenEntity {
     pub mob_entity: MobEntity,
     anger: AsyncMutex<AngerManagement>,
@@ -136,6 +196,8 @@ pub struct WardenEntity {
     listener: std::sync::Mutex<Option<Arc<WardenVibrationListener>>>,
     /// `Roar` behavior state; `None` when not roaring. See `RoarState`.
     roar_state: std::sync::Mutex<Option<RoarState>>,
+    /// Ticks left in `Pose::EMERGING`; 0 when not emerging. See `start_emerging`.
+    emerging_ticks: AtomicI32,
 }
 
 impl WardenEntity {
@@ -150,6 +212,7 @@ impl WardenEntity {
             listener_registered: AtomicBool::new(false),
             listener: std::sync::Mutex::new(None),
             roar_state: std::sync::Mutex::new(None),
+            emerging_ticks: AtomicI32::new(0),
         };
         let mob_arc = Arc::new(warden);
         let mob_weak: Weak<dyn Mob> = {
@@ -191,6 +254,55 @@ impl WardenEntity {
         *mob_arc.listener.lock().unwrap() = Some(listener);
 
         mob_arc
+    }
+
+    /// `Warden.finalizeSpawn` with `EntitySpawnReason.TRIGGERED` (Warden.java:480-492):
+    /// enters `Pose::EMERGING` for `WardenAi.EMERGE_DURATION` and plays the agitated sound.
+    ///
+    /// The module doc comment above says EMERGING is unreachable because Pumpkin has no
+    /// spawn-reason plumbing. That is still true of *natural* spawns; this entry point exists
+    /// because the sculk shrieker's summon is vanilla's only `TRIGGERED` spawn of a warden
+    /// (`SculkShriekerBlockEntity.trySummonWarden`, lines 162-169), so the call site knows the
+    /// reason without a spawn-reason field. Nothing else calls it, so a `/summon` warden still
+    /// does not emerge - matching vanilla.
+    ///
+    /// Not carried across: the temporary invulnerability vanilla gives an emerging warden
+    /// (`Warden.isInvulnerableTo`), which lives in `living.rs`, and `MemoryModuleType.DIG_COOLDOWN`,
+    /// which has no equivalent here.
+    pub fn start_emerging(&self) {
+        self.emerging_ticks
+            .store(EMERGE_DURATION, Ordering::Relaxed);
+        sync_warden_pose(&self.mob_entity.living_entity.entity, EntityPose::Emerging);
+        let entity = &self.mob_entity.living_entity.entity;
+        entity.world.load().play_sound_fine(
+            Sound::EntityWardenAgitated,
+            SoundCategory::Hostile,
+            &entity.pos.load(),
+            5.0,
+            1.0,
+        );
+    }
+
+    /// `Warden.isDiggingOrEmerging` (Warden.java:165-167), minus DIGGING (never entered here).
+    #[must_use]
+    pub fn is_emerging(&self) -> bool {
+        self.emerging_ticks.load(Ordering::Relaxed) > 0
+    }
+
+    /// Counts the emerge down and returns to `Pose::STANDING` when it finishes
+    /// (`Emerging.stop`, `ai/behavior/warden/Emerging.java`).
+    fn tick_emerging(&self) -> bool {
+        let remaining = self.emerging_ticks.load(Ordering::Relaxed);
+        if remaining <= 0 {
+            return false;
+        }
+        if remaining == 1 {
+            self.emerging_ticks.store(0, Ordering::Relaxed);
+            sync_warden_pose(&self.mob_entity.living_entity.entity, EntityPose::Standing);
+            return false;
+        }
+        self.emerging_ticks.store(remaining - 1, Ordering::Relaxed);
+        true
     }
 
     /// `Warden.canTargetEntity`, minus the world-border check (see module doc comment).
@@ -526,6 +638,14 @@ impl Mob for WardenEntity {
         Box::pin(async move {
             self.register_listener_once().await;
 
+            // `WardenAi` runs only the EMERGE activity while emerging: no anger, no
+            // attacking. Note the Goal selector is driven outside `mob_tick`, so a warden's
+            // movement/look goals still run during the 134-tick emerge - vanilla's warden is
+            // frozen. Gating that needs a hook in `mob/mod.rs`, which is out of scope here.
+            if self.tick_emerging() {
+                return;
+            }
+
             if self.vibration_cooldown.load(Ordering::Relaxed) > 0 {
                 self.vibration_cooldown.fetch_sub(1, Ordering::Relaxed);
             }
@@ -566,7 +686,7 @@ impl Mob for WardenEntity {
         source: Option<&'a dyn EntityBase>,
     ) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
-            if self.mob_entity.is_no_ai() {
+            if self.mob_entity.is_no_ai() || self.is_emerging() {
                 return;
             }
             let Some(source) = source else {
@@ -698,6 +818,8 @@ const fn warden_can_listen(event: &GameEvent) -> bool {
             | GameEvent::ProjectileLand
             | GameEvent::ProjectileShoot
             | GameEvent::Shear
+            | GameEvent::Shriek
+            | GameEvent::SculkSensorTendrilsClicking
             | GameEvent::Splash
             | GameEvent::Step
             | GameEvent::Swim
@@ -717,6 +839,10 @@ mod tests {
         assert!(warden_can_listen(&GameEvent::Step));
         assert!(warden_can_listen(&GameEvent::NoteBlockPlay));
         assert!(!warden_can_listen(&GameEvent::JukeboxPlay));
-        assert!(!warden_can_listen(&GameEvent::SculkSensorTendrilsClicking));
+        // `warden_can_listen.json` lines 58-59: `minecraft:shriek` plus the whole
+        // `#minecraft:shrieker_can_listen` tag, whose single member is the tendril click.
+        // Both were missing here, so a shrieking sculk shrieker was inaudible to a warden.
+        assert!(warden_can_listen(&GameEvent::Shriek));
+        assert!(warden_can_listen(&GameEvent::SculkSensorTendrilsClicking));
     }
 }

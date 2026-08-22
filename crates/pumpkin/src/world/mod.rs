@@ -3575,6 +3575,9 @@ impl World {
         // Permissions, i.e. the commands a player may use.
         player.send_permission_lvl_update();
 
+        // The recipe book, sent right after permissions as `PlayerList.java:191` does.
+        player.send_initial_recipe_book().await;
+
         // Difficulty of the world
         player.send_difficulty_update().await;
         {
