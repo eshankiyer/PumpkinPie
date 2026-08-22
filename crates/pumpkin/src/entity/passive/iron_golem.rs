@@ -16,10 +16,13 @@ use rand::RngExt;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
-        defend_village_target::DefendVillageTargetGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal,
+        defend_village_target::DefendVillageTargetGoal,
+        golem_random_stroll_in_village::GolemRandomStrollInVillageGoal,
+        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
+        melee_attack::MeleeAttackGoal, move_back_to_village::MoveBackToVillageGoal,
+        move_towards_target::MoveTowardsTargetGoal,
         nearest_hostile_target::NearestHostileTargetGoal, offer_flower::OfferFlowerGoal,
-        revenge::RevengeGoal, wander_around::WanderAroundGoal,
+        revenge::RevengeGoal,
     },
     mob::{Mob, MobEntity},
     player::Player,
@@ -117,8 +120,14 @@ impl IronGolemEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(1, Box::new(MeleeAttackGoal::new(1.0, true)));
+            // `IronGolem.java:69-71`. Vanilla registers no plain `RandomStrollGoal` on the
+            // golem at all: `GolemRandomStrollInVillageGoal` at priority 4 *is* its stroll
+            // goal, which is why the previous stand-in `WanderAroundGoal(0.6)` at priority 6
+            // is removed here rather than kept alongside it.
+            goal_selector.add_goal(2, MoveTowardsTargetGoal::new(0.9, 32.0));
+            goal_selector.add_goal(2, MoveBackToVillageGoal::new(0.6, false));
+            goal_selector.add_goal(4, GolemRandomStrollInVillageGoal::new(0.6));
             goal_selector.add_goal(5, OfferFlowerGoal::new());
-            goal_selector.add_goal(6, Box::new(WanderAroundGoal::new(0.6)));
             goal_selector.add_goal(
                 7,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),

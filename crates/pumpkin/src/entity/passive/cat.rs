@@ -21,9 +21,10 @@ use crate::block::entities::sign::DyeColor;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
-        avoid_entity::AvoidEntityGoal, breed::BreedGoal, escape_danger::EscapeDangerGoal,
-        follow_owner::FollowOwnerGoal, follow_parent::FollowParentGoal,
-        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
+        avoid_entity::AvoidEntityGoal, breed::BreedGoal, cat_lie_on_bed::CatLieOnBedGoal,
+        cat_relax_on_owner::CatRelaxOnOwnerGoal, cat_sit_on_block::CatSitOnBlockGoal,
+        escape_danger::EscapeDangerGoal, follow_owner::FollowOwnerGoal,
+        leap_at_target::LeapAtTargetGoal, look_at_entity::LookAtEntityGoal,
         non_tame_random_target::NonTameRandomTargetGoal, ocelot_attack::OcelotAttackGoal,
         sit::SitGoal, swim::SwimGoal, tempt::TemptGoal, wander_around::WanderAroundGoal,
     },
@@ -170,6 +171,7 @@ impl CatEntity {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
             Arc::downgrade(&mob_arc)
         };
+        let cat_weak: Weak<Self> = Arc::downgrade(&mob_arc);
 
         {
             let mut goal_selector = mob_arc
@@ -183,6 +185,8 @@ impl CatEntity {
             // Goal 1: TamableAnimalPanicGoal (EscapeDangerGoal)
             goal_selector.add_goal(1, EscapeDangerGoal::new(1.5));
             goal_selector.add_goal(2, SitGoal::new());
+            // Cat.java:110 -- Goal 3: `Cat.CatRelaxOnOwnerGoal`.
+            goal_selector.add_goal(3, CatRelaxOnOwnerGoal::new(cat_weak.clone()));
             goal_selector.add_goal(4, Box::new(TemptGoal::new(0.6, TEMPT_ITEMS, true)));
             // Vanilla priority 4, `Cat.CatAvoidEntityGoal<Player>`: only present while untamed
             // (added here since a freshly spawned cat always starts untamed; removed by
@@ -200,10 +204,19 @@ impl CatEntity {
                     AVOID_PLAYER_FAST_SPEED,
                 )),
             );
-            goal_selector.add_goal(5, BreedGoal::new(0.8));
+            // Cat.java:112 -- Goal 5: `CatLieOnBedGoal(this, 1.1, 8)`.
+            goal_selector.add_goal(5, CatLieOnBedGoal::new(cat_weak.clone(), 1.1));
             goal_selector.add_goal(6, FollowOwnerGoal::new(1.0, 10.0, 5.0));
+            // Cat.java:114 -- Goal 7: `CatSitOnBlockGoal(this, 0.8)`.
+            goal_selector.add_goal(7, CatSitOnBlockGoal::new(cat_weak, 0.8));
+            // Cat.java:115 -- Goal 8: `LeapAtTargetGoal(this, 0.3F)`.
+            goal_selector.add_goal(8, LeapAtTargetGoal::new(0.3));
             goal_selector.add_goal(9, Box::new(OcelotAttackGoal::new()));
-            goal_selector.add_goal(9, Box::new(FollowParentGoal::new(0.8)));
+            // Cat.java:117 -- Goal 10: `BreedGoal(this, 0.8)`. Previously registered at 5, which
+            // put breeding ahead of lying on a bed and following its owner.
+            goal_selector.add_goal(10, BreedGoal::new(0.8));
+            // No `FollowParentGoal` is registered: `Cat.registerGoals` (Cat.java:105-123) has
+            // none, and neither does any supertype it inherits from.
             // Cat.java:118 -- Goal 11: WaterAvoidingRandomStrollGoal(this, 0.8, 1.0000001E-5F)
             goal_selector.add_goal(
                 11,
@@ -211,13 +224,12 @@ impl CatEntity {
                     0.8, 0.00001,
                 )),
             );
-            // Goal 12: LookAtPlayerGoal
+            // Cat.java:119 -- Goal 12: LookAtPlayerGoal(this, Player.class, 10.0F)
             goal_selector.add_goal(
                 12,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 10.0),
             );
-            // Goal 12: RandomLookAroundGoal
-            goal_selector.add_goal(12, Box::new(RandomLookAroundGoal::default()));
+            // No `RandomLookAroundGoal`: `Cat.registerGoals` (Cat.java:105-123) does not add one.
 
             let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
             target_selector.add_goal(

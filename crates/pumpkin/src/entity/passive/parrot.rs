@@ -17,7 +17,7 @@ use pumpkin_protocol::java::client::play::Metadata;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
-        escape_danger::EscapeDangerGoal, follow_owner::FollowOwnerGoal,
+        escape_danger::EscapeDangerGoal, follow_mob::FollowMobGoal, follow_owner::FollowOwnerGoal,
         look_at_entity::LookAtEntityGoal, sit::SitGoal, swim::SwimGoal,
         wander_around::WanderAroundGoal,
     },
@@ -65,9 +65,12 @@ impl ParrotEntity {
             // `Parrot.ParrotWanderGoal` only overrides the flying-navigation position search;
             // this codebase has no flying-stroll variant, so the water-avoiding stroll stands in.
             goal_selector.add_goal(2, Box::new(WanderAroundGoal::new_water_avoiding(1.0)));
-            // Priority 3 `LandOnOwnersShoulderGoal` and `FollowMobGoal` are not registered:
-            // neither shoulder-passenger support nor a `FollowMobGoal` exists here, and a goal
-            // that can never fire is worse than an absent one.
+            // `Parrot.java:168` -- priority 3 `LandOnOwnersShoulderGoal` is still NOT registered:
+            // it needs `Player.setEntityOnShoulder` / shoulder-passenger support, and grepping
+            // `crates/pumpkin/src` for "shoulder" finds nothing but this comment. A goal that can
+            // never fire is worse than an absent one.
+            // `Parrot.java:169` -- priority 3 `FollowMobGoal(this, 1.0, 3.0F, 7.0F)`.
+            goal_selector.add_goal(3, FollowMobGoal::new(1.0, 3.0, 7.0));
         };
 
         mob_arc
