@@ -3,13 +3,16 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI8, AtomicI32, Ordering};
 
+use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::world::WorldEvent;
 use pumpkin_nbt::compound::NbtCompound;
 
 use crate::entity::ai::goal::break_door::{self, BreakDoorGoal};
 use crate::entity::mob::equipment::RegionalDifficulty;
-use crate::entity::mob::zombie::{ZombieEntityBase, drowned::DrownedEntity};
+use crate::entity::mob::zombie::{
+    ZombieEntityBase, drowned::DrownedEntity, try_spawn_reinforcements,
+};
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     mob::{Mob, MobEntity},
@@ -187,6 +190,7 @@ impl NBTStorage for ZombieEntity {
 
     fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async {
+            self.entity.mark_restored_from_nbt();
             self.entity
                 .mob_entity
                 .living_entity
@@ -229,6 +233,24 @@ impl Mob for ZombieEntity {
                 let roll = BREAK_DOOR_CHANCE * difficulty.special_multiplier;
                 self.set_can_break_doors(rand::random::<f32>() < roll).await;
             }
+            // `Zombie::handleAttributes` (`Zombie.java:556`) forces door breaking on for a
+            // leader zombie, after `finalizeSpawn`'s own roll above.
+            if self.entity.is_leader.load(Ordering::Relaxed) {
+                self.set_can_break_doors(true).await;
+            }
+        })
+    }
+
+    /// `Zombie::hurtServer`'s reinforcement half (`Zombie.java:288-340`). `on_damage` only runs
+    /// once the hit landed, which is what vanilla's `if (!super.hurtServer(...)) return false;`
+    /// guarantees.
+    fn on_damage<'a>(
+        &'a self,
+        _damage_type: DamageType,
+        source: Option<&'a dyn EntityBase>,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            try_spawn_reinforcements(&self.entity.mob_entity, source).await;
         })
     }
 

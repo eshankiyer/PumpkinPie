@@ -3,6 +3,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicI32, Ordering},
 };
 
+use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::{EntityStatus, EntityType};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
@@ -319,6 +320,28 @@ impl NBTStorage for ZombieVillagerEntity {
 impl Mob for ZombieVillagerEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity.mob_entity
+    }
+
+    /// Delegates to `ZombieEntityBase`, which carries `Zombie::finalizeSpawn`'s
+    /// `handleAttributes` roll (`Zombie.java:505`) that every zombie variant inherits.
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move { self.mob_entity.mob_init_data_tracker().await })
+    }
+
+    /// `Zombie::hurtServer`'s reinforcement half (`Zombie.java:288-340`), inherited by
+    /// `ZombieVillager`.
+    fn on_damage<'a>(
+        &'a self,
+        _damage_type: DamageType,
+        source: Option<&'a dyn EntityBase>,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            crate::entity::mob::zombie::try_spawn_reinforcements(
+                &self.mob_entity.mob_entity,
+                source,
+            )
+            .await;
+        })
     }
 
     /// ZombieVillager.java:150-161 (`tick`): runs every tick while converting and alive.

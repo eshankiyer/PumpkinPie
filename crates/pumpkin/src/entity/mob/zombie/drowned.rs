@@ -4,7 +4,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Weak};
 
+use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
+use pumpkin_nbt::compound::NbtCompound;
 
 use crate::entity::ai::control::drowned_move_control::DrownedMoveControl;
 use crate::entity::ai::goal::drowned_attack::DrownedAttackGoal;
@@ -16,7 +18,7 @@ use crate::entity::ai::goal::non_tame_random_target::baby_turtle_on_land;
 use crate::entity::ai::goal::ranged_trident_attack::DrownedTridentAttackGoal;
 use crate::entity::mob::zombie::ZombieEntityBase;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
         active_target::ActiveTargetGoal, destroy_egg::DestroyEggGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal, revenge::RevengeGoal,
@@ -53,7 +55,7 @@ impl DrownedEntity {
         // `Drowned`'s own goal set avoids double-registering (this is the fix the file's old
         // "Fix duplicated" TODO was pointing at).
         let mob_entity = MobEntity::new(entity);
-        let base = Arc::new(ZombieEntityBase { mob_entity });
+        let base = Arc::new(ZombieEntityBase::from_mob_entity(mob_entity));
         let drowned = Self {
             entity: base,
             searching_for_land: AtomicBool::new(false),
@@ -198,11 +200,37 @@ impl DrownedEntity {
     }
 }
 
-impl NBTStorage for DrownedEntity {}
+impl NBTStorage for DrownedEntity {
+    /// `DrownedEntity` stores no extra NBT of its own; the override exists only to record that
+    /// this drowned came off disk, so `ZombieEntityBase` skips the fresh-spawn attribute roll.
+    fn read_nbt_non_mut<'a>(&'a self, _nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
+        Box::pin(async move {
+            self.entity.mark_restored_from_nbt();
+        })
+    }
+}
 
 impl Mob for DrownedEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.entity.mob_entity
+    }
+
+    /// Delegates to `ZombieEntityBase`, which carries `Zombie::finalizeSpawn`'s
+    /// `handleAttributes` roll (`Zombie.java:505`) that every zombie variant inherits.
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move { self.entity.mob_init_data_tracker().await })
+    }
+
+    /// `Zombie::hurtServer`'s reinforcement half (`Zombie.java:288-340`), inherited by `Drowned`.
+    fn on_damage<'a>(
+        &'a self,
+        _damage_type: DamageType,
+        source: Option<&'a dyn EntityBase>,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            crate::entity::mob::zombie::try_spawn_reinforcements(&self.entity.mob_entity, source)
+                .await;
+        })
     }
 
     fn wants_to_swim(&self) -> bool {
