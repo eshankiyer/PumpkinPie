@@ -92,6 +92,13 @@ const fn normalize_non_finite_damage(amount: f32) -> f32 {
     if amount.is_finite() { amount } else { f32::MAX }
 }
 
+/// Vanilla `Player.causeFallDamage` awards this statistic before delegating to the
+/// general fall-damage path. The threshold and rounding intentionally match
+/// `Math.round(fallDistance * 100.0)`.
+fn fall_one_cm_stat_amount(fall_distance: f32) -> Option<i32> {
+    (fall_distance >= 2.0).then_some((fall_distance * 100.0).round() as i32)
+}
+
 fn armor_resists_damage(stack: &ItemStack, damage_type: &DamageType) -> bool {
     let Some(resistant) = stack.get_data_component::<DamageResistantImpl>() else {
         return false;
@@ -2387,7 +2394,21 @@ impl LivingEntity {
         } else {
             false
         };
-        if may_fly || self.is_immune_to_fall_damage() {
+        if may_fly {
+            return;
+        }
+
+        // `Player.causeFallDamage` awards FALL_ONE_CM before its `super` call,
+        // so an otherwise immune player still receives the distance statistic.
+        if let Some(player) = caller.get_player()
+            && let Some(amount) = fall_one_cm_stat_amount(fall_distance)
+        {
+            player
+                .increment_custom_stat(CustomStatistic::FallOneCm, amount)
+                .await;
+        }
+
+        if self.is_immune_to_fall_damage() {
             return;
         }
 
@@ -6561,6 +6582,13 @@ mod tests {
     fn fall_flying_collision_damage_requires_meaningful_speed_loss() {
         assert_eq!(fall_flying_collision_damage(1.0, 0.8), None);
         assert_eq!(fall_flying_collision_damage(1.0, 0.5), Some(2.0));
+    }
+
+    #[test]
+    fn fall_one_cm_stat_uses_vanilla_threshold_and_rounding() {
+        assert_eq!(fall_one_cm_stat_amount(1.999), None);
+        assert_eq!(fall_one_cm_stat_amount(2.0), Some(200));
+        assert_eq!(fall_one_cm_stat_amount(2.345), Some(235));
     }
 
     #[test]
