@@ -77,6 +77,17 @@ pub struct RecipeResult {
 }
 
 impl RecipeResult {
+    /// Builds the crafted stack, matching vanilla `CraftingRecipe::assemble`.
+    #[must_use]
+    pub fn to_item_stack(&self) -> ItemStack {
+        let key = self
+            .item_id
+            .strip_prefix("minecraft:")
+            .unwrap_or(&self.item_id);
+        let item = Item::from_registry_key(key).unwrap_or(&Item::AIR);
+        ItemStack::new_with_component(self.count, item, self.component_patch.clone())
+    }
+
     fn new(item_id: String, count: u8) -> Self {
         Self {
             item_id,
@@ -757,88 +768,12 @@ impl ResultSlot {
     }
 
     async fn match_recipe(&self) -> Option<RecipeResult> {
-        let mut count: usize = 0;
-        let inventory_width = self.inventory.get_width();
-        let mut top_x = 9;
-        let mut top_y = 9;
-        let mut bottom_x = 0;
-        let mut bottom_y = 0;
-        for i in 0..self.inventory.size() {
-            let x = i % inventory_width;
-            let y = i / inventory_width;
-            let slot = self.inventory.get_stack(i).await;
-            if !slot.is_empty() {
-                top_x = top_x.min(x);
-                top_y = top_y.min(y);
-                bottom_x = bottom_x.max(x);
-                bottom_y = bottom_y.max(y);
-                count += 1;
-            }
-        }
-        if count == 0 {
-            return None;
-        }
-        let input_width = bottom_x + 1 - top_x;
-        let input_height = bottom_y + 1 - top_y;
-
-        for recipe in RECIPES_CRAFTING {
-            if let Some(result) = recipe_matches(
-                GenericRecipe::Vanilla(recipe),
-                input_height,
-                input_width,
-                top_x,
-                top_y,
-                count,
-                &*self.inventory,
-            )
-            .await
-            {
-                return Some(result);
-            }
-        }
-
-        if let Some(provider) = &self.recipe_provider {
-            let dynamic = provider.get_dynamic_recipes().await;
-            for recipe in &dynamic {
-                if let DynamicRecipe::Crafting(crafting) = recipe
-                    && let Some(result) = recipe_matches(
-                        GenericRecipe::Dynamic(crafting),
-                        input_height,
-                        input_width,
-                        top_x,
-                        top_y,
-                        count,
-                        &*self.inventory,
-                    )
-                    .await
-                {
-                    return Some(result);
-                }
-            }
-        }
-
-        let mut items = Vec::with_capacity(count);
-        for i in 0..self.inventory.size() {
-            let slot = self.inventory.get_stack(i).await;
-            if !slot.is_empty() {
-                items.push((i, slot));
-            }
-        }
-        match_special_recipe(&items)
+        match_crafting_recipe(&*self.inventory, self.recipe_provider.as_deref()).await
     }
 
     async fn refill_output(&self) -> ItemStack {
         let (result, remaining_items) = if let Some(matched) = self.match_recipe().await {
-            let key = matched
-                .item_id
-                .strip_prefix("minecraft:")
-                .unwrap_or(&matched.item_id);
-            let item = pumpkin_data::item::Item::from_registry_key(key)
-                .unwrap_or(&pumpkin_data::item::Item::AIR);
-            (
-                ItemStack::new_with_component(matched.count, item, matched.component_patch),
-                matched.remaining_items,
-            )
+            (matched.to_item_stack(), matched.remaining_items)
         } else {
             (ItemStack::EMPTY.clone(), Vec::new())
         };
@@ -846,6 +781,88 @@ impl ResultSlot {
         *self.remaining_items.lock().await = remaining_items;
         result
     }
+}
+
+/// Looks up the crafting recipe a grid currently satisfies.
+///
+/// This is vanilla's `RecipeManager::getRecipeFor(RecipeTypes.CRAFTING, input, level)`,
+/// reached from `AbstractCraftingMenu.slotsChanged` for menus and from
+/// `CrafterBlock.getPotentialResults` (`CrafterBlock.java:184-186`) for the crafter
+/// block. Vanilla's `CraftingInput.ofPositioned` (`CraftingContainer.java:19-21`) trims
+/// the empty border of the grid before matching, which is what the bounding box below
+/// reproduces.
+pub async fn match_crafting_recipe(
+    inventory: &dyn RecipeInputInventory,
+    recipe_provider: Option<&dyn RecipeProvider>,
+) -> Option<RecipeResult> {
+    let mut count: usize = 0;
+    let inventory_width = inventory.get_width();
+    let mut top_x = 9;
+    let mut top_y = 9;
+    let mut bottom_x = 0;
+    let mut bottom_y = 0;
+    for i in 0..inventory.size() {
+        let x = i % inventory_width;
+        let y = i / inventory_width;
+        let slot = inventory.get_stack(i).await;
+        if !slot.is_empty() {
+            top_x = top_x.min(x);
+            top_y = top_y.min(y);
+            bottom_x = bottom_x.max(x);
+            bottom_y = bottom_y.max(y);
+            count += 1;
+        }
+    }
+    if count == 0 {
+        return None;
+    }
+    let input_width = bottom_x + 1 - top_x;
+    let input_height = bottom_y + 1 - top_y;
+
+    for recipe in RECIPES_CRAFTING {
+        if let Some(result) = recipe_matches(
+            GenericRecipe::Vanilla(recipe),
+            input_height,
+            input_width,
+            top_x,
+            top_y,
+            count,
+            inventory,
+        )
+        .await
+        {
+            return Some(result);
+        }
+    }
+
+    if let Some(provider) = recipe_provider {
+        let dynamic = provider.get_dynamic_recipes().await;
+        for recipe in &dynamic {
+            if let DynamicRecipe::Crafting(crafting) = recipe
+                && let Some(result) = recipe_matches(
+                    GenericRecipe::Dynamic(crafting),
+                    input_height,
+                    input_width,
+                    top_x,
+                    top_y,
+                    count,
+                    inventory,
+                )
+                .await
+            {
+                return Some(result);
+            }
+        }
+    }
+
+    let mut items = Vec::with_capacity(count);
+    for i in 0..inventory.size() {
+        let slot = inventory.get_stack(i).await;
+        if !slot.is_empty() {
+            items.push((i, slot));
+        }
+    }
+    match_special_recipe(&items)
 }
 
 /// Applies vanilla's crafting-remainder precedence to one input slot.
@@ -1506,5 +1523,76 @@ mod special_recipe_tests {
             (2, ItemStack::new(1, &Item::WRITABLE_BOOK)),
         ];
         assert!(super::match_book_cloning(&items).is_none());
+    }
+}
+
+#[cfg(test)]
+mod match_crafting_recipe_tests {
+    use super::*;
+    use crate::crafting::crafting_inventory::CraftingInventory;
+    use pumpkin_data::item::Item;
+
+    async fn grid(slots: &[(usize, &'static Item)]) -> CraftingInventory {
+        let inventory = CraftingInventory::new(3, 3);
+        for (slot, item) in slots {
+            inventory.set_stack(*slot, ItemStack::new(1, item)).await;
+        }
+        inventory
+    }
+
+    #[tokio::test]
+    async fn empty_grid_matches_nothing() {
+        let inventory = grid(&[]).await;
+        assert!(match_crafting_recipe(&inventory, None).await.is_none());
+    }
+
+    /// A shaped recipe in the top-left corner: `CraftingInput.ofPositioned` trims the
+    /// empty border, so the 2x2 pattern matches inside a 3x3 grid.
+    #[tokio::test]
+    async fn shaped_recipe_matches_in_a_trimmed_corner() {
+        let inventory = grid(&[
+            (0, &Item::OAK_PLANKS),
+            (1, &Item::OAK_PLANKS),
+            (3, &Item::OAK_PLANKS),
+            (4, &Item::OAK_PLANKS),
+        ])
+        .await;
+        let result = match_crafting_recipe(&inventory, None)
+            .await
+            .expect("four planks are a crafting table");
+        assert_eq!(result.item_id, "minecraft:crafting_table");
+        assert!(result.to_item_stack().item == &Item::CRAFTING_TABLE);
+    }
+
+    /// The same four planks offset into the bottom-right corner must still match.
+    #[tokio::test]
+    async fn shaped_recipe_matches_when_offset() {
+        let inventory = grid(&[
+            (4, &Item::OAK_PLANKS),
+            (5, &Item::OAK_PLANKS),
+            (7, &Item::OAK_PLANKS),
+            (8, &Item::OAK_PLANKS),
+        ])
+        .await;
+        let result = match_crafting_recipe(&inventory, None)
+            .await
+            .expect("four planks are a crafting table");
+        assert_eq!(result.item_id, "minecraft:crafting_table");
+    }
+
+    #[tokio::test]
+    async fn an_uncraftable_ingredient_matches_nothing() {
+        let inventory = grid(&[(0, &Item::DIRT), (1, &Item::DIRT)]).await;
+        assert!(match_crafting_recipe(&inventory, None).await.is_none());
+    }
+
+    /// A one-slot shapeless recipe still matches after trimming to a 1x1 input.
+    #[tokio::test]
+    async fn single_slot_recipe_matches() {
+        let inventory = grid(&[(4, &Item::OAK_PLANKS)]).await;
+        let result = match_crafting_recipe(&inventory, None)
+            .await
+            .expect("one plank is a button");
+        assert_eq!(result.item_id, "minecraft:oak_button");
     }
 }

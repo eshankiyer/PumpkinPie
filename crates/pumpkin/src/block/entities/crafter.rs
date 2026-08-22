@@ -1,10 +1,14 @@
 use crate::block::entities::{BlockEntity, PropertyDelegate};
+use crate::world::World;
 use pumpkin_data::BlockDirection;
+use pumpkin_data::block_properties::{BlockProperties, CrafterLikeProperties};
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_inventory::crafting::recipes::RecipeInputInventory;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture, sync_write_items_to_nbt};
+use pumpkin_world::world::BlockFlags;
 use std::any::Any;
 use std::array::from_fn;
 use std::pin::Pin;
@@ -88,6 +92,36 @@ impl BlockEntity for CrafterBlockEntity {
             }
         }
         crafter
+    }
+
+    /// Vanilla `CrafterBlockEntity.serverTick` (`CrafterBlockEntity.java:236-245`):
+    /// counts the crafting animation down and clears `CRAFTING` when it reaches zero.
+    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            let remaining = self.crafting_ticks_remaining.load(Ordering::Relaxed) - 1;
+            if remaining < 0 {
+                return;
+            }
+            self.crafting_ticks_remaining
+                .store(remaining, Ordering::Relaxed);
+            if remaining != 0 {
+                return;
+            }
+            let block = world.get_block(&self.position);
+            let state = world.get_block_state(&self.position);
+            let mut props = CrafterLikeProperties::from_state_id(state.id, block);
+            if !props.crafting {
+                return;
+            }
+            props.crafting = false;
+            world
+                .set_block_state(
+                    &self.position,
+                    props.to_state_id(block),
+                    BlockFlags::NOTIFY_ALL,
+                )
+                .await;
+        })
     }
 
     fn resource_location(&self) -> &'static str {
@@ -206,6 +240,13 @@ impl CrafterBlockEntity {
         }
     }
 
+    /// Vanilla `CrafterBlockEntity.setCraftingTicksRemaining`
+    /// (`CrafterBlockEntity.java:247-249`).
+    pub fn set_crafting_ticks_remaining(&self, ticks: i32) {
+        self.crafting_ticks_remaining
+            .store(ticks, Ordering::Relaxed);
+    }
+
     /// Vanilla `CrafterBlockEntity.isSlotDisabled`.
     #[must_use]
     pub fn is_slot_disabled(&self, slot: usize) -> bool {
@@ -284,6 +325,20 @@ impl Inventory for CrafterBlockEntity {
     }
 }
 
+/// Vanilla `CrafterBlockEntity.getWidth`/`getHeight` (`CrafterBlockEntity.java:195-203`):
+/// the crafter is a `CraftingContainer`, so its nine slots are a 3x3 recipe grid.
+/// Disabled slots are simply empty ones, so they need no special handling here -
+/// `asCraftInput` (`CraftingContainer.java:15-21`) reads the raw item list.
+impl RecipeInputInventory for CrafterBlockEntity {
+    fn get_width(&self) -> usize {
+        3
+    }
+
+    fn get_height(&self) -> usize {
+        3
+    }
+}
+
 impl Clearable for CrafterBlockEntity {
     fn clear(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         Box::pin(async move {
@@ -291,5 +346,57 @@ impl Clearable for CrafterBlockEntity {
             items.fill_with(|| ItemStack::EMPTY.clone());
             self.mark_dirty();
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CrafterBlockEntity;
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
+    use pumpkin_inventory::crafting::crafting_screen_handler::match_crafting_recipe;
+    use pumpkin_util::math::position::BlockPos;
+    use pumpkin_world::inventory::Inventory;
+
+    fn crafter() -> CrafterBlockEntity {
+        CrafterBlockEntity::new(BlockPos::new(0, 0, 0))
+    }
+
+    /// The crafter is a `CraftingContainer`, so `CrafterBlock.dispenseFrom` can look a
+    /// recipe up straight out of its nine slots (`CrafterBlock.java:152-153`).
+    #[tokio::test]
+    async fn crafter_contents_are_a_recipe_input() {
+        let crafter = crafter();
+        for slot in [0, 1, 3, 4] {
+            crafter
+                .set_stack(slot, ItemStack::new(1, &Item::OAK_PLANKS))
+                .await;
+        }
+        let result = match_crafting_recipe(&crafter, None)
+            .await
+            .expect("four planks are a crafting table");
+        assert_eq!(result.item_id, "minecraft:crafting_table");
+    }
+
+    /// A disabled slot is an empty one, so it just shrinks the trimmed input.
+    #[tokio::test]
+    async fn a_disabled_slot_does_not_block_a_match() {
+        let crafter = crafter();
+        crafter.set_slot_state(8, false).await;
+        for slot in [0, 1, 3, 4] {
+            crafter
+                .set_stack(slot, ItemStack::new(1, &Item::OAK_PLANKS))
+                .await;
+        }
+        assert!(crafter.is_slot_disabled(8));
+        assert!(match_crafting_recipe(&crafter, None).await.is_some());
+    }
+
+    #[tokio::test]
+    async fn an_unmatched_grid_yields_no_recipe() {
+        let crafter = crafter();
+        crafter.set_stack(0, ItemStack::new(1, &Item::DIRT)).await;
+        crafter.set_stack(4, ItemStack::new(1, &Item::DIRT)).await;
+        assert!(match_crafting_recipe(&crafter, None).await.is_none());
     }
 }
