@@ -4162,8 +4162,11 @@ impl World {
             if let Ok(data) = java_client.serialize_packet(&settings_packet) {
                 java_client.send_packet_now(data).await;
             }
+            // Additive, not a replace: `send_initial_recipe_book` has already sent this
+            // player's own unlocked set, and `replace = true` here would wipe it. Dynamic
+            // plugin recipes are an extension on top of that set, not a substitute for it.
             let dynamic_recipes = server.recipe_manager.get_dynamic_recipes().await;
-            let add_packet = CRecipeBookAdd::new(true, &dynamic_recipes);
+            let add_packet = CRecipeBookAdd::new(false, &dynamic_recipes);
             if let Ok(data) = java_client.serialize_packet(&add_packet) {
                 java_client.send_packet_now(data).await;
             }

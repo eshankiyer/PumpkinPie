@@ -1065,3 +1065,400 @@ fn write_dynamic_cooking_entry(
     write.write_u8(flags)?;
     Ok(())
 }
+
+/// One `ClientboundRecipeBookAddPacket.Entry`
+/// (`ClientboundRecipeBookAddPacket.java:29-50`) named by the display id the static
+/// recipe tables assign it, plus the two flag bits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecipeBookEntry {
+    /// `RecipeDisplayEntry.id` (`RecipeDisplayId.java:7`).
+    pub display_id: i32,
+    /// `FLAG_NOTIFICATION` (`ClientboundRecipeBookAddPacket.java:30`).
+    pub notification: bool,
+    /// `FLAG_HIGHLIGHT` (`ClientboundRecipeBookAddPacket.java:31`).
+    pub highlight: bool,
+}
+
+impl RecipeBookEntry {
+    /// A newly unlocked recipe, `ServerRecipeBook.addRecipes`
+    /// (`ServerRecipeBook.java:70-72`): notification from the recipe's own
+    /// `showNotification`, highlight always set.
+    #[must_use]
+    pub fn unlocked(display_id: i32) -> Self {
+        Self {
+            display_id,
+            notification: show_notification(display_id),
+            highlight: true,
+        }
+    }
+
+    /// The `flags` byte, `ClientboundRecipeBookAddPacket.Entry`
+    /// (`ClientboundRecipeBookAddPacket.java:40-42`): bit 0 notification, bit 1
+    /// highlight. Unlike [`entry_flags`], vanilla never clears these for a
+    /// `replace` packet.
+    #[must_use]
+    pub const fn flags(&self) -> u8 {
+        (if self.notification {
+            ENTRY_FLAG_NOTIFICATION
+        } else {
+            0
+        }) | (if self.highlight {
+            ENTRY_FLAG_HIGHLIGHT
+        } else {
+            0
+        })
+    }
+
+    /// An already-known recipe, `ServerRecipeBook.sendInitialRecipeBook`
+    /// (`ServerRecipeBook.java:117`): notification never set, highlight only for a
+    /// recipe the player has not seen displayed yet.
+    #[must_use]
+    pub const fn known(display_id: i32, highlight: bool) -> Self {
+        Self {
+            display_id,
+            notification: false,
+            highlight,
+        }
+    }
+}
+
+/// `Recipe.showNotification()` for the recipe that carries this display id.
+/// Only shaped crafting recipes model the flag; everything else defaults to true,
+/// exactly as [`CRecipeBookAdd`] assumes.
+#[must_use]
+fn show_notification(display_id: i32) -> bool {
+    let mut index = 0;
+    for recipe in RECIPES_CRAFTING {
+        let notification = match recipe {
+            CraftingRecipeTypes::CraftingShaped {
+                show_notification, ..
+            } => *show_notification,
+            CraftingRecipeTypes::CraftingShapeless { .. }
+            | CraftingRecipeTypes::CraftingTransmute { .. } => true,
+            CraftingRecipeTypes::CraftingDecoratedPot { .. }
+            | CraftingRecipeTypes::CraftingSpecial => continue,
+        };
+        if index == display_id {
+            return notification;
+        }
+        index += 1;
+    }
+    true
+}
+
+/// `ClientboundRecipeBookAddPacket` carrying a per-player subset.
+///
+/// A subset is what vanilla always sends: `ServerRecipeBook.addRecipes`
+/// (`ServerRecipeBook.java:61-80`) sends only the newly unlocked entries with
+/// `replace = false`, and `ServerRecipeBook.sendInitialRecipeBook`
+/// (`ServerRecipeBook.java:112-121`) sends the known set with `replace = true`.
+///
+/// [`CRecipeBookAdd`] emits every entry of `RECIPES_CRAFTING` and `RECIPES_COOKING`
+/// unconditionally and so cannot express either; this type shares its entry writer
+/// and its display-id numbering, so an entry written here is byte-identical to the
+/// same entry written there.
+///
+/// Note that vanilla's per-entry flags are independent of `replace`
+/// (`ClientboundRecipeBookAddPacket.java:40-42`), unlike [`entry_flags`], which
+/// zeroes them whenever `replace` is set.
+#[java_packet(RECIPE_BOOK_ADD)]
+pub struct CRecipeBookAddSubset<'a> {
+    pub replace: bool,
+    pub entries: &'a [RecipeBookEntry],
+}
+
+impl<'a> CRecipeBookAddSubset<'a> {
+    #[must_use]
+    pub const fn new(replace: bool, entries: &'a [RecipeBookEntry]) -> Self {
+        Self { replace, entries }
+    }
+}
+
+/// The five crafting-station items every `RecipeDisplay` names.
+struct Stations {
+    crafting_table: &'static Item,
+    furnace: &'static Item,
+    blast_furnace: &'static Item,
+    smoker: &'static Item,
+    campfire: &'static Item,
+}
+
+impl Stations {
+    fn resolve() -> Result<Self, WritingError> {
+        let get = |key: &str| {
+            Item::from_registry_key(key)
+                .ok_or_else(|| WritingError::Message(format!("{key} item must exist")))
+        };
+        Ok(Self {
+            crafting_table: get("crafting_table")?,
+            furnace: get("furnace")?,
+            blast_furnace: get("blast_furnace")?,
+            smoker: get("smoker")?,
+            campfire: get("campfire")?,
+        })
+    }
+}
+
+/// Shared state of one subset write: the display-id cursor and the group-id table,
+/// both advanced for every eligible recipe so that a selected entry lands on exactly
+/// the id and group [`CRecipeBookAdd`] would have given it.
+struct SubsetWriter<'a> {
+    wanted: HashMap<i32, RecipeBookEntry>,
+    stations: Stations,
+    version: JavaMinecraftVersion,
+    body: Vec<u8>,
+    written: i32,
+    display_id: i32,
+    group_ids: HashMap<Cow<'a, str>, i32>,
+    next_group_id: i32,
+}
+
+impl SubsetWriter<'_> {
+    fn write_crafting(&mut self) -> Result<(), WritingError> {
+        for recipe in RECIPES_CRAFTING {
+            let group = match recipe {
+                CraftingRecipeTypes::CraftingShaped { group, .. }
+                | CraftingRecipeTypes::CraftingShapeless { group, .. }
+                | CraftingRecipeTypes::CraftingTransmute { group, .. } => group.map(Cow::Borrowed),
+                // No display, no display id: `CRecipeBookAdd` skips these too.
+                CraftingRecipeTypes::CraftingDecoratedPot { .. }
+                | CraftingRecipeTypes::CraftingSpecial => continue,
+            };
+            let group_id =
+                resolve_group_id_owned(&mut self.group_ids, &mut self.next_group_id, group);
+            if let Some(entry) = self.wanted.get(&self.display_id).copied() {
+                self.emit(entry, group_id, Some(recipe), None)?;
+            }
+            self.display_id += 1;
+        }
+        Ok(())
+    }
+
+    fn write_cooking(&mut self) -> Result<(), WritingError> {
+        for recipe in RECIPES_COOKING {
+            let (book_category, group) = cooking_category_and_group(recipe);
+            let group_id = resolve_group_id_owned(
+                &mut self.group_ids,
+                &mut self.next_group_id,
+                group.map(Cow::Borrowed),
+            );
+            if let Some(entry) = self.wanted.get(&self.display_id).copied() {
+                self.emit(entry, group_id, None, Some((recipe, book_category)))?;
+            }
+            self.display_id += 1;
+        }
+        Ok(())
+    }
+
+    fn emit(
+        &mut self,
+        entry: RecipeBookEntry,
+        group_id: Option<i32>,
+        crafting_recipe: Option<&CraftingRecipeTypes>,
+        cooking_recipe: Option<(&CookingRecipeType, i32)>,
+    ) -> Result<(), WritingError> {
+        if write_entry(
+            &mut self.body,
+            self.display_id,
+            self.version,
+            group_id,
+            entry.flags(),
+            self.stations.crafting_table,
+            self.stations.furnace,
+            self.stations.blast_furnace,
+            self.stations.smoker,
+            self.stations.campfire,
+            crafting_recipe,
+            cooking_recipe,
+        )? {
+            self.written += 1;
+        }
+        Ok(())
+    }
+}
+
+/// The recipe-book category id and group of one cooking recipe, matching what
+/// [`CRecipeBookAdd`] derives for the same entry.
+const fn cooking_category_and_group(recipe: &CookingRecipeType) -> (i32, Option<&'static str>) {
+    match recipe {
+        CookingRecipeType::Smelting(r) => (
+            match r.category {
+                RecipeCategoryTypes::Food => CATEGORY_FURNACE_FOOD,
+                RecipeCategoryTypes::Blocks => CATEGORY_FURNACE_BLOCKS,
+                _ => CATEGORY_FURNACE_MISC,
+            },
+            r.group,
+        ),
+        CookingRecipeType::Blasting(r) => (
+            match r.category {
+                RecipeCategoryTypes::Blocks => CATEGORY_BLAST_FURNACE_BLOCKS,
+                _ => CATEGORY_BLAST_FURNACE_MISC,
+            },
+            r.group,
+        ),
+        CookingRecipeType::Smoking(r) => (CATEGORY_SMOKER_FOOD, r.group),
+        CookingRecipeType::CampfireCooking(r) => (CATEGORY_CAMPFIRE, r.group),
+    }
+}
+
+impl ClientPacket for CRecipeBookAddSubset<'_> {
+    fn write_packet_data(
+        &self,
+        write: impl Write,
+        version: &JavaMinecraftVersion,
+    ) -> Result<(), WritingError> {
+        let mut write = write;
+        let mut writer = SubsetWriter {
+            wanted: self
+                .entries
+                .iter()
+                .map(|entry| (entry.display_id, *entry))
+                .collect(),
+            stations: Stations::resolve()?,
+            version: *version,
+            // Entries go into a scratch buffer first so the leading count can never
+            // disagree with the number of entries that actually got written.
+            body: Vec::new(),
+            written: 0,
+            display_id: 0,
+            group_ids: HashMap::new(),
+            next_group_id: 0,
+        };
+
+        writer.write_crafting()?;
+        writer.write_cooking()?;
+
+        write.write_var_int(&VarInt(writer.written))?;
+        write.write_slice(&writer.body)?;
+        write.write_bool(self.replace)?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const VERSION: JavaMinecraftVersion = JavaMinecraftVersion::V_26_2;
+
+    fn encode_subset(replace: bool, entries: &[RecipeBookEntry]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        CRecipeBookAddSubset::new(replace, entries)
+            .write_packet_data(&mut buf, &VERSION)
+            .expect("write");
+        buf
+    }
+
+    #[test]
+    fn empty_subset_is_count_zero_then_the_replace_flag() {
+        assert_eq!(encode_subset(false, &[]), vec![0x00, 0x00]);
+        assert_eq!(encode_subset(true, &[]), vec![0x00, 0x01]);
+    }
+
+    #[test]
+    fn entry_count_leads_and_replace_flag_trails() {
+        let bytes = encode_subset(
+            true,
+            &[RecipeBookEntry {
+                display_id: 0,
+                notification: false,
+                highlight: false,
+            }],
+        );
+        assert_eq!(bytes[0], 0x01, "one entry");
+        // The entry's own first byte is its RecipeDisplayId VarInt.
+        assert_eq!(bytes[1], 0x00);
+        assert_eq!(*bytes.last().expect("non-empty"), 0x01, "replace = true");
+    }
+
+    #[test]
+    fn flags_byte_is_the_last_byte_of_an_entry_and_ignores_replace() {
+        for (notification, highlight, expected) in [
+            (false, false, 0x00u8),
+            (true, false, 0x01),
+            (false, true, 0x02),
+            (true, true, 0x03),
+        ] {
+            for replace in [false, true] {
+                let bytes = encode_subset(
+                    replace,
+                    &[RecipeBookEntry {
+                        display_id: 0,
+                        notification,
+                        highlight,
+                    }],
+                );
+                let len = bytes.len();
+                assert_eq!(
+                    bytes[len - 2],
+                    expected,
+                    "flags for ({notification}, {highlight}, replace={replace})"
+                );
+            }
+        }
+    }
+
+    /// An entry written here must be byte-identical to the same entry written by the
+    /// full-table writer, so the client's `RecipeDisplayId`s keep meaning the same
+    /// recipe whichever packet delivered them.
+    #[test]
+    fn subset_entries_match_the_full_packet_byte_for_byte() {
+        let full = {
+            let mut buf = Vec::new();
+            CRecipeBookAdd::new(false, &[])
+                .write_packet_data(&mut buf, &VERSION)
+                .expect("write");
+            buf
+        };
+
+        // The full packet is: VarInt count, entries..., replace bool. Its per-entry
+        // flags are notification|highlight with highlight = !replace, so replace=false
+        // gives highlight = true.
+        let mut cursor = 0usize;
+        let (total, len) = read_var_int(&full[cursor..]);
+        cursor += len;
+        assert!(total > 8, "expected a populated recipe table, got {total}");
+
+        // Walk every entry by re-encoding each one alone and matching the prefix,
+        // which both locates the boundary and proves the bytes are equal. Covering
+        // the whole table is what catches cooking-category and group-id drift.
+        for display_id in 0..total {
+            let one = encode_subset(
+                false,
+                &[RecipeBookEntry {
+                    display_id,
+                    notification: show_notification(display_id),
+                    highlight: true,
+                }],
+            );
+            // Strip the leading count (0x01) and the trailing replace flag.
+            let entry = &one[1..one.len() - 1];
+            assert_eq!(
+                &full[cursor..cursor + entry.len()],
+                entry,
+                "entry {display_id} differs between the full and subset writers"
+            );
+            cursor += entry.len();
+        }
+        assert_eq!(
+            cursor,
+            full.len() - 1,
+            "the full packet must be exactly its entries plus the trailing replace flag"
+        );
+    }
+
+    fn read_var_int(bytes: &[u8]) -> (i32, usize) {
+        let mut value: i32 = 0;
+        let mut position = 0;
+        let mut index = 0;
+        loop {
+            let byte = bytes[index];
+            value |= i32::from(byte & 0x7F) << position;
+            index += 1;
+            if byte & 0x80 == 0 {
+                return (value, index);
+            }
+            position += 7;
+        }
+    }
+}

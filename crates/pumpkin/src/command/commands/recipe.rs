@@ -10,7 +10,6 @@ use crate::command::suggestion::suggestions::{Suggestions, SuggestionsBuilder};
 use crate::entity::EntityBase;
 use pumpkin_data::translation;
 use pumpkin_protocol::codec::recipe::DynamicRecipe;
-use pumpkin_protocol::java::client::play::CRecipeBookAdd;
 use pumpkin_util::PermissionLvl;
 use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
 use pumpkin_util::text::TextComponent;
@@ -108,15 +107,14 @@ impl CommandExecutor for RecipeGiveExecutor {
             }
 
             let recipe_count = matching_recipes.len();
-            let packet = CRecipeBookAdd::new(false, &matching_recipes);
 
             for player in &targets {
-                // Record the unlock, not just the packet: `/recipe give` is
-                // `ServerPlayer.awardRecipes`, so the ids have to enter the player's book or
-                // they are forgotten the moment they reconnect.
+                // `/recipe give` is `ServerPlayer.awardRecipes`: the unlock has to enter the
+                // player's book, or it is forgotten on reconnect. `award_recipes` also sends
+                // the subset add packet, so sending a full-table add here as well would
+                // overwrite the per-player set that was just established.
                 let ids: Vec<String> = matching_recipes.iter().map(get_recipe_id).collect();
                 player.award_recipes(ids.iter().map(String::as_str)).await;
-                player.send_client_packet(&packet).await;
             }
 
             let recipe_count_str = recipe_count.to_string();
@@ -195,11 +193,12 @@ impl CommandExecutor for RecipeTakeExecutor {
                 all_recipes.len() - remaining_recipes.len()
             };
 
-            let packet = CRecipeBookAdd::new(true, &remaining_recipes);
             for player in &targets {
+                // `reset_recipes` sends the remove packet naming exactly the display ids it
+                // dropped, which is what `ServerRecipeBook.removeRecipes` does. A full-table
+                // add here would re-add everything it had just removed.
                 let ids: Vec<String> = all_recipes.iter().map(get_recipe_id).collect();
                 player.reset_recipes(ids.iter().map(String::as_str)).await;
-                player.send_client_packet(&packet).await;
             }
 
             let taken_count_str = taken_count.to_string();

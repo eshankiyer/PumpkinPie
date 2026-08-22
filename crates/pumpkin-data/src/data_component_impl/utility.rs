@@ -3,6 +3,7 @@ use crc_fast::CrcAlgorithm::Crc32Iscsi;
 use crc_fast::Digest;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
+use std::borrow::Cow;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct DyeImpl;
@@ -548,8 +549,98 @@ impl DataComponentImpl for JukeboxPlayableImpl {
     default_impl!(JukeboxPlayable);
 }
 
+/// `DataComponents.RECIPES` (`DataComponents.java:290-292`): a plain list of recipe
+/// keys, persisted with `Recipe.KEY_CODEC.listOf()` (`Recipe.java:20`, a
+/// `ResourceKey` codec, i.e. a string). The type declares no
+/// `networkSynchronized` codec, so its wire form is the `fromCodecWithRegistries`
+/// fallback (`DataComponentType.java:70-76`) - the NBT tag itself.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct RecipesImpl;
+pub struct RecipesImpl {
+    pub recipes: Cow<'static, [Cow<'static, str>]>,
+}
+
+/// The empty list, so that `&RecipesImpl` keeps naming a valid `'static` value in
+/// the generated item table (`generated/item.rs`), which is not editable here.
+/// A struct and a const may share a name because they live in different namespaces.
+#[allow(non_upper_case_globals)]
+pub const RecipesImpl: RecipesImpl = RecipesImpl {
+    recipes: Cow::Borrowed(&[]),
+};
+
+impl RecipesImpl {
+    #[must_use]
+    pub fn from_ids(ids: Vec<String>) -> Self {
+        Self {
+            recipes: Cow::Owned(ids.into_iter().map(Cow::Owned).collect()),
+        }
+    }
+
+    pub fn read_data(data: &NbtTag) -> Option<Self> {
+        let list = data.extract_list()?;
+        let mut ids = Vec::with_capacity(list.len());
+        for tag in list {
+            ids.push(Cow::Owned(tag.extract_string()?.to_owned()));
+        }
+        Some(Self {
+            recipes: Cow::Owned(ids),
+        })
+    }
+}
+
 impl DataComponentImpl for RecipesImpl {
+    fn write_data(&self) -> NbtTag {
+        NbtTag::List(
+            self.recipes
+                .iter()
+                .map(|id| NbtTag::String(id.as_ref().into()))
+                .collect(),
+        )
+    }
+    /// `HashOps.createList` (`HashOps.java:153-159`): tag 4, each element hash as
+    /// little-endian bytes, tag 5. Elements are `HashOps.createString`
+    /// (`HashOps.java:123-125`), which is what [`get_str_hash`] implements.
+    fn get_hash(&self) -> i32 {
+        let mut digest = Digest::new(Crc32Iscsi);
+        digest.update(&[4u8]);
+        for id in self.recipes.iter() {
+            digest.update(&get_str_hash(id).to_le_bytes());
+        }
+        digest.update(&[5u8]);
+        digest.finalize() as i32
+    }
     default_impl!(Recipes);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DataComponentImpl, RecipesImpl};
+    use pumpkin_nbt::tag::NbtTag;
+    use std::borrow::Cow;
+
+    /// `Recipe.KEY_CODEC.listOf()` persists as a plain NBT list of strings.
+    #[test]
+    fn recipes_round_trip_through_nbt() {
+        let value = RecipesImpl {
+            recipes: Cow::Owned(vec![
+                Cow::Borrowed("minecraft:stick"),
+                Cow::Borrowed("minecraft:torch"),
+            ]),
+        };
+        let tag = value.write_data();
+        assert_eq!(
+            tag,
+            NbtTag::List(vec![
+                NbtTag::String("minecraft:stick".into()),
+                NbtTag::String("minecraft:torch".into()),
+            ])
+        );
+        assert_eq!(RecipesImpl::read_data(&tag), Some(value));
+    }
+
+    /// The const of the same name keeps `&RecipesImpl` valid in the generated item
+    /// table, and must stay the empty list vanilla's `getOrDefault` falls back to.
+    #[test]
+    fn the_default_recipes_component_is_empty() {
+        assert!(super::RecipesImpl.recipes.is_empty());
+    }
 }

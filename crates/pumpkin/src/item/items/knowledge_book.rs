@@ -20,15 +20,20 @@ impl ItemMetadata for KnowledgeBookItem {
 }
 
 /// The recipe ids listed by the stack's `minecraft:recipes` component
-/// (`DataComponents.RECIPES`, read at `KnowledgeBookItem.java:29`).
-///
-/// `RecipesImpl` in `pumpkin-data` is a unit struct with no payload, so the list is
-/// always empty and a knowledge book behaves as vanilla's does when its component is
-/// absent: the book is consumed and the use fails. Giving `RecipesImpl` a
-/// `Vec<String>` field is the only change needed here for the full behaviour.
+/// (`itemStack.getOrDefault(DataComponents.RECIPES, List.of())`,
+/// `KnowledgeBookItem.java:29`). An absent component reads as the empty list, which
+/// is what makes an unwritten knowledge book consume itself and fail.
 fn recipe_ids(stack: &ItemStack) -> Vec<String> {
-    let _present = stack.get_data_component::<RecipesImpl>();
-    Vec::new()
+    stack
+        .get_data_component::<RecipesImpl>()
+        .map(|component| {
+            component
+                .recipes
+                .iter()
+                .map(|id| id.as_ref().to_owned())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 impl ItemBehaviour for KnowledgeBookItem {

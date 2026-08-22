@@ -240,12 +240,13 @@ use pumpkin_protocol::java::client::play::{
     Animation, CActionBar, CAwardStats, CBlockUpdate, CChangeDifficulty, CCloseContainer,
     CCombatDeath, CCustomPayload, CDisguisedChatMessage, CEntityAnimation, CEntityPositionSync,
     CGameEvent, CItemCooldown, CMapItemData, COpenScreen, CParticle, CPlayerAbilities,
-    CPlayerInfoUpdate, CPlayerPosition, CPlayerSpawnPosition, CRecipeBookSettings, CRespawn,
-    CSetCamera, CSetContainerContent, CSetContainerProperty, CSetContainerSlot, CSetCursorItem,
-    CSetExperience, CSetHealth, CSetPlayerInventory, CSetSelectedSlot, CSoundEffect, CStopSound,
-    CSubtitle, CSystemChatMessage, CTabList, CTitleAnimation, CTitleText, CUnloadChunk,
-    CUpdateMobEffect, CUpdateTime, GameEvent, MapIcon, MapPatch, Metadata, PlayerAction,
-    PlayerInfoFlags, PlayerSpawnData, PreviousMessage, Statistic,
+    CPlayerInfoUpdate, CPlayerPosition, CPlayerSpawnPosition, CRecipeBookAddSubset,
+    CRecipeBookRemove, CRecipeBookSettings, CRespawn, CSetCamera, CSetContainerContent,
+    CSetContainerProperty, CSetContainerSlot, CSetCursorItem, CSetExperience, CSetHealth,
+    CSetPlayerInventory, CSetSelectedSlot, CSoundEffect, CStopSound, CSubtitle, CSystemChatMessage,
+    CTabList, CTitleAnimation, CTitleText, CUnloadChunk, CUpdateMobEffect, CUpdateTime, GameEvent,
+    MapIcon, MapPatch, Metadata, PlayerAction, PlayerInfoFlags, PlayerSpawnData, PreviousMessage,
+    RecipeBookEntry, Statistic,
 };
 use pumpkin_protocol::java::server::play::{
     SClickSlot, SContainerButtonClick, SRenameItem, SSetBeacon, SlotActionType,
@@ -3354,13 +3355,27 @@ impl Player {
     /// Returns the number of recipes newly unlocked.
     ///
     /// Vanilla also sends a `ClientboundRecipeBookAddPacket` naming exactly the new
-    /// recipes. `CRecipeBookAdd` in this codebase cannot express that: its writer
-    /// always emits every entry of `RECIPES_CRAFTING` and `RECIPES_COOKING`, and its
-    /// per-entry writer is private to `pumpkin-protocol`, so a per-player subset is
-    /// not representable on the wire yet. The unlocked set is therefore
-    /// server-authoritative and persisted, but unlocks are not pushed to the client.
+    /// recipes, with `replace = false` and each entry flagged notification+highlight
+    /// (`ServerRecipeBook.java:70-77`); [`CRecipeBookAddSubset`] carries that.
+    ///
+    /// Ids the static recipe registry does not know - a datapack recipe, say - are
+    /// still unlocked server-side, they just have no display id to name on the wire.
     pub async fn award_recipes<'a>(&self, ids: impl IntoIterator<Item = &'a str>) -> usize {
-        self.recipe_book.lock().await.add_recipes(ids).len()
+        let added = self.recipe_book.lock().await.add_recipes(ids);
+        if added.is_empty() {
+            return 0;
+        }
+        let registry = crate::data::recipe_book::registry();
+        let entries: Vec<RecipeBookEntry> = added
+            .iter()
+            .filter_map(|id| registry.by_id(id))
+            .map(|entry| RecipeBookEntry::unlocked(entry.display_id))
+            .collect();
+        if !entries.is_empty() {
+            self.send_client_packet(&CRecipeBookAddSubset::new(false, &entries))
+                .await;
+        }
+        added.len()
     }
 
     /// `ServerPlayer.awardRecipesByKey` (`ServerPlayer.java:1534-1539`): ids no recipe
@@ -3374,9 +3389,27 @@ impl Player {
         self.award_recipes(known).await
     }
 
-    /// `ServerPlayer.resetRecipes` (`ServerPlayer.java:1541-1544`).
+    /// `ServerPlayer.resetRecipes` (`ServerPlayer.java:1541-1544`), delegating to
+    /// `ServerRecipeBook.removeRecipes` (`ServerRecipeBook.java:82-97`), which sends
+    /// a `ClientboundRecipeBookRemovePacket` naming the display ids it dropped.
+    ///
+    /// This is what backs `/recipe take`, which calls straight into it.
     pub async fn reset_recipes<'a>(&self, ids: impl IntoIterator<Item = &'a str>) -> usize {
-        self.recipe_book.lock().await.remove_recipes(ids).len()
+        let removed = self.recipe_book.lock().await.remove_recipes(ids);
+        if removed.is_empty() {
+            return 0;
+        }
+        let registry = crate::data::recipe_book::registry();
+        let display_ids: Vec<i32> = removed
+            .iter()
+            .filter_map(|id| registry.by_id(id))
+            .map(|entry| entry.display_id)
+            .collect();
+        if !display_ids.is_empty() {
+            self.send_client_packet(&CRecipeBookRemove::new(&display_ids))
+                .await;
+        }
+        removed.len()
     }
 
     /// Unlocks every recipe that takes `item_id` as an ingredient.
@@ -3441,10 +3474,9 @@ impl Player {
 
     /// `ServerRecipeBook.sendInitialRecipeBook` (`ServerRecipeBook.java:112-121`),
     /// called from `PlayerList.placeNewPlayer` (`PlayerList.java:191`) and on a
-    /// datapack reload (`PlayerList.java:861`).
-    ///
-    /// Only the settings half is sent; see `Player::award_recipes` for why the add
-    /// packet cannot carry a per-player set yet.
+    /// datapack reload (`PlayerList.java:861`): the settings packet, then the whole
+    /// known set with `replace = true`, each entry highlighted only if the player has
+    /// not seen it displayed yet and never flagged as a notification.
     pub async fn send_initial_recipe_book(&self) {
         let wire = self.recipe_book_settings().await.to_wire();
         self.send_client_packet(&CRecipeBookSettings {
@@ -3458,6 +3490,25 @@ impl Player {
             smoker_filtering: wire[7],
         })
         .await;
+
+        let registry = crate::data::recipe_book::registry();
+        let entries: Vec<RecipeBookEntry> = {
+            let book = self.recipe_book.lock().await;
+            let mut entries: Vec<RecipeBookEntry> = book
+                .known()
+                .iter()
+                .filter_map(|id| {
+                    registry.by_id(id).map(|entry| {
+                        RecipeBookEntry::known(entry.display_id, book.is_highlighted(id))
+                    })
+                })
+                .collect();
+            // `known` is a hash set, so fix an order the client can be diffed against.
+            entries.sort_unstable_by_key(|entry| entry.display_id);
+            entries
+        };
+        self.send_client_packet(&CRecipeBookAddSubset::new(true, &entries))
+            .await;
     }
 
     pub async fn increment_interaction_stat(

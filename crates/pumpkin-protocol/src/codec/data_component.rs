@@ -13,12 +13,12 @@ use pumpkin_data::data_component_impl::{
     FoxVariantImpl, FrogVariantImpl, HorseVariantImpl, IDSet, IDSetContent, IdOr, ItemModelImpl,
     ItemNameImpl, LlamaVariantImpl, LodestoneTarget, LodestoneTrackerImpl, MapIdImpl,
     MaxStackSizeImpl, MooshroomVariantImpl, PaintingVariantImpl, ParrotVariantImpl,
-    PigSoundVariantImpl, PigVariantImpl, PotionContentsImpl, RabbitVariantImpl, SalmonSizeImpl,
-    SheepColorImpl, ShulkerColorImpl, SoundEvent, StatusEffectInstance, StoredEnchantmentsImpl,
-    SuspiciousStewEffect, SuspiciousStewEffectsImpl, TropicalFishBaseColorImpl,
-    TropicalFishPatternColorImpl, TropicalFishPatternImpl, UnbreakableImpl, UseCooldownImpl,
-    VillagerVariantImpl, WolfCollarImpl, WolfSoundVariantImpl, WolfVariantImpl,
-    ZombieNautilusVariantImpl, get,
+    PigSoundVariantImpl, PigVariantImpl, PotionContentsImpl, RabbitVariantImpl, RecipesImpl,
+    SalmonSizeImpl, SheepColorImpl, ShulkerColorImpl, SoundEvent, StatusEffectInstance,
+    StoredEnchantmentsImpl, SuspiciousStewEffect, SuspiciousStewEffectsImpl,
+    TropicalFishBaseColorImpl, TropicalFishPatternColorImpl, TropicalFishPatternImpl,
+    UnbreakableImpl, UseCooldownImpl, VillagerVariantImpl, WolfCollarImpl, WolfSoundVariantImpl,
+    WolfVariantImpl, ZombieNautilusVariantImpl, get,
 };
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::EntityType;
@@ -875,6 +875,7 @@ pub fn deserialize(
         DataComponent::BlockState => Ok(BlockStateImpl::deserialize(seq)?.to_dyn()),
         DataComponent::LodestoneTracker => Ok(LodestoneTrackerImpl::deserialize(seq)?.to_dyn()),
         DataComponent::BaseColor => Ok(BaseColorImpl::deserialize(seq)?.to_dyn()),
+        DataComponent::Recipes => Ok(RecipesImpl::deserialize(seq)?.to_dyn()),
         _ => Err(ReadingError::Message(format!(
             "component_id_{} (TODO)",
             id.to_id()
@@ -911,10 +912,38 @@ pub fn serialize(
         DataComponent::BlockState => get::<BlockStateImpl>(value).serialize(seq),
         DataComponent::LodestoneTracker => get::<LodestoneTrackerImpl>(value).serialize(seq),
         DataComponent::BaseColor => get::<BaseColorImpl>(value).serialize(seq),
+        DataComponent::Recipes => get::<RecipesImpl>(value).serialize(seq),
         _ => Err(WritingError::Message(format!(
             "{} not yet implemented",
             id.to_name()
         ))),
+    }
+}
+
+/// `DataComponents.RECIPES` (`DataComponents.java:290-292`) declares no
+/// `networkSynchronized` codec, so its stream codec is the
+/// `ByteBufCodecs.fromCodecWithRegistries` fallback
+/// (`DataComponentType.java:70-76`, `ByteBufCodecs.java:356-373`): the value is
+/// encoded to NBT with `Recipe.KEY_CODEC.listOf()` (a list of strings) and the tag
+/// is written by `tagCodec`, i.e. network NBT - a type byte then the payload, with
+/// no root name.
+///
+/// So the bytes are `0x09` (`TAG_List`), `0x08` (`TAG_String`), a big-endian `i32`
+/// count, then each id as a big-endian `u16` length and its UTF-8 bytes.
+impl DataComponentCodec<Self> for RecipesImpl {
+    fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
+        seq.write_nbt(NbtTag::List(
+            self.recipes
+                .iter()
+                .map(|id| NbtTag::String(id.as_ref().into()))
+                .collect(),
+        ))
+    }
+
+    fn deserialize(_seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
+        Err(ReadingError::Message(
+            "Recipes component decoding is not supported: reading a network NBT tag off a packet stream has no helper here".into(),
+        ))
     }
 }
 
@@ -1213,10 +1242,43 @@ codec_string_variant!(ShulkerColorImpl);
 #[cfg(test)]
 mod tests {
     use super::{
-        BaseColorImpl, DataComponentCodec, LodestoneTarget, LodestoneTrackerImpl,
+        BaseColorImpl, DataComponentCodec, LodestoneTarget, LodestoneTrackerImpl, RecipesImpl,
         SuspiciousStewEffect, SuspiciousStewEffectsImpl,
     };
     use std::borrow::Cow;
+
+    /// The NBT tag `Recipe.KEY_CODEC.listOf()` produces, written by `tagCodec` -
+    /// `0x09` `TAG_List`, `0x08` `TAG_String` element type, big-endian `i32` count, then
+    /// each id as a big-endian `u16` byte length and its UTF-8 bytes.
+    #[test]
+    fn recipes_component_is_a_network_nbt_string_list() {
+        let value = RecipesImpl {
+            recipes: Cow::Owned(vec![Cow::Borrowed("minecraft:stick"), Cow::Borrowed("ab")]),
+        };
+        let mut bytes = Vec::new();
+        value.serialize(&mut bytes).expect("serialize");
+
+        let mut expected = vec![0x09, 0x08, 0x00, 0x00, 0x00, 0x02];
+        expected.extend_from_slice(&[0x00, 0x0F]);
+        expected.extend_from_slice(b"minecraft:stick");
+        expected.extend_from_slice(&[0x00, 0x02]);
+        expected.extend_from_slice(b"ab");
+        assert_eq!(bytes, expected);
+    }
+
+    /// An empty list still carries an element type byte, so the client reads a list
+    /// rather than an end tag.
+    #[test]
+    fn empty_recipes_component_keeps_its_header() {
+        let mut bytes = Vec::new();
+        RecipesImpl {
+            recipes: Cow::Borrowed(&[]),
+        }
+        .serialize(&mut bytes)
+        .expect("serialize");
+        assert_eq!(bytes[0], 0x09);
+        assert_eq!(&bytes[2..6], &[0x00, 0x00, 0x00, 0x00]);
+    }
 
     #[test]
     fn suspicious_stew_effects_round_trip() {
