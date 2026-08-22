@@ -247,6 +247,12 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         self.get_entity().get_eye_pos()
     }
 
+    /// Whether this entity was restored from saved NBT instead of freshly spawned. Guards the
+    /// work vanilla only does in `Mob.finalizeSpawn`, which chunk loading never runs.
+    fn is_restored_from_nbt(&self) -> bool {
+        self.get_entity().restored_from_nbt.load(Ordering::Relaxed)
+    }
+
     /// Whether this entity is written to its chunk's entity data on unload.
     ///
     /// Vanilla gates serialization on `EntityType.canSerialize()`
@@ -1032,6 +1038,12 @@ pub struct Entity {
     pub supporting_block_pos: AtomicCell<Option<BlockPos>>,
     /// The chunk coordinates of the entity's current position
     pub chunk_pos: AtomicCell<Vector2<i32>>,
+    /// Set once this entity's state has been restored from saved NBT, so the spawn-only work
+    /// vanilla does in `Mob.finalizeSpawn` (equipment, loot pickup, variant and baby rolls) is
+    /// skipped. Vanilla reaches `finalizeSpawn` only from a real spawn
+    /// (`ServerLevel.addFreshEntityWithPassengers` callers), never from chunk deserialization,
+    /// where `EntityType.loadEntityRecursive` just reads the tag.
+    pub restored_from_nbt: AtomicBool,
     /// Indicates whether the entity is sneaking
     pub sneaking: AtomicBool,
     /// Indicates whether the entity is sprinting
@@ -1340,6 +1352,7 @@ impl Entity {
                 get_section_cord(floor_x),
                 get_section_cord(floor_z),
             )),
+            restored_from_nbt: AtomicBool::new(false),
             sneaking: AtomicBool::new(false),
             swimming: AtomicBool::new(false),
             invisible: AtomicBool::new(false),
@@ -4517,6 +4530,9 @@ impl NBTStorage for Entity {
 
     fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async {
+            // Every deserialization path reaches this, which is what makes it the right place to
+            // record that this entity came off disk rather than out of a spawn.
+            self.restored_from_nbt.store(true, Relaxed);
             if let Some(position) = nbt.get_list("Pos")
                 && position.len() >= 3
             {

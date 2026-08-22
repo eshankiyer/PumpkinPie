@@ -139,6 +139,13 @@ pub struct LivingEntity {
     pub entity: Entity,
     /// Tracks the remaining time until the entity can regenerate health.
     pub hurt_cooldown: AtomicI32,
+    /// Vanilla `LivingEntity.skipDropExperience` (`LivingEntity.java:278`), set through
+    /// `skipDropExperience()` (`:1680`) and read by `shouldDropExperience()` in the death
+    /// path (`:1527`).
+    ///
+    /// A sculk catalyst that absorbs a nearby death claims the experience as charge, so the
+    /// orb must not also drop (`SculkCatalystBlockEntity.java:80`).
+    pub skip_drop_experience: AtomicBool,
     /// Vanilla `LivingEntity.lastHurtByPlayerMemoryTime`: ticks left in which a death still
     /// counts as a player kill for loot and experience. Set to 100 by any player-sourced damage.
     pub last_hurt_by_player_time: AtomicI32,
@@ -358,6 +365,7 @@ impl LivingEntity {
             air_metadata_initialized: AtomicBool::new(false),
             entity,
             hurt_cooldown: AtomicI32::new(0),
+            skip_drop_experience: AtomicBool::new(false),
             last_hurt_by_player_time: AtomicI32::new(0),
             last_damage_taken: AtomicCell::new(0.0),
             absorption: AtomicCell::new(0.0),
@@ -2354,6 +2362,7 @@ impl LivingEntity {
 
             // Award experience
             if params.killed_by_player.unwrap_or(false)
+                && !self.skip_drop_experience.load(Ordering::Relaxed)
                 && world.level_info.load().game_rules.mob_drops
             {
                 let amount = dyn_self.get_experience_reward(cause);
@@ -3662,6 +3671,168 @@ impl LivingEntity {
     }
 }
 
+/// Vanilla persists only an attribute instance's *permanent* modifiers
+/// (`AttributeInstance.java:186-188`, which packs `permanentModifiers`). Everything applied
+/// through `addTransientModifier` is rebuilt from its source after load instead: equipment and
+/// enchantments (`LivingEntity.java:2972-2976`), the witch's drinking slowdown
+/// (`Witch.java:170`), the enderman and zombified piglin attack speed boosts
+/// (`EnderMan.java:135`, `ZombifiedPiglin.java:102`) and the killer bunny's damage bonus
+/// (`Rabbit.java:376`). Status effect modifiers are deliberately *not* in that set: vanilla adds
+/// them permanently (`MobEffect.java:172`), so they belong in the saved list. This codebase keeps
+/// permanent and transient modifiers in one `Vec`, so they are told apart by id here.
+fn is_permanent_modifier(id: &str) -> bool {
+    const TRANSIENT_PREFIXES: [&str; 1] = ["minecraft:enchantment."];
+    const TRANSIENT_IDS: [&str; 3] = ["minecraft:attacking", "witch_drinking", "evil"];
+    !TRANSIENT_PREFIXES
+        .iter()
+        .any(|prefix| id.starts_with(prefix))
+        && !TRANSIENT_IDS.contains(&id)
+}
+
+/// `AttributeModifier.Operation.getSerializedName` (`AttributeModifier.java:38-40`).
+const fn modifier_operation_name(operation: ModifierOperation) -> &'static str {
+    match operation {
+        ModifierOperation::Add => "add_value",
+        ModifierOperation::MultiplyBase => "add_multiplied_base",
+        ModifierOperation::MultiplyTotal => "add_multiplied_total",
+    }
+}
+
+fn modifier_operation_from_name(name: &str) -> Option<ModifierOperation> {
+    match name {
+        "add_value" => Some(ModifierOperation::Add),
+        "add_multiplied_base" => Some(ModifierOperation::MultiplyBase),
+        "add_multiplied_total" => Some(ModifierOperation::MultiplyTotal),
+        _ => None,
+    }
+}
+
+/// `AttributeMap.pack` (`AttributeMap.java:132-140`) plus `AttributeInstance.pack`
+/// (`AttributeInstance.java:186-188`), serialized through `AttributeInstance.Packed.CODEC`
+/// (`AttributeInstance.java:203-210`): `{id: <attribute name>, base: double, modifiers: [...]}`.
+///
+/// Vanilla's map only holds instances something has touched, while this one is pre-filled with
+/// every default for the entity type, so an instance still sitting at its default base with no
+/// permanent modifiers is skipped: `AttributeMap.apply` leaves an unlisted attribute alone
+/// (`AttributeMap.java:142-149`), which is exactly that state.
+fn pack_attributes(
+    attributes: &HashMap<u8, AttributeInstance>,
+    defaults: &[(Attributes, f64)],
+) -> Vec<NbtTag> {
+    let mut ids: Vec<u8> = attributes.keys().copied().collect();
+    ids.sort_unstable();
+
+    let mut packed = Vec::new();
+    for id in ids {
+        let Some(instance) = attributes.get(&id) else {
+            continue;
+        };
+        let Some(attribute) = Attributes::ALL.iter().find(|entry| entry.id == id) else {
+            continue;
+        };
+
+        let modifiers: Vec<NbtTag> = instance
+            .modifiers
+            .iter()
+            .filter(|modifier| is_permanent_modifier(&modifier.id))
+            .map(|modifier| {
+                let mut compound = NbtCompound::new();
+                compound.put_string("id", modifier.id.clone());
+                compound.put_double("amount", modifier.amount);
+                compound.put_string(
+                    "operation",
+                    modifier_operation_name(modifier.operation).to_string(),
+                );
+                NbtTag::Compound(compound)
+            })
+            .collect();
+
+        let default_base = defaults
+            .iter()
+            .find(|(entry, _)| entry.id == id)
+            .map_or(attribute.default_value, |(_, base)| *base);
+        if modifiers.is_empty() && instance.base_value.to_bits() == default_base.to_bits() {
+            continue;
+        }
+
+        let mut compound = NbtCompound::new();
+        compound.put_string("id", attribute.name.to_string());
+        compound.put_double("base", instance.base_value);
+        if !modifiers.is_empty() {
+            compound.put_list("modifiers", modifiers);
+        }
+        packed.push(NbtTag::Compound(compound));
+    }
+    packed
+}
+
+/// Reads the `attributes` tag, if present, into the entity's live attribute map.
+/// `LivingEntity.readAdditionalSaveData` (`LivingEntity.java:802`) does this before health and
+/// absorption, both of which clamp against attributes it may just have changed. Kept out of
+/// `read_nbt_non_mut` so the lock guard's scope is obvious and cannot straddle an await.
+fn load_attributes_from_nbt(
+    attributes: &RwLock<HashMap<u8, AttributeInstance>>,
+    nbt: &NbtCompound,
+) {
+    let Some(packed) = nbt.get_list("attributes") else {
+        return;
+    };
+    let mut attributes = attributes
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    apply_packed_attributes(&mut attributes, packed);
+}
+
+/// `AttributeMap.apply` (`AttributeMap.java:142-149`) plus `AttributeInstance.apply`
+/// (`AttributeInstance.java:190-200`): the saved base replaces the current one and every saved
+/// modifier is put back; attributes absent from the list keep their defaults.
+fn apply_packed_attributes(attributes: &mut HashMap<u8, AttributeInstance>, packed: &[NbtTag]) {
+    for tag in packed {
+        let NbtTag::Compound(entry) = tag else {
+            continue;
+        };
+        let Some(name) = entry.get_string("id") else {
+            continue;
+        };
+        let Some(attribute) = Attributes::ALL.iter().find(|candidate| {
+            candidate.name == name || candidate.name.strip_prefix("minecraft:") == Some(name)
+        }) else {
+            warn!("Unknown attribute {name} in entity NBT");
+            continue;
+        };
+
+        let instance = attributes.entry(attribute.id).or_insert_with(|| {
+            AttributeInstance::new(
+                attribute.default_value,
+                attribute.min_value,
+                attribute.max_value,
+            )
+        });
+        instance.base_value = entry.get_double("base").unwrap_or(0.0);
+        for modifier_tag in entry.get_list("modifiers").unwrap_or_default() {
+            let NbtTag::Compound(modifier) = modifier_tag else {
+                continue;
+            };
+            let (Some(id), Some(amount), Some(operation)) = (
+                modifier.get_string("id"),
+                modifier.get_double("amount"),
+                modifier
+                    .get_string("operation")
+                    .and_then(modifier_operation_from_name),
+            ) else {
+                warn!("Malformed attribute modifier in entity NBT");
+                continue;
+            };
+            instance.add_or_replace_modifier(Modifier {
+                id: id.to_string(),
+                amount,
+                operation,
+            });
+        }
+        instance.dirty.store(true, Relaxed);
+    }
+}
+
 impl NBTStorage for LivingEntity {
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async move {
@@ -3679,6 +3850,21 @@ impl NBTStorage for LivingEntity {
             // Persist current absorption amount
             nbt.put("AbsorptionAmount", NbtTag::Float(self.absorption.load()));
             nbt.put("FallDistance", NbtTag::Float(fall_distance));
+            // `LivingEntity.addAdditionalSaveData` (`LivingEntity.java:753`) stores the packed
+            // attribute list here, right after AbsorptionAmount. An all-defaults entity packs to
+            // nothing, and the tag is then left out rather than written as an empty list.
+            {
+                let packed = {
+                    let attributes = self
+                        .attributes
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    pack_attributes(&attributes, self.entity.entity_type.attributes)
+                };
+                if !packed.is_empty() {
+                    nbt.put_list("attributes", packed);
+                }
+            }
             {
                 let effects = self.active_effects.lock().await;
                 let hidden_effects = self.hidden_effects.lock().await;
@@ -3743,6 +3929,7 @@ impl NBTStorage for LivingEntity {
     fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async {
             self.entity.read_nbt_non_mut(nbt).await;
+            load_attributes_from_nbt(&self.attributes, nbt);
             self.health.store(nbt.get_float("Health").unwrap_or(0.0));
             if self.entity.entity_type != &EntityType::PLAYER
                 && let Some(air) = nbt
@@ -3807,11 +3994,11 @@ impl NBTStorage for LivingEntity {
                     }
                 }
             }
-            // Vanilla saves the effects' permanent attribute modifiers alongside the effects
-            // themselves (`LivingEntity.readAdditionalSaveData`: the `attributes` tag is applied
-            // right before `active_effects`), so a reloaded Speed or Strength still moves the
-            // attribute. Pumpkin does not persist attributes, so the modifiers are rebuilt from
-            // the effects that were just loaded instead of silently going missing.
+            // Vanilla saves the effects' attribute modifiers in the `attributes` tag, which is
+            // applied right before `active_effects` (`LivingEntity.java:802`) and is now read
+            // above. Rebuilding them from the loaded effects as well is idempotent (same
+            // modifier ids, replaced in place) and keeps worlds saved before that tag existed
+            // from losing a reloaded Speed or Strength.
             for effect in loaded_effects {
                 self.restore_effect_attribute_modifiers(&effect);
                 if effect.effect_type == &StatusEffect::INVISIBILITY {
@@ -3821,38 +4008,46 @@ impl NBTStorage for LivingEntity {
                 }
             }
 
-            let mut equipment = self.entity_equipment.lock().await;
-            for (key, slot) in [
-                (
-                    "HandItems",
-                    [EquipmentSlot::MAIN_HAND, EquipmentSlot::OFF_HAND].as_slice(),
-                ),
-                (
-                    "ArmorItems",
-                    [
-                        EquipmentSlot::FEET,
-                        EquipmentSlot::LEGS,
-                        EquipmentSlot::CHEST,
-                        EquipmentSlot::HEAD,
-                    ]
-                    .as_slice(),
-                ),
-            ] {
-                let Some(items) = nbt.get_list(key) else {
-                    continue;
-                };
-                for (index, slot) in slot.iter().enumerate() {
-                    let Some(compound) = items.get(index).and_then(NbtTag::extract_compound) else {
-                        continue;
-                    };
-                    let Some(stack) = ItemStack::read_item_stack(compound) else {
-                        continue;
-                    };
-                    equipment.put(slot, stack);
-                }
-            }
+            self.load_equipment_from_nbt(nbt).await;
         })
         // todo more...
+    }
+}
+
+impl LivingEntity {
+    /// Restores the `HandItems` / `ArmorItems` lists written by `write_nbt`. Split out of
+    /// `read_nbt_non_mut` purely to keep that function within its line budget.
+    async fn load_equipment_from_nbt(&self, nbt: &NbtCompound) {
+        let mut equipment = self.entity_equipment.lock().await;
+        for (key, slots) in [
+            (
+                "HandItems",
+                [EquipmentSlot::MAIN_HAND, EquipmentSlot::OFF_HAND].as_slice(),
+            ),
+            (
+                "ArmorItems",
+                [
+                    EquipmentSlot::FEET,
+                    EquipmentSlot::LEGS,
+                    EquipmentSlot::CHEST,
+                    EquipmentSlot::HEAD,
+                ]
+                .as_slice(),
+            ),
+        ] {
+            let Some(items) = nbt.get_list(key) else {
+                continue;
+            };
+            for (index, slot) in slots.iter().enumerate() {
+                let Some(compound) = items.get(index).and_then(NbtTag::extract_compound) else {
+                    continue;
+                };
+                let Some(stack) = ItemStack::read_item_stack(compound) else {
+                    continue;
+                };
+                equipment.put(slot, stack);
+            }
+        }
     }
 }
 
@@ -6248,5 +6443,149 @@ mod tests {
             .unwrap();
 
         assert_eq!(bytes, [10, 17, 1, 28, 0xff, 0xcd, 0x5c, 0xab]);
+    }
+}
+
+#[cfg(test)]
+mod attribute_nbt_tests {
+    use super::{
+        AttributeInstance, Modifier, ModifierOperation, apply_packed_attributes, pack_attributes,
+    };
+    use pumpkin_data::attributes::Attributes;
+    use pumpkin_nbt::tag::NbtTag;
+    use std::collections::HashMap;
+
+    fn instance_of(attribute: &Attributes, base: f64) -> AttributeInstance {
+        AttributeInstance::new(base, attribute.min_value, attribute.max_value)
+    }
+
+    fn defaults() -> Vec<(Attributes, f64)> {
+        vec![
+            (Attributes::MAX_HEALTH, Attributes::MAX_HEALTH.default_value),
+            (
+                Attributes::FOLLOW_RANGE,
+                Attributes::FOLLOW_RANGE.default_value,
+            ),
+        ]
+    }
+
+    #[test]
+    fn round_trips_base_and_permanent_modifiers() {
+        let mut saved: HashMap<u8, AttributeInstance> = HashMap::new();
+        let mut health = instance_of(&Attributes::MAX_HEALTH, 20.0);
+        health.add_or_replace_modifier(Modifier {
+            id: "minecraft:leader_zombie_bonus".to_string(),
+            amount: 2.5,
+            operation: ModifierOperation::MultiplyTotal,
+        });
+        saved.insert(Attributes::MAX_HEALTH.id, health);
+        let mut follow = instance_of(&Attributes::FOLLOW_RANGE, 42.0);
+        follow.add_or_replace_modifier(Modifier {
+            id: "minecraft:zombie_random_spawn_bonus".to_string(),
+            amount: 1.25,
+            operation: ModifierOperation::Add,
+        });
+        saved.insert(Attributes::FOLLOW_RANGE.id, follow);
+
+        let packed = pack_attributes(&saved, &defaults());
+        assert_eq!(packed.len(), 2);
+
+        let mut loaded: HashMap<u8, AttributeInstance> = HashMap::new();
+        loaded.insert(
+            Attributes::MAX_HEALTH.id,
+            instance_of(
+                &Attributes::MAX_HEALTH,
+                Attributes::MAX_HEALTH.default_value,
+            ),
+        );
+        loaded.insert(
+            Attributes::FOLLOW_RANGE.id,
+            instance_of(
+                &Attributes::FOLLOW_RANGE,
+                Attributes::FOLLOW_RANGE.default_value,
+            ),
+        );
+        apply_packed_attributes(&mut loaded, &packed);
+
+        for id in [Attributes::MAX_HEALTH.id, Attributes::FOLLOW_RANGE.id] {
+            let before = &saved[&id];
+            let after = &loaded[&id];
+            assert_eq!(before.base_value.to_bits(), after.base_value.to_bits());
+            assert_eq!(before.modifiers.len(), after.modifiers.len());
+            for (a, b) in before.modifiers.iter().zip(after.modifiers.iter()) {
+                assert_eq!(a.id, b.id);
+                assert_eq!(a.amount.to_bits(), b.amount.to_bits());
+                assert_eq!(a.operation as i8, b.operation as i8);
+            }
+            assert_eq!(before.value().to_bits(), after.value().to_bits());
+        }
+    }
+
+    #[test]
+    fn skips_transient_modifiers_and_untouched_attributes() {
+        let mut saved: HashMap<u8, AttributeInstance> = HashMap::new();
+        let mut speed = instance_of(
+            &Attributes::MOVEMENT_SPEED,
+            Attributes::MOVEMENT_SPEED.default_value,
+        );
+        speed.add_or_replace_modifier(Modifier {
+            id: "minecraft:enchantment.swift_sneak/legs".to_string(),
+            amount: 0.4,
+            operation: ModifierOperation::MultiplyTotal,
+        });
+        speed.add_or_replace_modifier(Modifier {
+            id: "minecraft:attacking".to_string(),
+            amount: 0.15,
+            operation: ModifierOperation::Add,
+        });
+        saved.insert(Attributes::MOVEMENT_SPEED.id, speed);
+        saved.insert(
+            Attributes::MAX_HEALTH.id,
+            instance_of(
+                &Attributes::MAX_HEALTH,
+                Attributes::MAX_HEALTH.default_value,
+            ),
+        );
+
+        assert!(pack_attributes(&saved, &defaults()).is_empty());
+    }
+
+    #[test]
+    fn packed_shape_matches_vanilla_codec() {
+        let mut saved: HashMap<u8, AttributeInstance> = HashMap::new();
+        let mut health = instance_of(&Attributes::MAX_HEALTH, 24.0);
+        health.add_or_replace_modifier(Modifier {
+            id: "minecraft:leader_zombie_bonus".to_string(),
+            amount: 0.5,
+            operation: ModifierOperation::Add,
+        });
+        saved.insert(Attributes::MAX_HEALTH.id, health);
+
+        let packed = pack_attributes(&saved, &defaults());
+        let NbtTag::Compound(entry) = &packed[0] else {
+            panic!("attribute entry is not a compound");
+        };
+        assert_eq!(entry.get_string("id"), Some("minecraft:max_health"));
+        assert_eq!(entry.get_double("base"), Some(24.0));
+        let modifiers = entry.get_list("modifiers").expect("modifiers list");
+        let NbtTag::Compound(modifier) = &modifiers[0] else {
+            panic!("modifier is not a compound");
+        };
+        assert_eq!(
+            modifier.get_string("id"),
+            Some("minecraft:leader_zombie_bonus")
+        );
+        assert_eq!(modifier.get_double("amount"), Some(0.5));
+        assert_eq!(modifier.get_string("operation"), Some("add_value"));
+    }
+
+    #[test]
+    fn unknown_attribute_is_ignored() {
+        let mut compound = pumpkin_nbt::compound::NbtCompound::new();
+        compound.put_string("id", "modded:not_an_attribute".to_string());
+        compound.put_double("base", 5.0);
+        let mut loaded: HashMap<u8, AttributeInstance> = HashMap::new();
+        apply_packed_attributes(&mut loaded, &[NbtTag::Compound(compound)]);
+        assert!(loaded.is_empty());
     }
 }

@@ -7911,6 +7911,14 @@ impl WorldPortalExt for WorldPortal {
                 );
                 entity.get_entity().read_nbt_non_mut(&nbt).await;
                 entity.read_nbt_non_mut(&nbt).await;
+                // Reading the template tag marks the entity as restored from disk, which
+                // suppresses the `Mob.finalizeSpawn` work. A structure entity is not a reload:
+                // `StructureTemplate.placeEntities` (`StructureTemplate.java:512-513`) calls
+                // `finalizeSpawn` right before adding it, so clear the flag again.
+                entity
+                    .get_entity()
+                    .restored_from_nbt
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
                 world.spawn_entity(entity).await;
             }
         });

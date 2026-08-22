@@ -2268,8 +2268,14 @@ impl<T: Mob + Send + 'static> EntityBase for T {
         Box::pin(async move {
             self.mob_init_data_tracker().await;
             let world = self.get_mob_entity().living_entity.entity.world.load();
-            crate::entity::mob::equipment::equip_mob_on_spawn(self as &dyn EntityBase, &world)
-                .await;
+            // `Mob.finalizeSpawn` work, which vanilla runs only on a genuine spawn. A mob read
+            // back out of chunk NBT already carries the equipment it was saved with
+            // (`LivingEntity`'s HandItems/ArmorItems), so re-rolling it here would hand every
+            // reloaded zombie a fresh random set.
+            if !self.is_restored_from_nbt() {
+                crate::entity::mob::equipment::equip_mob_on_spawn(self as &dyn EntityBase, &world)
+                    .await;
+            }
 
             let entity_name = self.get_entity().entity_type.resource_name;
             if let Some(def) = crate::entity::mob::equipment::EQUIPMENT_REGISTRY.get(entity_name)
@@ -2280,6 +2286,11 @@ impl<T: Mob + Send + 'static> EntityBase for T {
                     self.get_entity().pos.load(),
                 );
                 let pickup_chance = 0.55 * difficulty.special_multiplier;
+                // Deliberately still rolled for a reloaded mob: vanilla persists this as
+                // `CanPickUpLoot` (`Mob.java:370`, read back at `Mob.java:396`), but nothing
+                // here writes that tag yet, so suppressing the roll would silently turn every
+                // reloaded mob's loot pickup off instead of restoring what it had. Move this
+                // under the guard above once `CanPickUpLoot` is persisted.
                 self.get_mob_entity()
                     .set_can_pick_up_loot(rand::random::<f32>() < pickup_chance);
             }
