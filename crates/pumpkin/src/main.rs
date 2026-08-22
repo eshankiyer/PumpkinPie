@@ -68,7 +68,7 @@ async fn main() {
         "{}",
         TextComponent::text(format!(
             "Starting {} {} Java Minecraft (Protocol {}) | {} Bedrock (Protocol {})",
-            TextComponent::text("Pumpkin")
+            TextComponent::text("PumpkinPie")
                 .color_named(NamedColor::Gold)
                 .to_pretty_console(),
             TextComponent::text(CARGO_PKG_VERSION.to_string())
@@ -100,7 +100,7 @@ async fn main() {
     );
     if cfg!(debug_assertions) {
         warn!(
-            "Pumpkin is running an unoptimized debug build. Do not use this build for performance testing; run `cargo run --release` or use a release binary."
+            "PumpkinPie is running an unoptimized debug build. Do not use this build for performance testing; run `cargo run --release` or use a release binary."
         );
     }
     print_support_links_and_warning();
@@ -175,32 +175,14 @@ async fn main() {
 fn print_support_links_and_warning() {
     warn!(
         "{}",
-        TextComponent::text("Pumpkin is currently under heavy development!")
+        TextComponent::text("PumpkinPie is currently under heavy development!")
             .color_named(NamedColor::DarkRed)
             .to_pretty_console(),
     );
     info!(
         "Report issues on {}",
-        TextComponent::text("https://github.com/Pumpkin-MC/Pumpkin/issues")
+        TextComponent::text("https://github.com/eshankiyer/PumpkinPie/issues")
             .color_named(NamedColor::DarkAqua)
-            .to_pretty_console()
-    );
-    info!(
-        "Join our {} for community support: {}",
-        TextComponent::text("Discord")
-            .color_named(NamedColor::DarkBlue)
-            .to_pretty_console(),
-        TextComponent::text("https://discord.gg/wT8XjrjKkf")
-            .color_named(NamedColor::Aqua)
-            .to_pretty_console()
-    );
-    info!(
-        "Consider {} to {}",
-        TextComponent::text("Donating")
-            .color_named(NamedColor::DarkPurple)
-            .to_pretty_console(),
-        TextComponent::text("https://pumpkinmc.org/donate/")
-            .color_named(NamedColor::Gold)
             .to_pretty_console()
     );
 }

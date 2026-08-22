@@ -9,7 +9,7 @@ default-run = "pumpkin"
 
 [package.metadata.tauri-winres]
 # FileDescription is handled as the Program name by Windows!
-FileDescription = "Pumpkin"
+FileDescription = "PumpkinPie"
 OriginalFilename = "pumpkin.exe"
 LegalCopyright = "Copyright © 2026 Aleksander Medvedev"
 
