@@ -13,6 +13,7 @@ pub mod banlist_serializer;
 pub mod banned_ip;
 pub mod banned_player;
 pub mod player_server;
+pub mod recipe_book;
 pub mod usercache;
 pub mod whitelist;
 

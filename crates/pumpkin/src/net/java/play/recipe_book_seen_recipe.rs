@@ -2,6 +2,9 @@
 use super::*;
 
 impl JavaClient {
+    /// `ServerGamePacketListenerImpl.handleRecipeBookSeenRecipePacket`: the client has
+    /// displayed the recipe, so it stops being highlighted
+    /// (`ServerRecipeBook.removeHighlight`, `ServerRecipeBook.java:53-55`).
     pub async fn handle_recipe_book_seen_recipe(
         &self,
         server: &Arc<Server>,
@@ -13,5 +16,7 @@ impl JavaClient {
             format!("display_{}", packet.recipe_display_id.0),
         );
         server.plugin_manager.fire(server, &mut event).await;
+
+        player.mark_recipe_seen(packet.recipe_display_id.0).await;
     }
 }

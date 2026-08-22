@@ -26,6 +26,7 @@ pub mod honeycomb;
 pub mod ignite;
 pub mod ink_sac;
 pub mod item_frame;
+pub mod knowledge_book;
 pub mod lead;
 pub mod mace;
 pub mod map;
@@ -57,6 +58,7 @@ use crate::item::items::end_crystal::EndCrystalItem;
 use crate::item::items::experience_bottle::ExperienceBottleItem;
 use crate::item::items::glass_bottle::GlassBottleItem;
 use crate::item::items::goat_horn::GoatHornItem;
+use crate::item::items::knowledge_book::KnowledgeBookItem;
 use crate::item::items::lead::LeadItem;
 use crate::item::items::map::MapItem;
 
@@ -137,6 +139,7 @@ pub fn default_registry() -> Arc<ItemRegistry> {
     let mut manager = ItemRegistry::default();
 
     manager.register(ArrowItem);
+    manager.register(KnowledgeBookItem);
     manager.register(PaintingItem);
     manager.register(BowItem);
     manager.register(BoneMealItem);

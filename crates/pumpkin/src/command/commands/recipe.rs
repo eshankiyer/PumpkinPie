@@ -111,6 +111,11 @@ impl CommandExecutor for RecipeGiveExecutor {
             let packet = CRecipeBookAdd::new(false, &matching_recipes);
 
             for player in &targets {
+                // Record the unlock, not just the packet: `/recipe give` is
+                // `ServerPlayer.awardRecipes`, so the ids have to enter the player's book or
+                // they are forgotten the moment they reconnect.
+                let ids: Vec<String> = matching_recipes.iter().map(get_recipe_id).collect();
+                player.award_recipes(ids.iter().map(String::as_str)).await;
                 player.send_client_packet(&packet).await;
             }
 
@@ -192,6 +197,8 @@ impl CommandExecutor for RecipeTakeExecutor {
 
             let packet = CRecipeBookAdd::new(true, &remaining_recipes);
             for player in &targets {
+                let ids: Vec<String> = all_recipes.iter().map(get_recipe_id).collect();
+                player.reset_recipes(ids.iter().map(String::as_str)).await;
                 player.send_client_packet(&packet).await;
             }
 
