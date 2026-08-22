@@ -5,10 +5,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::damage::DamageType;
-use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::EntityType;
-use pumpkin_data::item::Item;
-use pumpkin_data::item_stack::ItemStack;
 use pumpkin_nbt::compound::NbtCompound;
 
 use crate::entity::ai::control::drowned_move_control::DrownedMoveControl;
@@ -256,20 +253,6 @@ impl Mob for DrownedEntity {
             .entity
             .swimming
             .load(Relaxed)
-    }
-
-    /// `Drowned.canReplaceCurrentItem`: a trident is always preferred over any other
-    /// main-hand item. Other replacements retain Pumpkin's conservative empty-slot rule.
-    fn can_replace_current_item(
-        &self,
-        new_stack: &ItemStack,
-        current_stack: &ItemStack,
-        slot: &EquipmentSlot,
-    ) -> bool {
-        current_stack.is_empty()
-            || (matches!(slot, EquipmentSlot::MainHand(_))
-                && new_stack.item == &Item::TRIDENT
-                && current_stack.item != &Item::TRIDENT)
     }
 
     fn set_searching_for_land(&self, searching: bool) {
