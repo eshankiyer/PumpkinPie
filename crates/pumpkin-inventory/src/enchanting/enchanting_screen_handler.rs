@@ -2,7 +2,10 @@ use std::any::Any;
 use std::sync::Arc;
 
 use pumpkin_data::Enchantment;
-use pumpkin_data::data_component_impl::EnchantableImpl;
+use pumpkin_data::data_component::DataComponent;
+use pumpkin_data::data_component_impl::{
+    DataComponentImpl, EnchantableImpl, StoredEnchantmentsImpl,
+};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::screen::WindowType;
@@ -25,6 +28,30 @@ struct LapisSlot(NormalSlot);
 
 fn is_lapis(stack: &ItemStack) -> bool {
     stack.item == &Item::LAPIS_LAZULI
+}
+
+/// `ItemStack.enchant` routes through `EnchantmentHelper.getComponentType`
+/// (EnchantmentHelper.java:81-83): an enchanted book stores its levels in
+/// `StoredEnchantments`, every other item in `Enchantments`.
+fn add_enchantment_for(stack: &mut ItemStack, enchantment: &'static Enchantment, level: i32) {
+    if stack.item != &Item::ENCHANTED_BOOK {
+        stack.add_enchantment(enchantment, level as u16);
+        return;
+    }
+    let mut stored = stack
+        .get_data_component::<StoredEnchantmentsImpl>()
+        .map(|c| c.enchantment.to_vec())
+        .unwrap_or_default();
+    stored.push((enchantment, level));
+    stack
+        .patch
+        .retain(|(id, _)| *id != DataComponent::StoredEnchantments);
+    let boxed: Box<dyn DataComponentImpl> = Box::new(StoredEnchantmentsImpl {
+        enchantment: stored.into(),
+    });
+    stack
+        .patch
+        .push((DataComponent::StoredEnchantments, Some(boxed)));
 }
 
 impl LapisSlot {
@@ -386,7 +413,15 @@ impl ScreenHandler for EnchantingTableScreenHandler {
             }
 
             let level_req = self.level_requirements[id as usize];
-            if player.experience_level() < level_req && !player.is_creative() {
+            // `EnchantmentMenu.clickMenuButton` (EnchantmentMenu.java:143-147) rejects a
+            // zero cost outright, and requires the player's level to cover BOTH the lapis
+            // cost (button index + 1) and the button's own level requirement.
+            if level_req <= 0 {
+                return false;
+            }
+            if (player.experience_level() < level_req || player.experience_level() < id + 1)
+                && !player.is_creative()
+            {
                 return false;
             }
 
@@ -430,8 +465,13 @@ impl ScreenHandler for EnchantingTableScreenHandler {
                 self.inventory.set_stack(1, lapis_stack).await;
             }
 
+            // `EnchantmentMenu.clickMenuButton` (EnchantmentMenu.java:154-158): a plain book
+            // is transmuted into an enchanted book before the levels are written.
+            if item_stack.item == &Item::BOOK {
+                item_stack.item = &Item::ENCHANTED_BOOK;
+            }
             for (enchant, level) in enchantments {
-                item_stack.add_enchantment(enchant, level as u16);
+                add_enchantment_for(&mut item_stack, enchant, level);
             }
             self.inventory.set_stack(0, item_stack).await;
 

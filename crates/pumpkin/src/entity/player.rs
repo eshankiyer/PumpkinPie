@@ -6,7 +6,9 @@ use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::f64::consts::TAU;
 use std::num::NonZero;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, AtomicI8, AtomicI32, AtomicU8, AtomicU32, Ordering};
+use std::sync::atomic::{
+    AtomicBool, AtomicI8, AtomicI32, AtomicU8, AtomicU16, AtomicU32, Ordering,
+};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
@@ -891,6 +893,12 @@ pub struct Player {
     pub ping: AtomicU32,
     /// The amount of ticks since the player's last attack.
     pub last_attacked_ticks: AtomicU32,
+    /// Item id of the main-hand stack observed on the previous tick. `Player.tick`
+    /// (Player.java:270-277) resets the attack-strength ticker whenever the main-hand
+    /// item changes to a different item, so swapping weapons mid-cooldown does not carry
+    /// the charge over. `ItemStack.isSameItem` (ItemStack.java:634-636) compares the item
+    /// only, so the id alone is enough.
+    last_main_hand_item: AtomicU16,
     /// The player's last known experience level.
     pub last_sent_xp: AtomicI32,
     pub last_sent_health: AtomicI32,
@@ -913,6 +921,10 @@ pub struct Player {
     pub client_loaded_timeout: AtomicU32,
     /// Counter for tracking chat and command spam. Decays each server tick.
     pub chat_spam_tick_count: AtomicU32,
+    /// Vanilla's `dropSpamThrottler`, a `TickThrottler(20, 1480)`
+    /// (`ServerGamePacketListenerImpl.java:243`), which rate-limits creative-mode item
+    /// drops. Drained by one per tick, charged 20 per drop.
+    drop_spam_tick_count: AtomicU32,
     /// Item usage tracking for bows, crossbows, etc.
     pub using_item: AtomicBool,
     pub item_use_start_time: AtomicI32,
@@ -1166,10 +1178,12 @@ impl Player {
             last_action_time: AtomicCell::new(std::time::Instant::now()),
             ping: AtomicU32::new(0),
             last_attacked_ticks: AtomicU32::new(0),
+            last_main_hand_item: AtomicU16::new(pumpkin_data::item::Item::AIR.id),
             client_loaded: AtomicBool::new(initially_loaded),
             bedrock_spawned: AtomicBool::new(false),
             client_loaded_timeout: AtomicU32::new(if initially_loaded { 0 } else { 60 }),
             chat_spam_tick_count: AtomicU32::new(0),
+            drop_spam_tick_count: AtomicU32::new(0),
             // Item usage tracking
             using_item: AtomicBool::new(false),
             item_use_start_time: AtomicI32::new(0),
@@ -2867,6 +2881,14 @@ impl Player {
             }
         }
         self.last_attacked_ticks.fetch_add(1, Ordering::Relaxed);
+        let main_hand_item = self.inventory().held_item().await.item.id;
+        if self
+            .last_main_hand_item
+            .swap(main_hand_item, Ordering::Relaxed)
+            != main_hand_item
+        {
+            self.last_attacked_ticks.store(0, Ordering::Relaxed);
+        }
 
         // Player.aiStep resets fall distance while flying before the normal
         // living-entity tick, unless the player is riding another entity.
@@ -2890,6 +2912,14 @@ impl Player {
         // Update auto-computed scoreboard criteria (health, food, air, armor, xp, level)
         self.tick_scoreboard_criteria().await;
         self.tick_maps(server).await;
+
+        // `ServerGamePacketListenerImpl.tick` (ServerGamePacketListenerImpl.java:303)
+        // drains the creative drop throttler by one every tick.
+        let _ =
+            self.drop_spam_tick_count
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                    Some(count.saturating_sub(1))
+                });
 
         // Anti-spam counter decay
         let anti_spam = &server.advanced_config.chat.anti_spam;
@@ -3113,6 +3143,25 @@ impl Player {
             self.client_loaded_timeout.store(60, Ordering::Relaxed);
         }
         self.client_loaded.store(loaded, Ordering::Relaxed);
+    }
+
+    /// Charges the creative-mode drop throttler, returning whether the drop is allowed.
+    ///
+    /// `ServerGamePacketListenerImpl.handleSetCreativeModeSlot`
+    /// (ServerGamePacketListenerImpl.java:2033-2038) drops only while
+    /// `dropSpamThrottler.isUnderThreshold()`, then increments it;
+    /// `TickThrottler` (TickThrottler.java) adds `incrementStep` per use and drains one per
+    /// tick, so the vanilla `(20, 1480)` pair allows a burst of 74 drops draining at one
+    /// drop per 20 ticks.
+    pub fn try_creative_drop(&self) -> bool {
+        const INCREMENT_STEP: u32 = 20;
+        const THRESHOLD: u32 = 1480;
+        if self.drop_spam_tick_count.load(Ordering::Relaxed) >= THRESHOLD {
+            return false;
+        }
+        self.drop_spam_tick_count
+            .fetch_add(INCREMENT_STEP, Ordering::Relaxed);
+        true
     }
 
     pub fn get_attack_cooldown_progress(&self, tps: f64, base_time: f64, attack_speed: f64) -> f64 {
@@ -5013,6 +5062,11 @@ impl Player {
             };
             speed *= fatigue_speed;
         }
+        // `Player.getDestroySpeed` (Player.java:606) scales by the BLOCK_BREAK_SPEED
+        // attribute before the submerged and off-ground penalties.
+        speed *= self
+            .living_entity
+            .get_attribute_value(&Attributes::BLOCK_BREAK_SPEED) as f32;
         let entity = self.get_entity();
         let bounds = entity.bounding_box.load();
         let eye_height = entity.get_eye_y() - bounds.min.y;

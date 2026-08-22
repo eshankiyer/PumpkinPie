@@ -1172,11 +1172,11 @@ pub trait ScreenHandler: Send + Sync {
 
                     let mut moved_stack = self.quick_move(player, slot_index).await;
 
+                    // `AbstractContainerMenu.doClick` (AbstractContainerMenu.java:425) loops
+                    // while `ItemStack.isSameItem`, which compares the item only
+                    // (ItemStack.java:634-636) - not its components.
                     while !moved_stack.is_empty()
-                        && ItemStack::are_items_and_components_equal(
-                            &slot.get_cloned_stack().await,
-                            &moved_stack,
-                        )
+                        && slot.get_cloned_stack().await.item == moved_stack.item
                     {
                         moved_stack = self.quick_move(player, slot_index).await;
                     }

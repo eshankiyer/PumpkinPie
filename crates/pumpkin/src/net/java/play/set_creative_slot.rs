@@ -77,8 +77,17 @@ impl JavaClient {
             player_screen_handler.send_content_updates().await;
             drop(player_screen_handler);
         } else if is_negative && is_legal {
-            // Item drop
-            player.drop_item(item_stack).await;
+            // `handleSetCreativeModeSlot` (ServerGamePacketListenerImpl.java:2033-2038)
+            // rate-limits creative drops through `dropSpamThrottler` and silently ignores
+            // the packet once the throttle trips.
+            if player.try_creative_drop() {
+                player.drop_item(item_stack).await;
+            } else {
+                tracing::warn!(
+                    "Player {} was dropping items too fast in creative mode, ignoring.",
+                    player.gameprofile.name
+                );
+            }
         }
         Ok(())
     }
