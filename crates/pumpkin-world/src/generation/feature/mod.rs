@@ -6,6 +6,7 @@ pub mod configured_features;
 pub mod placed_features;
 
 mod features;
+pub mod java_set;
 mod size;
 
 /// Proof that [`GenerationCache`] is implementable without a [`ProtoChunk`].

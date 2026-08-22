@@ -4,6 +4,7 @@ use pumpkin_util::{
     random::{RandomGenerator, RandomImpl},
 };
 
+use crate::generation::feature::java_set::vanilla_hash_set_order;
 use crate::generation::proto_chunk::GenerationCache;
 use crate::{generation::block_state_provider::BlockStateProvider, world::WorldPortalExt};
 
@@ -45,42 +46,4 @@ impl AttachedToLogsTreeDecorator {
             );
         }
     }
-}
-
-/// Reproduces the iteration order of Java's default `HashSet<BlockPos>`.
-/// Vanilla builds the decorator context from that set before sorting by Y.
-fn vanilla_hash_set_order(positions: &[BlockPos]) -> Vec<BlockPos> {
-    let mut capacity = 16usize;
-    let mut threshold = capacity * 3 / 4;
-    let mut buckets = vec![Vec::new(); capacity];
-
-    for &pos in positions {
-        if buckets.iter().map(Vec::len).sum::<usize>() + 1 > threshold {
-            capacity *= 2;
-            threshold = capacity * 3 / 4;
-            let mut resized = vec![Vec::new(); capacity];
-            for bucket in buckets {
-                for entry in bucket {
-                    let index = java_hash(entry) as usize & (capacity - 1);
-                    resized[index].push(entry);
-                }
-            }
-            buckets = resized;
-        }
-
-        let index = java_hash(pos) as usize & (capacity - 1);
-        buckets[index].push(pos);
-    }
-
-    buckets.into_iter().flatten().collect()
-}
-
-const fn java_hash(pos: BlockPos) -> u32 {
-    let hash = pos
-        .0
-        .y
-        .wrapping_add(pos.0.z.wrapping_mul(31))
-        .wrapping_mul(31)
-        .wrapping_add(pos.0.x);
-    hash as u32 ^ (hash as u32 >> 16)
 }

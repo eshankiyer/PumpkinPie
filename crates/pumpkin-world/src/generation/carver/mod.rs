@@ -115,7 +115,6 @@ pub trait Carver {
         random: &mut RandomGenerator,
         chunk_pos: &Vector2<i32>,
         carver_chunk_pos: &Vector2<i32>,
-        legacy_random_source: bool,
     );
 }
 
@@ -194,8 +193,7 @@ pub fn carve(chunk: &mut ProtoChunk, generator: &VanillaGenerator) {
                     carver_x,
                     carver_z,
                 );
-                let mut carver_random =
-                    new_carver_random(seed, generator.settings.legacy_random_source);
+                let mut carver_random = new_carver_random(seed);
 
                 if should_carve(config, &mut carver_random) {
                     match config.additional {
@@ -206,7 +204,6 @@ pub fn carve(chunk: &mut ProtoChunk, generator: &VanillaGenerator) {
                                 &mut carver_random,
                                 &chunk_pos,
                                 &carver_chunk_pos,
-                                generator.settings.legacy_random_source,
                             );
                         }
                         CarverAdditionalConfig::Canyon(_) => {
@@ -216,7 +213,6 @@ pub fn carve(chunk: &mut ProtoChunk, generator: &VanillaGenerator) {
                                 &mut carver_random,
                                 &chunk_pos,
                                 &carver_chunk_pos,
-                                generator.settings.legacy_random_source,
                             );
                         }
                     }
@@ -240,16 +236,17 @@ fn get_large_feature_seed(seed: u64, chunk_x: i32, chunk_z: i32) -> u64 {
     result as u64
 }
 
-const fn new_carver_random(seed: u64, non_vanilla_random: bool) -> RandomGenerator {
-    if non_vanilla_random {
-        RandomGenerator::Xoroshiro(pumpkin_util::random::xoroshiro128::Xoroshiro::from_seed(
-            seed,
-        ))
-    } else {
-        RandomGenerator::Legacy(pumpkin_util::random::legacy_rand::LegacyRand::from_seed(
-            seed,
-        ))
-    }
+/// Carvers always run on the legacy LCG, whatever the dimension's noise settings say about
+/// `legacy_random_source`: `NoiseBasedChunkGenerator.applyCarvers`
+/// (`NoiseBasedChunkGenerator.java:316`) builds its `WorldgenRandom` over a
+/// `LegacyRandomSource`, and each tunnel forks a `RandomSource.createThreadLocalInstance`
+/// (`CaveWorldCarver.java:144`, `CanyonWorldCarver.java`), which is a
+/// `SingleThreadedRandomSource` - the same 48-bit LCG
+/// (`RandomSource.java:31-33`, `SingleThreadedRandomSource.java:6-40`).
+const fn new_carver_random(seed: u64) -> RandomGenerator {
+    RandomGenerator::Legacy(pumpkin_util::random::legacy_rand::LegacyRand::from_seed(
+        seed,
+    ))
 }
 
 fn carvers_for_dimension(dimension: &Dimension) -> &'static [&'static CarverConfig] {

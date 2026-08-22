@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use pumpkin_util::{
     math::{position::BlockPos, vector3::Vector3, vertical_surface_type::VerticalSurfaceType},
     random::{RandomGenerator, RandomImpl},
@@ -7,6 +5,7 @@ use pumpkin_util::{
 
 use crate::generation::block_predicate::BlockPredicate;
 use crate::generation::block_state_provider::BlockStateProvider;
+use crate::generation::feature::java_set::vanilla_hash_set_order;
 use crate::generation::proto_chunk::GenerationCache;
 use crate::world::WorldPortalExt;
 
@@ -85,8 +84,11 @@ impl VegetationPatchFeature {
         replaceable: &BlockPredicate,
         x_radius: i32,
         z_radius: i32,
-    ) -> HashSet<BlockPos> {
-        let mut surface = HashSet::new();
+    ) -> Vec<BlockPos> {
+        // Vanilla collects these into a `Set<BlockPos>` and iterates it later; the insertion
+        // order is kept here so `vanilla_hash_set_order` can reproduce that iteration
+        // (`VegetationPatchFeature.java:48/77/96`).
+        let mut surface: Vec<BlockPos> = Vec::new();
 
         // Determine "inwards" and "outwards" directions based on the surface
         let inwards = self.surface_direction();
@@ -153,8 +155,9 @@ impl VegetationPatchFeature {
                         random,
                         ground_pos,
                         depth,
-                    ) {
-                        surface.insert(ground_pos);
+                    ) && !surface.contains(&ground_pos)
+                    {
+                        surface.push(ground_pos);
                     }
                 }
             }
@@ -203,11 +206,14 @@ impl VegetationPatchFeature {
         min_y: i8,
         height: u16,
         feature_name: pumpkin_data::placed_feature::PlacedFeature,
-        surface: &HashSet<BlockPos>,
+        surface: &[BlockPos],
     ) {
         let opposite_dir = self.surface_direction().opposite();
 
-        for &surface_pos in surface {
+        // `VegetationPatchFeature.distributeVegetation` walks the `HashSet` itself, drawing one
+        // `nextFloat` per element, so the order is part of the seeded output
+        // (`VegetationPatchFeature.java:96-100`).
+        for surface_pos in vanilla_hash_set_order(surface) {
             if self.vegetation_chance > 0.0 && random.next_f32() < self.vegetation_chance {
                 let placement_pos = surface_pos.offset(opposite_dir.to_offset());
                 let _ = self.vegetation_feature.generate(

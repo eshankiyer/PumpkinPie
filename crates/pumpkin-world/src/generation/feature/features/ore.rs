@@ -2,7 +2,7 @@ use core::f32;
 
 use pumpkin_data::{BlockDirection, BlockState, BlockStateId};
 use pumpkin_util::{
-    math::{lerp, position::BlockPos, vector3::Vector3},
+    math::{self, lerp, position::BlockPos, vector3::Vector3},
     random::{RandomGenerator, RandomImpl},
 };
 
@@ -36,10 +36,15 @@ impl OreFeature {
         let g = self.size as f32 / 8.0f32;
         let i = f32::midpoint(self.size as f32 / 16.0f32 * 2.0, 1.0).ceil() as i32;
 
-        let d = pos.0.x as f64 + f.sin() as f64 * g as f64;
-        let e = pos.0.x as f64 - f.sin() as f64 * g as f64;
-        let h = pos.0.z as f64 + f.cos() as f64 * g as f64; // Use f.cos() for Math.cos(f)
-        let j = pos.0.z as f64 - f.cos() as f64 * g as f64;
+        // `OreFeature.java:31-34` uses `java.lang.Math.sin` / `Math.cos`: the exact double
+        // routines applied to the widened float angle, not the `Mth` sine table and not a
+        // single-precision sine.
+        let sin = f64::from(f).sin();
+        let cos = f64::from(f).cos();
+        let d = f64::from(pos.0.x) + sin * f64::from(g);
+        let e = f64::from(pos.0.x) - sin * f64::from(g);
+        let h = f64::from(pos.0.z) + cos * f64::from(g);
+        let j = f64::from(pos.0.z) - cos * f64::from(g);
 
         let l = pos.0.y as f64 + random.next_bounded_i32(3) as f64 - 2.0;
         let m = pos.0.y as f64 + random.next_bounded_i32(3) as f64 - 2.0;
@@ -90,13 +95,16 @@ impl OreFeature {
             let d = lerp(f as f64, start_x, end_x);
             let e = lerp(f as f64, start_y, end_y);
             let g = lerp(f as f64, start_z, end_z);
-            let h = random.next_f64() * j as f64 / 16.0;
-            let l = f32::midpoint(((f32::consts::PI * f).sin() + 1.0) * h as f32, 1.0);
+            let h = random.next_f64() * f64::from(j) / 16.0;
+            // `OreFeature.java:83`: `Mth.sin` is the 65536-entry lookup table
+            // (`Mth.java:50-52`), and multiplying by the double `ss` promotes the whole
+            // expression to double before the trailing `+ 1.0) / 2.0`.
+            let l = f64::midpoint(f64::from(math::sin(f32::consts::PI * f) + 1.0) * h, 1.0);
 
             ds[k as usize * 4] = d;
             ds[k as usize * 4 + 1] = e;
             ds[k as usize * 4 + 2] = g;
-            ds[k as usize * 4 + 3] = l as f64;
+            ds[k as usize * 4 + 3] = l;
         }
 
         for k in 0..(j - 1) {

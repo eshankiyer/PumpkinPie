@@ -56,7 +56,9 @@ impl TreeDecorator {
             Self::PaleMoss(_decorator) => {}
             Self::CreakingHeart(_decorator) => {}
             Self::Cocoa(_decorator) => {}
-            Self::Beehive(_decorator) => {}
+            Self::Beehive(decorator) => {
+                decorator.generate(chunk, random, log_positions, foliage_positions);
+            }
             Self::AlterGround(_decorator) => {}
             Self::PlaceOnGround(decorator) => {
                 decorator.generate(chunk, block_registry, random, root_positions, log_positions);

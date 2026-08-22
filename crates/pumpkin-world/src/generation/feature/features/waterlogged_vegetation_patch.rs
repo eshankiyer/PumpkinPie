@@ -1,10 +1,9 @@
-use std::collections::HashSet;
-
 use pumpkin_util::{
     math::position::BlockPos,
     random::{RandomGenerator, RandomImpl},
 };
 
+use crate::generation::feature::java_set::vanilla_hash_set_order;
 use crate::generation::proto_chunk::GenerationCache;
 use crate::world::WorldPortalExt;
 use pumpkin_data::BlockDirection;
@@ -42,7 +41,10 @@ impl WaterloggedVegetationPatchFeature {
 
         // Waterlogged vegetation should occupy the water block itself rather
         // than sitting above it. We pass the water surface position directly.
-        for &surface_pos in &water_surface {
+        // `WaterloggedVegetationPatchFeature` inherits `distributeVegetation`, which walks the
+        // returned `HashSet` and draws one `nextFloat` per element
+        // (`VegetationPatchFeature.java:96-100`).
+        for surface_pos in vanilla_hash_set_order(&water_surface) {
             if self.base.vegetation_chance > 0.0 && random.next_f32() < self.base.vegetation_chance
             {
                 self.place_vegetation(
@@ -70,7 +72,7 @@ impl WaterloggedVegetationPatchFeature {
         replaceable: &crate::generation::block_predicate::BlockPredicate,
         x_radius: i32,
         z_radius: i32,
-    ) -> HashSet<BlockPos> {
+    ) -> Vec<BlockPos> {
         let surface = self.base.place_ground_patch(
             chunk,
             block_registry,
@@ -81,8 +83,10 @@ impl WaterloggedVegetationPatchFeature {
             z_radius,
         );
 
-        // Filter the surface to only include unexposed positions, turning them into water
-        let water_surface: HashSet<BlockPos> = surface
+        // `WaterloggedVegetationPatchFeature.placeGroundPatch` (`:35-46`) walks the parent's
+        // set to build a second one, so the filter runs in the parent set's iteration order and
+        // that becomes the new set's insertion order.
+        let water_surface: Vec<BlockPos> = vanilla_hash_set_order(&surface)
             .into_iter()
             .filter(|&pos| !is_exposed(chunk, pos))
             .collect();
