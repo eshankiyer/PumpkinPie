@@ -11,7 +11,7 @@ use pumpkin_data::{
 };
 use pumpkin_util::math::{boundingbox::BoundingBox, position::BlockPos, vector3::Vector3};
 use pumpkin_world::chunk::ChunkData;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     block::blocks::fire::fire::FireBlock,
@@ -93,20 +93,26 @@ pub trait ExplosionDamageCalculator: Send + Sync {
         entity: &dyn EntityBase,
         exposure: f32,
     ) -> f32 {
-        let radius = explosion.power as f64 * 2.0;
+        let double_radius = explosion.power as f64 * 2.0;
         let distance = (entity
             .get_entity()
             .pos
             .load()
             .squared_distance_to_vec(&explosion.pos))
         .sqrt()
-            / radius;
-        let damage_multiplier = (1.0 - distance) * exposure as f64;
-        (f64::midpoint(damage_multiplier * damage_multiplier, damage_multiplier)
-            * 7.0
-            * explosion.power as f64
-            + 1.0) as f32
+            / double_radius;
+        explosion_damage_amount(double_radius, distance, f64::from(exposure))
     }
+}
+
+/// `ExplosionDamageCalculator.getEntityDamageAmount` (`ExplosionDamageCalculator.java:31-37`).
+///
+/// The final factor is `doubleRadius` (`radius * 2.0`, line 32), *not* the raw power: at
+/// `power = 4` and full exposure the point-blank hit is `1.0 * 7.0 * 8.0 + 1.0 = 57.0`.
+#[must_use]
+pub fn explosion_damage_amount(double_radius: f64, distance_ratio: f64, exposure: f64) -> f32 {
+    let p = (1.0 - distance_ratio) * exposure;
+    f64::midpoint(p * p, p).mul_add(7.0 * double_radius, 1.0) as f32
 }
 
 /// Default explosion damage calculator implementing vanilla standard explosion rules.
@@ -124,15 +130,20 @@ pub struct SimpleExplosionDamageCalculator {
 
 impl SimpleExplosionDamageCalculator {
     #[must_use]
+    /// Argument order mirrors vanilla's constructor
+    /// (`SimpleExplosionDamageCalculator.java:84-86`): `explodesBlocks` first, then
+    /// `damagesEntities`. Wind charges construct this as `(true, false, ...)`
+    /// (`AbstractWindCharge.java:30`, `WindCharge.java:24`), i.e. they trigger blocks and
+    /// deal no damage.
     pub const fn new(
+        explodes_blocks: bool,
         damages_entities: bool,
-        damages_blocks: bool,
         knockback_multiplier: Option<f32>,
         immune_blocks: Option<&'static Tag>,
     ) -> Self {
         Self {
             damages_entities,
-            damages_blocks,
+            damages_blocks: explodes_blocks,
             knockback_multiplier,
             immune_blocks,
         }
@@ -148,10 +159,12 @@ impl ExplosionDamageCalculator for SimpleExplosionDamageCalculator {
         block: &Block,
         fluid: &pumpkin_data::fluid::FluidState,
     ) -> Option<f32> {
-        if let Some(immune_tag) = self.immune_blocks
-            && block.has_tag(immune_tag)
-        {
-            return None;
+        // `SimpleExplosionDamageCalculator.java:97-101`: when an immune set is configured it
+        // *replaces* the default lookup entirely - an immune block reports the 3600000.0
+        // bedrock-grade resistance that stops the ray, and every other block reports empty so
+        // the ray passes through it at no cost. It is not a filter layered over the default.
+        if let Some(immune_tag) = self.immune_blocks {
+            return block.has_tag(immune_tag).then_some(3_600_000.0);
         }
         if block.default_state.is_air() && fluid.is_empty {
             None
@@ -160,29 +173,27 @@ impl ExplosionDamageCalculator for SimpleExplosionDamageCalculator {
         }
     }
 
+    /// `SimpleExplosionDamageCalculator.java:104-107` returns the bare flag; immune blocks are
+    /// already excluded by the 3600000.0 resistance above, which drives the ray's remaining
+    /// power negative.
     fn should_block_explode(
         &self,
         _explosion: &Explosion,
         _world: &World,
         _pos: &BlockPos,
-        block: &Block,
+        _block: &Block,
         _power: f32,
     ) -> bool {
-        if !self.damages_blocks {
-            return false;
-        }
-        if let Some(immune_tag) = self.immune_blocks
-            && block.has_tag(immune_tag)
-        {
-            return false;
-        }
-        true
+        self.damages_blocks
     }
 
     fn should_damage_entity(&self, _explosion: &Explosion, _entity: &dyn EntityBase) -> bool {
         self.damages_entities
     }
 
+    /// `SimpleExplosionDamageCalculator.java:114-118`. Vanilla additionally returns 0.0 for a
+    /// creative player who is flying; `Player::is_flying` is async here while this trait method
+    /// is not, so that term is a documented omission.
     fn get_knockback_multiplier(&self, _entity: &dyn EntityBase) -> f32 {
         self.knockback_multiplier.unwrap_or(1.0)
     }
@@ -286,11 +297,22 @@ impl Explosion {
     }
 
     #[allow(clippy::too_many_lines)]
+    /// Returns the blocks the ray destroys, plus the air positions it swept through.
+    ///
+    /// Vanilla accumulates both into a single `toBlow` set: `calculateExplodedPositions`
+    /// (`ServerExplosion.java:121-170`) has no air guard, so an air position whose resistance
+    /// came back empty is still added, and `createFire` (`ServerExplosion.java:227-233`) then
+    /// walks that set. Keeping the air positions in their own collection preserves that fire
+    /// coverage without sending air through the destroy-and-drop-loot path.
     fn get_blocks_to_destroy(
         &self,
         world: &World,
-    ) -> FxHashMap<BlockPos, (&'static Block, &'static BlockState)> {
+    ) -> (
+        FxHashMap<BlockPos, (&'static Block, &'static BlockState)>,
+        FxHashSet<BlockPos>,
+    ) {
         let mut map = FxHashMap::default();
+        let mut swept_air = FxHashSet::default();
 
         let mut chunk_cache: FxHashMap<
             pumpkin_util::math::vector2::Vector2<i32>,
@@ -378,28 +400,32 @@ impl Explosion {
                             },
                         );
 
-                        if !state.is_air() || !fluid_state.is_empty {
-                            let protects_rail = self.protects_rail(world, &block_pos, block);
-                            let resistance = if protects_rail {
-                                Some(0.0)
+                        let protects_rail = self.protects_rail(world, &block_pos, block);
+                        let resistance = if protects_rail {
+                            Some(0.0)
+                        } else {
+                            calc.get_block_explosion_resistance(
+                                self,
+                                world,
+                                &block_pos,
+                                block,
+                                fluid_state,
+                            )
+                        };
+
+                        if let Some(resistance) = resistance {
+                            h -= (resistance + 0.3) * 0.3;
+                        }
+
+                        if h > 0.0
+                            && !protects_rail
+                            && calc.should_block_explode(self, world, &block_pos, block, h)
+                        {
+                            if state.is_air() && fluid_state.is_empty {
+                                if self.creates_fire {
+                                    swept_air.insert(block_pos);
+                                }
                             } else {
-                                calc.get_block_explosion_resistance(
-                                    self,
-                                    world,
-                                    &block_pos,
-                                    block,
-                                    fluid_state,
-                                )
-                            };
-
-                            if let Some(resistance) = resistance {
-                                h -= (resistance + 0.3) * 0.3;
-                            }
-
-                            if h > 0.0
-                                && !protects_rail
-                                && calc.should_block_explode(self, world, &block_pos, block, h)
-                            {
                                 map.insert(block_pos, (block, state));
                             }
                         }
@@ -412,7 +438,7 @@ impl Explosion {
                 }
             }
         }
-        map
+        (map, swept_air)
     }
 
     async fn damage_entities(&self, world: &Arc<World>) {
@@ -473,10 +499,6 @@ impl Explosion {
             } else {
                 Self::calculate_exposure(&self.pos, entity, world).await as f64
             };
-
-            if exposure == 0.0 {
-                continue;
-            }
 
             if should_damage {
                 let damage =
@@ -584,7 +606,7 @@ impl Explosion {
         match self.block_interaction {
             BlockInteraction::Keep => 0,
             BlockInteraction::TriggerBlock => {
-                let blocks = self.get_blocks_to_destroy(world);
+                let (blocks, _) = self.get_blocks_to_destroy(world);
                 for (pos, (block, _state)) in &blocks {
                     let pumpkin_block = world.block_registry.get_pumpkin_block(block.id);
                     if let Some(pumpkin_block) = pumpkin_block {
@@ -617,7 +639,7 @@ impl Explosion {
                     return 0;
                 }
 
-                let blocks = self.get_blocks_to_destroy(world);
+                let (blocks, swept_air) = self.get_blocks_to_destroy(world);
                 let decay_drops = self.block_interaction == BlockInteraction::DestroyWithDecay;
                 let explosion_radius = decay_drops.then_some(self.power);
 
@@ -658,7 +680,10 @@ impl Explosion {
                     }
                 }
                 if self.creates_fire {
-                    for pos in blocks.keys() {
+                    // `ServerExplosion.java:227-233` walks every position the ray reached, not
+                    // only the ones that held a block: an airburst over open ground still
+                    // ignites the surface it swept past.
+                    for pos in blocks.keys().chain(swept_air.iter()) {
                         if !world.get_block_state(pos).is_air()
                             || !world
                                 .get_block_state(&pos.down())
@@ -682,9 +707,46 @@ impl Explosion {
 
 #[cfg(test)]
 mod tests {
-    use super::{BlockInteraction, Explosion};
+    use super::{
+        BlockInteraction, Explosion, SimpleExplosionDamageCalculator, explosion_damage_amount,
+    };
     use pumpkin_data::Block;
     use pumpkin_util::math::vector3::Vector3;
+
+    /// `ExplosionDamageCalculator.java:31-37`. The final factor is `doubleRadius`, so a
+    /// power-4 TNT at point blank with full exposure deals `(1+1)/2 * 7 * 8 + 1 = 57`, not the
+    /// 29 that multiplying by the raw power would give.
+    #[test]
+    fn point_blank_tnt_damage_uses_double_radius() {
+        assert!((explosion_damage_amount(8.0, 0.0, 1.0) - 57.0).abs() < 1.0e-4);
+    }
+
+    /// Same source line: at zero exposure the formula collapses to the constant `+ 1.0`, so an
+    /// entity fully shielded but inside the radius still takes exactly one point of damage.
+    #[test]
+    fn fully_shielded_entity_still_takes_one_damage() {
+        assert!((explosion_damage_amount(8.0, 0.0, 0.0) - 1.0).abs() < 1.0e-4);
+        assert!((explosion_damage_amount(8.0, 1.0, 1.0) - 1.0).abs() < 1.0e-4);
+    }
+
+    /// Half the radius at full exposure: `p = 0.5`, `(0.25 + 0.5) / 2 * 7 * 8 + 1 = 22`.
+    #[test]
+    fn half_radius_damage_is_exact() {
+        assert!((explosion_damage_amount(8.0, 0.5, 1.0) - 22.0).abs() < 1.0e-4);
+    }
+
+    /// Vanilla constructs the wind charge calculator as
+    /// `new SimpleExplosionDamageCalculator(true, false, ...)`
+    /// (`AbstractWindCharge.java:30`, `WindCharge.java:24`), whose first argument is
+    /// `explodesBlocks` and whose second is `damagesEntities`
+    /// (`SimpleExplosionDamageCalculator.java:84-86`). A wind charge therefore triggers blocks
+    /// and deals no damage; this pins the positional order against being read the other way.
+    #[test]
+    fn wind_charge_calculator_explodes_blocks_and_deals_no_damage() {
+        let calc = SimpleExplosionDamageCalculator::new(true, false, Some(1.22), None);
+        assert!(calc.damages_blocks);
+        assert!(!calc.damages_entities);
+    }
 
     #[test]
     fn fire_explosions_keep_block_destruction_enabled() {

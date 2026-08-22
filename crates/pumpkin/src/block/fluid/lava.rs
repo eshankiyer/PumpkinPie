@@ -340,6 +340,17 @@ impl FlowingFluid for FlowingLava {
         world.level_info.load().game_rules.lava_source_conversion
     }
 
+    /// `LavaFluid.beforeDestroyingBlock` (`LavaFluid.java:144-147`) only calls `fizz`, which is
+    /// `levelEvent(1501, pos, 0)` (`LavaFluid.java:193-195`). Unlike `WaterFluid`
+    /// (`WaterFluid.java:80-84`) it never calls `Block.dropResources`, so a torch or a sapling
+    /// consumed by advancing lava leaves no item behind.
+    async fn before_destroying_block(&self, world: &Arc<World>, pos: &BlockPos) {
+        world
+            .break_block(pos, None, BlockFlags::NOTIFY_ALL | BlockFlags::SKIP_DROPS)
+            .await;
+        world.sync_world_event(WorldEvent::LavaFizz, *pos, 0);
+    }
+
     async fn spread_to(
         &self,
         world: &Arc<World>,

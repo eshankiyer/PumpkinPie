@@ -396,7 +396,7 @@ pub trait FlowingFluid: Send + Sync {
                     return;
                 }
                 if block.id != Block::AIR.id {
-                    world.break_block(pos, None, BlockFlags::NOTIFY_ALL).await;
+                    self.before_destroying_block(world, pos).await;
                 }
             }
 
@@ -495,6 +495,24 @@ pub trait FlowingFluid: Send + Sync {
 
             // Convert to source if below is solid or a source of same fluid
             below_is_same_source || below_state.is_solid_block()
+        }
+    }
+
+    /// `FlowingFluid.beforeDestroyingBlock` (`FlowingFluid.java:280`), called from `spreadTo`
+    /// (`FlowingFluid.java:268-278`) for every non-air block the fluid is about to overwrite.
+    ///
+    /// The two fluids differ here, and the difference is visible in any lava flow:
+    /// `WaterFluid` drops the block's resources (`WaterFluid.java:80-84`), while `LavaFluid`
+    /// drops nothing and plays the fizz level event instead (`LavaFluid.java:144-147`, which
+    /// calls `fizz` -> `levelEvent(1501, ...)` at `LavaFluid.java:193-195`). Water washing a
+    /// torch away therefore yields a torch item; lava consuming one yields nothing.
+    fn before_destroying_block<'a>(
+        &'a self,
+        world: &'a Arc<World>,
+        pos: &'a BlockPos,
+    ) -> impl std::future::Future<Output = ()> + Send + 'a {
+        async move {
+            world.break_block(pos, None, BlockFlags::NOTIFY_ALL).await;
         }
     }
 
