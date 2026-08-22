@@ -118,6 +118,12 @@ impl PlayerScreenHandler {
 }
 
 impl ScreenHandler for PlayerScreenHandler {
+    /// `InventoryMenu.stillValid` returns `true` unconditionally
+    /// (`InventoryMenu.java:97-99`): the player's own inventory has no world position.
+    fn container_access(&self) -> crate::screen_handler::ContainerAccess {
+        crate::screen_handler::ContainerAccess::None
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

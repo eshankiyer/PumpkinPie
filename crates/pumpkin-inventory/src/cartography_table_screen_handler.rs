@@ -50,6 +50,15 @@ impl CartographyTableScreenHandler {
 }
 
 impl ScreenHandler for CartographyTableScreenHandler {
+    /// Port of `CartographyTableMenu.java:93-95`: the block at the opening position must still be
+    /// `Blocks.CARTOGRAPHY_TABLE` and the player must still be within
+    /// `blockInteractionRange() + 4.0` (`AbstractContainerMenu.java:93-95`).
+    fn container_access(&self) -> crate::screen_handler::ContainerAccess {
+        crate::screen_handler::ContainerAccess::Block(|block| {
+            block.id == pumpkin_data::Block::CARTOGRAPHY_TABLE.id
+        })
+    }
+
     fn get_behaviour(&self) -> &ScreenHandlerBehaviour {
         &self.behaviour
     }

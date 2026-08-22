@@ -124,6 +124,16 @@ impl ShulkerBoxScreenHandler {
 }
 
 impl ScreenHandler for ShulkerBoxScreenHandler {
+    /// Port of `ShulkerBoxMenu.java:35-37`, which delegates to
+    /// `Container.stillValidBlockEntity` (`Container.java:94-101`): same block entity at
+    /// the opening position, and the player within `blockInteractionRange() + 4.0`
+    /// (`Player.java:2014-2016`). Pumpkin cannot compare block-entity identity here, so
+    /// only the range half is enforced; a destroyed block entity is handled by
+    /// `World::close_container_screens_at`.
+    fn container_access(&self) -> crate::screen_handler::ContainerAccess {
+        crate::screen_handler::ContainerAccess::RangeOnly
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

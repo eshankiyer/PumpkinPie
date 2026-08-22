@@ -336,6 +336,15 @@ impl EnchantingTableScreenHandler {
 }
 
 impl ScreenHandler for EnchantingTableScreenHandler {
+    /// Port of `EnchantmentMenu.java:218-220`: the block at the opening position must still be
+    /// `Blocks.ENCHANTING_TABLE` and the player must still be within
+    /// `blockInteractionRange() + 4.0` (`AbstractContainerMenu.java:93-95`).
+    fn container_access(&self) -> crate::screen_handler::ContainerAccess {
+        crate::screen_handler::ContainerAccess::Block(|block| {
+            block.id == pumpkin_data::Block::ENCHANTING_TABLE.id
+        })
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

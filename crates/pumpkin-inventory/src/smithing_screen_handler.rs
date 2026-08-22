@@ -122,6 +122,15 @@ impl SmithingScreenHandler {
 }
 
 impl ScreenHandler for SmithingScreenHandler {
+    /// Port of `SmithingMenu.java:66-68 via ItemCombinerMenu.java:110-112`: the block at the opening position must still be
+    /// `Blocks.SMITHING_TABLE` and the player must still be within
+    /// `blockInteractionRange() + 4.0` (`AbstractContainerMenu.java:93-95`).
+    fn container_access(&self) -> crate::screen_handler::ContainerAccess {
+        crate::screen_handler::ContainerAccess::Block(|block| {
+            block.id == pumpkin_data::Block::SMITHING_TABLE.id
+        })
+    }
+
     fn get_behaviour(&self) -> &ScreenHandlerBehaviour {
         &self.behaviour
     }

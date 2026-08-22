@@ -1065,6 +1065,15 @@ impl CraftingTableScreenHandler {
 impl RecipeFinderScreenHandler for CraftingTableScreenHandler {}
 
 impl ScreenHandler for CraftingTableScreenHandler {
+    /// Port of `CraftingMenu.java:104-106`: the block at the opening position must still be
+    /// `Blocks.CRAFTING_TABLE` and the player must still be within
+    /// `blockInteractionRange() + 4.0` (`AbstractContainerMenu.java:93-95`).
+    fn container_access(&self) -> crate::screen_handler::ContainerAccess {
+        crate::screen_handler::ContainerAccess::Block(|block| {
+            block.id == pumpkin_data::Block::CRAFTING_TABLE.id
+        })
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

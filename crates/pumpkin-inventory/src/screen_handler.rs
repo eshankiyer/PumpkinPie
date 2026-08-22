@@ -33,7 +33,7 @@ use crate::{
 };
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::{
-    Enchantment,
+    Block, Enchantment,
     data_component_impl::{EquipmentSlot, EquipmentType, EquippableImpl},
     screen::WindowType,
     sound::Sound,
@@ -122,8 +122,91 @@ pub type PlayerFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 /// - Receive experience
 ///
 /// Implementors are typically player entities that can open containers.
+/// Server-side analogue of vanilla's `ContainerLevelAccess` predicate
+/// (`net/minecraft/world/inventory/ContainerLevelAccess.java:9-37`), describing what
+/// still has to hold at the position a menu was opened against for the menu to stay
+/// usable.
+///
+/// Vanilla splits menu validation into two families:
+///
+/// * `AbstractContainerMenu.stillValid(ContainerLevelAccess, Player, Block)`
+///   (`AbstractContainerMenu.java:93-95`) - the block at the opening position must
+///   still be the expected block, and the player must still be within
+///   `blockInteractionRange() + 4.0` of it (`Player.java:2014-2016`). Crafting table,
+///   enchanting table, beacon, grindstone, loom, stonecutter, cartography table and
+///   the `ItemCombinerMenu` subclasses (`ItemCombinerMenu.java:110-112`) use this.
+/// * `Container.stillValidBlockEntity` (`Container.java:94-101`) - the block entity at
+///   the opening position must still be the same object, plus the same range check.
+///   Chest, furnace family, brewing stand, hopper, shulker box, crafter and lectern use
+///   this via `container.stillValid(player)`.
+///
+/// Pumpkin has no stable block-entity identity to compare against here, so the second
+/// family is modelled as [`ContainerAccess::RangeOnly`]; the "block entity replaced"
+/// half is covered separately by `World::close_container_screens_at`.
+#[derive(Clone, Copy)]
+pub enum ContainerAccess {
+    /// The menu has no backing world position and is never invalidated by movement
+    /// (the player's own inventory, merchant menus, plugin GUIs). Equivalent to
+    /// `ContainerLevelAccess.NULL`, whose `evaluate` yields `Optional.empty()` and so
+    /// falls through to `stillValid`'s `.orElse(true)`
+    /// (`ContainerLevelAccess.java:10-15`, `AbstractContainerMenu.java:93-95`).
+    None,
+    /// Range check only, mirroring `Container.stillValidBlockEntity`
+    /// (`Container.java:94-101`).
+    RangeOnly,
+    /// Range check plus a predicate on the block currently at the opening position,
+    /// mirroring `AbstractContainerMenu.stillValid`'s `state.is(block)` test
+    /// (`AbstractContainerMenu.java:93-95`) and `ItemCombinerMenu.isValidBlock`
+    /// (`ItemCombinerMenu.java:32`, `AnvilMenu.java:65-67`, `SmithingMenu.java:66-68`).
+    Block(fn(&Block) -> bool),
+}
+
+impl ContainerAccess {
+    /// Whether this access has a backing world position at all. `false` corresponds to
+    /// `ContainerLevelAccess.NULL` (`ContainerLevelAccess.java:10-15`), which makes
+    /// `stillValid` fall through to `.orElse(true)`.
+    #[must_use]
+    pub const fn requires_position(self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    /// Applies the block half of `AbstractContainerMenu.stillValid`
+    /// (`AbstractContainerMenu.java:93-95`) to the block currently at the opening
+    /// position. Accesses with no block requirement accept anything.
+    #[must_use]
+    pub fn accepts_block(self, block: &Block) -> bool {
+        match self {
+            Self::None | Self::RangeOnly => true,
+            Self::Block(predicate) => predicate(block),
+        }
+    }
+}
+
 pub trait InventoryPlayer: Send + Sync {
     fn as_any(&self) -> &dyn std::any::Any;
+
+    /// Evaluates a [`ContainerAccess`] against the position this player's currently
+    /// open menu was opened at.
+    ///
+    /// This is the `ContainerLevelAccess.evaluate` half of vanilla's
+    /// `AbstractContainerMenu.stillValid(access, player, block)`
+    /// (`AbstractContainerMenu.java:93-95`): the implementor supplies the world and the
+    /// opening position, applies the caller's block predicate to the block currently
+    /// there, and range-checks the player with
+    /// `Player.isWithinBlockInteractionRange(pos, 4.0)` (`Player.java:2014-2016`,
+    /// i.e. squared distance from the eye position to the block's box below
+    /// `(blockInteractionRange() + 4.0)^2`).
+    ///
+    /// Implementations with no opening position must return `true`, matching
+    /// `ContainerLevelAccess.NULL` falling through to `.orElse(true)`
+    /// (`ContainerLevelAccess.java:10-15`).
+    ///
+    /// The default returns `true` so that test doubles need not model a world; the
+    /// real server player overrides it.
+    fn evaluate_container_access(&self, access: ContainerAccess) -> bool {
+        let _ = access;
+        true
+    }
     /// Drops an item into the world.
     ///
     /// # Arguments
@@ -290,9 +373,26 @@ pub trait ScreenHandler: Send + Sync {
         self.get_behaviour().sync_id
     }
 
-    /// Checks if the player can use this container.
-    fn can_use(&self, _player: &dyn InventoryPlayer) -> bool {
-        true
+    /// What must still hold at the position this menu was opened against.
+    ///
+    /// Vanilla equivalent: the `ContainerLevelAccess`/`Block` pair a menu passes to
+    /// `AbstractContainerMenu.stillValid` (`AbstractContainerMenu.java:93-95`), or the
+    /// backing container for the `Container.stillValidBlockEntity` family
+    /// (`Container.java:94-101`). Defaults to [`ContainerAccess::None`], i.e. a menu
+    /// with no backing position.
+    fn container_access(&self) -> ContainerAccess {
+        ContainerAccess::None
+    }
+
+    /// Checks if the player can still use this container.
+    ///
+    /// Port of `AbstractContainerMenu.stillValid(Player)`
+    /// (`AbstractContainerMenu.java:635`). The default routes
+    /// [`ScreenHandler::container_access`] through the player, so a menu stays valid
+    /// only while the player is in range of - and the expected block still stands at -
+    /// the position the menu was opened against.
+    fn can_use(&self, player: &dyn InventoryPlayer) -> bool {
+        player.evaluate_container_access(self.container_access())
     }
 
     /// Gets a reference to the screen handler behaviour.
@@ -1477,5 +1577,48 @@ impl ScreenHandlerBehaviour {
     pub fn next_revision(&self) -> u32 {
         self.revision.fetch_add(1, Ordering::Relaxed);
         self.revision.fetch_and(32767, Ordering::Relaxed) & 32767
+    }
+}
+
+#[cfg(test)]
+mod container_access_tests {
+    use super::ContainerAccess;
+    use pumpkin_data::Block;
+    use pumpkin_data::tag::Taggable;
+
+    #[test]
+    fn null_access_has_no_position() {
+        assert!(!ContainerAccess::None.requires_position());
+        assert!(ContainerAccess::None.accepts_block(&Block::STONE));
+    }
+
+    #[test]
+    fn block_entity_family_checks_range_but_not_identity() {
+        let access = ContainerAccess::RangeOnly;
+        assert!(access.requires_position());
+        // `Container.stillValidBlockEntity` (`Container.java:94-101`) compares block
+        // entities, never block ids, so any block passes the block half here.
+        assert!(access.accepts_block(&Block::STONE));
+    }
+
+    #[test]
+    fn block_family_rejects_a_replaced_block() {
+        let access = ContainerAccess::Block(|block| block.id == Block::CRAFTING_TABLE.id);
+        assert!(access.requires_position());
+        assert!(access.accepts_block(&Block::CRAFTING_TABLE));
+        assert!(!access.accepts_block(&Block::STONE));
+    }
+
+    /// `AnvilMenu.isValidBlock` tests `BlockTags.ANVIL` (`AnvilMenu.java:65-67`), so a
+    /// chipped or damaged anvil must keep the menu open while any other block closes it.
+    #[test]
+    fn anvil_family_accepts_every_damage_stage() {
+        let access = ContainerAccess::Block(|block| {
+            block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_ANVIL)
+        });
+        assert!(access.accepts_block(&Block::ANVIL));
+        assert!(access.accepts_block(&Block::CHIPPED_ANVIL));
+        assert!(access.accepts_block(&Block::DAMAGED_ANVIL));
+        assert!(!access.accepts_block(&Block::STONE));
     }
 }

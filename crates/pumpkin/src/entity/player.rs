@@ -221,7 +221,7 @@ use pumpkin_inventory::player::{
     player_inventory::PlayerInventory, player_screen_handler::PlayerScreenHandler,
 };
 use pumpkin_inventory::screen_handler::{
-    ClickType, InventoryPlayer, PlayerFuture, ScreenHandler, ScreenHandlerFactory,
+    ClickType, ContainerAccess, InventoryPlayer, PlayerFuture, ScreenHandler, ScreenHandlerFactory,
     ScreenHandlerListener,
 };
 use pumpkin_inventory::sync_handler::SyncHandler;
@@ -7163,6 +7163,25 @@ impl MessageCache {
 impl InventoryPlayer for Player {
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    /// Port of `ContainerLevelAccess.evaluate` as consumed by
+    /// `AbstractContainerMenu.stillValid` (`AbstractContainerMenu.java:93-95`): the block at
+    /// the position the menu was opened against must still satisfy the menu's predicate, and
+    /// the player must still be within `blockInteractionRange() + 4.0` of it
+    /// (`Player.java:2014-2016`) - measured eye to block AABB, not the flat 8 blocks an
+    /// older note claimed.
+    fn evaluate_container_access(&self, access: ContainerAccess) -> bool {
+        if !access.requires_position() {
+            return true;
+        }
+        // No backing position is `ContainerLevelAccess.NULL`, whose `evaluate` yields the
+        // `.orElse(true)` fallback (`ContainerLevelAccess.java:10-15`).
+        let Some(pos) = self.open_container_pos.load() else {
+            return true;
+        };
+        access.accepts_block(self.world().get_block(&pos))
+            && self.can_interact_with_block_at(&pos, 4.0)
     }
 
     fn drop_item(&self, item: ItemStack, _retain_ownership: bool) -> PlayerFuture<'_, ()> {

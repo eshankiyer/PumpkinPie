@@ -187,6 +187,16 @@ impl GenericContainerScreenHandler {
 }
 
 impl ScreenHandler for GenericContainerScreenHandler {
+    /// Port of `ChestMenu.java:70-72`, which delegates to
+    /// `Container.stillValidBlockEntity` (`Container.java:94-101`): same block entity at
+    /// the opening position, and the player within `blockInteractionRange() + 4.0`
+    /// (`Player.java:2014-2016`). Pumpkin cannot compare block-entity identity here, so
+    /// only the range half is enforced; a destroyed block entity is handled by
+    /// `World::close_container_screens_at`.
+    fn container_access(&self) -> crate::screen_handler::ContainerAccess {
+        crate::screen_handler::ContainerAccess::RangeOnly
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -282,17 +292,39 @@ mod tests {
     use pumpkin_world::inventory::SimpleInventory;
     use tokio::sync::Mutex;
 
-    use crate::{entity_equipment::EntityEquipment, screen_handler::PlayerFuture};
+    use crate::{
+        entity_equipment::EntityEquipment,
+        screen_handler::{ContainerAccess, PlayerFuture},
+    };
 
     use super::*;
 
     struct TestPlayer {
         inventory: Arc<PlayerInventory>,
+        /// Block currently standing at the position the open menu was created at,
+        /// `None` meaning the menu has no backing position.
+        block_at: Option<&'static pumpkin_data::Block>,
+        /// Whether the player is still within `blockInteractionRange() + 4.0` of it.
+        in_range: bool,
     }
 
     impl InventoryPlayer for TestPlayer {
         fn as_any(&self) -> &dyn Any {
             self
+        }
+
+        /// Test double for the server player's world lookup, transcribing
+        /// `AbstractContainerMenu.stillValid` (`AbstractContainerMenu.java:93-95`) and
+        /// `Container.stillValidBlockEntity` (`Container.java:94-101`).
+        fn evaluate_container_access(&self, access: ContainerAccess) -> bool {
+            if !access.requires_position() {
+                return true;
+            }
+            // `ContainerLevelAccess.NULL` -> `.orElse(true)`.
+            let Some(block) = self.block_at else {
+                return true;
+            };
+            access.accepts_block(block) && self.in_range
         }
         fn drop_item(&self, _item: ItemStack, _retain_ownership: bool) -> PlayerFuture<'_, ()> {
             Box::pin(async {})
@@ -443,6 +475,8 @@ mod tests {
         .await;
         let player = TestPlayer {
             inventory: player_inventory,
+            block_at: Some(&pumpkin_data::Block::CHEST),
+            in_range: true,
         };
         (handler, inventory, player)
     }
@@ -537,5 +571,51 @@ mod tests {
         handler.quick_move(&player, player_slot).await;
 
         assert_eq!(inventory.get_stack(0).await.item_count, 5);
+    }
+
+    /// Regression for the stale-menu hole: `ScreenHandler::can_use` used to return
+    /// `true` unconditionally, so a player who walked away from a chest could keep
+    /// moving its items through `SClickSlot`. Vanilla invalidates the menu via
+    /// `ChestMenu.stillValid` (`ChestMenu.java:70-72`) ->
+    /// `Container.stillValidBlockEntity` (`Container.java:94-101`).
+    #[tokio::test]
+    async fn chest_menu_is_invalid_once_the_player_walks_away() {
+        let (handler, _inventory, mut player) = handler_for(WindowType::Generic9x3, 3, 9).await;
+
+        assert!(handler.can_use(&player));
+
+        player.in_range = false;
+        assert!(!handler.can_use(&player));
+    }
+
+    /// A chest menu is block-entity backed, so vanilla applies no block-identity test -
+    /// only the range check (`Container.java:94-101`). Swapping the block underneath
+    /// must therefore not, by itself, invalidate the menu here.
+    #[tokio::test]
+    async fn chest_menu_access_is_range_only() {
+        let (handler, _inventory, mut player) = handler_for(WindowType::Generic9x3, 3, 9).await;
+
+        player.block_at = Some(&pumpkin_data::Block::STONE);
+        assert!(handler.can_use(&player));
+        assert!(handler.container_access().requires_position());
+        assert!(
+            handler
+                .container_access()
+                .accepts_block(&pumpkin_data::Block::STONE)
+        );
+    }
+
+    /// `ContainerLevelAccess.NULL.evaluate` yields `Optional.empty()`, and
+    /// `stillValid`'s `.orElse(true)` then keeps the menu valid
+    /// (`ContainerLevelAccess.java:10-15`, `AbstractContainerMenu.java:93-95`). Menus
+    /// opened by an entity (a minecart chest) have no block position and must not be
+    /// closed by this check.
+    #[tokio::test]
+    async fn menu_without_a_backing_position_stays_valid() {
+        let (handler, _inventory, mut player) = handler_for(WindowType::Generic9x3, 3, 9).await;
+
+        player.block_at = None;
+        player.in_range = false;
+        assert!(handler.can_use(&player));
     }
 }

@@ -281,6 +281,15 @@ impl GrindstoneScreenHandler {
 }
 
 impl ScreenHandler for GrindstoneScreenHandler {
+    /// Port of `GrindstoneMenu.java:207-209`: the block at the opening position must still be
+    /// `Blocks.GRINDSTONE` and the player must still be within
+    /// `blockInteractionRange() + 4.0` (`AbstractContainerMenu.java:93-95`).
+    fn container_access(&self) -> crate::screen_handler::ContainerAccess {
+        crate::screen_handler::ContainerAccess::Block(|block| {
+            block.id == pumpkin_data::Block::GRINDSTONE.id
+        })
+    }
+
     fn get_behaviour(&self) -> &ScreenHandlerBehaviour {
         &self.behaviour
     }

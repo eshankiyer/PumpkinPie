@@ -87,6 +87,15 @@ impl BeaconScreenHandler {
 }
 
 impl ScreenHandler for BeaconScreenHandler {
+    /// Port of `BeaconMenu.java:68-70`: the block at the opening position must still be
+    /// `Blocks.BEACON` and the player must still be within
+    /// `blockInteractionRange() + 4.0` (`AbstractContainerMenu.java:93-95`).
+    fn container_access(&self) -> crate::screen_handler::ContainerAccess {
+        crate::screen_handler::ContainerAccess::Block(|block| {
+            block.id == pumpkin_data::Block::BEACON.id
+        })
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

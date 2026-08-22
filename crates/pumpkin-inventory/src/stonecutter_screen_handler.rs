@@ -108,6 +108,15 @@ impl StonecutterScreenHandler {
 }
 
 impl ScreenHandler for StonecutterScreenHandler {
+    /// Port of `StonecutterMenu.java:105-107`: the block at the opening position must still be
+    /// `Blocks.STONECUTTER` and the player must still be within
+    /// `blockInteractionRange() + 4.0` (`AbstractContainerMenu.java:93-95`).
+    fn container_access(&self) -> crate::screen_handler::ContainerAccess {
+        crate::screen_handler::ContainerAccess::Block(|block| {
+            block.id == pumpkin_data::Block::STONECUTTER.id
+        })
+    }
+
     fn get_behaviour(&self) -> &ScreenHandlerBehaviour {
         &self.behaviour
     }

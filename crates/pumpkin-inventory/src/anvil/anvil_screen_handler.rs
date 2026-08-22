@@ -484,6 +484,15 @@ impl AnvilScreenHandler {
 }
 
 impl ScreenHandler for AnvilScreenHandler {
+    /// Port of `ItemCombinerMenu.stillValid` (`ItemCombinerMenu.java:110-112`) with
+    /// `AnvilMenu.isValidBlock` (`AnvilMenu.java:65-67`), which accepts any block in the
+    /// `minecraft:anvil` tag - so a chipped or damaged anvil keeps the menu open.
+    fn container_access(&self) -> crate::screen_handler::ContainerAccess {
+        crate::screen_handler::ContainerAccess::Block(|block| {
+            pumpkin_data::tag::Taggable::has_tag(block, &pumpkin_data::tag::Block::MINECRAFT_ANVIL)
+        })
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
