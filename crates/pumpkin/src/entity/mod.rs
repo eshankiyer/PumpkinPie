@@ -298,6 +298,7 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
     {
         Box::pin(async move {
             self.get_entity().teleport(position, yaw, pitch, world);
+            self.get_entity().sync_passenger_positions().await;
         })
     }
 
@@ -2813,11 +2814,13 @@ impl Entity {
     pub async fn move_self_with_collisions(&self, caller: &dyn EntityBase, motion: Vector3<f64>) {
         if self.no_clip.load(Ordering::Relaxed) {
             self.move_pos(motion);
+            self.sync_passenger_positions().await;
             return;
         }
 
         let final_move = self.adjust_movement_for_collisions(motion, caller).await;
         self.move_pos(final_move);
+        self.sync_passenger_positions().await;
     }
 
     // Move by a delta, adjust for collisions, and send
@@ -2834,6 +2837,7 @@ impl Entity {
 
         if self.no_clip.load(Ordering::Relaxed) {
             self.move_pos(motion);
+            self.sync_passenger_positions().await;
 
             return;
         }
@@ -2855,6 +2859,7 @@ impl Entity {
             .await;
 
         self.move_pos(final_move);
+        self.sync_passenger_positions().await;
 
         let velocity_multiplier = f64::from(self.get_velocity_multiplier());
 
@@ -4046,6 +4051,48 @@ impl Entity {
         vehicle.is_some()
     }
 
+    /// Vanilla `Entity.positionRider` with Pumpkin's shared fallback attachment geometry.
+    ///
+    /// Vanilla stores entity-specific attachment points in generated entity data. That data is
+    /// not yet exposed by Pumpkin, so keep every rider attached to the vehicle's top surface and
+    /// fan multiple riders out sideways in vehicle-local space. Crucially, this is a server-side
+    /// position update: rider collision, interaction, fall, and nested-vehicle state now move
+    /// with the vehicle even before individual boat/minecart/mob seat data is ported.
+    async fn position_rider(
+        &self,
+        passenger: &Arc<dyn EntityBase>,
+        passenger_index: usize,
+        passenger_count: usize,
+    ) {
+        let vehicle_position = self.pos.load();
+        let vehicle_height = f64::from(self.entity_dimension.load().height);
+        let passenger_width = f64::from(passenger.get_entity().entity_dimension.load().width);
+        let yaw = f64::from(self.yaw.load().to_radians());
+        let lateral =
+            passenger_width * (passenger_index as f64 - (passenger_count as f64 - 1.0) / 2.0);
+        let position = Vector3::new(
+            vehicle_position.x + lateral * yaw.cos(),
+            vehicle_position.y + vehicle_height,
+            vehicle_position.z + lateral * yaw.sin(),
+        );
+        passenger.get_entity().set_pos(position);
+        passenger.get_entity().sync_passenger_positions().await;
+    }
+
+    /// Reapply `Entity.positionRider` to every direct passenger, then recurse through nested
+    /// vehicles. Snapshotting the list before awaiting prevents passenger list locks from being
+    /// held while a nested position update mutates entity state.
+    pub fn sync_passenger_positions(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let passengers = self.passengers.lock().await.clone();
+            let passenger_count = passengers.len();
+            for (passenger_index, passenger) in passengers.iter().enumerate() {
+                self.position_rider(passenger, passenger_index, passenger_count)
+                    .await;
+            }
+        })
+    }
+
     pub async fn is_leashed(&self) -> bool {
         let leashed_to = self.leashed_to.lock().await;
         leashed_to.is_some()
@@ -4095,6 +4142,7 @@ impl Entity {
             .store(true, Relaxed);
         *passenger_entity.vehicle.lock().await = Some(vehicle);
 
+        let mounted_passenger = passenger.clone();
         let mut passengers = self.passengers.lock().await;
         passengers.push(passenger);
 
@@ -4109,6 +4157,13 @@ impl Entity {
             chunk_pos,
             &CSetPassengers::new(VarInt(self.entity_id), &passenger_ids),
         );
+        drop(passengers);
+        self.position_rider(
+            &mounted_passenger,
+            passenger_ids.len() - 1,
+            passenger_ids.len(),
+        )
+        .await;
     }
 
     pub(crate) async fn remove_passenger_on_disconnect(&self, passenger_id: i32) {
@@ -4804,6 +4859,7 @@ impl EntityBase for Entity {
         // TODO: handle world change
         Box::pin(async move {
             self.get_entity().teleport(position, yaw, pitch, world);
+            self.get_entity().sync_passenger_positions().await;
         })
     }
 
