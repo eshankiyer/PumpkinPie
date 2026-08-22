@@ -240,6 +240,11 @@ pub struct LivingEntity {
     /// applied. Vanilla keeps this as the enchantment's "active location-based effect" set and
     /// re-tests it through `enchantment_active_check` (`soul_speed.json`).
     soul_speed_active: AtomicBool,
+    /// The block position the location-changed enchantment effects last ran for.
+    ///
+    /// Vanilla fires them from `LivingEntity.onChangedBlock` (`LivingEntity.java:547-549`),
+    /// which runs when the entity's block position changes rather than every tick.
+    last_effect_block_pos: AtomicCell<Option<BlockPos>>,
 
     /// `Raider.raid`/`Raider.wave`/`Raider.isPatrolLeader` (`Raider.java`).
     pub raid_membership: AtomicCell<Option<RaidMembership>>,
@@ -403,6 +408,7 @@ impl LivingEntity {
             water_movement_speed_multiplier,
             last_equipment_items: Mutex::new(HashMap::new()),
             soul_speed_active: AtomicBool::new(false),
+            last_effect_block_pos: AtomicCell::new(None),
             raid_membership: AtomicCell::new(None),
             can_join_raid: AtomicBool::new(false),
             ticks_outside_raid: AtomicI32::new(0),
@@ -524,6 +530,50 @@ impl LivingEntity {
     pub async fn clear_equipment_attribute_snapshot(&self) {
         self.last_equipment_items.lock().await.clear();
         self.soul_speed_active.store(false, Relaxed);
+    }
+
+    /// `EnchantmentHelper.runLocationChangedEffects` as driven by
+    /// `LivingEntity.onChangedBlock` (`LivingEntity.java:547-549`): the equipment's
+    /// `location_changed` effects run when the entity's block position changes, not every
+    /// tick.
+    ///
+    /// Frost Walker freezes water under the wearer, and Soul Speed rolls its boot damage,
+    /// through this path. Both evaluators existed with no caller until this hook.
+    async fn tick_location_changed_effects(&self, caller: &dyn EntityBase) {
+        let pos = self.entity.block_pos.load();
+        if self.last_effect_block_pos.swap(Some(pos)) == Some(pos) {
+            return;
+        }
+
+        let boots = self.entity_equipment.lock().await.get(&EquipmentSlot::FEET);
+
+        let frost_level = boots.get_enchantment_level(&Enchantment::FROST_WALKER);
+        if frost_level > 0 {
+            crate::enchantment::apply_frost_walker(
+                &self.entity.world.load(),
+                self.entity.pos.load(),
+                frost_level,
+                None,
+            )
+            .await;
+        }
+
+        let soul_level = boots.get_enchantment_level(&Enchantment::SOUL_SPEED);
+        if soul_level > 0
+            && let Some((chance, amount)) =
+                crate::enchantment::location_based_item_damage(&Enchantment::SOUL_SPEED, soul_level)
+            && self
+                .entity
+                .get_block_with_y_offset(0.500_001)
+                .1
+                .has_tag(&tag::Block::MINECRAFT_SOUL_SPEED_BLOCKS)
+            && rand::random::<f32>() < chance
+            && let Some(player) = caller.get_player()
+        {
+            player
+                .damage_item_in_slot(&EquipmentSlot::FEET, amount)
+                .await;
+        }
     }
 
     /// Soul Speed's `minecraft:location_changed` effects (`soul_speed.json`).
@@ -4926,6 +4976,7 @@ impl EntityBase for LivingEntity {
             }
             self.tick_equipment_attributes(caller.as_ref()).await;
             self.tick_soul_speed(caller.as_ref()).await;
+            self.tick_location_changed_effects(caller.as_ref()).await;
             let was_alive_before_air =
                 !self.dead.load(Relaxed) && self.health.load() > 0.0 && !self.entity.is_removed();
             if self.entity.entity_type == &EntityType::PLAYER

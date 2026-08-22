@@ -17,6 +17,11 @@ pub struct Enchantment {
     pub anvil_cost: u32,
     /// Tag path (prefixed with `#`) of items that support this enchantment.
     pub supported_items: String,
+    /// Optional tag path (prefixed with `#`) of items an enchanting table may offer this
+    /// enchantment on. Vanilla `Enchantment.isPrimaryItem`
+    /// (`net/minecraft/world/item/enchantment/Enchantment.java:130-131`) falls back to
+    /// `supported_items` when this is absent.
+    pub primary_items: Option<String>,
     /// Display name component for this enchantment (typically a translation key).
     pub description: TextComponent,
     /// Optional exclusive-set tag; enchantments in the same set are mutually incompatible.
@@ -133,6 +138,19 @@ pub fn build() -> TokenStream {
                 .replace([':', '/'], "_")
                 .to_uppercase()
         );
+        let primary_items = enchantment.primary_items.as_ref().map_or_else(
+            || quote! { None },
+            |tag| {
+                let ident = format_ident!(
+                    "{}",
+                    tag.strip_prefix("#")
+                        .unwrap()
+                        .replace([':', '/'], "_")
+                        .to_uppercase()
+                );
+                quote! { Some(&ItemTag::#ident) }
+            },
+        );
         let max_level = enchantment.max_level;
         let weight = enchantment.weight;
         let min_cost_base = enchantment.min_cost.base;
@@ -169,6 +187,7 @@ pub fn build() -> TokenStream {
                     description: #translate,
                     anvil_cost: #anvil_cost,
                     supported_items: &ItemTag::#supported_items,
+                    primary_items: #primary_items,
                     exclusive_set: Some(&EnchantmentTag::#exclusive_set),
                     max_level: #max_level,
                     slots: &[#(#slots),*],
@@ -192,6 +211,7 @@ pub fn build() -> TokenStream {
                     registry_key: #raw_name,
                     anvil_cost: #anvil_cost,
                     supported_items: &ItemTag::#supported_items,
+                    primary_items: #primary_items,
                     exclusive_set: None,
                     max_level: #max_level,
                     slots: &[#(#slots),*],
@@ -230,6 +250,9 @@ pub fn build() -> TokenStream {
             pub description: &'static str, // TODO use TextComponent
             pub anvil_cost: u32,
             pub supported_items: &'static Tag,
+            /// Vanilla `EnchantmentDefinition.primaryItems`; `None` means "same as
+            /// `supported_items`" (`Enchantment.java:130-131`).
+            pub primary_items: Option<&'static Tag>,
             pub exclusive_set: Option<&'static Tag>,
             pub max_level: i32,
             pub slots: &'static [AttributeModifierSlot],
@@ -314,6 +337,18 @@ pub fn build() -> TokenStream {
 
             pub fn can_enchant(&self, item: &'static Item) -> bool {
                 self.supported_items.1.contains(&item.id)
+            }
+            /// Mirrors `Enchantment.isPrimaryItem` (`Enchantment.java:130-131`): supported, and
+            /// either the enchantment declares no `primary_items` set or the item is in it.
+            ///
+            /// This, not `can_enchant`, is what an enchanting table rolls against
+            /// (`EnchantmentHelper.getAvailableEnchantmentResults`, `EnchantmentHelper.java:597-601`).
+            pub fn is_primary_item(&self, item: &'static Item) -> bool {
+                self.can_enchant(item)
+                    && match self.primary_items {
+                        Some(tag) => tag.1.contains(&item.id),
+                        None => true,
+                    }
             }
             pub fn are_compatible(&self, other: &'static Enchantment) -> bool {
                 if self == other {

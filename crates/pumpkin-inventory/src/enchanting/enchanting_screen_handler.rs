@@ -239,14 +239,17 @@ impl EnchantingTableScreenHandler {
         enchant_level = enchant_level.max(1);
 
         // `EnchantmentHelper.getAvailableEnchantmentResults` (`EnchantmentHelper.java:597-601`)
-        // filters on `isPrimaryItem(stack) || isBook`. A plain book belongs to none of the
+        // filters on `isPrimaryItem(stack) || isBook`, NOT on `supported_items`: five
+        // enchantments declare a narrower `primary_items` set (thorns, sharpness, smite,
+        // bane_of_arthropods, fire_aspect), so a table must never offer e.g. Thorns on boots
+        // even though an anvil may apply it there. A plain book belongs to none of the
         // `enchantable/*` tags, so without the book bypass the candidate list is always empty
         // and a book can never be enchanted at a table at all.
         let is_book = item.item == &Item::BOOK;
         let mut available = Vec::new();
         for enchant in Enchantment::all() {
             if enchant.has_tag(&EnchantmentTag::MINECRAFT_IN_ENCHANTING_TABLE)
-                && (is_book || enchant.can_enchant(item.item))
+                && (is_book || enchant.is_primary_item(item.item))
             {
                 for l in (1..=enchant.max_level).rev() {
                     if enchant_level >= enchant.min_cost.calculate(l)
@@ -576,5 +579,36 @@ mod tests {
     fn lapis_slot_only_accepts_lapis_lazuli() {
         assert!(is_lapis(&ItemStack::new(1, &Item::LAPIS_LAZULI)));
         assert!(!is_lapis(&ItemStack::new(1, &Item::DIRT)));
+    }
+
+    /// `Enchantment.isPrimaryItem` (`Enchantment.java:130-131`) is what the table rolls
+    /// against; `supported_items` alone would let a table offer Thorns on boots/helmets, which
+    /// vanilla never does (`thorns.json`: primary `enchantable/chest_armor`, supported
+    /// `enchantable/armor`).
+    #[test]
+    fn table_rolls_thorns_only_on_chest_armor() {
+        assert!(Enchantment::THORNS.can_enchant(&Item::DIAMOND_BOOTS));
+        assert!(!Enchantment::THORNS.is_primary_item(&Item::DIAMOND_BOOTS));
+        assert!(!Enchantment::THORNS.is_primary_item(&Item::DIAMOND_HELMET));
+        assert!(Enchantment::THORNS.is_primary_item(&Item::DIAMOND_CHESTPLATE));
+    }
+
+    /// Fire Aspect supports every `enchantable/fire_aspect` item (maces and spears included)
+    /// but is only ever *offered* on `enchantable/melee_weapon` (`fire_aspect.json`).
+    #[test]
+    fn table_rolls_fire_aspect_only_on_melee_weapons() {
+        assert!(Enchantment::FIRE_ASPECT.is_primary_item(&Item::DIAMOND_SWORD));
+        assert!(Enchantment::FIRE_ASPECT.can_enchant(&Item::MACE));
+        assert!(!Enchantment::FIRE_ASPECT.is_primary_item(&Item::MACE));
+    }
+
+    /// An enchantment with no `primary_items` set must keep behaving exactly like before.
+    #[test]
+    fn primary_item_falls_back_to_supported_items() {
+        assert!(Enchantment::UNBREAKING.primary_items.is_none());
+        assert_eq!(
+            Enchantment::UNBREAKING.can_enchant(&Item::DIAMOND_PICKAXE),
+            Enchantment::UNBREAKING.is_primary_item(&Item::DIAMOND_PICKAXE)
+        );
     }
 }

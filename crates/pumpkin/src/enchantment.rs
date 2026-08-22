@@ -18,19 +18,33 @@
 //! All numeric constants below are transcribed directly from
 //! `/tmp/pumpkin-vanilla-26.2/decompiled/data/minecraft/enchantment/*.json` and cross-checked
 //! against unit tests in this file. Where a JSON effect component has no Pumpkin evaluator yet
-//! (e.g. `location_changed`'s `replace_disk`/attribute-on-equip machinery, or a
-//! `ConditionalEffect` predicate type Pumpkin doesn't model), the enchantment's *values* are
-//! still captured here for completeness and testing, but callers don't exist yet — see the
+//! (e.g. a `ConditionalEffect` predicate type Pumpkin doesn't model), the enchantment's
+//! *values* are still captured here for completeness and testing, but callers don't exist yet — see the
 //! module-level doc on [`EnchantmentEffect`] for exactly which variants are wired vs. deferred.
+//!
+//! Three effects have an evaluator here but no caller, because the code that would drive them
+//! lives outside this module: [`apply_frost_walker`] needs a `location_changed` hook in the
+//! living-entity tick, [`location_based_item_damage`] needs the same hook (Soul Speed's boot
+//! drain, next to `LivingEntity::tick_soul_speed`), and [`post_piercing_lunge`] needs the spear
+//! piercing-attack path.
 
 use crate::entity::attributes::{Modifier, ModifierOperation};
+use crate::world::World;
+use pumpkin_data::Block;
 use pumpkin_data::Enchantment;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::data_component_impl::{EnchantmentsImpl, EquipmentSlot};
 use pumpkin_data::enchantment::AttributeModifierSlot;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::fluid::Fluid;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::tag::Block as BlockTag;
 use pumpkin_data::tag::{EntityType as EntityTypeTag, Taggable};
+use pumpkin_util::math::boundingbox::BoundingBox;
+use pumpkin_util::math::position::BlockPos;
+use pumpkin_util::math::vector3::Vector3;
+use pumpkin_world::world::BlockFlags;
+use std::sync::Arc;
 
 /// Mirrors vanilla `LevelBasedValue`.
 ///
@@ -457,6 +471,28 @@ pub enum EnchantmentEffect {
     ItemDamageRemoveBinomial(LevelBasedValue),
     PreventEquipmentDrop,
     PreventArmorChange,
+    /// Frost Walker's `minecraft:location_changed` -> `minecraft:replace_disk`
+    /// (`frost_walker.json`). Only the radius is level-scaled; height (1), offset (0,-1,0) and
+    /// the placed state (`frosted_ice[age=0]`) are constants, so they live in
+    /// [`apply_frost_walker`] rather than in the effect.
+    ReplaceDiskRadius(LevelBasedValue),
+    /// A `minecraft:location_changed` -> `minecraft:change_item_damage` gated by a
+    /// `minecraft:random_chance` whose amount is a `minecraft:enchantment_level` value.
+    ///
+    /// Only Soul Speed carries one (`soul_speed.json`: 0.04 per level, 1 durability). Vanilla's
+    /// `EnchantmentLevelProvider` multiplies the constant by the level, which is exactly what
+    /// [`location_based_item_damage`] returns.
+    LocationBasedItemDamage {
+        chance_per_level: f32,
+        amount: i32,
+    },
+    /// Lunge's `minecraft:post_piercing_attack` bundle (`lunge.json`): a forward impulse with
+    /// coordinate scale (1,0,1), hunger exhaustion, and 1 point of item damage.
+    PostPiercingLunge {
+        magnitude: LevelBasedValue,
+        exhaustion: LevelBasedValue,
+        item_damage: i32,
+    },
 }
 
 const BANE_DAMAGE: LevelBasedValue = LevelBasedValue::linear(2.5, 2.5);
@@ -516,6 +552,25 @@ const SWEEPING_EDGE_RATIO: LevelBasedValue = LevelBasedValue::Fraction {
 const SOUL_SPEED_SPEED_ATTR: LevelBasedValue = LevelBasedValue::linear(0.0405, 0.0105);
 const SOUL_SPEED_EFFICIENCY_ATTR: LevelBasedValue = LevelBasedValue::Constant(1.0);
 const FIRE_PROTECTION_BURNING_TIME_ATTR: LevelBasedValue = LevelBasedValue::linear(-0.15, -0.15);
+
+/// `frost_walker.json`: `clamped(linear(3, 1), 0, 16)`.
+const FROST_WALKER_RADIUS_INNER: LevelBasedValue = LevelBasedValue::linear(3.0, 1.0);
+const FROST_WALKER_RADIUS: LevelBasedValue = LevelBasedValue::Clamped {
+    value: &FROST_WALKER_RADIUS_INNER,
+    min: 0.0,
+    max: 16.0,
+};
+/// `frost_walker.json`: `"height": 1.0` and `"offset": [0, -1, 0]`, both level-independent.
+const FROST_WALKER_HEIGHT: i32 = 1;
+const FROST_WALKER_Y_OFFSET: i32 = -1;
+
+/// `soul_speed.json`, second `location_changed` entry: `random_chance` of
+/// `enchantment_level(0.04)`, `change_item_damage` amount 1.
+const SOUL_SPEED_DAMAGE_CHANCE_PER_LEVEL: f32 = 0.04;
+
+/// `lunge.json`: `linear(0.458, 0.458)` magnitude, `linear(4, 4)` exhaustion, 1 item damage.
+const LUNGE_MAGNITUDE: LevelBasedValue = LevelBasedValue::linear(0.458, 0.458);
+const LUNGE_EXHAUSTION: LevelBasedValue = LevelBasedValue::linear(4.0, 4.0);
 
 const UNBREAKING_ARMOR_NUMERATOR: LevelBasedValue = LevelBasedValue::linear(2.0, 2.0);
 const UNBREAKING_ARMOR_DENOMINATOR: LevelBasedValue = LevelBasedValue::linear(10.0, 5.0);
@@ -591,9 +646,14 @@ pub fn effects_for(enchantment: &'static Enchantment) -> &'static [EnchantmentEf
                 operation: AttributeOperation::AddMultipliedBase,
             },
         ],
-        // "flame" (constant 100-tick ignite, not level-scaled), "fortune" (loot-table only, no
-        // data component), and "frost_walker" (location_changed/replace_disk, no evaluator) all
-        // fall through to the wildcard arm below.
+        // "flame" (constant 100-tick ignite, not level-scaled) and "fortune" (loot-table only,
+        // no data component) fall through to the wildcard arm below.
+        "frost_walker" => &[E::ReplaceDiskRadius(FROST_WALKER_RADIUS)],
+        "lunge" => &[E::PostPiercingLunge {
+            magnitude: LUNGE_MAGNITUDE,
+            exhaustion: LUNGE_EXHAUSTION,
+            item_damage: 1,
+        }],
         "impaling" => &[E::Damage(
             DamageCondition::SensitiveToImpaling,
             IMPALING_DAMAGE,
@@ -648,6 +708,10 @@ pub fn effects_for(enchantment: &'static Enchantment) -> &'static [EnchantmentEf
                 attribute: "movement_efficiency",
                 amount: SOUL_SPEED_EFFICIENCY_ATTR,
                 operation: AttributeOperation::AddValue,
+            },
+            E::LocationBasedItemDamage {
+                chance_per_level: SOUL_SPEED_DAMAGE_CHANCE_PER_LEVEL,
+                amount: 1,
             },
         ],
         "sweeping_edge" => &[E::AttributeBonus {
@@ -720,6 +784,154 @@ pub fn apply_mob_effect_on_hit(
     let amplifier = amplifier.clamp(0.0, f32::from(u8::MAX)) as u8;
 
     (ticks.max(0), amplifier)
+}
+
+/// Frost Walker's `minecraft:location_changed` -> `minecraft:replace_disk` effect.
+///
+/// Ports `ReplaceDisk.apply`
+/// (`net/minecraft/world/item/enchantment/effects/ReplaceDisk.java:43-55`) with the constants
+/// `frost_walker.json` fixes for this enchantment: offset `(0, -1, 0)`, height `1` (so the y
+/// loop collapses to the single layer below the entity, because vanilla's upper bound is
+/// `min(height - 1, 0)`), and the placed state `frosted_ice[age=0]`.
+///
+/// The `block_predicate` is the `all_of` from the same JSON: air directly above, water block,
+/// water fluid, and unobstructed (`UnobstructedPredicate.test` -> `isUnobstructed(null, ...)`,
+/// i.e. no entity intersects the full block cube).
+///
+/// `source_entity` is the walker: vanilla passes it as the game-event context for the
+/// `trigger_game_event: minecraft:block_place` the JSON fires per placed block
+/// (`ReplaceDisk.java:52-54`).
+///
+/// The caller is responsible for the effect's *requirements* (`is_on_ground`, no vehicle) and
+/// for having a nonzero Frost Walker level on the boots.
+pub async fn apply_frost_walker(
+    world: &Arc<World>,
+    position: Vector3<f64>,
+    level: i32,
+    source_entity: Option<Arc<dyn crate::entity::EntityBase>>,
+) {
+    if level <= 0 {
+        return;
+    }
+    let radius = FROST_WALKER_RADIUS.calculate(level) as i32;
+    if radius <= 0 {
+        return;
+    }
+    let center = BlockPos::new(
+        position.x.floor() as i32,
+        position.y.floor() as i32 + FROST_WALKER_Y_OFFSET,
+        position.z.floor() as i32,
+    );
+    // `Math.min(height - 1, 0)` — with height 1 this is 0, so exactly one layer.
+    let max_dy = (FROST_WALKER_HEIGHT - 1).min(0);
+    let radius_sq = f64::from(radius * radius);
+    let frosted_ice = Block::FROSTED_ICE.default_state.id;
+
+    for dy in 0..=max_dy {
+        for dx in -radius..=radius {
+            for dz in -radius..=radius {
+                let pos = BlockPos::new(center.0.x + dx, center.0.y + dy, center.0.z + dz);
+                // `BlockPos.distToCenterSqr(x, pos.getY() + 0.5, z)`: the y term cancels, so
+                // this is the horizontal distance from the block centre to the entity.
+                let ox = f64::from(pos.0.x) + 0.5 - position.x;
+                let oz = f64::from(pos.0.z) + 0.5 - position.z;
+                if ox * ox + oz * oz >= radius_sq {
+                    continue;
+                }
+                if !world.get_block(&pos.up()).has_tag(&BlockTag::MINECRAFT_AIR) {
+                    continue;
+                }
+                if world.get_block(&pos) != &Block::WATER {
+                    continue;
+                }
+                if world.get_fluid(&pos) != &Fluid::WATER {
+                    continue;
+                }
+                if !world
+                    .get_entities_at_box(&BoundingBox::from_block(&pos))
+                    .is_empty()
+                {
+                    continue;
+                }
+                let replaced = world
+                    .set_block_state(&pos, frosted_ice, BlockFlags::NOTIFY_ALL)
+                    .await;
+                if replaced == frosted_ice {
+                    continue;
+                }
+                crate::world::game_event::emit_game_event(
+                    world,
+                    pumpkin_data::game_event::GameEvent::BlockPlace,
+                    Vector3::new(
+                        f64::from(pos.0.x) + 0.5,
+                        f64::from(pos.0.y) + 0.5,
+                        f64::from(pos.0.z) + 0.5,
+                    ),
+                    source_entity.clone().map_or_else(
+                        crate::world::game_event::GameEventContext::none,
+                        crate::world::game_event::GameEventContext::of_entity,
+                    ),
+                )
+                .await;
+            }
+        }
+    }
+}
+
+/// The `minecraft:location_changed` -> `change_item_damage` roll an enchantment contributes,
+/// as `(chance, damage_amount)`.
+///
+/// Only Soul Speed has one (`soul_speed.json`, second `location_changed` entry): a
+/// `random_chance` of `enchantment_level(0.04)` — so `0.04 * level`, vanilla's
+/// `EnchantmentLevelProvider` — damaging the boots by 1. Note this is a `location_changed`
+/// effect, *not* part of the `minecraft:tick` component, which is only particles and sound.
+#[must_use]
+pub fn location_based_item_damage(
+    enchantment: &'static Enchantment,
+    level: i32,
+) -> Option<(f32, i32)> {
+    if level <= 0 {
+        return None;
+    }
+    effects_for(enchantment)
+        .iter()
+        .find_map(|effect| match effect {
+            EnchantmentEffect::LocationBasedItemDamage {
+                chance_per_level,
+                amount,
+            } => Some((chance_per_level * level as f32, *amount)),
+            _ => None,
+        })
+}
+
+/// Lunge's `minecraft:post_piercing_attack` payload, as
+/// `(impulse_magnitude, exhaustion, item_damage)` (`lunge.json`).
+///
+/// The impulse direction is the attacker's look vector with coordinate scale `(1, 0, 1)`, i.e.
+/// horizontal only; the caller applies it, since the spear piercing-attack path lives outside
+/// this module.
+#[must_use]
+pub fn post_piercing_lunge(
+    enchantment: &'static Enchantment,
+    level: i32,
+) -> Option<(f32, f32, i32)> {
+    if level <= 0 {
+        return None;
+    }
+    effects_for(enchantment)
+        .iter()
+        .find_map(|effect| match effect {
+            EnchantmentEffect::PostPiercingLunge {
+                magnitude,
+                exhaustion,
+                item_damage,
+            } => Some((
+                magnitude.calculate(level),
+                exhaustion.calculate(level),
+                *item_damage,
+            )),
+            _ => None,
+        })
 }
 
 #[cfg(test)]
@@ -936,6 +1148,43 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// `frost_walker.json`: `clamped(linear(3, 1), 0, 16)`, truncated to an int radius by
+    /// `ReplaceDisk.apply` (`ReplaceDisk.java:46`).
+    #[test]
+    fn frost_walker_radius_matches_vanilla() {
+        assert_eq!(FROST_WALKER_RADIUS.calculate(1), 3.0);
+        assert_eq!(FROST_WALKER_RADIUS.calculate(2), 4.0);
+        // Clamp bites well above max_level=2, but NBT/command levels can reach it.
+        assert_eq!(FROST_WALKER_RADIUS.calculate(50), 16.0);
+        // height 1 collapses vanilla's `min(height - 1, 0)` y range to a single layer.
+        assert_eq!((FROST_WALKER_HEIGHT - 1).min(0), 0);
+        assert_eq!(FROST_WALKER_Y_OFFSET, -1);
+    }
+
+    /// `soul_speed.json`, second `location_changed` entry: `enchantment_level(0.04)` chance of
+    /// 1 point of item damage. This is the boot-durability drain, not the `minecraft:tick`
+    /// component (particles and sound only).
+    #[test]
+    fn soul_speed_item_damage_scales_with_level() {
+        let (chance, amount) =
+            location_based_item_damage(&Enchantment::SOUL_SPEED, 3).expect("soul speed drain");
+        assert!((chance - 0.12).abs() < 1e-6);
+        assert_eq!(amount, 1);
+        assert!(location_based_item_damage(&Enchantment::SOUL_SPEED, 0).is_none());
+        assert!(location_based_item_damage(&Enchantment::DEPTH_STRIDER, 3).is_none());
+    }
+
+    /// `lunge.json`: impulse `linear(0.458, 0.458)`, exhaustion `linear(4, 4)`, 1 item damage.
+    #[test]
+    fn lunge_values_match_vanilla() {
+        let (magnitude, exhaustion, damage) =
+            post_piercing_lunge(&Enchantment::LUNGE, 2).expect("lunge effect");
+        assert!((magnitude - 0.916).abs() < 1e-6);
+        assert!((exhaustion - 8.0).abs() < 1e-6);
+        assert_eq!(damage, 1);
+        assert!(post_piercing_lunge(&Enchantment::SHARPNESS, 2).is_none());
     }
 
     #[test]
