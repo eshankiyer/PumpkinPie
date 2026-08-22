@@ -43,9 +43,10 @@
 //     (`Digging.java:36-40`) — an under-specified port here would despawn Wardens
 //     unexpectedly, which is a worse regression than the missing animation. Left as a
 //     separate, reviewed follow-up.
-//   Temporary invulnerability while emerging/digging (`isInvulnerableTo`,
-//   `ignoreExplosion`) is likewise not implemented, since it's keyed off the same
-//   never-entered EMERGING/DIGGING poses.
+//   Temporary invulnerability while emerging (`isInvulnerableTo`, Warden.java:161-163) IS
+//   implemented, as `pre_damage` below - EMERGING is reachable now via `start_emerging`.
+//   `ignoreExplosion` (Warden.java:368-369) is not: it only suppresses explosion knockback,
+//   since the damage half already goes through `pre_damage`.
 // - `doPush`-triggered touch anger (Warden.java lines 528-537): Pumpkin's `EntityBase`
 //   has no entity-entity collision/push hook to attach this to at all (grepped
 //   `pumpkin/src/entity/{mod,living}.rs` and `mob/mod.rs` — no `on_push`/`do_push`).
@@ -75,6 +76,8 @@ use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::{EntityPose, EntityType};
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::tag;
+use pumpkin_data::tag::Taggable;
 use pumpkin_data::tracked_data;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
@@ -134,6 +137,8 @@ pub async fn apply_darkness_around(
     }
 }
 
+/// Per-player warden summoning state.
+///
 /// `WardenSpawnTracker` lives beside `Warden` in vanilla's `monster.warden` package. It is
 /// declared through `#[path]` so the file sits under `entity/` without needing a new `mod`
 /// line in `entity/mod.rs`.
@@ -266,18 +271,34 @@ impl WardenEntity {
     /// reason without a spawn-reason field. Nothing else calls it, so a `/summon` warden still
     /// does not emerge - matching vanilla.
     ///
-    /// Not carried across: the temporary invulnerability vanilla gives an emerging warden
-    /// (`Warden.isInvulnerableTo`), which lives in `living.rs`, and `MemoryModuleType.DIG_COOLDOWN`,
-    /// which has no equivalent here.
+    /// Both sounds vanilla plays are here: `finalizeSpawn` plays `WARDEN_AGITATED`
+    /// (Warden.java:490) and the `Emerging` behaviour's `start` plays `WARDEN_EMERGE`, both at
+    /// volume 5.0 / pitch 1.0. Vanilla plays the second one on the first brain tick after the
+    /// spawn, one tick later; there is no brain here, so it is played with the first.
+    ///
+    /// Invulnerability for the duration is `pre_damage` below; the AI freeze is
+    /// `suppress_ai_goals`. Still not carried across: `MemoryModuleType.DIG_COOLDOWN`
+    /// (Warden.java:485), which has no equivalent here, and `Warden.getDefaultDimensions`'s
+    /// 1.0-block emerging hitbox (Warden.java:517-521) plus `isPushable` (Warden.java:524-526),
+    /// which need `Entity`-level pose dimension hooks.
     pub fn start_emerging(&self) {
         self.emerging_ticks
             .store(EMERGE_DURATION, Ordering::Relaxed);
         sync_warden_pose(&self.mob_entity.living_entity.entity, EntityPose::Emerging);
         let entity = &self.mob_entity.living_entity.entity;
-        entity.world.load().play_sound_fine(
+        let world = entity.world.load();
+        let pos = entity.pos.load();
+        world.play_sound_fine(
             Sound::EntityWardenAgitated,
             SoundCategory::Hostile,
-            &entity.pos.load(),
+            &pos,
+            5.0,
+            1.0,
+        );
+        world.play_sound_fine(
+            Sound::EntityWardenEmerge,
+            SoundCategory::Hostile,
+            &pos,
             5.0,
             1.0,
         );
@@ -634,14 +655,38 @@ impl Mob for WardenEntity {
         false
     }
 
+    /// `Activity.EMERGE` is the top of `WardenAi`'s exclusive activity ladder
+    /// (`WardenAi.java:79`, `:90`), so while `IS_EMERGING` is set nothing that could pick a
+    /// walk target runs. See `Mob::suppress_ai_goals`; `mob_tick` still runs and counts the
+    /// emerge down.
+    fn suppress_ai_goals(&self) -> bool {
+        self.is_emerging()
+    }
+
+    /// `Warden.isInvulnerableTo` (Warden.java:161-163): an emerging (or digging) warden takes
+    /// no damage unless the damage type is in `BYPASSES_INVULNERABILITY`. Digging is not
+    /// implemented here, so only the emerging half exists.
+    ///
+    /// Returning `false` here also skips `on_damage`, which matches vanilla: `hurtServer`'s
+    /// anger-on-hit is itself gated on `!isDiggingOrEmerging()` (Warden.java:497).
+    fn pre_damage<'a>(
+        &'a self,
+        damage_type: DamageType,
+        _source: Option<&'a dyn EntityBase>,
+    ) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async move {
+            !self.is_emerging()
+                || damage_type.has_tag(&tag::DamageType::MINECRAFT_BYPASSES_INVULNERABILITY)
+        })
+    }
+
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             self.register_listener_once().await;
 
             // `WardenAi` runs only the EMERGE activity while emerging: no anger, no
-            // attacking. Note the Goal selector is driven outside `mob_tick`, so a warden's
-            // movement/look goals still run during the 134-tick emerge - vanilla's warden is
-            // frozen. Gating that needs a hook in `mob/mod.rs`, which is out of scope here.
+            // attacking. The selectors and navigation are frozen for the same 134 ticks by
+            // `suppress_ai_goals` above, which is what routes the tick here and nowhere else.
             if self.tick_emerging() {
                 return;
             }

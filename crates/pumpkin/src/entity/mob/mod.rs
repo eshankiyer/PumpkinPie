@@ -1577,6 +1577,20 @@ pub trait Mob: EntityBase + Send + Sync {
         Box::pin(async { true })
     }
 
+    /// Whether the sensing, target/goal selectors and navigation must be skipped this tick,
+    /// while `mob_tick` still runs.
+    ///
+    /// This is the shape Pumpkin has for vanilla's *exclusive* brain activities: an activity
+    /// like `Activity.EMERGE` sits at the top of the ladder (`WardenAi.java:79`) and, while its
+    /// gating memory is present, is the only non-core activity running, so nothing can pick a
+    /// walk target - `Emerging` itself demands `WALK_TARGET` absent
+    /// (`ai/behavior/warden/Emerging.java`, its `Behavior` memory map). Returning `true`
+    /// reproduces that freeze without `set_no_ai`, which is player-visible state and persists
+    /// to NBT.
+    fn suppress_ai_goals(&self) -> bool {
+        false
+    }
+
     fn on_damage<'a>(
         &'a self,
         _damage_type: DamageType,
@@ -2127,6 +2141,16 @@ pub(crate) fn tick_mob_ai<'a>(
         if mob_entity.is_no_ai() {
             mob_entity.living_entity.jumping.store(false, Relaxed);
             mob_entity.jump_requested.store(false, Relaxed);
+            return;
+        }
+
+        // An exclusive brain activity (see `Mob::suppress_ai_goals`) still ticks the brain, so
+        // `mob_tick` - which is where such a state counts itself down - runs, but nothing that
+        // could produce movement does.
+        if mob.suppress_ai_goals() {
+            mob_entity.living_entity.jumping.store(false, Relaxed);
+            mob_entity.jump_requested.store(false, Relaxed);
+            mob.mob_tick(caller).await;
             return;
         }
 

@@ -1,10 +1,11 @@
+use crate::block::blocks::composter;
 use crate::block::entities::BlockEntity;
 use crate::world::World;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BlockProperties, FacingHopper, HopperLikeProperties};
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::tag::Taggable;
-use pumpkin_data::{Block, tag};
+use pumpkin_data::{Block, BlockDirection, tag};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::boundingbox::BoundingBox;
@@ -41,6 +42,19 @@ pub fn to_offset(facing: &FacingHopper) -> Vector3<i32> {
 
 fn output_position(position: BlockPos, state: HopperLikeProperties) -> BlockPos {
     position.offset(to_offset(&state.facing))
+}
+
+/// The face of the block in front of a hopper that the hopper itself touches: the opposite of
+/// the hopper's own facing, which is the `Direction` vanilla passes to
+/// `WorldlyContainer.canPlaceItemThroughFace`.
+const fn target_face(facing: FacingHopper) -> BlockDirection {
+    match facing {
+        FacingHopper::Down => BlockDirection::Up,
+        FacingHopper::North => BlockDirection::South,
+        FacingHopper::South => BlockDirection::North,
+        FacingHopper::West => BlockDirection::East,
+        FacingHopper::East => BlockDirection::West,
+    }
 }
 
 /// `Hopper.SUCK_AABB` is `Block.column(16.0, 11.0, 32.0)`, i.e. the hopper's own
@@ -238,6 +252,22 @@ impl HopperBlockEntity {
             }
             return false;
         }
+        // A composter has no block entity: vanilla reaches it through
+        // `WorldlyContainerHolder.getContainer` (`ComposterBlock.java:365-373`) instead, so the
+        // block-entity lookup above never finds one. `getSourceContainer` still returns a
+        // container for a composter at any level, so a hopper under one never falls through to
+        // sucking up dropped items.
+        if world.get_block(pos_up) == &Block::COMPOSTER {
+            if composter::hopper_output_ready(world, pos_up, BlockDirection::Down) {
+                let bone_meal = ItemStack::new(1, &pumpkin_data::item::Item::BONE_MEAL);
+                if Self::add_one_item(self, self, bone_meal, &[0, 1, 2, 3, 4]).await {
+                    composter::hopper_take_output(world, pos_up).await;
+                    return true;
+                }
+            }
+            return false;
+        }
+
         let (block, state) = world.get_block_and_state(pos_up);
         if !blocks_hopper_suction(block, state) {
             let entities = world.get_entities_at_box(&suck_box(self.position));
@@ -288,18 +318,18 @@ impl HopperBlockEntity {
     async fn eject_items(&self, state: &HopperLikeProperties, world: &Arc<World>) -> bool {
         // TODO getEntityContainer
 
+        let target_face = target_face(state.facing);
+        // Same story as the suction path: the composter's `InputContainer`
+        // (`ComposterBlock.java:396-437`) is not a block entity.
+        if world.get_block(&output_position(self.position, *state)) == &Block::COMPOSTER {
+            return self.eject_into_composter(state, world, target_face).await;
+        }
+
         if let Some(entity) = world.get_block_entity(&output_position(self.position, *state))
             && let Some(container) = entity.get_inventory()
         {
             // The face of the target container the hopper touches is the face pointing
             // back at the hopper, i.e. the opposite of the hopper's own facing.
-            let target_face = match state.facing {
-                FacingHopper::Down => pumpkin_data::BlockDirection::Up,
-                FacingHopper::North => pumpkin_data::BlockDirection::South,
-                FacingHopper::South => pumpkin_data::BlockDirection::North,
-                FacingHopper::West => pumpkin_data::BlockDirection::East,
-                FacingHopper::East => pumpkin_data::BlockDirection::West,
-            };
             let target_slots = container.slots_for_face(target_face);
 
             let mut is_full = true;
@@ -351,6 +381,41 @@ impl HopperBlockEntity {
         }
         false
     }
+    /// `HopperBlockEntity.ejectItems` against the composter's `InputContainer`
+    /// (`ComposterBlock.java:396-437`): one item leaves the hopper and is consumed whether or
+    /// not the composter level rises.
+    async fn eject_into_composter(
+        &self,
+        state: &HopperLikeProperties,
+        world: &Arc<World>,
+        target_face: BlockDirection,
+    ) -> bool {
+        let target_pos = output_position(self.position, *state);
+        for i in 0..self.size() {
+            let item = self.get_stack(i).await;
+            if item.is_empty() {
+                continue;
+            }
+            let mut move_event = crate::plugin::api::events::inventory::inventory_move_item::InventoryMoveItemEvent::new(
+                self.position,
+                target_pos,
+                item.item.registry_key.to_string(),
+                1,
+            );
+            if let Some(server) = world.server.upgrade() {
+                server.plugin_manager.fire(&server, &mut move_event).await;
+            }
+            if move_event.cancelled {
+                continue;
+            }
+            if composter::hopper_insert_item(world, &target_pos, target_face, item.item.id).await {
+                self.remove_stack_specific(i, 1).await;
+                return true;
+            }
+        }
+        false
+    }
+
     pub async fn add_one_item(
         from: &dyn Inventory,
         to: &dyn Inventory,
@@ -469,11 +534,13 @@ impl Clearable for HopperBlockEntity {
 
 #[cfg(test)]
 mod tests {
-    use super::{blocks_hopper_suction, can_merge_hopper_stack, output_position, suck_box};
-    use pumpkin_data::Block;
+    use super::{
+        blocks_hopper_suction, can_merge_hopper_stack, output_position, suck_box, target_face,
+    };
     use pumpkin_data::block_properties::{BlockProperties, FacingHopper, HopperLikeProperties};
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
+    use pumpkin_data::{Block, BlockDirection};
     use pumpkin_util::math::boundingbox::BoundingBox;
     use pumpkin_util::math::position::BlockPos;
     use pumpkin_util::math::vector3::Vector3;
@@ -485,6 +552,18 @@ mod tests {
         state.facing = FacingHopper::West;
 
         assert_eq!(output_position(position, state), BlockPos::new(3, 20, -3));
+    }
+
+    /// The `Direction` vanilla hands `canPlaceItemThroughFace` is the face of the target the
+    /// hopper touches, so only a downward-facing hopper reaches a composter's UP face
+    /// (`ComposterBlock.java:420-422`).
+    #[test]
+    fn hopper_target_face_is_the_opposite_of_its_facing() {
+        assert_eq!(target_face(FacingHopper::Down), BlockDirection::Up);
+        assert_eq!(target_face(FacingHopper::North), BlockDirection::South);
+        assert_eq!(target_face(FacingHopper::South), BlockDirection::North);
+        assert_eq!(target_face(FacingHopper::West), BlockDirection::East);
+        assert_eq!(target_face(FacingHopper::East), BlockDirection::West);
     }
 
     #[test]

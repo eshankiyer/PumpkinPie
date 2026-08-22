@@ -9,7 +9,7 @@ use crate::{
     world::World,
 };
 use pumpkin_data::{
-    Block, BlockStateId,
+    Block, BlockDirection, BlockStateId,
     block_properties::{BlockProperties, ComposterLikeProperties},
     composter_increase_chance::get_composter_increase_chance_from_item_id,
     entity::EntityType,
@@ -23,6 +23,9 @@ use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::{tick::TickPriority, world::BlockFlags};
 use rand::RngExt;
+
+/// `ComposterBlock.READY` (`ComposterBlock.java:46`).
+const COMPOSTER_READY: u8 = 8;
 
 #[pumpkin_block("minecraft:composter")]
 pub struct ComposterBlock;
@@ -186,4 +189,74 @@ impl ComposterBlock {
             &location.to_centered_f64(),
         );
     }
+}
+
+/// `ComposterBlock.InputContainer.setChanged` (`ComposterBlock.java:428-436`).
+///
+/// `ComposterBlock` implements `WorldlyContainerHolder` (`ComposterBlock.java:44`), so hoppers
+/// reach a composter through the throwaway containers `getContainer` hands out
+/// (`ComposterBlock.java:365-373`). A composter has no block entity, so the hopper's normal
+/// inventory lookup finds nothing; this and `hopper_take_output` stand in for those containers.
+///
+/// Only the UP face accepts
+/// items, only below level 7, and only compostables. The item is consumed whether or not the
+/// level rises, matching `addItem` (`ComposterBlock.java:317-334`), which also fires level event
+/// 1500 with data 0 for the "did not rise" variant.
+///
+/// Returns `true` when the item was consumed.
+pub async fn hopper_insert_item(
+    world: &Arc<World>,
+    position: &BlockPos,
+    face: BlockDirection,
+    item_id: u16,
+) -> bool {
+    if face != BlockDirection::Up {
+        return false;
+    }
+    let (block, state_id) = world.get_block_and_state_id(position);
+    if block != &Block::COMPOSTER {
+        return false;
+    }
+    let level = ComposterLikeProperties::from_state_id(state_id, block).level;
+    if level >= 7 {
+        return false;
+    }
+    let Some(chance) = get_composter_increase_chance_from_item_id(item_id) else {
+        return false;
+    };
+    let rose = level == 0 || rand::rng().random_bool(f64::from(chance));
+    if rose {
+        ComposterBlock
+            .update_level_composter(world, position, state_id, block, level + 1)
+            .await;
+    }
+    world.sync_world_event(WorldEvent::ComposterFill, *position, i32::from(rose));
+    true
+}
+
+/// `ComposterBlock.OutputContainer.canTakeItemThroughFace` (`ComposterBlock.java:469-472`).
+///
+/// A ready composter hands its single bone meal out through the DOWN face only.
+#[must_use]
+pub fn hopper_output_ready(world: &Arc<World>, position: &BlockPos, face: BlockDirection) -> bool {
+    if face != BlockDirection::Down {
+        return false;
+    }
+    let (block, state_id) = world.get_block_and_state_id(position);
+    block == &Block::COMPOSTER
+        && ComposterLikeProperties::from_state_id(state_id, block).level == COMPOSTER_READY
+}
+
+/// `ComposterBlock.OutputContainer.setChanged` (`ComposterBlock.java:475-477`).
+///
+/// Taking the bone meal empties the composter. Unlike `extractProduce`
+/// (`ComposterBlock.java:297-309`) this path spawns no item entity and plays no sound.
+pub async fn hopper_take_output(world: &Arc<World>, position: &BlockPos) {
+    let (block, state_id) = world.get_block_and_state_id(position);
+    if block != &Block::COMPOSTER {
+        return;
+    }
+    ComposterBlock
+        .update_level_composter(world, position, state_id, block, 0)
+        .await;
 }

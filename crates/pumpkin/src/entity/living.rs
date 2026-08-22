@@ -4683,7 +4683,15 @@ impl EntityBase for LivingEntity {
                     &self.entity.pos.load(),
                 );
 
-                if let Some(source) = source {
+                // `LivingEntity.hurtServer` gates the default 0.4 knockback on the
+                // `no_knockback` damage-type tag (LivingEntity.java:1247-1249) before calling
+                // `dealDefaultKnockback` (LivingEntity.java:1290-1305). Without that gate a
+                // creeper blast knocked the victim back twice - once from the explosion's own
+                // impulse and again from this hit - and magic, wither, dragon breath and spear
+                // damage knocked back at all, none of which vanilla does.
+                if let Some(source) = source
+                    && !damage_type.has_tag(&tag::DamageType::MINECRAFT_NO_KNOCKBACK)
+                {
                     let source_pos = source.get_entity().pos.load();
                     let target_pos = self.entity.pos.load();
                     let dx = source_pos.x - target_pos.x;
@@ -6189,6 +6197,40 @@ mod tests {
         assert_eq!(knockback_strength_with_resistance(0.4, 0.0), 0.4);
         assert!((knockback_strength_with_resistance(0.4, 0.25) - 0.3).abs() < f64::EPSILON);
         assert_eq!(knockback_strength_with_resistance(0.4, 1.0), 0.0);
+    }
+
+    /// `LivingEntity.hurtServer` skips `dealDefaultKnockback` for the `no_knockback` tag
+    /// (LivingEntity.java:1247-1249). Explosions and lightning are the cases that carry a
+    /// source entity, so they are the ones the missing gate actually double-applied.
+    #[test]
+    fn no_knockback_tag_covers_the_damage_types_with_a_source_entity() {
+        for damage_type in [
+            DamageType::EXPLOSION,
+            DamageType::PLAYER_EXPLOSION,
+            DamageType::LIGHTNING_BOLT,
+            DamageType::MAGIC,
+            DamageType::WITHER,
+            DamageType::DRAGON_BREATH,
+        ] {
+            assert!(
+                damage_type.has_tag(&tag::DamageType::MINECRAFT_NO_KNOCKBACK),
+                "{} should be in minecraft:no_knockback",
+                damage_type.registry_name
+            );
+        }
+
+        for damage_type in [
+            DamageType::MOB_ATTACK,
+            DamageType::PLAYER_ATTACK,
+            DamageType::ARROW,
+            DamageType::MOB_PROJECTILE,
+        ] {
+            assert!(
+                !damage_type.has_tag(&tag::DamageType::MINECRAFT_NO_KNOCKBACK),
+                "{} must keep its hurt knockback",
+                damage_type.registry_name
+            );
+        }
     }
 
     #[test]

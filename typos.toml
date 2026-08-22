@@ -16,3 +16,6 @@ Interruptable = "Interruptable"
 Activites = "Activites"
 Neigbour = "Neigbour"
 Mergable = "Mergable"
+# `ThrownTrident.isAcceptibleReturnOwner` (verified at ThrownTrident.java:99). Correcting the
+# spelling here would falsify a citation of a real vanilla method name.
+Acceptible = "Acceptible"
