@@ -26,9 +26,9 @@ impl FallenTreeFeature {
         &self,
         chunk: &mut T,
         block_registry: &dyn WorldPortalExt,
-        _min_y: i8,
-        _height: u16,
-        _feature: pumpkin_data::placed_feature::PlacedFeature,
+        min_y: i8,
+        height: u16,
+        feature: pumpkin_data::placed_feature::PlacedFeature,
         random: &mut RandomGenerator,
         origin: BlockPos,
     ) -> bool {
@@ -36,6 +36,9 @@ impl FallenTreeFeature {
         Self::decorate(
             chunk,
             block_registry,
+            min_y,
+            height,
+            feature,
             random,
             &[stump],
             &self.stump_decorators,
@@ -64,7 +67,16 @@ impl FallenTreeFeature {
                 ));
                 log_start = log_start.offset(direction.to_offset());
             }
-            Self::decorate(chunk, block_registry, random, &logs, &self.log_decorators);
+            Self::decorate(
+                chunk,
+                block_registry,
+                min_y,
+                height,
+                feature,
+                random,
+                &logs,
+                &self.log_decorators,
+            );
         }
 
         true
@@ -154,15 +166,29 @@ impl FallenTreeFeature {
         BlockState::from_id(block.from_properties(&properties).to_state_id(block))
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn decorate<T: GenerationCache>(
         chunk: &mut T,
         block_registry: &dyn WorldPortalExt,
+        min_y: i8,
+        height: u16,
+        feature: pumpkin_data::placed_feature::PlacedFeature,
         random: &mut RandomGenerator,
         logs: &[BlockPos],
         decorators: &[TreeDecorator],
     ) {
         for decorator in decorators {
-            decorator.generate(chunk, block_registry, random, &[], logs, &[]);
+            decorator.generate(
+                chunk,
+                block_registry,
+                min_y,
+                height,
+                feature,
+                random,
+                &[],
+                logs,
+                &[],
+            );
         }
     }
 }

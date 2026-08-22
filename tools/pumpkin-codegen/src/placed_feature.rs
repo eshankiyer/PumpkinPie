@@ -577,9 +577,40 @@ pub fn value_to_y_offset(v: &Value) -> TokenStream {
 /// # Returns
 /// An `IntProvider` variant token stream; defaults to `IntProvider::Constant(0)` when unrecognized.
 pub fn value_to_int_provider(v: &Value) -> TokenStream {
+    assert!(
+        !v.is_null(),
+        "value_to_int_provider called on an absent field; a field that is optional in the vanilla \
+         codec must go through value_to_int_provider_or with that codec's default, never fall back \
+         to a zero constant"
+    );
+    value_to_int_provider_inner(v)
+}
+
+/// Same as [`value_to_int_provider`] but substitutes `default` when the field is absent.
+///
+/// Vanilla's `optionalFieldOf` defaults live in Java, not in the datapack JSON, so an omitted
+/// field must be given the default from the config class's codec explicitly.
+pub fn value_to_int_provider_or(v: &Value, default: TokenStream) -> TokenStream {
+    if v.is_null() {
+        return default;
+    }
+    value_to_int_provider_inner(v)
+}
+
+/// Emits an `IntProvider` for a vanilla `UniformInt.of(min, max)` default (both bounds inclusive).
+pub fn uniform_int_default(min: i32, max: i32) -> TokenStream {
+    quote! {
+        IntProvider::Object(NormalIntProvider::Uniform(UniformIntProvider {
+            min_inclusive: #min,
+            max_inclusive: #max,
+        }))
+    }
+}
+
+fn value_to_int_provider_inner(v: &Value) -> TokenStream {
     match v {
         Value::Null => {
-            quote! { IntProvider::Constant(0) }
+            unreachable!("null handled by the callers of value_to_int_provider_inner")
         }
         Value::Number(n) => {
             let val = n.as_i64().unwrap_or(0) as i32;

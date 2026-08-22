@@ -7,7 +7,8 @@ use std::fs;
 
 use crate::placed_feature::{
     value_to_block_direction, value_to_block_predicate, value_to_block_state,
-    value_to_block_state_codec, value_to_height_provider, value_to_int_provider,
+    uniform_int_default, value_to_block_state_codec, value_to_height_provider,
+    value_to_int_provider, value_to_int_provider_or,
 };
 
 fn load_configured_features() -> BTreeMap<String, Value> {
@@ -543,9 +544,18 @@ pub fn value_to_configured_feature(v: &Value) -> TokenStream {
             let placements_require_layer0_alternate = config["placements_require_layer0_alternate"]
                 .as_bool()
                 .unwrap_or(true);
-            let outer_wall_distance = value_to_int_provider(&config["outer_wall_distance"]);
-            let distribution_points = value_to_int_provider(&config["distribution_points"]);
-            let point_offset = value_to_int_provider(&config["point_offset"]);
+            // GeodeConfiguration.java:37-39: these three are `optionalFieldOf` with UniformInt
+            // defaults that the datapack JSON omits precisely because they are the defaults.
+            let outer_wall_distance = value_to_int_provider_or(
+                &config["outer_wall_distance"],
+                uniform_int_default(4, 5),
+            );
+            let distribution_points = value_to_int_provider_or(
+                &config["distribution_points"],
+                uniform_int_default(3, 4),
+            );
+            let point_offset =
+                value_to_int_provider_or(&config["point_offset"], uniform_int_default(1, 2));
             let min_gen_offset = config["min_gen_offset"].as_i64().unwrap_or(-16) as i32;
             let max_gen_offset = config["max_gen_offset"].as_i64().unwrap_or(16) as i32;
             let noise_multiplier = config["noise_multiplier"].as_f64().unwrap_or(0.05);
@@ -1589,13 +1599,19 @@ fn value_to_tree_decorator(v: &Value) -> TokenStream {
             let prob = v["probability"].as_f64().unwrap_or(0.0) as f32;
             quote! { TreeDecorator::LeaveVine(LeavesVineTreeDecorator { probability: #prob }) }
         }
-        "minecraft:cocoa" => quote! { TreeDecorator::Cocoa(CocoaTreeDecorator {}) },
+        "minecraft:cocoa" => {
+            // CocoaDecorator.java:13 - a bare `fieldOf("probability")`.
+            let prob = v["probability"].as_f64().unwrap_or(0.0) as f32;
+            quote! { TreeDecorator::Cocoa(CocoaTreeDecorator { probability: #prob }) }
+        }
         "minecraft:beehive" => {
             let prob = v["probability"].as_f64().unwrap_or(0.0) as f32;
             quote! { TreeDecorator::Beehive(BeehiveTreeDecorator { probability: #prob }) }
         }
         "minecraft:alter_ground" => {
-            quote! { TreeDecorator::AlterGround(AlterGroundTreeDecorator {}) }
+            // AlterGroundDecorator.java:12 - a bare `fieldOf("provider")`.
+            let provider = value_to_block_state_provider(&v["provider"]);
+            quote! { TreeDecorator::AlterGround(AlterGroundTreeDecorator { provider: #provider }) }
         }
         "minecraft:attached_to_logs" => {
             let prob = v["probability"].as_f64().unwrap_or(0.0) as f32;
@@ -1617,7 +1633,30 @@ fn value_to_tree_decorator(v: &Value) -> TokenStream {
             }
         }
         "minecraft:attached_to_leaves" => {
-            quote! { TreeDecorator::AttachedToLeaves(AttachedToLeavesTreeDecorator {}) }
+            // AttachedToLeavesDecorator.java:17-26 - every field is a required `fieldOf`.
+            let prob = v["probability"].as_f64().unwrap_or(0.0) as f32;
+            let excl_xz = v["exclusion_radius_xz"].as_i64().unwrap_or(0) as i32;
+            let excl_y = v["exclusion_radius_y"].as_i64().unwrap_or(0) as i32;
+            let bp = value_to_block_state_provider(&v["block_provider"]);
+            let required_empty = v["required_empty_blocks"].as_i64().unwrap_or(1) as i32;
+            let dirs: Vec<TokenStream> = v["directions"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|d| d.as_str().map(value_to_block_direction))
+                        .collect()
+                })
+                .unwrap_or_default();
+            quote! {
+                TreeDecorator::AttachedToLeaves(AttachedToLeavesTreeDecorator {
+                    probability: #prob,
+                    exclusion_radius_xz: #excl_xz,
+                    exclusion_radius_y: #excl_y,
+                    block_provider: #bp,
+                    required_empty_blocks: #required_empty,
+                    directions: vec![#(#dirs),*],
+                })
+            }
         }
         "minecraft:place_on_ground" => {
             let tries = v["tries"].as_i64().unwrap_or(1) as i32;
@@ -1634,10 +1673,22 @@ fn value_to_tree_decorator(v: &Value) -> TokenStream {
             }
         }
         "minecraft:creaking_heart" => {
-            quote! { TreeDecorator::CreakingHeart(CreakingHeartTreeDecorator {}) }
+            // CreakingHeartDecorator.java:18-20 - a bare `fieldOf("probability")`.
+            let prob = v["probability"].as_f64().unwrap_or(0.0) as f32;
+            quote! { TreeDecorator::CreakingHeart(CreakingHeartTreeDecorator { probability: #prob }) }
         }
         "minecraft:pale_moss" => {
-            quote! { TreeDecorator::PaleMoss(PaleMossTreeDecorator {}) }
+            // PaleMossDecorator.java:20-27 - three required probability fields.
+            let leaves = v["leaves_probability"].as_f64().unwrap_or(0.0) as f32;
+            let trunk = v["trunk_probability"].as_f64().unwrap_or(0.0) as f32;
+            let ground = v["ground_probability"].as_f64().unwrap_or(0.0) as f32;
+            quote! {
+                TreeDecorator::PaleMoss(PaleMossTreeDecorator {
+                    leaves_probability: #leaves,
+                    trunk_probability: #trunk,
+                    ground_probability: #ground,
+                })
+            }
         }
         other => {
             let msg = format!("unknown tree decorator: {other}");

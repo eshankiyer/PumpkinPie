@@ -60,6 +60,9 @@ impl TreeFeature {
             decorator.generate(
                 chunk,
                 block_registry,
+                min_y,
+                height,
+                feature_name,
                 random,
                 &root_positions,
                 &log_positions,
