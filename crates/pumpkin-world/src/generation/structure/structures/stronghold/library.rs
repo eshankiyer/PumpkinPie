@@ -75,6 +75,7 @@ impl StructurePieceBase for LibraryPiece {
         &mut self.piece.piece
     }
 
+    #[expect(clippy::too_many_lines)]
     fn place(
         &mut self,
         chunk: &mut ProtoChunk,
