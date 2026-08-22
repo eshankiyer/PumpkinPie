@@ -40,6 +40,7 @@ use tokio::sync::Mutex;
 use crate::entity::player::Player;
 use crate::entity::{
     Entity, EntityBase, NBTStorage,
+    ageable::{AgeableData, AgeableMob},
     ai::{
         goal::{
             avoid_entity::AvoidEntityGoal,
@@ -60,8 +61,10 @@ use crate::entity::{
 use crate::world::World;
 use crate::world::villager_poi::profession_for_block;
 
+pub mod breed;
 pub mod data;
 pub mod gossip;
+pub use breed::VillagerBreedGoal;
 pub use data::{
     BREEDING_FOOD_THRESHOLD, GossipType, VillagerData, VillagerProfession, VillagerType,
     get_food_points, villager_type_at, villager_type_by_biome,
@@ -304,6 +307,15 @@ pub struct VillagerEntity {
     /// (`VillagerGoalPackages.java`, `getCorePackage` priority 10).
     pub meeting_point: std::sync::Mutex<Option<BlockPos>>,
     pub self_weak: std::sync::Mutex<Option<Weak<Self>>>,
+    /// Vanilla `AgeableMob`'s age/`AgeLocked` state. Villagers are `AgeableMob`s
+    /// (`Villager extends AbstractVillager extends AgeableMob`), so babies grow up on the
+    /// shared `ageable_ai_step` clock.
+    pub ageable_data: AgeableData,
+    /// Counts `mob_tick` invocations for the 20-tick sensor cadence below. Previously that
+    /// cadence keyed off `Entity::age`, which for villagers is the vanilla *breeding* age and
+    /// not a monotonic tick counter, so it read 0 forever and the "every 20 ticks" block ran
+    /// every tick.
+    pub sensor_tick: AtomicI32,
 }
 
 impl VillagerEntity {
@@ -383,6 +395,8 @@ impl VillagerEntity {
             home_pos: std::sync::Mutex::new(None),
             meeting_point: std::sync::Mutex::new(None),
             self_weak: std::sync::Mutex::new(None),
+            ageable_data: AgeableData::default(),
+            sensor_tick: AtomicI32::new(0),
         };
         let mob_arc = Arc::new(villager);
         *mob_arc
@@ -470,6 +484,10 @@ impl VillagerEntity {
             goal_selector.add_goal(1, Box::new(VillagerScheduleGoal::new(0.5)));
 
             goal_selector.add_goal(2, Box::new(TradeWithPlayerGoal::new(0.5)));
+            // `VillagerGoalPackages.getIdlePackage` runs `VillagerMakeLove` behind the
+            // `InteractWith` that sets `BREED_TARGET`; see `breed.rs` for what the port does
+            // and does not carry across.
+            goal_selector.add_goal(2, Box::new(VillagerBreedGoal::new(0.5)));
             // Basic movement and looking (Vanilla uses 0.5 speed)
             goal_selector.add_goal(3, Box::new(WorkAtJobSiteGoal::new(0.5)));
             goal_selector.add_goal(4, Box::new(WanderAroundGoal::new(0.5)));
@@ -1712,6 +1730,220 @@ impl ScreenHandlerFactory for VillagerEntity {
     }
 }
 
+/// Vanilla `Villager` is an `AgeableMob`; babies produced by `VillagerMakeLove` start at
+/// -24000 and grow up on the shared clock.
+impl AgeableMob for VillagerEntity {
+    fn get_ageable_data(&self) -> &AgeableData {
+        &self.ageable_data
+    }
+
+    /// `Villager.BABY_DIMENSIONS` (`Villager.java:116`):
+    /// `EntityDimensions.scalable(0.49F, 0.98F).withEyeHeight(0.63F)`.
+    fn baby_dimensions(&self) -> Option<pumpkin_util::math::boundingbox::EntityDimensions> {
+        Some(pumpkin_util::math::boundingbox::EntityDimensions::new(
+            0.49, 0.98, 0.63,
+        ))
+    }
+}
+
+/// `Villager.canBreed` (`Villager.java:645-647`), as a pure predicate.
+///
+/// Note the age test is `== 0`, not `>= 0`: a villager inside its post-breed cooldown (age
+/// 6000, counting down) must not immediately breed again, which is what the generic
+/// `Mob::is_breeding_ready` (`age >= 0`) would allow.
+#[must_use]
+pub const fn can_breed_from(
+    food_level: i32,
+    inventory_food_points: i32,
+    sleeping: bool,
+    age: i32,
+) -> bool {
+    age == 0 && !sleeping && food_level + inventory_food_points >= BREEDING_FOOD_THRESHOLD
+}
+
+/// `Villager.getBreedOffspring`'s type roll (`Villager.java:739-747`).
+#[must_use]
+pub const fn breed_offspring_type(
+    roll: f64,
+    biome_type: VillagerType,
+    own_type: VillagerType,
+    partner_type: VillagerType,
+) -> VillagerType {
+    if roll < 0.5 {
+        biome_type
+    } else if roll < 0.75 {
+        own_type
+    } else {
+        partner_type
+    }
+}
+
+impl VillagerEntity {
+    /// `Villager.canBreed` (`Villager.java:645-647`).
+    pub async fn can_breed_villager(&self) -> bool {
+        can_breed_from(
+            self.food_level.load(Ordering::Relaxed),
+            self.count_food_points_in_inventory().await,
+            self.get_entity().pose.load() == EntityPose::Sleeping,
+            self.get_entity().age.load(Ordering::Relaxed),
+        )
+    }
+
+    /// `Villager.eatAndDigestFood` (`Villager.java:683-686`): top the food bar up from the
+    /// inventory, then spend 12 points on the breed.
+    pub async fn eat_and_digest_food(&self) {
+        self.eat_until_full().await;
+        self.food_level
+            .fetch_sub(BREEDING_FOOD_THRESHOLD, Ordering::Relaxed);
+    }
+
+    /// `Villager.hasExcessFood` (`Villager.java:784-786`).
+    pub async fn has_excess_food(&self) -> bool {
+        self.count_food_points_in_inventory().await >= 2 * BREEDING_FOOD_THRESHOLD
+    }
+
+    /// `Villager.wantsMoreFood` (`Villager.java:788-790`).
+    pub async fn wants_more_food(&self) -> bool {
+        self.count_food_points_in_inventory().await < BREEDING_FOOD_THRESHOLD
+    }
+
+    pub(super) fn send_breeding_event(&self, status: pumpkin_data::entity::EntityStatus) {
+        let world = self.get_entity().world.load();
+        let bedrock = match status {
+            pumpkin_data::entity::EntityStatus::InLoveHearts => Some(ActorEventType::InLoveHearts),
+            pumpkin_data::entity::EntityStatus::LoveHearts => Some(ActorEventType::LoveHearts),
+            pumpkin_data::entity::EntityStatus::VillagerAngry => {
+                Some(ActorEventType::VillagerAngry)
+            }
+            _ => None,
+        };
+        world.send_entity_status(self.get_entity(), status, bedrock);
+    }
+
+    /// `Villager.getBreedOffspring` (`Villager.java:738-753`): the child's type is the local
+    /// biome's half the time, otherwise one parent's, and it is always unemployed at level 1.
+    async fn breed_offspring_data(&self, partner: &Self) -> VillagerData {
+        use rand::RngExt;
+        let roll = rand::rng().random::<f64>();
+        let r#type = breed_offspring_type(
+            roll,
+            villager_type_at(self.get_entity()),
+            self.villager_data.lock().await.type_enum(),
+            partner.villager_data.lock().await.type_enum(),
+        );
+        VillagerData::new(r#type, VillagerProfession::None, 1)
+    }
+
+    /// `VillagerMakeLove.tryToGiveBirth` (`VillagerMakeLove.java:64-78`) plus its `breed` and
+    /// `giveBedToChild` helpers. Returns `true` when a baby was actually spawned; a village
+    /// with no vacant bed within 48 blocks produces entity event 13 and no child, which is
+    /// the mechanic every villager breeder depends on.
+    pub async fn try_to_give_birth(&self, partner: &Self) -> bool {
+        // Both parents run their own copy of the breeding goal, so claim the birth by moving
+        // both ages 0 -> 6000 atomically (`VillagerMakeLove.java:107-108`) before doing
+        // anything else. Vanilla gets the same exclusion for free because the loser's
+        // `canStillUse` re-check sees the age it just lost; here the two villagers can tick
+        // concurrently, so the claim has to be a compare-exchange rather than a store.
+        if self
+            .get_entity()
+            .age
+            .compare_exchange(0, 6000, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return false;
+        }
+        if partner
+            .get_entity()
+            .age
+            .compare_exchange(0, 6000, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            self.get_entity().age.store(0, Ordering::Release);
+            return false;
+        }
+
+        let world = self.get_entity().world.load();
+        let Some(bed) = world
+            .acquire_poi(
+                crate::world::village_poi::POI_TYPE_HOME,
+                self.get_entity().block_pos.load(),
+                48,
+            )
+            .await
+        else {
+            // `VillagerMakeLove.tryToGiveBirth` only broadcasts event 13 here and never
+            // reaches `breed`, so neither parent takes the post-breed cooldown: release the
+            // claim so the pair can try again once a bed frees up.
+            self.release_birth_claim(partner);
+            self.send_breeding_event(pumpkin_data::entity::EntityStatus::VillagerAngry);
+            partner.send_breeding_event(pumpkin_data::entity::EntityStatus::VillagerAngry);
+            return false;
+        };
+
+        let data = self.breed_offspring_data(partner).await;
+        let pos = self.get_entity().pos.load();
+        let baby =
+            crate::entity::r#type::from_type(&EntityType::VILLAGER, pos, &world, Uuid::new_v4());
+        let Some(baby_villager) = baby.cast_any().downcast_ref::<Self>() else {
+            // `VillagerMakeLove.java:73-76`: a null child releases the bed ticket again.
+            world.release_poi(bed).await;
+            self.release_birth_claim(partner);
+            return false;
+        };
+
+        baby_villager.set_villager_data(data).await;
+        baby_villager.set_age(crate::entity::ageable::BABY_START_AGE);
+        *baby_villager
+            .home_pos
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(bed);
+
+        world.spawn_entity(baby.clone()).await;
+        baby_villager.send_breeding_event(pumpkin_data::entity::EntityStatus::LoveHearts);
+        true
+    }
+
+    fn release_birth_claim(&self, partner: &Self) {
+        self.get_entity().age.store(0, Ordering::Release);
+        partner.get_entity().age.store(0, Ordering::Release);
+    }
+
+    /// `InventoryCarrier.pickUpItem` -> `SimpleContainer.addItem`, over the villager's own
+    /// eight-slot inventory. Synchronous because `Mob::on_item_pickup` is; a contended
+    /// inventory lock simply declines the pickup this tick.
+    fn add_to_inventory(&self, stack: &ItemStack) -> u8 {
+        let Ok(inventory) = self.inventory.try_lock() else {
+            return 0;
+        };
+        let mut taken = 0u8;
+        let mut remaining = stack.item_count;
+        for slot in inventory.iter() {
+            if remaining == 0 {
+                break;
+            }
+            let Ok(mut existing) = slot.try_lock() else {
+                continue;
+            };
+            if existing.is_empty() {
+                let mut new_stack = stack.clone();
+                new_stack.item_count = remaining;
+                *existing = new_stack;
+                taken += remaining;
+                remaining = 0;
+            } else if existing.are_items_and_components_equal(stack) {
+                let space = existing
+                    .get_max_stack_size()
+                    .saturating_sub(existing.item_count);
+                let moved = space.min(remaining);
+                existing.item_count += moved;
+                taken += moved;
+                remaining -= moved;
+            }
+        }
+        taken
+    }
+}
+
 impl NBTStorage for VillagerEntity {
     #[expect(clippy::too_many_lines)]
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> crate::entity::NbtFuture<'a, ()> {
@@ -1724,6 +1956,7 @@ impl NBTStorage for VillagerEntity {
             villager_data_nbt.put_int("Level", data.level.0);
             nbt.put_compound("VillagerData", villager_data_nbt);
 
+            self.write_ageable_nbt(nbt);
             nbt.put_int("FoodLevel", self.food_level.load(Ordering::Relaxed));
             nbt.put_int("Xp", self.xp.load(Ordering::Relaxed));
             nbt.put_long(
@@ -1860,6 +2093,7 @@ impl NBTStorage for VillagerEntity {
                 }
             }
 
+            self.read_ageable_nbt(nbt);
             if let Some(food) = nbt.get_int("FoodLevel") {
                 self.food_level.store(food, Ordering::Relaxed);
             }
@@ -2136,6 +2370,35 @@ impl Mob for VillagerEntity {
         })
     }
 
+    /// Vanilla persists `CanPickUpLoot: 1b` on every villager
+    /// (`VillagerSetCanPickUpLootFix`), and `Villager.pickUpItem` delegates straight to
+    /// `InventoryCarrier.pickUpItem` - villagers are always allowed to pick items up.
+    fn can_pick_up_loot(&self) -> bool {
+        true
+    }
+
+    /// `Villager.wantsToPickUp` (`Villager.java:778-782`).
+    fn wants_to_pick_up_item(&self, _world: &World, stack: &ItemStack) -> bool {
+        if stack
+            .item
+            .has_tag(&pumpkin_data::tag::Item::MINECRAFT_VILLAGER_PICKS_UP)
+        {
+            return true;
+        }
+        // `getVillagerData().profession().value().requestedItems()`. A contended lock only
+        // costs one tick's pickup of a profession-specific item, never a tagged one.
+        self.villager_data.try_lock().is_ok_and(|data| {
+            data.profession_enum()
+                .requested_items()
+                .iter()
+                .any(|item| item.id == stack.item.id)
+        })
+    }
+
+    fn on_item_pickup(&self, stack: &ItemStack) -> u8 {
+        self.add_to_inventory(stack)
+    }
+
     fn get_job_site(&self) -> Option<BlockPos> {
         *self
             .job_site
@@ -2390,8 +2653,11 @@ impl Mob for VillagerEntity {
             self.decay_gossips(game_time).await;
             self.work_at_job_site(game_time, day_time, day).await;
 
-            let age = self.get_entity().age.load(Ordering::Relaxed);
-            if age % 20 != 0 {
+            // `AgeableMob.aiStep`: babies grow up, and a post-breed cooldown counts back
+            // down to 0. Must run every tick, ahead of the sensor-cadence gate below.
+            self.ageable_ai_step();
+
+            if self.sensor_tick.fetch_add(1, Ordering::Relaxed) % 20 != 0 {
                 return;
             }
             self.update_job_site(&world).await;
@@ -2937,6 +3203,34 @@ mod tests {
     use pumpkin_util::version::JavaMinecraftVersion;
 
     use super::*;
+
+    #[test]
+    fn breeding_requires_twelve_food_points_and_an_exact_zero_age() {
+        // Three bread is exactly 12 points (`Villager.FOOD_POINTS`, `Villager.java:101`).
+        assert_eq!(get_food_points(&Item::BREAD) * 3, BREEDING_FOOD_THRESHOLD);
+        assert!(can_breed_from(0, 12, false, 0));
+        assert!(can_breed_from(12, 0, false, 0));
+        assert!(!can_breed_from(6, 5, false, 0));
+        // Sleeping villagers never breed.
+        assert!(!can_breed_from(12, 12, true, 0));
+        // The post-breed cooldown (age 6000) and babies (negative age) are both excluded,
+        // where the generic `age >= 0` readiness test would let the cooldown through.
+        assert!(!can_breed_from(12, 12, false, 6000));
+        assert!(!can_breed_from(12, 12, false, -24000));
+    }
+
+    #[test]
+    fn offspring_type_is_the_biome_half_the_time_then_each_parent() {
+        let biome = VillagerType::Snow;
+        let own = VillagerType::Desert;
+        let partner = VillagerType::Jungle;
+        assert_eq!(breed_offspring_type(0.0, biome, own, partner), biome);
+        assert_eq!(breed_offspring_type(0.499, biome, own, partner), biome);
+        assert_eq!(breed_offspring_type(0.5, biome, own, partner), own);
+        assert_eq!(breed_offspring_type(0.749, biome, own, partner), own);
+        assert_eq!(breed_offspring_type(0.75, biome, own, partner), partner);
+        assert_eq!(breed_offspring_type(0.999, biome, own, partner), partner);
+    }
 
     #[test]
     fn villager_data_metadata_uses_the_villager_tracker_slot() {
