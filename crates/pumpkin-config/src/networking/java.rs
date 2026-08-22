@@ -31,6 +31,11 @@ pub struct JavaConfig {
     /// Java Edition packet compression settings.
     pub compression: CompressionConfig,
     /// Message of the Day; the server's description displayed on the status screen.
+    /// Supports legacy formatting codes, written with either `&` or `\u{a7}`:
+    /// colours `0`-`9`/`a`-`f`, styles `l` bold, `o` italic, `n` underline,
+    /// `m` strikethrough, `k` obfuscated, `r` reset, and `x` for RGB
+    /// (`&x&R&R&G&G&B&B`). A `\n` starts the second line. Write `&&` for a
+    /// literal ampersand; a bare `&` not followed by a code is left alone.
     pub motd: String,
     /// Authentication settings for client connections.
     pub authentication: AuthenticationConfig,
@@ -55,7 +60,7 @@ impl Default for JavaConfig {
             simulation_distance,
             keep_alive_time: 15,
             compression: CompressionConfig::default(),
-            motd: "A blazingly fast Pumpkin server!".to_string(),
+            motd: "A PumpkinPie server".to_string(),
             authentication: AuthenticationConfig::default(),
             packet_limiter: PacketLimiterConfig::default(),
         }

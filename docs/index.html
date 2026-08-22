@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PumpkinPie</title>
 <meta name="description" content="PumpkinPie is a Minecraft 26.2 server written in Rust, built for vanilla behavioural parity.">
+<link rel="icon" type="image/png" href="pumpkinpie.png">
+<meta property="og:title" content="PumpkinPie">
+<meta property="og:description" content="A Minecraft 26.2 server written in Rust, built for vanilla behavioural parity.">
+<meta property="og:image" content="https://eshankiyer.github.io/PumpkinPie/pumpkinpie.png">
 <style>
   :root {
     color-scheme: light dark;
@@ -26,6 +30,34 @@
     }
   }
   * { box-sizing: border-box; }
+  /* Pixel art must not be smoothed when scaled up. */
+  .logo, .mark {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+  .hero {
+    display: flex;
+    align-items: center;
+    gap: 1.1rem;
+    margin-bottom: .25rem;
+  }
+  .hero .logo {
+    width: 88px;
+    height: 88px;
+    flex: none;
+    filter: drop-shadow(0 3px 0 color-mix(in srgb, var(--accent) 35%, transparent));
+  }
+  .hero h1 { margin: 0; }
+  .mark {
+    width: 20px;
+    height: 20px;
+    vertical-align: -.25em;
+    margin-right: .35rem;
+  }
+  @media (max-width: 30rem) {
+    .hero { gap: .8rem; }
+    .hero .logo { width: 64px; height: 64px; }
+  }
   body {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
@@ -92,8 +124,13 @@
 </head>
 <body>
 <main>
-  <h1>PumpkinPie</h1>
-  <p class="tagline">A Minecraft 26.2 server written in Rust, built for vanilla behavioural parity.</p>
+  <div class="hero">
+    <img class="logo" src="pumpkinpie.png" alt="" width="88" height="88">
+    <div>
+      <h1>PumpkinPie</h1>
+      <p class="tagline">A Minecraft 26.2 server written in Rust, built for vanilla behavioural parity.</p>
+    </div>
+  </div>
 
   <div class="badges">
     <a href="https://github.com/eshankiyer/PumpkinPie/actions/workflows/rust.yml">

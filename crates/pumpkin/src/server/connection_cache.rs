@@ -211,7 +211,10 @@ impl CachedStatus {
                 online: 0,
                 sample: vec![],
             }),
-            description: TextComponent::text(motd.to_string()),
+            // Parsed rather than shipped flat, so an MOTD can carry colours, styles
+            // and a second line. Accepts `&c` as well as `\u{a7}c`, since section signs
+            // survive config files and shells badly.
+            description: TextComponent::from_legacy_string_lenient(motd),
             favicon,
             // This should stay true even when reports are disabled.
             // It prevents the annoying popup when joining the server.
@@ -222,10 +225,6 @@ impl CachedStatus {
 
 impl Default for CachedStatus {
     fn default() -> Self {
-        Self::new(
-            &BasicConfiguration::default(),
-            "A blazingly fast Pumpkin server!",
-            1000,
-        )
+        Self::new(&BasicConfiguration::default(), "A PumpkinPie server", 1000)
     }
 }

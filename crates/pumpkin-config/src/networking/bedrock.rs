@@ -99,7 +99,7 @@ impl Default for BedrockConfig {
             view_distance,
             simulation_distance,
             compression: CompressionConfig::default(),
-            motd: "A blazingly fast Pumpkin server!".to_string(),
+            motd: "A PumpkinPie server".to_string(),
             authentication: BedrockAuthenticationConfig::default(),
             nethernet: NetherNetConfig::default(),
             chunk_caching: true,

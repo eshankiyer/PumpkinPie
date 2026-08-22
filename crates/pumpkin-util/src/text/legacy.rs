@@ -23,6 +23,20 @@ impl TextComponent {
         Self::from_legacy_string_with_code(input, '§')
     }
 
+    /// Parses a legacy formatted string accepting EITHER `&` or `§` as the code symbol.
+    ///
+    /// Section signs are awkward to type and survive round-trips through config files
+    /// and shells badly, so the convention everywhere they are hand-authored is to
+    /// write `&c` and let the server translate. An `&` is only treated as a code when
+    /// the character after it is actually a formatting code, so an MOTD containing
+    /// "Bread &amp; Butter" keeps its ampersand.
+    ///
+    /// Doubling the symbol (`&&`) escapes it to a single literal `&`.
+    #[must_use]
+    pub fn from_legacy_string_lenient(input: &str) -> Self {
+        Self::from_legacy_string(&translate_alternate_codes(input))
+    }
+
     /// Parses a legacy formatted string using a custom color code symbol (e.g. '&' or '§').
     ///
     /// # Arguments
@@ -303,8 +317,39 @@ impl TextComponent {
     }
 }
 
+/// Rewrites `&<code>` into `§<code>`, leaving every other `&` alone.
+///
+/// `x` is included because the legacy parser spells RGB as `§x§R§R§G§G§B§B`.
+fn translate_alternate_codes(input: &str) -> String {
+    const CODES: &str = "0123456789abcdefklmnorxABCDEFKLMNORX";
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '&' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek() {
+            // `&&` is a literal ampersand.
+            Some('&') => {
+                chars.next();
+                out.push('&');
+            }
+            Some(&next) if CODES.contains(next) => {
+                chars.next();
+                out.push('\u{a7}');
+                out.push(next);
+            }
+            // A bare `&`, e.g. "Bread & Butter".
+            _ => out.push('&'),
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod test {
+    use super::translate_alternate_codes;
     use crate::text::TextComponent;
     use crate::text::color::{Color, NamedColor};
     use crate::translation::Locale;
@@ -341,5 +386,37 @@ mod test {
         );
         let legacy = comp.to_legacy_string(Locale::EnUs);
         assert_eq!(legacy, "Hello §c§lWorld§r");
+    }
+    #[test]
+    fn lenient_translates_ampersand_codes() {
+        let comp = TextComponent::from_legacy_string_lenient("&cRed &lBold");
+        assert_eq!(comp.0.extra.len(), 2);
+        assert_eq!(
+            comp.0.extra[0].style.color,
+            Some(Color::Named(NamedColor::Red))
+        );
+        assert_eq!(comp.0.extra[1].style.bold, Some(true));
+    }
+
+    #[test]
+    fn lenient_accepts_section_signs_too() {
+        let comp = TextComponent::from_legacy_string_lenient("\u{a7}cRed");
+        assert_eq!(
+            comp.0.extra[0].style.color,
+            Some(Color::Named(NamedColor::Red))
+        );
+    }
+
+    #[test]
+    fn lenient_keeps_a_bare_ampersand() {
+        assert_eq!(
+            translate_alternate_codes("Bread & Butter"),
+            "Bread & Butter"
+        );
+    }
+
+    #[test]
+    fn lenient_unescapes_a_doubled_ampersand() {
+        assert_eq!(translate_alternate_codes("A && B"), "A & B");
     }
 }
