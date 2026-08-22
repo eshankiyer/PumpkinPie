@@ -3,11 +3,14 @@
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::{Arc, Weak};
 
+use pumpkin_data::Enchantment;
 use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_util::difficulty::Difficulty;
+use rand::RngExt;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -23,8 +26,9 @@ use crate::entity::{
         swim::SwimGoal,
         wander_around::WanderAroundGoal,
     },
-    mob::{Mob, MobEntity},
+    mob::{Mob, MobEntity, equipment::enchant_item_from_single_enchantment},
 };
+use crate::world::raid::num_groups_for_difficulty;
 
 pub struct VindicatorEntity {
     pub mob_entity: MobEntity,
@@ -185,21 +189,115 @@ impl Mob for VindicatorEntity {
         })
     }
 
-    /// Vanilla: `Vindicator.applyRaidBuffs`. Builds a fresh iron axe and sets it unconditionally;
-    /// the enchant roll is skipped since Pumpkin has no `VanillaEnchantmentProviders`/
-    /// `EnchantmentHelper.enchantItemFromProvider` equivalent yet (confirmed absent by a
-    /// repo-wide search), so `RAID_VINDICATOR`/`RAID_VINDICATOR_POST_WAVE_5` cannot be applied.
-    fn apply_raid_buffs(&self, _wave: i32, _is_captain: bool) -> EntityBaseFuture<'_, ()> {
+    /// Vanilla: `Vindicator.applyRaidBuffs` (`Vindicator.java:168-180`). Builds a fresh
+    /// iron axe, rolls `random.nextFloat() <= raid.getEnchantOdds()` on the raider's own
+    /// raid, and on success enchants the axe through the exact `SingleEnchantment`
+    /// provider for the wave: `raid/vindicator` (Sharpness I) at waves
+    /// `<= getNumGroups(Normal)` and `raid/vindicator_post_wave_5` (Sharpness II) after.
+    /// The `DifficultyInstance` argument is threaded through by vanilla but unused by
+    /// `SingleEnchantment`, so no regional difficulty is consulted here.
+    fn apply_raid_buffs(&self, wave: i32, _is_captain: bool) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
-            self.mob_entity
-                .living_entity
+            let living = &self.mob_entity.living_entity;
+            let mut axe = ItemStack::new(1, &Item::IRON_AXE);
+
+            // Vindicator.java:170-171: `shouldEnchant =
+            // this.random.nextFloat() <= raid.getEnchantOdds()` against
+            // `getCurrentRaid()`. Pumpkin keeps only the raid membership cached on the
+            // entity, so a missing membership/raid skips the roll entirely (vanilla can
+            // never reach this method without an active raid).
+            let should_enchant = {
+                let world = living.entity.world.load();
+                let raids = world.raids.lock().await;
+                living
+                    .raid_membership
+                    .load()
+                    .and_then(|membership| raids.raid(membership.raid_id))
+                    .is_some_and(|raid| self.get_random().random::<f32>() <= raid.enchant_odds())
+            };
+
+            // Vindicator.java:173-176: provider selection is
+            // `wave > raid.getNumGroups(Difficulty.NORMAL)`.
+            if should_enchant {
+                enchant_item_from_single_enchantment(
+                    &mut axe,
+                    &Enchantment::SHARPNESS,
+                    raid_vindicator_sharpness_level(wave),
+                );
+            }
+
+            // Vindicator.java:179: `setItemSlot(EquipmentSlot.MAINHAND, axe)` --
+            // unconditional, enchanted or not.
+            living
                 .entity_equipment
                 .lock()
                 .await
-                .put(
-                    &EquipmentSlot::MAIN_HAND,
-                    ItemStack::new(1, &Item::IRON_AXE),
-                );
+                .put(&EquipmentSlot::MAIN_HAND, axe);
         })
+    }
+}
+
+/// Vindicator.java:173-175: waves past `Raid.getNumGroups(Difficulty.NORMAL)`
+/// (`Raid.java:786-793`, 5 on Normal) use `RAID_VINDICATOR_POST_WAVE_5`
+/// (Sharpness II); all others use `RAID_VINDICATOR` (Sharpness I).
+const fn raid_vindicator_sharpness_level(wave: i32) -> i32 {
+    if wave > num_groups_for_difficulty(Difficulty::Normal) {
+        2
+    } else {
+        1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Enchantment, Item, ItemStack, raid_vindicator_sharpness_level};
+    use crate::entity::mob::equipment::enchant_item_from_single_enchantment;
+    use crate::world::raid::num_groups_for_difficulty;
+    use pumpkin_data::data_component_impl::EnchantmentsImpl;
+    use pumpkin_util::difficulty::Difficulty;
+
+    #[test]
+    fn vindicator_provider_level_follows_vanilla_wave_threshold() {
+        // Vindicator.java:173-175 with Raid.getNumGroups(NORMAL) == 5.
+        assert_eq!(
+            raid_vindicator_sharpness_level(num_groups_for_difficulty(Difficulty::Normal)),
+            1
+        );
+        assert_eq!(
+            raid_vindicator_sharpness_level(num_groups_for_difficulty(Difficulty::Normal) + 1),
+            2
+        );
+        for wave in 1..=5 {
+            assert_eq!(raid_vindicator_sharpness_level(wave), 1, "wave {wave}");
+        }
+        for wave in 6..=9 {
+            assert_eq!(raid_vindicator_sharpness_level(wave), 2, "wave {wave}");
+        }
+    }
+
+    #[test]
+    fn raid_buffs_enchant_is_exact_single_sharpness() {
+        // The providers are `SingleEnchantment(SHARPNESS, ConstantInt(1|2))`
+        // (`VanillaEnchantmentProviders.java:28-29`), so a buffed axe carries exactly
+        // Sharpness I or II -- never extra enchantments or other levels.
+        let sharpness_id = u16::from(Enchantment::SHARPNESS.id);
+        for (wave, expected) in [(3, 1), (7, 2)] {
+            let mut axe = ItemStack::new(1, &Item::IRON_AXE);
+            enchant_item_from_single_enchantment(
+                &mut axe,
+                &Enchantment::SHARPNESS,
+                raid_vindicator_sharpness_level(wave),
+            );
+            let applied: Vec<(u16, i32)> = axe
+                .get_data_component::<EnchantmentsImpl>()
+                .map(|data| {
+                    data.enchantment
+                        .iter()
+                        .map(|(enchantment, level)| (u16::from(enchantment.id), *level))
+                        .collect()
+                })
+                .unwrap_or_default();
+            assert_eq!(applied, vec![(sharpness_id, expected)]);
+        }
     }
 }

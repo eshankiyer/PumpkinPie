@@ -20,12 +20,14 @@
 //! Mobs not listed in the registry spawn with no equipment, matching vanilla
 //! (not all mob types have equipment definitions).
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::LazyLock;
 
 use pumpkin_data::Enchantment;
-use pumpkin_data::data_component_impl::{EnchantableImpl, EquipmentSlot};
+use pumpkin_data::data_component::DataComponent;
+use pumpkin_data::data_component_impl::{EnchantableImpl, EnchantmentsImpl, EquipmentSlot};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::tag::Enchantment as EnchantmentTag;
@@ -777,6 +779,54 @@ fn mob_spawn_equipment_provider_enchant<R: Rng + ?Sized>(
     }
 }
 
+/// Vanilla `EnchantmentHelper.enchantItemFromProvider` with the
+/// `minecraft:mob_spawn_equipment` provider key
+/// (`VanillaEnchantmentProviders.java:24`, `EnchantmentHelper.java:613-624`):
+/// delegates to [`mob_spawn_equipment_provider_enchant`] with the difficulty's own
+/// special multiplier. Exposed for callers outside the spawn pipeline that vanilla
+/// routes through the same provider (`SkeletonTrapGoal.enchant`,
+/// `SkeletonTrapGoal.java:95-102`).
+pub(crate) fn enchant_item_from_mob_spawn_equipment<R: Rng + ?Sized>(
+    rng: &mut R,
+    stack: &mut ItemStack,
+    difficulty: &RegionalDifficulty,
+) {
+    mob_spawn_equipment_provider_enchant(rng, stack, difficulty.special_multiplier);
+}
+
+/// Vanilla `ItemStack.set(DataComponents.ENCHANTMENTS, ItemEnchantments.EMPTY)` as
+/// performed by `SkeletonTrapGoal.enchant` (`SkeletonTrapGoal.java:97`): drops every
+/// enchantment already on the stack so a provider re-roll starts from scratch.
+pub(crate) fn clear_enchantments(stack: &mut ItemStack) {
+    stack
+        .patch
+        .retain(|(id, _)| *id != DataComponent::Enchantments);
+    stack.patch.push((
+        DataComponent::Enchantments,
+        Some(
+            EnchantmentsImpl {
+                enchantment: Cow::Owned(Vec::new()),
+            }
+            .to_dyn(),
+        ),
+    ));
+}
+
+/// Vanilla `SingleEnchantment.enchant` (`SingleEnchantment.java:24-29`) for the
+/// providers registered with a `ConstantInt` level
+/// (`VanillaEnchantmentProviders.java:25-30`, e.g. `raid/vindicator`): upgrade the
+/// stack with `Mth.clamp(level.sample(random), getMinLevel(), getMaxLevel())`.
+/// Sampling a `ConstantInt` consumes no entropy and vanilla enchantment minimums are
+/// always 1 (only `max_level` is stored on [`Enchantment`]), so the clamped level is
+/// exact without threading an RNG through.
+pub(crate) fn enchant_item_from_single_enchantment(
+    stack: &mut ItemStack,
+    enchantment: &'static Enchantment,
+    level: i32,
+) {
+    stack.enchant(enchantment, level.clamp(1, enchantment.max_level));
+}
+
 /// Vanilla `Mob.enchantSpawnedEquipment` (`Mob.java:1073-1081`).
 ///
 /// Rolls `nextFloat() < chance * difficulty.getSpecialMultiplier()` for a non-empty
@@ -1042,10 +1092,11 @@ mod tests {
         ARMOR_ENCHANT_CHANCE, DEFAULT_EQUIPMENT_DROP_CHANCE, Enchantment, EnchantmentTag, Item,
         ItemStack, MOB_SPAWN_ENCHANT_COST_SPAN, MOB_SPAWN_ENCHANT_MIN_COST,
         MOB_SPAWN_EQUIPMENT_POOL, RegionalDifficulty, WEAPON_ENCHANT_CHANCE, WEARING_ARMOR_CHANCE,
-        available_spawn_enchantment_results, enchant_spawned_armor, enchant_spawned_equipment,
-        enchant_spawned_weapon, mob_spawn_equipment_base_cost,
-        mob_spawn_equipment_provider_enchant, select_spawn_enchantments,
-        weighted_random_enchantment,
+        available_spawn_enchantment_results, clear_enchantments,
+        enchant_item_from_mob_spawn_equipment, enchant_item_from_single_enchantment,
+        enchant_spawned_armor, enchant_spawned_equipment, enchant_spawned_weapon,
+        mob_spawn_equipment_base_cost, mob_spawn_equipment_provider_enchant,
+        select_spawn_enchantments, weighted_random_enchantment,
     };
     use pumpkin_data::data_component_impl::{EnchantableImpl, EnchantmentsImpl};
     use pumpkin_util::difficulty::Difficulty;
@@ -1374,6 +1425,97 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(3);
         let stick = stack_of(&Item::STICK);
         assert!(select_spawn_enchantments(&mut rng, &stick, 30).is_empty());
+    }
+
+    /// `(enchantment id, level)` pairs -- `Enchantment` carries neither `Debug` nor a
+    /// name-stable `PartialEq` payload for direct tuple comparison.
+    fn applied_ids_and_levels(stack: &ItemStack) -> Vec<(u16, i32)> {
+        applied_enchantments(stack)
+            .iter()
+            .map(|(enchantment, level)| (u16::from(enchantment.id), *level))
+            .collect()
+    }
+
+    #[test]
+    fn single_enchantment_provider_sets_the_exact_constant_level() {
+        // `VanillaEnchantmentProviders.java:28-29`: `raid/vindicator` is Sharpness 1
+        // and `raid/vindicator_post_wave_5` is Sharpness 2, both `SingleEnchantment`
+        // over a `ConstantInt`.
+        let mut axe = stack_of(&Item::IRON_AXE);
+        enchant_item_from_single_enchantment(&mut axe, &Enchantment::SHARPNESS, 2);
+        assert_eq!(
+            applied_ids_and_levels(&axe),
+            vec![(u16::from(Enchantment::SHARPNESS.id), 2)]
+        );
+    }
+
+    #[test]
+    fn single_enchantment_provider_clamps_to_level_bounds() {
+        // `SingleEnchantment.java:27`:
+        // `Mth.clamp(level.sample(random), getMinLevel(), getMaxLevel())`.
+        let sharpness_id = u16::from(Enchantment::SHARPNESS.id);
+
+        let mut over = stack_of(&Item::IRON_AXE);
+        enchant_item_from_single_enchantment(&mut over, &Enchantment::SHARPNESS, 99);
+        assert_eq!(applied_ids_and_levels(&over), vec![(sharpness_id, 5)]);
+
+        let mut under = stack_of(&Item::IRON_AXE);
+        enchant_item_from_single_enchantment(&mut under, &Enchantment::SHARPNESS, 0);
+        assert_eq!(applied_ids_and_levels(&under), vec![(sharpness_id, 1)]);
+    }
+
+    #[test]
+    fn mob_spawn_equipment_wrapper_matches_the_internal_provider() {
+        // The shared entry point must behave exactly like the internal
+        // `EnchantmentsByCostWithDifficulty` port for identical seeds.
+        let difficulty = RegionalDifficulty::calculate(Difficulty::Hard, 3_000_000, 500_000, 1.0);
+        for seed in 0..64u64 {
+            let mut via_wrapper = stack_of(&Item::IRON_HELMET);
+            let mut direct = stack_of(&Item::IRON_HELMET);
+            let mut wrapper_rng = StdRng::seed_from_u64(seed);
+            let mut direct_rng = StdRng::seed_from_u64(seed);
+            enchant_item_from_mob_spawn_equipment(&mut wrapper_rng, &mut via_wrapper, &difficulty);
+            mob_spawn_equipment_provider_enchant(
+                &mut direct_rng,
+                &mut direct,
+                difficulty.special_multiplier,
+            );
+            assert_eq!(
+                applied_ids_and_levels(&via_wrapper),
+                applied_ids_and_levels(&direct),
+                "seed {seed} diverged"
+            );
+        }
+    }
+
+    #[test]
+    fn clear_enchantments_wipes_the_component_for_a_fresh_provider_roll() {
+        // `SkeletonTrapGoal.java:97`: existing enchantments are dropped before the
+        // provider runs, so its results are the only ones left on the piece.
+        let difficulty = max_difficulty();
+
+        // Patch-borne enchantments are removed...
+        let mut enchanted = stack_of(&Item::DIAMOND_CHESTPLATE);
+        enchanted.enchant(&Enchantment::PROTECTION, 4);
+        assert!(enchanted.has_enchantments());
+        clear_enchantments(&mut enchanted);
+        assert!(!enchanted.has_enchantments());
+
+        // ...and re-enchanting afterwards yields only mob-spawn-pool results.
+        let mut rng = StdRng::seed_from_u64(11);
+        mob_spawn_equipment_provider_enchant(
+            &mut rng,
+            &mut enchanted,
+            difficulty.special_multiplier,
+        );
+        for (enchantment, _) in applied_enchantments(&enchanted) {
+            assert!(MOB_SPAWN_EQUIPMENT_POOL.contains(&enchantment));
+        }
+
+        // A plain stack without any patch entry also ends up with an empty component.
+        let mut plain = stack_of(&Item::IRON_AXE);
+        clear_enchantments(&mut plain);
+        assert!(!plain.has_enchantments());
     }
 
     #[test]
