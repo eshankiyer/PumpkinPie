@@ -12,7 +12,6 @@ use crate::entity::{
             EvokerAttackSpellGoal, EvokerCastingSpellGoal, EvokerSummonSpellGoal,
             EvokerWololoSpellGoal,
         },
-        look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal,
         revenge::RevengeGoal,
         spellcaster::SpellcasterState,
@@ -71,16 +70,24 @@ impl EvokerEntity {
             goal_selector.add_goal(8, Box::new(WanderAroundGoal::new(0.6)));
             goal_selector.add_goal(
                 9,
-                LookAtEntityGoal::with_default(mob_weak.clone(), &EntityType::PLAYER, 3.0),
+                Box::new(LookAtEntityGoal::new(
+                    mob_weak.clone(),
+                    &EntityType::PLAYER,
+                    3.0,
+                    1.0,
+                    false,
+                )),
             );
-            goal_selector.add_goal(10, Box::new(RandomLookAroundGoal::default()));
+            // Evoker.java:65: `LookAtPlayerGoal(this, Mob.class, 8.0F)`.
+            goal_selector.add_goal(10, LookAtEntityGoal::with_default_any_mob(mob_weak, 8.0));
 
             let mut target_selector = mob_arc
                 .mob_entity
                 .target_selector
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            // Evoker.java:66: `HurtByTargetGoal(this, Raider.class).setAlertOthers()`.
+            target_selector.add_goal(1, Box::new(RevengeGoal::new(true).exclude_raiders()));
             target_selector.add_goal(
                 2,
                 ActiveTargetGoal::with_default_and_memory(

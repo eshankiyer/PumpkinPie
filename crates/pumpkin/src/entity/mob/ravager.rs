@@ -12,9 +12,9 @@ use pumpkin_util::math::{lerp, position::BlockPos, vector3::Vector3};
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
-        active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, revenge::RevengeGoal,
-        swim::SwimGoal, wander_around::WanderAroundGoal,
+        active_target::ActiveTargetGoal, look_at_entity::LookAtEntityGoal,
+        melee_attack::MeleeAttackGoal, revenge::RevengeGoal, swim::SwimGoal,
+        wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
 };
@@ -68,14 +68,17 @@ impl RavagerEntity {
                 6,
                 LookAtEntityGoal::with_default(mob_weak.clone(), &EntityType::PLAYER, 6.0),
             );
-            goal_selector.add_goal(7, Box::new(RandomLookAroundGoal::default()));
+            // Ravager.java:80: `LookAtPlayerGoal(this, Mob.class, 8.0F)`. Vanilla registers no
+            // `RandomLookAroundGoal` for the ravager.
+            goal_selector.add_goal(10, LookAtEntityGoal::with_default_any_mob(mob_weak, 8.0));
 
             let mut target_selector = mob_arc
                 .mob_entity
                 .target_selector
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            target_selector.add_goal(2, Box::new(RevengeGoal::new(true)));
+            // Ravager.java:81: `HurtByTargetGoal(this, Raider.class).setAlertOthers()`.
+            target_selector.add_goal(2, Box::new(RevengeGoal::new(true).exclude_raiders()));
             target_selector.add_goal(
                 3,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),

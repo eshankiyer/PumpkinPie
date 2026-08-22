@@ -5,6 +5,7 @@ use std::sync::{
     atomic::{AtomicU8, Ordering::Relaxed},
 };
 
+use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
@@ -22,8 +23,11 @@ use crate::entity::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal, breed::BreedGoal,
         climb_on_top_of_powder_snow::ClimbOnTopOfPowderSnowGoal, escape_danger::EscapeDangerGoal,
         follow_parent::FollowParentGoal, fox_defend_trusted::DefendTrustedTargetGoal,
-        fox_faceplant::FoxFaceplantGoal, fox_melee_attack::FoxMeleeAttackGoal,
-        fox_pounce::FoxPounceGoal, fox_sleep::FoxSleepGoal, fox_stalk_prey::StalkPreyGoal,
+        fox_eat_berries::FoxEatBerriesGoal, fox_faceplant::FoxFaceplantGoal,
+        fox_melee_attack::FoxMeleeAttackGoal, fox_perch_and_search::FoxPerchAndSearchGoal,
+        fox_pounce::FoxPounceGoal, fox_search_for_items::FoxSearchForItemsGoal,
+        fox_seek_shelter::FoxSeekShelterGoal, fox_sleep::FoxSleepGoal,
+        fox_stalk_prey::StalkPreyGoal, fox_stroll_through_village::FoxStrollThroughVillageGoal,
         leap_at_target::LeapAtTargetGoal, look_at_entity::LookAtEntityGoal, swim::SwimGoal,
         wander_around::WanderAroundGoal,
     },
@@ -150,9 +154,17 @@ pub struct FoxEntity {
     /// `mob_init_data_tracker` more than once in practice, but the guard makes that an invariant
     /// instead of an assumption).
     target_goals_registered: std::sync::atomic::AtomicBool,
+    /// Mirror of "main hand is non-empty", kept as an atomic because `Fox.canHoldItem`
+    /// (`Fox.java:512-516`) is reached from the synchronous `Mob::wants_to_pick_up_item`
+    /// while the real equipment slot sits behind an async lock. Same workaround piglin.rs
+    /// uses for its offhand.
+    holding_item: std::sync::atomic::AtomicBool,
+    /// Stack accepted by `on_item_pickup` this tick, moved into the main hand by `mob_tick`.
+    pending_pickup: Mutex<Option<ItemStack>>,
 }
 
 impl FoxEntity {
+    #[allow(clippy::too_many_lines)]
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
         let this = Self {
@@ -163,8 +175,12 @@ impl FoxEntity {
             crouch_ticks: AtomicU8::new(0),
             trusted: Mutex::new([None, None]),
             target_goals_registered: std::sync::atomic::AtomicBool::new(false),
+            holding_item: std::sync::atomic::AtomicBool::new(false),
+            pending_pickup: Mutex::new(None),
         };
         let mob_arc = Arc::new(this);
+        // `Fox.java:158`: `this.setCanPickUpLoot(true)`.
+        mob_arc.mob_entity.set_can_pick_up_loot(true);
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
             Arc::downgrade(&mob_arc)
@@ -249,32 +265,36 @@ impl FoxEntity {
             );
             // `Fox.StalkPreyGoal` (Fox.java:191).
             goal_selector.add_goal(5, StalkPreyGoal::new());
-            // `Fox.FoxPounceGoal` (Fox.java:192). Not ported at 6: `Fox.SeekShelterGoal(1.25)`
-            // (Fox.java:193), which needs a sky/rain-exposure query plus `RandomPos` shelter
-            // search.
+            // `Fox.FoxPounceGoal` then `Fox.SeekShelterGoal(1.25)`, both priority 6
+            // (Fox.java:192-193), in vanilla's registration order.
             goal_selector.add_goal(6, FoxPounceGoal::new());
+            goal_selector.add_goal(6, FoxSeekShelterGoal::new(1.25));
             // `Fox.FoxMeleeAttackGoal(1.2F, true)` then `Fox.SleepGoal`, both priority 7
             // (Fox.java:194-195), in vanilla's registration order.
             goal_selector.add_goal(7, FoxMeleeAttackGoal::new());
             goal_selector.add_goal(7, FoxSleepGoal::new());
             // `Fox.FoxFollowParentGoal(this, 1.25)` (Fox.java:196).
             goal_selector.add_goal(8, Box::new(FollowParentGoal::new(1.25)));
-            // Not ported at 9: `Fox.FoxStrollThroughVillageGoal(32, 200)` (Fox.java:197), which
-            // needs village POI lookup.
-            // `LeapAtTargetGoal(this, 0.4F)` (Fox.java:199). Not ported at the same priority:
-            // `Fox.FoxEatBerriesGoal(1.2F, 12, 1)` (Fox.java:198).
+            // `Fox.FoxStrollThroughVillageGoal(32, 200)` (Fox.java:197). The `searchRadius`
+            // argument is unused by vanilla's own constructor, which forwards only `interval`.
+            goal_selector.add_goal(9, FoxStrollThroughVillageGoal::new(200));
+            // `Fox.FoxEatBerriesGoal(1.2F, 12, 1)` then `LeapAtTargetGoal(this, 0.4F)`, both
+            // priority 10 (Fox.java:198-199), in vanilla's registration order.
+            goal_selector.add_goal(10, FoxEatBerriesGoal::new(1.2, 12, 1));
             goal_selector.add_goal(10, LeapAtTargetGoal::new(0.4));
-            // `WaterAvoidingRandomStrollGoal(this, 1.0)` (Fox.java:200). Not ported at the same
-            // priority: `Fox.FoxSearchForItemsGoal` (Fox.java:201): `GoToWantedItemGoal` exists here but
-            // only navigates; the pickup-and-equip-to-mainhand half is not modelled.
+            // `WaterAvoidingRandomStrollGoal(this, 1.0)` then `Fox.FoxSearchForItemsGoal`,
+            // both priority 11 (Fox.java:200-201), in vanilla's registration order.
             goal_selector.add_goal(11, Box::new(WanderAroundGoal::new_water_avoiding(1.0)));
+            goal_selector.add_goal(11, FoxSearchForItemsGoal::new());
             // `Fox.FoxLookAtPlayerGoal(this, Player.class, 24.0F)` (Fox.java:202). The subclass
             // also gates on `!isFaceplanted() && !isInterested()` (Fox.java:1051-1059), which is
-            // not modelled here. Not ported at 13: `Fox.PerchAndSearchGoal` (Fox.java:203).
+            // not modelled here.
             goal_selector.add_goal(
                 12,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 24.0),
             );
+            // `Fox.PerchAndSearchGoal` (Fox.java:203).
+            goal_selector.add_goal(13, FoxPerchAndSearchGoal::new());
 
             let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
             target_selector.add_goal(3, DefendTrustedTargetGoal::new());
@@ -487,6 +507,26 @@ impl FoxEntity {
         *self.trusted.lock().unwrap() = [None, None];
     }
 
+    /// `Fox.canHoldItem` (`Fox.java:512-516`), reduced to its main clause: the main hand is
+    /// empty. Vanilla's second clause swaps a held non-food for a food once `ticksSinceEaten`
+    /// has run up; `ticksSinceEaten` is not modelled here, so a fox that already holds
+    /// something never swaps.
+    #[must_use]
+    pub fn can_hold_item(&self) -> bool {
+        !self.holding_item.load(Relaxed)
+    }
+
+    /// `Fox.setItemSlot(EquipmentSlot.MAINHAND, ...)` plus the `holding_item` mirror the
+    /// synchronous pickup gate reads.
+    pub async fn set_held_item(&self, stack: ItemStack) {
+        let living = &self.mob_entity.living_entity;
+        let mut equipment = living.entity_equipment.lock().await;
+        equipment.put(&EquipmentSlot::MAIN_HAND, stack.clone());
+        drop(equipment);
+        self.holding_item.store(!stack.is_empty(), Relaxed);
+        living.send_equipment_changes(&[(EquipmentSlot::MAIN_HAND, stack)]);
+    }
+
     /// `Fox.getTrustedEntities`, flattened to just the UUIDs (callers resolve them against a
     /// `World` themselves, e.g. `DefendTrustedTargetGoal`).
     pub fn trusted_uuids(&self) -> impl Iterator<Item = Uuid> + use<> {
@@ -538,6 +578,14 @@ impl NBTStorage for FoxEntity {
     fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async move {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
+            // `living_entity.read_nbt_non_mut` restores `HandItems`, so resync the
+            // `holding_item` mirror or a reloaded fox would think its mouth is empty and
+            // pick up a second item.
+            let holding_item = {
+                let equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
+                !equipment.get(&EquipmentSlot::MAIN_HAND).is_empty()
+            };
+            self.holding_item.store(holding_item, Relaxed);
             self.read_ageable_nbt(nbt);
             self.read_animal_nbt(nbt);
             self.set_sleeping(nbt.get_bool("Sleeping").unwrap_or(false));
@@ -561,6 +609,35 @@ impl NBTStorage for FoxEntity {
 impl Mob for FoxEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `Fox.canHoldItem` reached through `Mob.wantsToPickUp` (`Mob.java`'s
+    /// `wantsToPickUp` -> `canHoldItem`).
+    fn wants_to_pick_up_item(&self, _world: &World, _stack: &ItemStack) -> bool {
+        self.can_hold_item()
+    }
+
+    /// `Fox.pickUpItem` (`Fox.java:535-551`), minus the parts this codebase's pickup loop
+    /// already owns: vanilla splits the ground stack and re-drops the remainder, whereas
+    /// `Mob::mob_try_pick_up_items` decrements by the returned count and leaves the rest as a
+    /// live `ItemEntity`, which is the same end state. The `spitOutItem` call is unreachable
+    /// because `can_hold_item` only accepts a pickup with an empty hand.
+    fn on_item_pickup(&self, stack: &ItemStack) -> u8 {
+        if !self.can_hold_item() {
+            return 0;
+        }
+        let mut pending = self
+            .pending_pickup
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if pending.is_some() {
+            return 0;
+        }
+        let mut single = stack.clone();
+        single.item_count = 1;
+        *pending = Some(single);
+        self.holding_item.store(true, Relaxed);
+        1
     }
 
     fn mob_set_variant_name(&self, name: &str) {
@@ -640,6 +717,19 @@ impl Mob for FoxEntity {
             }
             if in_water || self.is_sleeping() {
                 self.set_sitting(false);
+            }
+
+            // Move anything `on_item_pickup` accepted this tick into the real main-hand slot;
+            // that hook is synchronous and cannot await the equipment lock.
+            let pending = {
+                let mut slot = self
+                    .pending_pickup
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                slot.take()
+            };
+            if let Some(stack) = pending {
+                self.set_held_item(stack).await;
             }
 
             if self.is_crouching() {

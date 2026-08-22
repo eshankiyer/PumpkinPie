@@ -207,7 +207,8 @@ impl SpiderEntity {
             );
             goal_selector.add_goal(3, Box::new(SpiderLeapGoal));
             goal_selector.add_goal(4, Box::new(SpiderAttackGoal::new()));
-            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(0.8)));
+            // Spider.java:62: `WaterAvoidingRandomStrollGoal(this, 0.8)`.
+            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new_water_avoiding(0.8)));
             goal_selector.add_goal(
                 6,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 8.0),

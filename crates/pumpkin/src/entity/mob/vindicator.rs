@@ -13,10 +13,10 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
         active_target::ActiveTargetGoal,
+        avoid_entity::AvoidEntityGoal,
         break_door::{self, BreakDoorGoal},
         interact_with_door::InteractWithDoorGoal,
         johnny_attack::JohnnyAttackGoal,
-        look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal,
         melee_attack::MeleeAttackGoal,
         revenge::RevengeGoal,
@@ -65,6 +65,11 @@ impl VindicatorEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
+            // Vindicator.java:64: `AvoidEntityGoal<>(this, Creaking.class, 8.0F, 1.0, 1.2)`.
+            goal_selector.add_goal(
+                1,
+                Box::new(AvoidEntityGoal::new(&EntityType::CREAKING, 8.0, 1.0, 1.2)),
+            );
             goal_selector.add_goal(
                 2,
                 Box::new(BreakDoorGoal::new(break_door::normal_or_hard).raid_gated(true)),
@@ -73,33 +78,52 @@ impl VindicatorEntity {
                 3,
                 Box::new(InteractWithDoorGoal::new(false).raid_gated(true)),
             );
-            goal_selector.add_goal(5, Box::new(MeleeAttackGoal::new(1.0, true)));
-            goal_selector.add_goal(6, Box::new(WanderAroundGoal::new(1.0)));
+            // Vindicator.java:68: `MeleeAttackGoal(this, 1.0, false)`.
+            goal_selector.add_goal(5, Box::new(MeleeAttackGoal::new(1.0, false)));
+            // Vindicator.java:74-76: `RandomStrollGoal(this, 0.6)` at 8,
+            // `LookAtPlayerGoal(this, Player.class, 3.0F, 1.0F)` at 9 and
+            // `LookAtPlayerGoal(this, Mob.class, 8.0F)` at 10. Vanilla registers no
+            // `RandomLookAroundGoal` for the vindicator.
+            goal_selector.add_goal(8, Box::new(WanderAroundGoal::new(0.6)));
             goal_selector.add_goal(
-                7,
-                LookAtEntityGoal::with_default(mob_weak.clone(), &EntityType::PLAYER, 8.0),
+                9,
+                Box::new(LookAtEntityGoal::new(
+                    mob_weak.clone(),
+                    &EntityType::PLAYER,
+                    3.0,
+                    1.0,
+                    false,
+                )),
             );
-            goal_selector.add_goal(8, Box::new(RandomLookAroundGoal::default()));
+            goal_selector.add_goal(
+                10,
+                LookAtEntityGoal::with_default_any_mob(mob_weak.clone(), 8.0),
+            );
 
             let mut target_selector = mob_arc
                 .mob_entity
                 .target_selector
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            // Vindicator.java:69-73.
+            target_selector.add_goal(1, Box::new(RevengeGoal::new(true).exclude_raiders()));
             target_selector.add_goal(
-                1,
+                2,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),
             );
             target_selector.add_goal(
-                2,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::VILLAGER, true),
+                3,
+                ActiveTargetGoal::with_default_types(
+                    &mob_arc.mob_entity,
+                    &[&EntityType::VILLAGER, &EntityType::WANDERING_TRADER],
+                    true,
+                ),
             );
             target_selector.add_goal(
-                2,
+                3,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::IRON_GOLEM, true),
             );
-            target_selector.add_goal(3, Box::new(JohnnyAttackGoal::new(&mob_arc.mob_entity)));
+            target_selector.add_goal(4, Box::new(JohnnyAttackGoal::new(&mob_arc.mob_entity)));
         };
 
         mob_arc

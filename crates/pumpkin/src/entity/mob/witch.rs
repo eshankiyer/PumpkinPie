@@ -79,7 +79,8 @@ impl WitchEntity {
 
             goal_selector.add_goal(1, Box::new(SwimGoal::default()));
             goal_selector.add_goal(2, Box::new(WitchAttackGoal::new(witch_weak, 60, 10.0)));
-            goal_selector.add_goal(2, Box::new(WanderAroundGoal::new(1.0)));
+            // Witch.java:69: `WaterAvoidingRandomStrollGoal(this, 1.0)`.
+            goal_selector.add_goal(2, Box::new(WanderAroundGoal::new_water_avoiding(1.0)));
             goal_selector.add_goal(
                 3,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 8.0),

@@ -13,7 +13,7 @@ use crate::entity::{
     ai::goal::{
         active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, move_towards_restriction::MoveTowardsRestrictionGoal,
-        revenge::RevengeGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
+        revenge::RevengeGoal, wander_around::WanderAroundGoal,
     },
     ai::pathfinder::node::PathType,
     mob::{Mob, MobEntity},
@@ -69,7 +69,6 @@ impl BlazeEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
-            goal_selector.add_goal(0, Box::new(SwimGoal::default()));
 
             goal_selector.add_goal(
                 4,

@@ -16,10 +16,10 @@ use pumpkin_util::Difficulty;
 use crate::entity::{
     Entity, NBTStorage, NbtFuture,
     ai::goal::{
-        active_target::ActiveTargetGoal, flee_sun::FleeSunGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal,
-        ranged_bow_attack::RangedBowAttackGoal, revenge::RevengeGoal, swim::SwimGoal,
-        wander_around::WanderAroundGoal,
+        active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal, flee_sun::FleeSunGoal,
+        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
+        melee_attack::MeleeAttackGoal, ranged_bow_attack::RangedBowAttackGoal,
+        revenge::RevengeGoal, wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
 };
@@ -134,8 +134,12 @@ impl SkeletonEntityBase {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(3, FleeSunGoal::new(1.0));
+            // AbstractSkeleton.java:79: `AvoidEntityGoal<>(this, Wolf.class, 6.0F, 1.0, 1.2)`.
+            goal_selector.add_goal(
+                3,
+                Box::new(AvoidEntityGoal::new(&EntityType::WOLF, 6.0, 1.0, 1.2)),
+            );
             if uses_bow {
                 // Vanilla `AbstractSkeleton#reassessWeaponGoal` selects this at priority 4.
                 let interval = attack_interval(
@@ -168,12 +172,14 @@ impl SkeletonEntityBase {
             } else {
                 goal_selector.add_goal(4, Box::new(MeleeAttackGoal::new(1.2, false)));
             }
-            goal_selector.add_goal(7, Box::new(WanderAroundGoal::new(1.0)));
+            // AbstractSkeleton.java:80-82: `WaterAvoidingRandomStrollGoal(this, 1.0)` at 5,
+            // `LookAtPlayerGoal(this, Player.class, 8.0F)` and `RandomLookAroundGoal` at 6.
+            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new_water_avoiding(1.0)));
             goal_selector.add_goal(
-                8,
+                6,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 8.0),
             );
-            goal_selector.add_goal(8, Box::new(RandomLookAroundGoal::default()));
+            goal_selector.add_goal(6, Box::new(RandomLookAroundGoal::default()));
 
             target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
             target_selector.add_goal(

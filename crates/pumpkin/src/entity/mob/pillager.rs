@@ -16,7 +16,7 @@ use tokio::sync::Mutex;
 use crate::entity::{
     Entity, NBTStorage, NbtFuture,
     ai::goal::{
-        active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
+        active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal,
         look_at_entity::LookAtEntityGoal, ranged_crossbow_attack::RangedCrossbowAttackGoal,
         revenge::RevengeGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
     },
@@ -71,20 +71,40 @@ impl PillagerEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
-            goal_selector.add_goal(2, Box::new(RangedCrossbowAttackGoal::new(15.0)));
-            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
+            // Pillager.java:72: `AvoidEntityGoal<>(this, Creaking.class, 8.0F, 1.0, 1.2)`.
             goal_selector.add_goal(
-                6,
-                LookAtEntityGoal::with_default(mob_weak.clone(), &EntityType::PLAYER, 8.0),
+                1,
+                Box::new(AvoidEntityGoal::new(&EntityType::CREAKING, 8.0, 1.0, 1.2)),
             );
-            goal_selector.add_goal(7, Box::new(RandomLookAroundGoal::default()));
+            // Pillager.java:74: `RangedCrossbowAttackGoal<>(this, 1.0, 8.0F)`.
+            goal_selector.add_goal(3, Box::new(RangedCrossbowAttackGoal::new(8.0)));
+            // Pillager.java:75-77: `RandomStrollGoal(this, 0.6)` at 8,
+            // `LookAtPlayerGoal(this, Player.class, 15.0F, 1.0F)` at 9 and
+            // `LookAtPlayerGoal(this, Mob.class, 15.0F)` at 10. Vanilla registers no
+            // `RandomLookAroundGoal` for the pillager.
+            goal_selector.add_goal(8, Box::new(WanderAroundGoal::new(0.6)));
+            goal_selector.add_goal(
+                9,
+                Box::new(LookAtEntityGoal::new(
+                    mob_weak.clone(),
+                    &EntityType::PLAYER,
+                    15.0,
+                    1.0,
+                    false,
+                )),
+            );
+            goal_selector.add_goal(
+                10,
+                LookAtEntityGoal::with_default_any_mob(mob_weak.clone(), 15.0),
+            );
 
             let mut target_selector = mob_arc
                 .mob_entity
                 .target_selector
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            // Pillager.java:78: `HurtByTargetGoal(this, Raider.class).setAlertOthers()`.
+            target_selector.add_goal(1, Box::new(RevengeGoal::new(true).exclude_raiders()));
             target_selector.add_goal(
                 2,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),

@@ -28,15 +28,24 @@ use crate::block::entities::BlockEntity;
 use crate::block::entities::beehive::{BeehiveBlockEntity, bees_stay_in_hive, is_beehive};
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    ageable::{AgeableData, AgeableMob},
     ai::goal::{
-        Controls, Goal, GoalFuture, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, revenge::RevengeGoal,
+        Controls, Goal, GoalFuture, active_target::ActiveTargetGoal, breed::BreedGoal,
+        follow_parent::FollowParentGoal, look_around::RandomLookAroundGoal,
+        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal,
+        reset_universal_anger_target::ResetUniversalAngerTargetGoal, revenge::RevengeGoal,
         swim::SwimGoal, wander_around::WanderAroundGoal,
     },
     ai::pathfinder::NavigatorGoal,
     mob::{Mob, MobEntity},
+    passive::animal::Animal,
+    persistent_anger::PersistentAnger,
+    player::Player,
 };
+use crate::world::World;
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_world::world::BlockFlags;
+use uuid::Uuid;
 
 /// `Bee.FLAG_ROLL`, `Bee.FLAG_HAS_STUNG`, `Bee.FLAG_HAS_NECTAR`.
 const FLAG_ROLL: u8 = 2;
@@ -126,6 +135,10 @@ pub struct BeeEntity {
     hive_blacklist: StdMutex<Vec<BlockPos>>,
     /// `Entity.tickCount`, needed only for the 20-tick hive-validity sweep in `Bee.aiStep`.
     tick_count: AtomicI32,
+    /// `AgeableMob` state: `Bee extends Animal` (`Bee.java:96`), so bees age and breed.
+    ageable_data: AgeableData,
+    /// `Bee implements NeutralMob` (`Bee.java:96`): `angerEndTime`/`persistentAngerTarget`.
+    pub persistent_anger: PersistentAnger,
 }
 
 impl BeeEntity {
@@ -149,6 +162,8 @@ impl BeeEntity {
             pollinating: AtomicBool::new(false),
             hive_blacklist: StdMutex::new(Vec::new()),
             tick_count: AtomicI32::new(0),
+            ageable_data: AgeableData::default(),
+            persistent_anger: PersistentAnger::default(),
         };
         let mob_arc = Arc::new(bee);
         let bee_weak = Arc::downgrade(&mob_arc);
@@ -156,6 +171,7 @@ impl BeeEntity {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
             Arc::downgrade(&mob_arc)
         };
+        let mob_weak_target = mob_weak.clone();
 
         {
             let mut goal_selector = mob_arc
@@ -166,15 +182,21 @@ impl BeeEntity {
 
             goal_selector.add_goal(0, Box::new(BeeAttackGoal::new(bee_weak.clone())));
             goal_selector.add_goal(1, Box::new(BeeEnterHiveGoal::new(bee_weak.clone())));
-            goal_selector.add_goal(1, Box::new(SwimGoal::default()));
-            goal_selector.add_goal(2, Box::new(BeePollinateGoal::new(bee_weak.clone())));
-            goal_selector.add_goal(3, Box::new(BeeLocateHiveGoal::new(bee_weak.clone())));
-            goal_selector.add_goal(3, Box::new(BeeGoToHiveGoal::new(bee_weak.clone())));
+            // `new BreedGoal(this, 1.0)` (`Bee.java:177`). Not ported alongside it:
+            // `TemptGoal(this, 1.25, i -> i.is(ItemTags.BEE_FOOD), false)` (`Bee.java:178`) --
+            // `tempt.rs` takes a `&'static [&'static Item]`, not an item tag.
+            goal_selector.add_goal(2, BreedGoal::new(1.0));
             goal_selector.add_goal(3, Box::new(BeeValidateHiveGoal::new(bee_weak.clone())));
             goal_selector.add_goal(3, Box::new(BeeValidateFlowerGoal::new(bee_weak.clone())));
-            goal_selector.add_goal(3, Box::new(BeeGoToKnownFlowerGoal::new(bee_weak.clone())));
-            goal_selector.add_goal(3, Box::new(BeeGrowCropGoal::new(bee_weak)));
-            goal_selector.add_goal(4, Box::new(WanderAroundGoal::new(1.0)));
+            goal_selector.add_goal(4, Box::new(BeePollinateGoal::new(bee_weak.clone())));
+            // `new FollowParentGoal(this, 1.25)` (`Bee.java:183`).
+            goal_selector.add_goal(5, Box::new(FollowParentGoal::new(1.25)));
+            goal_selector.add_goal(5, Box::new(BeeLocateHiveGoal::new(bee_weak.clone())));
+            goal_selector.add_goal(5, Box::new(BeeGoToHiveGoal::new(bee_weak.clone())));
+            goal_selector.add_goal(6, Box::new(BeeGoToKnownFlowerGoal::new(bee_weak.clone())));
+            goal_selector.add_goal(7, Box::new(BeeGrowCropGoal::new(bee_weak)));
+            goal_selector.add_goal(8, Box::new(WanderAroundGoal::new(1.0)));
+            goal_selector.add_goal(9, Box::new(SwimGoal::default()));
             goal_selector.add_goal(
                 5,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
@@ -182,10 +204,46 @@ impl BeeEntity {
             goal_selector.add_goal(6, Box::new(RandomLookAroundGoal::default()));
 
             let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
-            // `Bee.BeeHurtByOtherGoal extends HurtByTargetGoal`. Its `setAlertOthers` alerting of
-            // nearby bees and `BeeBecomeAngryTargetGoal` both need the per-player persistent
-            // anger state Pumpkin does not track yet, so only the revenge part is ported.
+            // `new Bee.BeeHurtByOtherGoal(this).setAlertOthers()` (`Bee.java:192`).
             target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            // `new Bee.BeeBecomeAngryTargetGoal(this)` (`Bee.java:193`), which is
+            // `NearestAttackableTargetGoal<Player>(bee, Player.class, 10, true, false,
+            // bee::isAngryAt)` (`Bee.java:714-717`). The predicate only sees the candidate, so
+            // it closes over a weak handle back to this bee to consult its own
+            // `PersistentAnger` - the shape `polar_bear.rs:85-118` established.
+            let angry_weak = mob_weak_target.clone();
+            target_selector.add_goal(
+                2,
+                Box::new(ActiveTargetGoal::new(
+                    &mob_arc.mob_entity,
+                    &EntityType::PLAYER,
+                    10,
+                    true,
+                    false,
+                    Some(
+                        move |target: crate::entity::ai::target_predicate::TargetData,
+                              world: Arc<World>| {
+                            let angry_weak = angry_weak.clone();
+                            async move {
+                                let Some(mob) = angry_weak.upgrade() else {
+                                    return false;
+                                };
+                                let Some(anger) = mob.persistent_anger() else {
+                                    return false;
+                                };
+                                if anger.is_angry_at(target.entity_uuid).await {
+                                    return true;
+                                }
+                                let universal_anger =
+                                    world.level_info.load().game_rules.universal_anger;
+                                anger.is_angry_at_all_players(universal_anger).await
+                            }
+                        },
+                    ),
+                )),
+            );
+            // `new ResetUniversalAngerTargetGoal<>(this, true)` (`Bee.java:194`).
+            target_selector.add_goal(3, ResetUniversalAngerTargetGoal::new(true));
         };
 
         mob_arc
@@ -443,8 +501,8 @@ fn attracts_bees(block: &Block, state: &BlockState) -> bool {
 
 /// `Bee.BeeAttackGoal`: a `MeleeAttackGoal` that stops once the bee has stung.
 ///
-/// Vanilla additionally requires `isAngry()`; Pumpkin tracks no persistent anger, so the bee's
-/// target (set only by `RevengeGoal`) stands in for it.
+/// `canUse`/`canContinueToUse` also require `isAngry()` (`Bee.java:705`/`710`), now backed by
+/// `PersistentAnger`.
 pub struct BeeAttackGoal {
     bee: Weak<BeeEntity>,
     melee: MeleeAttackGoal,
@@ -460,7 +518,9 @@ impl BeeAttackGoal {
     }
 
     fn can_sting(&self) -> bool {
-        self.bee.upgrade().is_some_and(|bee| !bee.has_stung())
+        self.bee
+            .upgrade()
+            .is_some_and(|bee| !bee.has_stung() && bee.persistent_anger.is_angry())
     }
 }
 
@@ -1043,10 +1103,26 @@ fn block_pos_from_nbt(nbt: &NbtCompound, name: &str) -> Option<BlockPos> {
     Some(BlockPos::new(x, y, z))
 }
 
+impl AgeableMob for BeeEntity {
+    fn get_ageable_data(&self) -> &AgeableData {
+        &self.ageable_data
+    }
+}
+
+impl Animal for BeeEntity {
+    /// `Bee.isFood` (`Bee.java:576-578`): `itemStack.is(ItemTags.BEE_FOOD)`.
+    fn is_food(&self, item_stack: &ItemStack) -> bool {
+        item_stack.item.has_tag(&tag::Item::MINECRAFT_BEE_FOOD)
+    }
+}
+
 impl NBTStorage for BeeEntity {
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async move {
             self.mob_entity.living_entity.write_nbt(nbt).await;
+            self.write_ageable_nbt(nbt);
+            self.write_animal_nbt(nbt);
+            self.persistent_anger.write_nbt(nbt).await;
             if let Some(hive_pos) = self.hive_pos.load() {
                 nbt.put("hive_pos", block_pos_to_nbt(hive_pos));
             }
@@ -1073,6 +1149,9 @@ impl NBTStorage for BeeEntity {
     fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async move {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
+            self.read_ageable_nbt(nbt);
+            self.read_animal_nbt(nbt);
+            self.persistent_anger.read_nbt(nbt).await;
             // Store the flag bits directly: the entity has no viewers yet during load, so the
             // byte is published by `mob_init_data_tracker` instead of broadcast from here.
             let mut flags = 0u8;
@@ -1106,15 +1185,51 @@ impl Mob for BeeEntity {
         Some(self)
     }
 
+    fn persistent_anger(&self) -> Option<&PersistentAnger> {
+        Some(&self.persistent_anger)
+    }
+
+    fn mob_interact<'a>(
+        &'a self,
+        player: &'a Arc<Player>,
+        item_stack: &'a mut ItemStack,
+    ) -> EntityBaseFuture<'a, bool> {
+        self.animal_interact(player, item_stack, Sound::EntityBeeLoop)
+    }
+
+    /// `Bee.getBreedOffspring` (`Bee.java:604`): a plain new bee, no inherited state.
+    fn create_offspring<'a>(
+        &'a self,
+        _mate: &'a dyn EntityBase,
+        world: &'a Arc<World>,
+    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
+        Box::pin(async move {
+            let entity = self.get_entity();
+            Some(crate::entity::r#type::from_type(
+                entity.entity_type,
+                entity.pos.load(),
+                world,
+                Uuid::new_v4(),
+            ))
+        })
+    }
+
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
-            self.mob_entity.living_entity.entity.send_meta_data(
+            let entity = &self.mob_entity.living_entity.entity;
+            entity.send_meta_data(
                 &[Metadata::new(
                     tracked_data::bee::FLAGS_ID,
                     self.flags.load(Relaxed) as i8,
                 )],
                 None,
             );
+            if entity.age.load(Relaxed) < 0 {
+                entity.send_meta_data(
+                    &[Metadata::new(tracked_data::bee::DATA_BABY_ID, true)],
+                    None,
+                );
+            }
         })
     }
 
@@ -1140,8 +1255,8 @@ impl Mob for BeeEntity {
             }
 
             self.set_has_stung(true);
-            // `Bee.doHurtTarget` calls `stopBeingAngry`. Pumpkin has no persistent anger state,
-            // so clearing the target is the equivalent that keeps a stung bee from pursuing.
+            // `Bee.doHurtTarget` calls `stopBeingAngry`.
+            self.persistent_anger.stop_being_angry().await;
             self.set_mob_target(None).await;
             let entity = &self.mob_entity.living_entity.entity;
             entity.world.load().play_sound(
@@ -1158,6 +1273,18 @@ impl Mob for BeeEntity {
             let living = &self.mob_entity.living_entity;
             if living.dead.load(Relaxed) {
                 return;
+            }
+
+            self.persistent_anger.tick().await;
+            // Simplified `NeutralMob.updatePersistentAnger(level, true)`, the same shape
+            // `polar_bear.rs` uses: adopt whatever target the revenge goal set as the anger
+            // target and (re)start the timer.
+            if let Some(target) = self.mob_entity.get_target().await {
+                let target_uuid = target.get_entity().entity_uuid;
+                if !self.persistent_anger.is_angry_at(target_uuid).await {
+                    self.persistent_anger.set_angry_at(Some(target_uuid)).await;
+                    self.persistent_anger.start_timer();
+                }
             }
 
             if self.stay_out_of_hive_countdown.load(Relaxed) > 0 {
@@ -1242,11 +1369,10 @@ fn state_id_with_age(block: &Block, age: u8) -> Option<BlockStateId> {
 
 /// `Bee.BaseBeeGoal.canUse`/`canContinueToUse`'s shared `!Bee.this.isAngry()` gate.
 ///
-/// Pumpkin tracks no persistent per-player anger (see the target-selector comment in
-/// `BeeEntity::new`), so "angry" is read as "currently has a target", which is the same
-/// equivalence `Bee.doHurtTarget`'s port already uses in this file.
-async fn bee_is_angry(bee: &BeeEntity) -> bool {
-    bee.mob_entity.get_target().await.is_some()
+/// Backed by `PersistentAnger` (`entity/persistent_anger.rs`), Pumpkin's `NeutralMob`
+/// equivalent, so this is now vanilla's `isAngry()` rather than a target-presence stand-in.
+fn bee_is_angry(bee: &BeeEntity) -> bool {
+    bee.persistent_anger.is_angry()
 }
 
 /// `BeeGrowCropGoal.tick`'s per-block max age, which vanilla reads off each block class
@@ -1298,7 +1424,7 @@ impl Goal for BeeValidateHiveGoal {
             let Some(bee) = self.bee.upgrade() else {
                 return false;
             };
-            if bee_is_angry(&bee).await {
+            if bee_is_angry(&bee) {
                 return false;
             }
             let world = bee.mob_entity.living_entity.entity.world.load();
@@ -1356,7 +1482,7 @@ impl Goal for BeeValidateFlowerGoal {
             let Some(bee) = self.bee.upgrade() else {
                 return false;
             };
-            if bee_is_angry(&bee).await {
+            if bee_is_angry(&bee) {
                 return false;
             }
             let world = bee.mob_entity.living_entity.entity.world.load();
@@ -1410,7 +1536,7 @@ impl BeeGoToKnownFlowerGoal {
     }
 
     /// `BeeGoToKnownFlowerGoal.canBeeUse`.
-    async fn can_use(bee: &BeeEntity) -> bool {
+    fn can_use(bee: &BeeEntity) -> bool {
         let Some(flower_pos) = bee.flower_pos.load() else {
             return false;
         };
@@ -1420,7 +1546,7 @@ impl BeeGoToKnownFlowerGoal {
         if bee.ticks_without_nectar() <= TICKS_WITHOUT_NECTAR_BEFORE_SEEKING_KNOWN_FLOWER {
             return false;
         }
-        !bee.closer_than(flower_pos, 2.0) && !bee_is_angry(bee).await
+        !bee.closer_than(flower_pos, 2.0) && !bee_is_angry(bee)
     }
 }
 
@@ -1430,7 +1556,7 @@ impl Goal for BeeGoToKnownFlowerGoal {
             let Some(bee) = self.bee.upgrade() else {
                 return false;
             };
-            Self::can_use(&bee).await
+            Self::can_use(&bee)
         })
     }
 
@@ -1518,14 +1644,14 @@ impl BeeGrowCropGoal {
 
     /// `BeeGrowCropGoal.canBeeUse`. The 0.3 roll is vanilla's per-check jitter, so the goal only
     /// engages about 70% of the time it otherwise could.
-    async fn can_use(bee: &BeeEntity) -> bool {
+    fn can_use(bee: &BeeEntity) -> bool {
         if bee.crops_grown_since_pollination() >= MAX_CROPS_GROWN_PER_POLLINATION {
             return false;
         }
         if rand::rng().random::<f32>() < 0.3 {
             return false;
         }
-        bee.has_nectar() && bee.is_hive_valid() && !bee_is_angry(bee).await
+        bee.has_nectar() && bee.is_hive_valid() && !bee_is_angry(bee)
     }
 
     /// The state-mutation half of `BeeGrowCropGoal.tick`, kept generic over the age property via
@@ -1564,7 +1690,7 @@ impl Goal for BeeGrowCropGoal {
             let Some(bee) = self.bee.upgrade() else {
                 return false;
             };
-            Self::can_use(&bee).await
+            Self::can_use(&bee)
         })
     }
 

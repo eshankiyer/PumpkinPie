@@ -8,6 +8,7 @@ use crate::world::World;
 use arc_swap::ArcSwap;
 use pumpkin_data::biome::Spawner;
 use pumpkin_data::chunk::Biome;
+use pumpkin_data::dimension::Dimension;
 use pumpkin_data::entity::{EntityType, MobCategory, SpawnLocation};
 use pumpkin_data::tag::Block::MINECRAFT_FIRE;
 use pumpkin_data::tag::Block::MINECRAFT_PREVENT_MOB_SPAWNING_INSIDE;
@@ -810,6 +811,7 @@ pub fn spawn_category_for_position(
     }
     let level_info = world.level_info.load();
     let spawn_position = Vector3::new(level_info.spawn_x, level_info.spawn_y, level_info.spawn_z);
+    let spawn_point_is_in_this_dimension = world.dimension.id == Dimension::OVERWORLD.id;
 
     'group_loop: for _ in 0..3 {
         let mut new_x = pos.0.x;
@@ -824,8 +826,34 @@ pub fn spawn_category_for_position(
         'spawn_loop: while inc < random_group_size {
             new_x += rng().random_range(0..6) - rng().random_range(0..6);
             new_z += rng().random_range(0..6) - rng().random_range(0..6);
-            let mut new_pos = BlockPos::new(new_x, pos.0.y, new_z);
+            let new_pos = BlockPos::new(new_x, pos.0.y, new_z);
 
+            // `NaturalSpawner.spawnCategoryForPosition` (NaturalSpawner.java:176-205) keeps
+            // the candidate at the chunk's chosen `yStart` for every jitter step;
+            // `adjustSpawnPosition` is reached only from `getTopNonCollidingPos`
+            // (NaturalSpawner.java:448), the chunk-generation path. Shifting the natural
+            // candidate down a block here moved spawns off the column vanilla tests.
+            let spawn_pos_f64 = Vector3::new(
+                f64::from(new_pos.0.x) + 0.5,
+                f64::from(new_pos.0.y),
+                f64::from(new_pos.0.z) + 0.5,
+            );
+
+            let player_distance = get_nearest_player(&spawn_pos_f64, &player_positions);
+            if !is_right_distance_to_player_and_spawn_point(
+                &new_pos,
+                player_distance,
+                chunk_pos,
+                &spawn_position,
+                spawn_point_is_in_this_dimension,
+            ) {
+                inc += 1;
+                continue;
+            }
+
+            // Vanilla checks distance before choosing the biome's spawn entry. Keeping that
+            // order preserves both its RNG stream and its selection behavior for rejected
+            // columns (`NaturalSpawner.java:182-193`).
             if current_spawner.is_none() {
                 let Some(spawner) = get_random_spawn_mob_at(world, category, &new_pos) else {
                     break 'spawn_loop;
@@ -846,25 +874,6 @@ pub fn spawn_category_for_position(
             };
 
             if !is_spawner_allowed_at(world, category, &new_pos, spawner) {
-                inc += 1;
-                continue;
-            }
-
-            new_pos = adjust_spawn_position(world, new_pos, entity_type);
-
-            let spawn_pos_f64 = Vector3::new(
-                f64::from(new_pos.0.x) + 0.5,
-                f64::from(new_pos.0.y),
-                f64::from(new_pos.0.z) + 0.5,
-            );
-
-            let player_distance = get_nearest_player(&spawn_pos_f64, &player_positions);
-            if !is_right_distance_to_player_and_spawn_point(
-                &new_pos,
-                player_distance,
-                chunk_pos,
-                &spawn_position,
-            ) {
                 inc += 1;
                 continue;
             }
@@ -935,15 +944,23 @@ pub fn is_right_distance_to_player_and_spawn_point(
     distance: f64,
     chunk_pos: &Vector2<i32>,
     spawn_position: &Vector3<i32>,
+    spawn_point_is_in_this_dimension: bool,
 ) -> bool {
     if distance <= 24. * 24. {
         return false;
     }
-    if pos.to_centered_f64().squared_distance_to(
-        f64::from(spawn_position.x) + 0.5,
-        f64::from(spawn_position.y) + 0.5,
-        f64::from(spawn_position.z) + 0.5,
-    ) <= 24. * 24.
+    // `NaturalSpawner.isRightDistanceToPlayerAndSpawnPoint` (NaturalSpawner.java:235-238)
+    // applies the 24-block world-spawn exclusion only when the respawn data's dimension is
+    // this level's. `LevelData.RespawnData.DEFAULT` (LevelData.java:34) is the overworld, and
+    // Pumpkin's level.dat carries no respawn dimension, so the exclusion belongs to the
+    // overworld alone. Applying it everywhere blanked a 48-block box around the overworld
+    // spawn coordinates in the Nether and the End as well.
+    if spawn_point_is_in_this_dimension
+        && pos.to_centered_f64().squared_distance_to(
+            f64::from(spawn_position.x) + 0.5,
+            f64::from(spawn_position.y),
+            f64::from(spawn_position.z) + 0.5,
+        ) <= 24. * 24.
     {
         return false;
     }
@@ -1091,7 +1108,7 @@ pub fn is_valid_spawn_position_for_type(
 /// The entity registry stores base dimensions, while the Java entity type
 /// applies `spawnDimensionsScale` only when checking a natural-spawn box.
 /// Slimes and magma cubes use 4.0, and sulfur cubes use 2.0 in 26.2.
-fn spawn_dimensions(entity_type: &'static EntityType) -> EntityDimensions {
+pub(crate) fn spawn_dimensions(entity_type: &'static EntityType) -> EntityDimensions {
     let scale = match entity_type.resource_name {
         "magma_cube" | "slime" => 4.0,
         "sulfur_cube" => 2.0,
@@ -1618,12 +1635,22 @@ mod tests {
             25. * 25.,
             &chunk,
             &Vector3::new(100, 64, 100),
+            true,
         ));
         assert!(is_right_distance_to_player_and_spawn_point(
             &pos,
             25. * 25.,
             &chunk,
             &Vector3::new(0, 64, 0),
+            true,
+        ));
+        // The spawn-point exclusion is skipped where the respawn dimension is not this one.
+        assert!(is_right_distance_to_player_and_spawn_point(
+            &pos,
+            25. * 25.,
+            &chunk,
+            &Vector3::new(100, 64, 100),
+            false,
         ));
     }
 

@@ -21,9 +21,11 @@ use crate::entity::{
         avoid_entity::AvoidEntityGoal, breath_air::BreathAirGoal,
         dolphin_hurt_by_target::DolphinHurtByTargetGoal, dolphin_jump::DolphinJumpGoal,
         dolphin_swim_to_treasure::DolphinSwimToTreasureGoal,
-        dolphin_swim_with_player::DolphinSwimWithPlayerGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal,
-        try_find_water::TryFindWaterGoal, wander_around::WanderAroundGoal,
+        dolphin_swim_with_player::DolphinSwimWithPlayerGoal,
+        follow_player_ridden_entity::FollowPlayerRiddenEntityGoal,
+        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
+        melee_attack::MeleeAttackGoal, try_find_water::TryFindWaterGoal,
+        wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
     player::Player,
@@ -82,12 +84,25 @@ impl DolphinEntity {
             );
             goal_selector.add_goal(5, Box::new(DolphinJumpGoal::new(10)));
             goal_selector.add_goal(6, Box::new(MeleeAttackGoal::new(1.2, true)));
-            // Not ported, all priority 8 (`Dolphin.java:167-169`): `Dolphin.PlayWithItemsGoal`,
-            // which needs mob item-entity pickup and toss (`GoToWantedItemGoal` only
-            // navigates); and the two
-            // `FollowPlayerRiddenEntityGoal` registrations (`AbstractBoat`, `AbstractNautilus`),
-            // which need a `Player.hasMovedHorizontallyRecently` analogue (none exists in
-            // `crates/pumpkin/src`, verified by grep) plus a controlling-passenger scan. These are the only goal-list gaps left for Dolphin.
+            // The two `FollowPlayerRiddenEntityGoal` registrations at priority 8
+            // (`Dolphin.java:168-169`). `hasMovedHorizontallyRecently` is backed by
+            // `Entity::movement`, which `Entity::update_last_pos` already maintains -- see the
+            // goal's module doc.
+            goal_selector.add_goal(
+                8,
+                FollowPlayerRiddenEntityGoal::new(|entity_type| {
+                    entity_type.has_tag(&tag::EntityType::C_BOATS)
+                }),
+            );
+            goal_selector.add_goal(
+                8,
+                FollowPlayerRiddenEntityGoal::new(|entity_type| {
+                    entity_type == &EntityType::NAUTILUS
+                        || entity_type == &EntityType::ZOMBIE_NAUTILUS
+                }),
+            );
+            // Still not ported at priority 8 (`Dolphin.java:167`): `Dolphin.PlayWithItemsGoal`,
+            // which needs the pick-up-into-mainhand and toss-back halves on the dolphin itself.
             // `AvoidEntityGoal<Guardian>(8.0F, 1.0, 1.0)` at priority 9 (`Dolphin.java:170`).
             // Vanilla's search is `getEntitiesOfClass(Guardian.class, ...)`, which also matches
             // `ElderGuardian extends Guardian`; this codebase's `AvoidEntityGoal` only matches

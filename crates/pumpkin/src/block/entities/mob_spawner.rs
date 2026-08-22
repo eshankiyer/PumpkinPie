@@ -9,11 +9,7 @@ use std::{
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::{entity::EntityType, world::WorldEvent};
 use pumpkin_nbt::compound::NbtCompound;
-use pumpkin_util::math::{
-    boundingbox::{BoundingBox, EntityDimensions},
-    position::BlockPos,
-    vector3::Vector3,
-};
+use pumpkin_util::math::{boundingbox::BoundingBox, position::BlockPos, vector3::Vector3};
 
 use crate::{block::entities::BlockEntity, entity::EntityBase, world::World};
 
@@ -112,62 +108,104 @@ impl BlockEntity for MobSpawnerBlockEntity {
 
     fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
-            if let Some(entity_type) = &self.entity_type.load() {
-                if world
-                    .get_closest_player_where(
-                        self.position.to_centered_f64(),
-                        self.required_player_range as f64,
-                        |player| !player.is_spectator() && player.living_entity.health.load() > 0.0,
-                    )
-                    .is_none()
-                {
-                    return;
-                }
-                if self.delay.load(Ordering::Relaxed) == -1 {
-                    self.update_spawns(world).await;
-                } else {
-                    self.delay.fetch_sub(1, Ordering::Relaxed);
-                    return;
-                }
-                let spawn_range = self.spawn_range;
-                let mut update_spawns = false;
-                for _ in 0..self.spawn_count {
-                    let pos = self.position.0;
+            let Some(entity_type) = self.entity_type.load() else {
+                return;
+            };
+            // `BaseSpawner.serverTick` (BaseSpawner.java:89) gates the whole tick on
+            // `ServerLevel.isSpawnerBlockEnabled`, i.e. the `spawner_blocks_work` game rule
+            // (ServerLevel.java:1889-1891). Ordinary spawners ignored it entirely; only the
+            // trial spawner honoured it.
+            if !world.level_info.load().game_rules.spawner_blocks_work {
+                return;
+            }
+            if world
+                .get_closest_player_where(
+                    self.position.to_centered_f64(),
+                    self.required_player_range as f64,
+                    |player| !player.is_spectator() && player.living_entity.health.load() > 0.0,
+                )
+                .is_none()
+            {
+                return;
+            }
+            // `BaseSpawner.serverTick` (BaseSpawner.java:88-96): the -1 sentinel only seeds a
+            // fresh delay, and the countdown is a separate branch, so the tick the delay
+            // reaches 0 is the tick that spawns. Decrementing unconditionally instead made
+            // the delay go negative, skipped the 0 tick, and rolled a new delay twice.
+            if self.delay.load(Ordering::Relaxed) == -1 {
+                self.update_spawns(world).await;
+            }
+            if self.delay.load(Ordering::Relaxed) > 0 {
+                self.delay.fetch_sub(1, Ordering::Relaxed);
+                return;
+            }
+            let spawn_range = self.spawn_range;
+            let mut update_spawns = false;
+            for _ in 0..self.spawn_count {
+                let pos = self.position.0;
 
-                    let spawn_pos = Vector3::new(
-                        pos.x as f64
-                            + spawn_offset(rand::random(), rand::random(), spawn_range as f64)
-                            + 0.5,
-                        (pos.y + rand::random_range(0..3) - 1) as f64,
-                        pos.z as f64
-                            + spawn_offset(rand::random(), rand::random(), spawn_range as f64)
-                            + 0.5,
-                    );
-                    if !world.is_space_empty(BoundingBox::new_from_pos(
-                        spawn_pos.x,
-                        spawn_pos.y,
-                        spawn_pos.z,
-                        &EntityDimensions {
-                            width: entity_type.dimension[0],
-                            height: entity_type.dimension[1],
-                            eye_height: entity_type.eye_height,
-                        },
-                    )) {
-                        continue;
-                    }
-                    let entity = crate::entity::r#type::from_type(
-                        entity_type,
-                        spawn_pos,
-                        world,
-                        uuid::Uuid::new_v4(),
-                    );
-                    world.spawn_entity(entity).await;
-                    world.sync_world_event(WorldEvent::ParticlesMobblockSpawn, self.position, 0);
-                    update_spawns = true;
+                let spawn_pos = Vector3::new(
+                    pos.x as f64
+                        + spawn_offset(rand::random(), rand::random(), spawn_range as f64)
+                        + 0.5,
+                    (pos.y + rand::random_range(0..3) - 1) as f64,
+                    pos.z as f64
+                        + spawn_offset(rand::random(), rand::random(), spawn_range as f64)
+                        + 0.5,
+                );
+                // `BaseSpawner.serverTick` (BaseSpawner.java:118) tests `getSpawnAABB`, which
+                // applies the spawn dimension scale; the raw registry dimensions used before
+                // checked a quarter-size box for slimes and magma cubes.
+                if !world.is_space_empty(BoundingBox::new_from_pos(
+                    spawn_pos.x,
+                    spawn_pos.y,
+                    spawn_pos.z,
+                    &crate::world::natural_spawner::spawn_dimensions(entity_type),
+                )) {
+                    continue;
                 }
-                if update_spawns {
+                // `BaseSpawner.serverTick` (BaseSpawner.java:142-151): count the same entity
+                // type inside the spawner block inflated by `spawnRange`, ignoring spectators,
+                // and give up for this cycle once `maxNearbyEntities` is reached. Without this
+                // the spawner ignored its own cap and kept spawning forever.
+                let nearby_box = BoundingBox::new(
+                    Vector3::new(f64::from(pos.x), f64::from(pos.y), f64::from(pos.z)),
+                    Vector3::new(
+                        f64::from(pos.x) + 1.0,
+                        f64::from(pos.y) + 1.0,
+                        f64::from(pos.z) + 1.0,
+                    ),
+                )
+                .expand_all(f64::from(spawn_range));
+                let nearby = world
+                    .get_all_at_box(&nearby_box)
+                    .iter()
+                    .filter(|entity| {
+                        !entity.is_spectator()
+                            && entity.get_entity().entity_type.id == entity_type.id
+                    })
+                    .count();
+                if is_nearby_cap_reached(nearby, self.max_nearby_entities) {
                     self.update_spawns(world).await;
+                    return;
                 }
+
+                let entity = crate::entity::r#type::from_type(
+                    entity_type,
+                    spawn_pos,
+                    world,
+                    uuid::Uuid::new_v4(),
+                );
+                // `BaseSpawner.serverTick` (BaseSpawner.java:153) randomises yaw on spawn.
+                entity
+                    .get_entity()
+                    .set_rotation(rand::random::<f32>() * 360.0, 0.0);
+                world.spawn_entity(entity).await;
+                world.sync_world_event(WorldEvent::ParticlesMobblockSpawn, self.position, 0);
+                update_spawns = true;
+            }
+            if update_spawns {
+                self.update_spawns(world).await;
             }
         })
     }
@@ -251,6 +289,12 @@ fn spawn_offset(r1: f64, r2: f64, range: f64) -> f64 {
     (r1 - r2) * range
 }
 
+/// `BaseSpawner.serverTick` (BaseSpawner.java:148) aborts the whole spawn cycle once the
+/// nearby count reaches `maxNearbyEntities`; the comparison is `>=`, not `>`.
+const fn is_nearby_cap_reached(nearby: usize, max_nearby_entities: i32) -> bool {
+    max_nearby_entities <= 0 || nearby >= max_nearby_entities as usize
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,6 +304,14 @@ mod tests {
         assert!(spawn_offset(0.1, 0.9, 4.0) < 0.0);
         assert!(spawn_offset(0.9, 0.1, 4.0) > 0.0);
         assert_eq!(spawn_offset(0.5, 0.5, 4.0), 0.0);
+    }
+
+    #[test]
+    fn nearby_cap_matches_vanilla_boundary() {
+        assert!(!is_nearby_cap_reached(5, 6));
+        assert!(is_nearby_cap_reached(6, 6));
+        assert!(is_nearby_cap_reached(7, 6));
+        assert!(is_nearby_cap_reached(0, 0));
     }
 
     #[test]

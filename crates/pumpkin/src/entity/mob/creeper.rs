@@ -92,7 +92,8 @@ impl CreeperEntity {
                 Box::new(AvoidEntityGoal::new(&EntityType::CAT, 6.0, 1.0, 1.2)),
             );
             goal_selector.add_goal(4, Box::new(MeleeAttackGoal::new(1.0, false)));
-            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(0.8)));
+            // Creeper.java:70: `WaterAvoidingRandomStrollGoal(this, 0.8)`.
+            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new_water_avoiding(0.8)));
 
             goal_selector.add_goal(
                 6,

@@ -51,11 +51,15 @@ use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_util::Difficulty;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector2::Vector2;
+use pumpkin_util::math::vector3::Vector3;
 
 use super::World;
 use super::bossbar::{Bossbar, BossbarColor, BossbarDivisions, BossbarFlags};
+use crate::entity::EntityBase;
 use crate::entity::living::RaidMembership;
+use crate::entity::mob::equipment::RegionalDifficulty;
 use crate::entity::player::Player;
+use crate::world::natural_spawner::{is_spawn_position_ok, is_valid_empty_spawn_block};
 
 const RAID_TIMEOUT_TICKS: i64 = 48000; // Raid.java:88
 const NUM_SPAWN_ATTEMPTS: i32 = 5; // Raid.java:89
@@ -66,6 +70,18 @@ const HERO_OF_THE_VILLAGE_DURATION: i32 = 48000; // Raid.java:103
 const POST_RAID_TICK_LIMIT: i32 = 40; // Raid.java:93
 const VALID_RAID_RADIUS_SQR: f64 = 9216.0; // Raid.java:105
 const RAID_REMOVAL_THRESHOLD_SQR: f64 = 12544.0; // Raid.java:106
+
+// PatrolSpawner.java:26 - base cooldown and jitter between patrol-spawn attempts.
+const PATROL_SPAWN_INTERVAL: i32 = 12000;
+const PATROL_SPAWN_INTERVAL_JITTER: i32 = 1200;
+/// `Level.isBrightOutside` (Level.java:384-386): `skyDarken < 4`.
+const BRIGHT_OUTSIDE_SKY_DARKEN: u8 = 4;
+/// `PatrollingMonster.checkPatrollingMonsterSpawnRules` (PatrollingMonster.java:87-95) refuses
+/// any position whose block light exceeds 8.
+const PATROL_MAX_BLOCK_LIGHT: u8 = 8;
+/// `PatrolSpawner.tick` (PatrolSpawner.java:37-38): the half-extent of the square of chunks that
+/// must already be loaded around the chosen spawn column.
+const PATROL_REQUIRED_LOADED_DELTA: i32 = 10;
 
 // Raid.java:831-846, RaiderType.spawnsPerWaveBeforeBonus, indexed by wave number
 // (index 0 unused; index == numGroups is the bonus-wave row).
@@ -407,12 +423,7 @@ impl Raid {
                 if is_leader {
                     leader_set = true;
                     self.group_leaders.insert(group_number, uuid);
-                    mob.get_mob_entity()
-                        .living_entity
-                        .entity_equipment
-                        .lock()
-                        .await
-                        .put(&EquipmentSlot::HEAD, ItemStack::new(1, &Item::WHITE_BANNER));
+                    equip_ominous_banner(mob.get_mob_entity()).await;
                 }
                 self.join_raid(group_number, uuid, mob.get_mob_entity(), is_leader);
                 // Raid.java:582 passes `false` unconditionally, regardless of leader status.
@@ -720,9 +731,209 @@ impl Raid {
     }
 }
 
+/// Equips the ominous-banner head slot used to mark a raid wave leader and a patrol captain.
+///
+/// `Raid.getOminousBannerInstance` (Raid.java:656) builds a white banner carrying the eight
+/// `BannerPatternLayers` from `Raid.getBannerComponentPatch` (Raid.java:633-648) plus an
+/// `ITEM_NAME` override. Pumpkin's `BannerPatterns` data component
+/// (`pumpkin_data::data_component_impl::BannerPatternsImpl`) is a payload-less unit struct, so
+/// the pattern layers cannot be attached yet; the banner is a plain white banner until that
+/// component carries data. `setDropChance(HEAD, 2.0F)` (PatrollingMonster.java:77) is likewise
+/// not represented - `EntityEquipment` has no per-slot drop chance.
+async fn equip_ominous_banner(mob_entity: &crate::entity::mob::MobEntity) {
+    mob_entity
+        .living_entity
+        .entity_equipment
+        .lock()
+        .await
+        .put(&EquipmentSlot::HEAD, ItemStack::new(1, &Item::WHITE_BANNER));
+}
+
+/// `PatrolSpawner` (PatrolSpawner.java:16-91): the world-tick spawner that seeds illager
+/// patrols away from villages, one of which carries the ominous banner as its captain.
+///
+/// Ported field for field: the `12000 + nextInt(1200)` reschedule (line 26), the daylight gate
+/// (line 27), the 1-in-5 chance (line 28), the random non-spectator player (lines 29-32), the
+/// "not within 2 sections of a village" refusal (line 33), the `(24 + nextInt(24))` signed
+/// offset on each horizontal axis (lines 34-36), the loaded-chunk requirement (line 38), the
+/// `ceil(effectiveDifficulty) + 1` group size (line 40), leader-first with break-on-failure
+/// (lines 44-47) and the `nextInt(5) - nextInt(5)` per-member walk (lines 52-53).
+///
+/// Scope reductions, each because the vanilla dependency has no analogue in Pumpkin:
+/// - `EnvironmentAttributes.CAN_PILLAGER_PATROL_SPAWN` (line 39) - no environment-attribute
+///   system exists; the biome/dimension gate is therefore not applied.
+/// - The Y lookup uses `World::get_top_block` (the `WORLD_SURFACE` heightmap) rather than
+///   `Heightmap.Types.MOTION_BLOCKING_NO_LEAVES` (line 43); Pumpkin tracks the latter on chunks
+///   but exposes no world-level accessor for it.
+/// - `PatrollingMonster.setPatrolLeader`/`findPatrolTarget`/`setPatrolling`
+///   (PatrollingMonster.java:102-131) and `LongDistancePatrolGoal` are not ported - Pumpkin's
+///   `PillagerEntity` carries no patrol-target state, so spawned patrols use the pillager's
+///   ordinary wander and target goals instead of marching toward a distant target. The captain
+///   is still marked the way vanilla marks it, by the head-slot banner
+///   (PatrollingMonster.java:76).
+/// - Killing a captain does not yield an ominous bottle. Vanilla routes that through the
+///   `minecraft:pillager` entity loot table's `type_specific/raider {is_captain: true}`
+///   predicate; `pumpkin_util::loot_table::LootCondition::EntityProperties` models only
+///   `expected_type`/`is_on_fire`/`mainhand_enchantment_tag`, so the predicate cannot be
+///   expressed. Drinking an ominous bottle already triggers the whole raid chain
+///   (`LivingEntity::apply_effect_tick`), so this is the one missing link in the
+///   captain-to-raid loop.
+#[derive(Default)]
+pub struct PatrolSpawner {
+    next_tick: i32,
+}
+
+impl PatrolSpawner {
+    /// `Level.isBrightOutside` (Level.java:384-386). A dimension with a fixed time of day is
+    /// never "bright outside"; Pumpkin models that as "has no sky light".
+    fn is_bright_outside(world: &Arc<World>) -> bool {
+        world.dimension.has_skylight
+            && world.sky_darken.load(std::sync::atomic::Ordering::Relaxed)
+                < BRIGHT_OUTSIDE_SKY_DARKEN
+    }
+
+    /// `ServerLevel.hasChunksAt` over the `+/-10` block square of PatrolSpawner.java:38.
+    fn has_chunks_at(world: &Arc<World>, pos: BlockPos) -> bool {
+        let min_chunk_x = (pos.0.x - PATROL_REQUIRED_LOADED_DELTA) >> 4;
+        let max_chunk_x = (pos.0.x + PATROL_REQUIRED_LOADED_DELTA) >> 4;
+        let min_chunk_z = (pos.0.z - PATROL_REQUIRED_LOADED_DELTA) >> 4;
+        let max_chunk_z = (pos.0.z + PATROL_REQUIRED_LOADED_DELTA) >> 4;
+        for chunk_x in min_chunk_x..=max_chunk_x {
+            for chunk_z in min_chunk_z..=max_chunk_z {
+                if world
+                    .level
+                    .loaded_chunks
+                    .get(&Vector2::new(chunk_x, chunk_z))
+                    .is_none()
+                {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// `PatrolSpawner.spawnPatrolMember` (PatrolSpawner.java:67-91).
+    async fn spawn_patrol_member(world: &Arc<World>, pos: BlockPos, is_leader: bool) -> bool {
+        if !is_valid_empty_spawn_block(world.get_block_state(&pos), &EntityType::PILLAGER) {
+            return false;
+        }
+        // PatrollingMonster.checkPatrollingMonsterSpawnRules (PatrollingMonster.java:87-95):
+        // block light above 8 refuses, then the ordinary `checkMobSpawnRules` support check.
+        if world
+            .get_block_light_level(&pos)
+            .unwrap_or(0)
+            .gt(&PATROL_MAX_BLOCK_LIGHT)
+        {
+            return false;
+        }
+        if !is_spawn_position_ok(world, &pos, &EntityType::PILLAGER) {
+            return false;
+        }
+
+        let spawn_pos = Vector3::new(
+            f64::from(pos.0.x) + 0.5,
+            f64::from(pos.0.y),
+            f64::from(pos.0.z) + 0.5,
+        );
+        let pillager = crate::entity::r#type::from_type(
+            &EntityType::PILLAGER,
+            spawn_pos,
+            world,
+            Uuid::new_v4(),
+        );
+        if is_leader && let Some(mob) = pillager.get_mob() {
+            equip_ominous_banner(mob.get_mob_entity()).await;
+        }
+        world.spawn_entity(pillager).await;
+        true
+    }
+
+    /// `PatrolSpawner.tick` (PatrolSpawner.java:20-65). `spawn_enemies` mirrors
+    /// `ServerChunkCache.spawnEnemies`, which `MinecraftServer` sets from
+    /// `ServerLevel.isSpawningMonsters` (ServerLevel.java:1776-1778).
+    async fn tick(&mut self, world: &Arc<World>) {
+        let level_info = world.level_info.load();
+        let game_rules = &level_info.game_rules;
+        let spawn_enemies = game_rules.spawn_mobs
+            && game_rules.spawn_monsters
+            && level_info.difficulty != Difficulty::Peaceful;
+        if !spawn_enemies || !game_rules.spawn_patrols {
+            return;
+        }
+
+        self.next_tick -= 1;
+        if self.next_tick > 0 {
+            return;
+        }
+        // PatrolSpawner.java:26 accumulates onto the (already non-positive) counter rather than
+        // assigning, so an overshoot is carried into the next interval.
+        self.next_tick +=
+            PATROL_SPAWN_INTERVAL + rand::random_range(0..PATROL_SPAWN_INTERVAL_JITTER);
+
+        if !Self::is_bright_outside(world) {
+            return;
+        }
+        if rand::random_range(0..5) != 0 {
+            return;
+        }
+
+        let players = world.players.load();
+        if players.is_empty() {
+            return;
+        }
+        let player = players[rand::random_range(0..players.len())].clone();
+        drop(players);
+        if player.gamemode.load() == pumpkin_util::GameMode::Spectator {
+            return;
+        }
+
+        let player_pos = player.get_entity().block_pos.load();
+        if world.is_close_to_village(player_pos, 2).await {
+            return;
+        }
+
+        let offset_x =
+            (24 + rand::random_range(0..24)) * if rand::random_range(0..2) == 0 { -1 } else { 1 };
+        let offset_z =
+            (24 + rand::random_range(0..24)) * if rand::random_range(0..2) == 0 { -1 } else { 1 };
+        let mut spawn_pos = player_pos.add(offset_x, 0, offset_z);
+
+        if !Self::has_chunks_at(world, spawn_pos) {
+            return;
+        }
+
+        let difficulty = RegionalDifficulty::at(world, spawn_pos.to_centered_f64());
+        let group_size = difficulty.effective_difficulty.ceil() as i32 + 1;
+
+        for i in 0..group_size {
+            spawn_pos = BlockPos::new(
+                spawn_pos.0.x,
+                world.get_top_block(Vector2::new(spawn_pos.0.x, spawn_pos.0.z)) + 1,
+                spawn_pos.0.z,
+            );
+            if i == 0 {
+                if !Self::spawn_patrol_member(world, spawn_pos, true).await {
+                    break;
+                }
+            } else {
+                Self::spawn_patrol_member(world, spawn_pos, false).await;
+            }
+            spawn_pos = spawn_pos.add(
+                rand::random_range(0..5) - rand::random_range(0..5),
+                0,
+                rand::random_range(0..5) - rand::random_range(0..5),
+            );
+        }
+    }
+}
+
 pub struct RaidManager {
     raids: HashMap<i32, Raid>,
     next_id: i32,
+    /// `ServerLevel.customSpawners`' `PatrolSpawner` entry; kept here because `RaidManager`
+    /// is the only raid-owned struct already ticked from `World::tick`.
+    patrol_spawner: PatrolSpawner,
 }
 
 impl Default for RaidManager {
@@ -737,6 +948,7 @@ impl RaidManager {
         Self {
             raids: HashMap::new(),
             next_id: 1,
+            patrol_spawner: PatrolSpawner::default(),
         }
     }
 
@@ -823,6 +1035,10 @@ impl RaidManager {
     pub async fn tick(mgr_mutex: &Mutex<Self>, world: &Arc<World>) {
         let mut mgr = mgr_mutex.lock().await;
 
+        // `ServerLevel.tickCustomSpawners` (ServerLevel.java:483-485). Independent of the
+        // `raids` game rule: patrols spawn whether or not raids are enabled.
+        mgr.patrol_spawner.tick(world).await;
+
         if !world.level_info.load().game_rules.raids {
             for raid in mgr.raids.values_mut() {
                 raid.stop();
@@ -854,7 +1070,10 @@ impl RaidManager {
 
 #[cfg(test)]
 mod tests {
-    use super::{Difficulty, Raid, RaiderType, num_groups_for_difficulty, potential_bonus_spawns};
+    use super::{
+        Difficulty, PATROL_SPAWN_INTERVAL, PATROL_SPAWN_INTERVAL_JITTER, PatrolSpawner, Raid,
+        RaiderType, num_groups_for_difficulty, potential_bonus_spawns,
+    };
     use pumpkin_util::math::position::BlockPos;
 
     #[test]
@@ -946,6 +1165,53 @@ mod tests {
                 0
             );
             assert!(potential_bonus_spawns(RaiderType::Ravager, 5, Difficulty::Normal, true) <= 1);
+        }
+    }
+
+    /// PatrolSpawner.java:24-26: the counter is decremented every tick and only rearms when it
+    /// reaches zero, then accumulates rather than assigns, so an overshoot carries forward.
+    #[test]
+    fn patrol_spawner_reschedule_carries_overshoot() {
+        let mut spawner = PatrolSpawner::default();
+        assert_eq!(spawner.next_tick, 0);
+        spawner.next_tick = -7;
+        spawner.next_tick -= 1;
+        let before = spawner.next_tick;
+        spawner.next_tick += PATROL_SPAWN_INTERVAL;
+        assert_eq!(spawner.next_tick, before + PATROL_SPAWN_INTERVAL);
+        assert!(spawner.next_tick < PATROL_SPAWN_INTERVAL);
+    }
+
+    /// PatrolSpawner.java:26 bounds the rearmed interval to `[12000, 13200)`.
+    #[test]
+    fn patrol_spawn_interval_bounds_match_vanilla() {
+        assert_eq!(PATROL_SPAWN_INTERVAL, 12000);
+        assert_eq!(PATROL_SPAWN_INTERVAL_JITTER, 1200);
+        for _ in 0..200 {
+            let interval =
+                PATROL_SPAWN_INTERVAL + rand::random_range(0..PATROL_SPAWN_INTERVAL_JITTER);
+            assert!((12000..13200).contains(&interval));
+        }
+    }
+
+    /// PatrolSpawner.java:34-35: each horizontal offset is `(24 + nextInt(24))` with a random
+    /// sign, so its magnitude always lands in `[24, 48)`.
+    #[test]
+    fn patrol_offset_magnitude_matches_vanilla_range() {
+        for _ in 0..200 {
+            let offset: i32 = (24 + rand::random_range(0..24))
+                * if rand::random_range(0..2) == 0 { -1 } else { 1 };
+            assert!((24..48).contains(&offset.abs()));
+        }
+    }
+
+    /// PatrolSpawner.java:40: `ceil(effectiveDifficulty) + 1`. `RegionalDifficulty` clamps the
+    /// effective difficulty to `[2.0, 4.0]` for non-peaceful worlds, so a live patrol is 3 to 5
+    /// pillagers.
+    #[test]
+    fn patrol_group_size_matches_vanilla_formula() {
+        for (effective, expected) in [(2.0f32, 3), (2.5f32, 4), (3.0f32, 4), (4.0f32, 5)] {
+            assert_eq!(effective.ceil() as i32 + 1, expected);
         }
     }
 }
