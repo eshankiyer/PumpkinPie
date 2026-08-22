@@ -1627,6 +1627,12 @@ impl Player {
             }
         }
 
+        // Vanilla `Player.attack` awards `DAMAGE_DEALT` from the target's actual health loss,
+        // not the incoming damage amount that may exceed the target's remaining health.
+        let victim_health_before = victim
+            .get_living_entity()
+            .map(|living| living.health.load());
+
         if !victim
             .damage_with_context(
                 &*victim,
@@ -1648,6 +1654,16 @@ impl Player {
                 &self.living_entity.entity.pos.load(),
             );
             return;
+        }
+
+        if let Some(health_before) = victim_health_before
+            && let Some(victim_living) = victim.get_living_entity()
+        {
+            let dealt = damage_dealt_stat_points(health_before, victim_living.health.load());
+            if dealt > 0 {
+                self.increment_custom_stat(statistics::CustomStatistic::DamageDealt, dealt)
+                    .await;
+            }
         }
 
         if damage >= 100.0 {
@@ -7095,6 +7111,12 @@ fn player_death_experience_reward(level: i32, keep_inventory: bool, spectator: b
     }
 }
 
+/// Vanilla `CUSTOM.damage_dealt`: the target's actual health loss times ten, rounded to the
+/// nearest point (`Math.round`); no loss (or a health gain) awards nothing.
+fn damage_dealt_stat_points(health_before: f32, health_after: f32) -> i32 {
+    ((health_before - health_after).max(0.0) * 10.0).round() as i32
+}
+
 impl EntityBase for Player {
     fn damage_with_context<'a>(
         &'a self,
@@ -8148,7 +8170,7 @@ fn is_valid_for_forced_respawn(state: &BlockState) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        Player, ability_invulnerability_blocks, bedrock_inventory_slot,
+        Player, ability_invulnerability_blocks, bedrock_inventory_slot, damage_dealt_stat_points,
         is_valid_for_forced_respawn, is_vanishing_cursed, player_death_experience_reward,
         read_root_vehicle, write_root_vehicle,
     };
@@ -8340,5 +8362,15 @@ mod tests {
         assert!(is_valid_for_forced_respawn(
             Block::WHITE_BANNER.default_state
         ));
+    }
+
+    #[test]
+    fn damage_dealt_stat_tracks_actual_health_loss_and_rounds() {
+        assert_eq!(damage_dealt_stat_points(20.0, 20.0), 0);
+        assert_eq!(damage_dealt_stat_points(20.0, 20.5), 0);
+        assert_eq!(damage_dealt_stat_points(20.0, 18.5), 15);
+        assert_eq!(damage_dealt_stat_points(20.0, 0.0), 200);
+        assert_eq!(damage_dealt_stat_points(1.0, 0.875), 1);
+        assert_eq!(damage_dealt_stat_points(1.0, 0.25), 8);
     }
 }

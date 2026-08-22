@@ -92,6 +92,12 @@ const fn normalize_non_finite_damage(amount: f32) -> f32 {
     if amount.is_finite() { amount } else { f32::MAX }
 }
 
+/// Vanilla records combat damage statistics in tenths of a point using `Math.round`, not a
+/// truncating conversion. This applies equally to absorbed and health damage.
+fn damage_stat_amount(damage: f32) -> i32 {
+    (damage * 10.0).round() as i32
+}
+
 /// Vanilla `Player.causeFallDamage` awards this statistic before delegating to the
 /// general fall-damage path. The threshold and rounding intentionally match
 /// `Math.round(fallDistance * 100.0)`.
@@ -4669,7 +4675,14 @@ impl EntityBase for LivingEntity {
                         )
                         .await;
                 }
-                if let Some(attacker_player) = cause.and_then(|c| c.get_player()) {
+                // Direct player and mace attacks award their own source-faithful statistic from
+                // actual target health loss in `Player.attack`; all other player-caused damage
+                // keeps this shared accounting path.
+                let direct_player_attack = damage_type == DamageType::PLAYER_ATTACK
+                    || damage_type == DamageType::MACE_SMASH;
+                if !direct_player_attack
+                    && let Some(attacker_player) = cause.and_then(|c| c.get_player())
+                {
                     attacker_player
                         .increment_stat(
                             StatisticCategory::Custom,
@@ -4888,7 +4901,14 @@ impl EntityBase for LivingEntity {
                         )
                         .await;
                 }
-                if let Some(attacker_player) = cause.and_then(|c| c.get_player()) {
+                // `Player.attack` handles direct melee and mace damage from the victim's real
+                // health delta, including the overkill cap. Keep this generic path for every
+                // other player-caused source, but never award both paths for one attack.
+                let direct_player_attack = damage_type == DamageType::PLAYER_ATTACK
+                    || damage_type == DamageType::MACE_SMASH;
+                if !direct_player_attack
+                    && let Some(attacker_player) = cause.and_then(|c| c.get_player())
+                {
                     attacker_player
                         .increment_stat(
                             StatisticCategory::Custom,
@@ -5070,7 +5090,7 @@ impl EntityBase for LivingEntity {
                         .increment_stat(
                             StatisticCategory::Custom,
                             CustomStatistic::DamageAbsorbed as i32,
-                            (absorbed * 10.0) as i32,
+                            damage_stat_amount(absorbed),
                         )
                         .await;
                 }
@@ -5080,7 +5100,7 @@ impl EntityBase for LivingEntity {
                         .increment_stat(
                             StatisticCategory::Custom,
                             CustomStatistic::DamageDealtAbsorbed as i32,
-                            (absorbed * 10.0) as i32,
+                            damage_stat_amount(absorbed),
                         )
                         .await;
                 }
@@ -5122,7 +5142,7 @@ impl EntityBase for LivingEntity {
                         .increment_stat(
                             StatisticCategory::Custom,
                             CustomStatistic::DamageTaken as i32,
-                            (remaining * 10.0) as i32,
+                            damage_stat_amount(remaining),
                         )
                         .await;
                 }
@@ -5132,7 +5152,7 @@ impl EntityBase for LivingEntity {
                         .increment_stat(
                             StatisticCategory::Custom,
                             CustomStatistic::DamageDealt as i32,
-                            (remaining * 10.0) as i32,
+                            damage_stat_amount(remaining),
                         )
                         .await;
                 }
@@ -6546,6 +6566,14 @@ fn damage_causes_panic(damage_type: DamageType) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn combat_damage_statistics_use_vanilla_rounding() {
+        assert_eq!(damage_stat_amount(0.0), 0);
+        assert_eq!(damage_stat_amount(0.04), 0);
+        assert_eq!(damage_stat_amount(0.05), 1);
+        assert_eq!(damage_stat_amount(1.25), 13);
+    }
 
     #[test]
     fn fall_flying_velocity_preserves_forward_glide_with_drag() {
