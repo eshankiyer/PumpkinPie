@@ -12,6 +12,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub struct ShelfBlockEntity {
     pub position: BlockPos,
     pub items: tokio::sync::RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
+    /// `ShelfBlockEntity.alignItemsToBottom` (`ShelfBlockEntity.java:36`), saved and loaded
+    /// under `align_items_to_bottom` (`ShelfBlockEntity.java:47,54`) and repeated in the
+    /// update tag (`:66`) because the renderer reads it.
+    pub align_items_to_bottom: AtomicBool,
     pub dirty: AtomicBool,
 }
 
@@ -20,7 +24,13 @@ impl BlockEntity for ShelfBlockEntity {
         &'a self,
         nbt: &'a mut NbtCompound,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        self.write_inventory_nbt(nbt, true)
+        Box::pin(async move {
+            self.write_inventory_nbt(nbt, true).await;
+            nbt.put_bool(
+                "align_items_to_bottom",
+                self.align_items_to_bottom.load(Ordering::Relaxed),
+            );
+        })
     }
 
     fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound, position: BlockPos) -> Self
@@ -30,6 +40,9 @@ impl BlockEntity for ShelfBlockEntity {
         let mut shelf = Self {
             position,
             items: tokio::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+            align_items_to_bottom: AtomicBool::new(
+                nbt.get_bool("align_items_to_bottom").unwrap_or(false),
+            ),
             dirty: AtomicBool::new(false),
         };
 
@@ -62,6 +75,10 @@ impl BlockEntity for ShelfBlockEntity {
         let mut nbt = NbtCompound::new();
         let items = futures::executor::block_on(self.items.read());
         sync_write_items_to_nbt(items.as_slice(), &mut nbt);
+        nbt.put_bool(
+            "align_items_to_bottom",
+            self.align_items_to_bottom.load(Ordering::Relaxed),
+        );
         Some(nbt)
     }
 
@@ -79,6 +96,7 @@ impl ShelfBlockEntity {
         Self {
             position,
             items: tokio::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+            align_items_to_bottom: AtomicBool::new(false),
             dirty: AtomicBool::new(false),
         }
     }
@@ -149,5 +167,34 @@ impl Clearable for ShelfBlockEntity {
             items.fill_with(|| ItemStack::EMPTY.clone());
             self.mark_dirty();
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ShelfBlockEntity;
+    use crate::block::entities::BlockEntity;
+    use pumpkin_nbt::compound::NbtCompound;
+    use pumpkin_util::math::position::BlockPos;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn align_items_to_bottom_round_trips_through_nbt() {
+        let pos = BlockPos::new(1, 64, 2);
+        let entity = ShelfBlockEntity::new(pos);
+        entity.align_items_to_bottom.store(true, Ordering::Relaxed);
+
+        let mut nbt = NbtCompound::new();
+        futures::executor::block_on(entity.write_nbt(&mut nbt));
+        assert_eq!(nbt.get_bool("align_items_to_bottom"), Some(true));
+
+        let loaded = ShelfBlockEntity::from_nbt(&nbt, pos);
+        assert!(loaded.align_items_to_bottom.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn align_items_to_bottom_defaults_to_false() {
+        let loaded = ShelfBlockEntity::from_nbt(&NbtCompound::new(), BlockPos::new(0, 0, 0));
+        assert!(!loaded.align_items_to_bottom.load(Ordering::Relaxed));
     }
 }

@@ -41,6 +41,10 @@ pub struct StructureBlockBlockEntity {
     pub ignore_entities: Mutex<bool>,
     pub show_air: Mutex<bool>,
     pub show_bounding_box: Mutex<bool>,
+    /// `StructureBlockEntity.powered` (`StructureBlockEntity.java:95`).
+    pub powered: Mutex<bool>,
+    /// `StructureBlockEntity.strict` (`StructureBlockEntity.java:94`).
+    pub strict: Mutex<bool>,
     pub integrity: Mutex<f32>,
     pub seed: Mutex<i64>,
 }
@@ -73,8 +77,20 @@ impl BlockEntity for StructureBlockBlockEntity {
             mirror: Mutex::new(nbt.get_string("mirror").unwrap_or("NONE").to_string()),
             mode: Mutex::new(nbt.get_string("mode").unwrap_or("DATA").to_string()),
             ignore_entities: Mutex::new(nbt.get_bool("ignoreEntities").unwrap_or(true)),
-            show_air: Mutex::new(nbt.get_bool("showAir").unwrap_or(false)),
-            show_bounding_box: Mutex::new(nbt.get_bool("showBoundingBox").unwrap_or(true)),
+            // `StructureBlockEntity.java:122-123` spells these all-lowercase. Older
+            // Pumpkin saves used camelCase, so accept those as a fallback.
+            show_air: Mutex::new(
+                nbt.get_bool("showair")
+                    .or_else(|| nbt.get_bool("showAir"))
+                    .unwrap_or(false),
+            ),
+            show_bounding_box: Mutex::new(
+                nbt.get_bool("showboundingbox")
+                    .or_else(|| nbt.get_bool("showBoundingBox"))
+                    .unwrap_or(true),
+            ),
+            powered: Mutex::new(nbt.get_bool("powered").unwrap_or(false)),
+            strict: Mutex::new(nbt.get_bool("strict").unwrap_or(false)),
             integrity: Mutex::new(nbt.get_float("integrity").unwrap_or(1.0)),
             seed: Mutex::new(nbt.get_long("seed").unwrap_or(0)),
         }
@@ -98,8 +114,10 @@ impl BlockEntity for StructureBlockBlockEntity {
             nbt.put_string("mirror", self.mirror.lock().await.clone());
             nbt.put_string("mode", self.mode.lock().await.clone());
             nbt.put_bool("ignoreEntities", *self.ignore_entities.lock().await);
-            nbt.put_bool("showAir", *self.show_air.lock().await);
-            nbt.put_bool("showBoundingBox", *self.show_bounding_box.lock().await);
+            nbt.put_bool("strict", *self.strict.lock().await);
+            nbt.put_bool("powered", *self.powered.lock().await);
+            nbt.put_bool("showair", *self.show_air.lock().await);
+            nbt.put_bool("showboundingbox", *self.show_bounding_box.lock().await);
             nbt.put_float("integrity", *self.integrity.lock().await);
             nbt.put_long("seed", *self.seed.lock().await);
         })
@@ -120,8 +138,10 @@ impl BlockEntity for StructureBlockBlockEntity {
         nbt.put_string("mirror", self.mirror.try_lock().ok()?.clone());
         nbt.put_string("mode", self.mode.try_lock().ok()?.clone());
         nbt.put_bool("ignoreEntities", *self.ignore_entities.try_lock().ok()?);
-        nbt.put_bool("showAir", *self.show_air.try_lock().ok()?);
-        nbt.put_bool("showBoundingBox", *self.show_bounding_box.try_lock().ok()?);
+        nbt.put_bool("strict", *self.strict.try_lock().ok()?);
+        nbt.put_bool("powered", *self.powered.try_lock().ok()?);
+        nbt.put_bool("showair", *self.show_air.try_lock().ok()?);
+        nbt.put_bool("showboundingbox", *self.show_bounding_box.try_lock().ok()?);
         nbt.put_float("integrity", *self.integrity.try_lock().ok()?);
         nbt.put_long("seed", *self.seed.try_lock().ok()?);
         Some(nbt)
@@ -153,6 +173,8 @@ impl StructureBlockBlockEntity {
             ignore_entities: Mutex::new(true),
             show_air: Mutex::new(false),
             show_bounding_box: Mutex::new(true),
+            powered: Mutex::new(false),
+            strict: Mutex::new(false),
             integrity: Mutex::new(1.0),
             seed: Mutex::new(0),
         }
@@ -440,6 +462,45 @@ fn split_structure_identifier(name: &str) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn structure_flags_round_trip_with_vanilla_lowercase_keys() {
+        let pos = BlockPos::new(0, 64, 0);
+        let entity = StructureBlockBlockEntity::new(pos);
+        *futures::executor::block_on(entity.show_air.lock()) = true;
+        *futures::executor::block_on(entity.show_bounding_box.lock()) = false;
+        *futures::executor::block_on(entity.powered.lock()) = true;
+        *futures::executor::block_on(entity.strict.lock()) = true;
+
+        let mut nbt = NbtCompound::new();
+        futures::executor::block_on(entity.write_nbt(&mut nbt));
+
+        assert_eq!(nbt.get_bool("showair"), Some(true));
+        assert_eq!(nbt.get_bool("showboundingbox"), Some(false));
+        assert_eq!(nbt.get_bool("powered"), Some(true));
+        assert_eq!(nbt.get_bool("strict"), Some(true));
+        assert!(nbt.get_bool("showAir").is_none());
+
+        let loaded = StructureBlockBlockEntity::from_nbt(&nbt, pos);
+        assert!(*futures::executor::block_on(loaded.show_air.lock()));
+        assert!(!*futures::executor::block_on(
+            loaded.show_bounding_box.lock()
+        ));
+        assert!(*futures::executor::block_on(loaded.powered.lock()));
+        assert!(*futures::executor::block_on(loaded.strict.lock()));
+    }
+
+    #[test]
+    fn legacy_camel_case_show_flags_still_load() {
+        let mut nbt = NbtCompound::new();
+        nbt.put_bool("showAir", true);
+        nbt.put_bool("showBoundingBox", false);
+        let loaded = StructureBlockBlockEntity::from_nbt(&nbt, BlockPos::new(0, 0, 0));
+        assert!(*futures::executor::block_on(loaded.show_air.lock()));
+        assert!(!*futures::executor::block_on(
+            loaded.show_bounding_box.lock()
+        ));
+    }
 
     #[test]
     fn split_defaults_to_minecraft_namespace() {
