@@ -877,6 +877,9 @@ pub struct Player {
     pub delayed_mining_start_time: AtomicI32,
     pub start_mining_time: AtomicI32,
     pub tick_counter: AtomicI32,
+    /// Vanilla `ServerPlayer.levitationStartPos` (`ServerPlayer.java:254`): the position at
+    /// which the player's current levitation effect began, `None` while not levitating.
+    pub levitation_start_pos: AtomicCell<Option<Vector3<f64>>>,
     pub mining_pos: Mutex<BlockPos>,
     /// Serializes protocol mining actions that can arrive on separate tasks.
     pub mining_action_lock: Mutex<()>,
@@ -1146,6 +1149,7 @@ impl Player {
             open_container: AtomicCell::new(None),
             open_container_pos: AtomicCell::new(None),
             tick_counter: AtomicI32::new(0),
+            levitation_start_pos: AtomicCell::new(None),
             start_mining_time: AtomicI32::new(0),
             last_input: AtomicI8::new(0),
             carried_item: Mutex::new(None),
@@ -2904,6 +2908,13 @@ impl Player {
         self.hunger_manager.tick(self).await;
         self.tick_world_border().await;
         self.check_inventory_advancements().await;
+        // `ServerPlayer.doTick` fires LEVITATION every tick while levitating
+        // (`ServerPlayer.java:607-610`) and LOCATION every 20 ticks
+        // (`ServerPlayer.java:723-725`), both before `advancements.flushDirty`.
+        self.check_levitation_advancements().await;
+        if self.tick_counter.load(Ordering::Relaxed) % 20 == 0 {
+            self.check_location_advancements().await;
+        }
         self.advancements.lock().await.flush_dirty(self, true);
 
         // experience handling
@@ -6643,6 +6654,76 @@ impl Player {
             crate::entity::player::advancement::trigger::AdvancementTrigger::InventoryChanged,
         )
         .await;
+    }
+
+    /// Vanilla's `CriteriaTriggers.LOCATION`, fired from `ServerPlayer.doTick` every 20 ticks
+    /// (`ServerPlayer.java:723-725`).
+    ///
+    /// Only the biome-predicate half of the trigger is modelled: the two vanilla advancements
+    /// whose criteria are literally biome ids, `adventure/adventuring_time` (55 overworld
+    /// biomes) and `nether/explore_nether` (5 nether biomes). Location criteria that test
+    /// structures or dimensions are not covered here.
+    pub async fn check_location_advancements(&self) {
+        const BIOME_ADVANCEMENTS: [&pumpkin_data::advancement::Advancement; 2] = [
+            pumpkin_data::advancement::Advancement::ADVENTURE_ADVENTURING_TIME,
+            pumpkin_data::advancement::Advancement::NETHER_EXPLORE_NETHER,
+        ];
+
+        let position = self.living_entity.entity.block_pos.load();
+        let Some(biome) = self.world().get_biome(&position) else {
+            // Unloaded chunk or out-of-range y; vanilla has no default biome to substitute.
+            return;
+        };
+
+        for advancement in BIOME_ADVANCEMENTS {
+            if self.has_advancement(advancement).await {
+                continue;
+            }
+            for criterion in advancement.criteria {
+                if criterion.strip_prefix("minecraft:") == Some(biome.registry_id) {
+                    self.trigger_advancement_criterion(advancement, criterion)
+                        .await;
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Vanilla's `CriteriaTriggers.LEVITATION`, fired from `ServerPlayer.doTick` while
+    /// `levitationStartPos` is set (`ServerPlayer.java:607-610`).
+    ///
+    /// Vanilla records the start position when the levitation effect is added and clears it
+    /// when it is removed (`ServerPlayer.java:1657-1658`, `1678`); this polls the effect from
+    /// the player tick instead, which lands on the same tick boundary. The only vanilla
+    /// advancement using this trigger is `end/levitate`, whose criterion asks for a vertical
+    /// distance of at least 50 (`VanillaTheEndAdvancements.java:141`, matched with `abs(dy)`
+    /// per `DistancePredicate.matches`).
+    pub async fn check_levitation_advancements(&self) {
+        const LEVITATE_DISTANCE: f64 = 50.0;
+
+        if !self
+            .living_entity
+            .has_effect(&StatusEffect::LEVITATION)
+            .await
+        {
+            self.levitation_start_pos.store(None);
+            return;
+        }
+
+        let start = self.levitation_start_pos.load().unwrap_or_else(|| {
+            let start = self.living_entity.entity.pos.load();
+            self.levitation_start_pos.store(Some(start));
+            start
+        });
+
+        let advancement = pumpkin_data::advancement::Advancement::END_LEVITATE;
+        if self.has_advancement(advancement).await {
+            return;
+        }
+        if (self.living_entity.entity.pos.load().y - start.y).abs() >= LEVITATE_DISTANCE {
+            self.trigger_advancement_criterion(advancement, "levitated")
+                .await;
+        }
     }
 }
 
