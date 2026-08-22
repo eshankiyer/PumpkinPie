@@ -4296,6 +4296,13 @@ impl EntityBase for LivingEntity {
                 }
             }
 
+            // Vanilla stops a resting victim after damage is accepted and immunity gates have
+            // passed, but before blocking or hurt-cooldown rejection. Use the occupied bed,
+            // rather than the respawn point, to clear the actual sleep state.
+            if let Some(player) = caller.get_player() {
+                player.stop_sleeping_after_damage().await;
+            }
+
             // Check for shield blocking. Vanilla resolves blocking in `applyItemBlocking`
             // (hurtServer:1200) before the freeze multiplier (1203-1205) and the helmet
             // multiplier/hurtHelmet call (1207-1210), so this must run on the raw `amount`

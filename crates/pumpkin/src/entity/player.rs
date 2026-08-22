@@ -836,6 +836,9 @@ pub struct Player {
     pub respawn_point: Mutex<Option<RespawnPoint>>,
     /// The player's sleep status
     pub sleeping_since: AtomicCell<Option<u8>>,
+    /// The bed currently occupied by the player. This is distinct from the respawn point:
+    /// a player can change beds or be damaged before any later respawn lookup.
+    pub sleeping_pos: AtomicCell<Option<BlockPos>>,
     /// Manages the player's breath level
     pub breath_manager: BreathManager,
     /// Manages the player's hunger level.
@@ -1171,6 +1174,7 @@ impl Player {
             // TODO: Send the CPlayerSpawnPosition packet when the client connects with proper values
             respawn_point: Mutex::new(None),
             sleeping_since: AtomicCell::new(None),
+            sleeping_pos: AtomicCell::new(None),
             // We want this to be an impossible watched section so that `chunker::update_position`
             // will mark chunks as watched for a new join rather than a respawn.
             // (We left shift by one so we can search around that chunk)
@@ -2458,6 +2462,7 @@ impl Player {
         self.get_entity().set_velocity(Vector3::default());
 
         self.sleeping_since.store(Some(0));
+        self.sleeping_pos.store(Some(bed_head_pos));
     }
 
     pub async fn get_off_ground_speed(&self) -> f64 {
@@ -2484,8 +2489,7 @@ impl Player {
     }
 
     fn is_sleeping(&self) -> bool {
-        // TODO: Track sleeping position state explicitly (vanilla checks sleepingPosition.isPresent()).
-        self.sleeping_since.load().is_some()
+        self.sleeping_pos.load().is_some()
     }
 
     async fn is_swimming(&self, flying: bool) -> bool {
@@ -2601,6 +2605,37 @@ impl Player {
         );
 
         self.sleeping_since.store(None);
+        self.sleeping_pos.store(None);
+    }
+
+    /// Vanilla `LivingEntity.stopSleeping`, used when accepted damage interrupts rest. This must
+    /// rely on the occupied bed, not the respawn point: damage can arrive before later respawn
+    /// handling, and the transition must still clear the bed and synchronized sleep state.
+    pub async fn stop_sleeping_after_damage(&self) {
+        let Some(bed_pos) = self.sleeping_pos.swap(None) else {
+            return;
+        };
+
+        let world = self.world();
+        let (bed, bed_state) = world.get_block_and_state_id(&bed_pos);
+        BedBlock::set_occupied(false, &world, bed, &bed_pos, bed_state).await;
+
+        self.living_entity.entity.set_pose(EntityPose::Standing);
+        self.living_entity.entity.set_pos(self.position());
+        self.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::player::SLEEPING_POS_ID,
+                None::<BlockPos>,
+            )],
+            None,
+        );
+        self.sleeping_since.store(None);
+
+        let chunk_pos = self.living_entity.entity.chunk_pos.load();
+        world.broadcast_to_chunk(
+            chunk_pos,
+            &CEntityAnimation::new(self.entity_id().into(), Animation::LeaveBed),
+        );
     }
 
     pub async fn show_title(&self, text: &TextComponent, mode: &TitleMode) {
