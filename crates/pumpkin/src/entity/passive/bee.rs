@@ -1237,21 +1237,23 @@ impl Mob for BeeEntity {
     /// hit actually landing, which is what `Mob::try_attack` gates this hook on.
     fn on_successful_attack<'a>(&'a self, target: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
-            if let Some(living) = target.get_living_entity()
-                && let Some(duration) =
+            if let Some(living) = target.get_living_entity() {
+                living.add_stinger();
+                if let Some(duration) =
                     poison_duration(self.get_entity().world.load().level_info.load().difficulty)
-            {
-                living
-                    .add_effect(Effect {
-                        effect_type: &StatusEffect::POISON,
-                        duration,
-                        amplifier: 0,
-                        ambient: false,
-                        show_particles: true,
-                        show_icon: true,
-                        blend: false,
-                    })
-                    .await;
+                {
+                    living
+                        .add_effect(Effect {
+                            effect_type: &StatusEffect::POISON,
+                            duration,
+                            amplifier: 0,
+                            ambient: false,
+                            show_particles: true,
+                            show_icon: true,
+                            blend: false,
+                        })
+                        .await;
+                }
             }
 
             self.set_has_stung(true);

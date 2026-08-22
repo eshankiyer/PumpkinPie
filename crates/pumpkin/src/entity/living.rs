@@ -164,6 +164,7 @@ pub struct LivingEntity {
     pub health: AtomicCell<f32>,
     /// The remaining air supply used by vanilla `LivingEntity.baseTick`.
     pub air_supply: AtomicI32,
+    pub stinger_count: AtomicI32,
     /// Entity-local random stream used by vanilla's air depletion roll.
     air_random: std::sync::Mutex<StdRng>,
     /// Whether the initial air value has been published to clients.
@@ -373,6 +374,7 @@ impl LivingEntity {
             },
             health: AtomicCell::new(max_health), // Initial health value from attributes
             air_supply: AtomicI32::new(max_air_supply),
+            stinger_count: AtomicI32::new(0),
             air_random: std::sync::Mutex::new(StdRng::seed_from_u64(rand::rng().random())),
             air_metadata_initialized: AtomicBool::new(false),
             entity,
@@ -4120,6 +4122,33 @@ impl NBTStorage for LivingEntity {
 }
 
 impl LivingEntity {
+    pub fn add_stinger(&self) {
+        let count = self.stinger_count.fetch_add(1, Relaxed) + 1;
+        self.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::living_entity::DATA_STINGER_COUNT_ID,
+                count,
+            )],
+            None,
+        );
+    }
+
+    fn tick_stingers(&self) {
+        let count = self.stinger_count.load(Relaxed);
+        if count <= 0 {
+            return;
+        }
+        if rand::random_range(0..20) == 0 {
+            let remaining = self.stinger_count.fetch_sub(1, Relaxed) - 1;
+            self.entity.send_meta_data(
+                &[Metadata::new(
+                    pumpkin_data::tracked_data::living_entity::DATA_STINGER_COUNT_ID,
+                    remaining,
+                )],
+                None,
+            );
+        }
+    }
     /// Restores the `HandItems` / `ArmorItems` lists written by `write_nbt`. Split out of
     /// `read_nbt_non_mut` purely to keep that function within its line budget.
     async fn load_equipment_from_nbt(&self, nbt: &NbtCompound) {
@@ -5134,6 +5163,7 @@ impl EntityBase for LivingEntity {
             }
 
             self.tick_effects().await;
+            self.tick_stingers();
 
             // Current active item
             {
