@@ -356,25 +356,71 @@ impl ToTokens for CraftingDecoratedPotStruct {
     }
 }
 
-/// Deserialized recipe result specifying the output item and count.
+/// A single `minecraft:suspicious_stew_effects` entry on a recipe result.
+#[derive(Deserialize)]
+pub struct StewEffectEntryStruct {
+    /// Registry key of the mob effect applied on consumption.
+    id: String,
+    /// Duration in ticks; vanilla `SuspiciousStewEffects.Entry.CODEC` defaults it to 160.
+    duration: Option<i32>,
+}
+
+/// Deserialized recipe result specifying the output item, count and data components.
 #[derive(Deserialize)]
 pub struct RecipeResultStruct {
     /// Registry key of the result item.
     id: String,
     /// Number of result items produced (defaults to 1).
     count: Option<u8>,
-    // TODO: components: Option<RecipeResultComponentsStruct>,
+    /// Data components attached to the crafted stack, keyed by component registry key.
+    #[serde(default)]
+    components: BTreeMap<String, serde_json::Value>,
 }
+
+/// `SuspiciousStewEffects.DEFAULT_DURATION`.
+const DEFAULT_STEW_EFFECT_DURATION: i32 = 160;
 
 impl ToTokens for RecipeResultStruct {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let id = self.id.to_token_stream();
         let count = self.count.unwrap_or(1).to_token_stream();
 
+        let mut components = Vec::new();
+        for (key, value) in &self.components {
+            match key.as_str() {
+                "minecraft:suspicious_stew_effects" => {
+                    let entries: Vec<StewEffectEntryStruct> =
+                        serde_json::from_value(value.clone()).unwrap_or_else(|err| {
+                            panic!("Bad suspicious_stew_effects on result {}: {err}", self.id)
+                        });
+                    let entries = entries.iter().map(|entry| {
+                        let effect_id = entry.id.to_token_stream();
+                        let duration = entry
+                            .duration
+                            .unwrap_or(DEFAULT_STEW_EFFECT_DURATION)
+                            .to_token_stream();
+                        quote! {
+                            StewEffectEntry { id: #effect_id, duration: #duration }
+                        }
+                    });
+                    components.push(quote! {
+                        RecipeResultComponent::SuspiciousStewEffects(&[#(#entries),*])
+                    });
+                }
+                // Silently dropping components is what left crafted suspicious stew with no
+                // effect for so long; fail loudly instead when the datapack grows a new one.
+                other => panic!(
+                    "Unsupported recipe result component {other} on result {}; teach recipes.rs about it",
+                    self.id
+                ),
+            }
+        }
+
         tokens.extend(quote! {
             RecipeResultStruct {
                 id: #id,
                 count: #count,
+                components: &[#(#components),*],
             }
         });
     }
@@ -554,6 +600,11 @@ pub fn build() -> TokenStream {
     quote! {
         use crate::tag::Taggable;
         use crate::item::Item;
+        use crate::data_component::DataComponent;
+        use crate::data_component_impl::{
+            DataComponentImpl, SuspiciousStewEffect, SuspiciousStewEffectsImpl,
+        };
+        use std::borrow::Cow;
         use serde::{Serialize, Deserialize};
 
         #[derive(Clone, Debug, Serialize)]
@@ -654,10 +705,56 @@ pub fn build() -> TokenStream {
             pub result: RecipeResultStruct,
         }
 
+        /// One `SuspiciousStewEffects.Entry` carried by a recipe result.
+        #[derive(Clone, Debug, Serialize)]
+        pub struct StewEffectEntry {
+            pub id: &'static str,
+            pub duration: i32,
+        }
+
+        /// A data component attached to a recipe result by the datapack.
+        #[derive(Clone, Debug, Serialize)]
+        pub enum RecipeResultComponent {
+            SuspiciousStewEffects(&'static [StewEffectEntry]),
+        }
+
         #[derive(Clone, Debug, Serialize)]
         pub struct RecipeResultStruct {
             pub id: &'static str,
             pub count: u8,
+            pub components: &'static [RecipeResultComponent],
+        }
+
+        impl RecipeResultStruct {
+            /// Component patch vanilla's `ShapelessRecipe::assemble` copies onto the crafted
+            /// stack from the recipe's `result.components`.
+            #[must_use]
+            pub fn component_patch(
+                &self,
+            ) -> Vec<(DataComponent, Option<Box<dyn DataComponentImpl>>)> {
+                self.components
+                    .iter()
+                    .map(|component| match component {
+                        RecipeResultComponent::SuspiciousStewEffects(entries) => (
+                            DataComponent::SuspiciousStewEffects,
+                            Some(
+                                SuspiciousStewEffectsImpl {
+                                    effects: Cow::Owned(
+                                        entries
+                                            .iter()
+                                            .map(|entry| SuspiciousStewEffect {
+                                                effect: Cow::Borrowed(entry.id),
+                                                duration: entry.duration,
+                                            })
+                                            .collect(),
+                                    ),
+                                }
+                                .to_dyn(),
+                            ),
+                        ),
+                    })
+                    .collect()
+            }
         }
 
         #[derive(Clone, Debug, Serialize)]
@@ -738,6 +835,81 @@ pub fn build() -> TokenStream {
                 };
                 (cooking_recipe.recipe_id == recipe_id).then_some(cooking_recipe.experience)
             })
+        }
+
+        #[cfg(test)]
+        mod recipe_result_component_tests {
+            use super::*;
+
+            /// `suspicious_stew_from_allium.json` puts a 60-tick fire resistance entry in
+            /// `result.components`; crafting it must carry that component onto the stack.
+            #[test]
+            fn suspicious_stew_from_allium_carries_fire_resistance() {
+                let result = RECIPES_CRAFTING
+                    .iter()
+                    .find_map(|recipe| match recipe {
+                        CraftingRecipeTypes::CraftingShapeless {
+                            ingredients,
+                            result,
+                            ..
+                        } if result.id == "minecraft:suspicious_stew"
+                            && ingredients.iter().any(|ingredient| {
+                                matches!(
+                                    ingredient,
+                                    RecipeIngredientTypes::Simple("minecraft:allium")
+                                )
+                            }) =>
+                        {
+                            Some(result)
+                        }
+                        _ => None,
+                    })
+                    .expect("the allium suspicious stew recipe should be generated");
+
+                assert_eq!(result.id, "minecraft:suspicious_stew");
+                assert!(matches!(
+                    result.components,
+                    [RecipeResultComponent::SuspiciousStewEffects([StewEffectEntry {
+                        id: "minecraft:fire_resistance",
+                        duration: 60
+                    }])]
+                ));
+
+                let patch = result.component_patch();
+                assert_eq!(patch.len(), 1);
+                let (component, value) = patch.first().unwrap();
+                assert!(matches!(component, DataComponent::SuspiciousStewEffects));
+                let effects = value
+                    .as_ref()
+                    .unwrap()
+                    .as_any()
+                    .downcast_ref::<SuspiciousStewEffectsImpl>()
+                    .expect("patch should hold suspicious stew effects");
+                assert_eq!(
+                    effects.effects.as_ref(),
+                    &[SuspiciousStewEffect {
+                        effect: Cow::Borrowed("minecraft:fire_resistance"),
+                        duration: 60,
+                    }]
+                );
+            }
+
+            /// Every generated result must expose a components slice, empty for the
+            /// overwhelming majority of recipes.
+            #[test]
+            fn only_suspicious_stew_results_carry_components() {
+                for recipe in RECIPES_CRAFTING {
+                    let result = match recipe {
+                        CraftingRecipeTypes::CraftingShaped { result, .. }
+                        | CraftingRecipeTypes::CraftingShapeless { result, .. }
+                        | CraftingRecipeTypes::CraftingTransmute { result, .. } => result,
+                        _ => continue,
+                    };
+                    if !result.components.is_empty() {
+                        assert_eq!(result.id, "minecraft:suspicious_stew");
+                    }
+                }
+            }
         }
     }
 }

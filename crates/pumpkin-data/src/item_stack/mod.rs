@@ -722,10 +722,13 @@ impl ItemStack {
 
 impl From<&RecipeResultStruct> for ItemStack {
     fn from(value: &RecipeResultStruct) -> Self {
-        Self::new(
+        // A recipe result can carry components of its own - a suspicious stew's effect is
+        // the only one in 26.2 - and dropping them here is why a crafted stew did nothing.
+        Self::new_with_component(
             value.count,
             Item::from_registry_key(value.id.strip_prefix("minecraft:").unwrap_or(value.id))
                 .unwrap_or(&Item::AIR),
+            value.component_patch(),
         )
     }
 }

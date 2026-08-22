@@ -88,6 +88,14 @@ impl RecipeResult {
         ItemStack::new_with_component(self.count, item, self.component_patch.clone())
     }
 
+    fn with_component_patch(
+        mut self,
+        patch: Vec<(DataComponent, Option<Box<dyn DataComponentImpl>>)>,
+    ) -> Self {
+        self.component_patch = patch;
+        self
+    }
+
     fn new(item_id: String, count: u8) -> Self {
         Self {
             item_id,
@@ -225,7 +233,12 @@ async fn recipe_matches(
                 }
             }
 
-            matched.then(|| RecipeResult::new(result.id.to_string(), result.count))
+            matched.then(|| {
+                // The result's own components, e.g. a suspicious stew's effect. Distinct
+                // from the transmute patch below, which copies from the INPUT.
+                RecipeResult::new(result.id.to_string(), result.count)
+                    .with_component_patch(result.component_patch())
+            })
         }
         GenericRecipe::Vanilla(CraftingRecipeTypes::CraftingShapeless {
             ingredients,
@@ -249,7 +262,10 @@ async fn recipe_matches(
                 }
                 return None;
             }
-            Some(RecipeResult::new(result.id.to_string(), result.count))
+            Some(
+                RecipeResult::new(result.id.to_string(), result.count)
+                    .with_component_patch(result.component_patch()),
+            )
         }
         GenericRecipe::Vanilla(CraftingRecipeTypes::CraftingTransmute {
             input,
@@ -1228,6 +1244,7 @@ mod tests {
             result: RecipeResultStruct {
                 id: "minecraft:black_shulker_box",
                 count: 1,
+                components: &[],
             },
         }
     }
