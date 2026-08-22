@@ -5,7 +5,11 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::damage::DamageType;
+use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::item::Item;
+use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 
 use crate::entity::ai::control::drowned_move_control::DrownedMoveControl;
@@ -42,6 +46,16 @@ async fn ok_target(
     world: Arc<World>,
 ) -> bool {
     !is_bright_outside(&world) || target.touching_water
+}
+
+/// `Drowned.NAUTILUS_SHELL_CHANCE` (`Drowned.java:68`): chance that `finalizeSpawn` puts a
+/// nautilus shell into an empty offhand.
+const NAUTILUS_SHELL_CHANCE: f32 = 0.03;
+
+/// `itemStack.is(ItemTags.SPEARS)` (`Drowned.java:320`), resolved against the generated
+/// `#minecraft:spears` item tag rather than a hardcoded item list.
+fn is_spear(stack: &ItemStack) -> bool {
+    stack.item.has_tag(&tag::Item::MINECRAFT_SPEARS)
 }
 
 impl DrownedEntity {
@@ -216,9 +230,61 @@ impl Mob for DrownedEntity {
     }
 
     /// Delegates to `ZombieEntityBase`, which carries `Zombie::finalizeSpawn`'s
-    /// `handleAttributes` roll (`Zombie.java:505`) that every zombie variant inherits.
+    /// `handleAttributes` roll (`Zombie.java:505`) that every zombie variant inherits. On a
+    /// fresh spawn this also performs `Drowned.finalizeSpawn`'s offhand roll
+    /// (`Drowned.java:110-114`): an empty offhand receives a nautilus shell 3% of the time and
+    /// that slot is marked a guaranteed drop.
+    ///
+    /// The roll runs before the generic spawn-equipment pass (`equip_mob_on_spawn`, reached
+    /// from the blanket `Mob::init_data_tracker`) instead of after it as in vanilla. That pass
+    /// only ever fills a drowned's main hand, so the empty-offhand guard observes the same slot
+    /// state vanilla's post-equipment check does.
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move { self.entity.mob_init_data_tracker().await })
+        Box::pin(async move {
+            self.entity.mob_init_data_tracker().await;
+
+            // Vanilla reaches `finalizeSpawn` only on a genuine spawn; a mob read back out of
+            // chunk NBT keeps the equipment it was saved with (the same gate the blanket
+            // `init_data_tracker` puts around `equip_mob_on_spawn`).
+            if self.is_restored_from_nbt() {
+                return;
+            }
+
+            let living = &self.entity.mob_entity.living_entity;
+            // `this.getItemBySlot(EquipmentSlot.OFFHAND).isEmpty()` (`Drowned.java:111`).
+            if !living
+                .entity_equipment
+                .lock()
+                .await
+                .get(&EquipmentSlot::OFF_HAND)
+                .is_empty()
+            {
+                return;
+            }
+
+            // `level.getRandom().nextFloat() < 0.03F` (`Drowned.java:111`).
+            if rand::random::<f32>() >= NAUTILUS_SHELL_CHANCE {
+                return;
+            }
+
+            // `this.setItemSlot(EquipmentSlot.OFFHAND, new ItemStack(Items.NAUTILUS_SHELL))`
+            // (`Drowned.java:112`).
+            let shell = ItemStack::new(1, &Item::NAUTILUS_SHELL);
+            living
+                .entity_equipment
+                .lock()
+                .await
+                .put(&EquipmentSlot::OFF_HAND, shell.clone());
+            // `this.setGuaranteedDrop(EquipmentSlot.OFFHAND)` (`Drowned.java:113`): a drop
+            // chance of 1.0, the same representation
+            // `Mob::set_item_slot_and_drop_when_killed` uses for guaranteed drops.
+            living
+                .equipment_drop_chances
+                .lock()
+                .await
+                .insert(EquipmentSlot::OFF_HAND.clone(), 1.0);
+            living.send_equipment_changes(&[(EquipmentSlot::OFF_HAND, shell)]);
+        })
     }
 
     /// `Zombie::hurtServer`'s reinforcement half (`Zombie.java:288-340`), inherited by `Drowned`.
@@ -235,6 +301,14 @@ impl Mob for DrownedEntity {
 
     fn wants_to_swim(&self) -> bool {
         self.searching_for_land.load(Relaxed) || self.target_in_water.load(Relaxed)
+    }
+
+    /// `Drowned.wantsToPickUp` (`Drowned.java:318-321`): a drowned refuses anything tagged
+    /// `#minecraft:spears`; everything else falls through to `Mob.wantsToPickUp`, whose
+    /// Pumpkin default (`Mob::wants_to_pick_up_item`) is unconditional acceptance.
+    fn wants_to_pick_up_item(&self, _world: &World, stack: &ItemStack) -> bool {
+        // `itemStack.is(ItemTags.SPEARS) ? false : super.wantsToPickUp(level, itemStack)`.
+        !is_spear(stack)
     }
 
     fn is_searching_for_land(&self) -> bool {
@@ -329,5 +403,43 @@ impl Mob for DrownedEntity {
             entity.velocity.store(entity.velocity.load() * 0.9);
             true
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NAUTILUS_SHELL_CHANCE, is_spear};
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
+
+    #[test]
+    fn nautilus_shell_chance_matches_vanilla() {
+        // `Drowned.java:68`: `public static final float NAUTILUS_SHELL_CHANCE = 0.03F;`
+        assert!((NAUTILUS_SHELL_CHANCE - 0.03).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn every_spear_tag_member_is_refused() {
+        // The full generated `#minecraft:spears` membership (`Drowned.java:320`); the rule
+        // must keep tracking the tag, so assert each member through the same generated API.
+        for item in [
+            &Item::WOODEN_SPEAR,
+            &Item::STONE_SPEAR,
+            &Item::COPPER_SPEAR,
+            &Item::IRON_SPEAR,
+            &Item::GOLDEN_SPEAR,
+            &Item::DIAMOND_SPEAR,
+            &Item::NETHERITE_SPEAR,
+        ] {
+            assert!(is_spear(&ItemStack::new(1, item)));
+        }
+    }
+
+    #[test]
+    fn non_spears_fall_through_to_the_mob_default() {
+        // A trident stays attractive (it is the drowned's own ranged weapon) and unrelated
+        // items reach `Mob.wantsToPickUp`'s acceptance.
+        assert!(!is_spear(&ItemStack::new(1, &Item::TRIDENT)));
+        assert!(!is_spear(&ItemStack::new(1, &Item::NAUTILUS_SHELL)));
     }
 }

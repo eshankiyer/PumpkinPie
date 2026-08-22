@@ -4178,7 +4178,23 @@ impl Entity {
 
         let mounted_passenger = passenger.clone();
         let mut passengers = self.passengers.lock().await;
-        passengers.push(passenger);
+        // Vanilla keeps a server-side player ahead of non-player passengers. The first
+        // passenger controls rideable entities, so preserving this ordering is observable in
+        // mounted input handling and in the passenger list sent to clients.
+        if passenger.get_player().is_some()
+            && passengers
+                .first()
+                .is_none_or(|first| first.get_player().is_none())
+        {
+            passengers.insert(0, passenger);
+        } else {
+            passengers.push(passenger);
+        }
+
+        let mounted_index = passengers
+            .iter()
+            .position(|p| p.get_entity().entity_id == mounted_passenger.get_entity().entity_id)
+            .expect("new passenger must be present in the vehicle passenger list");
 
         let passenger_ids: Vec<VarInt> = passengers
             .iter()
@@ -4192,12 +4208,8 @@ impl Entity {
             &CSetPassengers::new(VarInt(self.entity_id), &passenger_ids),
         );
         drop(passengers);
-        self.position_rider(
-            &mounted_passenger,
-            passenger_ids.len() - 1,
-            passenger_ids.len(),
-        )
-        .await;
+        self.position_rider(&mounted_passenger, mounted_index, passenger_ids.len())
+            .await;
     }
 
     pub(crate) async fn remove_passenger_on_disconnect(&self, passenger_id: i32) {
@@ -4821,6 +4833,17 @@ impl EntityBase for Entity {
             }
 
             self.update_last_pos();
+
+            // Vanilla `Entity.baseTick` stops riding when the vehicle was removed
+            // (Entity.java:517-519). Keep the bidirectional relationship in sync
+            // before any portal or movement work can observe the stale vehicle.
+            let vehicle = self.vehicle.lock().await.clone();
+            if let Some(vehicle) = vehicle
+                && vehicle.get_entity().is_removed()
+            {
+                vehicle.get_entity().remove_passenger(self.entity_id).await;
+            }
+
             self.tick_portal(caller).await;
             self.was_eye_in_water
                 .store(self.eye_in_water.load(Relaxed), Relaxed);

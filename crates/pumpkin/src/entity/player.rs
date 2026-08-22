@@ -1611,6 +1611,12 @@ impl Player {
             damage *= 1.5;
         }
 
+        // Vanilla keeps the weapon damage passed to `doSweepAttack` separate from
+        // `magicBoost`: the Sweeping Edge attribute is applied to that base damage,
+        // and each nearby target then receives its own enchantment-sensitive bonus.
+        // Preserve that pre-enchantment value for the sweep branch below.
+        let sweep_base_damage = damage;
+
         // `Player.attack`: the crit multiplier applies to the weapon's base damage only. The
         // enchantment bonus is held aside as `magicBoost` and added after, so a crit does not
         // multiply Sharpness.
@@ -1783,16 +1789,16 @@ impl Player {
                 AttackType::Sweeping => {
                     combat::spawn_sweep_particle(attacker_entity, &world, &pos);
 
-                    let mut sweep_damage = 1.0;
-                    if let Some(enchantments) = item_stack.get_data_component::<EnchantmentsImpl>()
-                    {
-                        for (enchantment, level) in enchantments.enchantment.iter() {
-                            if **enchantment == Enchantment::SWEEPING_EDGE {
-                                sweep_damage +=
-                                    damage as f32 * (*level as f32 / (*level as f32 + 1.0));
-                            }
-                        }
-                    }
+                    // `Player.doSweepAttack`: `1 + sweeping_damage_ratio * baseDamage`,
+                    // followed by `getEnchantedDamage(target, ...) * attackStrengthScale`.
+                    // The ratio is supplied by the Sweeping Edge attribute modifier, so
+                    // this also respects custom/datapack modifiers rather than hardcoding
+                    // the enchantment's level formula at the call site.
+                    let sweep_base = 1.0
+                        + self
+                            .living_entity
+                            .get_attribute_value(&Attributes::SWEEPING_DAMAGE_RATIO)
+                            * sweep_base_damage;
 
                     let search_box = BoundingBox::new(
                         Vector3::new(pos.x - 1.0, pos.y - 0.5, pos.z - 1.0),
@@ -1803,10 +1809,27 @@ impl Player {
                         if other_victim.get_entity().entity_id != victim_entity.entity_id
                             && other_victim.get_entity().entity_id != attacker_entity.entity_id
                         {
+                            let enchantment_bonus = item_stack
+                                .get_data_component::<EnchantmentsImpl>()
+                                .map_or(0.0, |enchantments| {
+                                    enchantments
+                                        .enchantment
+                                        .iter()
+                                        .map(|(enchantment, level)| {
+                                            crate::enchantment::damage_bonus(
+                                                enchantment,
+                                                *level,
+                                                other_victim.get_entity().entity_type,
+                                            )
+                                        })
+                                        .sum::<f32>()
+                                });
+                            let sweep_damage = (sweep_base + f64::from(enchantment_bonus))
+                                * attack_cooldown_progress;
                             other_victim
                                 .damage_with_context(
                                     other_victim.as_ref(),
-                                    sweep_damage,
+                                    sweep_damage as f32,
                                     DamageType::PLAYER_ATTACK,
                                     Some(self.living_entity.entity.pos.load()),
                                     Some(self),
