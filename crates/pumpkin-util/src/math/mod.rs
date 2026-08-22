@@ -16,8 +16,14 @@ pub mod vector2;
 pub mod vector3;
 pub mod vertical_surface_type;
 
-const SIN_SCALE: f32 = 10430.378; // 65536 / 2P
-const SIN_MASK: i32 = 65535;
+/// `65536 / 2PI`, at `Mth.java:51`'s full precision.
+///
+/// Vanilla's `Mth.sin` takes a `double` and multiplies by this in double, so an `f32`
+/// argument is widened before the multiply. Computing the index in `f32` against a
+/// truncated `10430.378` instead diverged on 0.02% of sine and 0.17% of cosine lookups
+/// over 500k angles - small per call, but enough to walk a hundred-step carver off course.
+const SIN_SCALE: f64 = 10_430.378_350_470_453;
+const SIN_MASK: i64 = 65535;
 
 static SIN: LazyLock<[f32; 65536]> = LazyLock::new(|| {
     std::array::from_fn(|i| (f64::from(i as u32) / 10430.378350470453).sin() as f32)
@@ -26,13 +32,13 @@ static SIN: LazyLock<[f32; 65536]> = LazyLock::new(|| {
 /// Returns the vanilla sine table value for an angle in radians.
 #[must_use]
 pub fn sin(value: f32) -> f32 {
-    SIN[((value * SIN_SCALE) as i32 & SIN_MASK) as usize]
+    SIN[((f64::from(value) * SIN_SCALE) as i64 & SIN_MASK) as usize]
 }
 
 /// Returns the vanilla cosine table value for an angle in radians.
 #[must_use]
 pub fn cos(value: f32) -> f32 {
-    SIN[((value * SIN_SCALE + 16384.0) as i32 & SIN_MASK) as usize]
+    SIN[((f64::from(value) * SIN_SCALE + 16384.0) as i64 & SIN_MASK) as usize]
 }
 
 /// Wraps an angle in degrees to the range [-180, 180).

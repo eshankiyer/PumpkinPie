@@ -565,6 +565,74 @@ mod tests {
         });
     }
 
+    /// Canyons are ravines: tall and narrow. `CanyonWorldCarver.shouldSkip`
+    /// (`CanyonWorldCarver.java:152-155`) divides the vertical term by 6, so a carved column
+    /// reaches far higher than the ellipsoid is wide, and `yScale` is a constant 3
+    /// (`Carvers.java:74`). Carving canyons alone into a solid chunk and measuring the mean
+    /// height of each carved column pins that shape down: dropping the `/ 6.0`, or the
+    /// `y_scale` multiply, collapses it towards a cave-like blob.
+    #[test]
+    fn canyon_carves_tall_narrow_columns() {
+        with_carve_run_options(Dimension::OVERWORLD, None, false, |run| {
+            let bottom = run.chunk.bottom_y() as i32;
+            let top = bottom + run.chunk.height() as i32;
+            for x in 0..16 {
+                for z in 0..16 {
+                    for y in bottom..top {
+                        run.chunk
+                            .set_block_state(x, y, z, Block::STONE.default_state);
+                    }
+                }
+            }
+
+            let carver = canyon::CanyonCarver;
+            let chunk_pos = Vector2::new(run.chunk.x, run.chunk.z);
+            let seed = 42u64;
+            for dx in -8..=8 {
+                for dz in -8..=8 {
+                    let carver_pos = Vector2::new(run.chunk.x + dx, run.chunk.z + dz);
+                    let mut random = new_carver_random(get_large_feature_seed(
+                        seed + 2,
+                        carver_pos.x,
+                        carver_pos.y,
+                    ));
+                    if should_carve(&CANYON, &mut random) {
+                        carver.carve(&CANYON, run, &mut random, &chunk_pos, &carver_pos);
+                    }
+                }
+            }
+
+            let mut carved = 0u32;
+            let mut columns = 0u32;
+            for x in 0..16 {
+                for z in 0..16 {
+                    let mut column = 0u32;
+                    for y in bottom..top {
+                        if run.chunk.get_block_state(&Vector3::new(x, y, z))
+                            != Block::STONE.default_state.id
+                        {
+                            column += 1;
+                        }
+                    }
+                    if column > 0 {
+                        columns += 1;
+                        carved += column;
+                    }
+                }
+            }
+
+            assert!(carved > 0, "canyon carver removed nothing");
+            // Measured 27.02 on this fixed seed. Dropping the `/ 6.0` from `should_skip`
+            // takes it to 20.46, so the bound both catches that mutation and leaves room
+            // for float noise.
+            let mean_height = f64::from(carved) / f64::from(columns);
+            assert!(
+                mean_height > 24.0,
+                "canyon columns are {mean_height:.2} blocks tall on average; a ravine should be far taller than wide"
+            );
+        });
+    }
+
     fn set_surface_height(chunk: &mut ProtoChunk, x: i32, z: i32, height: i16) {
         let index = (x & 15) as usize * 16 + (z & 15) as usize;
         chunk.flat_surface_height_map[index] = height;
