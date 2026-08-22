@@ -1778,9 +1778,9 @@ impl LivingEntity {
                 && self.entity.entity_type != &EntityType::STRIDER
             {
                 self.travel_in_fluid(caller, touching_water).await;
+            } else if self.entity.is_fall_flying() {
+                self.travel_fall_flying(caller).await;
             } else {
-                // TODO: Gliding
-
                 self.travel_in_air(caller).await;
             }
         }
@@ -1881,6 +1881,25 @@ impl LivingEntity {
         });
 
         self.entity.velocity.store(velo);
+    }
+
+    /// Vanilla `LivingEntity.travelFallFlying`: update velocity from the look vector before
+    /// moving through the normal collision solver.
+    async fn travel_fall_flying<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) {
+        if self.climbing.load(Relaxed) {
+            self.travel_in_air(caller).await;
+            self.entity.set_fall_flying(false).await;
+            return;
+        }
+
+        let velocity = self.entity.velocity.load();
+        let look = caller.get_looking_vector();
+        let pitch = f64::from(self.entity.pitch.load()).to_radians();
+        let gravity = self.get_effective_gravity(caller).await;
+        self.entity
+            .velocity
+            .store(fall_flying_velocity(velocity, look, pitch, gravity));
+        self.make_move(caller).await;
     }
 
     async fn travel_in_fluid<'a>(&'a self, caller: &'a Arc<dyn EntityBase>, water: bool) {
@@ -6266,6 +6285,39 @@ fn friction_influenced_speed(speed: f64, slipperiness: f64) -> f64 {
     speed * 0.216_000_02 / (slipperiness * slipperiness * slipperiness)
 }
 
+/// Vanilla `LivingEntity.updateFallFlyingMovement`, kept pure so its pitch and velocity
+/// response can be checked independently of world collision state.
+fn fall_flying_velocity(
+    mut velocity: Vector3<f64>,
+    look: Vector3<f64>,
+    pitch: f64,
+    gravity: f64,
+) -> Vector3<f64> {
+    let look_horizontal = look.x.hypot(look.z);
+    let horizontal_speed = velocity.x.hypot(velocity.z);
+    let lift = pitch.cos().powi(2);
+
+    velocity.y += gravity * (-1.0 + lift * 0.75);
+    if velocity.y < 0.0 && look_horizontal > 0.0 {
+        let convert = velocity.y * -0.1 * lift;
+        velocity.x += look.x * convert / look_horizontal;
+        velocity.y += convert;
+        velocity.z += look.z * convert / look_horizontal;
+    }
+    if pitch < 0.0 && look_horizontal > 0.0 {
+        let convert = horizontal_speed * -pitch.sin() * 0.04;
+        velocity.x -= look.x * convert / look_horizontal;
+        velocity.y += convert * 3.2;
+        velocity.z -= look.z * convert / look_horizontal;
+    }
+    if look_horizontal > 0.0 {
+        velocity.x += (look.x / look_horizontal * horizontal_speed - velocity.x) * 0.1;
+        velocity.z += (look.z / look_horizontal * horizontal_speed - velocity.z) * 0.1;
+    }
+
+    velocity.multiply(0.99, 0.98, 0.99)
+}
+
 fn damage_causes_panic(damage_type: DamageType) -> bool {
     damage_type.has_tag(&tag::DamageType::MINECRAFT_PANIC_CAUSES)
 }
@@ -6273,6 +6325,37 @@ fn damage_causes_panic(damage_type: DamageType) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fall_flying_velocity_preserves_forward_glide_with_drag() {
+        let velocity = fall_flying_velocity(
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            0.0,
+            0.08,
+        );
+        assert!(velocity.x > 0.9);
+        assert!(velocity.y < 0.0);
+        assert!(velocity.z.abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn fall_flying_velocity_converts_a_dive_into_speed_and_climb_into_lift() {
+        let diving = fall_flying_velocity(
+            Vector3::new(0.8, -0.1, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            0.5,
+            0.08,
+        );
+        let climbing = fall_flying_velocity(
+            Vector3::new(0.8, -0.1, 0.0),
+            Vector3::new(1.0, 0.0, 0.0),
+            -0.5,
+            0.08,
+        );
+        assert!(diving.y < climbing.y);
+        assert!(climbing.y > -0.1);
+    }
 
     #[test]
     fn non_finite_damage_is_clamped_before_combat_state_updates() {
