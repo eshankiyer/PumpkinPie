@@ -2,7 +2,7 @@ use crate::block::blocks::copper_weathering;
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::{
     BlockBehaviour, BlockFuture, BlockMetadata, GetComparatorOutputArgs, OnNeighborUpdateArgs,
-    OnPlaceArgs, RandomTickArgs,
+    OnPlaceArgs, PlacedArgs, RandomTickArgs,
 };
 use pumpkin_data::BlockId;
 use pumpkin_data::BlockStateId;
@@ -48,33 +48,22 @@ impl BlockBehaviour for CopperBulbBlock {
         })
     }
 
+    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // `CopperBulbBlock.onPlace` (CopperBulbBlock.java:148-152) runs `checkAndFlip` on every
+            // arrival, not just a player placement, so a bulb pushed into a powered spot by a
+            // piston or written by /setblock still flips. `on_place` below only covers the
+            // player-placement path.
+            if pumpkin_data::Block::from_state_id(args.old_state_id) == args.block {
+                return;
+            }
+            Self::check_and_flip(args.world, args.block, args.position).await;
+        })
+    }
+
     fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            let state = args.world.get_block_state(args.position);
-            let mut props = CopperBulbLikeProperties::from_state_id(state.id, args.block);
-            let is_receiving_power = block_receives_redstone_power(args.world, args.position).await;
-            if props.powered != is_receiving_power {
-                if !props.powered {
-                    props.lit = !props.lit;
-                    args.world.play_block_sound(
-                        if props.lit {
-                            Sound::BlockCopperBulbTurnOn
-                        } else {
-                            Sound::BlockCopperBulbTurnOff
-                        },
-                        SoundCategory::Blocks,
-                        *args.position,
-                    );
-                }
-                props.powered = is_receiving_power;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-            }
+            Self::check_and_flip(args.world, args.block, args.position).await;
         })
     }
 
@@ -115,5 +104,37 @@ impl BlockBehaviour for CopperBulbBlock {
             let props = CopperBulbLikeProperties::from_state_id(args.state.id, args.block);
             Some(if props.lit { 15 } else { 0 })
         })
+    }
+}
+
+impl CopperBulbBlock {
+    /// `CopperBulbBlock.checkAndFlip` (CopperBulbBlock.java:163-174).
+    async fn check_and_flip(
+        world: &std::sync::Arc<crate::world::World>,
+        block: &pumpkin_data::Block,
+        position: &pumpkin_util::math::position::BlockPos,
+    ) {
+        let state = world.get_block_state(position);
+        let mut props = CopperBulbLikeProperties::from_state_id(state.id, block);
+        let signal = block_receives_redstone_power(world, position).await;
+        if props.powered == signal {
+            return;
+        }
+        if !props.powered {
+            props.lit = !props.lit;
+            world.play_block_sound(
+                if props.lit {
+                    Sound::BlockCopperBulbTurnOn
+                } else {
+                    Sound::BlockCopperBulbTurnOff
+                },
+                SoundCategory::Blocks,
+                *position,
+            );
+        }
+        props.powered = signal;
+        world
+            .set_block_state(position, props.to_state_id(block), BlockFlags::NOTIFY_ALL)
+            .await;
     }
 }

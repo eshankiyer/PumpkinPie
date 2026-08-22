@@ -13,7 +13,7 @@ use pumpkin_world::world::BlockFlags;
 
 use crate::block::{
     BlockBehaviour, BlockFuture, BlockIsReplacing, EmitsRedstonePowerArgs, GetRedstonePowerArgs,
-    OnPlaceArgs, OnScheduledTickArgs,
+    OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
 };
 use crate::world::World;
 
@@ -108,6 +108,33 @@ impl BlockBehaviour for TargetBlock {
 
     // Vanilla only overrides `getWeakRedstonePower` for the target block, so strong power
     // stays at the default of 0 and a target never powers the block it is next to.
+
+    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // `TargetBlock.onPlace` (TargetBlock.java:107-113): a target that ARRIVES already lit
+            // with no reset queued - pushed by a piston, written by /setblock, restored from a
+            // structure - would emit its carried power forever, because nothing is left to run the
+            // scheduled tick that clears it.
+            if pumpkin_data::Block::from_state_id(args.old_state_id) == args.block {
+                return;
+            }
+            let mut props = TargetProperties::from_state_id(args.state_id, args.block);
+            if props.power > 0
+                && !args
+                    .world
+                    .is_block_tick_scheduled(args.position, args.block)
+            {
+                props.power = 0;
+                args.world
+                    .set_block_state(
+                        args.position,
+                        props.to_state_id(args.block),
+                        BlockFlags::NOTIFY_LISTENERS,
+                    )
+                    .await;
+            }
+        })
+    }
 
     fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {

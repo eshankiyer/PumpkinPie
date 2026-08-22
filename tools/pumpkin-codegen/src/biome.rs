@@ -170,7 +170,82 @@ enum BiomeTree {
     },
 }
 
+/// `assets/multi_noise_biome_tree.json` was extracted from a pre-26.2 game version and
+/// therefore has no leaf for `minecraft:sulfur_caves`, which 26.2 registers in
+/// `OverworldBiomeBuilder.addUndergroundBiomes` (`OverworldBiomeBuilder.java:880-888`).
+/// Without a leaf the multi-noise search can never return the biome, so it never generates.
+///
+/// The seven ranges below are that call's `Climate.ParameterPoint`, quantized by
+/// `Climate.quantizeCoord` (`Climate.java:77-79`, `(long)(coord * 10000.0F)`), in
+/// `Climate.parameters` order (`Climate.java:65-75`): temperature, humidity,
+/// continentalness, erosion, depth, weirdness, offset.
+///
+/// * temperature / humidity: `FULL_RANGE` = span(-1.0, 1.0)
+/// * continentalness: span(`coastContinentalness`, `inlandContinentalness`) = span(-0.19, 0.55)
+/// * erosion: span(`erosions[5]`, `erosions[6]`) = span(0.45, 1.0)
+/// * depth: span(0.2, 0.9), supplied by `addUndergroundBiome` (`OverworldBiomeBuilder.java:1008`)
+/// * weirdness: span(-1.1, -0.85)
+/// * offset: 0.0
+const SULFUR_CAVES_PARAMETERS: [(i64, i64); 7] = [
+    (-10000, 10000),
+    (-10000, 10000),
+    (-1900, 5500),
+    (4500, 10000),
+    (2000, 9000),
+    (-11000, -8500),
+    (0, 0),
+];
+
 impl BiomeTree {
+    /// The seven bounding ranges of this node.
+    fn parameters_mut(&mut self) -> &mut [ParameterRange; 7] {
+        match self {
+            Self::Leaf { parameters, .. } | Self::Branch { parameters, .. } => parameters,
+        }
+    }
+
+    /// True if this subtree already resolves to `biome` somewhere.
+    fn contains_biome(&self, biome: &str) -> bool {
+        match self {
+            Self::Leaf { biome: leaf, .. } => leaf == biome,
+            Self::Branch { nodes, .. } => nodes.iter().any(|node| node.contains_biome(biome)),
+        }
+    }
+
+    /// Appends the missing `minecraft:sulfur_caves` leaf as a child of this (root) node,
+    /// widening the root bounding box to cover it.
+    ///
+    /// `BiomeTree::get` is an exact nearest-leaf search under the squared per-dimension
+    /// distance of vanilla `Climate.RTree.Node.distance` (`Climate.java:424-431`), with
+    /// bounding-box pruning, so where the leaf is attached only affects pruning speed and
+    /// exact-distance tie-breaks, not which leaf wins. Vanilla's weirdness span reaches
+    /// -1.1, below the -1.0 every other overworld leaf stays within, so the root box has to
+    /// be unioned with the new leaf or the search would prune the whole tree for points
+    /// beyond the old bound.
+    fn patch_in_sulfur_caves(&mut self) {
+        const NAME: &str = "minecraft:sulfur_caves";
+
+        if self.contains_biome(NAME) {
+            return;
+        }
+
+        let parameters = SULFUR_CAVES_PARAMETERS.map(|(min, max)| ParameterRange { min, max });
+        for (root, leaf) in self.parameters_mut().iter_mut().zip(&parameters) {
+            root.min = root.min.min(leaf.min);
+            root.max = root.max.max(leaf.max);
+        }
+
+        let Self::Branch { nodes, .. } = self else {
+            panic!("overworld biome tree root is a leaf");
+        };
+        let mut patched = std::mem::take(nodes).into_vec();
+        patched.push(Self::Leaf {
+            parameters,
+            biome: NAME.to_string(),
+        });
+        *nodes = patched.into_boxed_slice();
+    }
+
     /// Converts this biome tree node into a `TokenStream` for use in generated code.
     fn into_token_stream(self) -> TokenStream {
         match self {
@@ -241,10 +316,11 @@ pub fn build() -> TokenStream {
         biomes.insert(stem, biome);
     }
 
-    let biome_trees: MultiNoiseBiomeSuppliers = serde_json::from_str(
+    let mut biome_trees: MultiNoiseBiomeSuppliers = serde_json::from_str(
         &fs::read_to_string("../../assets/multi_noise_biome_tree.json").unwrap(),
     )
     .expect("Failed to parse multi_noise_biome_tree.json");
+    biome_trees.overworld.patch_in_sulfur_caves();
     let bedrock_biomes: BTreeMap<String, GeyserBiomeMapping> =
         serde_json::from_str(&fs::read_to_string("../../assets/bedrock/biomes.json").unwrap())
             .expect("Failed to parse biomes.json");
@@ -614,14 +690,15 @@ pub fn build() -> TokenStream {
                     Self::Branch { parameters, .. } => parameters,
                 };
 
-                // Fully unrolled for 7 dimensions to maximize throughput
-                params[0].calc_distance(p[0]) +
-                params[1].calc_distance(p[1]) +
-                params[2].calc_distance(p[2]) +
-                params[3].calc_distance(p[3]) +
-                params[4].calc_distance(p[4]) +
-                params[5].calc_distance(p[5]) +
-                params[6].calc_distance(p[6])
+                // Vanilla `Climate.RTree.Node.distance` (`Climate.java:424-431`) sums the
+                // SQUARE of each dimension's distance. Fully unrolled for 7 dimensions.
+                params[0].calc_distance(p[0]).pow(2) +
+                params[1].calc_distance(p[1]).pow(2) +
+                params[2].calc_distance(p[2]).pow(2) +
+                params[3].calc_distance(p[3]).pow(2) +
+                params[4].calc_distance(p[4]).pow(2) +
+                params[5].calc_distance(p[5]).pow(2) +
+                params[6].calc_distance(p[6]).pow(2)
             }
         }
 

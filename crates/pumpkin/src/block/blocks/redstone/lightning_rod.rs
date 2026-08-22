@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::block::blocks::copper_weathering;
 use crate::block::{
     BlockBehaviour, BlockFuture, EmitsRedstonePowerArgs, GetRedstonePowerArgs, OnPlaceArgs,
-    OnScheduledTickArgs, RandomTickArgs,
+    OnScheduledTickArgs, PlacedArgs, RandomTickArgs,
 };
 use crate::world::World;
 use pumpkin_data::block_properties::{BlockProperties, LightningRodLikeProperties};
@@ -63,6 +63,26 @@ impl BlockBehaviour for LightningRodBlock {
             props.facing = args.direction.to_facing().opposite();
             props.waterlogged = args.replacing.water_source();
             props.to_state_id(args.block)
+        })
+    }
+
+    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // `LightningRodBlock.onPlace` (LightningRodBlock.java:97-103): a rod that ARRIVES
+            // already POWERED with no tick queued has nothing left to switch it off, so it emits
+            // 15 forever. Vanilla re-queues the 8-tick reset.
+            if pumpkin_data::Block::from_state_id(args.old_state_id) == args.block {
+                return;
+            }
+            let props = LightningRodLikeProperties::from_state_id(args.state_id, args.block);
+            if props.powered
+                && !args
+                    .world
+                    .is_block_tick_scheduled(args.position, args.block)
+            {
+                args.world
+                    .schedule_block_tick(args.block, *args.position, 8, TickPriority::Normal);
+            }
         })
     }
 

@@ -9964,13 +9964,13 @@ impl BiomeTree {
             Self::Leaf { parameters, .. } => parameters,
             Self::Branch { parameters, .. } => parameters,
         };
-        params[0].calc_distance(p[0])
-            + params[1].calc_distance(p[1])
-            + params[2].calc_distance(p[2])
-            + params[3].calc_distance(p[3])
-            + params[4].calc_distance(p[4])
-            + params[5].calc_distance(p[5])
-            + params[6].calc_distance(p[6])
+        params[0].calc_distance(p[0]).pow(2)
+            + params[1].calc_distance(p[1]).pow(2)
+            + params[2].calc_distance(p[2]).pow(2)
+            + params[3].calc_distance(p[3]).pow(2)
+            + params[4].calc_distance(p[4]).pow(2)
+            + params[5].calc_distance(p[5]).pow(2)
+            + params[6].calc_distance(p[6]).pow(2)
     }
 }
 pub const OVERWORLD_BIOME_SOURCE: BiomeTree = BiomeTree::Branch {
@@ -9996,7 +9996,7 @@ pub const OVERWORLD_BIOME_SOURCE: BiomeTree = BiomeTree::Branch {
             max: 11000i64,
         },
         ParameterRange {
-            min: -10000i64,
+            min: -11000i64,
             max: 10000i64,
         },
         ParameterRange {
@@ -312185,6 +312185,39 @@ pub const OVERWORLD_BIOME_SOURCE: BiomeTree = BiomeTree::Branch {
                     ],
                 },
             ],
+        },
+        BiomeTree::Leaf {
+            parameters: [
+                ParameterRange {
+                    min: -10000i64,
+                    max: 10000i64,
+                },
+                ParameterRange {
+                    min: -10000i64,
+                    max: 10000i64,
+                },
+                ParameterRange {
+                    min: -1900i64,
+                    max: 5500i64,
+                },
+                ParameterRange {
+                    min: 4500i64,
+                    max: 10000i64,
+                },
+                ParameterRange {
+                    min: 2000i64,
+                    max: 9000i64,
+                },
+                ParameterRange {
+                    min: -11000i64,
+                    max: -8500i64,
+                },
+                ParameterRange {
+                    min: 0i64,
+                    max: 0i64,
+                },
+            ],
+            biome: &Biome::SULFUR_CAVES,
         },
     ],
 };

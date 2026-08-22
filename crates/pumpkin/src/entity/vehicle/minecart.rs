@@ -146,10 +146,19 @@ impl EntityBase for MinecartEntity {
     fn tick<'a>(
         &'a self,
         caller: &'a Arc<dyn EntityBase>,
-        _server: &'a Server,
+        server: &'a Server,
     ) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             self.vehicle.tick();
+
+            // Vanilla runs `entityInside` for every entity moving through a block, vehicles
+            // included, which is how a cart trips a detector rail or a pressure plate. This
+            // hook was wired for falling blocks, items, orbs, TNT and living entities but
+            // never for vehicles, so those blocks could never fire from a cart at all.
+            self.vehicle
+                .entity
+                .tick_block_collisions(caller, server)
+                .await;
             if let MinecartKind::Furnace(minecart) = &self.kind {
                 minecart.tick(&self.vehicle.entity);
             }

@@ -237,18 +237,19 @@ mod test {
 /// -20..=50 on y, seed 0), sampled with one `MultiNoiseSampler` window per chunk
 /// and in the same iteration order `ProtoChunk::populate_biomes` uses.
 ///
-/// Every sample matches vanilla exactly except for 943 that are all attributable
-/// to `assets/multi_noise_biome_tree.json` having been extracted from an older
-/// game version than `assets/biome.json`:
+/// Every sample matches vanilla exactly except for 71 cells in the single biome
+/// column (x=-49, z=-24), where the noise point is exactly equidistant from a
+/// `forest` leaf and a `birch_forest` leaf at every y, so the winner is decided
+/// purely by leaf order.
 ///
-/// * 872 cells whose vanilla biome is `sulfur_caves`, which has a registry entry
-///   (`Biome::SULFUR_CAVES`, id 53) but no leaf in the extracted tree, so the
-///   search can never return it.
-/// * 71 cells in the single biome column (x=-49, z=-24) where the noise point is
-///   exactly equidistant from a `forest` leaf and a `birch_forest` leaf at every
-///   y, so the winner is decided purely by leaf order.
-///
-/// See `CENSUS_FIXLIST.md`.
+/// It used to be 943. The other 872 were every cell whose vanilla biome is
+/// `sulfur_caves`: `assets/multi_noise_biome_tree.json` was extracted from a
+/// pre-26.2 game and carries no leaf for it, so the search could never return the
+/// biome however close the noise point came. The codegen now patches the leaf in
+/// from `OverworldBiomeBuilder.java:880-888`. Fixing that exposed a second bug -
+/// the emitted distance summed unsquared per-dimension distances where
+/// `Climate.RTree.Node.distance` squares each (`Climate.java:424-431`) - without
+/// which only 70 of the 872 resolved.
 #[cfg(test)]
 mod multi_noise_wide_area_test {
     use pumpkin_data::{chunk::Biome, dimension::Dimension};
@@ -340,9 +341,9 @@ mod multi_noise_wide_area_test {
             "unexplained biome mismatches vs vanilla: {unexplained:#?}"
         );
         assert_eq!(
-            missing_sulfur_caves, 872,
-            "sulfur_caves coverage changed; if this dropped to 0 the biome tree asset was \
-             re-extracted and this test should assert an exact match instead"
+            missing_sulfur_caves, 0,
+            "every vanilla sulfur_caves cell must now resolve to sulfur_caves; the biome tree \
+             asset carries the leaf and the climate metric squares per dimension"
         );
         assert_eq!(tie_column_diffs, 71, "tie-break column coverage changed");
     }
