@@ -27,7 +27,9 @@ use std::sync::LazyLock;
 
 use pumpkin_data::Enchantment;
 use pumpkin_data::data_component::DataComponent;
-use pumpkin_data::data_component_impl::{EnchantableImpl, EnchantmentsImpl, EquipmentSlot};
+use pumpkin_data::data_component_impl::{
+    DataComponentImpl, EnchantableImpl, EnchantmentsImpl, EquipmentSlot,
+};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::tag::Enchantment as EnchantmentTag;
