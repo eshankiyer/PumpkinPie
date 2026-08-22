@@ -31,6 +31,7 @@ use pumpkin_registry::RootRegistryOwner;
 use pumpkin_util::permission::PermissionManager;
 use pumpkin_util::text::color::NamedColor;
 use pumpkin_world::dimension::into_level;
+use pumpkin_world::generation::generator::GeneratorInit;
 use pumpkin_world::world::WorldPortalExt;
 use tracing::{debug, error, info, warn};
 
@@ -57,6 +58,7 @@ use tokio::task::{JoinHandle, JoinSet};
 use tokio_util::task::TaskTracker;
 
 mod connection_cache;
+pub(crate) mod debug_profiler;
 pub mod enchantment;
 mod key_store;
 pub mod recipe;
@@ -140,6 +142,8 @@ pub struct Server {
     pub aggregated_tick_times_nanos: AtomicI64,
     /// Total number of ticks processed by the server
     pub tick_count: AtomicI32,
+    /// Owns the server-wide tick profiling session used by `/debug`.
+    pub(crate) debug_profiler: debug_profiler::DebugProfiler,
     /// Random unique Server ID used by Bedrock Edition
     pub server_guid: u64,
     /// Player idle timeout in minutes (0 = disabled)
@@ -199,7 +203,12 @@ impl Server {
                     world_path.display(),
                     basic_config.seed.0 as i64
                 );
-                let default_data = LevelData::default(basic_config.seed);
+                let overworld_gen = pumpkin_world::generation::generator::VanillaGenerator::new(
+                    basic_config.seed,
+                    Dimension::OVERWORLD,
+                );
+                let default_data =
+                    LevelData::from_world_generator(basic_config.seed, &overworld_gen);
                 if let Err(err) = AnvilLevelInfo.write_world_info(&default_data, &world_path) {
                     error!("Failed to save level.dat: {err}");
                 }
@@ -307,6 +316,7 @@ impl Server {
             tick_times_nanos: Mutex::new([0; 100]),
             aggregated_tick_times_nanos: AtomicI64::new(0),
             tick_count: AtomicI32::new(0),
+            debug_profiler: debug_profiler::DebugProfiler::new(),
             tasks: TaskTracker::new(),
             runtime: tokio::runtime::Handle::current(),
             task_scheduler: Arc::new(TaskScheduler::new()),

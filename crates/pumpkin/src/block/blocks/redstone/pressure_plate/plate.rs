@@ -107,6 +107,7 @@ impl PressurePlate for PressurePlateBlock {
         if props.powered { 15 } else { 0 }
     }
 
+    #[allow(clippy::unused_async_trait_impl)]
     async fn calculate_redstone_output(&self, world: &World, block: &Block, pos: &BlockPos) -> u8 {
         let aabb = detection_box_at(pos);
         let entity_triggers = world.get_entities_at_box(&aabb).into_iter().any(|entity| {

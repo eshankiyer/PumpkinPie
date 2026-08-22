@@ -1,26 +1,99 @@
-use crate::{ClientPacket, VarInt, WritingError, ser::NetworkWriteExt};
-use pumpkin_data::packet::clientbound::play::MAP_ITEM_DATA;
-use pumpkin_macros::java_packet;
-use pumpkin_util::text::TextComponent;
 use std::io::Write;
 
+use pumpkin_data::packet::clientbound::play::MAP_ITEM_DATA;
+use pumpkin_macros::java_packet;
+use pumpkin_util::{text::TextComponent, version::JavaMinecraftVersion};
+
+use crate::{ClientPacket, VarInt, WritingError, ser::NetworkWriteExt};
+
 #[java_packet(MAP_ITEM_DATA)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CMapItemData<'a> {
     pub map_id: VarInt,
     pub scale: i8,
+    pub tracking_position: bool,
     pub locked: bool,
     pub icons: Option<&'a [MapIcon]>,
     pub data: Option<MapPatch<'a>>,
 }
 
+impl<'a> CMapItemData<'a> {
+    #[must_use]
+    pub const fn new(
+        map_id: VarInt,
+        scale: i8,
+        tracking_position: bool,
+        locked: bool,
+        icons: Option<&'a [MapIcon]>,
+        data: Option<MapPatch<'a>>,
+    ) -> Self {
+        Self {
+            map_id,
+            scale,
+            tracking_position,
+            locked,
+            icons,
+            data,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MapIcon {
     pub icon_type: VarInt,
     pub x: i8,
     pub z: i8,
     pub direction: i8,
-    pub display_name: Option<String>,
+    pub display_name: Option<TextComponent>,
 }
 
+impl MapIcon {
+    #[must_use]
+    pub const fn new(
+        icon_type: VarInt,
+        x: i8,
+        z: i8,
+        direction: i8,
+        display_name: Option<TextComponent>,
+    ) -> Self {
+        Self {
+            icon_type,
+            x,
+            z,
+            direction,
+            display_name,
+        }
+    }
+
+    pub fn write_with_version(
+        &self,
+        mut write: impl Write,
+        version: &JavaMinecraftVersion,
+    ) -> Result<(), WritingError> {
+        let v1_13 = *version >= JavaMinecraftVersion::V_1_13;
+        if v1_13 {
+            write.write_var_int(&self.icon_type)?;
+            write.write_i8(self.x)?;
+            write.write_i8(self.z)?;
+            write.write_i8(self.direction)?;
+            if let Some(display_name) = &self.display_name {
+                write.write_bool(true)?;
+                write.write_component(display_name, version)?;
+            } else {
+                write.write_bool(false)?;
+            }
+        } else {
+            let type_id = (self.icon_type.0 as u8) & 0x0F;
+            let direction = (self.direction as u8) & 0x0F;
+            write.write_u8((type_id << 4) | direction)?;
+            write.write_i8(self.x)?;
+            write.write_i8(self.z)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MapPatch<'a> {
     pub columns: u8,
     pub rows: u8,
@@ -29,33 +102,48 @@ pub struct MapPatch<'a> {
     pub data: &'a [u8],
 }
 
+impl<'a> MapPatch<'a> {
+    #[must_use]
+    pub const fn new(columns: u8, rows: u8, x: i8, z: i8, data: &'a [u8]) -> Self {
+        Self {
+            columns,
+            rows,
+            x,
+            z,
+            data,
+        }
+    }
+}
+
 impl ClientPacket for CMapItemData<'_> {
     fn write_packet_data(
         &self,
         mut write: impl Write,
-        version: &pumpkin_util::version::JavaMinecraftVersion,
+        version: &JavaMinecraftVersion,
     ) -> Result<(), WritingError> {
         write.write_var_int(&self.map_id)?;
         write.write_i8(self.scale)?;
-        write.write_bool(self.locked)?;
+
+        if *version >= JavaMinecraftVersion::V_1_9 && *version < JavaMinecraftVersion::V_1_17 {
+            write.write_bool(self.tracking_position)?;
+        }
+
+        if *version >= JavaMinecraftVersion::V_1_14 {
+            write.write_bool(self.locked)?;
+        }
 
         if let Some(icons) = self.icons {
-            write.write_bool(true)?;
+            if *version >= JavaMinecraftVersion::V_1_17 {
+                write.write_bool(true)?;
+            }
             write.write_var_int(&VarInt(icons.len() as i32))?;
             for icon in icons {
-                write.write_var_int(&icon.icon_type)?;
-                write.write_i8(icon.x)?;
-                write.write_i8(icon.z)?;
-                write.write_i8(icon.direction)?;
-                if let Some(name) = &icon.display_name {
-                    write.write_bool(true)?;
-                    write.write_component(&TextComponent::text(name.clone()), version)?;
-                } else {
-                    write.write_bool(false)?;
-                }
+                icon.write_with_version(&mut write, version)?;
             }
-        } else {
+        } else if *version >= JavaMinecraftVersion::V_1_17 {
             write.write_bool(false)?;
+        } else {
+            write.write_var_int(&VarInt(0))?;
         }
 
         if let Some(patch) = &self.data {
@@ -94,12 +182,13 @@ mod tests {
     /// `MapId.STREAM_CODEC` (a `VarInt`), `ByteBufCodecs.BYTE`, `ByteBufCodecs.BOOL`, then the
     /// optional decoration list and `MapPatch.STREAM_CODEC`. Absent optionals are a single
     /// `false` byte, and an absent patch is a single zero width byte
-    /// (`MapItemSavedData.MapPatch::write`).
+    /// (`MapItemSavedData.MapPatch::write`). `tracking_position` is not on the wire from 1.17.
     #[test]
     fn empty_packet_is_the_five_byte_minimum() {
         let bytes = serialize(&CMapItemData {
             map_id: VarInt(7),
             scale: 3,
+            tracking_position: false,
             locked: true,
             icons: None,
             data: None,
@@ -115,6 +204,7 @@ mod tests {
         let bytes = serialize(&CMapItemData {
             map_id: VarInt(0),
             scale: 0,
+            tracking_position: false,
             locked: false,
             icons: Some(&[]),
             data: Some(MapPatch {
@@ -135,12 +225,14 @@ mod tests {
 
     /// `MapDecoration.STREAM_CODEC` is holder id (a plain `VarInt` registry id, since
     /// `ByteBufCodecs.holderRegistry` delegates to `registry(..)` which writes the raw id),
-    /// x, y, rot as bytes, then `ComponentSerialization.OPTIONAL_STREAM_CODEC`.
+    /// x, y, rot as bytes, then `ComponentSerialization.OPTIONAL_STREAM_CODEC`
+    /// (`MapDecoration.java:13-25`).
     #[test]
     fn icon_fields_are_id_x_z_rot_then_optional_name() {
         let bytes = serialize(&CMapItemData {
             map_id: VarInt(0),
             scale: 0,
+            tracking_position: false,
             locked: false,
             icons: Some(&[MapIcon {
                 icon_type: VarInt(4),
@@ -154,21 +246,24 @@ mod tests {
         assert_eq!(bytes, vec![0, 0, 0, 1, 1, 4, 0xFE, 100, 15, 0, 0]);
     }
 
-    /// Since 1.20.3 a `Component` on the wire is NBT, not a JSON string. Regressing to a
-    /// length-prefixed JSON string makes the client read the length byte as an NBT tag id
-    /// and drop the connection, so pin both the encoding and its leading tag byte.
+    /// Since 1.20.3 a `Component` on the wire is NBT, not a JSON string
+    /// (`MapDecoration.java:22` uses `ComponentSerialization.OPTIONAL_STREAM_CODEC`).
+    /// Regressing to a length-prefixed JSON string makes the client read the length byte as
+    /// an NBT tag id and drop the connection, so pin both the encoding and its leading tag
+    /// byte.
     #[test]
     fn icon_display_name_is_nbt_not_a_json_string() {
         let bytes = serialize(&CMapItemData {
             map_id: VarInt(0),
             scale: 0,
+            tracking_position: false,
             locked: false,
             icons: Some(&[MapIcon {
                 icon_type: VarInt(0),
                 x: 0,
                 z: 0,
                 direction: 0,
-                display_name: Some("hi".to_string()),
+                display_name: Some(TextComponent::text("hi")),
             }]),
             data: None,
         });

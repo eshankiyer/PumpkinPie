@@ -1,33 +1,42 @@
-use crate::WritingError;
+use std::io::Write;
+
 use crate::codec::bit_set::BitSet;
-use crate::{ClientPacket, VarInt, ser::NetworkWriteExt};
+use crate::codec::var_int::VarInt;
+use crate::ser::{NetworkReadExt, NetworkWriteExt, ReadingError, WritingError};
+use crate::{ClientPacket, ServerPacket};
 use pumpkin_data::packet::clientbound::play::LIGHT_UPDATE;
 use pumpkin_macros::java_packet;
 use pumpkin_util::version::JavaMinecraftVersion;
 use pumpkin_world::chunk::format::LightContainer;
 use pumpkin_world::chunk::{ChunkData, ChunkLight};
-use std::io::Write;
 
 /// Sent by the server to update light levels (block light and sky light) for a chunk.
 ///
 /// This packet updates lighting data for a specific chunk without sending the full chunk data.
-/// It's used when block placement or removal changes the lighting in a chunk.
+/// It was introduced in Minecraft 1.14 (protocol version 477).
+#[derive(Debug, PartialEq, Eq, Clone)]
 #[java_packet(LIGHT_UPDATE)]
-pub struct CLightUpdate<'a>(pub &'a ChunkData, pub Option<&'a [usize]>);
-
-impl<'a> CLightUpdate<'a> {
-    #[must_use]
-    pub const fn new(chunk: &'a ChunkData) -> Self {
-        Self(chunk, None)
-    }
-
-    #[must_use]
-    pub const fn sections(chunk: &'a ChunkData, sections: &'a [usize]) -> Self {
-        Self(chunk, Some(sections))
-    }
+pub struct CLightUpdate {
+    pub chunk_x: VarInt,
+    pub chunk_z: VarInt,
+    pub light_data: LightData,
 }
 
-/// The four masks shared by initial chunk data and incremental light updates.
+pub type CUpdateLight = CLightUpdate;
+
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub struct LightData {
+    pub trust_edges: bool,
+    pub sky_light_mask: BitSet,
+    pub block_light_mask: BitSet,
+    pub empty_sky_light_mask: BitSet,
+    pub empty_block_light_mask: BitSet,
+    pub sky_light_arrays: Vec<Vec<u8>>,
+    pub block_light_arrays: Vec<Vec<u8>>,
+}
+
+/// The four masks shared by initial chunk data (`CChunkData`, 1.18+) and incremental light
+/// updates.
 ///
 /// Minecraft numbers light sections from the padding section below the world, so physical chunk
 /// section zero is bit one and the final above-world padding section is also explicitly empty.
@@ -38,14 +47,26 @@ pub(super) struct LightMasks {
     pub empty_block: u64,
 }
 
-/// Java's `DataLayer.isEmpty()` is true only for an implicit zero-filled layer.
-/// `Empty(15)` is a uniform layer in Pumpkin's storage representation, but it is
-/// a real full-data layer in the wire protocol and must be included in the data
-/// mask with a serialized 0xFF array.
+/// Java's `DataLayer.isEmpty()` is `data == null && defaultValue == 0`
+/// (`DataLayer.java:141-143`), so it is true only for an implicit zero-filled layer.
+/// `Empty(15)` is a uniform layer in Pumpkin's storage representation, but it is a real
+/// full-data layer in the wire protocol and must be included in the data mask with a
+/// serialized 0xFF array.
 pub(super) const fn light_container_has_data(container: &LightContainer) -> bool {
     !matches!(container, LightContainer::Empty(0))
 }
 
+/// The 2048-byte nibble array a light container serializes to.
+pub(super) fn light_container_bytes(container: &LightContainer) -> Vec<u8> {
+    match container {
+        LightContainer::Full(data) => data.to_vec(),
+        LightContainer::Empty(default) => {
+            vec![default << 4 | default; LightContainer::ARRAY_SIZE]
+        }
+    }
+}
+
+/// Writes one light container as a `VarInt`-prefixed 2048-byte array.
 pub(super) fn write_light_container(
     write: &mut impl Write,
     container: &LightContainer,
@@ -66,6 +87,9 @@ pub(super) fn light_masks(light_engine: &ChunkLight) -> LightMasks {
     light_masks_for_sections(light_engine, None)
 }
 
+/// When `changed_sections` is `Some`, only those physical sections appear in any mask and the
+/// below/above-world padding bits are deliberately omitted: an incremental update must not
+/// claim to describe sections it does not carry arrays for.
 pub(super) fn light_masks_for_sections(
     light_engine: &ChunkLight,
     changed_sections: Option<&[usize]>,
@@ -100,7 +124,7 @@ pub(super) fn light_masks_for_sections(
         }
     }
 
-    if changed_sections.is_none() {
+    if include_padding {
         let above_world_bit = num_sections + 1;
         masks.empty_sky |= 1 << above_world_bit;
         masks.empty_block |= 1 << above_world_bit;
@@ -108,65 +132,435 @@ pub(super) fn light_masks_for_sections(
     masks
 }
 
-impl ClientPacket for CLightUpdate<'_> {
-    fn write_packet_data(
-        &self,
-        write: impl Write,
-        version: &JavaMinecraftVersion,
-    ) -> Result<(), WritingError> {
-        let mut write = write;
+impl CLightUpdate {
+    #[must_use]
+    pub const fn new(chunk_x: VarInt, chunk_z: VarInt, light_data: LightData) -> Self {
+        Self {
+            chunk_x,
+            chunk_z,
+            light_data,
+        }
+    }
 
-        // Chunk X
-        write.write_var_int(&VarInt(self.0.x))?;
-        // Chunk Z
-        write.write_var_int(&VarInt(self.0.z))?;
+    pub fn from_chunk(
+        chunk: &ChunkData,
+        version: JavaMinecraftVersion,
+    ) -> Result<Self, WritingError> {
+        Self::sections_inner(chunk, version, None)
+    }
 
-        let light_engine = self
-            .0
+    /// An incremental update carrying only the sections the light engine marked dirty, as
+    /// vanilla's `ServerChunkCache` does when propagation touches a subset of a chunk.
+    pub fn sections(
+        chunk: &ChunkData,
+        sections: &[usize],
+        version: JavaMinecraftVersion,
+    ) -> Result<Self, WritingError> {
+        Self::sections_inner(chunk, version, Some(sections))
+    }
+
+    fn sections_inner(
+        chunk: &ChunkData,
+        version: JavaMinecraftVersion,
+        sections: Option<&[usize]>,
+    ) -> Result<Self, WritingError> {
+        let light_data = LightData::from_chunk_sections(chunk, version, sections)?;
+        Ok(Self {
+            chunk_x: VarInt(chunk.x),
+            chunk_z: VarInt(chunk.z),
+            light_data,
+        })
+    }
+}
+
+impl LightData {
+    #[must_use]
+    pub const fn new(
+        trust_edges: bool,
+        sky_light_mask: BitSet,
+        block_light_mask: BitSet,
+        empty_sky_light_mask: BitSet,
+        empty_block_light_mask: BitSet,
+        sky_light_arrays: Vec<Vec<u8>>,
+        block_light_arrays: Vec<Vec<u8>>,
+    ) -> Self {
+        Self {
+            trust_edges,
+            sky_light_mask,
+            block_light_mask,
+            empty_sky_light_mask,
+            empty_block_light_mask,
+            sky_light_arrays,
+            block_light_arrays,
+        }
+    }
+
+    pub fn from_chunk(
+        chunk: &ChunkData,
+        version: JavaMinecraftVersion,
+    ) -> Result<Self, WritingError> {
+        Self::from_chunk_sections(chunk, version, None)
+    }
+
+    /// `changed_sections` is honoured only on the 1.18+ path; pre-1.18 clients have no
+    /// incremental section addressing here and always receive the full column.
+    #[expect(clippy::too_many_lines)]
+    pub fn from_chunk_sections(
+        chunk: &ChunkData,
+        version: JavaMinecraftVersion,
+        changed_sections: Option<&[usize]>,
+    ) -> Result<Self, WritingError> {
+        let light_engine = chunk
             .light_engine
             .lock()
             .map_err(|_| WritingError::Message("light_engine lock poisoned".into()))?;
-        let num_sections = light_engine.sky_light.len();
-        let masks = light_masks_for_sections(&light_engine, self.1);
 
-        if version < &JavaMinecraftVersion::V_1_20_2 {
-            write.write_bool(true)?; // trust edges (removed in 1.20.2)
+        if version < JavaMinecraftVersion::V_1_18 {
+            let base_section = (0 - chunk.section.min_y).max(0) as usize / 16;
+            let mut sky_light_mask = 0u64;
+            let mut block_light_mask = 0u64;
+            let mut sky_light_empty_mask = 0u64;
+            let mut block_light_empty_mask = 0u64;
+            let mut sky_light_arrays = Vec::new();
+            let mut block_light_arrays = Vec::new();
+
+            // Bit 0: Y = -1 (below world section 0)
+            if base_section > 0 && base_section - 1 < light_engine.sky_light.len() {
+                match &light_engine.sky_light[base_section - 1] {
+                    LightContainer::Full(data) => {
+                        sky_light_mask |= 1 << 0;
+                        sky_light_arrays.push(data.to_vec());
+                    }
+                    LightContainer::Empty(val) if *val > 0 => {
+                        sky_light_mask |= 1 << 0;
+                        sky_light_arrays.push(vec![*val << 4 | *val; 2048]);
+                    }
+                    LightContainer::Empty(_) => {
+                        sky_light_empty_mask |= 1 << 0;
+                    }
+                }
+            } else {
+                sky_light_empty_mask |= 1 << 0;
+            }
+
+            if base_section > 0 && base_section - 1 < light_engine.block_light.len() {
+                match &light_engine.block_light[base_section - 1] {
+                    LightContainer::Full(data) => {
+                        block_light_mask |= 1 << 0;
+                        block_light_arrays.push(data.to_vec());
+                    }
+                    LightContainer::Empty(val) if *val > 0 => {
+                        block_light_mask |= 1 << 0;
+                        block_light_arrays.push(vec![*val << 4 | *val; 2048]);
+                    }
+                    LightContainer::Empty(_) => {
+                        block_light_empty_mask |= 1 << 0;
+                    }
+                }
+            } else {
+                block_light_empty_mask |= 1 << 0;
+            }
+
+            // Bits 1..=16: world sections (Y = 0..15)
+            for i in 0..16 {
+                let bit_index = i + 1;
+                let sec_idx = base_section + i;
+
+                if sec_idx < light_engine.sky_light.len() {
+                    match &light_engine.sky_light[sec_idx] {
+                        LightContainer::Full(data) => {
+                            sky_light_mask |= 1 << bit_index;
+                            sky_light_arrays.push(data.to_vec());
+                        }
+                        LightContainer::Empty(val) if *val > 0 => {
+                            sky_light_mask |= 1 << bit_index;
+                            sky_light_arrays.push(vec![*val << 4 | *val; 2048]);
+                        }
+                        LightContainer::Empty(_) => {
+                            sky_light_empty_mask |= 1 << bit_index;
+                        }
+                    }
+                } else {
+                    sky_light_empty_mask |= 1 << bit_index;
+                }
+
+                if sec_idx < light_engine.block_light.len() {
+                    match &light_engine.block_light[sec_idx] {
+                        LightContainer::Full(data) => {
+                            block_light_mask |= 1 << bit_index;
+                            block_light_arrays.push(data.to_vec());
+                        }
+                        LightContainer::Empty(val) if *val > 0 => {
+                            block_light_mask |= 1 << bit_index;
+                            block_light_arrays.push(vec![*val << 4 | *val; 2048]);
+                        }
+                        LightContainer::Empty(_) => {
+                            block_light_empty_mask |= 1 << bit_index;
+                        }
+                    }
+                } else {
+                    block_light_empty_mask |= 1 << bit_index;
+                }
+            }
+
+            // Bit 17: Y = 16 (above world section 15)
+            let top_sec = base_section + 16;
+            if top_sec < light_engine.sky_light.len() {
+                match &light_engine.sky_light[top_sec] {
+                    LightContainer::Full(data) => {
+                        sky_light_mask |= 1 << 17;
+                        sky_light_arrays.push(data.to_vec());
+                    }
+                    LightContainer::Empty(val) if *val > 0 => {
+                        sky_light_mask |= 1 << 17;
+                        sky_light_arrays.push(vec![*val << 4 | *val; 2048]);
+                    }
+                    LightContainer::Empty(_) => {
+                        sky_light_empty_mask |= 1 << 17;
+                    }
+                }
+            } else {
+                sky_light_empty_mask |= 1 << 17;
+            }
+
+            if top_sec < light_engine.block_light.len() {
+                match &light_engine.block_light[top_sec] {
+                    LightContainer::Full(data) => {
+                        block_light_mask |= 1 << 17;
+                        block_light_arrays.push(data.to_vec());
+                    }
+                    LightContainer::Empty(val) if *val > 0 => {
+                        block_light_mask |= 1 << 17;
+                        block_light_arrays.push(vec![*val << 4 | *val; 2048]);
+                    }
+                    LightContainer::Empty(_) => {
+                        block_light_empty_mask |= 1 << 17;
+                    }
+                }
+            } else {
+                block_light_empty_mask |= 1 << 17;
+            }
+
+            Ok(Self {
+                trust_edges: true,
+                sky_light_mask: BitSet::from_u64(sky_light_mask),
+                block_light_mask: BitSet::from_u64(block_light_mask),
+                empty_sky_light_mask: BitSet::from_u64(sky_light_empty_mask),
+                empty_block_light_mask: BitSet::from_u64(block_light_empty_mask),
+                sky_light_arrays,
+                block_light_arrays,
+            })
+        } else {
+            let num_sections = light_engine.sky_light.len();
+            // A uniform `Empty(15)` layer is real full data on the wire - only an implicit
+            // zero layer is `DataLayer.isEmpty()` (`DataLayer.java:141-143`) - so it belongs
+            // in the data mask with a serialized 0xFF array.
+            let masks = light_masks_for_sections(&light_engine, changed_sections);
+
+            let mut sky_light_arrays = Vec::new();
+            let mut block_light_arrays = Vec::new();
+
+            for section_index in 0..num_sections {
+                if changed_sections.is_some_and(|sections| !sections.contains(&section_index)) {
+                    continue;
+                }
+
+                if light_container_has_data(&light_engine.sky_light[section_index]) {
+                    sky_light_arrays.push(light_container_bytes(
+                        &light_engine.sky_light[section_index],
+                    ));
+                }
+                if light_container_has_data(&light_engine.block_light[section_index]) {
+                    block_light_arrays.push(light_container_bytes(
+                        &light_engine.block_light[section_index],
+                    ));
+                }
+            }
+
+            Ok(Self {
+                trust_edges: true,
+                sky_light_mask: BitSet::from_u64(masks.sky),
+                block_light_mask: BitSet::from_u64(masks.block),
+                empty_sky_light_mask: BitSet::from_u64(masks.empty_sky),
+                empty_block_light_mask: BitSet::from_u64(masks.empty_block),
+                sky_light_arrays,
+                block_light_arrays,
+            })
+        }
+    }
+
+    pub fn write(
+        &self,
+        mut write: impl Write,
+        version: &JavaMinecraftVersion,
+    ) -> Result<(), WritingError> {
+        // Trust edges (1.16 - 1.19.4; added in 1.16, removed in 1.20)
+        if *version >= JavaMinecraftVersion::V_1_16 && *version <= JavaMinecraftVersion::V_1_19_4 {
+            write.write_bool(self.trust_edges)?;
         }
 
-        // Write Sky Light Mask
-        write.write_bitset(&BitSet(Box::new([masks.sky as i64])))?;
-        // Write Block Light Mask
-        write.write_bitset(&BitSet(Box::new([masks.block as i64])))?;
-        // Write Empty Sky Light Mask
-        write.write_bitset(&BitSet(Box::new([masks.empty_sky as i64])))?;
-        // Write Empty Block Light Mask
-        write.write_bitset(&BitSet(Box::new([masks.empty_block as i64])))?;
+        // Chunk bitmasks
+        if *version >= JavaMinecraftVersion::V_1_17 {
+            write.write_bitset(&self.sky_light_mask)?;
+            write.write_bitset(&self.block_light_mask)?;
+            write.write_bitset(&self.empty_sky_light_mask)?;
+            write.write_bitset(&self.empty_block_light_mask)?;
+        } else {
+            write.write_var_int(&VarInt(self.sky_light_mask.as_u64() as i32))?;
+            write.write_var_int(&VarInt(self.block_light_mask.as_u64() as i32))?;
+            write.write_var_int(&VarInt(self.empty_sky_light_mask.as_u64() as i32))?;
+            write.write_var_int(&VarInt(self.empty_block_light_mask.as_u64() as i32))?;
+        }
 
-        // Write Sky Light arrays
-        write.write_var_int(&VarInt(masks.sky.count_ones() as i32))?;
-        for section_index in 0..num_sections {
-            if self
-                .1
-                .is_none_or(|sections| sections.contains(&section_index))
-                && light_container_has_data(&light_engine.sky_light[section_index])
-            {
-                write_light_container(&mut write, &light_engine.sky_light[section_index])?;
+        // Sky light arrays
+        if *version >= JavaMinecraftVersion::V_1_17 {
+            write.write_var_int(&VarInt(self.sky_light_arrays.len() as i32))?;
+            for array in &self.sky_light_arrays {
+                write.write_var_int(&VarInt(array.len() as i32))?;
+                write.write_slice(array)?;
+            }
+        } else {
+            let mut array_idx = 0;
+            for i in 0..18 {
+                if self.sky_light_mask.get_bit(i)
+                    && let Some(array) = self.sky_light_arrays.get(array_idx)
+                {
+                    write.write_var_int(&VarInt(array.len() as i32))?;
+                    write.write_slice(array)?;
+                    array_idx += 1;
+                }
             }
         }
 
-        // Write Block Light arrays
-        write.write_var_int(&VarInt(masks.block.count_ones() as i32))?;
-        for section_index in 0..num_sections {
-            if self
-                .1
-                .is_none_or(|sections| sections.contains(&section_index))
-                && light_container_has_data(&light_engine.block_light[section_index])
-            {
-                write_light_container(&mut write, &light_engine.block_light[section_index])?;
+        // Block light arrays
+        if *version >= JavaMinecraftVersion::V_1_17 {
+            write.write_var_int(&VarInt(self.block_light_arrays.len() as i32))?;
+            for array in &self.block_light_arrays {
+                write.write_var_int(&VarInt(array.len() as i32))?;
+                write.write_slice(array)?;
+            }
+        } else {
+            let mut array_idx = 0;
+            for i in 0..18 {
+                if self.block_light_mask.get_bit(i)
+                    && let Some(array) = self.block_light_arrays.get(array_idx)
+                {
+                    write.write_var_int(&VarInt(array.len() as i32))?;
+                    write.write_slice(array)?;
+                    array_idx += 1;
+                }
             }
         }
 
         Ok(())
+    }
+
+    pub fn read(bytebuf: &mut &[u8], version: &JavaMinecraftVersion) -> Result<Self, ReadingError> {
+        let trust_edges = if *version >= JavaMinecraftVersion::V_1_16
+            && *version <= JavaMinecraftVersion::V_1_19_4
+        {
+            bytebuf.get_bool()?
+        } else {
+            false
+        };
+
+        let (sky_light_mask, block_light_mask, empty_sky_light_mask, empty_block_light_mask) =
+            if *version >= JavaMinecraftVersion::V_1_17 {
+                (
+                    BitSet::decode(bytebuf)?,
+                    BitSet::decode(bytebuf)?,
+                    BitSet::decode(bytebuf)?,
+                    BitSet::decode(bytebuf)?,
+                )
+            } else {
+                (
+                    BitSet::from_u64(bytebuf.get_var_int()?.0 as u64),
+                    BitSet::from_u64(bytebuf.get_var_int()?.0 as u64),
+                    BitSet::from_u64(bytebuf.get_var_int()?.0 as u64),
+                    BitSet::from_u64(bytebuf.get_var_int()?.0 as u64),
+                )
+            };
+
+        let sky_light_arrays = if *version >= JavaMinecraftVersion::V_1_17 {
+            let count = bytebuf.get_var_int()?.0 as usize;
+            let mut arrays = Vec::with_capacity(count);
+            for _ in 0..count {
+                let len = bytebuf.get_var_int()?.0 as usize;
+                let mut buf = vec![0u8; len];
+                bytebuf.read_bytes_to_buf(&mut buf)?;
+                arrays.push(buf);
+            }
+            arrays
+        } else {
+            let mut arrays = Vec::new();
+            for i in 0..18 {
+                if sky_light_mask.get_bit(i) {
+                    let len = bytebuf.get_var_int()?.0 as usize;
+                    let mut buf = vec![0u8; len];
+                    bytebuf.read_bytes_to_buf(&mut buf)?;
+                    arrays.push(buf);
+                }
+            }
+            arrays
+        };
+
+        let block_light_arrays = if *version >= JavaMinecraftVersion::V_1_17 {
+            let count = bytebuf.get_var_int()?.0 as usize;
+            let mut arrays = Vec::with_capacity(count);
+            for _ in 0..count {
+                let len = bytebuf.get_var_int()?.0 as usize;
+                let mut buf = vec![0u8; len];
+                bytebuf.read_bytes_to_buf(&mut buf)?;
+                arrays.push(buf);
+            }
+            arrays
+        } else {
+            let mut arrays = Vec::new();
+            for i in 0..18 {
+                if block_light_mask.get_bit(i) {
+                    let len = bytebuf.get_var_int()?.0 as usize;
+                    let mut buf = vec![0u8; len];
+                    bytebuf.read_bytes_to_buf(&mut buf)?;
+                    arrays.push(buf);
+                }
+            }
+            arrays
+        };
+
+        Ok(Self {
+            trust_edges,
+            sky_light_mask,
+            block_light_mask,
+            empty_sky_light_mask,
+            empty_block_light_mask,
+            sky_light_arrays,
+            block_light_arrays,
+        })
+    }
+}
+
+impl ClientPacket for CLightUpdate {
+    fn write_packet_data(
+        &self,
+        mut write: impl Write,
+        version: &JavaMinecraftVersion,
+    ) -> Result<(), WritingError> {
+        write.write_var_int(&self.chunk_x)?;
+        write.write_var_int(&self.chunk_z)?;
+        self.light_data.write(&mut write, version)
+    }
+}
+
+impl<'a> ServerPacket<'a> for CLightUpdate {
+    fn read(bytebuf: &mut &'a [u8], version: &JavaMinecraftVersion) -> Result<Self, ReadingError> {
+        let chunk_x = bytebuf.get_var_int()?;
+        let chunk_z = bytebuf.get_var_int()?;
+        let light_data = LightData::read(bytebuf, version)?;
+        Ok(Self {
+            chunk_x,
+            chunk_z,
+            light_data,
+        })
     }
 }
 
@@ -209,7 +603,8 @@ mod tests {
 
     fn serialize(chunk: &ChunkData) -> Vec<u8> {
         let mut out = Vec::new();
-        CLightUpdate::new(chunk)
+        CLightUpdate::from_chunk(chunk, JavaMinecraftVersion::V_26_2)
+            .unwrap()
             .write_packet_data(&mut out, &JavaMinecraftVersion::V_26_2)
             .unwrap();
         out
@@ -217,14 +612,14 @@ mod tests {
 
     fn serialize_sections(chunk: &ChunkData, sections: &[usize]) -> Vec<u8> {
         let mut out = Vec::new();
-        CLightUpdate::sections(chunk, sections)
+        CLightUpdate::sections(chunk, sections, JavaMinecraftVersion::V_26_2)
+            .unwrap()
             .write_packet_data(&mut out, &JavaMinecraftVersion::V_26_2)
             .unwrap();
         out
     }
 
-    /// The client's nibble layout, per the Mojang-named 1.21.4 source
-    /// (`net/minecraft/world/level/chunk/DataLayer.java`):
+    /// The client's nibble layout, per `DataLayer.java`:
     ///
     /// ```java
     /// getIndex(x, y, z) { return y << 8 | z << 4 | x; }
@@ -234,15 +629,15 @@ mod tests {
     /// ```
     ///
     /// So `y` is slowest-varying and `x` fastest, index parity 0 is the LOW nibble, and each
-    /// section is `4096 / 2 = 2048` bytes (`DataLayer.SIZE`). The packet framing is from
-    /// <https://minecraft.wiki/w/Java_Edition_protocol> for protocol 776 (Minecraft 26.2):
-    /// four `BitSet`s (sky, block, empty sky, empty block), then a prefixed array of sky light
-    /// arrays - "There is 1 array for each bit set to true in the sky light mask, starting
-    /// with the lowest value" - then the same for block light, each inner array length 2048.
+    /// section is `4096 / 2 = 2048` bytes (`DataLayer.java:11`, `SIZE`). The packet framing is
+    /// from <https://minecraft.wiki/w/Java_Edition_protocol>: four `BitSet`s (sky, block,
+    /// empty sky, empty block), then a prefixed array of sky light arrays - "There is 1 array
+    /// for each bit set to true in the sky light mask, starting with the lowest value" - then
+    /// the same for block light, each inner array length 2048.
     ///
-    /// This asserts the byte at the exact protocol offset rather than reading the code, which
-    /// is what the tracker demands. Point chosen with x != z != y so that BOTH a transposed
-    /// index formula and a swapped nibble parity move the answer:
+    /// This asserts the byte at the exact protocol offset rather than reading the code. Point
+    /// chosen with x != z != y so that BOTH a transposed index formula and a swapped nibble
+    /// parity move the answer:
     ///   correct:    idx = 2*256 + 3*16 + 1 = 561 -> byte 280, HIGH nibble  -> 0xA0
     ///   transposed: idx = 1*256 + 3*16 + 2 = 306 -> byte 153, LOW nibble
     #[test]

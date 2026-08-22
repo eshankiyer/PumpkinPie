@@ -1,12 +1,11 @@
 use crate::entity::EntityBase;
-use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::BlockProperties;
 use pumpkin_data::block_properties::Half;
 use pumpkin_data::block_properties::HorizontalAxis;
 use pumpkin_data::block_properties::HorizontalFacing;
 use pumpkin_data::block_properties::StairsShape;
 use pumpkin_data::tag::Taggable;
-use pumpkin_data::{Block, BlockDirection, BlockState, Mirror, Rotation, tag};
+use pumpkin_data::{Block, BlockDirection, BlockState, BlockStateId, Mirror, Rotation, tag};
 use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockFlags;
@@ -112,11 +111,6 @@ impl BlockBehaviour for StairBlock {
         })
     }
 
-    fn mirror(&self, block: &Block, state_id: BlockStateId, mirror: Mirror) -> &'static BlockState {
-        let stair = StairsProperties::from_state_id(state_id, block);
-        BlockState::from_id(mirror_stairs(stair, mirror).to_state_id(block))
-    }
-
     fn rotate(
         &self,
         block: &Block,
@@ -126,53 +120,10 @@ impl BlockBehaviour for StairBlock {
         let stair = StairsProperties::from_state_id(state_id, block);
         BlockState::from_id(rotate_stairs(stair, rotation).to_state_id(block))
     }
-}
 
-const fn rotate_facing(facing: HorizontalFacing, rotation: Rotation) -> HorizontalFacing {
-    match rotation {
-        Rotation::None => facing,
-        Rotation::Clockwise90 => facing.rotate_clockwise(),
-        Rotation::Rotate180 => facing.opposite(),
-        Rotation::CounterClockwise90 => facing.rotate_counter_clockwise(),
-    }
-}
-
-/// Matches vanilla `StairBlock.rotate`: only the facing changes, the shape is untouched.
-const fn rotate_stairs(mut stair: StairsProperties, rotation: Rotation) -> StairsProperties {
-    stair.facing = rotate_facing(stair.facing, rotation);
-    stair
-}
-
-/// Matches vanilla `StairBlock.mirror`. A mirror only has an effect when the facing's axis
-/// lines up with the mirror axis (`LEFT_RIGHT` mirrors Z-axis facings, `FRONT_BACK` mirrors
-/// X-axis facings) - otherwise it falls through to the block-behaviour default (identity).
-/// When it does apply, the facing is rotated 180 degrees and the inner/outer shape is
-/// swapped left<->right, except that `FRONT_BACK` leaves `INNER_LEFT`/`INNER_RIGHT`/
-/// `STRAIGHT` unchanged - this asymmetry with `LEFT_RIGHT` is intentional, straight from
-/// vanilla source, not a transcription error.
-fn mirror_stairs(mut stair: StairsProperties, mirror: Mirror) -> StairsProperties {
-    match mirror {
-        Mirror::LeftRight if stair.facing.to_axis() == HorizontalAxis::Z => {
-            stair.facing = rotate_facing(stair.facing, Rotation::Rotate180);
-            stair.shape = match stair.shape {
-                StairsShape::OuterLeft => StairsShape::OuterRight,
-                StairsShape::OuterRight => StairsShape::OuterLeft,
-                StairsShape::InnerLeft => StairsShape::InnerRight,
-                StairsShape::InnerRight => StairsShape::InnerLeft,
-                StairsShape::Straight => StairsShape::Straight,
-            };
-            stair
-        }
-        Mirror::FrontBack if stair.facing.to_axis() == HorizontalAxis::X => {
-            stair.facing = rotate_facing(stair.facing, Rotation::Rotate180);
-            stair.shape = match stair.shape {
-                StairsShape::OuterLeft => StairsShape::OuterRight,
-                StairsShape::OuterRight => StairsShape::OuterLeft,
-                other => other,
-            };
-            stair
-        }
-        _ => stair,
+    fn mirror(&self, block: &Block, state_id: BlockStateId, mirror: Mirror) -> &'static BlockState {
+        let stair = StairsProperties::from_state_id(state_id, block);
+        BlockState::from_id(mirror_stairs(stair, mirror).to_state_id(block))
     }
 }
 
@@ -232,6 +183,54 @@ fn get_stair_properties_if_exists(world: &World, block_pos: &BlockPos) -> Option
     block
         .has_tag(&tag::Block::MINECRAFT_STAIRS)
         .then(|| StairsProperties::from_state_id(block_state, block))
+}
+
+const fn rotate_facing(facing: HorizontalFacing, rotation: Rotation) -> HorizontalFacing {
+    match rotation {
+        Rotation::None => facing,
+        Rotation::Clockwise90 => facing.rotate_clockwise(),
+        Rotation::Rotate180 => facing.opposite(),
+        Rotation::CounterClockwise90 => facing.rotate_counter_clockwise(),
+    }
+}
+
+/// Matches vanilla `StairBlock.rotate`: only the facing changes, the shape is untouched.
+const fn rotate_stairs(mut stair: StairsProperties, rotation: Rotation) -> StairsProperties {
+    stair.facing = rotate_facing(stair.facing, rotation);
+    stair
+}
+
+/// Matches vanilla `StairBlock.mirror`. A mirror only has an effect when the facing's axis
+/// lines up with the mirror axis (`LEFT_RIGHT` mirrors Z-axis facings, `FRONT_BACK` mirrors
+/// X-axis facings) - otherwise it falls through to the block-behaviour default (identity).
+/// When it does apply, the facing is rotated 180 degrees and the inner/outer shape is
+/// swapped left<->right, except that `FRONT_BACK` leaves `INNER_LEFT`/`INNER_RIGHT`/
+/// `STRAIGHT` unchanged - this asymmetry with `LEFT_RIGHT` is intentional, straight from
+/// vanilla source, not a transcription error.
+fn mirror_stairs(mut stair: StairsProperties, mirror: Mirror) -> StairsProperties {
+    match mirror {
+        Mirror::LeftRight if stair.facing.to_axis() == HorizontalAxis::Z => {
+            stair.facing = rotate_facing(stair.facing, Rotation::Rotate180);
+            stair.shape = match stair.shape {
+                StairsShape::OuterLeft => StairsShape::OuterRight,
+                StairsShape::OuterRight => StairsShape::OuterLeft,
+                StairsShape::InnerLeft => StairsShape::InnerRight,
+                StairsShape::InnerRight => StairsShape::InnerLeft,
+                StairsShape::Straight => StairsShape::Straight,
+            };
+            stair
+        }
+        Mirror::FrontBack if stair.facing.to_axis() == HorizontalAxis::X => {
+            stair.facing = rotate_facing(stair.facing, Rotation::Rotate180);
+            stair.shape = match stair.shape {
+                StairsShape::OuterLeft => StairsShape::OuterRight,
+                StairsShape::OuterRight => StairsShape::OuterLeft,
+                other => other,
+            };
+            stair
+        }
+        _ => stair,
+    }
 }
 
 #[cfg(test)]

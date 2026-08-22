@@ -14,6 +14,13 @@ pub mod position_finder;
 /// identifies trees by address and needs that guarantee.
 static OVERWORLD_TREE: BiomeTree = OVERWORLD_BIOME_SOURCE;
 static NETHER_TREE: BiomeTree = NETHER_BIOME_SOURCE;
+pub use position_finder::{
+    Climate, ClimateSampler, DistanceMetric, FittestPositionFinder, FittestPositionFinderResult,
+    ParameterList, RTree, RTreeLeaf, RTreeNode, RTreeSubTree, SpawnFinder, SpawnFinderResult,
+};
+pub use pumpkin_data::chunk::{
+    Parameter, ParameterPoint, ParameterRange, TargetPoint, quantize_coord, unquantize_coord,
+};
 
 thread_local! {
     /// A shortcut; check if last used biome is what we should use.
