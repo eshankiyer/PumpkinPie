@@ -113,6 +113,19 @@ impl EntityBase for LingeringPotionEntity {
             // Only extinguish fire for plain water potions
             let stack = self.item_stack.read().await.clone();
             extinguish_fire_if_water_potion(&world, hit_pos, &stack).await;
+            // `AbstractThrownPotion.onHit` (`AbstractThrownPotion.java:70-85`) runs the water
+            // branch for the lingering potion too, so a lingering water bottle also burns
+            // endermen, douses burning mobs and rehydrates axolotls.
+            let owner = self
+                .thrown
+                .owner_id
+                .and_then(|id| world.get_entity_by_id(id));
+            crate::entity::projectile::splash_potion::apply_water_potion_entity_effects(
+                self,
+                owner.as_deref(),
+                &stack,
+            )
+            .await;
 
             // Play impact particles
             world.send_entity_status(self.get_entity(), EntityStatus::Death, None);
@@ -121,12 +134,9 @@ impl EntityBase for LingeringPotionEntity {
             let stack = self.item_stack.read().await.clone();
             let effects = crate::item::potion::PotionContents::read_potion_effects(&stack);
 
-            // If no effects, just splash (like water bottles)
-            if effects.is_empty() {
-                return;
-            }
-
-            // Play splash/break particles & sound
+            // Play splash/break particles & sound. `AbstractThrownPotion.onHit`
+            // (`AbstractThrownPotion.java:81-82`) emits the level event unconditionally, before
+            // the effect branch, so a plain water bottle still splashes.
             let mut color = 0x385dc6; // default water-like color
             if let Some(pc) =
                 stack.get_data_component::<pumpkin_data::data_component_impl::PotionContentsImpl>()
@@ -181,6 +191,12 @@ impl EntityBase for LingeringPotionEntity {
                 chunk_pos,
                 &CWorldEvent::new(event_id, block_pos, color, false),
             );
+
+            // `ThrownLingeringPotion.onHitAsPotion` is only reached for a potion that actually
+            // has effects (`AbstractThrownPotion.java:77-79`), so a water bottle leaves no cloud.
+            if effects.is_empty() {
+                return;
+            }
 
             // Spawn and configure an `AreaEffectCloud` entity
             let cloud_entity = crate::entity::Entity::from_uuid(

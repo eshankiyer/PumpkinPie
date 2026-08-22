@@ -14,7 +14,7 @@ use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_protocol::IdOr;
-use pumpkin_protocol::java::client::play::{CEntityVelocity, CSoundEffect};
+use pumpkin_protocol::java::client::play::{CEntityVelocity, CSoundEffect, Metadata};
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
@@ -33,6 +33,19 @@ pub struct TridentEntity {
     pub shake_time: AtomicU8,
     pub has_hit: AtomicBool,
     pub last_block_pos: Arc<std::sync::RwLock<Option<BlockPos>>>,
+    /// `ThrownTrident.dealtDamage` (`ThrownTrident.java:36`): set once the trident has hit
+    /// something, which is one of the two conditions that lets a loyal trident start returning.
+    pub dealt_damage: AtomicBool,
+    /// `ThrownTrident.tick` sets `setNoPhysics(true)` while returning
+    /// (`ThrownTrident.java:83`), so the returning trident passes through blocks.
+    pub no_physics: AtomicBool,
+    /// `ThrownTrident.clientSideReturnTridentTickCount` (`ThrownTrident.java:37`); only used
+    /// server side here to play the return sound exactly once.
+    pub return_tick_count: AtomicU32,
+    /// `ThrownTrident.ID_LOYALTY` (`ThrownTrident.java:32`), set from the item's Loyalty level
+    /// via `EnchantmentHelper.getTridentReturnToOwnerAcceleration`
+    /// (`EnchantmentHelper.java:415-421`).
+    pub loyalty: AtomicU8,
 }
 
 impl TridentEntity {
@@ -56,6 +69,10 @@ impl TridentEntity {
             shake_time: AtomicU8::new(0),
             has_hit: AtomicBool::new(false),
             last_block_pos: Arc::new(std::sync::RwLock::new(None)),
+            dealt_damage: AtomicBool::new(false),
+            no_physics: AtomicBool::new(false),
+            return_tick_count: AtomicU32::new(0),
+            loyalty: AtomicU8::new(0),
         }
     }
 
@@ -65,6 +82,11 @@ impl TridentEntity {
         item_stack: ItemStack,
         pickup: ArrowPickup,
     ) -> Self {
+        // `ThrownTrident(Level, LivingEntity, ItemStack)` (`ThrownTrident.java:43-47`) sets
+        // `ID_LOYALTY` at construction from the thrown stack.
+        let loyalty = item_stack
+            .get_enchantment_level(&pumpkin_data::Enchantment::LOYALTY)
+            .clamp(0, i32::from(u8::MAX)) as u8;
         let mut owner_pos = shooter.pos.load();
         owner_pos.y = owner_pos.y + f64::from(shooter.entity_dimension.load().eye_height) - 0.1;
         entity.pos.store(owner_pos);
@@ -81,6 +103,10 @@ impl TridentEntity {
             shake_time: AtomicU8::new(0),
             has_hit: AtomicBool::new(false),
             last_block_pos: Arc::new(std::sync::RwLock::new(None)),
+            dealt_damage: AtomicBool::new(false),
+            no_physics: AtomicBool::new(false),
+            return_tick_count: AtomicU32::new(0),
+            loyalty: AtomicU8::new(loyalty),
         }
     }
 
@@ -155,11 +181,233 @@ impl TridentEntity {
 
         false
     }
+
+    /// `ThrownTrident.tick` (`ThrownTrident.java:63-97`), the Loyalty return leg. Returns `true`
+    /// when the trident is flying home, in which case the caller must skip the normal movement
+    /// and collision sweep -- vanilla sets `noPhysics`, so a returning trident hits nothing.
+    async fn tick_loyalty_return(&self, world: &Arc<crate::world::World>) -> bool {
+        let entity = self.get_entity();
+
+        // `ThrownTrident.java:64-66`: a trident stuck for more than four ticks counts as having
+        // dealt damage, which is the second way a loyal trident becomes eligible to return.
+        if self.in_ground_time.load(Ordering::Relaxed) > 4 {
+            self.dealt_damage.store(true, Ordering::Relaxed);
+        }
+
+        let loyalty = self.loyalty.load(Ordering::Relaxed);
+        if loyalty == 0
+            || !(self.dealt_damage.load(Ordering::Relaxed)
+                || self.no_physics.load(Ordering::Relaxed))
+        {
+            return false;
+        }
+        let Some(owner) = self.owner_id.and_then(|id| world.get_entity_by_id(id)) else {
+            return false;
+        };
+
+        let owner_entity = owner.get_entity();
+        let owner_player = world.get_player_by_id(owner_entity.entity_id);
+
+        // `ThrownTrident.isAcceptibleReturnOwner` (`ThrownTrident.java:99-102`): a dead owner, or
+        // a spectating player, makes the trident drop instead of return.
+        let acceptable = owner_entity.is_alive()
+            && owner
+                .get_living_entity()
+                .is_none_or(|living| living.health.load() > 0.0)
+            && owner_player.as_ref().is_none_or(|p| !p.is_spectator());
+
+        if !acceptable {
+            if self.pickup == ArrowPickup::Allowed {
+                let stack = self.item_stack.lock().await.clone();
+                let pos = entity.pos.load();
+                world
+                    .drop_stack(&BlockPos::floored(pos.x, pos.y, pos.z), stack)
+                    .await;
+            }
+            entity.remove().await;
+            return true;
+        }
+
+        let eye_pos = owner_entity.pos.load().add_raw(
+            0.0,
+            f64::from(owner_entity.entity_dimension.load().eye_height),
+            0.0,
+        );
+        let to_owner = eye_pos.sub(&entity.pos.load());
+
+        // `ThrownTrident.java:78-81`: a non player owner simply absorbs the trident once it is
+        // within its own width plus one block.
+        if owner_player.is_none()
+            && to_owner.length() < f64::from(owner_entity.entity_dimension.load().width) + 1.0
+        {
+            entity.remove().await;
+            return true;
+        }
+
+        self.no_physics.store(true, Ordering::Relaxed);
+        self.in_ground.store(false, Ordering::Relaxed);
+
+        let pos = entity.pos.load();
+        entity.set_pos(Vector3::new(
+            pos.x,
+            pos.y + to_owner.y * 0.015 * f64::from(loyalty),
+            pos.z,
+        ));
+
+        let accel = 0.05 * f64::from(loyalty);
+        let mut velocity = entity
+            .velocity
+            .load()
+            .multiply(0.95, 0.95, 0.95)
+            .add(&to_owner.normalize().multiply(accel, accel, accel));
+
+        // `ThrownTrident.tick` falls through to `super.tick()` (`ThrownTrident.java:96`), so the
+        // returning trident still takes `AbstractArrow`'s drag and gravity before it moves.
+        velocity.y -= Self::GRAVITY;
+        let inertia = if entity.touching_water.load(Ordering::Relaxed) {
+            Self::WATER_INERTIA
+        } else {
+            Self::AIR_INERTIA
+        };
+        velocity = velocity.multiply(inertia, inertia, inertia);
+        entity.velocity.store(velocity);
+        entity.set_pos(entity.pos.load().add(&velocity));
+
+        let chunk_pos = entity.chunk_pos.load();
+        world.broadcast_to_chunk(
+            chunk_pos,
+            &CEntityVelocity::new(entity.entity_id.into(), velocity),
+        );
+
+        if self.return_tick_count.fetch_add(1, Ordering::Relaxed) == 0 {
+            world.broadcast_to_chunk(
+                chunk_pos,
+                &CSoundEffect::new(
+                    IdOr::Id(Sound::ItemTridentReturn as u16),
+                    SoundCategory::Neutral,
+                    &entity.pos.load(),
+                    10.0,
+                    1.0,
+                    0.0,
+                ),
+            );
+        }
+
+        true
+    }
+
+    /// The block-then-entity raycast sweep of `AbstractArrow.tick` (`AbstractArrow.java`), split
+    /// out of `tick` so the Loyalty return leg can bypass it wholesale.
+    async fn sweep_collision(
+        &self,
+        world: &Arc<crate::world::World>,
+        start_pos: Vector3<f64>,
+        velocity: Vector3<f64>,
+    ) -> Option<ProjectileHit> {
+        let entity = self.get_entity();
+        let new_pos = start_pos.add(&velocity);
+        // Check for collisions using raycasting
+        let search_box = BoundingBox::new(
+            Vector3::new(
+                start_pos.x.min(new_pos.x),
+                start_pos.y.min(new_pos.y),
+                start_pos.z.min(new_pos.z),
+            ),
+            Vector3::new(
+                start_pos.x.max(new_pos.x),
+                start_pos.y.max(new_pos.y),
+                start_pos.z.max(new_pos.z),
+            ),
+        )
+        .expand(0.3, 0.3, 0.3);
+
+        let mut closest_t = 1.0f64;
+        let mut hit = None;
+
+        // Block collisions
+        let (block_cols, block_positions) = world
+            .get_block_collisions(search_box, self.get_entity())
+            .await;
+        for (idx, bb) in block_cols.iter().enumerate() {
+            if let Some(t) = calculate_ray_intersection(&start_pos, &velocity, bb)
+                && t < closest_t
+            {
+                closest_t = t;
+
+                // Map back to block pos
+                let mut curr = 0;
+                for (len, pos) in &block_positions {
+                    curr += len;
+                    if idx < curr {
+                        let hit_pos = start_pos.add(&velocity.multiply(t, t, t));
+                        hit = Some(ProjectileHit::Block {
+                            pos: *pos,
+                            face: get_hit_face(hit_pos, *pos),
+                            hit_pos,
+                            normal: velocity.normalize().multiply(-1.0, -1.0, -1.0),
+                        });
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Entity collisions
+        let candidates = world.get_entities_at_box(&search_box);
+        for cand in candidates {
+            if self.should_skip_collision(entity, &cand) {
+                continue;
+            }
+
+            let ebb = cand.get_entity().bounding_box.load().expand(0.3, 0.3, 0.3);
+            if let Some(t) = calculate_ray_intersection(&start_pos, &velocity, &ebb)
+                && t < closest_t
+            {
+                closest_t = t;
+                let hit_pos = start_pos.add(&velocity.multiply(t, t, t));
+                hit = Some(ProjectileHit::Entity {
+                    entity: cand.clone(),
+                    hit_pos,
+                    normal: velocity.normalize().multiply(-1.0, -1.0, -1.0),
+                });
+            }
+        }
+        hit
+    }
 }
 
 impl NBTStorage for TridentEntity {}
 
 impl EntityBase for TridentEntity {
+    /// `ThrownTrident.defineSynchedData` (`ThrownTrident.java:56-60`) plus the constructor's
+    /// `entityData.set(ID_LOYALTY, ...)` / `set(ID_FOIL, ...)` (`ThrownTrident.java:44-46`).
+    /// Without `ID_LOYALTY` the client never animates the trident spiralling home.
+    fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let has_foil = {
+                let stack = self.item_stack.lock().await;
+                stack
+                    .get_data_component::<pumpkin_data::data_component_impl::EnchantmentsImpl>()
+                    .is_some_and(|e| !e.enchantment.is_empty())
+            };
+
+            self.entity.send_meta_data(
+                &[Metadata::new(
+                    pumpkin_data::tracked_data::thrown_trident::ID_LOYALTY,
+                    self.loyalty.load(Ordering::Relaxed),
+                )],
+                None,
+            );
+            self.entity.send_meta_data(
+                &[Metadata::new(
+                    pumpkin_data::tracked_data::thrown_trident::ID_FOIL,
+                    has_foil,
+                )],
+                None,
+            );
+        })
+    }
+
     fn tick<'a>(
         &'a self,
         caller: &'a Arc<dyn EntityBase>,
@@ -173,6 +421,10 @@ impl EntityBase for TridentEntity {
             let shake = self.shake_time.load(Ordering::Relaxed);
             if shake > 0 {
                 self.shake_time.store(shake - 1, Ordering::Relaxed);
+            }
+
+            if self.tick_loyalty_return(&world).await {
+                return;
             }
 
             if self.in_ground.load(Ordering::Relaxed) {
@@ -219,72 +471,7 @@ impl EntityBase for TridentEntity {
             let chunk_pos = entity.chunk_pos.load();
             world.broadcast_to_chunk(chunk_pos, &packet);
 
-            // Check for collisions using raycasting
-            let search_box = BoundingBox::new(
-                Vector3::new(
-                    start_pos.x.min(new_pos.x),
-                    start_pos.y.min(new_pos.y),
-                    start_pos.z.min(new_pos.z),
-                ),
-                Vector3::new(
-                    start_pos.x.max(new_pos.x),
-                    start_pos.y.max(new_pos.y),
-                    start_pos.z.max(new_pos.z),
-                ),
-            )
-            .expand(0.3, 0.3, 0.3);
-
-            let mut closest_t = 1.0f64;
-            let mut hit = None;
-
-            // Block collisions
-            let (block_cols, block_positions) = world
-                .get_block_collisions(search_box, self.get_entity())
-                .await;
-            for (idx, bb) in block_cols.iter().enumerate() {
-                if let Some(t) = calculate_ray_intersection(&start_pos, &velocity, bb)
-                    && t < closest_t
-                {
-                    closest_t = t;
-
-                    // Map back to block pos
-                    let mut curr = 0;
-                    for (len, pos) in &block_positions {
-                        curr += len;
-                        if idx < curr {
-                            let hit_pos = start_pos.add(&velocity.multiply(t, t, t));
-                            hit = Some(ProjectileHit::Block {
-                                pos: *pos,
-                                face: get_hit_face(hit_pos, *pos),
-                                hit_pos,
-                                normal: velocity.normalize().multiply(-1.0, -1.0, -1.0),
-                            });
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // Entity collisions
-            let candidates = world.get_entities_at_box(&search_box);
-            for cand in candidates {
-                if self.should_skip_collision(entity, &cand) {
-                    continue;
-                }
-
-                let ebb = cand.get_entity().bounding_box.load().expand(0.3, 0.3, 0.3);
-                if let Some(t) = calculate_ray_intersection(&start_pos, &velocity, &ebb)
-                    && t < closest_t
-                {
-                    closest_t = t;
-                    let hit_pos = start_pos.add(&velocity.multiply(t, t, t));
-                    hit = Some(ProjectileHit::Entity {
-                        entity: cand.clone(),
-                        hit_pos,
-                        normal: velocity.normalize().multiply(-1.0, -1.0, -1.0),
-                    });
-                }
-            }
+            let hit = self.sweep_collision(&world, start_pos, velocity).await;
 
             // Handle hit
             if let Some(h) = hit
@@ -393,6 +580,11 @@ impl EntityBase for TridentEntity {
                         }
                     }
 
+                    // `ThrownTrident.onHitEntity` (`ThrownTrident.java:129`) sets `dealtDamage`
+                    // before the hurt call, so a loyal trident returns even if the target is
+                    // invulnerable to the hit.
+                    self.dealt_damage.store(true, Ordering::Relaxed);
+
                     target
                         .damage(self, damage as f32, DamageType::TRIDENT)
                         .await;
@@ -438,8 +630,14 @@ impl EntityBase for TridentEntity {
 
     fn on_player_collision<'a>(&'a self, player: &'a Arc<Player>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
+            // `ThrownTrident.tryPickup` (`ThrownTrident.java:173-175`): a trident flying back
+            // under Loyalty is picked up by its owner regardless of the normal pickup rules,
+            // which is the whole point of the enchantment.
+            let returning_to_owner = self.no_physics.load(Ordering::Relaxed)
+                && self.owner_id == Some(player.living_entity.entity.entity_id);
+
             // Can only pick up when on the ground
-            if !self.in_ground.load(Ordering::Relaxed) {
+            if !returning_to_owner && !self.in_ground.load(Ordering::Relaxed) {
                 return;
             }
 
@@ -447,10 +645,12 @@ impl EntityBase for TridentEntity {
                 return;
             }
 
-            match self.pickup {
-                ArrowPickup::Disallowed => return,
-                ArrowPickup::CreativeOnly if !player.is_creative() => return,
-                _ => {}
+            if !returning_to_owner {
+                match self.pickup {
+                    ArrowPickup::Disallowed => return,
+                    ArrowPickup::CreativeOnly if !player.is_creative() => return,
+                    _ => {}
+                }
             }
 
             let mut stack = self.item_stack.lock().await.clone();

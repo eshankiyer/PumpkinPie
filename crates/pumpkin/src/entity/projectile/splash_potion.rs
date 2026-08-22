@@ -5,6 +5,7 @@ use crate::{
     entity::{Entity, EntityBase, EntityBaseFuture, NBTStorage, projectile::ThrownItemEntity},
     server::Server,
 };
+use pumpkin_data::entity::EntityType;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::{Block, BlockId};
 use pumpkin_protocol::java::client::play::CWorldEvent;
@@ -100,6 +101,88 @@ pub(crate) async fn extinguish_fire_if_water_potion(
     }
 }
 
+/// `AbstractThrownPotion.onHitAsWater` (`AbstractThrownPotion.java:87-106`). A thrown water
+/// bottle -- splash or lingering -- searches its own bounding box inflated by (4, 2, 4) for
+/// living entities that are either water sensitive or on fire, and for every one closer than
+/// `SPLASH_RANGE_SQ` (16.0) deals a point of indirect magic damage if it is water sensitive and
+/// extinguishes it if it is burning. Axolotls in the same box are rehydrated
+/// (`Axolotl.rehydrate`, `Axolotl.java:270-273`) regardless of distance.
+pub(crate) async fn apply_water_potion_entity_effects(
+    potion_base: &dyn EntityBase,
+    owner: Option<&dyn EntityBase>,
+    stack: &ItemStack,
+) {
+    if !is_water_potion(stack) {
+        return;
+    }
+
+    let potion = potion_base.get_entity();
+    let world = potion.world.load();
+    let aabb = potion.bounding_box.load().expand(4.0, 2.0, 4.0);
+    let potion_pos = potion.pos.load();
+
+    let mut candidates = world.get_entities_at_box(&aabb);
+    for player in world.get_players_at_box(&aabb) {
+        candidates.push(player as Arc<dyn EntityBase>);
+    }
+
+    for candidate in candidates {
+        let target = candidate.get_entity();
+        if target.entity_id == potion.entity_id {
+            continue;
+        }
+
+        // `Axolotl.rehydrate`: +1800 air, capped at the axolotl's 6000 maximum. Vanilla runs this
+        // over the whole inflated box, with no distance test.
+        if target.entity_type.id == EntityType::AXOLOTL.id
+            && let Some(living) = candidate.get_living_entity()
+        {
+            let max_air = living.max_air_supply();
+            let new_air =
+                (living.air_supply.load(std::sync::atomic::Ordering::Relaxed) + 1800).min(max_air);
+            if living
+                .air_supply
+                .swap(new_air, std::sync::atomic::Ordering::Relaxed)
+                != new_air
+            {
+                living.send_air_supply();
+            }
+        }
+
+        if candidate.get_living_entity().is_none() {
+            continue;
+        }
+
+        let on_fire = target.fire_ticks.load(std::sync::atomic::Ordering::Relaxed) > 0;
+        let sensitive = candidate.is_sensitive_to_water();
+        if !sensitive && !on_fire {
+            continue;
+        }
+
+        let delta = target.pos.load() - potion_pos;
+        if delta.length_squared() >= 16.0 {
+            continue;
+        }
+
+        if sensitive {
+            candidate
+                .damage_with_context(
+                    candidate.as_ref(),
+                    1.0,
+                    pumpkin_data::damage::DamageType::INDIRECT_MAGIC,
+                    None,
+                    Some(potion_base),
+                    owner,
+                )
+                .await;
+        }
+
+        if on_fire && target.is_alive() {
+            target.extinguish();
+        }
+    }
+}
+
 fn average_effect_color(
     effects: &[(
         &'static pumpkin_data::effect::StatusEffect,
@@ -177,6 +260,11 @@ impl EntityBase for SplashPotionEntity {
             // Only extinguish fire for plain water potions
             let stack = self.item_stack.read().await.clone();
             extinguish_fire_if_water_potion(&world, hit_pos, &stack).await;
+            let owner = self
+                .thrown
+                .owner_id
+                .and_then(|id| world.get_entity_by_id(id));
+            apply_water_potion_entity_effects(self, owner.as_deref(), &stack).await;
 
             let effects = crate::item::potion::PotionContents::read_potion_effects(&stack);
 
