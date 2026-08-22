@@ -461,6 +461,7 @@ mod tests {
                 },
             ],
             entities: Vec::new(),
+            ..StructureTemplate::default()
         };
 
         // (rotation, rail shape, stair facing, rail pos, stair pos)
