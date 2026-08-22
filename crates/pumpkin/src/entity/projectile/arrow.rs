@@ -64,7 +64,7 @@ pub struct ArrowEntity {
     pub owner_id: Option<i32>,
     pub item_stack: RwLock<ItemStack>,
     pub base_damage: AtomicCell<f64>,
-    pub pickup: ArrowPickup,
+    pub pickup: AtomicCell<ArrowPickup>,
     pub is_critical: AtomicBool,
     pub pierce_level: AtomicU8,
     pub punch_level: AtomicU8,
@@ -104,7 +104,7 @@ impl ArrowEntity {
             owner_id,
             item_stack: RwLock::new(item_stack.copy_with_count(1)),
             base_damage: AtomicCell::new(Self::ARROW_BASE_DAMAGE),
-            pickup,
+            pickup: AtomicCell::new(pickup),
             is_critical: AtomicBool::new(false),
             pierce_level: AtomicU8::new(0),
             punch_level: AtomicU8::new(0),
@@ -147,7 +147,7 @@ impl ArrowEntity {
             owner_id: Some(shooter.entity_id),
             item_stack: RwLock::new(item_stack.copy_with_count(1)),
             base_damage: AtomicCell::new(Self::ARROW_BASE_DAMAGE),
-            pickup,
+            pickup: AtomicCell::new(pickup),
             is_critical: AtomicBool::new(false),
             pierce_level: AtomicU8::new(0),
             punch_level: AtomicU8::new(0),
@@ -298,6 +298,13 @@ impl ArrowEntity {
     }
 }
 
+/// `AbstractArrow.addAdditionalSaveData` / `readAdditionalSaveData`
+/// (`AbstractArrow.java:606-635`). Only the stored `item` used to survive a chunk reload, so a
+/// reloaded arrow forgot how much damage it was carrying, whether it was critical, how far it
+/// could pierce and whether it could be picked up at all.
+///
+/// `inBlockState`, `SoundEvent` and `weapon` are not stored: the first is re-derived from the
+/// world on the next tick, and the other two have no field on this entity.
 impl NBTStorage for ArrowEntity {
     fn write_nbt<'a>(
         &'a self,
@@ -307,6 +314,17 @@ impl NBTStorage for ArrowEntity {
             self.entity.write_nbt(nbt).await;
             let item_stack = self.item_stack.read().await;
             Self::write_item_stack_nbt(&item_stack, nbt);
+
+            nbt.put_short("life", self.life.load(Ordering::Relaxed) as i16);
+            nbt.put_byte("shake", self.shake_time.load(Ordering::Relaxed) as i8);
+            nbt.put_bool("inGround", self.in_ground.load(Ordering::Relaxed));
+            nbt.put_byte("pickup", self.pickup.load().to_byte() as i8);
+            nbt.put_double("damage", self.base_damage.load());
+            nbt.put_bool("crit", self.is_critical.load(Ordering::Relaxed));
+            nbt.put_byte(
+                "PierceLevel",
+                self.pierce_level.load(Ordering::Relaxed) as i8,
+            );
         })
     }
 
@@ -319,6 +337,28 @@ impl NBTStorage for ArrowEntity {
             if let Some(item_stack) = Self::read_item_stack_nbt(nbt) {
                 *self.item_stack.write().await = item_stack;
             }
+
+            self.life.store(
+                u32::from(nbt.get_short("life").unwrap_or(0).max(0) as u16),
+                Ordering::Relaxed,
+            );
+            // `AbstractArrow.java:626` masks the stored byte with 255.
+            self.shake_time
+                .store(nbt.get_byte("shake").unwrap_or(0) as u8, Ordering::Relaxed);
+            self.in_ground
+                .store(nbt.get_bool("inGround").unwrap_or(false), Ordering::Relaxed);
+            self.pickup.store(ArrowPickup::from_byte(
+                nbt.get_byte("pickup").unwrap_or(0) as u8
+            ));
+            // `AbstractArrow.java:628` defaults `damage` to 2.0, not to 0.0.
+            self.base_damage
+                .store(nbt.get_double("damage").unwrap_or(2.0));
+            self.is_critical
+                .store(nbt.get_bool("crit").unwrap_or(false), Ordering::Relaxed);
+            self.pierce_level.store(
+                nbt.get_byte("PierceLevel").unwrap_or(0) as u8,
+                Ordering::Relaxed,
+            );
         })
     }
 }
@@ -609,7 +649,13 @@ impl EntityBase for ArrowEntity {
                         let bonus = (rand::random::<u32>() % (damage / 2 + 2) as u32) as i32;
                         damage = damage.saturating_add(bonus);
                     }
-                    if self.is_flame.load(Ordering::Relaxed) {
+                    // `AbstractArrow.onHitEntity` (`AbstractArrow.java:463-467`) skips the
+                    // ignite for endermen and remembers the target's fire ticks so they can be
+                    // put back if the damage does not land.
+                    let is_enderman = *target.get_entity().entity_type == EntityType::ENDERMAN;
+                    let remaining_fire_ticks =
+                        target.get_entity().fire_ticks.load(Ordering::Relaxed);
+                    if self.is_flame.load(Ordering::Relaxed) && !is_enderman {
                         target.get_entity().set_on_fire_for_ticks(100);
                     }
 
@@ -623,6 +669,48 @@ impl EntityBase for ArrowEntity {
                             Some(self),
                         )
                         .await;
+
+                    if !damage_succeeded {
+                        // `AbstractArrow.java:506-517`: damage that does not land (invulnerable
+                        // target, or one still in its damage-immunity window) bounces the arrow
+                        // off instead of consuming it. Restore the fire ticks, reverse-deflect,
+                        // damp the flight to a fifth, and only drop the arrow once it has
+                        // effectively stopped.
+                        target
+                            .get_entity()
+                            .fire_ticks
+                            .store(remaining_fire_ticks, Ordering::Relaxed);
+                        crate::entity::projectile_deflection::ProjectileDeflectionType::Simple
+                            .deflect(self, Some(target.as_ref()));
+                        let bounced = entity.velocity.load().multiply(0.2, 0.2, 0.2);
+                        entity.velocity.store(bounced);
+                        if bounced.length_squared() < 1.0e-7 {
+                            if self.pickup.load() == ArrowPickup::Allowed {
+                                let stack = self.item_stack.read().await.clone();
+                                let pos = entity.pos.load();
+                                world
+                                    .drop_stack(
+                                        &BlockPos::floored(pos.x, pos.y, pos.z),
+                                        Self::pickup_item_stack(&stack),
+                                    )
+                                    .await;
+                            }
+                            entity.remove().await;
+                        } else {
+                            // The tick loop latches `has_hit` before dispatching, so a bounced
+                            // arrow has to be re-armed or it would never collide again.
+                            self.has_hit.store(false, Ordering::SeqCst);
+                        }
+                        return;
+                    }
+
+                    if is_enderman {
+                        // `AbstractArrow.java:470-472` returns before the arrow count, the
+                        // knockback, the post-hurt effects and the `discard()` at `:503-504`,
+                        // so an arrow that hits an enderman keeps flying.
+                        self.has_hit.store(false, Ordering::SeqCst);
+                        return;
+                    }
 
                     if let Some(living) = target.get_living_entity() {
                         // `AbstractArrow.doKnockback`: the push follows the ARROW's horizontal
@@ -731,7 +819,7 @@ impl EntityBase for ArrowEntity {
             }
 
             // Check pickup rules
-            match self.pickup {
+            match self.pickup.load() {
                 ArrowPickup::Disallowed => return,
                 ArrowPickup::CreativeOnly if !player.is_creative() => return,
                 _ => {}

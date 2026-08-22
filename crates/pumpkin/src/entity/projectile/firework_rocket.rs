@@ -1,6 +1,6 @@
 use crate::{
     entity::{
-        Entity, EntityBase, EntityBaseFuture, NBTStorage,
+        Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
         projectile::{ProjectileHit, ThrownItemEntity},
     },
     server::Server,
@@ -10,6 +10,7 @@ use pumpkin_data::{
     damage::DamageType, data_component_impl::FireworksImpl, entity::EntityStatus, item::Item,
     item_stack::ItemStack, sound::Sound, sound::SoundCategory,
 };
+use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::bedrock::server::actor_event::ActorEventType;
 use pumpkin_protocol::{
     codec::{item_stack_seralizer::ItemStackSerializer, optional_int::OptionalInt},
@@ -256,7 +257,34 @@ fn firework_damage(base_damage: f32, distance: f64) -> Option<f32> {
     Some(base_damage * (((5.0 - distance) / 5.0).sqrt() as f32))
 }
 
-impl NBTStorage for FireworkRocketEntity {}
+/// `FireworkRocketEntity.addAdditionalSaveData` / `readAdditionalSaveData`
+/// (`FireworkRocketEntity.java:276-292`). Without this a rocket reloaded mid-flight restarted
+/// its fuse from zero and lost its shot-at-angle flag.
+///
+/// `FireworksItem` is not restored: the stack is held by value here, so there is nothing to
+/// write it back into.
+impl NBTStorage for FireworkRocketEntity {
+    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
+        Box::pin(async move {
+            nbt.put_int("Life", self.life.load(Ordering::Relaxed));
+            nbt.put_int("LifeTime", self.life_time.load(Ordering::Relaxed));
+            nbt.put_bool("ShotAtAngle", self.shot_at_angle.load(Ordering::Relaxed));
+        })
+    }
+
+    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
+        Box::pin(async move {
+            self.life
+                .store(nbt.get_int("Life").unwrap_or(0), Ordering::Relaxed);
+            self.life_time
+                .store(nbt.get_int("LifeTime").unwrap_or(0), Ordering::Relaxed);
+            self.shot_at_angle.store(
+                nbt.get_bool("ShotAtAngle").unwrap_or(false),
+                Ordering::Relaxed,
+            );
+        })
+    }
+}
 
 impl EntityBase for FireworkRocketEntity {
     fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {

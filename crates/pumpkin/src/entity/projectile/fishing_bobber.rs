@@ -166,17 +166,16 @@ impl FishingBobberEntity {
         if hooked_id != 0
             && let Some(hooked) = world.get_entity_by_id(hooked_id)
         {
+            // `FishingHook.pullEntity` (`FishingHook.java:494-500`) measures the pull from the
+            // HOOK to the owner and scales it by 0.1, with no vertical term. The upward
+            // `sqrt(len) * 0.08` this used belongs to the loot item's throw, not to this pull,
+            // and measuring from the hooked entity instead of the hook aimed it wrong as well.
             let player_pos = player.get_entity().pos.load();
-            let hooked_pos = hooked.get_entity().pos.load();
-            let delta = player_pos - hooked_pos;
-            let motion =
-                delta
-                    .multiply(0.1, 0.1, 0.1)
-                    .add_raw(0.0, delta.length().sqrt() * 0.08, 0.0);
-            hooked.get_entity().add_velocity(motion);
-            return hooked_reel_damage(
+            let delta = (player_pos - self.entity.pos.load()).multiply(0.1, 0.1, 0.1);
+            hooked.get_entity().add_velocity(delta);
+            return self.ground_retrieve_override(hooked_reel_damage(
                 hooked.get_entity().entity_type == &pumpkin_data::entity::EntityType::ITEM,
-            );
+            ));
         }
 
         if self.bite_countdown.load(Ordering::Relaxed) > 0 {
@@ -254,10 +253,21 @@ impl FishingBobberEntity {
                 ))
                 .await;
 
-            return 1;
+            return self.ground_retrieve_override(1);
         }
 
-        0
+        self.ground_retrieve_override(0)
+    }
+
+    /// `FishingHook.retrieve` (`FishingHook.java:466-468`) overwrites the damage it just
+    /// computed with 2 whenever the bobber ended up on the ground, so a rod reeled in off dry
+    /// land always costs 2 durability.
+    fn ground_retrieve_override(&self, damage: i32) -> i32 {
+        if self.entity.on_ground.load(Ordering::Relaxed) {
+            2
+        } else {
+            damage
+        }
     }
 
     #[expect(clippy::too_many_lines)]

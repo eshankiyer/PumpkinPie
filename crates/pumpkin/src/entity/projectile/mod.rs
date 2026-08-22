@@ -222,6 +222,16 @@ pub async fn emit_projectile_land(
     .await;
 }
 
+/// `AbstractWindCharge` overrides both `canHitEntity` and the inertia getters, and
+/// `ThrownItemEntity` is the shared body those live on here, so the two wind-charge-only
+/// branches identify their projectile by downcasting the caller.
+fn is_wind_charge(caller: &Arc<dyn EntityBase>) -> bool {
+    caller
+        .cast_any()
+        .downcast_ref::<wind_charge::WindChargeEntity>()
+        .is_some()
+}
+
 pub struct ThrownItemEntity {
     pub entity: Entity,
     pub owner_id: Option<i32>,
@@ -306,7 +316,12 @@ impl ThrownItemEntity {
         let mut velocity = entity.velocity.load();
         velocity.y -= self.get_gravity();
 
-        let inertia = if entity.touching_water.load(Ordering::Relaxed) {
+        let inertia = if is_wind_charge(caller) {
+            // `AbstractWindCharge.getInertia`/`getLiquidInertia`
+            // (`AbstractWindCharge.java:132-140`) both return 1.0F, overriding
+            // `AbstractHurtingProjectile`'s 0.95F/0.8F: a wind charge never decelerates.
+            1.0
+        } else if entity.touching_water.load(Ordering::Relaxed) {
             0.8
         } else {
             0.99
@@ -376,7 +391,7 @@ impl ThrownItemEntity {
         // Entity collisions
         let candidates = world.get_all_at_box(&search_box);
         for cand in candidates {
-            if self.should_skip_collision(entity, &cand) {
+            if self.should_skip_collision(caller, entity, &cand) {
                 continue;
             }
 
@@ -416,8 +431,21 @@ impl ThrownItemEntity {
     }
 
     /// Returns if collision should be skipped (e.g. owner or projectile vs projectile)
-    fn should_skip_collision(&self, self_ent: &Entity, other: &Arc<dyn EntityBase>) -> bool {
+    fn should_skip_collision(
+        &self,
+        caller: &Arc<dyn EntityBase>,
+        self_ent: &Entity,
+        other: &Arc<dyn EntityBase>,
+    ) -> bool {
         let other_ent = other.get_entity();
+
+        // `AbstractWindCharge.canHitEntity` (`AbstractWindCharge.java:69-75`) rejects end
+        // crystals outright. The other half of that override - never hitting another wind
+        // charge - is already covered by the `is_projectile` skip below, since
+        // `collides_with_projectiles` is false at every wind-charge construction site.
+        if *other_ent.entity_type == EntityType::END_CRYSTAL && is_wind_charge(caller) {
+            return true;
+        }
         if other_ent.entity_id == self_ent.entity_id {
             return true;
         }

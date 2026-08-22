@@ -5,10 +5,12 @@ use tokio::sync::Mutex;
 use crate::{
     block::blocks::redstone::target_block::TargetBlock,
     entity::{
-        Entity, EntityBase, EntityBaseFuture, NBTStorage, living::LivingEntity, player::Player,
+        Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture, living::LivingEntity,
+        player::Player,
     },
     server::Server,
 };
+use crossbeam::atomic::AtomicCell;
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
@@ -26,7 +28,7 @@ pub struct TridentEntity {
     pub entity: Entity,
     pub owner_id: Option<i32>,
     pub item_stack: Arc<Mutex<ItemStack>>,
-    pub pickup: ArrowPickup,
+    pub pickup: AtomicCell<ArrowPickup>,
     pub in_ground: AtomicBool,
     pub in_ground_time: AtomicU32,
     pub life: AtomicU32,
@@ -62,7 +64,7 @@ impl TridentEntity {
             entity,
             owner_id,
             item_stack: Arc::new(Mutex::new(ItemStack::new(1, &Item::TRIDENT))),
-            pickup: ArrowPickup::Disallowed,
+            pickup: AtomicCell::new(ArrowPickup::Disallowed),
             in_ground: AtomicBool::new(false),
             in_ground_time: AtomicU32::new(0),
             life: AtomicU32::new(0),
@@ -96,7 +98,7 @@ impl TridentEntity {
             entity,
             owner_id: Some(shooter.entity_id),
             item_stack: Arc::new(Mutex::new(item_stack)),
-            pickup,
+            pickup: AtomicCell::new(pickup),
             in_ground: AtomicBool::new(false),
             in_ground_time: AtomicU32::new(0),
             life: AtomicU32::new(0),
@@ -217,7 +219,7 @@ impl TridentEntity {
             && owner_player.as_ref().is_none_or(|p| !p.is_spectator());
 
         if !acceptable {
-            if self.pickup == ArrowPickup::Allowed {
+            if self.pickup.load() == ArrowPickup::Allowed {
                 let stack = self.item_stack.lock().await.clone();
                 let pos = entity.pos.load();
                 world
@@ -376,7 +378,81 @@ impl TridentEntity {
     }
 }
 
-impl NBTStorage for TridentEntity {}
+/// `ThrownTrident.addAdditionalSaveData` / `readAdditionalSaveData`
+/// (`ThrownTrident.java:194-205`) on top of `AbstractArrow`'s
+/// (`AbstractArrow.java:606-635`). Without this a trident lost its item, its pickup rule and
+/// its dealt-damage flag across a chunk reload, so a loyal trident stopped returning and a
+/// thrown one could no longer be picked up.
+///
+/// `damage`, `crit`, `PierceLevel`, `SoundEvent`, `inBlockState` and `weapon` are not stored:
+/// a trident's damage is the fixed 8.0 of `ThrownTrident.onHitEntity`
+/// (`ThrownTrident.java:122`) and the rest have no field on this entity.
+impl NBTStorage for TridentEntity {
+    fn write_nbt<'a>(
+        &'a self,
+        nbt: &'a mut pumpkin_nbt::compound::NbtCompound,
+    ) -> NbtFuture<'a, ()> {
+        Box::pin(async move {
+            self.entity.write_nbt(nbt).await;
+
+            let mut item = pumpkin_nbt::compound::NbtCompound::new();
+            self.item_stack
+                .lock()
+                .await
+                .copy_with_count(1)
+                .write_item_stack(&mut item);
+            nbt.put_compound("item", item);
+
+            // `ThrownTrident.java:204`.
+            nbt.put_bool("DealtDamage", self.dealt_damage.load(Ordering::Relaxed));
+            // `AbstractArrow.java:608-612`.
+            nbt.put_short("life", self.life.load(Ordering::Relaxed) as i16);
+            nbt.put_byte("shake", self.shake_time.load(Ordering::Relaxed) as i8);
+            nbt.put_bool("inGround", self.in_ground.load(Ordering::Relaxed));
+            nbt.put_byte("pickup", self.pickup.load().to_byte() as i8);
+        })
+    }
+
+    fn read_nbt_non_mut<'a>(
+        &'a self,
+        nbt: &'a pumpkin_nbt::compound::NbtCompound,
+    ) -> NbtFuture<'a, ()> {
+        Box::pin(async move {
+            self.entity.read_nbt_non_mut(nbt).await;
+
+            if let Some(stack) = nbt
+                .get_compound("item")
+                .and_then(ItemStack::read_item_stack)
+                .map(|stack| stack.copy_with_count(1))
+            {
+                // `ThrownTrident.readAdditionalSaveData` (`ThrownTrident.java:198`) does not
+                // save loyalty: it re-derives it from the stored stack on load.
+                let loyalty = stack
+                    .get_enchantment_level(&pumpkin_data::Enchantment::LOYALTY)
+                    .clamp(0, i32::from(u8::MAX)) as u8;
+                self.loyalty.store(loyalty, Ordering::Relaxed);
+                *self.item_stack.lock().await = stack;
+            }
+
+            self.dealt_damage.store(
+                nbt.get_bool("DealtDamage").unwrap_or(false),
+                Ordering::Relaxed,
+            );
+            self.life.store(
+                u32::from(nbt.get_short("life").unwrap_or(0).max(0) as u16),
+                Ordering::Relaxed,
+            );
+            // `AbstractArrow.java:626` masks the stored byte with 255.
+            self.shake_time
+                .store(nbt.get_byte("shake").unwrap_or(0) as u8, Ordering::Relaxed);
+            self.in_ground
+                .store(nbt.get_bool("inGround").unwrap_or(false), Ordering::Relaxed);
+            self.pickup.store(ArrowPickup::from_byte(
+                nbt.get_byte("pickup").unwrap_or(0) as u8
+            ));
+        })
+    }
+}
 
 impl EntityBase for TridentEntity {
     /// `ThrownTrident.defineSynchedData` (`ThrownTrident.java:56-60`) plus the constructor's
@@ -646,7 +722,7 @@ impl EntityBase for TridentEntity {
             }
 
             if !returning_to_owner {
-                match self.pickup {
+                match self.pickup.load() {
                     ArrowPickup::Disallowed => return,
                     ArrowPickup::CreativeOnly if !player.is_creative() => return,
                     _ => {}

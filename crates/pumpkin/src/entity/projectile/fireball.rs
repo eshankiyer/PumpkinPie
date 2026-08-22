@@ -261,7 +261,9 @@ impl EntityBase for FireballEntity {
             let world = self.get_entity().world.load();
 
             if let ProjectileHit::Entity { ref entity, .. } = hit {
-                entity.get_entity().set_on_fire_for(5.0);
+                // `LargeFireball.onHitEntity` (`LargeFireball.java:42-51`) only deals 6.0
+                // fireball damage; the 5-second ignite belongs to `SmallFireball`
+                // (`SmallFireball.java:40`), not to the ghast fireball.
                 let _ = entity
                     .damage(self, 6.0, pumpkin_data::damage::DamageType::FIREBALL)
                     .await;
