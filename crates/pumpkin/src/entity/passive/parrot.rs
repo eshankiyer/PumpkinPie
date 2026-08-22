@@ -12,11 +12,14 @@ use pumpkin_data::{
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
+use pumpkin_protocol::java::client::play::Metadata;
+
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
-        escape_danger::EscapeDangerGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
+        escape_danger::EscapeDangerGoal, follow_owner::FollowOwnerGoal,
+        look_at_entity::LookAtEntityGoal, sit::SitGoal, swim::SwimGoal,
+        wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
     player::Player,
@@ -50,14 +53,21 @@ impl ParrotEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            goal_selector.add_goal(0, Box::new(SwimGoal::default()));
+            // `Parrot.registerGoals` (`Parrot.java:162-171`).
             goal_selector.add_goal(0, EscapeDangerGoal::new(1.25));
-            goal_selector.add_goal(1, Box::new(WanderAroundGoal::new(1.0)));
+            goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(
-                2,
-                LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
+                1,
+                LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 8.0),
             );
-            goal_selector.add_goal(3, Box::new(RandomLookAroundGoal::default()));
+            goal_selector.add_goal(2, SitGoal::new());
+            goal_selector.add_goal(2, FollowOwnerGoal::new(1.0, 5.0, 1.0));
+            // `Parrot.ParrotWanderGoal` only overrides the flying-navigation position search;
+            // this codebase has no flying-stroll variant, so the water-avoiding stroll stands in.
+            goal_selector.add_goal(2, Box::new(WanderAroundGoal::new_water_avoiding(1.0)));
+            // Priority 3 `LandOnOwnersShoulderGoal` and `FollowMobGoal` are not registered:
+            // neither shoulder-passenger support nor a `FollowMobGoal` exists here, and a goal
+            // that can never fire is worse than an absent one.
         };
 
         mob_arc
@@ -96,11 +106,85 @@ impl ParrotEntity {
     }
 }
 
-impl NBTStorage for ParrotEntity {}
+impl NBTStorage for ParrotEntity {
+    /// `TamableAnimal.addAdditionalSaveData`: owner UUID plus the ordered-to-sit flag.
+    /// Without these a tamed parrot reverted to wild on reload.
+    fn write_nbt<'a>(
+        &'a self,
+        nbt: &'a mut pumpkin_nbt::compound::NbtCompound,
+    ) -> NbtFuture<'a, ()> {
+        Box::pin(async move {
+            self.mob_entity.living_entity.write_nbt(nbt).await;
+            if let Some(owner) = self.mob_entity.owner.load() {
+                nbt.put_uuid("Owner", owner);
+            }
+            nbt.put_bool("Sitting", self.mob_entity.is_ordered_to_sit());
+        })
+    }
+
+    fn read_nbt_non_mut<'a>(
+        &'a self,
+        nbt: &'a pumpkin_nbt::compound::NbtCompound,
+    ) -> NbtFuture<'a, ()> {
+        Box::pin(async move {
+            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
+            if let Some(owner) = nbt.get_uuid("Owner") {
+                self.mob_entity.set_owner(owner);
+            }
+            if let Some(sitting) = nbt.get_bool("Sitting") {
+                self.mob_entity.set_ordered_to_sit(sitting);
+            }
+        })
+    }
+}
+
+/// Vanilla `TamableAnimal` flag byte: bit 0 sitting, bit 2 tame.
+const fn tame_flags_byte(sitting: bool, tamed: bool) -> u8 {
+    let mut flags = 0u8;
+    if sitting {
+        flags |= 0x01;
+    }
+    if tamed {
+        flags |= 0x04;
+    }
+    flags
+}
+
+impl ParrotEntity {
+    fn tame_flags(&self) -> u8 {
+        tame_flags_byte(
+            self.mob_entity.is_ordered_to_sit(),
+            self.mob_entity.is_tamed(),
+        )
+    }
+
+    fn sync_tame_flags(&self) {
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::parrot::TAMEABLE_FLAGS,
+                self.tame_flags(),
+            )],
+            None,
+        );
+    }
+}
 
 impl Mob for ParrotEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            self.sync_tame_flags();
+            self.mob_entity.living_entity.entity.send_meta_data(
+                &[Metadata::new(
+                    pumpkin_data::tracked_data::parrot::OWNER_UUID,
+                    self.mob_entity.owner.load(),
+                )],
+                None,
+            );
+        })
     }
 
     fn mob_interact<'a>(
@@ -128,11 +212,25 @@ impl Mob for ParrotEntity {
 
                 if self.get_random().random_range(0..10) == 0 {
                     self.mob_entity.set_owner(player.gameprofile.id);
+                    self.sync_tame_flags();
                     world.spawn_particle(pos, Vector3::new(0.5, 0.5, 0.5), 1.0, 7, Particle::Heart);
                 } else {
                     world.spawn_particle(pos, Vector3::new(0.5, 0.5, 0.5), 1.0, 7, Particle::Smoke);
                 }
 
+                return true;
+            }
+
+            // `Parrot.mobInteract` (`Parrot.java:281-286`): a grounded, tamed parrot owned by
+            // this player toggles its ordered-to-sit flag on an empty-handed/other-item click.
+            // `Parrot.isFlying` (`Parrot.java:453-455`) is `!onGround()`.
+            if entity.on_ground.load(std::sync::atomic::Ordering::Relaxed)
+                && self.mob_entity.is_tamed()
+                && self.mob_entity.owner.load() == Some(player.gameprofile.id)
+            {
+                let sitting = !self.mob_entity.is_ordered_to_sit();
+                self.mob_entity.set_ordered_to_sit(sitting);
+                self.sync_tame_flags();
                 return true;
             }
 
@@ -145,7 +243,7 @@ impl Mob for ParrotEntity {
 
 #[cfg(test)]
 mod tests {
-    use super::COOKIE_POISON_DURATION;
+    use super::{COOKIE_POISON_DURATION, tame_flags_byte};
     use pumpkin_data::item::Item;
     use pumpkin_data::tag::{self, Taggable};
 
@@ -167,5 +265,15 @@ mod tests {
     #[test]
     fn poison_lasts_45_seconds() {
         assert_eq!(COOKIE_POISON_DURATION, 900);
+    }
+
+    /// `TamableAnimal` packs sitting into bit 0 and tame into bit 2 of the same byte, so a
+    /// sitting tamed parrot must send `0x05`, not `0x03`.
+    #[test]
+    fn tame_flag_bits() {
+        assert_eq!(tame_flags_byte(false, false), 0x00);
+        assert_eq!(tame_flags_byte(true, false), 0x01);
+        assert_eq!(tame_flags_byte(false, true), 0x04);
+        assert_eq!(tame_flags_byte(true, true), 0x05);
     }
 }

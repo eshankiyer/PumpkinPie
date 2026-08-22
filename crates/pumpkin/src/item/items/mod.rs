@@ -32,6 +32,7 @@ pub mod map;
 pub mod minecart;
 pub mod name_tag;
 pub mod on_a_stick;
+pub mod painting;
 pub mod potions;
 pub mod saddle;
 pub mod shears;
@@ -62,6 +63,7 @@ use crate::item::items::map::MapItem;
 use crate::item::items::minecart::MinecartItem;
 use crate::item::items::name_tag::NameTagItem;
 use crate::item::items::on_a_stick::{CarrotOnAStickItem, WarpedFungusOnAStickItem};
+use crate::item::items::painting::PaintingItem;
 use crate::item::items::saddle::SaddleItem;
 use crate::item::items::shears::ShearsItem;
 use crate::item::items::spawn_egg::SpawnEggItem;
@@ -135,6 +137,7 @@ pub fn default_registry() -> Arc<ItemRegistry> {
     let mut manager = ItemRegistry::default();
 
     manager.register(ArrowItem);
+    manager.register(PaintingItem);
     manager.register(BowItem);
     manager.register(BoneMealItem);
     manager.register(CrossbowItem);

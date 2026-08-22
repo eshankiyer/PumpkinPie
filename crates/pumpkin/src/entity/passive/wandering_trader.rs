@@ -19,9 +19,9 @@ use crate::entity::player::Player;
 use crate::entity::{
     Entity, EntityBase, NBTStorage,
     ai::goal::{
-        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
-        move_towards_restriction::MoveTowardsRestrictionGoal, swim::SwimGoal,
-        wander_around::WanderAroundGoal,
+        avoid_entity::AvoidEntityGoal, escape_danger::EscapeDangerGoal,
+        look_at_entity::LookAtEntityGoal, move_towards_restriction::MoveTowardsRestrictionGoal,
+        swim::SwimGoal, trade_with_player::TradeWithPlayerGoal, wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
 };
@@ -34,6 +34,28 @@ use crate::entity::{
 /// non-naturally-spawned trader.
 const DEFAULT_DESPAWN_DELAY: i32 = 0;
 
+/// The seven `AvoidEntityGoal`s of `WanderingTrader.registerGoals`
+/// (`WanderingTrader.java:80-86`), each at priority 1 with speeds `0.5, 0.5`.
+///
+/// Vanilla matches `Zombie.class` by class hierarchy, so it also covers every subclass:
+/// `Drowned.java:67`, `Husk.java:31`, `ZombieVillager.java:61` and `ZombifiedPiglin.java:48`
+/// all `extends Zombie`. `AvoidEntityGoal`'s `FleeSelector::Type` matches one exact entity
+/// type, so those four are listed explicitly at the same 8.0 radius. The other six vanilla
+/// classes here have no subclasses (verified by grepping `extends <Class>` over the decompile).
+const AVOIDED: &[(&EntityType, f64)] = &[
+    (&EntityType::ZOMBIE, 8.0),
+    (&EntityType::DROWNED, 8.0),
+    (&EntityType::HUSK, 8.0),
+    (&EntityType::ZOMBIE_VILLAGER, 8.0),
+    (&EntityType::ZOMBIFIED_PIGLIN, 8.0),
+    (&EntityType::EVOKER, 12.0),
+    (&EntityType::VINDICATOR, 8.0),
+    (&EntityType::VEX, 8.0),
+    (&EntityType::PILLAGER, 15.0),
+    (&EntityType::ILLUSIONER, 12.0),
+    (&EntityType::ZOGLIN, 10.0),
+];
+
 /// `WanderingTrader.java`.
 ///
 /// Vanilla's `AbstractVillager` base (trading-player tracking,
@@ -45,11 +67,14 @@ const DEFAULT_DESPAWN_DELAY: i32 = 0;
 /// - `WanderingTraderSpawner`/`WanderingTraderData` (per-world periodic natural spawner) --
 ///   a separate, larger piece of world-tick + saved-data infrastructure, out of scope here.
 ///   Without it, a trader can currently only appear via spawn egg/command.
-/// - `WanderToPositionGoal`/`TradeWithPlayerGoal` -- polish goals (steer back to a wander
-///   target; stand still while trading) not required for the core ask (offer generation +
-///   `mob_interact` + despawn tracking). The entity still wanders via the existing
-///   `WanderAroundGoal` and doesn't stop moving mid-trade, matching neither villagers today
-///   (same pre-existing gap, not introduced by this change).
+/// - `WanderToPositionGoal` (`WanderingTrader.java:89`) -- steers back to the `wanderTarget`
+///   that only `WanderingTraderSpawner` ever sets. With that spawner unimplemented the target
+///   is always absent, so the goal could never fire; left out rather than registered dead.
+/// - The two `UseItemGoal`s (`WanderingTrader.java:62-78`, drink invisibility after dark and
+///   milk at dawn) -- vanilla's generic `UseItemGoal` has no Rust counterpart yet.
+/// - `InteractGoal` (`WanderingTrader.java:92`) and `LookAtTradingPlayerGoal`
+///   (`WanderingTrader.java:88`) -- neither goal exists in this codebase; `VillagerEntity`
+///   has the same two gaps.
 pub struct WanderingTraderEntity {
     pub mob_entity: MobEntity,
     pub offers: Mutex<Vec<pumpkin_protocol::java::client::play::MerchantOffer>>,
@@ -57,6 +82,10 @@ pub struct WanderingTraderEntity {
     /// Vanilla `despawnDelay` (`WanderingTrader.java:52-53, 195-201`). Ticks remaining before
     /// natural despawn; decremented in `mob_tick` while not trading.
     pub despawn_delay: AtomicI32,
+    /// Vanilla `AbstractVillager.tradingPlayer`. Set while the merchant screen is open, which
+    /// is what makes `isTrading()` (`WanderingTrader.java:212`) and `TradeWithPlayerGoal`
+    /// meaningful here. Mirrors `VillagerEntity::trading_player`.
+    pub trading_player: std::sync::Mutex<Option<uuid::Uuid>>,
     pub self_weak: std::sync::Mutex<Option<Weak<Self>>>,
 }
 
@@ -68,6 +97,7 @@ impl WanderingTraderEntity {
             offers: Mutex::new(Vec::new()),
             merchant_inventory: Arc::new(SimpleInventory::new(3)),
             despawn_delay: AtomicI32::new(DEFAULT_DESPAWN_DELAY),
+            trading_player: std::sync::Mutex::new(None),
             self_weak: std::sync::Mutex::new(None),
         };
         let mob_arc = Arc::new(trader);
@@ -84,14 +114,20 @@ impl WanderingTraderEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
+            // `WanderingTrader.registerGoals` (`WanderingTrader.java:60-94`).
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
-            goal_selector.add_goal(1, Box::new(WanderAroundGoal::new(0.6)));
+            goal_selector.add_goal(1, Box::new(TradeWithPlayerGoal::new(0.5)));
+            for (flee_type, flee_distance) in AVOIDED {
+                goal_selector.add_goal(
+                    1,
+                    Box::new(AvoidEntityGoal::new(flee_type, *flee_distance, 0.5, 0.5)),
+                );
+            }
+            goal_selector.add_goal(1, EscapeDangerGoal::new(0.5));
             goal_selector.add_goal(4, MoveTowardsRestrictionGoal::new(0.35));
-            goal_selector.add_goal(
-                2,
-                LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 8.0),
-            );
-            goal_selector.add_goal(3, Box::new(RandomLookAroundGoal::default()));
+            goal_selector.add_goal(8, Box::new(WanderAroundGoal::new_water_avoiding(0.35)));
+            // `LookAtPlayerGoal(this, Mob.class, 8.0F)` -- any mob, not only players.
+            goal_selector.add_goal(10, LookAtEntityGoal::with_default_any_mob(mob_weak, 8.0));
         };
 
         mob_arc
@@ -175,7 +211,7 @@ impl ScreenHandlerFactory for WanderingTraderEntity {
         &'a self,
         sync_id: u8,
         player_inventory: &'a Arc<pumpkin_inventory::player::player_inventory::PlayerInventory>,
-        _player: &'a dyn InventoryPlayer,
+        player: &'a dyn InventoryPlayer,
     ) -> BoxFuture<'a, Option<SharedScreenHandler>> {
         Box::pin(async move {
             let offers = self.offers.lock().await;
@@ -188,6 +224,29 @@ impl ScreenHandlerFactory for WanderingTraderEntity {
                 offers.clone(),
             )
             .await;
+
+            // `AbstractVillager.startTrading` sets `tradingPlayer`; `stopTrading` clears it.
+            // With it set, `isTrading()` suppresses despawn and `TradeWithPlayerGoal` holds
+            // the trader still (`WanderingTrader.java:79, 212`).
+            if let Some(server_player) = player.as_any().downcast_ref::<Player>() {
+                *self
+                    .trading_player
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                    Some(server_player.get_entity().entity_uuid);
+            }
+            let close_weak = self_weak.clone();
+            handler.on_close = Some(Box::new(move || {
+                let close_weak = close_weak.clone();
+                Box::pin(async move {
+                    if let Some(trader) = close_weak.upgrade() {
+                        *trader
+                            .trading_player
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+                    }
+                })
+            }));
 
             handler.on_trade = Some(Box::new(move |offer_index| {
                 let self_weak = self_weak.clone();
@@ -330,16 +389,29 @@ impl Mob for WanderingTraderEntity {
         &self.mob_entity
     }
 
+    fn get_trading_player(&self) -> Option<Arc<Player>> {
+        let uuid = (*self
+            .trading_player
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner))?;
+        self.get_entity().world.load().get_player_by_uuid(uuid)
+    }
+
     /// Vanilla `WanderingTrader::maybeDespawn` (`WanderingTrader.java:211-215`): decrements
-    /// `despawnDelay` each tick while not trading; discards the entity at 0. There is no
-    /// `!isTrading()` check here (see module doc: no `trading_player` tracking exists), so
-    /// this despawns even mid-trade -- a known deviation from vanilla, which never despawns
-    /// a trader the player currently has the trade screen open with.
+    /// `despawnDelay` each tick while `!isTrading()`; discards the entity at 0.
     fn mob_tick<'a>(
         &'a self,
         _caller: &'a Arc<dyn EntityBase>,
     ) -> crate::entity::EntityBaseFuture<'a, ()> {
         Box::pin(async move {
+            if self
+                .trading_player
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_some()
+            {
+                return;
+            }
             let delay = self.despawn_delay.load(Ordering::Relaxed);
             if delay > 0 {
                 let new_delay = delay - 1;
@@ -388,5 +460,42 @@ impl Mob for WanderingTraderEntity {
 
             true
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AVOIDED;
+    use pumpkin_data::entity::EntityType;
+
+    /// `WanderingTrader.registerGoals` (`WanderingTrader.java:80-86`) registers exactly seven
+    /// `AvoidEntityGoal`s, and the flee radii are not uniform -- pillagers are feared from
+    /// 15 blocks, evokers and illusioners from 12, zoglins from 10, the rest from 8.
+    #[test]
+    fn avoided_table_matches_vanilla() {
+        // Six single classes plus `Zombie` and its four subclasses.
+        assert_eq!(AVOIDED.len(), 11);
+        let radius = |ty: &EntityType| {
+            AVOIDED
+                .iter()
+                .find(|(t, _)| t.id == ty.id)
+                .map(|(_, d)| *d)
+                .expect("entity type missing from AVOIDED")
+        };
+        for zombie in [
+            &EntityType::ZOMBIE,
+            &EntityType::DROWNED,
+            &EntityType::HUSK,
+            &EntityType::ZOMBIE_VILLAGER,
+            &EntityType::ZOMBIFIED_PIGLIN,
+        ] {
+            assert!((radius(zombie) - 8.0).abs() < f64::EPSILON);
+        }
+        assert!((radius(&EntityType::EVOKER) - 12.0).abs() < f64::EPSILON);
+        assert!((radius(&EntityType::VINDICATOR) - 8.0).abs() < f64::EPSILON);
+        assert!((radius(&EntityType::VEX) - 8.0).abs() < f64::EPSILON);
+        assert!((radius(&EntityType::PILLAGER) - 15.0).abs() < f64::EPSILON);
+        assert!((radius(&EntityType::ILLUSIONER) - 12.0).abs() < f64::EPSILON);
+        assert!((radius(&EntityType::ZOGLIN) - 10.0).abs() < f64::EPSILON);
     }
 }
