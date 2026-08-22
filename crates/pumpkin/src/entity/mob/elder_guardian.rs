@@ -3,6 +3,7 @@ use std::sync::{
     atomic::{AtomicI32, Ordering::Relaxed},
 };
 
+use pumpkin_data::damage::DamageType;
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::potion::Effect;
@@ -16,7 +17,7 @@ use crate::entity::{
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
         move_towards_restriction::MoveTowardsRestrictionGoal, wander_around::WanderAroundGoal,
     },
-    mob::{Mob, MobEntity},
+    mob::{Mob, MobEntity, guardian::guardian_thorns},
 };
 
 /// `ElderGuardian.EFFECT_INTERVAL` / `EFFECT_RADIUS` / `EFFECT_DURATION` /
@@ -67,9 +68,17 @@ impl ElderGuardianEntity {
                 8,
                 LookAtEntityGoal::with_default(mob_weak.clone(), &EntityType::PLAYER, 8.0),
             );
+            // Guardian.java:78: `LookAtPlayerGoal(this, Guardian.class, 12.0F, 0.01F)` -- an
+            // explicit 0.01 probability, half `LookAtPlayerGoal`'s 0.02 default.
             goal_selector.add_goal(
                 8,
-                LookAtEntityGoal::with_default(mob_weak, &EntityType::GUARDIAN, 12.0),
+                Box::new(LookAtEntityGoal::new(
+                    mob_weak,
+                    &EntityType::GUARDIAN,
+                    12.0,
+                    0.01,
+                    false,
+                )),
             );
             goal_selector.add_goal(9, Box::new(RandomLookAroundGoal::default()));
 
@@ -171,6 +180,15 @@ impl NBTStorage for ElderGuardianEntity {}
 impl Mob for ElderGuardianEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `ElderGuardian` inherits `Guardian.hurtServer` (Guardian.java:311-324) unchanged.
+    fn on_damage<'a>(
+        &'a self,
+        damage_type: DamageType,
+        source: Option<&'a dyn EntityBase>,
+    ) -> EntityBaseFuture<'a, ()> {
+        guardian_thorns(self, damage_type, source)
     }
 
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {

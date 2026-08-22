@@ -49,15 +49,17 @@ impl EndermiteEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            goal_selector.add_goal(0, Box::new(SwimGoal::default()));
+            // Priorities are vanilla's, from `Endermite.registerGoals` (Endermite.java:40-49).
+            goal_selector.add_goal(1, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, ClimbOnTopOfPowderSnowGoal::new());
-            goal_selector.add_goal(4, Box::new(MeleeAttackGoal::new(1.0, false)));
-            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
+            goal_selector.add_goal(2, Box::new(MeleeAttackGoal::new(1.0, false)));
+            // Endermite.java:44 is `WaterAvoidingRandomStrollGoal`, not the plain stroll goal.
+            goal_selector.add_goal(3, Box::new(WanderAroundGoal::new_water_avoiding(1.0)));
             goal_selector.add_goal(
-                6,
+                7,
                 LookAtEntityGoal::with_default(mob_weak.clone(), &EntityType::PLAYER, 8.0),
             );
-            goal_selector.add_goal(7, Box::new(RandomLookAroundGoal::default()));
+            goal_selector.add_goal(8, Box::new(RandomLookAroundGoal::default()));
 
             let mut target_selector = mob_arc
                 .mob_entity
@@ -65,8 +67,10 @@ impl EndermiteEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            // Endermite.java:48 puts the player target goal at priority 2, below the revenge
+            // goal; sharing priority 1 with it made the two goals compete instead of nest.
             target_selector.add_goal(
-                1,
+                2,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),
             );
         };

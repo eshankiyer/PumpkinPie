@@ -1,9 +1,11 @@
 use std::sync::{Arc, Weak};
 
+use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::tag::{self, Taggable};
 
 use crate::entity::{
-    Entity, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, guardian_attack::GuardianAttackGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
@@ -11,6 +13,47 @@ use crate::entity::{
     },
     mob::{Mob, MobEntity},
 };
+
+/// Vanilla `Guardian.hurtServer` (Guardian.java:311-324): a guardian that is not currently
+/// swimming reflects 2.0 thorns damage back at whatever living entity dealt the blow directly,
+/// unless the damage already avoids guardian thorns or is itself thorns.
+///
+/// Two scope reductions, both from machinery Pumpkin does not have:
+///
+/// * `isMoving()` is driven by vanilla's `Guardian.GuardianMoveControl` (Guardian.java:477/480),
+///   which Pumpkin does not port. `!Navigator::is_idle()` stands in for it: it is true exactly
+///   while the guardian is following a path, which is the same window in which vanilla's move
+///   control is running a `MOVE_TO` operation with an unfinished navigation.
+/// * `randomStrollGoal.trigger()` (Guardian.java:319-321) is skipped; a mob cannot reach an
+///   individual goal instance out of `goals_selector` here, so a hurt guardian does not
+///   immediately re-roll its stroll destination.
+pub(super) fn guardian_thorns<'a>(
+    guardian: &'a dyn Mob,
+    damage_type: DamageType,
+    source: Option<&'a dyn EntityBase>,
+) -> EntityBaseFuture<'a, ()> {
+    Box::pin(async move {
+        let moving = !guardian
+            .get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_idle();
+        if moving
+            || damage_type.has_tag(&tag::DamageType::MINECRAFT_AVOIDS_GUARDIAN_THORNS)
+            || damage_type == DamageType::THORNS
+        {
+            return;
+        }
+        let Some(attacker) = source else {
+            return;
+        };
+        if attacker.get_living_entity().is_none() {
+            return;
+        }
+        attacker.damage(attacker, 2.0, DamageType::THORNS).await;
+    })
+}
 
 pub struct GuardianEntity {
     pub mob_entity: MobEntity,
@@ -44,9 +87,17 @@ impl GuardianEntity {
                 8,
                 LookAtEntityGoal::with_default(mob_weak.clone(), &EntityType::PLAYER, 8.0),
             );
+            // Guardian.java:78: `LookAtPlayerGoal(this, Guardian.class, 12.0F, 0.01F)` -- an
+            // explicit 0.01 probability, half `LookAtPlayerGoal`'s 0.02 default.
             goal_selector.add_goal(
                 8,
-                LookAtEntityGoal::with_default(mob_weak, &EntityType::GUARDIAN, 12.0),
+                Box::new(LookAtEntityGoal::new(
+                    mob_weak,
+                    &EntityType::GUARDIAN,
+                    12.0,
+                    0.01,
+                    false,
+                )),
             );
             goal_selector.add_goal(9, Box::new(RandomLookAroundGoal::default()));
 
@@ -99,5 +150,13 @@ impl NBTStorage for GuardianEntity {}
 impl Mob for GuardianEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    fn on_damage<'a>(
+        &'a self,
+        damage_type: DamageType,
+        source: Option<&'a dyn EntityBase>,
+    ) -> EntityBaseFuture<'a, ()> {
+        guardian_thorns(self, damage_type, source)
     }
 }

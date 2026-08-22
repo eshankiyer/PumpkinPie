@@ -46,7 +46,9 @@ impl SilverfishEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
 
-            goal_selector.add_goal(0, Box::new(SwimGoal::default()));
+            // Silverfish.java:43 registers `FloatGoal` at priority 1, tied with the powder
+            // snow goal below, not at 0.
+            goal_selector.add_goal(1, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, ClimbOnTopOfPowderSnowGoal::new());
             goal_selector.add_goal(
                 3,
