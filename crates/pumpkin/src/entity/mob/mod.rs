@@ -22,10 +22,10 @@ use crate::world::game_event::{GameEventContext, emit_game_event};
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::damage::DamageType;
-use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, IDSet};
+use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, IDSet, WeaponImpl};
 use pumpkin_data::entity::entity_from_egg;
 use pumpkin_data::entity::{EntityType, MobCategory};
-use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::item_stack::{DamageResult, ItemStack};
 use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data;
@@ -741,6 +741,9 @@ impl MobEntity {
             .living_entity
             .get_attribute_value(&Attributes::ATTACK_DAMAGE);
         let mut fire_aspect_level = 0u32;
+        let base_attack_knockback = self
+            .living_entity
+            .get_attribute_value(&Attributes::ATTACK_KNOCKBACK);
         let mut knockback_level = 0u32;
         let held_item = self
             .living_entity
@@ -773,6 +776,11 @@ impl MobEntity {
         }
         drop(held_item);
 
+        // `Mob.getKnockback` begins with the attacker's attribute, then adds any Knockback
+        // enchantment contribution. Most mobs have zero here, but equipment, data packs, and
+        // attributes can all make the base value meaningful.
+        let knockback_strength = attack_knockback_strength(base_attack_knockback, knockback_level);
+
         let caller = self
             .living_entity
             .entity
@@ -797,16 +805,23 @@ impl MobEntity {
                     .get_entity()
                     .set_on_fire_for_ticks(fire_aspect_ticks(fire_aspect_level as i32));
             }
-            if knockback_level != 0 {
+            if knockback_strength > 0.0 {
                 let yaw = self.living_entity.entity.yaw.load().to_radians();
-                let strength = knockback_enchantment_strength(knockback_level);
                 let x = f64::from(yaw.sin());
                 let z = f64::from(-yaw.cos());
                 if let Some(living) = target.get_living_entity() {
-                    living.knockback_with_resistance(strength, x, z);
+                    living.knockback_with_resistance(knockback_strength, x, z);
                 } else {
-                    target.get_entity().knockback(strength, x, z);
+                    target.get_entity().knockback(knockback_strength, x, z);
                 }
+
+                // `Mob.causeExtraKnockback` slows the attacker horizontally after a landed
+                // knockback hit. Keep vertical motion intact, as vanilla does.
+                let velocity = self.living_entity.entity.velocity.load();
+                self.living_entity
+                    .entity
+                    .velocity
+                    .store(velocity.multiply(0.6, 1.0, 0.6));
             }
             self.living_entity
                 .last_attacking_id
@@ -814,9 +829,38 @@ impl MobEntity {
             self.living_entity
                 .last_attack_time
                 .store(self.living_entity.entity.age.load(Relaxed), Relaxed);
+            self.damage_main_hand_weapon_after_hit().await;
         }
 
         damaged
+    }
+
+    /// `Mob.doHurtTarget` delegates successful weapon strikes to `ItemStack.hurtEnemy`.
+    /// Pumpkin's weapon component carries the equivalent durability cost, so mutate and publish
+    /// the equipped main-hand stack only after the target actually accepted the hit.
+    async fn damage_main_hand_weapon_after_hit(&self) {
+        let living = &self.living_entity;
+        let slot = EquipmentSlot::MAIN_HAND;
+        let mut equipment = living.entity_equipment.lock().await;
+        let Some(stack) = equipment.equipment.get_mut(&slot) else {
+            return;
+        };
+        let cost = mob_weapon_durability_cost(stack);
+        let result = stack.damage_item(cost);
+        if result == DamageResult::Untouched {
+            return;
+        }
+        let updated_stack = stack.clone();
+        drop(equipment);
+
+        if result == DamageResult::Broken {
+            living.entity.world.load().send_entity_status(
+                &living.entity,
+                equipment_break_status(&slot),
+                None,
+            );
+        }
+        living.send_equipment_changes(&[(slot, updated_stack)]);
     }
 
     async fn get_attack_box(&self, attack_range: f64) -> BoundingBox {
@@ -2737,6 +2781,16 @@ const fn knockback_enchantment_strength(level: u32) -> f64 {
     level as f64 * 0.5
 }
 
+const fn attack_knockback_strength(attribute: f64, enchantment_level: u32) -> f64 {
+    attribute + knockback_enchantment_strength(enchantment_level)
+}
+
+fn mob_weapon_durability_cost(stack: &ItemStack) -> i32 {
+    stack
+        .get_data_component::<WeaponImpl>()
+        .map_or(0, |weapon| weapon.item_damage_per_attack as i32)
+}
+
 pub trait PathAwareEntity: Mob + Send + Sync {
     fn get_pathfinding_favor(&self, _block_pos: BlockPos, _world: Arc<World>) -> f32 {
         0.0
@@ -2795,8 +2849,11 @@ pub trait PathAwareEntity: Mob + Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::{
-        EntityType, fire_aspect_ticks, knockback_enchantment_strength, uses_monster_no_action_time,
+        EntityType, attack_knockback_strength, fire_aspect_ticks, knockback_enchantment_strength,
+        mob_weapon_durability_cost, uses_monster_no_action_time,
     };
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
 
     #[test]
     fn fire_aspect_uses_eighty_ticks_per_level() {
@@ -2808,6 +2865,29 @@ mod tests {
     fn knockback_enchantment_adds_half_strength_per_level() {
         assert_eq!(knockback_enchantment_strength(1), 0.5);
         assert_eq!(knockback_enchantment_strength(2), 1.0);
+    }
+
+    #[test]
+    fn attack_knockback_keeps_the_attribute_and_enchantment_components() {
+        assert_eq!(attack_knockback_strength(0.0, 0), 0.0);
+        assert_eq!(attack_knockback_strength(1.5, 0), 1.5);
+        assert_eq!(attack_knockback_strength(1.5, 2), 2.5);
+    }
+
+    #[test]
+    fn mob_weapon_durability_uses_the_weapon_component_cost() {
+        assert_eq!(
+            mob_weapon_durability_cost(&ItemStack::new(1, &Item::IRON_SWORD)),
+            1
+        );
+        assert_eq!(
+            mob_weapon_durability_cost(&ItemStack::new(1, &Item::IRON_AXE)),
+            2
+        );
+        assert_eq!(
+            mob_weapon_durability_cost(&ItemStack::new(1, &Item::COAL)),
+            0
+        );
     }
 
     #[test]
