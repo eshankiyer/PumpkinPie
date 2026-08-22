@@ -1166,10 +1166,6 @@ impl LivingEntity {
         effect_applies_to(self.entity.entity_type, effect_type)
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "effect application also synchronizes attributes"
-    )]
     /// Vanilla `LivingEntity.addEffect`: returns whether the active instance changed, which is
     /// what decides whether a caller counts the application as a success.
     pub async fn add_effect(&self, mut effect: Effect) -> bool {
@@ -1248,45 +1244,7 @@ impl LivingEntity {
                 return false;
             }
 
-            // Effects that modify attributes (ex. speed) should also update the
-            // entity's attribute instances (server-side) and then notify clients.
-            if !effect.effect_type.attribute_modifiers.is_empty() {
-                // Apply each attribute modifier into the local AttributeInstance
-                for m in effect.effect_type.attribute_modifiers {
-                    let id = m.id.to_string();
-                    let op = match m.operation {
-                        Operation::AddValue => ModifierOperation::Add,
-                        Operation::AddMultipliedBase => ModifierOperation::MultiplyBase,
-                        Operation::AddMultipliedTotal => ModifierOperation::MultiplyTotal,
-                    };
-                    let scaled_amount = m.base_value * (f64::from(effect.amplifier) + 1.);
-                    let mod_inst = Modifier {
-                        id,
-                        amount: scaled_amount,
-                        operation: op,
-                    };
-
-                    self.update_attribute(m.attribute, |inst| {
-                        inst.add_or_replace_modifier(mod_inst.clone());
-                    });
-                }
-
-                // Recompute packet modifiers from active effects for each affected attribute
-                let mut touched_attrs: Vec<pumpkin_data::attributes::Attributes> = Vec::new();
-                for m in effect.effect_type.attribute_modifiers {
-                    if !touched_attrs.iter().any(|a| a.id == m.attribute.id) {
-                        touched_attrs.push(m.attribute.clone());
-                    }
-                }
-
-                if !touched_attrs.is_empty() {
-                    crate::entity::attributes::send_attribute_updates_for_living(
-                        self,
-                        touched_attrs,
-                    )
-                    .await;
-                }
-            }
+            self.apply_effect_attribute_modifiers(&effect).await;
 
             // Apply invisible effect
             if effect.effect_type == &StatusEffect::INVISIBILITY {
@@ -1299,7 +1257,76 @@ impl LivingEntity {
             }
         }
 
-        // Broadcast effect to nearby players
+        self.sync_effect_to_clients(&effect);
+        self.update_effect_visibility().await;
+
+        true
+    }
+
+    /// Applies an active effect's attribute modifiers and sends the resulting attribute snapshot
+    /// to tracking clients. `add_effect` and `force_add_effect` share this so replacement cannot
+    /// leave the old amplifier installed on the server.
+    async fn apply_effect_attribute_modifiers(&self, effect: &Effect) {
+        if effect.effect_type.attribute_modifiers.is_empty() {
+            return;
+        }
+
+        let mut touched_attrs: Vec<Attributes> = Vec::new();
+        for effect_modifier in effect.effect_type.attribute_modifiers {
+            let attribute = effect_modifier.attribute;
+            let operation = match effect_modifier.operation {
+                Operation::AddValue => ModifierOperation::Add,
+                Operation::AddMultipliedBase => ModifierOperation::MultiplyBase,
+                Operation::AddMultipliedTotal => ModifierOperation::MultiplyTotal,
+            };
+            let modifier = Modifier {
+                id: effect_modifier.id.to_string(),
+                amount: effect_modifier.base_value * (f64::from(effect.amplifier) + 1.0),
+                operation,
+            };
+            self.update_attribute(attribute, |instance| {
+                instance.add_or_replace_modifier(modifier.clone());
+            });
+            if !touched_attrs
+                .iter()
+                .any(|current| current.id == attribute.id)
+            {
+                touched_attrs.push(attribute.clone());
+            }
+        }
+
+        crate::entity::attributes::send_attribute_updates_for_living(self, touched_attrs).await;
+    }
+
+    /// Removes one active effect's attribute modifiers and synchronizes every attribute it
+    /// touched. This mirrors `LivingEntity.onEffectsRemoved` and is intentionally paired with
+    /// `apply_effect_attribute_modifiers` above.
+    async fn remove_effect_attribute_modifiers(&self, effect: &Effect) {
+        if effect.effect_type.attribute_modifiers.is_empty() {
+            return;
+        }
+
+        let mut touched_attrs: Vec<Attributes> = Vec::new();
+        for modifier in effect.effect_type.attribute_modifiers {
+            let id = modifier.id.to_string();
+            self.update_attribute(modifier.attribute, |instance| {
+                instance.remove_modifier(&id);
+            });
+            if !touched_attrs
+                .iter()
+                .any(|attribute| attribute.id == modifier.attribute.id)
+            {
+                touched_attrs.push(modifier.attribute.clone());
+            }
+        }
+
+        crate::entity::attributes::send_attribute_updates_for_living(self, touched_attrs).await;
+    }
+
+    /// Sends the `ClientboundUpdateMobEffectPacket` equivalent after an effect's active
+    /// instance changes. Keeping this separate from insertion lets `force_add_effect` follow
+    /// vanilla's replacement path without accidentally merging a hidden-effect chain.
+    fn sync_effect_to_clients(&self, effect: &Effect) {
         let mut flag: i8 = 0;
         if effect.ambient {
             flag |= 1;
@@ -1338,9 +1365,19 @@ impl LivingEntity {
             .world
             .load()
             .broadcast_to_chunk_editioned_sync(chunk_pos, &je_packet, &be_packet);
-        self.sync_effect_particles().await;
+    }
 
-        true
+    /// `LivingEntity.updateEffectVisibility`, applied immediately on the server because Pumpkin
+    /// does not have vanilla's deferred `effectsDirty` metadata pass. Glowing deliberately stays
+    /// under `Entity::set_glowing`: teams and other entity state can also make an entity glow.
+    pub async fn update_effect_visibility(&self) {
+        let has_invisibility = self
+            .active_effects
+            .lock()
+            .await
+            .contains_key(&&StatusEffect::INVISIBILITY);
+        self.entity.set_invisible(has_invisibility).await;
+        self.sync_effect_particles().await;
     }
 
     async fn sync_effect_particles(&self) {
@@ -1388,20 +1425,60 @@ impl LivingEntity {
         succeeded
     }
 
-    pub async fn remove_effect(&self, effect_type: &'static StatusEffect) -> bool {
-        // Remove the effect
-        let succeeded = self
-            .active_effects
-            .lock()
-            .await
-            .remove(&effect_type)
-            .is_some();
+    /// Snapshot counterpart to vanilla `LivingEntity.getActiveEffectsMap`. Returning a clone
+    /// keeps the asynchronous Rust state private while allowing gameplay systems to reason
+    /// about one coherent active-effect view.
+    pub async fn get_active_effects_map(&self) -> HashMap<&'static StatusEffect, Effect> {
+        self.active_effects.lock().await.clone()
+    }
 
-        if !succeeded {
+    /// Vanilla `LivingEntity.forceAddEffect`: replace the active instance directly instead of
+    /// merging it into the old instance's hidden-effect chain. This is used by state-restoring
+    /// and authoritative gameplay paths where the supplied instance must win exactly.
+    pub async fn force_add_effect(&self, effect: Effect) -> bool {
+        if !self.can_be_affected(effect.effect_type) {
             return false;
         }
 
+        let previous = {
+            let mut active_effects = self.active_effects.lock().await;
+            let mut hidden_effects = self.hidden_effects.lock().await;
+            hidden_effects.remove(effect.effect_type);
+            active_effects.insert(effect.effect_type, effect.clone())
+        };
+
+        if let Some(previous) = previous {
+            self.remove_effect_attribute_modifiers(&previous).await;
+        }
+        self.apply_effect_attribute_modifiers(&effect).await;
+
+        if effect.effect_type == &StatusEffect::INVISIBILITY {
+            self.entity.set_invisible(true).await;
+        }
+        if effect.effect_type == &StatusEffect::GLOWING {
+            self.entity.set_glowing(true).await;
+        }
+
+        self.sync_effect_to_clients(&effect);
+        self.update_effect_visibility().await;
+        true
+    }
+
+    /// Vanilla `LivingEntity.removeEffectNoUpdate`. A hidden chain belongs to the same logical
+    /// `MobEffectInstance`, so discard it with the active instance while deliberately leaving
+    /// attributes, metadata, and packets untouched for the caller to reconcile.
+    pub async fn remove_effect_no_update(
+        &self,
+        effect_type: &'static StatusEffect,
+    ) -> Option<Effect> {
         self.hidden_effects.lock().await.remove(&effect_type);
+        self.active_effects.lock().await.remove(&effect_type)
+    }
+
+    pub async fn remove_effect(&self, effect_type: &'static StatusEffect) -> bool {
+        let Some(effect) = self.remove_effect_no_update(effect_type).await else {
+            return false;
+        };
 
         // Broadcast effect removal
         self.entity
@@ -1409,33 +1486,7 @@ impl LivingEntity {
             .load()
             .send_remove_mob_effect(&self.entity, effect_type);
 
-        // Remove attribute modifiers, if any
-        if !effect_type.attribute_modifiers.is_empty() {
-            let mut touched_attrs = Vec::new();
-
-            for m in effect_type.attribute_modifiers {
-                let id = m.id.to_string();
-
-                // Clean local server state
-                self.update_attribute(m.attribute, |inst| {
-                    inst.remove_modifier(&id);
-                });
-
-                // Track unique attributes for the packet update
-                if !touched_attrs
-                    .iter()
-                    .any(|a: &Attributes| a.id == m.attribute.id)
-                {
-                    touched_attrs.push(m.attribute.clone());
-                }
-            }
-
-            // Sync the clean state to the client
-            if !touched_attrs.is_empty() {
-                crate::entity::attributes::send_attribute_updates_for_living(self, touched_attrs)
-                    .await;
-            }
-        }
+        self.remove_effect_attribute_modifiers(&effect).await;
 
         // Vanilla has no absorption reset on removal: dropping the effect drops its
         // MAX_ABSORPTION modifier, and `LivingEntity.onAttributeUpdated` clamps the current
@@ -1465,11 +1516,8 @@ impl LivingEntity {
             self.entity.set_glowing(false).await;
         }
 
-        if succeeded {
-            self.sync_effect_particles().await;
-        }
-
-        succeeded
+        self.update_effect_visibility().await;
+        true
     }
 
     pub async fn has_effect(&self, effect: &'static StatusEffect) -> bool {
