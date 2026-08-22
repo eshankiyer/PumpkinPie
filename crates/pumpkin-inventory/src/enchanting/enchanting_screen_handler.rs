@@ -238,10 +238,15 @@ impl EnchantingTableScreenHandler {
         enchant_level = (enchant_level as f32 * (1.0 + bonus)).round() as i32;
         enchant_level = enchant_level.max(1);
 
+        // `EnchantmentHelper.getAvailableEnchantmentResults` (`EnchantmentHelper.java:597-601`)
+        // filters on `isPrimaryItem(stack) || isBook`. A plain book belongs to none of the
+        // `enchantable/*` tags, so without the book bypass the candidate list is always empty
+        // and a book can never be enchanted at a table at all.
+        let is_book = item.item == &Item::BOOK;
         let mut available = Vec::new();
         for enchant in Enchantment::all() {
             if enchant.has_tag(&EnchantmentTag::MINECRAFT_IN_ENCHANTING_TABLE)
-                && enchant.can_enchant(item.item)
+                && (is_book || enchant.can_enchant(item.item))
             {
                 for l in (1..=enchant.max_level).rev() {
                     if enchant_level >= enchant.min_cost.calculate(l)

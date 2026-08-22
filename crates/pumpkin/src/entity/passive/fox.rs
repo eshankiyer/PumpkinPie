@@ -24,8 +24,8 @@ use crate::entity::{
         follow_parent::FollowParentGoal, fox_defend_trusted::DefendTrustedTargetGoal,
         fox_faceplant::FoxFaceplantGoal, fox_melee_attack::FoxMeleeAttackGoal,
         fox_pounce::FoxPounceGoal, fox_sleep::FoxSleepGoal, fox_stalk_prey::StalkPreyGoal,
-        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal, swim::SwimGoal,
-        tempt::TemptGoal, wander_around::WanderAroundGoal,
+        leap_at_target::LeapAtTargetGoal, look_at_entity::LookAtEntityGoal, swim::SwimGoal,
+        wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
     passive::animal::Animal,
@@ -178,18 +178,23 @@ impl FoxEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
+            // `Fox.registerGoals` (`Fox.java:180-205`). Priorities below are vanilla's literal
+            // numbers: this codebase's `GoalSelector` uses the same preemption rule as vanilla
+            // (`PrioritizedGoal::can_be_replaced_by` requires `goal.priority < self.priority`,
+            // `goal_selector.rs`), so collapsing distinct vanilla priorities onto one number
+            // silently disables preemption between them. Vanilla registers no `TemptGoal` and no
+            // `RandomLookAroundGoal` for foxes; both are dropped.
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(0, ClimbOnTopOfPowderSnowGoal::new());
-            goal_selector.add_goal(1, EscapeDangerGoal::new(1.5));
-            // Note: vanilla registers `FaceplantGoal` at the same relative slot (above panic/
-            // breed, below float/climb) -- also priority 1 here since `EscapeDangerGoal` already
-            // occupies it, matching vanilla's own numbering.
+            // `Fox.FaceplantGoal` (Fox.java:182).
             goal_selector.add_goal(1, FoxFaceplantGoal::new());
-            goal_selector.add_goal(2, BreedGoal::new(1.0));
-            goal_selector.add_goal(3, Box::new(TemptGoal::new(1.2, TEMPT_ITEMS, false)));
-            goal_selector.add_goal(4, Box::new(FollowParentGoal::new(1.1)));
-            // Vanilla registers the three `AvoidEntityGoal`s at priority 4 too (above stalk/
-            // pounce/sleep at 5, below tempt/follow-parent) -- kept at the same relative slot.
+            // `Fox.FoxPanicGoal(2.2)` (Fox.java:183). The subclass additionally requires
+            // `!isDefending()` (Fox.java:1124-1127), which this codebase's `EscapeDangerGoal`
+            // does not model.
+            goal_selector.add_goal(2, EscapeDangerGoal::new(2.2));
+            // `Fox.FoxBreedGoal(1.0)` (Fox.java:184).
+            goal_selector.add_goal(3, BreedGoal::new(1.0));
+            // The three `AvoidEntityGoal`s at priority 4 (Fox.java:185-190).
             goal_selector.add_goal(
                 4,
                 Box::new(
@@ -242,22 +247,34 @@ impl FoxEntity {
                     ),
                 ),
             );
-            // Below `WanderAroundGoal`'s priority 6 so stalking/pouncing/sleeping/melee always
-            // preempts idle wandering when their own gates are satisfied. Equal-priority goals
-            // are never preempted by one another (`can_be_replaced_by` needs strictly-lower
-            // priority) and ties break by insertion order, so melee is registered before sleep
-            // here to match vanilla's own relative order (`FoxMeleeAttackGoal` before
-            // `SleepGoal`, both priority 7 in `Fox.java`).
+            // `Fox.StalkPreyGoal` (Fox.java:191).
             goal_selector.add_goal(5, StalkPreyGoal::new());
-            goal_selector.add_goal(5, FoxPounceGoal::new());
-            goal_selector.add_goal(5, FoxMeleeAttackGoal::new());
-            goal_selector.add_goal(5, FoxSleepGoal::new());
-            goal_selector.add_goal(6, Box::new(WanderAroundGoal::new(1.0)));
+            // `Fox.FoxPounceGoal` (Fox.java:192). Not ported at 6: `Fox.SeekShelterGoal(1.25)`
+            // (Fox.java:193), which needs a sky/rain-exposure query plus `RandomPos` shelter
+            // search.
+            goal_selector.add_goal(6, FoxPounceGoal::new());
+            // `Fox.FoxMeleeAttackGoal(1.2F, true)` then `Fox.SleepGoal`, both priority 7
+            // (Fox.java:194-195), in vanilla's registration order.
+            goal_selector.add_goal(7, FoxMeleeAttackGoal::new());
+            goal_selector.add_goal(7, FoxSleepGoal::new());
+            // `Fox.FoxFollowParentGoal(this, 1.25)` (Fox.java:196).
+            goal_selector.add_goal(8, Box::new(FollowParentGoal::new(1.25)));
+            // Not ported at 9: `Fox.FoxStrollThroughVillageGoal(32, 200)` (Fox.java:197), which
+            // needs village POI lookup.
+            // `LeapAtTargetGoal(this, 0.4F)` (Fox.java:199). Not ported at the same priority:
+            // `Fox.FoxEatBerriesGoal(1.2F, 12, 1)` (Fox.java:198).
+            goal_selector.add_goal(10, LeapAtTargetGoal::new(0.4));
+            // `WaterAvoidingRandomStrollGoal(this, 1.0)` (Fox.java:200). Not ported at the same
+            // priority: `Fox.FoxSearchForItemsGoal` (Fox.java:201): `GoToWantedItemGoal` exists here but
+            // only navigates; the pickup-and-equip-to-mainhand half is not modelled.
+            goal_selector.add_goal(11, Box::new(WanderAroundGoal::new_water_avoiding(1.0)));
+            // `Fox.FoxLookAtPlayerGoal(this, Player.class, 24.0F)` (Fox.java:202). The subclass
+            // also gates on `!isFaceplanted() && !isInterested()` (Fox.java:1051-1059), which is
+            // not modelled here. Not ported at 13: `Fox.PerchAndSearchGoal` (Fox.java:203).
             goal_selector.add_goal(
-                9,
-                LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
+                12,
+                LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 24.0),
             );
-            goal_selector.add_goal(10, Box::new(RandomLookAroundGoal::default()));
 
             let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
             target_selector.add_goal(3, DefendTrustedTargetGoal::new());

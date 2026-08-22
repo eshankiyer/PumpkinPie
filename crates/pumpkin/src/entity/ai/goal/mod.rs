@@ -54,6 +54,7 @@ pub mod frog_tongue_attack;
 pub mod ghast_random_float;
 pub mod ghast_shoot_fireball;
 pub mod ghast_target;
+pub mod go_to_wanted_item;
 pub mod goal_selector;
 pub mod goat_ram;
 pub mod golem_random_stroll_in_village;

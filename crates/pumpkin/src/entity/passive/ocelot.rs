@@ -16,8 +16,7 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal, breed::BreedGoal,
-        escape_danger::EscapeDangerGoal, follow_parent::FollowParentGoal,
-        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
+        leap_at_target::LeapAtTargetGoal, look_at_entity::LookAtEntityGoal,
         ocelot_attack::OcelotAttackGoal, swim::SwimGoal, tempt::TemptGoal,
         wander_around::WanderAroundGoal,
     },
@@ -25,6 +24,7 @@ use crate::entity::{
     passive::animal::Animal,
     player::Player,
 };
+use crate::world::World;
 
 const TEMPT_ITEMS: &[&Item] = &[&Item::COD, &Item::SALMON];
 
@@ -48,6 +48,7 @@ impl OcelotEntity {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
             Arc::downgrade(&mob_arc)
         };
+        let ocelot_weak = Arc::downgrade(&mob_arc);
 
         {
             let mut goal_selector = mob_arc
@@ -56,38 +57,57 @@ impl OcelotEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            // Goal 1: FloatGoal (SwimGoal)
+            // `Ocelot.registerGoals` (`Ocelot.java:104-113`). Vanilla registers exactly
+            // seven goal-selector goals; no panic, follow-parent or random-look-around goal
+            // appears in that list.
             goal_selector.add_goal(1, Box::new(SwimGoal::default()));
-            // Goal 1: PanicGoal (EscapeDangerGoal)
-            goal_selector.add_goal(1, EscapeDangerGoal::new(1.5));
-            // Goal 3: OcelotTemptGoal
+            // `Ocelot.OcelotTemptGoal(this, 0.6, ItemTags.OCELOT_FOOD, true)` (Ocelot.java:104).
+            // The subclass only overrides `canScare` to additionally require `!isTrusting`
+            // (Ocelot.java:310-313); that gate is not modelled by this codebase's `TemptGoal`.
             goal_selector.add_goal(3, Box::new(TemptGoal::new(0.6, TEMPT_ITEMS, true)));
-            // Goal 4: OcelotAvoidEntityGoal (when not trusting)
+            // `Ocelot.OcelotAvoidEntityGoal<Player>(this, 16.0F, 0.8, 1.33)` registered from
+            // `reassessTrustingGoals` only while the ocelot is not trusting (Ocelot.java:219),
+            // and the subclass re-checks `!isTrusting()` in both `canUse` and `canContinueToUse`
+            // (Ocelot.java:291-299). Registered once here with that check as a predicate, which
+            // is equivalent and avoids mutating the selector at runtime. Vanilla also filters
+            // with `NO_CREATIVE_OR_SPECTATOR` (Ocelot.java:287).
             goal_selector.add_goal(
                 4,
-                Box::new(AvoidEntityGoal::new(&EntityType::PLAYER, 16.0, 0.8, 1.33)),
+                Box::new(
+                    AvoidEntityGoal::new(&EntityType::PLAYER, 16.0, 0.8, 1.33).with_predicate(
+                        Arc::new(move |candidate: &dyn EntityBase| {
+                            let Some(ocelot) = ocelot_weak.upgrade() else {
+                                return false;
+                            };
+                            if ocelot.is_trusting() {
+                                return false;
+                            }
+                            let Some(player) = candidate.get_player() else {
+                                return false;
+                            };
+                            !player.is_creative() && !player.is_spectator()
+                        }),
+                    ),
+                ),
             );
-            // Goal 8: OcelotAttackGoal (`Ocelot.registerGoals`, Ocelot.java:108)
+            // `LeapAtTargetGoal(this, 0.3F)` (Ocelot.java:107).
+            goal_selector.add_goal(7, LeapAtTargetGoal::new(0.3));
+            // `OcelotAttackGoal(this)` (Ocelot.java:108).
             goal_selector.add_goal(8, Box::new(OcelotAttackGoal::new()));
-            // Goal 9: BreedGoal
+            // `BreedGoal(this, 0.8)` (Ocelot.java:109).
             goal_selector.add_goal(9, BreedGoal::new(0.8));
-            // Goal 9: FollowParentGoal
-            goal_selector.add_goal(9, Box::new(FollowParentGoal::new(0.8)));
-            // Goal 10: `WaterAvoidingRandomStrollGoal(this, 0.8, 1.0000001E-5)`
-            // (`Ocelot.registerGoals`, Ocelot.java:110).
+            // `WaterAvoidingRandomStrollGoal(this, 0.8, 1.0000001E-5)` (Ocelot.java:110).
             goal_selector.add_goal(
                 10,
                 Box::new(WanderAroundGoal::new_water_avoiding_with_probability(
                     0.8, 0.00001,
                 )),
             );
-            // Goal 11: LookAtPlayerGoal
+            // `LookAtPlayerGoal(this, Player.class, 10.0F)` (Ocelot.java:111).
             goal_selector.add_goal(
                 11,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 10.0),
             );
-            // Goal 11: RandomLookAroundGoal
-            goal_selector.add_goal(11, Box::new(RandomLookAroundGoal::default()));
         };
 
         {
@@ -97,14 +117,28 @@ impl OcelotEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            // Target Goal 1: NearestAttackableTargetGoal for Chicken and Turtle
+            // `NearestAttackableTargetGoal<Chicken>(this, false)` (Ocelot.java:112).
             target_selector.add_goal(
                 1,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::CHICKEN, false),
             );
+            // `NearestAttackableTargetGoal<Turtle>(this, 10, false, false,
+            // Turtle.BABY_ON_LAND_SELECTOR)` (Ocelot.java:113) -- baby turtles out of water only.
             target_selector.add_goal(
                 1,
-                ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::TURTLE, false),
+                Box::new(ActiveTargetGoal::new(
+                    &mob_arc.mob_entity,
+                    &EntityType::TURTLE,
+                    10,
+                    false,
+                    false,
+                    Some(
+                        |target: crate::entity::ai::target_predicate::TargetData,
+                         _world: Arc<World>| async move {
+                            target.age < 0 && !target.in_water
+                        },
+                    ),
+                )),
             );
         };
 

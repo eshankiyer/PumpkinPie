@@ -1,12 +1,11 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::sync::{
-    Arc, Weak,
+    Arc,
     atomic::{AtomicBool, AtomicI32, Ordering, Ordering::Relaxed},
 };
 
 use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, IDSet, IdOr};
-use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
@@ -18,10 +17,7 @@ use pumpkin_util::math::boundingbox::EntityDimensions;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ageable::{AgeableData, AgeableMob},
-    ai::goal::{
-        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal, swim::SwimGoal,
-        tempt::TemptGoal, wander_around::WanderAroundGoal,
-    },
+    ai::goal::{ghast_random_float::GhastRandomFloatAroundGoal, swim::SwimGoal, tempt::TemptGoal},
     mob::{Mob, MobEntity},
     passive::animal::Animal,
     player::Player,
@@ -74,10 +70,6 @@ impl HappyGhastEntity {
         };
 
         let mob_arc = Arc::new(happy_ghast);
-        let mob_weak: Weak<dyn Mob> = {
-            let mob_arc: Arc<dyn Mob> = mob_arc.clone();
-            Arc::downgrade(&mob_arc)
-        };
 
         {
             let mut goal_selector = mob_arc
@@ -86,10 +78,27 @@ impl HappyGhastEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-            goal_selector.add_goal(0, Box::new(SwimGoal::default()));
-            // `HappyGhast.java:107-114`: `TemptGoal.ForNonPathfinders(this, 1.0, ..., false, 7.0)`.
+            // `HappyGhast.registerGoals` (`HappyGhast.java:102-118`) registers exactly three
+            // goals, at priorities 3/4/5. No look-at-player or random-look-around goal appears
+            // in that list -- the head yaw is driven by `HappyGhastLookControl`
+            // (`HappyGhast.java:639-660`) instead, so both are dropped here.
+            //
+            // Divergence: vanilla registers this set only for adults. `babyGhastSetup`
+            // (`HappyGhast.java:132-138`) calls `removeAllGoals(goal -> true)` and registers
+            // nothing, and `adultGhastSetup` (`HappyGhast.java:120-129`) clears and re-registers
+            // on the age boundary. This codebase registers once at construction, so a baby happy
+            // ghast still runs the adult goal list.
+            //
+            // `HappyGhast.HappyGhastFloatGoal` (`HappyGhast.java:628-637`) is a `FloatGoal`
+            // whose `canUse` additionally requires `!isOnStillTimeout()`; that extra gate is not
+            // modelled by this codebase's `SwimGoal`.
+            goal_selector.add_goal(3, Box::new(SwimGoal::default()));
+            // `TemptGoal.ForNonPathfinders(this, 1.0, <tag predicate>, false, 7.0)`
+            // (`HappyGhast.java:104-118`). Vanilla picks `HAPPY_GHAST_TEMPT_ITEMS` for an
+            // unarmored adult and `HAPPY_GHAST_FOOD` otherwise; see `HAPPY_GHAST_FOOD` above for
+            // why the single-list approximation is used.
             goal_selector.add_goal(
-                1,
+                4,
                 Box::new(TemptGoal::with_stop_distance(
                     1.0,
                     HAPPY_GHAST_FOOD,
@@ -97,12 +106,12 @@ impl HappyGhastEntity {
                     7.0,
                 )),
             );
-            goal_selector.add_goal(2, Box::new(WanderAroundGoal::new(1.0)));
-            goal_selector.add_goal(
-                3,
-                LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
-            );
-            goal_selector.add_goal(4, Box::new(RandomLookAroundGoal::default()));
+            // `Ghast.RandomFloatAroundGoal(this, 16)` (`HappyGhast.java:117`). Happy ghasts fly,
+            // so the previous ground-pathing `WanderAroundGoal` was wrong. Divergence: this
+            // codebase's goal is the `distanceToBlocks == 0` form (see
+            // `ghast_random_float.rs`), so vanilla's 16-block clearance check on the chosen
+            // target position is not applied.
+            goal_selector.add_goal(5, Box::new(GhastRandomFloatAroundGoal::new()));
         };
 
         mob_arc

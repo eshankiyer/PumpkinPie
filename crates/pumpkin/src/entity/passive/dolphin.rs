@@ -69,6 +69,8 @@ impl DolphinEntity {
             // priority 0 is removed rather than kept as an approximation.
             goal_selector.add_goal(0, BreathAirGoal::new());
             goal_selector.add_goal(0, TryFindWaterGoal::new());
+            // Speed 1.3 is vanilla's inline `moveTo(..., 1.3)` inside
+            // `DolphinSwimToTreasureGoal.tick` (`Dolphin.java:458`), not a constructor arg.
             goal_selector.add_goal(1, DolphinSwimToTreasureGoal::new(1.3));
             goal_selector.add_goal(2, DolphinSwimWithPlayerGoal::new(4.0));
             // Vanilla: `Dolphin.registerGoals` uses `RandomSwimmingGoal(this, 1.0, 10)`.
@@ -80,6 +82,12 @@ impl DolphinEntity {
             );
             goal_selector.add_goal(5, Box::new(DolphinJumpGoal::new(10)));
             goal_selector.add_goal(6, Box::new(MeleeAttackGoal::new(1.2, true)));
+            // Not ported, all priority 8 (`Dolphin.java:167-169`): `Dolphin.PlayWithItemsGoal`,
+            // which needs mob item-entity pickup and toss (`GoToWantedItemGoal` only
+            // navigates); and the two
+            // `FollowPlayerRiddenEntityGoal` registrations (`AbstractBoat`, `AbstractNautilus`),
+            // which need a `Player.hasMovedHorizontallyRecently` analogue (none exists in
+            // `crates/pumpkin/src`, verified by grep) plus a controlling-passenger scan. These are the only goal-list gaps left for Dolphin.
             // `AvoidEntityGoal<Guardian>(8.0F, 1.0, 1.0)` at priority 9 (`Dolphin.java:170`).
             // Vanilla's search is `getEntitiesOfClass(Guardian.class, ...)`, which also matches
             // `ElderGuardian extends Guardian`; this codebase's `AvoidEntityGoal` only matches
