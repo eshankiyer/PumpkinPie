@@ -8,9 +8,9 @@ use crate::entity::EntityBase;
 use crate::entity::player::Player;
 use indexmap::IndexMap;
 use pumpkin_data::advancement_data::{
-    AdvancementNode, AdvancementProgressData, AdvancementRequirement, AdvancementReward, Criteria,
+    AdvancementNode, AdvancementProgressData, AdvancementRequirement, Criteria,
 };
-use pumpkin_data::{ADVANCEMENT_TREE, Advancement, translation};
+use pumpkin_data::{ADVANCEMENT_TREE, Advancement, AdvancementReward, translation};
 use pumpkin_protocol::bedrock::server::text::SText;
 use pumpkin_protocol::java::client::play::{
     CSelectAdvancementsTab, CSystemChatMessage, CUpdateAdvancements,
@@ -360,7 +360,13 @@ impl PlayerAdvancement {
 
     /// Flushes any pending advancement state down to the client.
     pub fn flush_dirty(&mut self, player: &Arc<Player>, show_advancement: bool) {
-        if self.is_first_packet || !self.roots_to_update.is_empty() {
+        // `PlayerAdvancements.flushDirty` (`PlayerAdvancements.java:239`) also
+        // flushes on a non-empty `progressChanged`, so partial criterion progress
+        // reaches the client as it changes rather than only on a completion.
+        if self.is_first_packet
+            || !self.roots_to_update.is_empty()
+            || !self.progress_changed.is_empty()
+        {
             let mut progress: HashMap<Identifier, &AdvancementProgress> = HashMap::new();
             let mut added: Vec<&Advancement> = Vec::new();
             let mut removed: Vec<Identifier> = Vec::new();
@@ -410,13 +416,17 @@ impl PlayerAdvancement {
         self.is_first_packet = false;
     }
 
-    /// Grants the rewards (like experience) associated with completing an advancement.
+    /// `AdvancementRewards.grant` (`AdvancementRewards.java:39-90`): experience
+    /// first, then the recipe keys via `awardRecipesByKey`
+    /// (`AdvancementRewards.java:77-79`). Loot tables and the reward function are
+    /// still unimplemented.
     pub fn grant_reward(player: Arc<Player>, reward: &'static AdvancementReward) {
         tokio::spawn(async move {
-            tokio::join!(
-                player.add_experience_points(reward.experience),
-                // more reward later
-            );
+            player.add_experience_points(reward.experience).await;
+            if !reward.recipes.is_empty() {
+                let ids: Vec<String> = reward.recipes.iter().map(|id| (*id).to_string()).collect();
+                player.award_recipes_by_key(&ids).await;
+            }
         });
     }
 

@@ -135,11 +135,12 @@ pub struct AdvancementRewards {
 impl ToTokens for AdvancementRewards {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         let experience = self.experience;
-        let recipes = self.recipes.iter().map(|_recipe| {
-            quote! {
-                //TODO implement recipe reward
-                //Recipe::from_id(#recipe)
-            }
+        // Vanilla's rewards carry recipe resource keys, granted by
+        // `AdvancementRewards.grant` -> `awardRecipesByKey`
+        // (`AdvancementRewards.java:77-79`), so emit the keys verbatim.
+        let recipes = self.recipes.iter().map(|recipe| {
+            let recipe = recipe.as_str();
+            quote! { #recipe }
         });
         tokens.extend(quote! {
             AdvancementReward {
@@ -930,6 +931,14 @@ pub(crate) fn build() -> TokenStream {
         use std::hash::{Hash,Hasher};
         use std::fmt::Display;
         use std::collections::BTreeMap;
+
+        /// `AdvancementRewards` (`AdvancementRewards.java:27`). `recipes` holds
+        /// recipe resource keys, matching `List<ResourceKey<Recipe<?>>> recipes`.
+        #[derive(Clone)]
+        pub struct AdvancementReward {
+            pub experience : i32,
+            pub recipes : &'static[&'static str],
+        }
 
         pub struct Advancement {
             pub id : Identifier,
