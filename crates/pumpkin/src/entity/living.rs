@@ -2674,9 +2674,11 @@ impl LivingEntity {
             self.create_wither_rose(cause).await;
 
             // Award experience
-            if params.killed_by_player.unwrap_or(false)
-                && !self.skip_drop_experience.load(Ordering::Relaxed)
-                && world.level_info.load().game_rules.mob_drops
+            let always_drops_experience = dyn_self.get_player().is_some();
+            if !self.skip_drop_experience.load(Ordering::Relaxed)
+                && (always_drops_experience
+                    || (params.killed_by_player.unwrap_or(false)
+                        && world.level_info.load().game_rules.mob_drops))
             {
                 let amount = dyn_self.get_experience_reward(cause);
                 if amount > 0 {

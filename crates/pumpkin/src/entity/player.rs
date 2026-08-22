@@ -7084,6 +7084,17 @@ const fn respawn_anchor_should_consume_charge(forced: bool, charges: u8) -> bool
     !forced && charges > 0
 }
 
+/// Vanilla `Player.getBaseExperienceReward`: a player always enters the generic
+/// experience-drop path, but contributes no reward when inventory is retained or while
+/// spectating.
+fn player_death_experience_reward(level: i32, keep_inventory: bool, spectator: bool) -> u32 {
+    if keep_inventory || spectator {
+        0
+    } else {
+        level.saturating_mul(7).clamp(0, 100) as u32
+    }
+}
+
 impl EntityBase for Player {
     fn damage_with_context<'a>(
         &'a self,
@@ -7241,9 +7252,13 @@ impl EntityBase for Player {
     }
 
     fn get_experience_reward(&self, _killer: Option<&dyn EntityBase>) -> u32 {
-        // vanilla: min(level * 7, 100)
         let level = self.experience_level.load(Ordering::Relaxed);
-        (level * 7).min(100) as u32
+        let keep_inventory = self.world().level_info.load().game_rules.keep_inventory;
+        player_death_experience_reward(
+            level,
+            keep_inventory,
+            self.gamemode.load() == GameMode::Spectator,
+        )
     }
 
     fn tick_in_void<'a>(&'a self, dyn_self: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
@@ -8134,7 +8149,8 @@ fn is_valid_for_forced_respawn(state: &BlockState) -> bool {
 mod tests {
     use super::{
         Player, ability_invulnerability_blocks, bedrock_inventory_slot,
-        is_valid_for_forced_respawn, is_vanishing_cursed, read_root_vehicle, write_root_vehicle,
+        is_valid_for_forced_respawn, is_vanishing_cursed, player_death_experience_reward,
+        read_root_vehicle, write_root_vehicle,
     };
     use pumpkin_data::Block;
     use pumpkin_data::damage::DamageType;
@@ -8214,6 +8230,15 @@ mod tests {
     fn invulnerability_allows_bypass_tagged_damage() {
         assert!(ability_invulnerability_blocks(&DamageType::MOB_ATTACK));
         assert!(!ability_invulnerability_blocks(&DamageType::OUT_OF_WORLD));
+    }
+
+    #[test]
+    fn player_death_experience_honors_inventory_and_spectator_rules() {
+        assert_eq!(player_death_experience_reward(0, false, false), 0);
+        assert_eq!(player_death_experience_reward(5, false, false), 35);
+        assert_eq!(player_death_experience_reward(20, false, false), 100);
+        assert_eq!(player_death_experience_reward(5, true, false), 0);
+        assert_eq!(player_death_experience_reward(5, false, true), 0);
     }
 
     #[test]
