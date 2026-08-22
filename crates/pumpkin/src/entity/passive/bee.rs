@@ -6,6 +6,7 @@ use std::sync::{
 };
 
 use crossbeam::atomic::AtomicCell;
+use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{
     BlockProperties, DoubleBlockHalf, TallSeagrassLikeProperties,
 };
@@ -35,6 +36,7 @@ use crate::entity::{
     ai::pathfinder::NavigatorGoal,
     mob::{Mob, MobEntity},
 };
+use pumpkin_world::world::BlockFlags;
 
 /// `Bee.FLAG_ROLL`, `Bee.FLAG_HAS_STUNG`, `Bee.FLAG_HAS_NECTAR`.
 const FLAG_ROLL: u8 = 2;
@@ -167,7 +169,11 @@ impl BeeEntity {
             goal_selector.add_goal(1, Box::new(SwimGoal::default()));
             goal_selector.add_goal(2, Box::new(BeePollinateGoal::new(bee_weak.clone())));
             goal_selector.add_goal(3, Box::new(BeeLocateHiveGoal::new(bee_weak.clone())));
-            goal_selector.add_goal(3, Box::new(BeeGoToHiveGoal::new(bee_weak)));
+            goal_selector.add_goal(3, Box::new(BeeGoToHiveGoal::new(bee_weak.clone())));
+            goal_selector.add_goal(3, Box::new(BeeValidateHiveGoal::new(bee_weak.clone())));
+            goal_selector.add_goal(3, Box::new(BeeValidateFlowerGoal::new(bee_weak.clone())));
+            goal_selector.add_goal(3, Box::new(BeeGoToKnownFlowerGoal::new(bee_weak.clone())));
+            goal_selector.add_goal(3, Box::new(BeeGrowCropGoal::new(bee_weak)));
             goal_selector.add_goal(4, Box::new(WanderAroundGoal::new(1.0)));
             goal_selector.add_goal(
                 5,
@@ -253,6 +259,23 @@ impl BeeEntity {
     /// `Bee.setStayOutOfHiveCountdown`.
     pub fn set_stay_out_of_hive_countdown(&self, ticks: i32) {
         self.stay_out_of_hive_countdown.store(ticks, Relaxed);
+    }
+
+    /// `Bee.ticksWithoutNectarSinceExitingHive`, for the goals that gate on it.
+    #[must_use]
+    pub fn ticks_without_nectar(&self) -> i32 {
+        self.ticks_without_nectar.load(Relaxed)
+    }
+
+    /// `Bee.getCropsGrownSincePollination`.
+    #[must_use]
+    pub fn crops_grown_since_pollination(&self) -> i32 {
+        self.crops_grown_since_pollination.load(Relaxed)
+    }
+
+    /// `Bee.incrementNumCropsGrownSincePollination`.
+    pub fn increment_crops_grown_since_pollination(&self) {
+        self.crops_grown_since_pollination.fetch_add(1, Relaxed);
     }
 
     /// `Bee.dropFlower`.
@@ -1184,6 +1207,409 @@ impl Mob for BeeEntity {
     }
 }
 
+/// `ValidateHiveGoal.VALIDATE_HIVE_COOLDOWN` / `ValidateFlowerGoal.validateFlowerCooldown`:
+/// `Mth.nextInt(random, 20, 40)`, inclusive on both ends.
+const VALIDATE_COOLDOWN_MIN: i64 = 20;
+const VALIDATE_COOLDOWN_MAX: i64 = 40;
+
+/// `BeeGoToKnownFlowerGoal.wantsToGoToKnownFlower`: `ticksWithoutNectarSinceExitingHive > 600`.
+const TICKS_WITHOUT_NECTAR_BEFORE_SEEKING_KNOWN_FLOWER: i32 = 600;
+/// `BeeGoToKnownFlowerGoal.MAX_TRAVELLING_TICKS`.
+const MAX_FLOWER_TRAVELLING_TICKS: i32 = 2400;
+/// `BeeGrowCropGoal.GROW_CHANCE`.
+const GROW_CHANCE: i32 = 30;
+/// `BeeGrowCropGoal.canBeeUse`: a bee stops fertilising after ten crops per load of nectar.
+const MAX_CROPS_GROWN_PER_POLLINATION: i32 = 10;
+
+/// Builds the state id of `block` with its `age` property set to `age`, or `None` when the block
+/// has no such state. Used by the max-age table's test.
+#[cfg(test)]
+fn state_id_with_age(block: &Block, age: u8) -> Option<BlockStateId> {
+    let props = block.properties(block.default_state.id)?.to_props();
+    let age = age.to_string();
+    let updated: Vec<(&str, &str)> = props
+        .iter()
+        .map(|(name, value)| {
+            if *name == "age" {
+                (*name, age.as_str())
+            } else {
+                (*name, *value)
+            }
+        })
+        .collect();
+    Some(block.from_properties(&updated).to_state_id(block))
+}
+
+/// `Bee.BaseBeeGoal.canUse`/`canContinueToUse`'s shared `!Bee.this.isAngry()` gate.
+///
+/// Pumpkin tracks no persistent per-player anger (see the target-selector comment in
+/// `BeeEntity::new`), so "angry" is read as "currently has a target", which is the same
+/// equivalence `Bee.doHurtTarget`'s port already uses in this file.
+async fn bee_is_angry(bee: &BeeEntity) -> bool {
+    bee.mob_entity.get_target().await.is_some()
+}
+
+/// `BeeGrowCropGoal.tick`'s per-block max age, which vanilla reads off each block class
+/// (`CropBlock.getMaxAge`, `StemBlock.AGE`'s range, `SweetBerryBushBlock.AGE`'s range). There is
+/// no generic max-age query on `Block` here, so the five families are tabulated.
+///
+/// Two tag members are deliberately absent. `cave_vines`/`cave_vines_plant` are grown by vanilla
+/// through `BonemealableBlock.performBonemeal`, and no bone-meal entry point is reachable from mob
+/// AI in this codebase yet. `pitcher_crop` is grown by vanilla's goal not at all:
+/// `PitcherCropBlock extends DoublePlantBlock` (`PitcherCropBlock.java:33`), so it matches none of
+/// `BeeGrowCropGoal.tick`'s four `instanceof`/`is` branches even though it is in the tag. A bee
+/// flying over either simply grows nothing, rather than growing something wrong -- bumping only
+/// the lower half of a pitcher crop would desynchronise the double block.
+const fn bee_growable_max_age(block: &Block) -> Option<u8> {
+    match block.id.as_u16() {
+        // wheat, pumpkin_stem, melon_stem, carrots, potatoes
+        207 | 364 | 365 | 441 | 442 => Some(7),
+        // beetroots (`BeetrootBlock.MAX_AGE = 3`), sweet_berry_bush
+        // (`SweetBerryBushBlock.MAX_AGE = 3`)
+        665 | 861 => Some(3),
+        // torchflower_crop (`TorchflowerCropBlock.MAX_AGE = 1`)
+        662 => Some(1),
+        _ => None,
+    }
+}
+
+/// `Bee.ValidateHiveGoal` (`Bee.java:1320-1344`): every 20-40 ticks, forget a hive position whose
+/// block is no longer a valid beehive.
+pub struct BeeValidateHiveGoal {
+    bee: Weak<BeeEntity>,
+    cooldown: i64,
+    last_validate_tick: i64,
+}
+
+impl BeeValidateHiveGoal {
+    #[must_use]
+    pub fn new(bee: Weak<BeeEntity>) -> Self {
+        Self {
+            bee,
+            cooldown: rand::rng().random_range(VALIDATE_COOLDOWN_MIN..=VALIDATE_COOLDOWN_MAX),
+            last_validate_tick: -1,
+        }
+    }
+}
+
+impl Goal for BeeValidateHiveGoal {
+    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        Box::pin(async move {
+            let Some(bee) = self.bee.upgrade() else {
+                return false;
+            };
+            if bee_is_angry(&bee).await {
+                return false;
+            }
+            let world = bee.mob_entity.living_entity.entity.world.load();
+            let game_time = world.level_time.lock().await.world_age;
+            game_time > self.last_validate_tick + self.cooldown
+        })
+    }
+
+    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        Box::pin(async { false })
+    }
+
+    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            let Some(bee) = self.bee.upgrade() else {
+                return;
+            };
+            let world = bee.mob_entity.living_entity.entity.world.load();
+            // `ValidateHiveGoal.start`'s `level().isLoaded(hivePos)` guard: an unloaded chunk
+            // reads as having no block entity, which would make the bee forget a perfectly good
+            // hive it has simply flown out of render distance of.
+            if let Some(hive_pos) = bee.hive_pos.load()
+                && world.is_loaded(&hive_pos)
+                && !bee.is_hive_valid()
+            {
+                bee.drop_hive();
+            }
+            self.last_validate_tick = world.level_time.lock().await.world_age;
+        })
+    }
+}
+
+/// `Bee.ValidateFlowerGoal` (`Bee.java:1292-1318`): the same sweep for the saved flower position,
+/// dropping it once the block there stops attracting bees (picked, replaced, waterlogged).
+pub struct BeeValidateFlowerGoal {
+    bee: Weak<BeeEntity>,
+    cooldown: i64,
+    last_validate_tick: i64,
+}
+
+impl BeeValidateFlowerGoal {
+    #[must_use]
+    pub fn new(bee: Weak<BeeEntity>) -> Self {
+        Self {
+            bee,
+            cooldown: rand::rng().random_range(VALIDATE_COOLDOWN_MIN..=VALIDATE_COOLDOWN_MAX),
+            last_validate_tick: -1,
+        }
+    }
+}
+
+impl Goal for BeeValidateFlowerGoal {
+    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        Box::pin(async move {
+            let Some(bee) = self.bee.upgrade() else {
+                return false;
+            };
+            if bee_is_angry(&bee).await {
+                return false;
+            }
+            let world = bee.mob_entity.living_entity.entity.world.load();
+            let game_time = world.level_time.lock().await.world_age;
+            game_time > self.last_validate_tick + self.cooldown
+        })
+    }
+
+    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        Box::pin(async { false })
+    }
+
+    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            let Some(bee) = self.bee.upgrade() else {
+                return;
+            };
+            let world = bee.mob_entity.living_entity.entity.world.load();
+            // `ValidateFlowerGoal.start`'s `level().isLoaded(savedFlowerPos)` guard, for the
+            // same reason as the hive validator above.
+            if let Some(flower_pos) = bee.flower_pos.load()
+                && world.is_loaded(&flower_pos)
+            {
+                let (block, state) = world.get_block_and_state(&flower_pos);
+                if !attracts_bees(block, state) {
+                    bee.drop_flower();
+                }
+            }
+            self.last_validate_tick = world.level_time.lock().await.world_age;
+        })
+    }
+}
+
+/// `Bee.BeeGoToKnownFlowerGoal` (`Bee.java:888-938`).
+///
+/// A homeless bee that has gone 600 ticks without nectar flies back to the flower it remembers,
+/// giving up (and forgetting the flower) after 2400 ticks of travel or if the flower turns out to
+/// be too far away.
+pub struct BeeGoToKnownFlowerGoal {
+    bee: Weak<BeeEntity>,
+    travelling_ticks: i32,
+}
+
+impl BeeGoToKnownFlowerGoal {
+    #[must_use]
+    pub const fn new(bee: Weak<BeeEntity>) -> Self {
+        Self {
+            bee,
+            travelling_ticks: 0,
+        }
+    }
+
+    /// `BeeGoToKnownFlowerGoal.canBeeUse`.
+    async fn can_use(bee: &BeeEntity) -> bool {
+        let Some(flower_pos) = bee.flower_pos.load() else {
+            return false;
+        };
+        if bee.has_hive() {
+            return false;
+        }
+        if bee.ticks_without_nectar() <= TICKS_WITHOUT_NECTAR_BEFORE_SEEKING_KNOWN_FLOWER {
+            return false;
+        }
+        !bee.closer_than(flower_pos, 2.0) && !bee_is_angry(bee).await
+    }
+}
+
+impl Goal for BeeGoToKnownFlowerGoal {
+    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        Box::pin(async move {
+            let Some(bee) = self.bee.upgrade() else {
+                return false;
+            };
+            Self::can_use(&bee).await
+        })
+    }
+
+    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        self.can_start(mob)
+    }
+
+    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            self.travelling_ticks = 0;
+        })
+    }
+
+    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            self.travelling_ticks = 0;
+            mob.get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .stop();
+        })
+    }
+
+    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            let Some(bee) = self.bee.upgrade() else {
+                return;
+            };
+            let Some(flower_pos) = bee.flower_pos.load() else {
+                return;
+            };
+
+            self.travelling_ticks += 1;
+            if self.travelling_ticks > MAX_FLOWER_TRAVELLING_TICKS {
+                bee.drop_flower();
+                return;
+            }
+
+            let mut navigator = mob
+                .get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !navigator.is_idle() {
+                return;
+            }
+            if bee.is_too_far_away(flower_pos) {
+                drop(navigator);
+                bee.drop_flower();
+                return;
+            }
+            let pos = mob.get_entity().pos.load();
+            let target = Vector3::new(
+                f64::from(flower_pos.0.x) + 0.5,
+                f64::from(flower_pos.0.y) + 0.5,
+                f64::from(flower_pos.0.z) + 0.5,
+            );
+            navigator.set_progress(NavigatorGoal::new(pos, target, 1.0));
+        })
+    }
+
+    fn should_run_every_tick(&self) -> bool {
+        true
+    }
+
+    fn controls(&self) -> Controls {
+        Controls::MOVE
+    }
+}
+
+/// `Bee.BeeGrowCropGoal` (`Bee.java:940-1000`).
+///
+/// A nectar-carrying bee with a valid hive advances the age of up to two
+/// `#minecraft:bee_growables` blocks directly beneath it, at most ten per load of nectar.
+pub struct BeeGrowCropGoal {
+    bee: Weak<BeeEntity>,
+}
+
+impl BeeGrowCropGoal {
+    #[must_use]
+    pub const fn new(bee: Weak<BeeEntity>) -> Self {
+        Self { bee }
+    }
+
+    /// `BeeGrowCropGoal.canBeeUse`. The 0.3 roll is vanilla's per-check jitter, so the goal only
+    /// engages about 70% of the time it otherwise could.
+    async fn can_use(bee: &BeeEntity) -> bool {
+        if bee.crops_grown_since_pollination() >= MAX_CROPS_GROWN_PER_POLLINATION {
+            return false;
+        }
+        if rand::rng().random::<f32>() < 0.3 {
+            return false;
+        }
+        bee.has_nectar() && bee.is_hive_valid() && !bee_is_angry(bee).await
+    }
+
+    /// The state-mutation half of `BeeGrowCropGoal.tick`, kept generic over the age property via
+    /// `Block::properties`/`Block::from_properties` rather than per-block property structs.
+    /// Returns the grown state id, or `None` when the block is not growable or is already ripe.
+    fn grown_state(block: &Block, state_id: BlockStateId) -> Option<BlockStateId> {
+        let max_age = bee_growable_max_age(block)?;
+        let props = block.properties(state_id)?.to_props();
+        let age: u8 = props
+            .iter()
+            .find(|(name, _)| *name == "age")?
+            .1
+            .parse()
+            .ok()?;
+        if age >= max_age {
+            return None;
+        }
+        let next = (age + 1).to_string();
+        let updated: Vec<(&str, &str)> = props
+            .iter()
+            .map(|(name, value)| {
+                if *name == "age" {
+                    (*name, next.as_str())
+                } else {
+                    (*name, *value)
+                }
+            })
+            .collect();
+        Some(block.from_properties(&updated).to_state_id(block))
+    }
+}
+
+impl Goal for BeeGrowCropGoal {
+    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        Box::pin(async move {
+            let Some(bee) = self.bee.upgrade() else {
+                return false;
+            };
+            Self::can_use(&bee).await
+        })
+    }
+
+    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        self.can_start(mob)
+    }
+
+    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            let Some(bee) = self.bee.upgrade() else {
+                return;
+            };
+            if rand::rng().random_range(0..self.get_tick_count(GROW_CHANCE)) != 0 {
+                return;
+            }
+
+            let entity = mob.get_entity();
+            let world = entity.world.load_full();
+            let origin = entity.block_pos.load();
+            for i in 1..=2 {
+                let below = origin.down_height(i);
+                let (block, state_id) = world.get_block_and_state_id(&below);
+                if !block.has_tag(&tag::Block::MINECRAFT_BEE_GROWABLES) {
+                    continue;
+                }
+                let Some(grown) = Self::grown_state(block, state_id) else {
+                    continue;
+                };
+                world
+                    .set_block_state(&below, grown, BlockFlags::NOTIFY_ALL)
+                    .await;
+                bee.increment_crops_grown_since_pollination();
+            }
+        })
+    }
+
+    fn should_run_every_tick(&self) -> bool {
+        true
+    }
+
+    fn controls(&self) -> Controls {
+        Controls::empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{is_tired_of_looking_for_nectar, poison_duration, sting_death_roll_bound};
@@ -1237,5 +1663,78 @@ mod tests {
     fn bee_is_tired_of_looking_for_nectar_after_3600_ticks() {
         assert!(!is_tired_of_looking_for_nectar(3600));
         assert!(is_tired_of_looking_for_nectar(3601));
+    }
+
+    /// `BeeGrowCropGoal.tick` advances the age property by exactly one and stops at the block's
+    /// own max age, which differs per crop family.
+    #[test]
+    fn bee_grows_a_crop_by_one_age_step_and_stops_when_ripe() {
+        use pumpkin_data::Block;
+        use pumpkin_data::block_properties::{BlockProperties, WheatLikeProperties};
+
+        let mut props = WheatLikeProperties::default(&Block::WHEAT);
+        props.age = 3;
+        let grown =
+            super::BeeGrowCropGoal::grown_state(&Block::WHEAT, props.to_state_id(&Block::WHEAT))
+                .expect("age 3 wheat is growable");
+        assert_eq!(
+            WheatLikeProperties::from_state_id(grown, &Block::WHEAT).age,
+            4
+        );
+
+        props.age = 7;
+        assert_eq!(
+            super::BeeGrowCropGoal::grown_state(&Block::WHEAT, props.to_state_id(&Block::WHEAT)),
+            None,
+            "fully grown wheat must not advance"
+        );
+    }
+
+    /// The tabulated max ages, checked against each block's own state space: growing from
+    /// `max_age - 1` must succeed and from `max_age` must not.
+    #[test]
+    fn tabulated_max_ages_match_each_blocks_state_space() {
+        use pumpkin_data::Block;
+        for block in [
+            &Block::WHEAT,
+            &Block::CARROTS,
+            &Block::POTATOES,
+            &Block::MELON_STEM,
+            &Block::PUMPKIN_STEM,
+            &Block::BEETROOTS,
+            &Block::SWEET_BERRY_BUSH,
+            &Block::TORCHFLOWER_CROP,
+        ] {
+            let max = super::bee_growable_max_age(block)
+                .unwrap_or_else(|| panic!("{} should be tabulated", block.name));
+            let ripe = super::state_id_with_age(block, max)
+                .unwrap_or_else(|| panic!("{} should have an age {max} state", block.name));
+            assert_eq!(
+                super::BeeGrowCropGoal::grown_state(block, ripe),
+                None,
+                "{} at max age must not grow",
+                block.name
+            );
+            let almost = super::state_id_with_age(block, max - 1)
+                .unwrap_or_else(|| panic!("{} should have an age {} state", block.name, max - 1));
+            assert!(
+                super::BeeGrowCropGoal::grown_state(block, almost).is_some(),
+                "{} one below max age must grow",
+                block.name
+            );
+        }
+    }
+
+    /// The two deliberate exclusions must not be tabulated: cave vines (vanilla grows them
+    /// via bone meal, unreachable from mob AI here) and pitcher crop (a `DoublePlantBlock`,
+    /// which vanilla's own goal never matches).
+    #[test]
+    fn cave_vines_are_not_tabulated() {
+        use pumpkin_data::Block;
+        assert_eq!(super::bee_growable_max_age(&Block::CAVE_VINES), None);
+        assert_eq!(super::bee_growable_max_age(&Block::CAVE_VINES_PLANT), None);
+        // `PitcherCropBlock extends DoublePlantBlock`, so vanilla's goal never grows it either.
+        assert_eq!(super::bee_growable_max_age(&Block::PITCHER_CROP), None);
+        assert_eq!(super::bee_growable_max_age(&Block::STONE), None);
     }
 }
