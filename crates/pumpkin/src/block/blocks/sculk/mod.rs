@@ -6,3 +6,4 @@ pub use sculk_block::SculkBlock;
 
 pub mod sculk_catalyst;
 pub mod sculk_shrieker;
+pub mod sculk_spreader;

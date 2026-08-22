@@ -21,25 +21,57 @@ use crate::block::blocks::abstract_multiface::FaceSet;
 use crate::block::blocks::multiface_spreader::{self, SpreadTarget};
 use crate::block::blocks::sculk_vein::{self, SculkVeinSpreaderConfig};
 
-/// `SculkSpreader.ChargeCursor`.
+/// `SculkSpreader.ChargeCursor` (`SculkSpreader.java:186-358`).
 ///
-/// Reduced to the three fields `attemptUseCharge` actually reads
-/// (`getPos`/`getCharge`/`getDecayDelay`). The cursor list, movement, merging, and
-/// persistence (`updateDelay`, `facings`, `CODEC`) are Step 4's job.
+/// Carries vanilla's full five-field state: `pos`, `charge`, `decayDelay`, `updateDelay`
+/// and the nullable `facings` set (`SculkSpreader.java:195-199`). `facings` is `None`
+/// for a cursor that has never sat on a multiface block, which `DEFAULT`'s
+/// `attemptSpreadVein` distinguishes from a present-but-empty set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChargeCursor {
     pos: BlockPos,
     charge: i32,
     decay_delay: i32,
+    update_delay: i32,
+    facings: Option<FaceSet>,
 }
 
 impl ChargeCursor {
+    /// Partial constructor kept for the algorithm tests: `updateDelay = 0`, no facings.
     #[must_use]
     pub const fn new(pos: BlockPos, charge: i32, decay_delay: i32) -> Self {
         Self {
             pos,
             charge,
             decay_delay,
+            update_delay: 0,
+            facings: None,
+        }
+    }
+
+    /// `ChargeCursor(BlockPos, int)` (`SculkSpreader.java:220-222`): `decayDelay = 1`,
+    /// `updateDelay = 0`, `facings = null`.
+    #[must_use]
+    pub const fn fresh(pos: BlockPos, charge: i32) -> Self {
+        Self::new(pos, charge, 1)
+    }
+
+    /// The private five-argument constructor the codec calls
+    /// (`SculkSpreader.java:212-218`).
+    #[must_use]
+    pub const fn from_parts(
+        pos: BlockPos,
+        charge: i32,
+        decay_delay: i32,
+        update_delay: i32,
+        facings: Option<FaceSet>,
+    ) -> Self {
+        Self {
+            pos,
+            charge,
+            decay_delay,
+            update_delay,
+            facings,
         }
     }
 
@@ -56,6 +88,56 @@ impl ChargeCursor {
     #[must_use]
     pub const fn decay_delay(&self) -> i32 {
         self.decay_delay
+    }
+
+    /// `updateDelay` (`SculkSpreader.java:197`).
+    #[must_use]
+    pub const fn update_delay(&self) -> i32 {
+        self.update_delay
+    }
+
+    /// `getFacingData()` (`SculkSpreader.java:240-242`).
+    #[must_use]
+    pub const fn facings(&self) -> Option<FaceSet> {
+        self.facings
+    }
+
+    pub const fn set_pos(&mut self, pos: BlockPos) {
+        self.pos = pos;
+    }
+
+    pub const fn set_charge(&mut self, charge: i32) {
+        self.charge = charge;
+    }
+
+    pub const fn set_decay_delay(&mut self, decay_delay: i32) {
+        self.decay_delay = decay_delay;
+    }
+
+    pub const fn set_update_delay(&mut self, update_delay: i32) {
+        self.update_delay = update_delay;
+    }
+
+    pub const fn set_facings(&mut self, facings: Option<FaceSet>) {
+        self.facings = facings;
+    }
+
+    /// `mergeWith` (`SculkSpreader.java:299-303`).
+    pub fn merge_with(&mut self, other: &mut Self) {
+        self.charge += other.charge;
+        other.charge = 0;
+        self.update_delay = self.update_delay.min(other.update_delay);
+    }
+
+    /// `isPosUnreasonable` (`SculkSpreader.java:228-230`): chessboard distance > 1024.
+    #[must_use]
+    pub const fn is_pos_unreasonable(&self, origin_pos: BlockPos) -> bool {
+        let dx = (self.pos.0.x - origin_pos.0.x).abs();
+        let dy = (self.pos.0.y - origin_pos.0.y).abs();
+        let dz = (self.pos.0.z - origin_pos.0.z).abs();
+        let max = if dx > dy { dx } else { dy };
+        let max = if max > dz { max } else { dz };
+        max > 1024
     }
 }
 
@@ -146,6 +228,13 @@ pub trait SculkWorld: SpreadTarget {
 
     /// `LevelAccessor.playSound(null, pos, sound, SoundSource.BLOCKS, 1.0F, 1.0F)`.
     fn play_block_sound(&self, pos: BlockPos, sound: Sound);
+
+    /// `ServerLevel.shouldTickBlocksAt(pos)`, read by `ChargeCursor.shouldUpdate`
+    /// (`SculkSpreader.java:244-252`). Defaults to `true` for the in-memory test doubles
+    /// and for world generation, where vanilla short-circuits the check anyway.
+    fn should_tick_blocks_at(&self, _pos: BlockPos) -> bool {
+        true
+    }
 
     /// Simplified `Block.pushEntitiesUp`: real vanilla diffs old/new collision shapes;
     /// this codebase's existing ports (`farmland.rs`, `dirt_path.rs`) approximate it as

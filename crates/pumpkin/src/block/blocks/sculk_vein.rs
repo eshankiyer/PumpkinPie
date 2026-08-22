@@ -71,7 +71,7 @@ impl MultifaceBlockBase for SculkVeinBlock {}
 /// Extracts this position's vein faces if (and only if) it currently holds
 /// `sculk_vein`, mirroring vanilla's repeated `oldState.is(this)`/`state.is(Blocks.SCULK_VEIN)`
 /// guards before treating a state as carrying face data.
-fn existing_vein_faces(state: &BlockState) -> Option<FaceSet> {
+pub(crate) fn existing_vein_faces(state: &BlockState) -> Option<FaceSet> {
     (Block::from_state_id(state.id) == &Block::SCULK_VEIN)
         .then(|| GlowLichenLikeProperties::from_state_id(state.id, &Block::SCULK_VEIN).faces())
 }
@@ -341,6 +341,12 @@ impl SculkWorld for WorldSpreadTarget<'_> {
     fn play_block_sound(&self, pos: BlockPos, sound: Sound) {
         self.world
             .play_block_sound(sound, SoundCategory::Blocks, pos);
+    }
+
+    /// `ServerLevel.shouldTickBlocksAt`: this codebase's nearest equivalent is
+    /// "is the chunk containing this position loaded".
+    fn should_tick_blocks_at(&self, pos: BlockPos) -> bool {
+        self.world.is_loaded(&pos)
     }
 
     fn push_entities_up(&self, pos: BlockPos) {
