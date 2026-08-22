@@ -168,11 +168,7 @@ impl HappyGhastEntity {
     }
 
     async fn try_mount(&self, player: &Arc<Player>) -> bool {
-        if !self.is_wearing_body_armor().await || player.get_entity().is_sneaking() {
-            return false;
-        }
-
-        if player.get_entity().has_vehicle().await {
+        if !self.is_wearing_body_armor().await || !player.get_entity().can_start_riding().await {
             return false;
         }
 

@@ -99,7 +99,7 @@ pub(crate) async fn equip_saddle_item(
 }
 
 pub(crate) async fn mount_player(mob_entity: &MobEntity, player: &Arc<Player>) {
-    if player.get_entity().has_vehicle().await {
+    if !player.get_entity().can_start_riding().await {
         return;
     }
 
@@ -456,7 +456,7 @@ pub trait AbstractHorse: Animal {
             self.horse_data().set_flag(FLAG_EATING, false);
             self.horse_data().set_flag(FLAG_STANDING, false);
 
-            if player.get_entity().has_vehicle().await {
+            if !player.get_entity().can_start_riding().await {
                 return;
             }
 

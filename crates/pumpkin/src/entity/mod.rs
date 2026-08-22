@@ -1050,6 +1050,13 @@ const fn delta_needs_position_sync(encoded: Vector3<i64>) -> bool {
         || encoded.z < i16::MIN as i64
         || encoded.z > i16::MAX as i64
 }
+
+/// Shared ordinary-interaction mount admission. The first two conditions are vanilla
+/// `Entity.canRide`; retaining an existing vehicle prevents the invalid double attachment that
+/// Pumpkin's current low-level mount primitive cannot safely transfer.
+const fn can_start_riding_state(sneaking: bool, riding_cooldown: i32, has_vehicle: bool) -> bool {
+    !sneaking && riding_cooldown <= 0 && !has_vehicle
+}
 pub struct Entity {
     /// A unique identifier for the entity
     pub entity_id: i32,
@@ -4063,6 +4070,21 @@ impl Entity {
         vehicle.is_some()
     }
 
+    /// Admission for Pumpkin's ordinary player-initiated mount interactions.
+    ///
+    /// The sneak and cooldown conditions mirror vanilla `Entity.canRide`. Pumpkin's interaction
+    /// paths also retain their existing no-transfer rule: vanilla can detach a rider from a
+    /// different vehicle first, but Pumpkin's `add_passenger` is not that full transfer API.
+    /// System paths such as raid spawning and saved-vehicle restoration intentionally bypass this
+    /// check, just as vanilla's forced `startRiding` overload does.
+    pub async fn can_start_riding(&self) -> bool {
+        can_start_riding_state(
+            self.is_sneaking(),
+            self.riding_cooldown.load(Ordering::Relaxed),
+            self.has_vehicle().await,
+        )
+    }
+
     /// Vanilla `Entity.positionRider` with Pumpkin's shared fallback attachment geometry.
     ///
     /// Vanilla stores entity-specific attachment points in generated entity data. That data is
@@ -5063,6 +5085,14 @@ mod tests {
                 "status mismatch at index {i}"
             );
         }
+    }
+
+    #[test]
+    fn ordinary_mounting_requires_an_eligible_rider() {
+        assert!(can_start_riding_state(false, 0, false));
+        assert!(!can_start_riding_state(true, 0, false));
+        assert!(!can_start_riding_state(false, 1, false));
+        assert!(!can_start_riding_state(false, 0, true));
     }
 }
 

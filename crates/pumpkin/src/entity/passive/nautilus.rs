@@ -425,15 +425,17 @@ impl Mob for NautilusEntity {
                     return true;
                 }
 
-                let world = player.world();
-                if let Some(vehicle) = world.get_entity_by_id(entity.entity_id)
-                    && let Some(passenger) = world.get_player_by_id(player.entity_id())
-                {
-                    entity
-                        .add_passenger(vehicle, passenger as Arc<dyn EntityBase>)
-                        .await;
-                    return true;
+                if player.get_entity().can_start_riding().await {
+                    let world = player.world();
+                    if let Some(vehicle) = world.get_entity_by_id(entity.entity_id)
+                        && let Some(passenger) = world.get_player_by_id(player.entity_id())
+                    {
+                        entity
+                            .add_passenger(vehicle, passenger as Arc<dyn EntityBase>)
+                            .await;
+                    }
                 }
+                return true;
             }
 
             self.animal_interact(player, item_stack, self.ambient_sound())

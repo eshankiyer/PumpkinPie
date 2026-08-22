@@ -6,9 +6,8 @@ pub(super) struct RideableMinecart;
 
 impl RideableMinecart {
     pub(super) async fn interact(&self, entity: &Entity, player: &Arc<Player>) -> bool {
-        if player.get_entity().is_sneaking()
+        if !player.get_entity().can_start_riding().await
             || !entity.passengers.lock().await.is_empty()
-            || player.get_entity().has_vehicle().await
         {
             return false;
         }
