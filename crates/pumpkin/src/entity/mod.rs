@@ -3512,6 +3512,18 @@ impl Entity {
         self.fall_flying.load(Ordering::Relaxed)
     }
 
+    /// Vanilla `LivingEntity.stopFallFlying` (`LivingEntity.java:2585-2589`): clears the glide
+    /// state and forces a shared-flags resync even when the flag was already off, by arming
+    /// the bit in place and clearing it through [`Self::set_flag`], so clients always receive
+    /// the update that ends their local glide animation.
+    pub fn stop_fall_flying(&self) {
+        self.fall_flying.store(false, Relaxed);
+        let index = Flag::FallFlying as u8;
+        let mask = (1i8).wrapping_shl(index as u32);
+        self.flags.fetch_or(mask, Relaxed);
+        self.set_flag(Flag::FallFlying, false);
+    }
+
     fn set_flag(&self, flag: Flag, value: bool) {
         let index = flag as u8;
         let mask = (1i8).wrapping_shl(index as u32);

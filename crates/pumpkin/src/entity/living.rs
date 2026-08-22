@@ -20,7 +20,7 @@ use pumpkin_world::world::BlockFlags;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::sync::atomic::{
-    AtomicBool, AtomicU8, AtomicU64,
+    AtomicBool, AtomicU8, AtomicU32, AtomicU64,
     Ordering::{Relaxed, SeqCst},
 };
 use std::{collections::HashMap, sync::atomic::AtomicI32};
@@ -52,7 +52,7 @@ use pumpkin_data::data_component_impl::food::{
 };
 use pumpkin_data::data_component_impl::{
     AttributeModifiersImpl, BlocksAttacksImpl, DamageResistantImpl, DamageResistantType,
-    DeathProtectionImpl, EnchantmentsImpl, EquipmentSlot, EquippableImpl, FoodImpl,
+    DeathProtectionImpl, EnchantmentsImpl, EquipmentSlot, EquippableImpl, FoodImpl, GliderImpl,
     OminousBottleAmplifierImpl,
 };
 use pumpkin_data::effect::StatusEffect;
@@ -208,6 +208,10 @@ pub struct LivingEntity {
     pub jumping: AtomicBool,
 
     pub jumping_cooldown: AtomicU8,
+
+    /// Vanilla `LivingEntity.fallFlyTicks`: consecutive ticks spent fall flying, driving
+    /// the glide game event and glider durability schedule in `updateFallFlying`.
+    pub fall_fly_ticks: AtomicU32,
 
     pub climbing: AtomicBool,
 
@@ -403,6 +407,7 @@ impl LivingEntity {
             equipment_slots: Arc::new(build_equipment_slots()),
             jumping: AtomicBool::new(false),
             jumping_cooldown: AtomicU8::new(0),
+            fall_fly_ticks: AtomicU32::new(0),
             climbing: AtomicBool::new(false),
             climbing_pos: AtomicCell::new(None),
             last_attacker_id: AtomicI32::new(0),
@@ -1758,6 +1763,12 @@ impl LivingEntity {
             self.fall_distance.store(0.0);
         }
 
+        // `LivingEntity.aiStep`: count consecutive glide ticks, then re-validate glider
+        // eligibility and run the durability/glide-event schedule right before travel.
+        // A failed check clears the glide flag, so the dispatch below falls back to the
+        // normal air/fluid travel exactly like vanilla's `travel` re-check.
+        self.tick_glide_state(caller).await;
+
         let custom_travel = if no_ai {
             false
         } else if let Some(mob) = caller.get_mob()
@@ -1888,11 +1899,13 @@ impl LivingEntity {
     async fn travel_fall_flying<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) {
         if self.climbing.load(Relaxed) {
             self.travel_in_air(caller).await;
-            self.entity.set_fall_flying(false).await;
+            // Vanilla calls `stopFallFlying` here, which forces a flags resync.
+            self.entity.stop_fall_flying();
             return;
         }
 
         let velocity = self.entity.velocity.load();
+        let horizontal_speed = velocity.x.hypot(velocity.z);
         let look = caller.get_looking_vector();
         let pitch = f64::from(self.entity.pitch.load()).to_radians();
         let gravity = self.get_effective_gravity(caller).await;
@@ -1900,6 +1913,159 @@ impl LivingEntity {
             .velocity
             .store(fall_flying_velocity(velocity, look, pitch, gravity));
         self.make_move(caller).await;
+
+        if self.entity.horizontal_collision.load(SeqCst) {
+            let new_horizontal_speed = self
+                .entity
+                .velocity
+                .load()
+                .x
+                .hypot(self.entity.velocity.load().z);
+            if let Some(damage) =
+                fall_flying_collision_damage(horizontal_speed, new_horizontal_speed)
+            {
+                self.damage(caller.as_ref(), damage, DamageType::FLY_INTO_WALL)
+                    .await;
+            }
+        }
+    }
+
+    /// Vanilla `LivingEntity.aiStep` glide bookkeeping (`LivingEntity.java:2854-2858` and
+    /// `LivingEntity.java:3116-3118`): count consecutive glide ticks, then re-validate
+    /// eligibility and run the durability/glide-event schedule before travel. Both steps
+    /// run even when travel itself is skipped for `NoAI` or ridden entities.
+    async fn tick_glide_state<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) {
+        if self.entity.is_fall_flying() {
+            self.fall_fly_ticks.fetch_add(1, Relaxed);
+            self.update_fall_flying(caller).await;
+        } else {
+            self.fall_fly_ticks.store(0, Relaxed);
+        }
+    }
+
+    /// Vanilla `LivingEntity.updateFallFlying` (`LivingEntity.java:3182-3202`): while
+    /// gliding, clamp accumulated fall distance on slow ticks, stop when no valid glider
+    /// is equipped, and at every tenth consecutive glide tick broadcast the glide game
+    /// event, damaging a random equipped glider on alternating one-second intervals.
+    async fn update_fall_flying<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) {
+        // `Entity.checkFallDistanceAccumulation` (`Entity.java:2890-2894`).
+        let velocity = self.entity.velocity.load();
+        let fall_distance = self.fall_distance.load();
+        if velocity.y > -0.5 && fall_distance > 1.0 {
+            self.fall_distance.store(1.0);
+        }
+
+        if !self.can_glide(caller).await {
+            // `this.setSharedFlag(7, false)`: end the glide without the forced-resync
+            // toggle of `stopFallFlying`, exactly like vanilla's ineligibility branch.
+            self.entity.set_fall_flying(false).await;
+            return;
+        }
+
+        // The counter was already advanced for this tick by `tick_movement`; vanilla adds
+        // one to it here (`LivingEntity.java:3190`).
+        let check_fall_fly_ticks = self.fall_fly_ticks.load(Relaxed).wrapping_add(1);
+        let (glide_event_tick, damage_glider_tick) = fall_flying_schedule(check_fall_fly_ticks);
+
+        if damage_glider_tick {
+            self.damage_random_glider(caller).await;
+        }
+
+        if glide_event_tick {
+            // `this.gameEvent(GameEvent.ELYTRA_GLIDE)` with the default source entity.
+            let world = self.entity.world.load();
+            crate::world::game_event::emit_game_event(
+                &world,
+                pumpkin_data::game_event::GameEvent::ElytraGlide,
+                self.entity.pos.load(),
+                crate::world::game_event::GameEventContext::of_entity(caller.clone()),
+            )
+            .await;
+        }
+    }
+
+    /// Vanilla `LivingEntity.canGlide` (`LivingEntity.java:3204-3216`): airborne, not
+    /// ridden, not levitating, and wearing an item that passes `canGlideUsing` in its slot.
+    pub async fn can_glide(&self, caller: &Arc<dyn EntityBase>) -> bool {
+        if self.entity.on_ground.load(SeqCst)
+            || self.entity.has_vehicle().await
+            || self.has_effect(&StatusEffect::LEVITATION).await
+        {
+            return false;
+        }
+
+        // `Player.canGlide` additionally rejects ability flight. Creative players may
+        // still use a glider after turning ability flight off, just as in vanilla.
+        if let Some(player) = caller.get_player()
+            && player.is_flying().await
+        {
+            return false;
+        }
+
+        // Resolve the main hand before taking the equipment lock; see
+        // `items_by_equipment_slot` for why players store their held item elsewhere.
+        let main_hand = self.held_item(caller.as_ref()).await;
+        !self.gliding_equipment_slots(&main_hand).await.is_empty()
+    }
+
+    /// Every equipment slot currently holding a stack that passes vanilla
+    /// `canGlideUsing`, iterated in `EquipmentSlot.VALUES` order.
+    async fn gliding_equipment_slots(&self, main_hand: &ItemStack) -> Vec<EquipmentSlot> {
+        let equipment = self.entity_equipment.lock().await;
+        Self::attribute_equipment_slots()
+            .into_iter()
+            .filter(|slot| {
+                if matches!(slot, EquipmentSlot::MainHand(_)) {
+                    can_glide_using(main_hand, slot)
+                } else {
+                    // A missing entry behaves like vanilla's empty getItemBySlot stacks.
+                    equipment
+                        .equipment
+                        .get(slot)
+                        .is_some_and(|stack| can_glide_using(stack, slot))
+                }
+            })
+            .collect()
+    }
+
+    /// Vanilla `updateFallFlying`'s glider damage step: pick uniformly among slots passing
+    /// `canGlideUsing` and apply `ItemStack.hurtAndBreak(1, owner, slot)`.
+    async fn damage_random_glider<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) {
+        let main_hand = self.held_item(caller.as_ref()).await;
+        let candidates = self.gliding_equipment_slots(&main_hand).await;
+        // `Util.getRandom(slotsWithGliders, this.random)`: an empty list picks nothing.
+        let Some(slot) = (!candidates.is_empty())
+            .then(|| rand::random_range(0..candidates.len()))
+            .map(|index| candidates[index].clone())
+        else {
+            return;
+        };
+
+        // Player main-hand items live in the hotbar rather than `entity_equipment`.
+        // The player helper mutates the authoritative inventory slot, emits break events,
+        // and synchronizes both the owner and observers for every eligible equipment slot.
+        if let Some(player) = caller.get_player() {
+            player.damage_item_in_slot(&slot, 1).await;
+            return;
+        }
+
+        let damaged = {
+            let mut equipment = self.entity_equipment.lock().await;
+            let mut stack = equipment.get(&slot);
+            let result = stack.damage_item(1);
+            (result != DamageResult::Untouched).then(|| {
+                equipment.put(&slot, stack.clone());
+                (result, stack)
+            })
+        };
+
+        if let Some((result, stack)) = damaged {
+            if result == DamageResult::Broken {
+                let world = self.entity.world.load();
+                world.send_entity_status(&self.entity, super::equipment_break_status(&slot), None);
+            }
+            self.send_equipment_changes(&[(slot, stack)]);
+        }
     }
 
     async fn travel_in_fluid<'a>(&'a self, caller: &'a Arc<dyn EntityBase>, water: bool) {
@@ -6318,6 +6484,40 @@ fn fall_flying_velocity(
     velocity.multiply(0.99, 0.98, 0.99)
 }
 
+/// Vanilla `LivingEntity.handleFallFlyingCollisions` damage threshold.
+fn fall_flying_collision_damage(previous_speed: f64, new_speed: f64) -> Option<f32> {
+    let damage = ((previous_speed - new_speed) * 10.0 - 3.0) as f32;
+    (damage > 0.0).then_some(damage)
+}
+
+/// Vanilla `LivingEntity.updateFallFlying` tick schedule (`LivingEntity.java:3190-3202`).
+/// Takes the consecutive glide tick count plus one; returns whether this tick broadcasts
+/// the `ELYTRA_GLIDE` game event and whether it additionally damages an equipped glider
+/// (every second one-second interval of free fall).
+const fn fall_flying_schedule(check_fall_fly_ticks: u32) -> (bool, bool) {
+    let glide_event_tick = check_fall_fly_ticks.is_multiple_of(10);
+    let damage_glider_tick = glide_event_tick && (check_fall_fly_ticks / 10).is_multiple_of(2);
+    (glide_event_tick, damage_glider_tick)
+}
+
+/// Vanilla `LivingEntity.canGlideUsing` (`LivingEntity.java:4001-4008`): the stack must
+/// carry the `minecraft:glider` component, its `equippable` component must target `slot`,
+/// and its next durability point must not break it.
+fn can_glide_using(stack: &ItemStack, slot: &EquipmentSlot) -> bool {
+    stack.get_data_component::<GliderImpl>().is_some()
+        && stack
+            .get_data_component::<EquippableImpl>()
+            .is_some_and(|equippable| equippable.slot == slot && !next_damage_will_break(stack))
+}
+
+/// Vanilla `ItemStack.nextDamageWillBreak`: one more durability point breaks the item.
+fn next_damage_will_break(stack: &ItemStack) -> bool {
+    !stack.is_empty()
+        && stack
+            .get_max_damage()
+            .is_some_and(|max_damage| stack.get_damage() >= max_damage - 1)
+}
+
 fn damage_causes_panic(damage_type: DamageType) -> bool {
     damage_type.has_tag(&tag::DamageType::MINECRAFT_PANIC_CAUSES)
 }
@@ -6355,6 +6555,51 @@ mod tests {
         );
         assert!(diving.y < climbing.y);
         assert!(climbing.y > -0.1);
+    }
+
+    #[test]
+    fn fall_flying_collision_damage_requires_meaningful_speed_loss() {
+        assert_eq!(fall_flying_collision_damage(1.0, 0.8), None);
+        assert_eq!(fall_flying_collision_damage(1.0, 0.5), Some(2.0));
+    }
+
+    #[test]
+    fn fall_flying_schedule_matches_vanilla_glide_and_damage_intervals() {
+        // Glide event every tenth tick; durability damage on alternating intervals
+        // (20th, 40th, ... glide tick), matching LivingEntity.java:3190-3202.
+        assert_eq!(fall_flying_schedule(1), (false, false));
+        assert_eq!(fall_flying_schedule(9), (false, false));
+        assert_eq!(fall_flying_schedule(10), (true, false));
+        assert_eq!(fall_flying_schedule(15), (false, false));
+        assert_eq!(fall_flying_schedule(20), (true, true));
+        assert_eq!(fall_flying_schedule(30), (true, false));
+        assert_eq!(fall_flying_schedule(40), (true, true));
+    }
+
+    #[test]
+    fn can_glide_using_requires_glider_component_in_matching_slot() {
+        let elytra = ItemStack::new(1, &Item::ELYTRA);
+        assert!(!elytra.is_empty());
+        // The elytra's equippable component targets the chest slot.
+        assert!(can_glide_using(&elytra, &EquipmentSlot::CHEST));
+        assert!(!can_glide_using(&elytra, &EquipmentSlot::HEAD));
+        assert!(!can_glide_using(&elytra, &EquipmentSlot::MAIN_HAND));
+
+        // A non-glider item never passes, even in its own slot.
+        let sword = ItemStack::new(1, &Item::IRON_SWORD);
+        assert!(!can_glide_using(&sword, &EquipmentSlot::MAIN_HAND));
+    }
+
+    #[test]
+    fn can_glide_using_rejects_a_glider_one_hit_from_breaking() {
+        let mut elytra = ItemStack::new(1, &Item::ELYTRA);
+        assert!(!next_damage_will_break(&elytra));
+
+        let max_damage = elytra.get_max_damage().unwrap_or(0);
+        elytra.set_damage(max_damage - 1);
+        assert!(next_damage_will_break(&elytra));
+        // Vanilla `canGlideUsing` stops gliding on the last durability point.
+        assert!(!can_glide_using(&elytra, &EquipmentSlot::CHEST));
     }
 
     #[test]
