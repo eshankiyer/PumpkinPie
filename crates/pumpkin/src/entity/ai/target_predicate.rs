@@ -190,6 +190,13 @@ impl TargetPredicate {
 async fn targeter_visibility_modifier(targeter: &LivingEntity, target: &LivingEntity) -> f64 {
     let mut modifier = 1.0;
 
+    // `LivingEntity.getVisibilityPercent` (`LivingEntity.java:919-922`): a discrete target is
+    // 20% harder to see. `Entity.isDiscrete` (`Entity.java:2689-2691`) is just
+    // `isShiftKeyDown`, i.e. the sneaking flag.
+    if target.entity.is_sneaking() {
+        modifier *= 0.8;
+    }
+
     if target.entity.invisible.load(Relaxed) {
         let equipment = target.entity_equipment.lock().await;
         let armor_slots = [
@@ -234,5 +241,19 @@ mod tests {
     fn invisible_targets_without_armor_keep_minimum_visibility() {
         let modifier: f64 = 0.7 * 0.1;
         assert!((modifier - 0.07).abs() < f64::EPSILON);
+    }
+
+    /// `LivingEntity.java:919-922`: sneaking multiplies visibility by 0.8, which shortens a
+    /// 16-block follow range to 12.8 blocks. Guards the term itself, since the surrounding
+    /// calculation needs a live world.
+    #[test]
+    fn sneaking_shortens_the_effective_detection_range() {
+        let base_max_distance: f64 = 16.0;
+        let sneaking_modifier: f64 = 0.8;
+        assert!(
+            (base_max_distance * sneaking_modifier - 12.8).abs() < 1.0e-9,
+            "a sneaking target should be detected only within 12.8 blocks"
+        );
+        assert!(base_max_distance * sneaking_modifier > super::MIN_DISTANCE);
     }
 }

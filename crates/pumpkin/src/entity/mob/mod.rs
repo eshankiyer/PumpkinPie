@@ -2262,6 +2262,19 @@ impl<T: Mob + Send + 'static> EntityBase for T {
         Mob::can_be_collided_with(self)
     }
 
+    /// `LivingEntity.isPushable` (`LivingEntity.java:3365-3367`): alive, not spectating and
+    /// not on a climbable block.
+    ///
+    /// Without this the blanket impl fell through to `EntityBase`'s `false`, so no mob was
+    /// pushable by anything - mobs never displaced each other, and nothing could shove them.
+    /// `LivingEntity` carries its own override but mobs never reach it through this impl.
+    fn is_pushable(&self) -> bool {
+        let living = &self.get_mob_entity().living_entity;
+        living.health.load() > 0.0
+            && !living.dead.load(std::sync::atomic::Ordering::Relaxed)
+            && !living.climbing.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     fn check_despawn(&self) -> EntityBaseFuture<'_, ()> {
         Mob::check_despawn(self)
     }

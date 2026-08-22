@@ -355,6 +355,17 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
             return !affects_blocklike_entities;
         }
 
+        // `Warden.ignoreExplosion` (`Warden.java:367-370`) returns `isDiggingOrEmerging`,
+        // which is `hasPose(DIGGING) || hasPose(EMERGING)` (`Warden.java:165-167`). The
+        // explosion loop skips such an entity outright, so this single check covers both the
+        // damage and the knockback halves, exactly as vanilla's does.
+        if id == EntityType::WARDEN.id {
+            return matches!(
+                entity.pose.load(),
+                EntityPose::Digging | EntityPose::Emerging
+            );
+        }
+
         false
     }
 
@@ -1616,6 +1627,10 @@ impl Entity {
     /// shrinks to this box while asleep, whatever its type is.
     pub const SLEEPING_DIMENSIONS: EntityDimensions = EntityDimensions::new(0.2, 0.2, 0.2);
 
+    /// `Warden.getDefaultDimensions` (`Warden.java:516-521`): the fixed height a digging or
+    /// emerging warden is squashed to.
+    pub const WARDEN_EMERGING_HEIGHT: f32 = 1.0;
+
     /// Vanilla `Avatar.getDefaultDimensions` (`Avatar.java:66-68`), reading `Avatar.POSES`
     /// (`Avatar.java:24-37`). This table is **player-shaped** and must not be applied to other
     /// entity types, which keep their own type dimensions in every pose.
@@ -1645,10 +1660,36 @@ impl Entity {
     #[must_use]
     pub fn get_default_dimensions(&self, pose: EntityPose) -> EntityDimensions {
         if self.is_avatar() {
-            Self::get_entity_dimensions(pose)
-        } else {
-            self.base_dimension.load()
+            return Self::get_entity_dimensions(pose);
         }
+
+        let base = self.base_dimension.load();
+
+        if self.entity_type.id == EntityType::WARDEN.id
+            && let Some(squashed) = Self::warden_pose_dimensions(base, pose)
+        {
+            return squashed;
+        }
+
+        base
+    }
+
+    /// `Warden.getDefaultDimensions` (`Warden.java:516-521`): a digging or emerging warden keeps
+    /// its width but is shrunk to `EntityDimensions.fixed(width, 1.0F)`, whose eye height is
+    /// `defaultEyeHeight` = `height * 0.85` (`EntityDimensions.java:7-13`). `None` for every
+    /// other pose -- `ROARING` included, which vanilla does not resize.
+    #[must_use]
+    pub fn warden_pose_dimensions(
+        base: EntityDimensions,
+        pose: EntityPose,
+    ) -> Option<EntityDimensions> {
+        matches!(pose, EntityPose::Digging | EntityPose::Emerging).then(|| {
+            EntityDimensions::new(
+                base.width,
+                Self::WARDEN_EMERGING_HEIGHT,
+                Self::WARDEN_EMERGING_HEIGHT * 0.85,
+            )
+        })
     }
 
     /// Vanilla `LivingEntity.getDimensions` (`LivingEntity.java:3727-3729`): sleeping is a fixed

@@ -45,8 +45,15 @@
 //     separate, reviewed follow-up.
 //   Temporary invulnerability while emerging (`isInvulnerableTo`, Warden.java:161-163) IS
 //   implemented, as `pre_damage` below - EMERGING is reachable now via `start_emerging`.
-//   `ignoreExplosion` (Warden.java:368-369) is not: it only suppresses explosion knockback,
-//   since the damage half already goes through `pre_damage`.
+//   `ignoreExplosion` (Warden.java:367-370) IS implemented, as the WARDEN arm of
+//   `EntityBase::ignores_explosion`: the explosion loop skips the entity outright, so that
+//   one check covers the knockback half as well as the damage half.
+//   `getDefaultDimensions` (Warden.java:516-521) IS implemented, as the WARDEN arm of
+//   `Entity::get_default_dimensions`, applied by `sync_warden_pose` below.
+//   `isPushable` (Warden.java:523-526) is NOT, and needs no code: mobs reach
+//   `EntityBase::is_pushable`, whose default is `false` for every mob in this codebase, so an
+//   emerging warden is already unpushable. Restoring mob pushability in general is a
+//   `mob/mod.rs` change, and the warden override only becomes meaningful after it.
 // - `doPush`-triggered touch anger (Warden.java lines 528-537): Pumpkin's `EntityBase`
 //   has no entity-entity collision/push hook to attach this to at all (grepped
 //   `pumpkin/src/entity/{mod,living}.rs` and `mob/mod.rs` — no `on_push`/`do_push`).
@@ -82,6 +89,7 @@ use pumpkin_data::tracked_data;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::GameMode;
+use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::vector3::Vector3;
 use tokio::sync::Mutex as AsyncMutex;
 use uuid::Uuid;
@@ -169,15 +177,29 @@ struct RoarState {
 }
 
 /// Syncs the tracked-data `POSE` without going through `Entity::set_pose`, for the same reason
-/// `frog_tongue_attack.rs::sync_tongue_pose` does. Vanilla's `Warden` only overrides dimensions
-/// for `DIGGING`/`EMERGING` (Warden.java:517-521), not `ROARING`, so skipping the resize here
-/// matches vanilla's own (lack of) hitbox change for this pose.
+/// `frog_tongue_attack.rs::sync_tongue_pose` does: `set_pose` gates on `is_space_empty`, so it
+/// would silently no-op in a tight spot, and vanilla's `refreshDimensions` has no such gate.
 ///
-/// The player-sized fallback this used to work around is gone -- `Entity::get_dimensions` now
-/// only reaches `Avatar.POSES` for avatars -- but `set_pose` still gates on `is_space_empty`,
-/// which would silently no-op in a tight spot, so the direct sync stays.
+/// The resize vanilla does perform is done here instead. `Warden.getDefaultDimensions`
+/// (Warden.java:516-521) overrides dimensions for `DIGGING`/`EMERGING` only, not `ROARING`, so
+/// a roaring warden keeps its normal box while an emerging one shrinks to 1.0 blocks tall.
 fn sync_warden_pose(entity: &Entity, pose: EntityPose) {
     entity.pose.store(pose);
+
+    // `Entity.refreshDimensions` (`Entity.java:660-676`), the half that matters here: apply
+    // whatever `getDefaultDimensions` returns for the new pose and rebuild the bounding box
+    // around the current position. `Warden.getDefaultDimensions` (`Warden.java:516-521`)
+    // squashes a digging or emerging warden to a 1.0-block-tall box; every other pose gets the
+    // type's own size back. Vanilla's `refreshDimensions` performs no space check, so neither
+    // does this -- the `is_space_empty` gate that `set_pose` applies is what this function
+    // exists to bypass.
+    let dimension = entity.get_dimensions(pose);
+    let position = entity.pos.load();
+    entity.bounding_box.store(BoundingBox::new_from_pos(
+        position.x, position.y, position.z, &dimension,
+    ));
+    entity.entity_dimension.store(dimension);
+
     entity.send_meta_data(
         &[Metadata::new(
             tracked_data::warden::POSE,
@@ -278,9 +300,9 @@ impl WardenEntity {
     ///
     /// Invulnerability for the duration is `pre_damage` below; the AI freeze is
     /// `suppress_ai_goals`. Still not carried across: `MemoryModuleType.DIG_COOLDOWN`
-    /// (Warden.java:485), which has no equivalent here, and `Warden.getDefaultDimensions`'s
-    /// 1.0-block emerging hitbox (Warden.java:517-521) plus `isPushable` (Warden.java:524-526),
-    /// which need `Entity`-level pose dimension hooks.
+    /// (Warden.java:485), which has no equivalent here. The 1.0-block emerging hitbox
+    /// (`Warden.getDefaultDimensions`, Warden.java:516-521) is carried across now, via
+    /// `sync_warden_pose`.
     pub fn start_emerging(&self) {
         self.emerging_ticks
             .store(EMERGE_DURATION, Ordering::Relaxed);
@@ -876,7 +898,42 @@ const fn warden_can_listen(event: &GameEvent) -> bool {
 #[cfg(test)]
 mod tests {
     use super::warden_can_listen;
+    use crate::entity::Entity;
+    use pumpkin_data::entity::{EntityPose, EntityType};
     use pumpkin_data::game_event::GameEvent;
+
+    /// `Warden.getDefaultDimensions` (Warden.java:516-521): `EntityDimensions.fixed(width, 1.0F)`
+    /// while digging or emerging, the type's own size otherwise. `sync_warden_pose` is what
+    /// applies this, since it deliberately bypasses `Entity::set_pose`.
+    #[test]
+    fn an_emerging_warden_is_squashed_to_a_one_block_hitbox() {
+        let base = pumpkin_util::math::boundingbox::EntityDimensions::new(
+            EntityType::WARDEN.dimension[0],
+            EntityType::WARDEN.dimension[1],
+            EntityType::WARDEN.eye_height,
+        );
+
+        for pose in [EntityPose::Emerging, EntityPose::Digging] {
+            let squashed = Entity::warden_pose_dimensions(base, pose)
+                .expect("a digging or emerging warden is resized");
+            assert!((squashed.height - 1.0).abs() < f32::EPSILON);
+            assert!((squashed.width - base.width).abs() < f32::EPSILON);
+            // `EntityDimensions.java:11-13`: `defaultEyeHeight` is `height * 0.85`.
+            assert!((squashed.eye_height - 0.85).abs() < 1.0e-6);
+        }
+
+        // Vanilla overrides no other pose, `ROARING` included.
+        for (name, pose) in [
+            ("standing", EntityPose::Standing),
+            ("roaring", EntityPose::Roaring),
+            ("sniffing", EntityPose::Sniffing),
+        ] {
+            assert!(
+                Entity::warden_pose_dimensions(base, pose).is_none(),
+                "a {name} warden must keep its normal box"
+            );
+        }
+    }
 
     #[test]
     fn warden_can_listen_matches_the_generated_tag_membership() {

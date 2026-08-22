@@ -1,9 +1,10 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use pumpkin_data::BlockStateId;
+use pumpkin_data::Block;
 use pumpkin_data::block_properties::HorizontalFacing;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
@@ -65,11 +66,19 @@ impl CopperGolemStatueBlockEntity {
     /// was facing, and removes the statue block.
     ///
     /// Callers must first check `WeatheringCopperGolemStatueBlock.useItemOn`'s condition
-    /// (an axe used on a statue whose weathering stage is `UNAFFECTED`) -- this method
-    /// performs the conversion unconditionally once called. No block currently calls it:
-    /// `minecraft:copper_golem_statue` has no registered `BlockBehaviour` in Pumpkin yet, so
-    /// wiring the axe-interaction trigger itself is deferred to that follow-up.
-    pub async fn remove_statue(&self, world: &Arc<World>, facing: HorizontalFacing) {
+    /// (an axe used on a statue whose weathering stage is `UNAFFECTED`, i.e. the unwaxed
+    /// `minecraft:copper_golem_statue` alone) -- this method performs the conversion
+    /// unconditionally once called. `CopperGolemStatueBlock::use_with_item` is that caller.
+    ///
+    /// `waterlogged` mirrors `Level.removeBlock(pos, false)`, which replaces the block with
+    /// `getFluidState(pos).createLegacyBlock()`: a waterlogged statue leaves a water source
+    /// behind, not air.
+    pub async fn remove_statue(
+        &self,
+        world: &Arc<World>,
+        facing: HorizontalFacing,
+        waterlogged: bool,
+    ) {
         let pos = self.position;
         let center = Vector3::new(
             f64::from(pos.0.x) + 0.5,
@@ -84,8 +93,22 @@ impl CopperGolemStatueBlockEntity {
 
         let golem = CopperGolemEntity::new(entity);
         world.spawn_entity(golem).await;
+
+        // `CopperGolemStatueBlockEntity.initCopperGolem` finishes with `playSpawnSound()`
+        // (`CopperGolem.playSpawnSound`, CopperGolem.java:378-380).
+        world.play_sound(
+            Sound::EntityCopperGolemSpawn,
+            SoundCategory::Neutral,
+            &center,
+        );
+
+        let remaining = if waterlogged {
+            Block::WATER.default_state.id
+        } else {
+            Block::AIR.default_state.id
+        };
         world
-            .set_block_state(&pos, BlockStateId::AIR, BlockFlags::NOTIFY_ALL)
+            .set_block_state(&pos, remaining, BlockFlags::NOTIFY_ALL)
             .await;
     }
 }

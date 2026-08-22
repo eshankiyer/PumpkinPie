@@ -14,6 +14,7 @@ use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::world::BlockFlags;
 
 use crate::block::blocks::copper_weathering;
+use crate::block::entities::copper_golem_statue::CopperGolemStatueBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
     BlockBehaviour, BlockFuture, BlockIsReplacing, BlockMetadata, GetComparatorOutputArgs,
@@ -130,17 +131,52 @@ impl BlockBehaviour for CopperGolemStatueBlock {
         })
     }
 
-    /// `WeatheringCopperGolemStatueBlock.useItemOn`: an axe is passed through (it either
-    /// de-waxes, scrapes oxidation, or -- on an UNAFFECTED statue -- releases the golem,
-    /// all handled by the axe item), honeycomb is passed through to the waxing path, and
-    /// anything else cycles the pose.
+    /// `WeatheringCopperGolemStatueBlock.useItemOn` (lines 50-82). An axe on the UNAFFECTED
+    /// stage releases the golem here; on any other stage it is passed through so the axe item
+    /// can de-wax or scrape it. Honeycomb is passed through to the waxing path, and anything
+    /// else cycles the pose.
+    ///
+    /// UNAFFECTED is the unwaxed `minecraft:copper_golem_statue` alone: the waxed variants are
+    /// plain `CopperGolemStatueBlock`s in vanilla (only the unwaxed four extend
+    /// `WeatheringCopperGolemStatueBlock`), so an axe de-waxes them instead of releasing.
     fn use_with_item<'a>(
         &'a self,
         args: UseWithItemArgs<'a>,
     ) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
             let item: &Item = args.item_stack.item;
-            if item.has_tag(&tag::Item::MINECRAFT_AXES) || item.id == Item::HONEYCOMB.id {
+            if item.has_tag(&tag::Item::MINECRAFT_AXES) {
+                if args.block.id != BlockId::COPPER_GOLEM_STATUE {
+                    return BlockActionResult::PassToDefaultBlockAction;
+                }
+
+                let state = args.world.get_block_state(args.position);
+                let props = CopperGolemStatueLikeProperties::from_state_id(state.id, args.block);
+
+                // The block entity is created on placement (`block/entities/mod.rs`), but a
+                // statue restored from an older world may predate that, and vanilla's own
+                // `useItemOn` no-ops when the block entity is missing.
+                let Some(block_entity) = args.world.get_block_entity(args.position) else {
+                    return BlockActionResult::PassToDefaultBlockAction;
+                };
+                let Some(statue) = block_entity
+                    .as_any()
+                    .downcast_ref::<CopperGolemStatueBlockEntity>()
+                else {
+                    return BlockActionResult::PassToDefaultBlockAction;
+                };
+
+                statue
+                    .remove_statue(args.world, props.facing, props.waterlogged)
+                    .await;
+                // `itemStack.hurtAndBreak(1, player, hand.asEquipmentSlot())`, line 72.
+                args.player
+                    .damage_item_in_slot(args.equipment_slot, 1)
+                    .await;
+                return BlockActionResult::Success;
+            }
+
+            if item.id == Item::HONEYCOMB.id {
                 return BlockActionResult::PassToDefaultBlockAction;
             }
 
@@ -189,5 +225,48 @@ impl BlockBehaviour for CopperGolemStatueBlock {
             )
             .await;
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CopperGolemStatueBlock, OXIDATION_FAMILY, next_pose};
+    use crate::block::BlockMetadata;
+    use pumpkin_data::BlockId;
+    use pumpkin_data::block_properties::CopperGolemPose;
+
+    /// `CopperGolemStatueBlock.Pose.getNextPose` wraps via `OutOfBoundsStrategy.ZERO`, so four
+    /// right-clicks return the statue to the pose it started in.
+    #[test]
+    fn cycling_the_pose_four_times_returns_to_standing() {
+        let mut pose = CopperGolemPose::Standing;
+        for _ in 0..4 {
+            pose = next_pose(pose);
+        }
+        assert!(matches!(pose, CopperGolemPose::Standing));
+    }
+
+    /// `WeatheringCopperGolemStatueBlock.useItemOn` lines 70-78: only the UNAFFECTED stage
+    /// releases the golem, and only the four unwaxed statues are weathering blocks at all, so
+    /// UNAFFECTED means the plain `copper_golem_statue` id and nothing else. Every other id
+    /// this block claims must fall through to the axe item, which scrapes or de-waxes it.
+    #[test]
+    fn only_the_unwaxed_unaffected_statue_releases_its_golem() {
+        let release_stage = BlockId::COPPER_GOLEM_STATUE;
+        assert_eq!(OXIDATION_FAMILY[0].id, release_stage);
+
+        let claimed = CopperGolemStatueBlock::ids();
+        assert!(claimed.contains(&release_stage));
+        assert_eq!(
+            claimed.iter().filter(|id| **id == release_stage).count(),
+            1,
+            "the release stage must be a single id, not a family"
+        );
+        assert!(
+            !claimed
+                .iter()
+                .any(|id| *id == BlockId::WAXED_COPPER_GOLEM_STATUE && *id == release_stage),
+            "the waxed statue is a plain CopperGolemStatueBlock in vanilla and de-waxes instead"
+        );
     }
 }
