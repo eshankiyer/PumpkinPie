@@ -85,6 +85,13 @@ fn knockback_strength_with_resistance(strength: f64, resistance: f64) -> f64 {
     strength * (1.0 - resistance.clamp(0.0, 1.0))
 }
 
+/// Vanilla turns a non-finite damage value into the largest finite value before it reaches
+/// cooldown, armor, or health calculations (`LivingEntity.hurtServer`). This matters at the
+/// plugin boundary too: a malformed replacement amount must not poison persistent combat state.
+const fn normalize_non_finite_damage(amount: f32) -> f32 {
+    if amount.is_finite() { amount } else { f32::MAX }
+}
+
 fn armor_resists_damage(stack: &ItemStack, damage_type: &DamageType) -> bool {
     let Some(resistant) = stack.get_data_component::<DamageResistantImpl>() else {
         return false;
@@ -4209,8 +4216,11 @@ impl EntityBase for LivingEntity {
                     .store(PLAYER_KILL_MEMORY_TICKS, Relaxed);
             }
 
+            // `LivingEntity.hurtServer` clamps negative incoming damage to zero rather than
+            // treating it as an invalid hit. Do this before plugins observe the value, matching
+            // the vanilla damage domain exposed to later damage processing.
             if amount < 0.0 {
-                return false;
+                amount = 0.0;
             }
 
             let mut damage_event =
@@ -4225,7 +4235,14 @@ impl EntityBase for LivingEntity {
             if damage_event.cancelled {
                 return false;
             }
-            amount = damage_event.damage;
+            amount = normalize_non_finite_damage(damage_event.damage);
+
+            // A successful hit restarts a mob's inactivity timer. Vanilla keeps this field on
+            // every living entity; Pumpkin stores it on MobEntity, so player victims simply do
+            // not have a corresponding timer to reset.
+            if let Some(mob) = caller.get_mob() {
+                mob.get_mob_entity().no_action_time.store(0, Relaxed);
+            }
 
             // Brain `HURT_BY`. Vanilla routes this through `HurtBySensor`
             // (`ai/sensing/HurtBySensor.java:18-28`), which each tick mirrors
@@ -4531,6 +4548,8 @@ impl EntityBase for LivingEntity {
             if damages_helmet(&damage_type) {
                 amount *= 0.75;
             }
+
+            amount = normalize_non_finite_damage(amount);
 
             // These damage types bypass the hurt cooldown and death protection
             let bypasses_cooldown_protection =
@@ -6217,6 +6236,14 @@ fn damage_causes_panic(damage_type: DamageType) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn non_finite_damage_is_clamped_before_combat_state_updates() {
+        assert_eq!(normalize_non_finite_damage(7.5), 7.5);
+        assert_eq!(normalize_non_finite_damage(f32::NAN), f32::MAX);
+        assert_eq!(normalize_non_finite_damage(f32::INFINITY), f32::MAX);
+        assert_eq!(normalize_non_finite_damage(f32::NEG_INFINITY), f32::MAX);
+    }
 
     /// Terminal horizontal speed, in blocks per second, of `velocity += input * factor`
     /// followed by `velocity *= slipperiness * 0.91` as `travel_in_air` applies it on a
