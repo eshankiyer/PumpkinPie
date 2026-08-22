@@ -1,19 +1,24 @@
 use std::pin::Pin;
 
+use std::sync::Arc;
+
 use crate::block::entities::mob_spawner::MobSpawnerBlockEntity;
 use crate::entity::EntityBase;
 use crate::entity::player::Player;
 use crate::entity::r#type::from_type;
 use crate::item::{ItemBehaviour, ItemMetadata};
 use crate::server::Server;
+use crate::world::World;
 use pumpkin_data::data_component_impl::{
     AxolotlVariantImpl, CatVariantImpl, ChickenVariantImpl, CowVariantImpl, FoxVariantImpl,
     FrogVariantImpl, HorseVariantImpl, LlamaVariantImpl, MooshroomVariantImpl, PigVariantImpl,
     RabbitVariantImpl, SheepColorImpl, ShulkerColorImpl, VillagerVariantImpl, WolfVariantImpl,
 };
-use pumpkin_data::entity::entity_from_egg;
+use pumpkin_data::entity::{EntityType, entity_from_egg};
+use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::{Block, BlockDirection};
+use pumpkin_util::Hand;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::math::wrap_degrees;
@@ -61,7 +66,93 @@ pub(crate) fn apply_entity_variant(item: &ItemStack, mob: &dyn EntityBase) {
     }
 }
 
+async fn spawn_egg_mob(
+    entity_type: &'static EntityType,
+    stack: &ItemStack,
+    world: &Arc<World>,
+    pos: Vector3<f64>,
+) {
+    // Create rotation like Vanilla
+    let yaw = wrap_degrees(rand::random::<f32>() * 360.0) % 360.0;
+
+    let mob = from_type(entity_type, pos, world, Uuid::new_v4());
+
+    // Set the rotation
+    mob.get_entity().set_rotation(yaw, 0.0);
+
+    apply_entity_variant(stack, mob.as_ref());
+
+    // Broadcast the new mob to all players
+    world.spawn_entity(mob).await;
+}
+
 impl ItemBehaviour for SpawnEggItem {
+    /// Vanilla `SpawnEggItem.use` (SpawnEggItem.java:100-131): right-clicking without hitting
+    /// a block raycasts with `ClipContext.Fluid.SOURCE_ONLY` and, if the hit block is a
+    /// `LiquidBlock`, spawns the mob inside the fluid itself (`tryMoveDown = false`).
+    /// Without this, water/lava mob eggs (cod, squid, dolphin, strider, ...) do nothing when
+    /// used on the surface of a fluid.
+    fn normal_use<'a>(
+        &'a self,
+        item: &'a Item,
+        player: &'a Player,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            let Some(entity_type) = entity_from_egg(item.id) else {
+                return;
+            };
+            let world = player.world();
+            let (start_pos, end_pos) = self.get_start_and_end_pos(player);
+
+            // ClipContext.Fluid.SOURCE_ONLY: stop on any non-air block outline and on
+            // full fluid source blocks, but pass through flowing fluid.
+            let checker = async |pos: &BlockPos, world_inner: &Arc<World>| {
+                let state_id = world_inner.get_block_state_id(pos);
+                let block = Block::from_state_id(state_id);
+                if state_id == Block::AIR.default_state.id {
+                    return false;
+                }
+                if block.id == Block::WATER.id || block.id == Block::LAVA.id {
+                    return state_id == block.default_state.id;
+                }
+                true
+            };
+
+            let Some((pos, _face)) = world.raycast(start_pos, end_pos, checker).await else {
+                return;
+            };
+
+            // SpawnEggItem.java:114: only a LiquidBlock is spawned into by `use`; anything
+            // else is left to `useOn`.
+            let hit_block = world.get_block(&pos);
+            if hit_block.id != Block::WATER.id && hit_block.id != Block::LAVA.id {
+                return;
+            }
+
+            let inventory = player.inventory();
+            let held = inventory.held_item().await;
+            let (mut stack, hand) = if !held.is_empty() && held.item.id == item.id {
+                (held, Hand::Right)
+            } else {
+                let off_hand = inventory.off_hand_item().await;
+                if !off_hand.is_empty() && off_hand.item.id == item.id {
+                    (off_hand, Hand::Left)
+                } else {
+                    return;
+                }
+            };
+
+            let spawn_pos = Vector3::new(
+                f64::from(pos.0.x) + 0.5,
+                f64::from(pos.0.y),
+                f64::from(pos.0.z) + 0.5,
+            );
+            spawn_egg_mob(entity_type, &stack, &world, spawn_pos).await;
+            stack.decrement_unless_creative(player.gamemode.load(), 1);
+            inventory.set_stack_in_hand(hand, stack).await;
+        })
+    }
+
     fn use_on_block<'a>(
         &'a self,
         item: &'a mut ItemStack,
@@ -104,18 +195,7 @@ impl ItemBehaviour for SpawnEggItem {
                     f64::from(pos.0.y),
                     f64::from(pos.0.z) + 0.5,
                 );
-                // Create rotation like Vanilla
-                let yaw = wrap_degrees(rand::random::<f32>() * 360.0) % 360.0;
-
-                let mob = from_type(entity_type, pos, &world, Uuid::new_v4());
-
-                // Set the rotation
-                mob.get_entity().set_rotation(yaw, 0.0);
-
-                apply_entity_variant(item, mob.as_ref());
-
-                // Broadcast the new mob to all players
-                world.spawn_entity(mob).await;
+                spawn_egg_mob(entity_type, item, &world, pos).await;
                 item.decrement_unless_creative(player.gamemode.load(), 1);
             }
         })

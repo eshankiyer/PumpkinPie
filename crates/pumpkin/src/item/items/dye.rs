@@ -43,7 +43,12 @@ impl ItemBehaviour for DyeItem {
             let Some(sheep) = entity.cast_any().downcast_ref::<SheepEntity>() else {
                 return;
             };
-            if sheep.is_sheared() {
+            // DyeItem.java:21 requires `sheep.isAlive()`, which is LivingEntity.isAlive:
+            // not removed AND health above zero. A dying sheep is not dyeable.
+            if entity.get_entity().is_removed()
+                || sheep.mob_entity.living_entity.health.load() <= 0.0
+                || sheep.is_sheared()
+            {
                 return;
             }
             let Some(color_name) = item.item.registry_key.strip_suffix("_dye") else {
