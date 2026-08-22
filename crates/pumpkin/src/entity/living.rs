@@ -6504,9 +6504,9 @@ fn fall_flying_collision_damage(previous_speed: f64, new_speed: f64) -> Option<f
 }
 
 /// Vanilla's shield `BlocksAttacks.ItemDamageFunction(3, 1, 1)`: shields take no
-/// durability loss below three blocked damage, then lose `floor(damage)` points.
+/// durability loss below three blocked damage, then lose `floor(1 + damage)` points.
 fn shield_block_durability_damage(blocked_damage: f32) -> Option<i32> {
-    (blocked_damage >= 3.0).then_some(blocked_damage.floor() as i32)
+    (blocked_damage >= 3.0).then_some((1.0 + blocked_damage).floor() as i32)
 }
 
 /// Vanilla `LivingEntity.updateFallFlying` tick schedule (`LivingEntity.java:3190-3202`).
@@ -6585,8 +6585,9 @@ mod tests {
     #[test]
     fn shield_durability_uses_the_vanilla_damage_threshold() {
         assert_eq!(shield_block_durability_damage(2.999), None);
-        assert_eq!(shield_block_durability_damage(3.0), Some(3));
-        assert_eq!(shield_block_durability_damage(3.9), Some(3));
+        assert_eq!(shield_block_durability_damage(3.0), Some(4));
+        assert_eq!(shield_block_durability_damage(3.9), Some(4));
+        assert_eq!(shield_block_durability_damage(4.0), Some(5));
     }
 
     #[test]
