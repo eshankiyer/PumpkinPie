@@ -2445,8 +2445,17 @@ impl Player {
         Some(spawn_pos)
     }
 
-    pub fn sleep(&self, bed_head_pos: BlockPos) {
-        // TODO: Stop riding
+    pub async fn sleep(&self, bed_head_pos: BlockPos) -> bool {
+        let vehicle = self.get_entity().vehicle.lock().await.clone();
+        if let Some(vehicle) = vehicle {
+            vehicle
+                .get_entity()
+                .remove_passenger(self.entity_id())
+                .await;
+            if self.get_entity().has_vehicle().await {
+                return false;
+            }
+        }
 
         self.get_entity().set_pose(EntityPose::Sleeping);
         self.living_entity
@@ -2463,6 +2472,7 @@ impl Player {
 
         self.sleeping_since.store(Some(0));
         self.sleeping_pos.store(Some(bed_head_pos));
+        true
     }
 
     pub async fn get_off_ground_speed(&self) -> f64 {
@@ -4974,26 +4984,21 @@ impl Player {
                 // Stop elytra flight and reset sneaking when switching to spectator mode
                 if gamemode == GameMode::Spectator {
                     let entity = self.get_entity();
+                    let vehicle = entity.vehicle.lock().await.clone();
+                    if let Some(vehicle) = vehicle {
+                        vehicle
+                            .get_entity()
+                            .remove_passenger(self.entity_id())
+                            .await;
+                    }
+                    self.stop_using_item();
+                    self.living_entity.clear_active_hand().await;
                     if entity.is_fall_flying() {
                         entity.set_fall_flying(false).await;
                     }
                     if entity.is_sneaking() {
                         entity.set_sneaking(false).await;
                     }
-                }
-
-                /* Vanilla doesn't reset fallDistance in setGameMode(), instead relies on
-                 * Player.aiStep() resetting when abilities.flying=true and
-                 * Player.causeFallDamage() returning false when abilities.mayfly=true
-                 * (Player.java:1451-1454). Neither is implemented here, so without this reset a
-                 * fall begun in Creative or Spectator still damages the player once they switch
-                 * back to Survival and land.
-                 * TODO: Reset fall_distance each tick when abilities.flying=true (mirrors Player.aiStep())
-                 * TODO: Add abilities.allow_flying check in LivingEntity::handle_fall_damage() (mirrors Player.causeFallDamage())
-                 * TODO: Once implemented, restrict this reset to Spectator only.
-                 */
-                if matches!(gamemode, GameMode::Creative | GameMode::Spectator) {
-                    self.living_entity.fall_distance.store(0.0);
                 }
 
                 if gamemode != GameMode::Spectator && self.camera_target_id.load().is_some() {

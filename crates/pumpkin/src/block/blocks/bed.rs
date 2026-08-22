@@ -410,7 +410,9 @@ impl BlockBehaviour for BedBlock {
                 }
             }
 
-            args.player.sleep(bed_head_pos);
+            if !args.player.sleep(bed_head_pos).await {
+                return BlockActionResult::SuccessServer;
+            }
             args.player
                 .trigger_advancement(
                     crate::entity::player::advancement::trigger::AdvancementTrigger::SleptInBed,
