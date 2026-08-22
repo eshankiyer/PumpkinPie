@@ -22,25 +22,23 @@ PumpkinPie is a Minecraft: Java Edition server for 26.2. It began as a fork of
 priority: **matching what vanilla actually does**.
 
 Every behavioural change is checked against a decompiled 26.2 server and cites the file and line
-it was checked against. Where it can be, it is confirmed against a running server with a real
-client attached, rather than by reading code alone — because reading is not enough. Recent
-examples of things that passed static review and were caught only by running them:
-
-- Every integer in every synced registry went out as `TAG_Long` instead of `TAG_Int`, which made
-  strict clients refuse to join.
-- End gateways saved their exit portal as a compound where vanilla writes an int array, so
-  vanilla-generated gateways were unreadable here and Pumpkin's unreadable by vanilla — silently,
-  in both directions.
-- Mineshafts sited correctly 174 times in a test sweep and then generated empty tunnels: no
-  cobwebs, no spawners, no chest minecarts, because the piece graph was a 140-line placeholder.
-- A pig recursed through a trait default back into itself until the tokio worker's stack died.
+it was checked against. Where it can be, it is also confirmed against a running server with a
+real client attached, rather than by reading code alone.
 
 ## Parity, measured
 
 Two instruments, deliberately separate, because they answer different questions. Both are in-repo
 and reproducible.
 
-**Registry coverage** — does an implementation exist at all?
+### Registry coverage: does an implementation exist at all?
+
+```mermaid
+xychart-beta horizontal
+    title "Registry coverage by category (%)"
+    x-axis ["Entities", "Items", "Blocks", "Total"]
+    y-axis "Covered (%)" 0 --> 100
+    bar [100, 92.4, 82.8, 88.8]
+```
 
 | | covered | total | |
 |---|---:|---:|---:|
@@ -50,32 +48,114 @@ and reproducible.
 | **Total** | **2568** | **2891** | **88.8%** |
 
 That block figure understates things substantially. Auditing all 206 uncovered blocks against
-`Blocks.java` found 185 that need no behaviour at all — wool, concrete and dyed terracotta are
-literally `(c, p) -> new Block(p)` — and 21 that are data-driven. Exactly one was a real gap. The
-item list is the same story. Counting only registrations that *should* exist puts both near 99%.
+`Blocks.java` found 185 that need no behaviour at all (wool, concrete and dyed terracotta are
+literally `(c, p) -> new Block(p)`) and 21 that are data-driven. Exactly one was a real gap.
 
-**Method-level conformance** — for each vanilla class with an analogue here, how much of its
-surface is covered?
+```mermaid
+pie showData
+    title The 206 "uncovered" blocks, audited
+    "Correctly needs no behaviour" : 185
+    "Data-driven" : 21
+    "Real gap" : 1
+```
+
+The item list tells the same story: of 118 uncovered items, 80 were inert crafting materials, 20
+were client-only tooltip subclasses, 14 were data-driven, and 4 were real. Counting only
+registrations that *should* exist puts both categories near 99%.
+
+### Method-level conformance: how much of each class's surface is covered?
+
+```mermaid
+xychart-beta horizontal
+    title "Method-level conformance, 8512 scored methods"
+    x-axis ["Strict (mapped file)", "Loose (anywhere in crates/)"]
+    y-axis "Matched (%)" 0 --> 100
+    bar [21.3, 50.6]
+```
 
 | | |
 |---|---:|
-| Strict (counterpart in the one mapped file) | 21.3% |
-| Loose (counterpart anywhere in `crates/`) | 50.6% |
+| Strict, counterpart in the one mapped file | 21.3% |
+| Loose, counterpart anywhere in `crates/` | 50.6% |
 | Remaining leads | 4209 |
 
-The truth is between the two: strict under-credits behaviour split across modules and trait
-impls, loose over-credits trait defaults. And a lead is **not** a confirmed gap — measured yield
-runs around one in five, the rest being renames, methods inlined into their callers, or
-client-only code a dedicated server never reaches. The worldgen pass found 3 real gaps in 14
-leads.
+The truth is between the two. Strict under-credits behaviour split across modules and trait
+impls; loose over-credits trait defaults.
 
-Neither number is behavioural proof. A matched method can still behave differently; that is what
-the ongoing verification work is for.
+A lead is **not** a confirmed gap. Measured yield runs around one in five, the rest being
+renames, methods inlined into their callers, or client-only code a dedicated server never
+reaches:
+
+```mermaid
+xychart-beta
+    title "Real gaps found per audit, against leads examined"
+    x-axis ["Blocks", "Worldgen", "Items", "Block entities"]
+    y-axis "Count" 0 --> 210
+    bar [207, 14, 118, 15]
+    line [1, 3, 4, 4]
+```
+
+Bars are leads examined, the line is real gaps found. Neither instrument is behavioural proof: a
+matched method can still behave differently, which is what the ongoing verification work is for.
+
+### Against other Rust Minecraft servers
+
+The same instrument, run unchanged against each project's own checkout. It discovers source
+roots per repo, so SteelMC's `steel-core/` layout is measured as fairly as a `crates/` one.
+
+```mermaid
+xychart-beta horizontal
+    title "Vanilla classes with an analogue (of 3238)"
+    x-axis ["Pumpkin (upstream)", "SteelMC", "PumpkinPie"]
+    y-axis "Classes" 0 --> 1200
+    bar [966, 894, 1096]
+```
+
+```mermaid
+xychart-beta horizontal
+    title "Vanilla methods with a counterpart, absolute"
+    x-axis ["Pumpkin (upstream)", "SteelMC", "PumpkinPie"]
+    y-axis "Methods" 0 --> 4600
+    bar [3168, 3384, 4303]
+```
+
+```mermaid
+xychart-beta horizontal
+    title "Depth: methods matched per class claimed (%)"
+    x-axis ["Pumpkin (upstream)", "PumpkinPie", "SteelMC"]
+    y-axis "Matched (%)" 0 --> 70
+    bar [40.8, 50.6, 62.5]
+```
+
+| | PumpkinPie | SteelMC | Pumpkin |
+|---|---:|---:|---:|
+| Classes with an analogue | **1096** | 894 | 966 |
+| Methods matched, absolute | **4303** | 3384 | 3168 |
+| Methods scored against | 8512 | 5418 | 7762 |
+| Depth per class claimed | 50.6% | **62.5%** | 40.8% |
+
+Read these together, because the third chart disagrees with the first two and the disagreement is
+the interesting part. PumpkinPie covers the most of vanilla and matches the most methods outright.
+SteelMC matches a higher *share* of what it takes on, because it takes on less: its percentage is
+computed over 5418 methods where PumpkinPie's is over 8512. A project implementing fewer classes
+scores higher on a per-class metric while covering less of the game, so neither number alone is
+the answer.
+
+Where PumpkinPie is straightforwardly ahead is against the upstream it forked from, on every
+measure here.
+
+Two caveats on the comparison. The instrument carries 18 negative-control probes; only 9 apply to
+SteelMC, and upstream needed `--no-probes` because one failed against its layout, so cross-repo
+confidence is weaker than same-repo confidence. And this is still name-level matching: it does not
+prove any of the three behaves correctly.
 
 ```sh
 python3 tools/tracker/build_surface.py      # registry coverage
 python3 tools/conformance/conformance.py    # method-level conformance
 tools/run-tests.sh                          # full suite, including a live server
+
+# and against any other server's checkout
+PUMPKIN_REPO=/path/to/other-server python3 tools/conformance/conformance.py
 ```
 
 ## Running it
@@ -97,15 +177,15 @@ sha256sum -c SHA256SUMS --ignore-missing
 
 These binaries are unsigned, so SmartScreen and some antivirus products will warn about them.
 That is what an unsigned executable from a small project looks like, not evidence of anything in
-particular; every release links a VirusTotal report so you can read the scan yourself, and
+particular. Every release links a VirusTotal report so you can read the scan yourself, and
 building from source is always an option.
 
 ### Configuration
 
 The server writes `pumpkin.toml` on first start. The MOTD accepts legacy formatting codes with
-either `&` or `§` — colours `0`-`9`/`a`-`f`, `l` bold, `o` italic, `n` underline, `m`
+either `&` or `§`: colours `0`-`9` and `a`-`f`, `l` bold, `o` italic, `n` underline, `m`
 strikethrough, `k` obfuscated, `r` reset, and `x` for RGB. `\n` starts a second line, and `&&` is
-a literal ampersand:
+a literal ampersand.
 
 ```toml
 motd = "&6&lPumpkinPie\n&7Vanilla parity, in Rust"
@@ -117,8 +197,19 @@ motd = "&6&lPumpkinPie\n&7Vanilla parity, in Rust"
 real server on a scratch world with a headless client joining it and a protocol fuzzer against
 it. Non-zero exit on any failure.
 
-The headless client (`tools/parity-bot`) earns its keep — it found both registry bugs above on
-its first run, after they had passed clippy, 870 unit tests and static review.
+```mermaid
+flowchart LR
+    A[conformance] --> B[tracker]
+    B --> C[build fuzzer + bot]
+    C --> D[boot server on scratch world]
+    D --> E[parity-bot joins]
+    D --> F[fuzzer runs]
+    E --> G[summary, non-zero on any FAIL]
+    F --> G
+```
+
+The headless client, `tools/parity-bot`, earns its keep. It has caught protocol bugs that had
+already passed clippy, the unit tests and static review.
 
 ## Contributing
 
@@ -142,6 +233,7 @@ Upstream's work is gratefully carried forward, and upstream changes are merged i
   [MIT](crates/pumpkin-plugin-api/LICENSE-MIT) OR
   [Apache-2.0](crates/pumpkin-plugin-api/LICENSE-APACHE), for flexibility when writing plugins.
 - **Third-party assets & data**: Bedrock mappings, protocol conversion data and Minecraft assets
-  are subject to their own licenses and attribution terms — see [assets/NOTICE.md](assets/NOTICE.md).
+  are subject to their own licenses and attribution terms. See
+  [assets/NOTICE.md](assets/NOTICE.md).
 
 Not affiliated with Mojang Studios or Microsoft. Minecraft is a trademark of Mojang Synergies AB.

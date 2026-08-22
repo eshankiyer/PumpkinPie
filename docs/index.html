@@ -113,6 +113,40 @@
     background: var(--card);
     margin: 1rem 0;
   }
+  .chart { margin: 1.25rem 0 1.75rem; }
+  .chart h4 {
+    font-size: .85rem;
+    font-weight: 600;
+    color: var(--muted);
+    margin: 0 0 .6rem;
+    letter-spacing: .01em;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 9.5rem 1fr auto;
+    align-items: center;
+    gap: .6rem;
+    margin: .3rem 0;
+    font-size: .9rem;
+  }
+  .row .name { color: var(--muted); }
+  .row .track {
+    background: color-mix(in srgb, var(--border) 60%, transparent);
+    border-radius: 3px;
+    height: 1.1rem;
+    overflow: hidden;
+  }
+  .row .fill {
+    height: 100%;
+    background: color-mix(in srgb, var(--accent) 45%, transparent);
+    border-radius: 3px;
+  }
+  .row.us .fill { background: var(--accent); }
+  .row.us .name { color: var(--fg); font-weight: 600; }
+  .row .val { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 3.5rem; text-align: right; }
+  @media (max-width: 32rem) {
+    .row { grid-template-columns: 7rem 1fr auto; font-size: .82rem; }
+  }
   footer {
     margin-top: 3.5rem;
     padding-top: 1.5rem;
@@ -195,6 +229,51 @@ cd pumpkinpie
   <p>
     The server writes <code>pumpkin.toml</code> on first start. It speaks the 26.2 protocol; older
     clients are not supported.
+  </p>
+
+
+  <h2>How it compares</h2>
+  <p>
+    The same instrument, run unchanged against each project's own checkout. It discovers source
+    roots per repository, so SteelMC's <code>steel-core/</code> layout is measured as fairly as a
+    <code>crates/</code> one. Measured against decompiled 26.2.
+  </p>
+
+  <div class="chart">
+    <h4>Vanilla classes with an analogue (of 3238)</h4>
+      <div class="row us"><span class="name">PumpkinPie</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">1096</span></div>
+      <div class="row"><span class="name">Pumpkin</span><span class="track"><span class="fill" style="width:88.1%"></span></span><span class="val">966</span></div>
+      <div class="row"><span class="name">SteelMC</span><span class="track"><span class="fill" style="width:81.6%"></span></span><span class="val">894</span></div>
+  </div>
+
+  <div class="chart">
+    <h4>Vanilla methods with a counterpart, absolute</h4>
+      <div class="row us"><span class="name">PumpkinPie</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">4303</span></div>
+      <div class="row"><span class="name">SteelMC</span><span class="track"><span class="fill" style="width:78.6%"></span></span><span class="val">3384</span></div>
+      <div class="row"><span class="name">Pumpkin</span><span class="track"><span class="fill" style="width:73.6%"></span></span><span class="val">3168</span></div>
+  </div>
+
+  <div class="chart">
+    <h4>Depth: methods matched per class claimed</h4>
+      <div class="row"><span class="name">SteelMC</span><span class="track"><span class="fill" style="width:100.0%"></span></span><span class="val">62.5%</span></div>
+      <div class="row us"><span class="name">PumpkinPie</span><span class="track"><span class="fill" style="width:81.0%"></span></span><span class="val">50.6%</span></div>
+      <div class="row"><span class="name">Pumpkin</span><span class="track"><span class="fill" style="width:65.3%"></span></span><span class="val">40.8%</span></div>
+  </div>
+
+  <div class="note">
+    <strong>Read all three together.</strong> The third disagrees with the first two, and that is
+    the interesting part. PumpkinPie covers the most of vanilla and matches the most methods
+    outright. SteelMC matches a higher <em>share</em> of what it takes on, because it takes on
+    less: its percentage is over 5418 methods where PumpkinPie's is over 8512. A project
+    implementing fewer classes scores higher per class while covering less of the game, so no one
+    number settles it. Against the upstream it forked from, PumpkinPie leads on every measure here.
+  </div>
+
+  <p>
+    Two caveats. The instrument carries 18 negative-control probes; only 9 apply to SteelMC, and
+    upstream needed <code>--no-probes</code> because one failed against its layout, so cross-repo
+    confidence is weaker than same-repo confidence. And this is name-level matching: it does not
+    prove any of the three behaves correctly.
   </p>
 
   <h2>Parity</h2>
