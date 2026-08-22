@@ -30,12 +30,13 @@ use crate::entity::mob::slime::SlimeEntity;
 use crate::entity::{Entity, EntityBase};
 
 /// Syncs the tracked-data `POSE` without going through `Entity::set_pose`'s per-pose
-/// bounding-box resize. `Entity::get_entity_dimensions` has no frog-sized entry for
-/// `UsingTongue`/`Standing`, so `set_pose` would fall back to its generic default (0.6x1.8,
-/// player-sized) and distort the frog's hitbox for the animation's duration -- and could even
-/// silently skip the pose change via its `is_space_empty` guard in tight spots. Vanilla's `Frog`
-/// doesn't override `getDimensions` either, so its hitbox is pose-independent; this mirrors that
-/// by only updating the pose field and the client-visible metadata.
+/// bounding-box resize. Vanilla's `Frog` does not override `getDefaultDimensions`, so its
+/// hitbox is pose-independent; this mirrors that by only updating the pose field and the
+/// client-visible metadata.
+///
+/// The player-sized fallback this used to work around is gone -- `Entity::get_dimensions` now
+/// only reaches `Avatar.POSES` for avatars -- but `set_pose` still gates on `is_space_empty`,
+/// which would silently skip the pose change in a tight spot, so the direct sync stays.
 fn sync_tongue_pose(entity: &Entity, pose: EntityPose) {
     entity.pose.store(pose);
     entity.send_meta_data(

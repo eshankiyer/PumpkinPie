@@ -127,6 +127,7 @@ impl PhantomEntity {
             height: original[1] * scale,
             eye_height: entity.entity_type.eye_height * scale,
         };
+        entity.base_dimension.store(dimensions);
         entity.entity_dimension.store(dimensions);
         let position = entity.pos.load();
         entity.bounding_box.store(BoundingBox::new_from_pos(

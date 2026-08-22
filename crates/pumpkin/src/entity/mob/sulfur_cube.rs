@@ -131,6 +131,7 @@ impl SulfurCubeEntity {
             height: entity.entity_type.dimension[1] * actual_size as f32,
             eye_height: entity.entity_type.eye_height * actual_size as f32,
         };
+        entity.base_dimension.store(scaled_dimensions);
         entity.entity_dimension.store(scaled_dimensions);
 
         let pos = entity.pos.load();

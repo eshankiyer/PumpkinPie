@@ -127,6 +127,7 @@ impl InteractionEntity {
         let pos = self.entity.pos.load();
         let aabb = BoundingBox::new_from_pos(pos.x, pos.y, pos.z, &dimensions);
         self.entity.bounding_box.store(aabb);
+        self.entity.base_dimension.store(dimensions);
         self.entity.entity_dimension.store(dimensions);
     }
 

@@ -71,6 +71,9 @@ pub trait AgeableMob: Mob {
             }
         {
             let position = entity.pos.load();
+            // `Entity::get_default_dimensions` reads this, so the baby/adult size survives a
+            // later pose change instead of being replaced by that pose's box.
+            entity.base_dimension.store(dimensions);
             entity.entity_dimension.store(dimensions);
             let new_box =
                 BoundingBox::new_from_pos(position.x, position.y, position.z, &dimensions);

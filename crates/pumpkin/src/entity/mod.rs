@@ -1084,6 +1084,11 @@ pub struct Entity {
     pub bounding_box: AtomicCell<BoundingBox>,
     ///The size (width and height) of the bounding box
     pub entity_dimension: AtomicCell<EntityDimensions>,
+    /// Vanilla `LivingEntity.getDefaultDimensions` (`LivingEntity.java:3731-3733`) resolves an
+    /// entity's pose-independent size from its type and baby state. This caches that value so a
+    /// pose change can restore it, rather than leaving whatever size the previous pose stored in
+    /// `entity_dimension`.
+    pub base_dimension: AtomicCell<EntityDimensions>,
     /// Whether this entity is invulnerable to all damage
     pub invulnerable: AtomicBool,
     /// List of damage types this entity is immune to
@@ -1355,6 +1360,7 @@ impl Entity {
                 &bounding_box_size,
             )),
             entity_dimension: AtomicCell::new(bounding_box_size),
+            base_dimension: AtomicCell::new(bounding_box_size),
             invulnerable: AtomicBool::new(false),
             damage_immunities: Mutex::new(Vec::new()),
             data: AtomicI32::new(0),
@@ -1593,6 +1599,13 @@ impl Entity {
         );
     }
 
+    /// Vanilla `LivingEntity.SLEEPING_DIMENSIONS` (`LivingEntity.java:191`). Every living entity
+    /// shrinks to this box while asleep, whatever its type is.
+    pub const SLEEPING_DIMENSIONS: EntityDimensions = EntityDimensions::new(0.2, 0.2, 0.2);
+
+    /// Vanilla `Avatar.getDefaultDimensions` (`Avatar.java:66-68`), reading `Avatar.POSES`
+    /// (`Avatar.java:24-37`). This table is **player-shaped** and must not be applied to other
+    /// entity types, which keep their own type dimensions in every pose.
     #[must_use]
     pub const fn get_entity_dimensions(pose: EntityPose) -> EntityDimensions {
         match pose {
@@ -1603,6 +1616,36 @@ impl Entity {
             EntityPose::Crouching => EntityDimensions::new(0.6, 1.5, 1.27),
             EntityPose::Dying => EntityDimensions::new(0.2, 0.2, 1.62),
             _ => EntityDimensions::new(0.6, 1.8, 1.62),
+        }
+    }
+
+    /// Vanilla `Avatar` covers the player and the mannequin (`Mannequin.java:28` extends
+    /// `Avatar`); only these two carry the pose-dependent size table.
+    #[must_use]
+    pub const fn is_avatar(&self) -> bool {
+        type_is_avatar(self.entity_type)
+    }
+
+    /// Vanilla `LivingEntity.getDefaultDimensions` (`LivingEntity.java:3731-3733`): the type's own
+    /// size, already scaled for the baby state by `AgeableMob::set_age`. `Avatar` overrides this
+    /// with its pose table (`Avatar.java:66-68`).
+    #[must_use]
+    pub fn get_default_dimensions(&self, pose: EntityPose) -> EntityDimensions {
+        if self.is_avatar() {
+            Self::get_entity_dimensions(pose)
+        } else {
+            self.base_dimension.load()
+        }
+    }
+
+    /// Vanilla `LivingEntity.getDimensions` (`LivingEntity.java:3727-3729`): sleeping is a fixed
+    /// box for every living entity, everything else defers to `getDefaultDimensions`.
+    #[must_use]
+    pub fn get_dimensions(&self, pose: EntityPose) -> EntityDimensions {
+        if pose == EntityPose::Sleeping {
+            Self::SLEEPING_DIMENSIONS
+        } else {
+            self.get_default_dimensions(pose)
         }
     }
 
@@ -3572,12 +3615,11 @@ impl Entity {
             }
         }
 
-        let dimension = Self::get_entity_dimensions(pose);
+        let dimension = self.get_dimensions(pose);
         let position = self.pos.load();
         let aabb = BoundingBox::new_from_pos(position.x, position.y, position.z, &dimension);
         if self.world.load().is_space_empty(aabb.contract_all(1.0E-7)) {
             self.pose.store(pose);
-            let dimension = Self::get_entity_dimensions(pose);
             self.bounding_box.store(aabb);
             self.entity_dimension.store(dimension);
             let pose = pose as i32;
@@ -4186,7 +4228,7 @@ impl Entity {
                 let mut found = None;
 
                 'search: for (pose, y_offsets) in poses_and_heights {
-                    let dims = Self::get_entity_dimensions(pose);
+                    let dims = passenger_entity.get_dimensions(pose);
 
                     for y_offset in y_offsets {
                         for &(ox, oz) in &offsets {
@@ -4237,7 +4279,7 @@ impl Entity {
                     ];
 
                     for pose in poses {
-                        let dims = Self::get_entity_dimensions(pose);
+                        let dims = passenger_entity.get_dimensions(pose);
                         let bbox = BoundingBox::new_from_pos(
                             self.pos.load().x,
                             vehicle_top,
@@ -5300,5 +5342,75 @@ mod tracked_data_replay_tests {
         let buf = serialize_tracked_data(&snapshot, JavaMinecraftVersion::V_26_2).unwrap();
         assert!(buf.contains(&tracked_data::creeper::DATA_SWELL_DIR.id.v26_2));
         assert!(buf.contains(&tracked_data::creeper::DATA_IS_IGNITED.id.v26_2));
+    }
+}
+
+/// Whether this type is a vanilla `Avatar`: the player, or the mannequin
+/// (`Mannequin.java:28` extends `Avatar`).
+///
+/// `Avatar.getDefaultDimensions` (`Avatar.java:66-68`) is the only override that makes an
+/// entity's size depend on its pose. Every other entity keeps its type dimensions in every
+/// pose, per `LivingEntity.getDefaultDimensions` (`LivingEntity.java:3731-3733`).
+#[must_use]
+pub const fn type_is_avatar(entity_type: &'static EntityType) -> bool {
+    entity_type.id == EntityType::PLAYER.id || entity_type.id == EntityType::MANNEQUIN.id
+}
+
+#[cfg(test)]
+mod default_dimension_tests {
+    use super::{Entity, EntityPose, type_is_avatar};
+    use pumpkin_data::entity::EntityType;
+
+    /// `Avatar.POSES` (`Avatar.java:24-37`). These numbers are player-shaped and applying them
+    /// to any other type is the bug this table guards against.
+    #[test]
+    fn avatar_pose_table_matches_vanilla() {
+        let standing = Entity::get_entity_dimensions(EntityPose::Standing);
+        assert_eq!(
+            (standing.width, standing.height, standing.eye_height),
+            (0.6, 1.8, 1.62)
+        );
+        let crouching = Entity::get_entity_dimensions(EntityPose::Crouching);
+        assert_eq!(
+            (crouching.width, crouching.height, crouching.eye_height),
+            (0.6, 1.5, 1.27)
+        );
+        for pose in [
+            EntityPose::Swimming,
+            EntityPose::FallFlying,
+            EntityPose::SpinAttack,
+        ] {
+            let dims = Entity::get_entity_dimensions(pose);
+            assert_eq!((dims.width, dims.height, dims.eye_height), (0.6, 0.6, 0.4));
+        }
+        let dying = Entity::get_entity_dimensions(EntityPose::Dying);
+        assert_eq!(
+            (dying.width, dying.height, dying.eye_height),
+            (0.2, 0.2, 1.62)
+        );
+    }
+
+    /// `LivingEntity.SLEEPING_DIMENSIONS` (`LivingEntity.java:191`).
+    #[test]
+    fn sleeping_dimensions_match_vanilla() {
+        let dims = Entity::SLEEPING_DIMENSIONS;
+        assert_eq!((dims.width, dims.height, dims.eye_height), (0.2, 0.2, 0.2));
+    }
+
+    /// Only the two `Avatar` subclasses may reach the pose table; a villager, a breeze and a
+    /// cat must all keep their own type dimensions whatever pose they are put in.
+    #[test]
+    fn only_avatars_use_the_pose_table() {
+        assert!(type_is_avatar(&EntityType::PLAYER));
+        assert!(type_is_avatar(&EntityType::MANNEQUIN));
+        for entity_type in [
+            &EntityType::VILLAGER,
+            &EntityType::BREEZE,
+            &EntityType::CAT,
+            &EntityType::WARDEN,
+            &EntityType::FROG,
+        ] {
+            assert!(!type_is_avatar(entity_type));
+        }
     }
 }

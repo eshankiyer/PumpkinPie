@@ -2323,6 +2323,15 @@ impl<T: Mob + Send + 'static> EntityBase for T {
                 mob_entity.breeding_cooldown.fetch_sub(1, Relaxed);
             }
 
+            // Vanilla `Animal.customServerAiStep` (`Animal.java:59-65`) and `Animal.aiStep`
+            // (`Animal.java:70-72`) both clear the in-love state whenever the age is not exactly
+            // 0, so a baby fed to hearts, or an adult still inside its post-breed cooldown,
+            // cannot stay in love. Only animals ever set `love_ticks`, so the check is a no-op
+            // for every other mob.
+            if mob_entity.living_entity.entity.age.load(Relaxed) != 0 {
+                mob_entity.reset_love_ticks();
+            }
+
             if mob_entity.love_ticks.load(Relaxed) > 0 {
                 let ticks = mob_entity.love_ticks.fetch_sub(1, Relaxed);
                 if ticks % 10 == 0 {

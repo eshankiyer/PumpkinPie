@@ -138,6 +138,7 @@ impl SalmonEntity {
             height: base[1] * scale,
             eye_height: entity.entity_type.eye_height * scale,
         };
+        entity.base_dimension.store(dimensions);
         entity.entity_dimension.store(dimensions);
         let pos = entity.pos.load();
         entity

@@ -35,6 +35,14 @@ pub trait MoveControlTrait: Control {
     /// controls that implement `has_wanted`.
     fn set_wanted_position(&mut self, _x: f64, _y: f64, _z: f64, _speed_modifier: f64) {}
 
+    /// Vanilla `MoveControl.getSpeedModifier`: the speed the current destination was requested
+    /// at. `Cat.customServerAiStep` (`Cat.java:235-252`) and `Ocelot.customServerAiStep`
+    /// (`Ocelot.java:117-134`) read it to choose their pose, so it must report the exact value
+    /// their goals asked for. Defaults to `0.0` for controls with no wanted position.
+    fn get_speed_modifier(&self) -> f64 {
+        0.0
+    }
+
     /// Vanilla `MoveControl.getWantedX/Y/Z`. Only meaningful for move controls that implement
     /// `has_wanted`; used by goals (e.g. `Ghast.RandomFloatAroundGoal`) that decide whether to
     /// re-roll a destination based on distance to the currently wanted position.

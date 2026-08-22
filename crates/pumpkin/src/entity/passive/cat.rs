@@ -6,7 +6,7 @@ use std::sync::{
 };
 
 use crossbeam::atomic::AtomicCell;
-use pumpkin_data::entity::{EntityStatus, EntityType};
+use pumpkin_data::entity::{EntityPose, EntityStatus, EntityType};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::tag::{self, Taggable};
@@ -483,9 +483,62 @@ impl Animal for CatEntity {
     }
 }
 
+/// Speed a feline's `AvoidEntityGoal`/`TemptGoal` requests while stalking; the pose step reads
+/// it back out of the move control. Vanilla compares against the literal `0.6`.
+pub const FELINE_CROUCH_SPEED: f64 = 0.6;
+/// Speed a fleeing feline is given; vanilla compares against the literal `1.33`.
+pub const FELINE_SPRINT_SPEED: f64 = 1.33;
+
+/// Pose and sprint flag a feline should hold, per its move control.
+///
+/// Vanilla `Cat.customServerAiStep` (`Cat.java:234-251`) and the byte-identical
+/// `Ocelot.customServerAiStep` (`Ocelot.java:116-133`): a feline crouches while creeping at
+/// `0.6`, sprints while fleeing at `1.33`, and stands otherwise. The comparison is an exact
+/// float equality in vanilla, so a goal's requested speed must match these constants bit for
+/// bit to select anything but the standing branch.
+#[must_use]
+pub fn feline_pose_for(has_wanted: bool, speed_modifier: f64) -> (EntityPose, bool) {
+    if !has_wanted {
+        return (EntityPose::Standing, false);
+    }
+    if speed_modifier == FELINE_CROUCH_SPEED {
+        (EntityPose::Crouching, false)
+    } else {
+        (EntityPose::Standing, speed_modifier == FELINE_SPRINT_SPEED)
+    }
+}
+
+/// Applies [`feline_pose_for`] to a live cat or ocelot.
+pub async fn feline_pose_step(mob: &dyn Mob) {
+    let mob_entity = mob.get_mob_entity();
+    let (has_wanted, speed) = {
+        let control = mob_entity.move_control.lock().unwrap();
+        (control.has_wanted(), control.get_speed_modifier())
+    };
+
+    let entity = &mob_entity.living_entity.entity;
+    let (pose, sprinting) = feline_pose_for(has_wanted, speed);
+
+    // Vanilla calls both setters unconditionally every tick; `SynchedEntityData` is dirty-tracked
+    // there, while `send_meta_data`/`set_flag` here broadcast whatever they are handed. Guarding
+    // on change keeps the observable result identical without a per-tick packet per feline.
+    if entity.pose.load() != pose {
+        entity.set_pose(pose);
+    }
+    if entity.is_sprinting() != sprinting {
+        entity.set_sprinting(sprinting).await;
+    }
+}
+
 impl Mob for CatEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            feline_pose_step(self).await;
+        })
     }
 
     fn get_owner_uuid(&self) -> Option<Uuid> {
@@ -658,7 +711,40 @@ impl Mob for CatEntity {
 
 #[cfg(test)]
 mod tests {
-    use super::{moon_brightness_allows_all_black, select_natural_cat_variant};
+    use super::{
+        FELINE_CROUCH_SPEED, FELINE_SPRINT_SPEED, feline_pose_for,
+        moon_brightness_allows_all_black, select_natural_cat_variant,
+    };
+    use pumpkin_data::entity::EntityPose;
+
+    /// `Cat.java:235-251` / `Ocelot.java:117-133`: only a wanted destination at exactly 0.6
+    /// crouches, only exactly 1.33 sprints, and everything else stands still and unsprinting.
+    ///
+    /// `EntityPose` has no `Debug`, so poses are compared through their discriminant.
+    fn pose_for(has_wanted: bool, speed: f64) -> (u8, bool) {
+        let (pose, sprinting) = feline_pose_for(has_wanted, speed);
+        (pose as u8, sprinting)
+    }
+
+    #[test]
+    fn feline_pose_matches_vanilla_speed_branches() {
+        let crouching = EntityPose::Crouching as u8;
+        let standing = EntityPose::Standing as u8;
+        assert_eq!(pose_for(true, FELINE_CROUCH_SPEED), (crouching, false));
+        assert_eq!(pose_for(true, FELINE_SPRINT_SPEED), (standing, true));
+        assert_eq!(pose_for(true, 1.0), (standing, false));
+        // No wanted position outranks the speed entirely.
+        assert_eq!(pose_for(false, FELINE_CROUCH_SPEED), (standing, false));
+        assert_eq!(pose_for(false, FELINE_SPRINT_SPEED), (standing, false));
+    }
+
+    /// A near-miss speed must not crouch or sprint: vanilla's comparison is exact equality.
+    #[test]
+    fn feline_pose_speed_comparison_is_exact() {
+        let standing = EntityPose::Standing as u8;
+        assert_eq!(pose_for(true, 0.6001), (standing, false));
+        assert_eq!(pose_for(true, 1.3299), (standing, false));
+    }
 
     #[test]
     fn only_full_moon_allows_all_black() {

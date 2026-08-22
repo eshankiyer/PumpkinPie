@@ -502,6 +502,7 @@ impl PaintingEntity {
                 height,
                 eye_height: 0.0,
             };
+            self.entity.base_dimension.store(dimensions);
             self.entity.entity_dimension.store(dimensions);
         }
     }

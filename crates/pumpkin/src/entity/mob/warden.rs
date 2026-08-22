@@ -106,14 +106,14 @@ struct RoarState {
     sound_played: bool,
 }
 
-/// Syncs the tracked-data `POSE` without going through `Entity::set_pose`'s per-pose
-/// bounding-box resize, for the same reason `frog_tongue_attack.rs::sync_tongue_pose` does:
-/// `Entity::get_entity_dimensions` has no arm for `Roaring` (falls back to the generic
-/// 0.6x1.8 player-sized default), so `set_pose` would distort the Warden's actual hitbox for
-/// the roar's duration and could silently no-op via its `is_space_empty` guard in tight
-/// spots. Vanilla's `Warden` only overrides dimensions for `DIGGING`/`EMERGING`
-/// (Warden.java:517-521), not `ROARING`, so skipping the resize here matches vanilla's own
-/// (lack of) hitbox change for this pose.
+/// Syncs the tracked-data `POSE` without going through `Entity::set_pose`, for the same reason
+/// `frog_tongue_attack.rs::sync_tongue_pose` does. Vanilla's `Warden` only overrides dimensions
+/// for `DIGGING`/`EMERGING` (Warden.java:517-521), not `ROARING`, so skipping the resize here
+/// matches vanilla's own (lack of) hitbox change for this pose.
+///
+/// The player-sized fallback this used to work around is gone -- `Entity::get_dimensions` now
+/// only reaches `Avatar.POSES` for avatars -- but `set_pose` still gates on `is_space_empty`,
+/// which would silently no-op in a tight spot, so the direct sync stays.
 fn sync_warden_pose(entity: &Entity, pose: EntityPose) {
     entity.pose.store(pose);
     entity.send_meta_data(

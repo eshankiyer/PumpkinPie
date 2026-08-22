@@ -162,6 +162,14 @@ impl Mob for OcelotEntity {
         &self.mob_entity
     }
 
+    /// Vanilla `Ocelot.customServerAiStep` (`Ocelot.java:116-133`) is byte-identical to
+    /// `Cat.customServerAiStep`, so both share one implementation.
+    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            crate::entity::passive::cat::feline_pose_step(self).await;
+        })
+    }
+
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             let entity = self.get_entity();

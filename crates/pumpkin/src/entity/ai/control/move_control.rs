@@ -157,6 +157,10 @@ impl MoveControlTrait for MoveControl {
     fn set_wanted_position(&mut self, x: f64, y: f64, z: f64, speed_modifier: f64) {
         Self::set_wanted_position(self, x, y, z, speed_modifier);
     }
+
+    fn get_speed_modifier(&self) -> f64 {
+        Self::get_speed_modifier(self)
+    }
 }
 
 fn should_jump(
