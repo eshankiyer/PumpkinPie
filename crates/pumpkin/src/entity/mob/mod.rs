@@ -23,9 +23,11 @@ use crossbeam::atomic::AtomicCell;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, IDSet, WeaponImpl};
+use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::entity_from_egg;
 use pumpkin_data::entity::{EntityType, MobCategory};
 use pumpkin_data::item_stack::{DamageResult, ItemStack};
+use pumpkin_data::potion::Effect;
 use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data;
@@ -45,6 +47,51 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, Ordering};
 use uuid::Uuid;
+
+/// Resolves generic `minecraft:post_attack` mob effects against the landed melee target.
+/// Today this is Bane of Arthropods' Slowness payload; the effect list is captured from the
+/// attacker's held item before damage is attempted, matching vanilla's weapon snapshot.
+async fn apply_post_hit_mob_effects(
+    target: &dyn EntityBase,
+    post_hit_effects: Vec<(crate::enchantment::EnchantmentEffect, i32)>,
+) {
+    let Some(living) = target.get_living_entity() else {
+        return;
+    };
+
+    for (effect, level) in post_hit_effects {
+        let crate::enchantment::EnchantmentEffect::ApplyMobEffectOnHit {
+            min_duration_seconds,
+            max_duration_seconds,
+            min_amplifier,
+            max_amplifier,
+            ..
+        } = effect
+        else {
+            continue;
+        };
+        let (duration, amplifier) = crate::enchantment::apply_mob_effect_on_hit(
+            min_duration_seconds,
+            max_duration_seconds,
+            min_amplifier,
+            max_amplifier,
+            level,
+            rand::random::<f32>(),
+            rand::random::<f32>(),
+        );
+        living
+            .add_effect(Effect {
+                effect_type: &StatusEffect::SLOWNESS,
+                duration,
+                amplifier,
+                ambient: false,
+                show_particles: true,
+                show_icon: true,
+                blend: false,
+            })
+            .await;
+    }
+}
 
 pub mod bat;
 pub mod blaze;
@@ -745,6 +792,7 @@ impl MobEntity {
             .living_entity
             .get_attribute_value(&Attributes::ATTACK_KNOCKBACK);
         let mut knockback_level = 0u32;
+        let mut post_hit_effects = Vec::new();
         let held_item = self
             .living_entity
             .held_item(&self.living_entity.entity)
@@ -768,6 +816,12 @@ impl MobEntity {
                             if *condition == crate::enchantment::KnockbackCondition::Always =>
                         {
                             knockback_level = value.calculate(*level).max(0.0) as u32;
+                        }
+                        effect @ crate::enchantment::EnchantmentEffect::ApplyMobEffectOnHit {
+                            condition,
+                            ..
+                        } if condition.applies(target_type) => {
+                            post_hit_effects.push((*effect, *level));
                         }
                         _ => {}
                     }
@@ -805,6 +859,7 @@ impl MobEntity {
                     .get_entity()
                     .set_on_fire_for_ticks(fire_aspect_ticks(fire_aspect_level as i32));
             }
+            apply_post_hit_mob_effects(target, post_hit_effects).await;
             if knockback_strength > 0.0 {
                 let yaw = self.living_entity.entity.yaw.load().to_radians();
                 let x = f64::from(yaw.sin());
