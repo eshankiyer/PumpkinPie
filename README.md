@@ -32,14 +32,6 @@ and reproducible.
 
 ### Registry coverage: does an implementation exist at all?
 
-```mermaid
-xychart-beta horizontal
-    title "Registry coverage by category (%)"
-    x-axis ["Entities", "Items", "Blocks", "Total"]
-    y-axis "Covered (%)" 0 --> 100
-    bar [100, 92.4, 82.8, 88.8]
-```
-
 | | covered | total | |
 |---|---:|---:|---:|
 | Blocks | 990 | 1196 | 82.8% |
@@ -51,27 +43,11 @@ That block figure understates things substantially. Auditing all 206 uncovered b
 `Blocks.java` found 185 that need no behaviour at all (wool, concrete and dyed terracotta are
 literally `(c, p) -> new Block(p)`) and 21 that are data-driven. Exactly one was a real gap.
 
-```mermaid
-pie showData
-    title The 206 "uncovered" blocks, audited
-    "Correctly needs no behaviour" : 185
-    "Data-driven" : 21
-    "Real gap" : 1
-```
-
 The item list tells the same story: of 118 uncovered items, 80 were inert crafting materials, 20
 were client-only tooltip subclasses, 14 were data-driven, and 4 were real. Counting only
 registrations that *should* exist puts both categories near 99%.
 
 ### Method-level conformance: how much of each class's surface is covered?
-
-```mermaid
-xychart-beta horizontal
-    title "Method-level conformance, 8512 scored methods"
-    x-axis ["Strict (mapped file)", "Loose (anywhere in crates/)"]
-    y-axis "Matched (%)" 0 --> 100
-    bar [21.3, 50.6]
-```
 
 | | |
 |---|---:|
@@ -84,48 +60,16 @@ impls; loose over-credits trait defaults.
 
 A lead is **not** a confirmed gap. Measured yield runs around one in five, the rest being
 renames, methods inlined into their callers, or client-only code a dedicated server never
-reaches:
+reaches. Audits so far: 1 real gap in 207 block leads, 3 in 14 worldgen leads, 4 in 118 item
+leads, 4 in 15 block-entity leads.
 
-```mermaid
-xychart-beta
-    title "Real gaps found per audit, against leads examined"
-    x-axis ["Blocks", "Worldgen", "Items", "Block entities"]
-    y-axis "Count" 0 --> 210
-    bar [207, 14, 118, 15]
-    line [1, 3, 4, 4]
-```
-
-Bars are leads examined, the line is real gaps found. Neither instrument is behavioural proof: a
-matched method can still behave differently, which is what the ongoing verification work is for.
+Neither instrument is behavioural proof: a matched method can still behave differently, which is
+what the ongoing verification work is for.
 
 ### Against other Rust Minecraft servers
 
 The same instrument, run unchanged against each project's own checkout. It discovers source
 roots per repo, so SteelMC's `steel-core/` layout is measured as fairly as a `crates/` one.
-
-```mermaid
-xychart-beta horizontal
-    title "Vanilla classes with an analogue (of 3238)"
-    x-axis ["Pumpkin (upstream)", "SteelMC", "PumpkinPie"]
-    y-axis "Classes" 0 --> 1200
-    bar [966, 894, 1096]
-```
-
-```mermaid
-xychart-beta horizontal
-    title "Vanilla methods with a counterpart, absolute"
-    x-axis ["Pumpkin (upstream)", "SteelMC", "PumpkinPie"]
-    y-axis "Methods" 0 --> 4600
-    bar [3168, 3384, 4303]
-```
-
-```mermaid
-xychart-beta horizontal
-    title "Depth: methods matched per class claimed (%)"
-    x-axis ["Pumpkin (upstream)", "PumpkinPie", "SteelMC"]
-    y-axis "Matched (%)" 0 --> 70
-    bar [40.8, 50.6, 62.5]
-```
 
 | | PumpkinPie | SteelMC | Pumpkin |
 |---|---:|---:|---:|
@@ -134,8 +78,8 @@ xychart-beta horizontal
 | Methods scored against | 8512 | 5418 | 7762 |
 | Depth per class claimed | 50.6% | **62.5%** | 40.8% |
 
-Read these together, because the third chart disagrees with the first two and the disagreement is
-the interesting part. PumpkinPie covers the most of vanilla and matches the most methods outright.
+Read the rows together, because the last one disagrees with the first two and the disagreement
+is the interesting part. PumpkinPie covers the most of vanilla and matches the most methods outright.
 SteelMC matches a higher *share* of what it takes on, because it takes on less: its percentage is
 computed over 5418 methods where PumpkinPie's is over 8512. A project implementing fewer classes
 scores higher on a per-class metric while covering less of the game, so neither number alone is
@@ -196,17 +140,6 @@ motd = "&6&lPumpkinPie\n&7Vanilla parity, in Rust"
 `tools/run-tests.sh` runs the whole instrument set in one command: the static instruments, then a
 real server on a scratch world with a headless client joining it and a protocol fuzzer against
 it. Non-zero exit on any failure.
-
-```mermaid
-flowchart LR
-    A[conformance] --> B[tracker]
-    B --> C[build fuzzer + bot]
-    C --> D[boot server on scratch world]
-    D --> E[parity-bot joins]
-    D --> F[fuzzer runs]
-    E --> G[summary, non-zero on any FAIL]
-    F --> G
-```
 
 The headless client, `tools/parity-bot`, earns its keep. It has caught protocol bugs that had
 already passed clippy, the unit tests and static review.
