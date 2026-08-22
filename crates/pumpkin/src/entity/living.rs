@@ -4671,23 +4671,16 @@ impl EntityBase for LivingEntity {
                         .increment_stat(
                             StatisticCategory::Custom,
                             CustomStatistic::DamageResisted as i32,
-                            (resisted * 10.0) as i32,
+                            damage_stat_amount(resisted),
                         )
                         .await;
                 }
-                // Direct player and mace attacks award their own source-faithful statistic from
-                // actual target health loss in `Player.attack`; all other player-caused damage
-                // keeps this shared accounting path.
-                let direct_player_attack = damage_type == DamageType::PLAYER_ATTACK
-                    || damage_type == DamageType::MACE_SMASH;
-                if !direct_player_attack
-                    && let Some(attacker_player) = cause.and_then(|c| c.get_player())
-                {
+                if let Some(attacker_player) = cause.and_then(|c| c.get_player()) {
                     attacker_player
                         .increment_stat(
                             StatisticCategory::Custom,
                             CustomStatistic::DamageDealtResisted as i32,
-                            (resisted * 10.0) as i32,
+                            damage_stat_amount(resisted),
                         )
                         .await;
                 }
