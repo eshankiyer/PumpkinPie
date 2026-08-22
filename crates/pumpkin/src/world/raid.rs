@@ -131,7 +131,7 @@ impl RaiderType {
 }
 
 /// Raid.java:786-793.
-const fn num_groups_for_difficulty(difficulty: Difficulty) -> i32 {
+pub(crate) const fn num_groups_for_difficulty(difficulty: Difficulty) -> i32 {
     match difficulty {
         Difficulty::Peaceful => 0,
         Difficulty::Easy => 3,
@@ -274,6 +274,20 @@ impl Raid {
     #[must_use]
     pub const fn raid_omen_level(&self) -> i32 {
         self.omen_level
+    }
+
+    /// Vanilla `Raid.getEnchantOdds` (`Raid.java:795-806`): the chance ceiling fed
+    /// into raider weapon-enchant rolls (`Vindicator.applyRaidBuffs`,
+    /// `Vindicator.java:171`), scaled by Bad Omen level above one.
+    #[must_use]
+    pub const fn enchant_odds(&self) -> f32 {
+        match self.omen_level {
+            2 => 0.1,
+            3 => 0.25,
+            4 => 0.5,
+            5 => 0.75,
+            _ => 0.0,
+        }
     }
 
     fn total_raiders_alive(&self) -> i32 {
@@ -956,6 +970,13 @@ impl RaidManager {
         self.raids.get_mut(&id)
     }
 
+    /// Immutable lookup for readers that only inspect raid state (e.g.
+    /// `Raid.getEnchantOdds` in `Vindicator.applyRaidBuffs`).
+    #[must_use]
+    pub fn raid(&self, id: i32) -> Option<&Raid> {
+        self.raids.get(&id)
+    }
+
     fn find_active_raid_near(&self, pos: BlockPos) -> Option<i32> {
         self.raids
             .iter()
@@ -1082,6 +1103,27 @@ mod tests {
         assert_eq!(num_groups_for_difficulty(Difficulty::Easy), 3);
         assert_eq!(num_groups_for_difficulty(Difficulty::Normal), 5);
         assert_eq!(num_groups_for_difficulty(Difficulty::Hard), 7);
+    }
+
+    #[test]
+    fn enchant_odds_match_vanilla_omen_table() {
+        // Raid.java:795-806.
+        let mut raid = Raid::new(0, BlockPos::new(0, 0, 0), Difficulty::Normal);
+        for (omen, odds) in [
+            (0, 0.0),
+            (1, 0.0),
+            (2, 0.1),
+            (3, 0.25),
+            (4, 0.5),
+            (5, 0.75),
+            (6, 0.0),
+        ] {
+            raid.omen_level = omen;
+            assert!(
+                (raid.enchant_odds() - odds).abs() < f32::EPSILON,
+                "Bad Omen level {omen} must yield odds {odds}"
+            );
+        }
     }
 
     #[test]
