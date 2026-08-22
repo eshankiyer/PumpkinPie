@@ -622,22 +622,27 @@ impl Mob for FoxEntity {
     /// `Mob::mob_try_pick_up_items` decrements by the returned count and leaves the rest as a
     /// live `ItemEntity`, which is the same end state. The `spitOutItem` call is unreachable
     /// because `can_hold_item` only accepts a pickup with an empty hand.
-    fn on_item_pickup(&self, stack: &ItemStack) -> u8 {
-        if !self.can_hold_item() {
-            return 0;
-        }
-        let mut pending = self
-            .pending_pickup
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if pending.is_some() {
-            return 0;
-        }
-        let mut single = stack.clone();
-        single.item_count = 1;
-        *pending = Some(single);
-        self.holding_item.store(true, Relaxed);
-        1
+    fn on_item_pickup<'a>(
+        &'a self,
+        stack: &'a ItemStack,
+    ) -> crate::entity::EntityBaseFuture<'a, u8> {
+        Box::pin(async move {
+            if !self.can_hold_item() {
+                return 0;
+            }
+            let mut pending = self
+                .pending_pickup
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if pending.is_some() {
+                return 0;
+            }
+            let mut single = stack.clone();
+            single.item_count = 1;
+            *pending = Some(single);
+            self.holding_item.store(true, Relaxed);
+            1
+        })
     }
 
     fn mob_set_variant_name(&self, name: &str) {

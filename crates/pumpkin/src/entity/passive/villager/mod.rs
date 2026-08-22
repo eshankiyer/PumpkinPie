@@ -1909,8 +1909,7 @@ impl VillagerEntity {
     }
 
     /// `InventoryCarrier.pickUpItem` -> `SimpleContainer.addItem`, over the villager's own
-    /// eight-slot inventory. Synchronous because `Mob::on_item_pickup` is; a contended
-    /// inventory lock simply declines the pickup this tick.
+    /// eight-slot inventory. A contended inventory lock simply declines the pickup this tick.
     fn add_to_inventory(&self, stack: &ItemStack) -> u8 {
         let Ok(inventory) = self.inventory.try_lock() else {
             return 0;
@@ -2395,8 +2394,11 @@ impl Mob for VillagerEntity {
         })
     }
 
-    fn on_item_pickup(&self, stack: &ItemStack) -> u8 {
-        self.add_to_inventory(stack)
+    fn on_item_pickup<'a>(
+        &'a self,
+        stack: &'a ItemStack,
+    ) -> crate::entity::EntityBaseFuture<'a, u8> {
+        Box::pin(async move { self.add_to_inventory(stack) })
     }
 
     fn get_job_site(&self) -> Option<BlockPos> {

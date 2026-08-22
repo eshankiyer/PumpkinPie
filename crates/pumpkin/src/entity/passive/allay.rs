@@ -500,20 +500,25 @@ impl Mob for AllayEntity {
 
     /// `InventoryCarrier.pickUpItem` (`Allay.java:360-362`): the stack goes into the single
     /// inventory slot, up to that slot's maximum.
-    fn on_item_pickup(&self, stack: &ItemStack) -> u8 {
-        let mut slot = self.inventory.lock().unwrap();
-        if slot.is_empty() {
-            let taken = stack.item_count.min(stack.get_max_stack_size());
-            *slot = stack.copy_with_count(taken);
-            return taken;
-        }
-        if !slot.are_items_and_components_equal(stack) {
-            return 0;
-        }
-        let room = slot.get_max_stack_size().saturating_sub(slot.item_count);
-        let taken = stack.item_count.min(room);
-        slot.item_count += taken;
-        taken
+    fn on_item_pickup<'a>(
+        &'a self,
+        stack: &'a ItemStack,
+    ) -> crate::entity::EntityBaseFuture<'a, u8> {
+        Box::pin(async move {
+            let mut slot = self.inventory.lock().unwrap();
+            if slot.is_empty() {
+                let taken = stack.item_count.min(stack.get_max_stack_size());
+                *slot = stack.copy_with_count(taken);
+                return taken;
+            }
+            if !slot.are_items_and_components_equal(stack) {
+                return 0;
+            }
+            let room = slot.get_max_stack_size().saturating_sub(slot.item_count);
+            let taken = stack.item_count.min(room);
+            slot.item_count += taken;
+            taken
+        })
     }
 
     fn carried_inventory_is_empty(&self) -> bool {

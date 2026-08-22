@@ -165,8 +165,7 @@ pub struct PiglinEntity {
     /// the offhand on the next `mob_tick`.
     ///
     /// `PiglinAi.pickUpItem` (`PiglinAi.java:336-360`) equips the item inside the pickup call,
-    /// but `Mob::on_item_pickup` is synchronous while this codebase's equipment slot is behind
-    /// an async mutex, so the equip is deferred by one tick instead of being done inline.
+    /// and is moved into the equipment slot by `mob_tick`, after the pickup path has accepted it.
     pending_offhand: std::sync::Mutex<Option<ItemStack>>,
     /// Whether the piglin currently has an attack target, sampled once per `mob_tick`.
     ///
@@ -514,19 +513,24 @@ impl Mob for PiglinEntity {
     ///
     /// `body.take(itemEntity, 1)` -- the client-side pickup animation -- is not sent: the
     /// caller in `mob/mod.rs` owns the `ItemEntity` and does not offer a hook for it.
-    fn on_item_pickup(&self, stack: &ItemStack) -> u8 {
-        if stack.item.id != Item::GOLD_INGOT.id {
-            return 0;
-        }
-        let mut pending = self
-            .pending_offhand
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if pending.is_some() {
-            return 0;
-        }
-        *pending = Some(ItemStack::new(1, &Item::GOLD_INGOT));
-        1
+    fn on_item_pickup<'a>(
+        &'a self,
+        stack: &'a ItemStack,
+    ) -> crate::entity::EntityBaseFuture<'a, u8> {
+        Box::pin(async move {
+            if stack.item.id != Item::GOLD_INGOT.id {
+                return 0;
+            }
+            let mut pending = self
+                .pending_offhand
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if pending.is_some() {
+                return 0;
+            }
+            *pending = Some(ItemStack::new(1, &Item::GOLD_INGOT));
+            1
+        })
     }
 
     /// `PiglinAi.mobInteract`/`canAdmire` (PiglinAi.java:539-554): a player directly

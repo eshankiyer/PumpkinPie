@@ -207,8 +207,8 @@ pub struct PandaEntity {
     /// `Panda.rollCounter`.
     roll_counter: AtomicI32,
     /// Whether the main-hand slot currently holds something. `entity_equipment` is behind an
-    /// async mutex, but `Mob::wants_to_pick_up_item`/`on_item_pickup` are synchronous hooks, so
-    /// the emptiness they need is mirrored here and written by `set_held_stack`. Without it a
+    /// async mutex while `Mob::wants_to_pick_up_item` is synchronous, so the emptiness it needs
+    /// is mirrored here and written by `set_held_stack`. Without it a
     /// panda that already holds bamboo would still claim a dropped stack, delete the `ItemEntity`
     /// and then discard the items.
     hand_occupied: AtomicBool,
@@ -850,34 +850,23 @@ impl Mob for PandaEntity {
 
     /// `Panda.pickUpItem`: the whole stack goes into the main hand, so the returned count is the
     /// full stack size and the caller then removes the emptied `ItemEntity`.
-    fn on_item_pickup(&self, stack: &ItemStack) -> u8 {
-        if !Self::can_pick_up_and_eat(stack) {
-            return 0;
-        }
-        // Claim the hand synchronously, before returning a nonzero count: the caller destroys the
-        // `ItemEntity` on that count, so a second stack must not also be claimed while the
-        // equipment write below is still queued.
-        if self.hand_occupied.swap(true, Relaxed) {
-            return 0;
-        }
-        let count = stack.item_count;
-        let stack = stack.clone();
-        // The equipment write is async and this hook is not, so it is spawned. The count is
-        // decided synchronously from the same stack the caller shrinks, so the two cannot
-        // disagree even if the spawned write lands a tick later.
-        let e = &self.mob_entity.living_entity.entity;
-        let world = e.world.load();
-        let Some(entity) = world.get_entity_by_uuid(e.entity_uuid) else {
-            // Release the claim taken above: nothing will write the equipment slot.
-            self.hand_occupied.store(false, Relaxed);
-            return 0;
-        };
-        tokio::spawn(async move {
-            if let Some(panda) = entity.cast_any().downcast_ref::<Self>() {
-                panda.set_held_stack(stack).await;
+    fn on_item_pickup<'a>(
+        &'a self,
+        stack: &'a ItemStack,
+    ) -> crate::entity::EntityBaseFuture<'a, u8> {
+        Box::pin(async move {
+            if !Self::can_pick_up_and_eat(stack) {
+                return 0;
             }
-        });
-        count
+            // Claim the hand before awaiting the equipment write: the caller decrements the
+            // `ItemEntity` by this count, so no second stack may be claimed in the meantime.
+            if self.hand_occupied.swap(true, Relaxed) {
+                return 0;
+            }
+            let count = stack.item_count;
+            self.set_held_stack(stack.clone()).await;
+            count
+        })
     }
 
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {

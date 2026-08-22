@@ -22,7 +22,7 @@ use crate::world::game_event::{GameEventContext, emit_game_event};
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::damage::DamageType;
-use pumpkin_data::data_component_impl::EquipmentSlot;
+use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, IDSet};
 use pumpkin_data::entity::entity_from_egg;
 use pumpkin_data::entity::{EntityType, MobCategory};
 use pumpkin_data::item_stack::ItemStack;
@@ -1907,12 +1907,113 @@ pub trait Mob: EntityBase + Send + Sync {
         self.get_mob_entity().can_pick_up_loot()
     }
 
+    /// Vanilla `Mob.getEquipmentSlotForItem`. Items with an `equippable` component use its
+    /// declared slot; ordinary items are candidate main-hand equipment.
+    fn get_equipment_slot_for_item(&self, stack: &ItemStack) -> EquipmentSlot {
+        stack
+            .get_data_component::<EquippableImpl>()
+            .map_or(EquipmentSlot::MAIN_HAND, |equippable| {
+                equippable.slot.clone()
+            })
+    }
+
+    /// Vanilla `Mob.isEquippableInSlot`. A concrete allow-list is checked directly; an
+    /// unresolved data-tag is conservatively refused rather than equipping restricted animal
+    /// armor or saddles onto arbitrary mobs.
+    fn is_equippable_in_slot(&self, stack: &ItemStack, slot: &EquipmentSlot) -> bool {
+        stack
+            .get_data_component::<EquippableImpl>()
+            .is_none_or(|equippable| {
+                equippable.slot == slot
+                    && equippable
+                        .allowed_entities
+                        .as_ref()
+                        .is_none_or(|allowed| match allowed {
+                            IDSet::IDs(entities) => entities.iter().any(|entity_type| {
+                                entity_type.id == self.get_entity().entity_type.id
+                            }),
+                            IDSet::Tag(_) => false,
+                        })
+            })
+    }
+
+    /// Vanilla `Mob.canHoldItem`; specialized mobs narrow this through
+    /// `wants_to_pick_up_item` before the generic equipment path runs.
+    fn can_hold_item(&self, _stack: &ItemStack) -> bool {
+        true
+    }
+
+    /// Vanilla `Mob.canReplaceCurrentItem`'s safe base case. Full armor/weapon attribute
+    /// comparison needs the missing item-attribute evaluator; until it exists Pumpkin only
+    /// equips an empty slot, which can neither lose nor duplicate an existing item.
+    fn can_replace_current_item(
+        &self,
+        _new_stack: &ItemStack,
+        current_stack: &ItemStack,
+        _slot: &EquipmentSlot,
+    ) -> bool {
+        current_stack.is_empty()
+    }
+
+    /// Vanilla `Mob.setItemSlotAndDropWhenKilled`: update persistent equipment, mark the slot
+    /// as a guaranteed drop, and publish the change before the ground item is decremented.
+    fn set_item_slot_and_drop_when_killed(
+        &self,
+        slot: EquipmentSlot,
+        stack: ItemStack,
+    ) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let living = &self.get_mob_entity().living_entity;
+            living
+                .entity_equipment
+                .lock()
+                .await
+                .put(&slot, stack.clone());
+            living
+                .equipment_drop_chances
+                .lock()
+                .await
+                .insert(slot.clone(), 1.0);
+            living.send_equipment_changes(&[(slot, stack)]);
+        })
+    }
+
+    /// Vanilla `Mob.equipItemIfPossible`, constrained to an empty target slot until the shared
+    /// attribute comparison machinery is ported. The returned stack is exactly the amount that
+    /// was equipped, so callers can shrink the live `ItemEntity` without inventing or losing
+    /// items.
+    fn equip_item_if_possible<'a>(
+        &'a self,
+        stack: &'a ItemStack,
+    ) -> EntityBaseFuture<'a, ItemStack> {
+        Box::pin(async move {
+            let slot = self.get_equipment_slot_for_item(stack);
+            if !self.is_equippable_in_slot(stack, &slot) || !self.can_hold_item(stack) {
+                return ItemStack::EMPTY.clone();
+            }
+
+            let living = &self.get_mob_entity().living_entity;
+            let current = living.entity_equipment.lock().await.get(&slot);
+            if !self.can_replace_current_item(stack, &current, &slot) {
+                return ItemStack::EMPTY.clone();
+            }
+
+            let count = match slot {
+                EquipmentSlot::MainHand(_) | EquipmentSlot::OffHand(_) => stack.item_count,
+                _ => 1,
+            };
+            let equipped = stack.copy_with_count(count);
+            self.set_item_slot_and_drop_when_killed(slot, equipped.clone())
+                .await;
+            equipped
+        })
+    }
+
     /// Vanilla `Mob.onItemPickup`/`equipItemIfPossible`: called once a candidate item stack
     /// has passed `wants_to_pick_up_item`, to actually take it. Returns the number of items
     /// taken from the stack; the caller only shrinks/removes the `ItemEntity` by that count.
-    /// Default takes nothing, so no `ItemEntity` is ever touched unless a mob overrides this.
-    fn on_item_pickup(&self, _stack: &ItemStack) -> u8 {
-        0
+    fn on_item_pickup<'a>(&'a self, stack: &'a ItemStack) -> EntityBaseFuture<'a, u8> {
+        Box::pin(async move { self.equip_item_if_possible(stack).await.item_count })
     }
 
     /// Vanilla `Mob.aiStep`'s pickup-loot loop: scans nearby dropped items within pickup
@@ -1954,6 +2055,7 @@ pub trait Mob: EntityBase + Send + Sync {
 
                 let taken = self
                     .on_item_pickup(&stack_snapshot)
+                    .await
                     .min(stack_snapshot.item_count);
                 if taken == 0 {
                     continue;
