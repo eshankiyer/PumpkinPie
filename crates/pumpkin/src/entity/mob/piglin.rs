@@ -8,6 +8,7 @@ use crate::entity::{
     ai::goal::{
         active_target::ActiveTargetGoal,
         avoid_entity::AvoidEntityGoal,
+        go_to_wanted_item::GoToWantedItemGoal,
         look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal,
         melee_attack::MeleeAttackGoal,
@@ -63,6 +64,12 @@ const NEMESIS_AVOID_DISTANCE: f64 = 12.0;
 /// (`PiglinAi.java:111-112`).
 const AVOID_SPEED: f64 = 1.0;
 
+/// `GoToWantedItem.create(PiglinAi::isNotHoldingLovedItemInOffHand, 1.0F, true, 9)`
+/// (`PiglinAi.java:218`): the piglin walks to a wanted item at speed 1.0, but only if it is
+/// within nine blocks.
+const WANTED_ITEM_WALK_SPEED: f64 = 1.0;
+const WANTED_ITEM_MAX_DISTANCE: f64 = 9.0;
+
 /// `CrossbowItem.getDefaultProjectileRange` (`CrossbowItem.java:274-276`), which is the distance
 /// `BehaviorUtils.isWithinAttackRange` (`BehaviorUtils.java:115-121`) checks for the piglin's
 /// `CrossbowAttack` behavior (`CrossbowAttack.java:28`).
@@ -115,7 +122,9 @@ async fn player_not_wearing_gold(target: TargetData, world: Arc<World>) -> bool 
 /// the shape `warden.rs` established. Each goal registration cites the vanilla behavior it
 /// stands for.
 ///
-/// Ported: gold-armour pacification, bartering/admiring, overworld zombification, the AVOID
+/// Ported: gold-armour pacification, bartering/admiring from both the direct-gift path
+/// (`mobInteract`) and the ground path (`GoToWantedItem` -> `wantsToPickup` ->
+/// `pickUpItem`), overworld zombification, the AVOID
 /// activity for zombified piglins and zoglins (`avoidZombified`), the baby-only nemesis retreat
 /// (`babyAvoidNemesis`), repellent avoidance (`avoidRepellent`), crossbow use (`CrossbowAttack`),
 /// hoglin hunting (`StartHuntingHoglin`) with its `HUNTED_RECENTLY` cooldown, and the adult-only
@@ -129,6 +138,9 @@ async fn player_not_wearing_gold(target: TargetData, world: Arc<World>) -> bool 
 ///   including baby piglins riding baby hoglins.
 /// - `BackUpIfTooClose.create(5, 0.75F)` (`PiglinAi.java:177`): a crossbow piglin does not back
 ///   away from a target that closes to within five blocks.
+/// - The non-currency branches of `pickUpItem`/`wantsToPickup` (gold nuggets, food, armour
+///   upgrades), each of which needs the mob inventory or the eating path this codebase
+///   lacks; see the `wants_to_pick_up_item` override.
 /// - `getSoundForCurrentActivity` (`PiglinAi.java:614-632`), which picks the ambient sound from
 ///   the active activity; there are no activities to read here.
 pub struct PiglinEntity {
@@ -149,6 +161,19 @@ pub struct PiglinEntity {
     /// that never started. See the cooldown handling there for why the cooldown is armed on hunt
     /// end rather than on hunt start.
     hunting_hoglin: AtomicBool,
+    /// An item taken off the ground by `Mob::mob_try_pick_up_items`, waiting to be moved into
+    /// the offhand on the next `mob_tick`.
+    ///
+    /// `PiglinAi.pickUpItem` (`PiglinAi.java:336-360`) equips the item inside the pickup call,
+    /// but `Mob::on_item_pickup` is synchronous while this codebase's equipment slot is behind
+    /// an async mutex, so the equip is deferred by one tick instead of being done inline.
+    pending_offhand: std::sync::Mutex<Option<ItemStack>>,
+    /// Whether the piglin currently has an attack target, sampled once per `mob_tick`.
+    ///
+    /// `wantsToPickup` consults `MemoryModuleType.ATTACK_TARGET` (`PiglinAi.java:464`), but it
+    /// runs from the synchronous `Mob::wants_to_pick_up_item`, which cannot await the target
+    /// mutex. The sample is at most one tick stale.
+    has_attack_target: AtomicBool,
 }
 
 impl PiglinEntity {
@@ -167,6 +192,8 @@ impl PiglinEntity {
             zombification: ZombificationTimer::new(),
             hunted_recently_ticks: hunted_recently_ticks.clone(),
             hunting_hoglin: AtomicBool::new(false),
+            pending_offhand: std::sync::Mutex::new(None),
+            has_attack_target: AtomicBool::new(false),
         };
         let mob_arc = Arc::new(piglin);
         let mob_weak: Weak<dyn Mob> = {
@@ -237,6 +264,17 @@ impl PiglinEntity {
         }
         // `PiglinAi.avoidRepellent` (`PiglinAi.java:290-292`).
         goal_selector.add_goal(3, Box::new(PiglinAvoidRepellentGoal::new()));
+        // `GoToWantedItem` in the IDLE activity (`PiglinAi.java:218`). This is the half of
+        // bartering a player actually uses: gold thrown on the ground is walked to, then
+        // picked up by `Mob::mob_try_pick_up_items`, which routes through the
+        // `wants_to_pick_up_item`/`on_item_pickup` overrides below into the admire countdown
+        // that `PiglinAdmireGoal` pays out. Ranked below the AVOID goals and the repellent
+        // retreat, matching vanilla, where IDLE is the lowest-priority activity
+        // (`PiglinAi.java:307-309`).
+        goal_selector.add_goal(
+            3,
+            GoToWantedItemGoal::new(WANTED_ITEM_WALK_SPEED, WANTED_ITEM_MAX_DISTANCE),
+        );
         // `initFightActivity` runs `MeleeAttack.create(20)` and `new CrossbowAttack()` side by
         // side (`PiglinAi.java:182-183`); the crossbow goal gates itself on the piglin actually
         // holding one, which `mob/equipment.rs` already gives it a chance of.
@@ -338,6 +376,48 @@ impl PiglinEntity {
             .load(Ordering::Relaxed)
             >= 0
     }
+
+    /// `PiglinAi.isNotHoldingLovedItemInOffHand` (`PiglinAi.java:849-851`).
+    ///
+    /// Read off the admire countdown rather than the offhand slot itself, which lives behind
+    /// an async mutex this is called from a synchronous context. The two agree in this port:
+    /// the offhand is only ever filled by `hold_in_offhand_and_admire`, which sets the
+    /// countdown in the same call, and is only ever emptied by `PiglinAdmireGoal`'s payout or
+    /// by `on_damage`'s `cancelAdmiring`, both of which clear the countdown. Vanilla's other
+    /// offhand writers -- `equipItemIfPossible` for armour and the baby's held item -- have no
+    /// analogue here.
+    fn is_not_holding_loved_item_in_offhand(&self) -> bool {
+        self.admiring_ticks.load(Ordering::Relaxed) <= 0
+            && self
+                .pending_offhand
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_none()
+    }
+
+    /// `PiglinAi.holdInOffhand` (`PiglinAi.java:362-368`) followed by `admireGoldItem`
+    /// (`PiglinAi.java:805-807`): drop whatever the offhand already held, equip the new stack,
+    /// and start the 119-tick admire countdown that `PiglinAdmireGoal` pays out.
+    async fn hold_in_offhand_and_admire(&self, stack: ItemStack) {
+        let mut equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
+        let previous = equipment.put(&EquipmentSlot::OFF_HAND, stack.clone());
+        drop(equipment);
+        if !previous.is_empty() {
+            let pos = self.mob_entity.living_entity.entity.block_pos.load();
+            self.mob_entity
+                .living_entity
+                .entity
+                .world
+                .load()
+                .drop_stack(&pos, previous)
+                .await;
+        }
+        self.mob_entity
+            .living_entity
+            .send_equipment_changes(&[(EquipmentSlot::OFF_HAND, stack)]);
+        self.admiring_ticks
+            .store(ADMIRE_DURATION_TICKS, Ordering::Relaxed);
+    }
 }
 
 impl NBTStorage for PiglinEntity {
@@ -372,6 +452,83 @@ impl Mob for PiglinEntity {
         &self.mob_entity
     }
 
+    /// `AbstractPiglin`'s constructor calls `setCanPickUpLoot(true)` unconditionally
+    /// (`AbstractPiglin.java:37`), and `readAdditionalSaveData` defaults the saved flag to
+    /// `true` as well (`AbstractPiglin.java:75`, `DEFAULT_PICK_UP_LOOT` at line 31). The
+    /// generic spawn-time roll in `mob/mod.rs` (0.55 x regional difficulty) is the wrong rule
+    /// for this mob, so it is overridden rather than configured -- without this a piglin
+    /// mostly cannot be bartered with at all.
+    fn can_pick_up_loot(&self) -> bool {
+        true
+    }
+
+    /// `PiglinAi.wantsToPickup` (`PiglinAi.java:460-478`).
+    ///
+    /// Only the barter-currency branch can ever return `true` here. The four other branches
+    /// all end in a capability this codebase does not have: `canAddToInventory` and
+    /// `putInInventory` need the mob inventory `InventoryCarrier` provides (gold nuggets and
+    /// non-currency loved items), `hasEatenRecently`/`eat` need the `ATE_RECENTLY` memory and
+    /// a mob eating path (`ItemTags.PIGLIN_FOOD`), and `canReplaceCurrentItem`
+    /// (`Mob.java`'s equipment-upgrade comparison) is not ported. Each is rejected here
+    /// rather than accepted and silently dropped, so a piglin never destroys an item it
+    /// cannot actually use.
+    fn wants_to_pick_up_item(&self, _world: &World, stack: &ItemStack) -> bool {
+        // `body.isBaby() && itemStack.is(ItemTags.IGNORED_BY_PIGLIN_BABIES)` (line 461).
+        if !self.is_adult()
+            && stack
+                .item
+                .has_tag(&tag::Item::MINECRAFT_IGNORED_BY_PIGLIN_BABIES)
+        {
+            return false;
+        }
+        // `itemStack.is(ItemTags.PIGLIN_REPELLENTS)` (line 463).
+        if stack.item.has_tag(&tag::Item::MINECRAFT_PIGLIN_REPELLENTS) {
+            return false;
+        }
+        // `isAdmiringDisabled(body) && body.getBrain().hasMemoryValue(ATTACK_TARGET)`
+        // (line 464).
+        if self.admiring_disabled_ticks.load(Ordering::Relaxed) > 0
+            && self.has_attack_target.load(Ordering::Relaxed)
+        {
+            return false;
+        }
+        // `isBarterCurrency(itemStack)` -> `isNotHoldingLovedItemInOffHand(body)`
+        // (lines 467-468). `PiglinAi.BARTERING_ITEM = Items.GOLD_INGOT` (`PiglinAi.java:83`).
+        //
+        // The `is_adult` term is a deliberate divergence. Vanilla lets a baby pick gold up,
+        // but `stopHoldingOffHandItem` gates the barter payout on `body.isAdult()`
+        // (`PiglinAi.java:385`); the baby branch (lines 395-406) moves the ingot into the main
+        // hand or the mob inventory and never throws loot. `PiglinAdmireGoal` here implements
+        // only the adult branch, so letting a baby pick gold up would pay out a barter no
+        // vanilla baby ever pays. Refusing the pickup keeps the wrong behaviour from firing at
+        // the cost of a baby not carrying gold around; the faithful baby branch needs the mob
+        // inventory this codebase lacks. `mob_interact` already refuses babies the same way.
+        self.is_adult()
+            && stack.item.id == Item::GOLD_INGOT.id
+            && self.is_not_holding_loved_item_in_offhand()
+    }
+
+    /// The taking half of `PiglinAi.pickUpItem` (`PiglinAi.java:336-347`): everything but a
+    /// gold nugget is taken one item at a time, and the nugget branch is unreachable because
+    /// `wants_to_pick_up_item` above never accepts one.
+    ///
+    /// `body.take(itemEntity, 1)` -- the client-side pickup animation -- is not sent: the
+    /// caller in `mob/mod.rs` owns the `ItemEntity` and does not offer a hook for it.
+    fn on_item_pickup(&self, stack: &ItemStack) -> u8 {
+        if stack.item.id != Item::GOLD_INGOT.id {
+            return 0;
+        }
+        let mut pending = self
+            .pending_offhand
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if pending.is_some() {
+            return 0;
+        }
+        *pending = Some(ItemStack::new(1, &Item::GOLD_INGOT));
+        1
+    }
+
     /// `PiglinAi.mobInteract`/`canAdmire` (PiglinAi.java:539-554): a player directly
     /// handing an adult, non-admiring, non-locked-out piglin a gold ingot starts
     /// admiring. Ground-item pickup (`isLovedItem`/broader `piglin_loved` tag) is not
@@ -395,28 +552,7 @@ impl Mob for PiglinEntity {
 
             let taken = ItemStack::new(1, &Item::GOLD_INGOT);
             item_stack.decrement_unless_creative(player.gamemode.load(), 1);
-
-            let mut equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
-            let previous = equipment.put(&EquipmentSlot::OFF_HAND, taken.clone());
-            drop(equipment);
-            if !previous.is_empty() {
-                // `holdInOffhand` (PiglinAi.java:353-359): drop whatever was already
-                // held in the offhand before replacing it.
-                let pos = self.mob_entity.living_entity.entity.block_pos.load();
-                self.mob_entity
-                    .living_entity
-                    .entity
-                    .world
-                    .load()
-                    .drop_stack(&pos, previous)
-                    .await;
-            }
-            self.mob_entity
-                .living_entity
-                .send_equipment_changes(&[(EquipmentSlot::OFF_HAND, taken)]);
-
-            self.admiring_ticks
-                .store(ADMIRE_DURATION_TICKS, Ordering::Relaxed);
+            self.hold_in_offhand_and_admire(taken).await;
             true
         })
     }
@@ -441,6 +577,12 @@ impl Mob for PiglinEntity {
             }
 
             self.admiring_ticks.store(0, Ordering::Relaxed);
+            // A ground pickup taken this tick but not yet equipped is cancelled too, so a
+            // piglin hit in the same tick it grabbed gold does not start admiring anyway.
+            self.pending_offhand
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
 
             // `cancelAdmiring` (PiglinAi.java:401-406): drop the offhand item instead
             // of silently voiding it.
@@ -485,6 +627,17 @@ impl Mob for PiglinEntity {
                     .store(remaining - 1, Ordering::Relaxed);
             }
 
+            // The equip half of `PiglinAi.pickUpItem`'s `isLovedItem` branch
+            // (`PiglinAi.java:348-351`), deferred out of the synchronous `on_item_pickup`.
+            let picked_up = self
+                .pending_offhand
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            if let Some(stack) = picked_up {
+                self.hold_in_offhand_and_admire(stack).await;
+            }
+
             // `HUNTED_RECENTLY`'s expiry, plus `PiglinAi.dontKillAnyMoreHoglinsForAWhile`
             // (`StartHuntingHoglin.java:23`).
             //
@@ -495,13 +648,17 @@ impl Mob for PiglinEntity {
             // tick and drop the hoglin immediately. The cooldown is therefore armed when the
             // hunt ENDS -- the hoglin dies, or the target is lost -- which still produces the
             // 30-120 second spacing between hunts the vanilla constant exists for.
-            let targeting_hoglin = self
-                .mob_entity
-                .target
-                .lock()
-                .await
-                .as_ref()
-                .is_some_and(|t| t.get_entity().entity_type.id == EntityType::HOGLIN.id);
+            let (has_target, targeting_hoglin) = {
+                let target = self.mob_entity.target.lock().await;
+                (
+                    target.is_some(),
+                    target
+                        .as_ref()
+                        .is_some_and(|t| t.get_entity().entity_type.id == EntityType::HOGLIN.id),
+                )
+            };
+            // Sampled for `wants_to_pick_up_item`'s `ATTACK_TARGET` check; see the field doc.
+            self.has_attack_target.store(has_target, Ordering::Relaxed);
             let was_hunting = self
                 .hunting_hoglin
                 .swap(targeting_hoglin, Ordering::Relaxed);
