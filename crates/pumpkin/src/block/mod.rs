@@ -14,6 +14,7 @@ use std::sync::Arc;
 pub mod blocks;
 pub mod entities;
 pub mod fluid;
+pub mod pathfindable;
 pub mod registry;
 pub mod sculk_behaviour;
 pub mod viewer;

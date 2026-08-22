@@ -7,6 +7,7 @@ use pumpkin_data::{
 use pumpkin_util::math::{boundingbox::BoundingBox, position::BlockPos, vector3::Vector3};
 
 use crate::{
+    block::pathfindable::{PathComputationType, is_pathfindable},
     entity::ai::pathfinder::{
         node::{Coordinate, PathType},
         path_type_cache::PathTypeCache,
@@ -195,7 +196,11 @@ impl PathfindingContext {
             return PathType::Fence;
         }
 
-        if state.is_full_cube() {
+        // `WalkNodeEvaluator.java:569`: blocked when the state is not pathfindable for LAND.
+        // Vanilla's default for LAND is `!isCollisionShapeFullBlock`, which is what a bare
+        // `is_full_cube` check reproduced - but it missed all 59 classes that override it, so
+        // mobs pathed straight through chests, anvils, slabs and stairs.
+        if !is_pathfindable(state, PathComputationType::Land) {
             return PathType::Blocked;
         }
 
@@ -437,33 +442,15 @@ impl PathfindingContext {
         BlockState::from_id(self.world.get_block_state_id(&pos.as_blockpos())).is_air()
     }
 
-    /// Matches the block-specific `BlockState.isPathfindable(..., WATER)` rules used by
-    /// `SwimNodeEvaluator`. The default is the water fluid state; doors are the important
-    /// override because vanilla rejects them even when waterlogged.
+    /// `BlockState.isPathfindable(..., WATER)`, as `SwimNodeEvaluator` consumes it
+    /// (`SwimNodeEvaluator.java:120,132`).
+    ///
+    /// This was a hand-maintained tag approximation; it now shares the one implementation
+    /// with the land path, so the two cannot drift apart.
     #[must_use]
     pub fn is_pathfindable_for_water(&self, pos: Vector3<i32>) -> bool {
-        let state_id = self.world.get_block_state_id(&pos.as_blockpos());
-        let block = Block::from_state_id(state_id);
-        let always_blocked_for_water = matches!(
-            block.id,
-            id if id == Block::CHEST.id
-                || id == Block::ENDER_CHEST.id
-                || id == Block::TRAPPED_CHEST.id
-                || id == Block::HOPPER.id
-                || id == Block::CONDUIT.id
-        );
-        Fluid::from_state_id(state_id)
-            .is_some_and(|fluid| fluid.has_tag(&tag::Fluid::MINECRAFT_WATER))
-            && !always_blocked_for_water
-            && !block.has_tag(&tag::Block::MINECRAFT_DOORS)
-            && !block.has_tag(&tag::Block::C_FENCE_GATES)
-            && !block.has_tag(&tag::Block::MINECRAFT_LANTERNS)
-            && !block.has_tag(&tag::Block::MINECRAFT_CAMPFIRES)
-            && !block.has_tag(&tag::Block::MINECRAFT_BARS)
-            && !block.has_tag(&tag::Block::MINECRAFT_FENCES)
-            && !block.has_tag(&tag::Block::MINECRAFT_CHAINS)
-            && !block.has_tag(&tag::Block::MINECRAFT_WALLS)
-            && !block.has_tag(&tag::Block::C_GLASS_PANES)
+        let state = BlockState::from_id(self.world.get_block_state_id(&pos.as_blockpos()));
+        is_pathfindable(state, PathComputationType::Water)
     }
 
     #[must_use]
