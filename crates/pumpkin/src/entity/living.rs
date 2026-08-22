@@ -4739,35 +4739,27 @@ impl EntityBase for LivingEntity {
                         }
                     }
 
-                    let active_hand = self.active_hand.lock().await;
-                    if let Some(hand) = *active_hand
-                        && amount >= 3.0
+                    // `BlocksAttacks.hurtBlockingItem` applies only to players. Resolve the
+                    // used hand through PlayerInventory so main-hand shields, owner updates,
+                    // break effects, and the broken-item statistic all use the same authoritative
+                    // path as other player item damage.
+                    let active_hand = *self.active_hand.lock().await;
+                    if let Some(player) = caller.get_player()
+                        && let Some(hand) = active_hand
                     {
                         let slot = equipment_slot_for_hand(hand);
+                        let blocking_item = player.inventory().get_stack_in_hand(hand).await;
+                        player
+                            .increment_stat(
+                                StatisticCategory::Used,
+                                blocking_item.item.id as i32,
+                                1,
+                            )
+                            .await;
 
-                        let mut equipment_guard = self.entity_equipment.lock().await;
-                        if let Some(stack) = equipment_guard.equipment.get_mut(&slot) {
-                            let durability_damage = (amount / 1.0).floor().max(1.0) as i32;
-                            if stack.damage_item(durability_damage) == DamageResult::Broken {
-                                if let Some(player) = caller.get_player() {
-                                    player
-                                        .increment_stat(
-                                            StatisticCategory::Broken,
-                                            stack.item.id as i32,
-                                            1,
-                                        )
-                                        .await;
-                                }
-                                world.send_entity_status(
-                                    &self.entity,
-                                    crate::entity::equipment_break_status(&slot),
-                                    None,
-                                );
-                                *stack = ItemStack::EMPTY.clone();
-                                let broken_stack = stack.clone();
-                                drop(equipment_guard);
-
-                                self.send_equipment_changes(&[(slot, broken_stack)]);
+                        if let Some(durability_damage) = shield_block_durability_damage(amount) {
+                            player.damage_item_in_slot(&slot, durability_damage).await;
+                            if player.inventory().get_stack_in_hand(hand).await.is_empty() {
                                 self.clear_active_hand().await;
                             }
                         }
@@ -6511,6 +6503,12 @@ fn fall_flying_collision_damage(previous_speed: f64, new_speed: f64) -> Option<f
     (damage > 0.0).then_some(damage)
 }
 
+/// Vanilla's shield `BlocksAttacks.ItemDamageFunction(3, 1, 1)`: shields take no
+/// durability loss below three blocked damage, then lose `floor(damage)` points.
+fn shield_block_durability_damage(blocked_damage: f32) -> Option<i32> {
+    (blocked_damage >= 3.0).then_some(blocked_damage.floor() as i32)
+}
+
 /// Vanilla `LivingEntity.updateFallFlying` tick schedule (`LivingEntity.java:3190-3202`).
 /// Takes the consecutive glide tick count plus one; returns whether this tick broadcasts
 /// the `ELYTRA_GLIDE` game event and whether it additionally damages an equipped glider
@@ -6582,6 +6580,13 @@ mod tests {
     fn fall_flying_collision_damage_requires_meaningful_speed_loss() {
         assert_eq!(fall_flying_collision_damage(1.0, 0.8), None);
         assert_eq!(fall_flying_collision_damage(1.0, 0.5), Some(2.0));
+    }
+
+    #[test]
+    fn shield_durability_uses_the_vanilla_damage_threshold() {
+        assert_eq!(shield_block_durability_damage(2.999), None);
+        assert_eq!(shield_block_durability_damage(3.0), Some(3));
+        assert_eq!(shield_block_durability_damage(3.9), Some(3));
     }
 
     #[test]
