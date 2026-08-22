@@ -51,9 +51,9 @@ registrations that *should* exist puts both categories near 99%.
 
 | | |
 |---|---:|
-| Strict, counterpart in the one mapped file | 21.3% |
-| Loose, counterpart anywhere in `crates/` | 50.6% |
-| Remaining leads | 4209 |
+| Strict, counterpart in the one mapped file | 22.4% |
+| Loose, counterpart anywhere in `crates/` | 52.5% |
+| Remaining leads | 4068 |
 
 The truth is between the two. Strict under-credits behaviour split across modules and trait
 impls; loose over-credits trait defaults.
@@ -73,15 +73,15 @@ roots per repo, so SteelMC's `steel-core/` layout is measured as fairly as a `cr
 
 | | PumpkinPie | SteelMC | Pumpkin |
 |---|---:|---:|---:|
-| Classes with an analogue | **1096** | 894 | 966 |
-| Methods matched, absolute | **4303** | 3384 | 3168 |
-| Methods scored against | 8512 | 5418 | 7762 |
-| Depth per class claimed | 50.6% | **62.5%** | 40.8% |
+| Classes with an analogue | **1111** | 895 | 968 |
+| Methods matched, absolute | **4504** | 3386 | 3178 |
+| Methods scored against | 8572 | 5423 | 7764 |
+| Depth per class claimed | 52.5% | **62.4%** | 40.9% |
 
 Read the rows together, because the last one disagrees with the first two and the disagreement
 is the interesting part. PumpkinPie covers the most of vanilla and matches the most methods outright.
 SteelMC matches a higher *share* of what it takes on, because it takes on less: its percentage is
-computed over 5418 methods where PumpkinPie's is over 8512. A project implementing fewer classes
+computed over 5423 methods where PumpkinPie's is over 8572. A project implementing fewer classes
 scores higher on a per-class metric while covering less of the game, so neither number alone is
 the answer.
 
