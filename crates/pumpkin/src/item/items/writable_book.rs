@@ -6,6 +6,7 @@ use crate::entity::player::Player;
 use crate::item::{ItemBehaviour, ItemMetadata};
 use pumpkin_data::item::Item;
 use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::statistic::StatisticCategory;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::COpenBook;
 
@@ -18,13 +19,22 @@ impl ItemMetadata for WritableBookItem {
 }
 
 impl ItemBehaviour for WritableBookItem {
+    /// `WritableBookItem.use` (`WritableBookItem.java:14-20`): opens the book editing GUI
+    /// and awards the `ITEM_USED` statistic.
     fn normal_use<'a>(
         &'a self,
         item: &'a Item,
         player: &'a Player,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
-            if item.id == Item::WRITTEN_BOOK.id {
+            if item.id == Item::WRITABLE_BOOK.id {
+                player
+                    .send_client_packet(&COpenBook::new(VarInt(0))) // 0 = main hand
+                    .await;
+                player
+                    .increment_stat(StatisticCategory::Used, item.id as i32, 1)
+                    .await;
+            } else if item.id == Item::WRITTEN_BOOK.id {
                 player
                     .send_client_packet(&COpenBook::new(VarInt(0))) // 0 = main hand
                     .await;
