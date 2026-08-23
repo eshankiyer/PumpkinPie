@@ -188,15 +188,14 @@ impl CropBlockBase for SweetBerryBushBlock {
             if state_above.is_full_cube() || state_above.is_solid() {
                 return;
             }
-            if rand::rng().random_range(0..=25) == 0 {
-                world
-                    .set_block_state(
-                        pos,
-                        self.state_with_age(block, state, age + 1),
-                        BlockFlags::NOTIFY_NEIGHBORS,
-                    )
-                    .await;
-            }
+            // The caller already applies vanilla's only growth gate of 1 in 5.
+            world
+                .set_block_state(
+                    pos,
+                    self.state_with_age(block, state, age + 1),
+                    BlockFlags::NOTIFY_NEIGHBORS,
+                )
+                .await;
         }
     }
 }
