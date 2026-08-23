@@ -1659,7 +1659,7 @@ impl World {
 
             // TODO findLightningRod(blockPos)
             // TODO encapsulatingFullBlocks
-            if true {
+            if self.is_raining_at_unchecked(&random_pos, is_raining, is_thundering) {
                 // TODO biome.getPrecipitationAt(pos, this.getSeaLevel()) == Biome.Precipitation.RAIN
                 // TODO this.getCurrentDifficultyAt(blockPos);
                 if rng().random::<f32>() < 0.0675
