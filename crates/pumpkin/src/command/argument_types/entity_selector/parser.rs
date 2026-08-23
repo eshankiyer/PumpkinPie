@@ -432,6 +432,22 @@ impl<'b, 'a> EntitySelectorParser<'b, 'a> {
         self.flags.contains(flag)
     }
 
+    /// Returns the current sorting order of this parser.
+    ///
+    /// Vanilla: `EntitySelectorParser.getOrder` (EntitySelectorParser.java:449)
+    #[must_use]
+    pub const fn get_order(&self) -> Order {
+        self.order
+    }
+
+    /// Returns whether this parser represents the `@s` (current entity) selector.
+    ///
+    /// Vanilla: `EntitySelectorParser.isCurrentEntity` (EntitySelectorParser.java:533)
+    #[must_use]
+    pub const fn is_current_entity(&self) -> bool {
+        self.is_current_entity
+    }
+
     /// Sets this parse to not include non-player entities.
     pub const fn set_includes_entities(&mut self, value: bool) {
         self.includes_entities = value;

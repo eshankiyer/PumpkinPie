@@ -19,6 +19,7 @@ use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::bounds::{DoubleBounds, FloatDegreeBounds, IntBounds};
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::math::wrap_degrees;
+use pumpkin_util::text::TextComponent;
 use rand::seq::SliceRandom;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -286,6 +287,30 @@ impl EntitySelector {
             entities,
         )
     }
+}
+
+/// Joins the display names of a list of entities into a single [`TextComponent`].
+///
+/// Vanilla `EntitySelector.joinNames` (`EntitySelector.java:287-289`) delegates to
+/// `ComponentUtils.formatList`, whose `DEFAULT_SEPARATOR` is a plain `", "`
+/// (`ComponentUtils.java:19`) used between every pair of names, including the last -
+/// there is no "and" before the final entry.
+pub async fn join_names(entities: &[Arc<dyn EntityBase>]) -> TextComponent {
+    if entities.is_empty() {
+        return TextComponent::empty();
+    }
+    if entities.len() == 1 {
+        return entities[0].get_display_name().await;
+    }
+
+    let mut result = TextComponent::empty();
+    for (i, entity) in entities.iter().enumerate() {
+        if i > 0 {
+            result = result.add_child(TextComponent::text(", "));
+        }
+        result = result.add_child(entity.get_display_name().await);
+    }
+    result
 }
 
 /// A function that may or may not manipulate a provided position to be used by a parser.

@@ -5,6 +5,8 @@ use crate::command::context::command_context::CommandContext;
 use crate::command::errors::error_types::CommandErrorType;
 use crate::command::node::dispatcher::CommandDispatcher;
 use crate::command::node::{CommandExecutor, CommandExecutorResult};
+use crate::command::suggestion::provider::{SuggestionProvider, SuggestionProviderResult};
+use crate::command::suggestion::suggestions::SuggestionsBuilder;
 use crate::world::scoreboard::ScoreboardScore;
 use pumpkin_data::translation;
 use pumpkin_protocol::codec::var_int::VarInt;
@@ -26,6 +28,43 @@ const UNPRIMED_TRIGGER_ERROR: CommandErrorType<0> = CommandErrorType::new(
     translation::java::COMMANDS_TRIGGER_FAILED_UNPRIMED,
     translation::java::COMMANDS_TRIGGER_FAILED_UNPRIMED,
 );
+
+/// Suggestion provider for trigger command objectives.
+/// Only suggests trigger-type objectives that are not locked for the current player.
+/// Mirrors `TriggerCommand.suggestObjectives` (TriggerCommand.java:70-87).
+struct TriggerObjectiveSuggestionProvider;
+
+impl SuggestionProvider for TriggerObjectiveSuggestionProvider {
+    fn suggest<'a>(
+        &'a self,
+        context: &'a CommandContext,
+        mut builder: SuggestionsBuilder,
+    ) -> SuggestionProviderResult<'a> {
+        Box::pin(async move {
+            let Some(player) = context.source.player_or_none() else {
+                return builder.build();
+            };
+            let player_name = &player.gameprofile.name;
+            let world = context.world();
+            let scoreboard = world.scoreboard.lock().await;
+
+            for (objective_name, objective) in scoreboard.get_objectives() {
+                if &*objective.criterion != "trigger" {
+                    continue;
+                }
+                let is_locked = scoreboard
+                    .get_scores()
+                    .get(objective_name)
+                    .and_then(|m| m.get(player_name))
+                    .is_none_or(|s| s.locked);
+                if !is_locked {
+                    builder = builder.suggest(objective_name.clone());
+                }
+            }
+            builder.build()
+        })
+    }
+}
 
 struct SimpleTriggerExecutor;
 
@@ -244,6 +283,7 @@ pub fn register(dispatcher: &mut CommandDispatcher, registry: &PermissionRegistr
     dispatcher.register(
         command("trigger", DESCRIPTION).requires(PERMISSION).then(
             argument(ARG_OBJECTIVE, ObjectiveArgumentType)
+                .suggests(TriggerObjectiveSuggestionProvider)
                 .executes(SimpleTriggerExecutor)
                 .then(literal("add").then(
                     argument(ARG_VALUE, IntegerArgumentType::any()).executes(AddTriggerExecutor),
