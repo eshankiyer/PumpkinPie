@@ -24,9 +24,13 @@ use rand::RngExt;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
-        Controls, Goal, GoalFuture, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, revenge::RevengeGoal,
-        swim::SwimGoal, wander_around::WanderAroundGoal,
+        Controls, Goal, GoalFuture,
+        look_around::RandomLookAroundGoal,
+        look_at_entity::LookAtEntityGoal,
+        melee_attack::MeleeAttackGoal,
+        revenge::{RevengeGoal, same_type_matcher},
+        swim::SwimGoal,
+        wander_around::WanderAroundGoal,
     },
     ai::pathfinder::NavigatorGoal,
     mob::{Mob, MobEntity},
@@ -140,7 +144,10 @@ impl BeeEntity {
             // `Bee.BeeHurtByOtherGoal extends HurtByTargetGoal`. Its `setAlertOthers` alerting of
             // nearby bees and `BeeBecomeAngryTargetGoal` both need the per-player persistent
             // anger state Pumpkin does not track yet, so only the revenge part is ported.
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            target_selector.add_goal(
+                1,
+                Box::new(RevengeGoal::with_alert_others(true, same_type_matcher)),
+            );
         };
 
         mob_arc

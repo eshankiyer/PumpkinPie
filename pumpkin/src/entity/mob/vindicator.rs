@@ -18,7 +18,7 @@ use crate::entity::{
         look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal,
         melee_attack::MeleeAttackGoal,
-        revenge::RevengeGoal,
+        revenge::{RevengeGoal, same_type_matcher},
         swim::SwimGoal,
         wander_around::WanderAroundGoal,
     },
@@ -77,7 +77,10 @@ impl VindicatorEntity {
             goal_selector.add_goal(8, Box::new(RandomLookAroundGoal::default()));
 
             let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            target_selector.add_goal(
+                1,
+                Box::new(RevengeGoal::with_alert_others(true, same_type_matcher)),
+            );
             target_selector.add_goal(
                 1,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),

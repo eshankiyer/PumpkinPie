@@ -16,12 +16,20 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ageable::{AgeableData, AgeableMob},
     ai::goal::{
-        active_target::ActiveTargetGoal, breed::BreedGoal,
-        climb_on_top_of_powder_snow::ClimbOnTopOfPowderSnowGoal, escape_danger::EscapeDangerGoal,
-        follow_parent::FollowParentGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal,
-        rabbit_avoid_entity::RabbitAvoidEntityGoal, rabbit_hop::RabbitHopGoal,
-        raid_garden::RaidGardenGoal, revenge::RevengeGoal, swim::SwimGoal, tempt::TemptGoal,
+        active_target::ActiveTargetGoal,
+        breed::BreedGoal,
+        climb_on_top_of_powder_snow::ClimbOnTopOfPowderSnowGoal,
+        escape_danger::EscapeDangerGoal,
+        follow_parent::FollowParentGoal,
+        look_around::RandomLookAroundGoal,
+        look_at_entity::LookAtEntityGoal,
+        melee_attack::MeleeAttackGoal,
+        rabbit_avoid_entity::RabbitAvoidEntityGoal,
+        rabbit_hop::RabbitHopGoal,
+        raid_garden::RaidGardenGoal,
+        revenge::{RevengeGoal, same_type_matcher},
+        swim::SwimGoal,
+        tempt::TemptGoal,
         wander_around::WanderAroundGoal,
     },
     attributes::{Modifier, ModifierOperation},
@@ -196,7 +204,10 @@ impl RabbitEntity {
                     .add_goal(4, Box::new(MeleeAttackGoal::new(1.4, true)));
 
                 let mut target_selector = self.mob_entity.target_selector.lock().unwrap();
-                target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+                target_selector.add_goal(
+                    1,
+                    Box::new(RevengeGoal::with_alert_others(true, same_type_matcher)),
+                );
                 target_selector.add_goal(
                     2,
                     ActiveTargetGoal::with_default(&self.mob_entity, &EntityType::PLAYER, true),

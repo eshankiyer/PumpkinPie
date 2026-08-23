@@ -21,12 +21,21 @@ use crate::block::entities::sign::DyeColor;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
-        active_target::ActiveTargetGoal, beg::BegGoal, breed::BreedGoal,
-        escape_danger::EscapeDangerGoal, follow_owner::FollowOwnerGoal,
-        follow_parent::FollowParentGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, non_tame_random_target::NonTameRandomTargetGoal,
-        owner_hurt_by_target::OwnerHurtByTargetGoal, owner_hurt_target::OwnerHurtTargetGoal,
-        revenge::RevengeGoal, sit::SitGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
+        active_target::ActiveTargetGoal,
+        beg::BegGoal,
+        breed::BreedGoal,
+        escape_danger::EscapeDangerGoal,
+        follow_owner::FollowOwnerGoal,
+        follow_parent::FollowParentGoal,
+        look_around::RandomLookAroundGoal,
+        look_at_entity::LookAtEntityGoal,
+        non_tame_random_target::NonTameRandomTargetGoal,
+        owner_hurt_by_target::OwnerHurtByTargetGoal,
+        owner_hurt_target::OwnerHurtTargetGoal,
+        revenge::{RevengeGoal, same_type_matcher},
+        sit::SitGoal,
+        swim::SwimGoal,
+        wander_around::WanderAroundGoal,
     },
     living::LivingEntity,
     mob::{Mob, MobEntity},
@@ -115,7 +124,10 @@ impl WolfEntity {
             let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
             target_selector.add_goal(1, OwnerHurtByTargetGoal::new());
             target_selector.add_goal(2, OwnerHurtTargetGoal::new());
-            target_selector.add_goal(3, Box::new(RevengeGoal::new(true)));
+            target_selector.add_goal(
+                3,
+                Box::new(RevengeGoal::with_alert_others(true, same_type_matcher)),
+            );
 
             // Vanilla priority 4: `NearestAttackableTargetGoal<Player>(..., this::isAngryAt)`.
             // The predicate only sees the candidate, not the mob, so it closes over a weak

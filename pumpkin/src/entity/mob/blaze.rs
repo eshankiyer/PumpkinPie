@@ -5,9 +5,13 @@ use pumpkin_data::entity::EntityType;
 use crate::entity::{
     Entity, NBTStorage,
     ai::goal::{
-        active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, move_towards_restriction::MoveTowardsRestrictionGoal,
-        revenge::RevengeGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
+        active_target::ActiveTargetGoal,
+        look_around::RandomLookAroundGoal,
+        look_at_entity::LookAtEntityGoal,
+        move_towards_restriction::MoveTowardsRestrictionGoal,
+        revenge::{RevengeGoal, same_type_matcher},
+        swim::SwimGoal,
+        wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
 };
@@ -28,7 +32,10 @@ impl BlazeEntity {
         {
             let mut goal_selector = mob_arc.entity.goals_selector.lock().unwrap();
             let mut target_selector = mob_arc.entity.target_selector.lock().unwrap();
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            target_selector.add_goal(
+                1,
+                Box::new(RevengeGoal::with_alert_others(true, same_type_matcher)),
+            );
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
 

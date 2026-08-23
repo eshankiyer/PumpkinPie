@@ -8,10 +8,13 @@ use pumpkin_data::tag::{self, Taggable};
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage,
     ai::goal::{
-        active_target::ActiveTargetGoal, climb_on_top_of_powder_snow::ClimbOnTopOfPowderSnowGoal,
-        melee_attack::MeleeAttackGoal, revenge::RevengeGoal,
+        active_target::ActiveTargetGoal,
+        climb_on_top_of_powder_snow::ClimbOnTopOfPowderSnowGoal,
+        melee_attack::MeleeAttackGoal,
+        revenge::{RevengeGoal, same_type_matcher},
         silverfish_merge_with_stone::SilverfishMergeWithStoneGoal,
-        silverfish_wake_up_friends::SilverfishWakeUpFriendsGoal, swim::SwimGoal,
+        silverfish_wake_up_friends::SilverfishWakeUpFriendsGoal,
+        swim::SwimGoal,
     },
     mob::{Mob, MobEntity},
 };
@@ -36,7 +39,10 @@ impl SilverfishEntity {
         {
             let mut goal_selector = mob_arc.entity.goals_selector.lock().unwrap();
             let mut target_selector = mob_arc.entity.target_selector.lock().unwrap();
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            target_selector.add_goal(
+                1,
+                Box::new(RevengeGoal::with_alert_others(true, same_type_matcher)),
+            );
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, ClimbOnTopOfPowderSnowGoal::new());

@@ -14,9 +14,13 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage,
     ai::control::vex_move_control::VexMoveControl,
     ai::goal::{
-        active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, revenge::RevengeGoal, swim::SwimGoal,
-        vex_charge_attack::VexChargeAttackGoal, vex_copy_owner_target::VexCopyOwnerTargetGoal,
+        active_target::ActiveTargetGoal,
+        look_around::RandomLookAroundGoal,
+        look_at_entity::LookAtEntityGoal,
+        revenge::{RevengeGoal, same_type_matcher},
+        swim::SwimGoal,
+        vex_charge_attack::VexChargeAttackGoal,
+        vex_copy_owner_target::VexCopyOwnerTargetGoal,
         vex_random_move::VexRandomMoveGoal,
     },
     mob::{Mob, MobEntity},
@@ -79,7 +83,10 @@ impl VexEntity {
             goal_selector.add_goal(10, Box::new(RandomLookAroundGoal::default()));
 
             let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            target_selector.add_goal(
+                1,
+                Box::new(RevengeGoal::with_alert_others(true, same_type_matcher)),
+            );
             target_selector.add_goal(2, Box::new(VexCopyOwnerTargetGoal::new(vex_weak)));
             target_selector.add_goal(
                 3,
