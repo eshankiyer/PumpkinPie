@@ -4186,6 +4186,10 @@ impl NBTStorage for LivingEntity {
                     nbt.put_list("attributes", packed);
                 }
             }
+            // `LivingEntity.java:748-758`.
+            nbt.put_short("HurtTime", self.hurt_cooldown.load(Relaxed).max(0) as i16);
+            nbt.put_short("DeathTime", i16::from(self.death_time.load(Relaxed)));
+            nbt.put_bool("FallFlying", self.entity.is_fall_flying());
             {
                 let effects = self.active_effects.lock().await;
                 let hidden_effects = self.hidden_effects.lock().await;
@@ -4277,6 +4281,15 @@ impl NBTStorage for LivingEntity {
             } else {
                 self.fall_distance.store(fd);
             }
+            if let Some(hurt_time) = nbt.get_short("HurtTime") {
+                self.hurt_cooldown.store(i32::from(hurt_time), Relaxed);
+            }
+            if let Some(death_time) = nbt.get_short("DeathTime") {
+                self.death_time.store(death_time as u8, Relaxed);
+            }
+            self.entity
+                .fall_flying
+                .store(nbt.get_bool("FallFlying").unwrap_or(false), Relaxed);
             let mut loaded_effects: Vec<Effect> = Vec::new();
             {
                 let mut active_effects = self.active_effects.lock().await;
