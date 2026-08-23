@@ -1020,6 +1020,12 @@ impl Slot for ResultSlot {
             }
         })
     }
+
+    /// `ResultSlot.isFake` (ResultSlot.java:122-124): result slots are fake
+    /// (recipe-book) slots.
+    fn is_fake(&self) -> bool {
+        true
+    }
 }
 
 impl ScreenHandlerListener for ResultSlot {

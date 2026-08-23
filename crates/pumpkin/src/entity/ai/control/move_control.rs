@@ -200,6 +200,12 @@ impl MoveControl {
         self.strafe_right = right;
         self.speed_modifier = 0.25;
     }
+
+    /// Sets the operation to WAIT, stopping the mob's movement.
+    /// Vanilla: `MoveControl.setWait()` (MoveControl.java:164-166).
+    pub const fn set_wait(&mut self) {
+        self.operation = Operation::Wait;
+    }
 }
 
 #[cfg(test)]

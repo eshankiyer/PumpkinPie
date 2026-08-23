@@ -162,6 +162,18 @@ impl Slot for NonInteractiveResultSlot {
     ) -> BoxFuture<'a, Option<ItemStack>> {
         Box::pin(async move { None })
     }
+
+    /// `NonInteractiveResultSlot.isFake` (NonInteractiveResultSlot.java:66-68):
+    /// the preview slot is a fake/recipe-book slot.
+    fn is_fake(&self) -> bool {
+        true
+    }
+
+    /// `NonInteractiveResultSlot.isHighlightable` (NonInteractiveResultSlot.java:62-64):
+    /// the preview slot should not be highlighted by the recipe book.
+    fn is_highlightable(&self) -> bool {
+        false
+    }
 }
 
 /// Screen handler for a crafter block (`CrafterMenu.java`).
