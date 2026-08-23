@@ -306,6 +306,15 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         true
     }
 
+    /// Vanilla `AbstractBoat.rideHeight` (`AbstractBoat.java:132`): the Y offset at which a
+    /// passenger sits relative to the vehicle's base position (the Y component of
+    /// `AbstractBoat.getPassengerAttachmentPoint`, `AbstractBoat.java:135-151`). The generic
+    /// fallback matches `Entity.positionRider`'s existing top-surface attachment; vehicle types
+    /// override this (e.g. `Boat` returns `dimensions.height() / 3.0`, `Boat.java:14-17`).
+    fn get_passengers_riding_offset(&self) -> f64 {
+        f64::from(self.get_entity().entity_dimension.load().height)
+    }
+
     /// Vanilla `LivingEntity.isSensitiveToWater` (`LivingEntity.java:3174-3176`). A sensitive mob
     /// takes a point of drown damage every tick it spends in water or rain
     /// (`LivingEntity.java:3163-3166`).
@@ -4099,7 +4108,7 @@ impl Entity {
         passenger_count: usize,
     ) {
         let vehicle_position = self.pos.load();
-        let vehicle_height = f64::from(self.entity_dimension.load().height);
+        let vehicle_height = self.get_passengers_riding_offset();
         let passenger_width = f64::from(passenger.get_entity().entity_dimension.load().width);
         let yaw = f64::from(self.yaw.load().to_radians());
         let lateral =
