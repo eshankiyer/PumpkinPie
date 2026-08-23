@@ -967,6 +967,44 @@ impl Mob for EnderDragonEntity {
     fn get_mob_gravity(&self) -> f64 {
         0.0
     }
+
+    /// Vanilla `EnderDragon.canUsePortal` (`EnderDragon.java:852-854`) always returns
+    /// false: the dragon never travels through portals.
+    fn mob_can_use_portal(&self) -> bool {
+        false
+    }
+
+    /// Vanilla `EnderDragon.handleKillingBlow` (`EnderDragon.java:484-490`): while the dragon
+    /// is not sitting, a killing blow never kills - vanilla resets health to 1 and hands the
+    /// sequence to the DYING phase. Clamping here (rather than letting health go to/below zero
+    /// and reacting afterward, as vanilla's separate `die()` step does) keeps Pumpkin's generic
+    /// death pipeline - which removes a health<=0 entity immediately inside
+    /// `LivingEntity::damage_with_context` rather than after a `death_time` delay like vanilla -
+    /// from deleting the dragon mid-animation, so the dying phase's XP shower and
+    /// `setDragonKilled` still run.
+    fn mob_pre_apply_damage(&self, health: f32, amount: f32) -> EntityBaseFuture<'_, (f32, bool)> {
+        Box::pin(async move {
+            let phase_type = *self.phase.lock().await;
+            if phase_type != EnderDragonPhase::Dying
+                && !phase_type.is_sitting()
+                && amount.is_finite()
+                && health > 0.0
+                && health - amount <= 0.0
+            {
+                // Land just above 0 so the blow registers as damage, then the DYING
+                // phase takes over; the floor keeps sub-1-HP dragons rescuable too.
+                ((health - 1.0).max(0.01), true)
+            } else {
+                (amount, false)
+            }
+        })
+    }
+
+    fn mob_on_lethal_rescue(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            self.set_phase(EnderDragonPhase::Dying).await;
+        })
+    }
 }
 
 pub trait Vector3Ext {

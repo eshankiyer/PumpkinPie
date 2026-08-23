@@ -1152,6 +1152,27 @@ pub trait Mob: EntityBase + Send + Sync {
         false
     }
 
+    /// The `Mob` half of `EntityBase::can_use_portal`; overridden by the ender dragon.
+    fn mob_can_use_portal(&self) -> bool {
+        true
+    }
+
+    /// Called from the blanket `damage_with_context` after `modify_incoming_damage`, before the
+    /// amount is applied to the underlying `LivingEntity`. Lets a mob clamp incoming damage
+    /// (e.g. the ender dragon refusing to let a killing blow drop its health below 1 while not
+    /// sitting, `EnderDragon.handleKillingBlow`, `EnderDragon.java:484-490`). The bool return
+    /// says whether `mob_on_lethal_rescue` should run once the hit is confirmed to have landed.
+    /// Default: pass the amount through unchanged, no rescue.
+    fn mob_pre_apply_damage(&self, _health: f32, amount: f32) -> EntityBaseFuture<'_, (f32, bool)> {
+        Box::pin(async move { (amount, false) })
+    }
+
+    /// Runs once a hit `mob_pre_apply_damage` flagged for rescue is confirmed to have landed.
+    /// Default: no-op.
+    fn mob_on_lethal_rescue(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {})
+    }
+
     /// The `Mob` half of `LivingEntity.calculateFallDamage`. The blanket `EntityBase` impl below
     /// routes to this, so a mob overrides here rather than on `EntityBase`.
     fn mob_calculate_fall_damage(&self, fall_distance: f64, damage_modifier: f32) -> i32 {
@@ -2541,6 +2562,10 @@ impl<T: Mob + Send + 'static> EntityBase for T {
         self.mob_is_sensitive_to_water()
     }
 
+    fn can_use_portal(&self) -> bool {
+        Mob::mob_can_use_portal(self)
+    }
+
     fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             self.mob_init_data_tracker().await;
@@ -2709,6 +2734,8 @@ impl<T: Mob + Send + 'static> EntityBase for T {
             }
             // Mob-specific damage modifier (e.g. shulker armor when closed).
             let amount = self.modify_incoming_damage(amount, damage_type);
+            let health = self.get_mob_entity().living_entity.health.load();
+            let (amount, rescue_lethal) = self.mob_pre_apply_damage(health, amount).await;
             let damaged = self
                 .get_mob_entity()
                 .living_entity
@@ -2716,6 +2743,9 @@ impl<T: Mob + Send + 'static> EntityBase for T {
                 .await;
             if damaged {
                 self.on_damage(damage_type, source).await;
+                if rescue_lethal {
+                    self.mob_on_lethal_rescue().await;
+                }
             }
             damaged
         })

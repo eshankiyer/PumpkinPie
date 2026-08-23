@@ -62,6 +62,27 @@ impl ItemBehaviour for EndCrystalItem {
             let end_crystal = Arc::new(EndCrystalEntity::new(entity));
             world.spawn_entity(end_crystal.clone()).await;
             end_crystal.set_show_bottom(false);
+
+            // `EndCrystalItem.useOn` (`EndCrystalItem.java:57`): placing a crystal emits
+            // ENTITY_PLACE at the position above the clicked block.
+            if let Some(player_arc) = world.get_player_by_id(player.living_entity.entity.entity_id)
+            {
+                crate::world::game_event::emit_game_event(
+                    &world,
+                    pumpkin_data::game_event::GameEvent::EntityPlace,
+                    location.to_f64(),
+                    crate::world::game_event::GameEventContext::of_entity(player_arc),
+                )
+                .await;
+            }
+
+            // `EndCrystalItem.useOn` (`EndCrystalItem.java:58-61`): every placed crystal
+            // retries the dragon respawn ritual, which only fires once the four cardinal
+            // crystals are in place (`EnderDragonFight.tryRespawn`).
+            if let Some(ref fight_mutex) = world.dragon_fight {
+                fight_mutex.lock().await.try_respawn(&world).await;
+            }
+
             item.decrement_unless_creative(player.gamemode.load(), 1);
         })
     }

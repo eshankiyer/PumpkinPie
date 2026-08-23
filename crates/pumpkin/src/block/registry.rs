@@ -1027,6 +1027,7 @@ impl BlockRegistry {
                     world,
                     block,
                     position,
+                    can_trigger_blocks: false,
                 })
                 .await;
         }

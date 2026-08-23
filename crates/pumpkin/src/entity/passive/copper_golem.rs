@@ -8,6 +8,7 @@ use pumpkin_data::Block;
 use pumpkin_data::block_properties::{
     BlockProperties, CopperGolemPose, CopperGolemStatueLikeProperties,
 };
+use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
@@ -411,6 +412,20 @@ impl Mob for CopperGolemEntity {
                 ],
                 None,
             );
+        })
+    }
+
+    /// `CopperGolem.actuallyHurt` (CopperGolem.java:450-453): once damage is applied, the
+    /// synched animation state snaps back to IDLE, cancelling any in-progress chest
+    /// interaction animation. `Mob::on_damage` only runs after the damage landed, which is
+    /// exactly vanilla's `actuallyHurt` position in the hurt pipeline.
+    fn on_damage<'a>(
+        &'a self,
+        _damage_type: DamageType,
+        _source: Option<&'a dyn EntityBase>,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            self.set_state(CopperGolemState::Idle);
         })
     }
 

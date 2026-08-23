@@ -14,7 +14,7 @@ use crate::block::entities::campfire::CampfireBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::{
     block::{
-        BlockBehaviour, BlockFuture, BlockIsReplacing, GetStateForNeighborUpdateArgs,
+        BlockBehaviour, BlockFuture, BlockIsReplacing, BrokenArgs, GetStateForNeighborUpdateArgs,
         NormalUseArgs, OnEntityCollisionArgs, OnPlaceArgs, OnProjectileHitArgs, PlacedArgs,
         UseWithItemArgs,
     },
@@ -87,6 +87,24 @@ impl BlockBehaviour for CampfireBlock {
         Box::pin(async move {
             let entity = CampfireBlockEntity::new(*args.position);
             args.world.add_block_entity(Arc::new(entity));
+        })
+    }
+
+    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // `CampfireBlockEntity.preRemoveSideEffects` (`CampfireBlockEntity.java:199-204`)
+            // drops every item still sitting on the campfire via `Containers.dropContents`
+            // before the block entity goes away.
+            if let Some(block_entity) = args.world.get_block_entity(args.position)
+                && let Some(campfire) = block_entity.as_any().downcast_ref::<CampfireBlockEntity>()
+            {
+                for slot in 0..campfire.items.len() {
+                    let item = campfire.items[slot].lock().await.clone();
+                    if !item.is_empty() {
+                        args.world.drop_stack(args.position, item).await;
+                    }
+                }
+            }
         })
     }
 

@@ -1,16 +1,20 @@
 use std::sync::Arc;
 
 use crate::block::{
-    BlockFuture, CanPlaceAtArgs, EmitsRedstonePowerArgs, GetRedstonePowerArgs,
+    BlockFuture, CanPlaceAtArgs, EmitsRedstonePowerArgs, ExplodeArgs, GetRedstonePowerArgs,
     GetStateForNeighborUpdateArgs, OnPlaceArgs, OnStateReplacedArgs,
     blocks::abstract_wall_mounting::WallMountedBlock,
 };
 use pumpkin_data::{
     Block, BlockDirection, BlockStateId, HorizontalFacingExt,
     block_properties::{AttachFace, BlockProperties, LeverLikeProperties},
+    game_event::GameEvent,
+    sound::Sound,
+    sound::SoundCategory,
 };
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
+use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::world::BlockFlags;
 
 use crate::{
@@ -19,6 +23,7 @@ use crate::{
         {BlockBehaviour, NormalUseArgs},
     },
     world::World,
+    world::game_event::{GameEventContext, emit_game_event},
 };
 
 async fn toggle_lever(world: &Arc<World>, block_pos: &BlockPos) {
@@ -35,6 +40,37 @@ async fn toggle_lever(world: &Arc<World>, block_pos: &BlockPos) {
         .await;
 
     LeverBlock::update_neighbors(world, block_pos, &lever_props).await;
+
+    // LeverBlock.java:97-100 (`playSound`) / :93-94 (`pull`): LEVER_CLICK at volume 0.3,
+    // pitch 0.6 when switching on / 0.5 when switching off, plus BLOCK_ACTIVATE /
+    // BLOCK_DEACTIVATE with no source entity (vanilla always pulls with a null player,
+    // `LeverBlock.java:72`).
+    world.play_sound_raw(
+        Sound::BlockLeverClick as u16,
+        SoundCategory::Blocks,
+        &Vector3::new(
+            f64::from(block_pos.0.x) + 0.5,
+            f64::from(block_pos.0.y) + 0.5,
+            f64::from(block_pos.0.z) + 0.5,
+        ),
+        0.3,
+        if lever_props.powered { 0.6 } else { 0.5 },
+    );
+    emit_game_event(
+        world,
+        if lever_props.powered {
+            GameEvent::BlockActivate
+        } else {
+            GameEvent::BlockDeactivate
+        },
+        Vector3::new(
+            f64::from(block_pos.0.x) + 0.5,
+            f64::from(block_pos.0.y) + 0.5,
+            f64::from(block_pos.0.z) + 0.5,
+        ),
+        GameEventContext::none(),
+    )
+    .await;
 }
 
 #[pumpkin_block("minecraft:lever")]
@@ -46,6 +82,16 @@ impl BlockBehaviour for LeverBlock {
             toggle_lever(args.world, args.position).await;
 
             BlockActionResult::Success
+        })
+    }
+
+    /// Vanilla `LeverBlock.java:79-87` (`onExplosionHit`): a wind-charge blast
+    /// (`canTriggerBlocks()`, `ServerExplosion.java:297-302`) flips the lever.
+    fn explode<'a>(&'a self, args: ExplodeArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if args.can_trigger_blocks {
+                toggle_lever(args.world, args.position).await;
+            }
         })
     }
 
