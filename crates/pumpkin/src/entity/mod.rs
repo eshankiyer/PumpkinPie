@@ -322,6 +322,16 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         false
     }
 
+    /// Vanilla `Entity.canUsePortal` (`Entity.java:3193-3195`): `(ignorePassenger ||
+    /// !this.isPassenger()) && this.isAlive()`. The one call site (`Entity.handlePortal`,
+    /// `Entity.java:2610`) always passes `ignorePassenger = false`, so this only needs the
+    /// `isAlive()` half; some entities refuse outright regardless - e.g. the ender dragon
+    /// always returns false (`EnderDragon.java:852-854`). The passenger check is not ported:
+    /// `vehicle` is behind an async `Mutex` here and this method is called synchronously.
+    fn can_use_portal(&self) -> bool {
+        self.get_entity().is_alive()
+    }
+
     /// Vanilla `LivingEntity.calculateFallDamage` (`LivingEntity.java:1845-1852`), the virtual
     /// that `causeFallDamage` (`LivingEntity.java:1801`) consults. Overriders subtract a flat
     /// amount from the `LivingEntity` result; a non-living entity takes no fall damage.
@@ -2976,7 +2986,7 @@ impl Entity {
             if portal_processor.process_portal_teleportation(
                 &self.world.load(),
                 caller.as_ref(),
-                true,
+                caller.can_use_portal(),
             ) {
                 self.portal_cooldown
                     .store(self.default_portal_cooldown(), Ordering::Relaxed);
