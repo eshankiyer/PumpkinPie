@@ -171,6 +171,22 @@ impl HungerManager {
         self.exhaustion.store(0.0);
         self.tick_timer.store(0);
     }
+
+    /// Vanilla `FoodData.hasEnoughFood()` (`FoodData.java:92-94`).
+    ///
+    /// Returns true if the food level is above 6 (enough to sprint).
+    #[must_use]
+    pub fn has_enough_food(&self) -> bool {
+        self.level.load() > 6
+    }
+
+    /// Vanilla `FoodData.needsFood()` (`FoodData.java:96-98`).
+    ///
+    /// Returns true if the food level is below maximum (20).
+    #[must_use]
+    pub fn needs_food(&self) -> bool {
+        self.level.load() < MAX_FOOD
+    }
 }
 
 impl NBTStorage for HungerManager {
