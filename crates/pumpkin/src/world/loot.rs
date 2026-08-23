@@ -53,6 +53,25 @@ fn push_split_stack(stacks: &mut Vec<ItemStack>, stack: ItemStack) {
     }
 }
 
+/// Resolves an item tag's members. Shared by `TagEntry.createItemStack` (`TagEntry.java:46-48`,
+/// `expand: false`) below and by the pool-level `expand: true` fan-out
+/// (`TagEntry.expandTag`, `TagEntry.java:50-65`) in `LootTableExt::get_loot`.
+fn resolve_tag_items(name: &str) -> Vec<&'static Item> {
+    // `get_tag_values` keys its map by the full namespaced id (e.g. `"minecraft:wool"`,
+    // `crates/pumpkin-data/src/generated/tag.rs`), unlike `Item::from_registry_key` below,
+    // which wants the bare path with no namespace.
+    pumpkin_data::tag::get_tag_values(tag::RegistryKey::Item, name)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|registry_key| {
+            let item_key = registry_key
+                .strip_prefix("minecraft:")
+                .unwrap_or(registry_key);
+            Item::from_registry_key(item_key)
+        })
+        .collect()
+}
+
 pub trait LootTableExt {
     fn get_loot(&self, params: LootContextParameters) -> Vec<ItemStack>;
 }
@@ -75,7 +94,12 @@ impl LootTableExt for LootTable {
 
                 for _ in 0..rolls {
                     let mut total_weight = 0;
-                    let mut valid_entries = Vec::new();
+                    // `Option<&Item>` fans an `expand: true` tag entry out into one candidate
+                    // per tag item, each carrying the entry's own weight (`LootPool.addRandomItem`
+                    // calling `LootPoolEntryContainer.expand`, `LootPool.java:70-77`, driven by
+                    // `TagEntry.expandTag`, `TagEntry.java:50-65`), rather than contributing the
+                    // entry's weight once and choosing an item internally.
+                    let mut valid_entries: Vec<(&LootPoolEntry, i32, Option<&Item>)> = Vec::new();
 
                     for entry in pool.entries {
                         if entry
@@ -86,8 +110,18 @@ impl LootTableExt for LootTable {
                             let weight = (entry.weight as f32 + entry.quality as f32 * params.luck)
                                 .floor() as i32;
                             let weight = weight.max(0);
-                            total_weight += weight;
-                            valid_entries.push((entry, weight));
+
+                            if let LootPoolEntryTypes::Tag(tag) = &entry.content
+                                && tag.expand
+                            {
+                                for item in resolve_tag_items(tag.name) {
+                                    total_weight += weight;
+                                    valid_entries.push((entry, weight, Some(item)));
+                                }
+                            } else {
+                                total_weight += weight;
+                                valid_entries.push((entry, weight, None));
+                            }
                         }
                     }
 
@@ -97,10 +131,22 @@ impl LootTableExt for LootTable {
 
                     let mut r = random.next_bounded_i32(total_weight);
 
-                    for (entry, weight) in valid_entries {
+                    for (entry, weight, forced_item) in valid_entries {
                         r -= weight;
                         if r < 0 {
-                            if let Some(loot) = entry.get_loot(&params) {
+                            let loot = forced_item.map_or_else(
+                                || entry.get_loot(&params),
+                                |item| {
+                                    let mut item_stacks = vec![ItemStack::new(1, item)];
+                                    if let Some(functions) = entry.functions {
+                                        for function in functions {
+                                            function.apply(&mut item_stacks, &params);
+                                        }
+                                    }
+                                    Some(item_stacks)
+                                },
+                            );
+                            if let Some(loot) = loot {
                                 for stack in loot {
                                     if stack.item_count > 0 {
                                         push_split_stack(&mut stacks, stack);
@@ -414,30 +460,28 @@ impl LootPoolEntryTypesExt for LootPoolEntryTypes {
                     .map_or_else(Vec::new, |item| vec![ItemStack::new(1, item)])
             }
             Self::Tag(tag) => {
-                let key = tag.name.strip_prefix("minecraft:").unwrap_or(tag.name);
-
-                let items = pumpkin_data::tag::get_tag_values(tag::RegistryKey::Item, key)
-                    .unwrap_or_default()
-                    .iter()
-                    .filter_map(|registry_key| {
-                        let item_key = registry_key
-                            .strip_prefix("minecraft:")
-                            .unwrap_or(registry_key);
-                        Item::from_registry_key(item_key)
-                    })
-                    .collect::<Vec<_>>();
-
+                let items = resolve_tag_items(tag.name);
                 if items.is_empty() {
                     return Vec::new();
                 }
 
                 if tag.expand {
-                    // Pick one random item from the tag
+                    // Reached only when this entry sits somewhere `LootTableExt::get_loot`'s
+                    // top-level pool-entry fan-out (`TagEntry.expandTag`, `TagEntry.java:50-65`)
+                    // doesn't apply, e.g. nested inside an `Alternatives`/`Sequence`/`Group`
+                    // entry. Vanilla still fans out to one weighted candidate per tag item in
+                    // that case (`LootPoolEntryContainer.expand`); this uniform pick is an
+                    // approximation, kept because no shipped loot table nests an `expand: true`
+                    // tag this way to exercise it.
                     let index = rand::random_range(0..items.len() as i32) as usize;
                     vec![ItemStack::new(1, items[index])]
                 } else {
-                    // Yield one stack of every item in the tag
-                    items.iter().map(|&item| ItemStack::new(1, item)).collect()
+                    // `TagEntry.createItemStack` (`TagEntry.java:46-48`): yield one stack of
+                    // every item in the tag.
+                    items
+                        .into_iter()
+                        .map(|item| ItemStack::new(1, item))
+                        .collect()
                 }
             }
             Self::Alternatives(alternative_entry) => {
@@ -922,6 +966,69 @@ mod tests {
         assert_eq!(out[0].item_count, 16);
         assert_eq!(out[1].item_count, 16);
         assert_eq!(out[2].item_count, 8);
+    }
+
+    /// Vanilla `TagEntry.expandTag` (`TagEntry.java:50-65`), driven from
+    /// `LootPool.addRandomItem` (`LootPool.java:70-77`): an `expand: true` tag entry fans out
+    /// into one weighted candidate per tag item, each carrying the entry's own weight, rather
+    /// than contributing its weight once and choosing an item internally. With a 16-item tag
+    /// (`minecraft:wool`) at weight 1 against a single sibling entry also at weight 1, the tag
+    /// should win roughly 16-in-17 rolls, not roughly half.
+    #[test]
+    fn expand_tag_entry_contributes_one_candidate_per_item() {
+        let tag_entry = LootPoolEntry {
+            content: LootPoolEntryTypes::Tag(pumpkin_util::loot_table::TagEntry {
+                name: "minecraft:wool",
+                expand: true,
+            }),
+            weight: 1,
+            quality: 0,
+            conditions: None,
+            functions: None,
+        };
+        let item_entry = LootPoolEntry {
+            content: LootPoolEntryTypes::Item(pumpkin_util::loot_table::ItemEntry {
+                name: "minecraft:stone",
+            }),
+            weight: 1,
+            quality: 0,
+            conditions: None,
+            functions: None,
+        };
+        let entries: &'static [LootPoolEntry] =
+            Box::leak(vec![tag_entry, item_entry].into_boxed_slice());
+        let pool = pumpkin_util::loot_table::LootPool {
+            entries,
+            rolls: pumpkin_util::loot_table::LootNumberProviderTypes::Constant(1.0),
+            bonus_rolls: pumpkin_util::loot_table::LootNumberProviderTypes::Constant(0.0),
+            conditions: None,
+            functions: None,
+        };
+        let pools: &'static [pumpkin_util::loot_table::LootPool] =
+            Box::leak(vec![pool].into_boxed_slice());
+        let table = LootTable {
+            r#type: pumpkin_util::loot_table::LootTableType::Chest,
+            random_sequence: None,
+            pools: Some(pools),
+        };
+
+        let trials: u32 = 4000;
+        let mut wool_rolls = 0u32;
+        for _ in 0..trials {
+            let loot = table.get_loot(LootContextParameters::default());
+            assert_eq!(loot.len(), 1);
+            if loot[0].item != &Item::STONE {
+                wool_rolls += 1;
+            }
+        }
+
+        // Expected ~16/17 = 0.941; the old single-candidate-per-tag behavior would land near
+        // 0.5. 0.85 is a wide margin that only the correct fan-out clears.
+        let wool_fraction = f64::from(wool_rolls) / f64::from(trials);
+        assert!(
+            wool_fraction > 0.85,
+            "expected the 16-item expand tag to dominate the roll (~0.94), got {wool_fraction}"
+        );
     }
 
     fn base_params() -> LootContextParameters {

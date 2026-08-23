@@ -223,8 +223,15 @@ impl Worldborder {
 
     #[must_use]
     pub fn contains(&self, x: f64, z: f64) -> bool {
+        self.contains_with_margin(x, z, 0.0)
+    }
+
+    /// Vanilla `WorldBorder.isWithinBounds(double, double, double)`
+    /// (`WorldBorder.java:72-74`): bounds widened outward by `margin` on all four sides.
+    #[must_use]
+    pub fn contains_with_margin(&self, x: f64, z: f64, margin: f64) -> bool {
         let (min_x, max_x, min_z, max_z) = self.bounds();
-        x >= min_x && x < max_x && z >= min_z && z < max_z
+        x >= min_x - margin && x < max_x + margin && z >= min_z - margin && z < max_z + margin
     }
 
     /// Vanilla `WorldBorder.isWithinBounds(BlockPos)`, which tests the single
@@ -257,6 +264,53 @@ impl Worldborder {
             clamp(f64::from(x), min_x, max_x - 1.0e-5).floor() as i32,
             clamp(f64::from(z), min_z, max_z - 1.0e-5).floor() as i32,
         )
+    }
+
+    /// Vanilla `WorldBorder.getLerpSpeed()`: the current interpolation speed in blocks per tick.
+    ///
+    /// Vanilla `WorldBorder.MovingBorderExtent.getLerpSpeed` (`WorldBorder.java:403-405`)
+    /// returns `Math.abs(this.from - this.to) / (this.lerpEnd - this.lerpBegin)`.
+    /// When not lerping, the speed is 0.
+    #[must_use]
+    pub const fn lerp_speed(&self) -> f64 {
+        if self.lerp_ticks_total > 0 {
+            (self.old_diameter - self.new_diameter).abs() / self.lerp_ticks_total as f64
+        } else {
+            0.0
+        }
+    }
+
+    /// Vanilla `WorldBorder.isInsideCloseToBorder` (`WorldBorder.java:114-117`).
+    ///
+    /// Checks if an entity's bounding box is close enough to the border to take damage.
+    /// The threshold is `max(|boundingBox.xSize|, |boundingBox.zSize|, 1.0) * 2.0`.
+    #[must_use]
+    pub fn is_inside_close_to_border(
+        &self,
+        x: f64,
+        z: f64,
+        bbox_xsize: f64,
+        bbox_zsize: f64,
+    ) -> bool {
+        let distance = self.distance_to_border(x, z);
+        let bb_max = bbox_xsize.abs().max(bbox_zsize.abs()).max(1.0);
+        distance < bb_max * 2.0 && self.contains_with_margin(x, z, bb_max)
+    }
+
+    /// Vanilla `WorldBorder.setAbsoluteMaxSize` (`WorldBorder.java:216-219`).
+    ///
+    /// Sets the absolute maximum size (clamping boundary) for the border.
+    /// Vanilla default is 29999984.
+    pub const fn set_absolute_max_size(&mut self, size: i32) {
+        self.portal_teleport_boundary = size;
+    }
+
+    /// Vanilla `WorldBorder.getAbsoluteMaxSize` (`WorldBorder.java:221-223`).
+    ///
+    /// Returns the absolute maximum size (clamping boundary) for the border.
+    #[must_use]
+    pub const fn absolute_max_size(&self) -> i32 {
+        self.portal_teleport_boundary
     }
 }
 

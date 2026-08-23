@@ -11,7 +11,7 @@ use pumpkin_data::data_component_impl::{
     CustomDataImpl, CustomNameImpl, DamageImpl, DataComponentImpl, DyedColorImpl, EnchantmentsImpl,
     EquipmentSlot, EquippableImpl, FireworkExplosionImpl, FireworkExplosionShape, FireworksImpl,
     FoxVariantImpl, FrogVariantImpl, HorseVariantImpl, IDSet, IDSetContent, IdOr, ItemModelImpl,
-    ItemNameImpl, LlamaVariantImpl, LodestoneTarget, LodestoneTrackerImpl, MapIdImpl,
+    ItemNameImpl, LlamaVariantImpl, LodestoneTarget, LodestoneTrackerImpl, LoreImpl, MapIdImpl,
     MaxStackSizeImpl, MooshroomVariantImpl, PaintingVariantImpl, ParrotVariantImpl,
     PigSoundVariantImpl, PigVariantImpl, PotionContentsImpl, RabbitVariantImpl, RecipesImpl,
     SalmonSizeImpl, SheepColorImpl, ShulkerColorImpl, SoundEvent, StatusEffectInstance,
@@ -334,6 +334,24 @@ impl DataComponentCodec<Self> for CustomNameImpl {
         Ok(Self {
             name: pumpkin_util::text::TextComponent::text(String::from(name)),
         })
+    }
+}
+
+impl DataComponentCodec<Self> for LoreImpl {
+    fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
+        seq.write_var_int(&VarInt(self.lines.len() as i32))?;
+        for line in &self.lines {
+            seq.write_slice(
+                &line.encode_for_version(&pumpkin_util::version::JavaMinecraftVersion::V_26_2),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn deserialize(_seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
+        Err(ReadingError::Message(
+            "Lore component decoding is not supported".into(),
+        ))
     }
 }
 
@@ -903,6 +921,7 @@ pub fn serialize(
         DataComponent::ItemModel => get::<ItemModelImpl>(value).serialize(seq),
         DataComponent::ItemName => get::<ItemNameImpl>(value).serialize(seq),
         DataComponent::CustomName => get::<CustomNameImpl>(value).serialize(seq),
+        DataComponent::Lore => get::<LoreImpl>(value).serialize(seq),
         DataComponent::Consumable => get::<ConsumableImpl>(value).serialize(seq),
         DataComponent::Equippable => get::<EquippableImpl>(value).serialize(seq),
         DataComponent::StoredEnchantments => get::<StoredEnchantmentsImpl>(value).serialize(seq),

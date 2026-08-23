@@ -14,6 +14,17 @@ pub struct VibrationInfo {
     pub distance: f32,
     pub pos: Vector3<f64>,
     pub source_entity: Option<Uuid>,
+    pub projectile_owner: Option<Uuid>,
+}
+
+impl VibrationInfo {
+    /// Vanilla `VibrationInfo.getProjectileOwner` (`VibrationInfo.java:50-56`).
+    ///
+    /// Returns the projectile owner UUID if available.
+    #[must_use]
+    pub const fn projectile_owner(&self) -> Option<Uuid> {
+        self.projectile_owner
+    }
 }
 
 // Port of VibrationSelector.java (66 lines). Picks, per game tick, the single
@@ -78,6 +89,7 @@ mod tests {
             distance,
             pos: Vector3::new(0.0, 0.0, 0.0),
             source_entity: None,
+            projectile_owner: None,
         }
     }
 

@@ -22,6 +22,12 @@ impl ComparatorBlockEntity {
             output_signal: AtomicU8::new(0),
         }
     }
+
+    /// Sets the output signal value.
+    /// Vanilla: `ComparatorBlockEntity.setOutputSignal` (net/minecraft/world/level/block/entity/ComparatorBlockEntity.java:28)
+    pub fn set_output_signal(&self, value: u8) {
+        self.output_signal.store(value, Ordering::Relaxed);
+    }
 }
 
 const OUTPUT_SIGNAL: &str = "OutputSignal";
