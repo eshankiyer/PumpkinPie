@@ -105,7 +105,98 @@ impl AreaEffectCloudEntity {
     }
 }
 
-impl NBTStorage for AreaEffectCloudEntity {}
+impl NBTStorage for AreaEffectCloudEntity {
+    fn write_nbt(&self, compound: &mut pumpkin_nbt::Compound) {
+        let age = *self.age.lock().await;
+        let duration = *self.duration.lock().await;
+        let radius = *self.radius.lock().await;
+        let radius_on_use = *self.radius_on_use.lock().await;
+        let radius_on_tick = *self.radius_on_tick.lock().await;
+        let duration_on_use = *self.duration_on_use.lock().await;
+        let reapplication_delay = *self.reapplication_delay.lock().await;
+        let wait_time = *self.wait_time.lock().await;
+        let item_stack = self.item_stack.lock().await.clone();
+        let effects = self.effects.lock().await.clone();
+
+        compound.put_i32("Age", age);
+        compound.put_i32("Duration", duration);
+        compound.put_float("Radius", radius);
+        compound.put_float("RadiusOnUse", radius_on_use);
+        compound.put_float("RadiusPerTick", radius_on_tick);
+        compound.put_i32("DurationOnUse", duration_on_use);
+        compound.put_i32("ReapplicationDelay", reapplication_delay);
+        compound.put_i32("WaitTime", wait_time);
+
+        if let Ok(nbt) = item_stack.to_nbt() {
+            compound.put_compound("Potion", nbt);
+        }
+
+        let mut effects_list = pumpkin_nbt::List::new_compound();
+        for (effect, duration, amplifier, ambient, show_particles, show_icon) in effects {
+            let mut effect_compound = pumpkin_nbt::Compound::new();
+            effect_compound.put_string("Id", effect.registry_name());
+            effect_compound.put_i32("Duration", duration);
+            effect_compound.put_i32("Amplifier", amplifier as i32);
+            effect_compound.put_bool("Ambient", ambient);
+            effect_compound.put_bool("ShowParticles", show_particles);
+            effect_compound.put_bool("ShowIcon", show_icon);
+            effects_list.add_compound(effect_compound);
+        }
+        compound.put_list("Effects", effects_list);
+    }
+
+    fn read_nbt(&self, compound: &pumpkin_nbt::Compound) {
+        let age = compound.get_i32("Age").unwrap_or(0);
+        let duration = compound.get_i32("Duration").unwrap_or(600);
+        let radius = compound.get_float("Radius").unwrap_or(3.0);
+        let radius_on_use = compound.get_float("RadiusOnUse").unwrap_or(0.0);
+        let radius_on_tick = compound.get_float("RadiusPerTick").unwrap_or(-3.0 / 600.0);
+        let duration_on_use = compound.get_i32("DurationOnUse").unwrap_or(0);
+        let reapplication_delay = compound.get_i32("ReapplicationDelay").unwrap_or(20);
+        let wait_time = compound.get_i32("WaitTime").unwrap_or(20);
+
+        let item_stack = compound
+            .get_compound("Potion")
+            .and_then(|nbt| ItemStack::from_nbt(nbt).ok())
+            .unwrap_or_else(|| ItemStack::new(0, &pumpkin_data::item::Item::GLASS_BOTTLE));
+
+        let effects = compound
+            .get_list_compound("Effects")
+            .map(|list| {
+                list.into_iter()
+                    .filter_map(|compound| {
+                        let id = compound.get_string("Id")?;
+                        let effect = pumpkin_data::effect::StatusEffect::from_registry_name(&id)?;
+                        let duration = compound.get_i32("Duration").unwrap_or(600);
+                        let amplifier = compound.get_i32("Amplifier").unwrap_or(0) as u8;
+                        let ambient = compound.get_bool("Ambient").unwrap_or(true);
+                        let show_particles = compound.get_bool("ShowParticles").unwrap_or(true);
+                        let show_icon = compound.get_bool("ShowIcon").unwrap_or(true);
+                        Some((
+                            effect,
+                            duration,
+                            amplifier,
+                            ambient,
+                            show_particles,
+                            show_icon,
+                        ))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        *self.age.lock().await = age;
+        *self.duration.lock().await = duration;
+        *self.radius.lock().await = radius;
+        *self.radius_on_use.lock().await = radius_on_use;
+        *self.radius_on_tick.lock().await = radius_on_tick;
+        *self.duration_on_use.lock().await = duration_on_use;
+        *self.reapplication_delay.lock().await = reapplication_delay;
+        *self.wait_time.lock().await = wait_time;
+        *self.item_stack.lock().await = item_stack;
+        *self.effects.lock().await = effects;
+    }
+}
 
 impl EntityBase for AreaEffectCloudEntity {
     fn as_nbt_storage(&self) -> &dyn NBTStorage {
