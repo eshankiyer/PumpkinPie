@@ -73,7 +73,10 @@ impl StructurePieceBase for BuriedTreasurePiece {
         let mut pos = BlockPos::new(boundingbox.min.x, y, boundingbox.min.z);
         let bottom_y = chunk.bottom_y() as i32;
 
-        for _ in (bottom_y..=y).rev() {
+        // Mirrors `BuriedTreasurePieces.BuriedTreasurePiece.postProcess`
+        // (`BuriedTreasurePieces.java:44-48`): the downward scan stops above the level minimum,
+        // so `bottom_y` itself is not inspected.
+        for _ in (bottom_y + 1..=y).rev() {
             let state = chunk.get_block_state(&pos.0);
             let down_pos = pos.down();
             let down_raw_state = chunk.get_block_state(&down_pos.0);
