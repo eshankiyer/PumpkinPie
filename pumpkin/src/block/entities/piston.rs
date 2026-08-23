@@ -278,8 +278,33 @@ impl BlockEntity for PistonBlockEntity {
     where
         Self: Sized,
     {
-        // TODO
-        let pushed_block_state = Block::AIR.default_state;
+        let pushed_block_state = nbt
+            .get_compound("blockState")
+            .and_then(|block_state| {
+                let name = block_state.get_string("Name")?;
+                let block =
+                    Block::from_registry_key(name.strip_prefix("minecraft:").unwrap_or(name))?;
+                let state = if let Some(properties) = block_state.get_compound("Properties") {
+                    if let Some(block_properties) = block.properties(block.default_state.id) {
+                        let pairs: Vec<(&str, &str)> = properties
+                            .iter()
+                            .filter_map(|(key, value)| {
+                                let key = key.as_str()?;
+                                let value = value.as_str()?;
+                                Some((key, value))
+                            })
+                            .collect();
+                        let state_id = from_props(&pairs, block_properties).to_state_id(block);
+                        BlockState::from_id(state_id)
+                    } else {
+                        block.default_state
+                    }
+                } else {
+                    block.default_state
+                };
+                Some(state)
+            })
+            .unwrap_or(Block::AIR.default_state);
         let facing = nbt.get_byte(FACING).unwrap_or(0);
         let last_progress = nbt.get_float(LAST_PROGRESS).unwrap_or(0.0);
         let extending = nbt.get_bool(EXTENDING).unwrap_or(false);
