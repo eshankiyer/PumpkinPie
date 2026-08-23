@@ -1,19 +1,24 @@
 use pumpkin_data::block_properties::{BlockProperties, TurtleEggLikeProperties};
-use pumpkin_data::entity::EntityPose;
+use pumpkin_data::entity::{EntityPose, EntityType};
+use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::Taggable;
-use pumpkin_data::{BlockDirection, BlockStateId, tag};
+use pumpkin_data::world::WorldEvent;
+use pumpkin_data::{Block, BlockDirection, BlockStateId, tag};
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::{BlockAccessor, BlockFlags};
+use rand::{RngExt, rng};
+use std::sync::atomic::Ordering::Relaxed;
 
 use crate::block::{
     BlockBehaviour, BlockFuture, BlockIsReplacing, BrokenArgs, CanPlaceAtArgs, CanUpdateAtArgs,
-    GetStateForNeighborUpdateArgs, OnLandedUponArgs, OnPlaceArgs, OnScheduledTickArgs,
-    RandomTickArgs,
+    GetStateForNeighborUpdateArgs, OnEntityStepArgs, OnLandedUponArgs, OnPlaceArgs,
+    OnScheduledTickArgs, RandomTickArgs,
 };
 use crate::entity::EntityBase;
+use crate::world::game_event::{GameEventContext, emit_game_event};
 
 type TurtleEggProperties = TurtleEggLikeProperties;
 
@@ -123,25 +128,115 @@ impl BlockBehaviour for TurtleEggBlock {
                     .await;
             }
 
-            // Entity falling onto turtle egg breaks an egg
-            if args.fall_distance > 0.5 {
-                args.world.play_sound(
-                    Sound::EntityTurtleEggBreak,
-                    SoundCategory::Blocks,
-                    &args.entity.get_entity().pos.load(),
-                );
+            // Vanilla `fallOn` (TurtleEggBlock.java:65-71): falling onto the egg (zombies are
+            // immune) rolls against randomness 3.
+            if args.entity.get_entity().entity_type.id != EntityType::ZOMBIE.id {
+                let block = args.world.get_block(args.position);
+                destroy_egg(args.world, block, args.position, args.entity, 3).await;
             }
         })
     }
 
     fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            args.world.play_sound(
-                Sound::EntityTurtleEggBreak,
-                SoundCategory::Blocks,
-                &args.position.to_f64(),
-            );
+            // Vanilla `playerDestroy` (TurtleEggBlock.java:142-152): after the normal break
+            // (loot handled by the engine), the cluster loses exactly one egg - mining a
+            // 4-egg block leaves a 3-egg block behind. `registry.broken` is only invoked
+            // from the player-mining path (`entity/player.rs`), matching vanilla's context.
+            decrease_eggs(args.world, args.block, args.position).await;
         })
+    }
+
+    /// Vanilla `stepOn` (TurtleEggBlock.java:56-62): anything not stepping carefully
+    /// (`isSteppingCarefully` == shift-key-down, `Entity.java:2681-2683`) can crush an egg,
+    /// rolled each tick against randomness 100.
+    fn on_entity_step<'a>(&'a self, args: OnEntityStepArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if !args.entity.get_entity().sneaking.load(Relaxed) {
+                destroy_egg(args.world, args.block, args.position, args.entity, 100).await;
+            }
+        })
+    }
+}
+
+/// Vanilla `canDestroyEgg` (TurtleEggBlock.java:177-183) + `destroyEgg` (:73-80): turtles and
+/// bats never crush eggs; non-living entities never do; living entities need to be players or
+/// mob griefing enabled; then a `random.nextInt(randomness) == 0` roll.
+async fn destroy_egg(
+    world: &std::sync::Arc<crate::world::World>,
+    block: &Block,
+    position: &BlockPos,
+    entity: &dyn EntityBase,
+    randomness: i32,
+) {
+    let entity_ref = entity.get_entity();
+    if entity_ref.entity_type.id == EntityType::TURTLE.id
+        || entity_ref.entity_type.id == EntityType::BAT.id
+    {
+        return;
+    }
+
+    if entity.get_living_entity().is_none() {
+        return;
+    }
+
+    if entity.get_player().is_none() && !world.level_info.load().game_rules.mob_griefing {
+        return;
+    }
+
+    if rng().random_range(0..randomness) != 0 {
+        return;
+    }
+
+    decrease_eggs(world, block, position).await;
+}
+
+/// Vanilla `decreaseEggs` (TurtleEggBlock.java:82-92): `TURTLE_EGG_BREAK` at volume 0.7 and
+/// pitch 0.9-1.1; the last egg pops the block (no drops), otherwise the state keeps the
+/// remaining eggs (flag 2 = `NOTIFY_LISTENERS`), firing `BLOCK_DESTROY` plus level event 2001
+/// for the break particles. Pumpkin's `GameEventContext` has no block-state variant, so the
+/// event carries no source (same documented simplification as `jukebox.rs`).
+async fn decrease_eggs(
+    world: &std::sync::Arc<crate::world::World>,
+    block: &Block,
+    position: &BlockPos,
+) {
+    world.play_sound_raw(
+        Sound::EntityTurtleEggBreak as u16,
+        SoundCategory::Blocks,
+        &position.to_f64(),
+        0.7,
+        0.9 + rng().random::<f32>() * 0.2,
+    );
+
+    let state_id = world.get_block_state_id(position);
+    let mut props = TurtleEggProperties::from_state_id(state_id, block);
+    if props.eggs <= 1 {
+        world
+            .break_block(position, None, BlockFlags::SKIP_DROPS)
+            .await;
+    } else {
+        props.eggs -= 1;
+        world
+            .set_block_state(
+                position,
+                props.to_state_id(block),
+                BlockFlags::NOTIFY_LISTENERS,
+            )
+            .await;
+
+        emit_game_event(
+            world,
+            GameEvent::BlockDestroy,
+            position.to_centered_f64(),
+            GameEventContext::none(),
+        )
+        .await;
+        world.sync_world_event(
+            WorldEvent::ParticlesDestroyBlock,
+            *position,
+            i32::from(state_id.as_u16()),
+        );
     }
 }
 

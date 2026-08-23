@@ -22,6 +22,7 @@ use crate::block::BlockBehaviour;
 use crate::block::BlockFuture;
 use crate::block::BrokenArgs;
 use crate::block::CanPlaceAtArgs;
+use crate::block::ExplodeArgs;
 use crate::block::GetStateForNeighborUpdateArgs;
 use crate::block::NormalUseArgs;
 use crate::block::OnNeighborUpdateArgs;
@@ -36,7 +37,6 @@ use crate::entity::player::Player;
 use pumpkin_protocol::java::server::play::SUseItemOn;
 
 use crate::world::World;
-use pumpkin_util::GameMode;
 
 type DoorProperties = pumpkin_data::block_properties::OakDoorLikeProperties;
 
@@ -304,11 +304,19 @@ impl BlockBehaviour for DoorBlock {
                 return; // Neighbor is already gone or is a different block
             }
 
-            let is_creative = args.player.gamemode.load() == GameMode::Creative;
-            let flags = if door_props.half == DoubleBlockHalf::Upper && !is_creative {
-                BlockFlags::NOTIFY_ALL
-            } else {
+            // `DoorBlock.playerWillDestroy` (`DoorBlock.java:122-125`) only calls
+            // `DoublePlantBlock.preventDropFromBottomPart` (`DoublePlantBlock.java:121-132`)
+            // when the player broke the UPPER half, and only suppresses that lower half's
+            // drop when `player.preventsBlockDrops() || !player.hasCorrectToolForDrops(state)`
+            // - breaking the LOWER half, or breaking the UPPER half in survival with the right
+            // tool, always lets the other half's loot drop normally. The wrong-tool check isn't
+            // ported (no tool-correctness helper exists here yet), so this only covers the
+            // creative-mode half of the condition.
+            let is_creative = args.player.gamemode.load() == pumpkin_util::GameMode::Creative;
+            let flags = if door_props.half == DoubleBlockHalf::Upper && is_creative {
                 BlockFlags::SKIP_DROPS | BlockFlags::NOTIFY_ALL
+            } else {
+                BlockFlags::NOTIFY_ALL
             };
 
             args.world
@@ -439,6 +447,32 @@ impl BlockBehaviour for DoorBlock {
                     BlockFlags::SKIP_DROPS | BlockFlags::NOTIFY_ALL,
                 )
                 .await;
+        })
+    }
+
+    /// Vanilla `DoorBlock.java:110-119` (`onExplosionHit`): a wind-charge blast (the only
+    /// explosion whose `canTriggerBlocks()` is true, `ServerExplosion.java:297-302`) swings a
+    /// door open/closed instead of destroying it - but only the lower half, only when the
+    /// block set allows wind-charge opening (`BlockSetType.java:13-14` iron = false,
+    /// `BlockSetType.java:47-56` copper / `BlockSetType.java:200-205` wooden = true), and
+    /// only when not already redstone-powered.
+    fn explode<'a>(&'a self, args: ExplodeArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if !args.can_trigger_blocks {
+                return;
+            }
+
+            let state_id = args.world.get_block_state_id(args.position);
+            let door_props = DoorProperties::from_state_id(state_id, args.block);
+
+            if door_props.half != DoubleBlockHalf::Lower
+                || door_props.powered
+                || !can_open_door(args.block)
+            {
+                return;
+            }
+
+            set_door_open(args.world, args.position, !door_props.open).await;
         })
     }
 

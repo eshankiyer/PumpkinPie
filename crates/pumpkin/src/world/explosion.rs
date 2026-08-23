@@ -615,6 +615,7 @@ impl Explosion {
                                 world,
                                 block,
                                 position: pos,
+                                can_trigger_blocks: true,
                             })
                             .await;
                     }
@@ -675,6 +676,7 @@ impl Explosion {
                                 world,
                                 block,
                                 position: pos,
+                                can_trigger_blocks: false,
                             })
                             .await;
                     }

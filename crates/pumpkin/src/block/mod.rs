@@ -350,6 +350,11 @@ pub struct ExplodeArgs<'a> {
     pub world: &'a Arc<World>,
     pub block: &'a Block,
     pub position: &'a BlockPos,
+    /// Vanilla `ServerExplosion.canTriggerBlocks()` (`ServerExplosion.java:297-302`): only true
+    /// for `TRIGGER_BLOCK` blasts (wind charges), which may flip open doors/buttons/etc.
+    /// without destroying them. The breeze-owned mob-griefing special case is not modeled
+    /// because `Explosion` carries no source entity here (see `explosion.rs`).
+    pub can_trigger_blocks: bool,
 }
 
 pub struct OnSyncedBlockEventArgs<'a> {
