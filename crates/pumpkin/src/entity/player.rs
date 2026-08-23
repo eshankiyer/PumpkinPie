@@ -1739,6 +1739,12 @@ impl Player {
             velocity.y = 0.01;
             self.living_entity.entity.set_velocity(velocity);
             self.living_entity.fall_distance.store(0.0);
+            if victim_entity.on_ground.load(Ordering::Relaxed) {
+                // `MaceItem.hurtEnemy` enables the attacker's extra fall particles for
+                // a grounded victim (`MaceItem.java:60-63`).
+                self.spawn_extra_particles_on_fall
+                    .store(true, Ordering::Relaxed);
+            }
             world.play_sound(
                 if victim_entity.on_ground.load(Ordering::Relaxed) {
                     if fall_distance > 5.0 {
