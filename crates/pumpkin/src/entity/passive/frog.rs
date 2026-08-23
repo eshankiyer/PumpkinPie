@@ -41,6 +41,11 @@ pub enum FrogVariant {
     Warm = 2,
 }
 
+/// Sentinel for "not yet rolled": distinct from every valid [`FrogVariant::id`] (0-2), so
+/// `mob_init_data_tracker` can tell a fresh spawn (roll by biome) from an NBT-restored frog
+/// (variant already loaded) apart, the same pattern `fox.rs`'s `VARIANT_UNSET` uses.
+const FROG_VARIANT_UNSET: i32 = -1;
+
 impl FrogVariant {
     #[must_use]
     pub const fn from_id(id: i32) -> Self {
@@ -96,7 +101,7 @@ impl FrogEntity {
         let frog = Self {
             mob_entity,
             ageable_data: AgeableData::default(),
-            variant: AtomicI32::new(FrogVariant::Temperate.id()),
+            variant: AtomicI32::new(FROG_VARIANT_UNSET),
             tongue_target_id: AtomicI32::new(-1),
             is_pregnant: AtomicBool::new(false),
         };
@@ -271,6 +276,31 @@ impl Mob for FrogEntity {
                     )],
                     None,
                 );
+            }
+            // `Frog.finalizeSpawn` (`Frog.java:265`): rolls the variant by biome via
+            // `VariantUtils.selectVariantToSpawn`, backed by `FrogVariant.selectors()`
+            // (`FrogVariant.java:38-40`) testing each variant's data-driven `spawn_conditions`
+            // (`data/minecraft/frog_variant/{cold,warm,temperate}.json`): cold/warm each require
+            // their biome tag at priority 1, temperate is the priority-0 fallback. Only roll on
+            // a fresh spawn -- an NBT-restored frog already has its variant loaded (see
+            // `read_nbt_non_mut` above), matching `fox.rs`'s `VARIANT_UNSET` guard.
+            if self.variant.load(Ordering::Relaxed) == FROG_VARIANT_UNSET {
+                let world = entity.world.load();
+                let pos = entity.block_pos.load();
+                let variant = world
+                    .get_biome(&pos)
+                    .map_or(FrogVariant::Temperate, |biome| {
+                        if biome.has_tag(&tag::WorldgenBiome::MINECRAFT_SPAWNS_COLD_VARIANT_FROGS) {
+                            FrogVariant::Cold
+                        } else if biome
+                            .has_tag(&tag::WorldgenBiome::MINECRAFT_SPAWNS_WARM_VARIANT_FROGS)
+                        {
+                            FrogVariant::Warm
+                        } else {
+                            FrogVariant::Temperate
+                        }
+                    });
+                self.set_variant(variant);
             }
             entity.send_meta_data(
                 &[Metadata::new(

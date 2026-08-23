@@ -53,8 +53,10 @@ impl ScreenHandlerFactory for CrafterScreenFactory {
             // `CrafterMenu.java:31-39`: the block-entity menu takes the crafter's
             // `CraftingContainer` plus its ten-entry `ContainerData`, and makes a fresh
             // `ResultContainer` for the non-interactive recipe preview
-            // (`CrafterMenu.java:18`). Recipe lookup is not implemented here, so that
-            // preview slot stays empty.
+            // (`CrafterMenu.java:18`). `CrafterScreenHandler::refresh_recipe_result`
+            // (`CrafterMenu.refreshRecipeResult`, `CrafterMenu.java:106-113`) populates that
+            // preview slot from the same `match_crafting_recipe` this file's own
+            // redstone-triggered crafting uses.
             let handler = CrafterScreenHandler::new(
                 sync_id,
                 player_inventory,

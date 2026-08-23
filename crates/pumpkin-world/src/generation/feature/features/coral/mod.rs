@@ -29,7 +29,7 @@ pub struct CoralFeature;
 impl CoralFeature {
     pub fn generate_coral_piece<T: GenerationCache>(
         chunk: &mut T,
-        block_registry: &dyn WorldPortalExt,
+        _block_registry: &dyn WorldPortalExt,
         random: &mut RandomGenerator,
         state: &BlockState,
         pos: BlockPos,
@@ -42,29 +42,20 @@ impl CoralFeature {
         {
             return false;
         }
-        if block_registry.can_place_at(Block::from_state_id(state.id), state, chunk, &pos) {
-            chunk.set_block_state(&pos.0, state);
-        }
+        // Mirrors `CoralFeature.placeCoralBlock` (`CoralFeature.java:36-47`): once the
+        // water/coral and water-above predicates pass, the feature writes the coral at `pos`
+        // and places optional growth at `pos.above()`.
+        chunk.set_block_state(&pos.0, state);
         if random.next_f32() < 0.25 {
             let block_to_place_state =
                 Self::get_random_tag_entry(tag::Block::MINECRAFT_CORALS, random);
-            if block_registry.can_place_at(
-                Block::from_state_id(block_to_place_state.id),
-                block_to_place_state,
-                chunk,
-                &pos,
-            ) {
-                chunk.set_block_state(&pos.0, block_to_place_state);
-            }
+            chunk.set_block_state(&pos.up().0, block_to_place_state);
         } else if random.next_f32() < 0.05 {
             let mut props = SeaPickleLikeProperties::default(&Block::SEA_PICKLE);
             props.pickles = (random.next_bounded_i32(4) as u8) + 1;
             let state_id = props.to_state_id(&Block::SEA_PICKLE);
             let block_state = BlockState::from_id(state_id);
-            if block_registry.can_place_at(Block::from_state_id(state_id), block_state, chunk, &pos)
-            {
-                chunk.set_block_state(&pos.0, block_state);
-            }
+            chunk.set_block_state(&pos.up().0, block_state);
         }
         for dir in BlockDirection::horizontal_worldgen() {
             let dir_pos = pos.offset(dir.to_offset());
@@ -91,18 +82,7 @@ impl CoralFeature {
                 })
                 .collect();
             let block_state_id = wall_coral.from_properties(&props).to_state_id(wall_coral);
-            let block_state = BlockState::from_id(block_state_id);
-            if block_registry.can_place_at(
-                Block::from_state_id(block_state_id),
-                block_state,
-                chunk,
-                &dir_pos,
-            ) {
-                chunk.set_block_state(
-                    &dir_pos.0,
-                    BlockState::from_id(wall_coral.from_properties(&props).to_state_id(wall_coral)),
-                );
-            }
+            chunk.set_block_state(&dir_pos.0, BlockState::from_id(block_state_id));
         }
 
         true

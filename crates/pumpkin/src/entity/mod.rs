@@ -450,6 +450,14 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         false
     }
 
+    /// Vanilla `Entity.isAttackable` (`Entity.java:2970-2972`), default `true`. Gates the whole
+    /// of `Player.attack`/`Player.cannotAttack` (`Player.java:1017-1018`): when an entity
+    /// returns `false` here, attacking it has no effect at all -- no cooldown reset, no sound,
+    /// no swing -- not merely no damage. Override to `false` where vanilla does.
+    fn is_attackable(&self) -> bool {
+        true
+    }
+
     fn is_flutterer(&self) -> bool {
         false
     }
