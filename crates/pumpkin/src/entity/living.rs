@@ -2711,7 +2711,22 @@ impl LivingEntity {
             }
             self.entity.pose.store(EntityPose::Dying);
 
-            self.drop_equipment(looting_level).await;
+            // `LivingEntity.dropAllDeathLoot` (`LivingEntity.java:1508-1516`) always calls
+            // `this.dropEquipment(level)`, but the base implementation
+            // (`LivingEntity.java:1519-1520`) is empty and `Mob` never overrides it: a mob's
+            // armour/hand items are dropped by its `dropCustomDeathLoot` override
+            // (`Mob.java:892-910`, chance-per-slot with looting and damage randomization),
+            // which is what `Self::drop_equipment` below models. `Player.dropEquipment`
+            // (`Player.java:551-557`) is the *only* override of the real method: it drops every
+            // equipped item unconditionally (no chance roll, no damage randomization) via
+            // `inventory.dropAll()` (`Inventory.java:538-541`, `EntityEquipment.dropAll`,
+            // `EntityEquipment.java:62-68`), gated only by the `keepInventory` gamerule. That
+            // path is implemented in `Player::handle_killed`, so the mob-style chance roll must
+            // not also run for a player here - it would drop armour far less often than vanilla,
+            // with spurious damage randomization, and ignore `keepInventory` entirely.
+            if dyn_self.get_player().is_none() {
+                self.drop_equipment(looting_level).await;
+            }
 
             // Broadcast death message if it's a player and the gamerule is enabled
             self.broadcast_death_message(&*dyn_self, damage_type, source, cause)
@@ -5099,13 +5114,36 @@ impl EntityBase for LivingEntity {
                 // creeper blast knocked the victim back twice - once from the explosion's own
                 // impulse and again from this hit - and magic, wither, dragon breath and spear
                 // damage knocked back at all, none of which vanilla does.
-                if let Some(source) = source
+                //
+                // `dealDefaultKnockback` itself branches on `source.getDirectEntity()`
+                // (LivingEntity.java:1292-1299): when the direct entity is a `Projectile`,
+                // knockback follows *the projectile's own flight direction*
+                // (`Projectile.calculateHorizontalHurtKnockbackDirection`,
+                // `Projectile.java:380-384`, the default returning `-deltaMovement.{x,z}`), not
+                // the position of whoever fired it. `cause` here is the direct/physical hit
+                // cause (e.g. the arrow itself - see `projectile_owner_id`'s doc comment above),
+                // matching vanilla's `directEntity`. Without this branch every arrow hit fell
+                // through with no `source` at all (arrow.rs passes `source: None`) and applied
+                // no base knockback whatsoever - only the separate Punch-enchantment bonus
+                // (`AbstractArrow.doKnockback`) still landed.
+                let knockback_direction = cause
+                    .filter(|c| {
+                        crate::entity::projectile::is_projectile(c.get_entity().entity_type)
+                    })
+                    .map(|projectile| {
+                        let v = projectile.get_entity().velocity.load();
+                        (-v.x, -v.z)
+                    })
+                    .or_else(|| {
+                        source.map(|source| {
+                            let source_pos = source.get_entity().pos.load();
+                            let target_pos = self.entity.pos.load();
+                            (source_pos.x - target_pos.x, source_pos.z - target_pos.z)
+                        })
+                    });
+                if let Some((dx, dz)) = knockback_direction
                     && !damage_type.has_tag(&tag::DamageType::MINECRAFT_NO_KNOCKBACK)
                 {
-                    let source_pos = source.get_entity().pos.load();
-                    let target_pos = self.entity.pos.load();
-                    let dx = source_pos.x - target_pos.x;
-                    let dz = source_pos.z - target_pos.z;
                     let resistance = self.get_attribute_value(&Attributes::KNOCKBACK_RESISTANCE);
                     self.entity.apply_knockback(
                         knockback_after_resistance(0.4, resistance),

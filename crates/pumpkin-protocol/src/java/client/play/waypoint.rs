@@ -67,6 +67,39 @@ impl TrackedWaypoint<'_> {
             target: WaypointTarget::Position(position),
         }
     }
+
+    /// Vanilla `TrackedWaypoint` constructed for
+    /// `ClientboundTrackedWaypointPacket.addWaypointChunk` /
+    /// `updateWaypointChunk` (`ClientboundTrackedWaypointPacket.java:42-48`).
+    #[must_use]
+    pub const fn set_chunk(
+        identifier: Uuid,
+        icon: Option<WaypointIcon<'_>>,
+        x: i32,
+        z: i32,
+    ) -> TrackedWaypoint<'_> {
+        TrackedWaypoint {
+            identifier,
+            icon,
+            target: WaypointTarget::Chunk { x, z },
+        }
+    }
+
+    /// Vanilla `TrackedWaypoint` constructed for
+    /// `ClientboundTrackedWaypointPacket.addWaypointAzimuth` /
+    /// `updateWaypointAzimuth` (`ClientboundTrackedWaypointPacket.java:50-56`).
+    #[must_use]
+    pub const fn set_azimuth(
+        identifier: Uuid,
+        icon: Option<WaypointIcon<'_>>,
+        angle: f32,
+    ) -> TrackedWaypoint<'_> {
+        TrackedWaypoint {
+            identifier,
+            icon,
+            target: WaypointTarget::Azimuth(angle),
+        }
+    }
 }
 
 /// Syncs tracked waypoints (`ClientboundTrackedWaypointPacket`) to client.
@@ -114,6 +147,60 @@ impl<'a> CWaypoint<'a> {
         Self {
             operation: WaypointOperation::Update,
             waypoint: TrackedWaypoint::set_position(identifier, icon, position),
+        }
+    }
+
+    /// Vanilla `ClientboundTrackedWaypointPacket.addWaypointChunk`
+    /// (`ClientboundTrackedWaypointPacket.java:42-44`).
+    #[must_use]
+    pub const fn add_chunk(
+        identifier: Uuid,
+        icon: Option<WaypointIcon<'a>>,
+        x: i32,
+        z: i32,
+    ) -> Self {
+        Self {
+            operation: WaypointOperation::Track,
+            waypoint: TrackedWaypoint::set_chunk(identifier, icon, x, z),
+        }
+    }
+
+    /// Vanilla `ClientboundTrackedWaypointPacket.updateWaypointChunk`
+    /// (`ClientboundTrackedWaypointPacket.java:46-48`).
+    #[must_use]
+    pub const fn update_chunk(
+        identifier: Uuid,
+        icon: Option<WaypointIcon<'a>>,
+        x: i32,
+        z: i32,
+    ) -> Self {
+        Self {
+            operation: WaypointOperation::Update,
+            waypoint: TrackedWaypoint::set_chunk(identifier, icon, x, z),
+        }
+    }
+
+    /// Vanilla `ClientboundTrackedWaypointPacket.addWaypointAzimuth`
+    /// (`ClientboundTrackedWaypointPacket.java:50-52`).
+    #[must_use]
+    pub const fn add_azimuth(identifier: Uuid, icon: Option<WaypointIcon<'a>>, angle: f32) -> Self {
+        Self {
+            operation: WaypointOperation::Track,
+            waypoint: TrackedWaypoint::set_azimuth(identifier, icon, angle),
+        }
+    }
+
+    /// Vanilla `ClientboundTrackedWaypointPacket.updateWaypointAzimuth`
+    /// (`ClientboundTrackedWaypointPacket.java:54-56`).
+    #[must_use]
+    pub const fn update_azimuth(
+        identifier: Uuid,
+        icon: Option<WaypointIcon<'a>>,
+        angle: f32,
+    ) -> Self {
+        Self {
+            operation: WaypointOperation::Update,
+            waypoint: TrackedWaypoint::set_azimuth(identifier, icon, angle),
         }
     }
 }

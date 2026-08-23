@@ -352,6 +352,14 @@ impl MemoryStore {
         self.slots[K::ID.index()].has_value()
     }
 
+    /// `Brain.getTimeUntilExpiry` (`Brain.java:225-227`) via `MemorySlot.timeToLive`
+    /// (`memory/MemorySlot.java:59-61`). A slot with no expiry (`time_to_live: None`) reports
+    /// vanilla's `NEVER_EXPIRE` sentinel (`Long.MAX_VALUE`).
+    #[must_use]
+    pub fn time_until_expiry<K: MemoryKey>(&self) -> i64 {
+        self.slots[K::ID.index()].time_to_live.unwrap_or(i64::MAX)
+    }
+
     /// `Brain.checkMemory` (`Brain.java:242-249`). Note the leading null check: an
     /// unregistered memory fails *every* status, including `REGISTERED`.
     #[must_use]

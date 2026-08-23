@@ -166,4 +166,10 @@ impl EntityBase for BoatEntity {
     fn is_pushable(&self) -> bool {
         true
     }
+
+    /// `Boat.rideHeight` (`Boat.java:14-17`): passengers sit at `dimensions.height() / 3.0`
+    /// above the boat's base, not on its full top surface.
+    fn get_passengers_riding_offset(&self) -> f64 {
+        f64::from(self.vehicle.entity.entity_dimension.load().height) / 3.0
+    }
 }

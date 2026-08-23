@@ -71,6 +71,9 @@ impl ItemBehaviour for BowItem {
 impl BowItem {
     /// The maximum number of ticks a bow can be drawn for
     pub const USE_DURATION: i32 = 72000;
+    // Vanilla `BowItem.DEFAULT_RANGE` (BowItem.java:19, returned by `getDefaultProjectileRange`
+    // at lines 111-114); the range a bow can target/launch projectiles over.
+    pub const DEFAULT_RANGE: i32 = 15;
     const MAX_DRAW_DURATION: f32 = 20.0;
     const ARROW_SPEED_MULTIPLIER: f32 = 3.0;
 

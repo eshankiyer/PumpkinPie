@@ -60,6 +60,9 @@ impl TridentEntity {
     const DESPAWN_TIME: u32 = 1200;
 
     pub fn new(entity: Entity, owner_id: Option<i32>) -> Self {
+        // `Projectile.getAddEntityPacket` (`Projectile.java:346-349`): the spawn packet's
+        // generic "data" int carries the owner's entity id, 0 with no owner.
+        entity.data.store(owner_id.unwrap_or(0), Ordering::Relaxed);
         Self {
             entity,
             owner_id,
@@ -93,6 +96,9 @@ impl TridentEntity {
         owner_pos.y = owner_pos.y + f64::from(shooter.entity_dimension.load().eye_height) - 0.1;
         entity.pos.store(owner_pos);
         entity.set_velocity(Vector3::new(0.0, 0.1, 0.0));
+        // `Projectile.getAddEntityPacket` (`Projectile.java:346-349`): the spawn packet's
+        // generic "data" int carries the owner's entity id.
+        entity.data.store(shooter.entity_id, Ordering::Relaxed);
 
         Self {
             entity,

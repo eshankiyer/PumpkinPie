@@ -99,6 +99,9 @@ impl ArrowEntity {
         item_stack: &ItemStack,
         pickup: ArrowPickup,
     ) -> Self {
+        // `Projectile.getAddEntityPacket` (`Projectile.java:346-349`): the spawn packet's
+        // generic "data" int carries the owner's entity id, 0 with no owner.
+        entity.data.store(owner_id.unwrap_or(0), Ordering::Relaxed);
         Self {
             entity,
             owner_id,
@@ -129,6 +132,9 @@ impl ArrowEntity {
         let mut owner_pos = shooter.pos.load();
         owner_pos.y = owner_pos.y + f64::from(shooter.entity_dimension.load().eye_height) - 0.1;
         entity.pos.store(owner_pos);
+        // `Projectile.getAddEntityPacket` (`Projectile.java:346-349`): the spawn packet's
+        // generic "data" int carries the owner's entity id.
+        entity.data.store(shooter.entity_id, Ordering::Relaxed);
         let mut launch_event =
             crate::plugin::api::events::entity::projectile_launch::ProjectileLaunchEvent::new(
                 entity.entity_id,

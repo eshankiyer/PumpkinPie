@@ -221,6 +221,43 @@ impl Worldborder {
         )
     }
 
+    /// Vanilla `WorldBorder.clampVec3ToBound(double, double, double)`
+    /// (`WorldBorder.java:92-94`): clamps `x`/`z` into
+    /// `[min, max - 1.0E-5]` without flooring, unlike `clamp_block` which floors
+    /// to a `BlockPos`. Returns the clamped `(x, z)`.
+    #[must_use]
+    pub fn clamp_vec3(&self, x: f64, z: f64) -> (f64, f64) {
+        let (min_x, max_x, min_z, max_z) = self.bounds();
+        (
+            clamp(x, min_x, max_x - 1.0e-5),
+            clamp(z, min_z, max_z - 1.0e-5),
+        )
+    }
+
+    /// Vanilla `WorldBorder.getMinX()` (`WorldBorder.java:123-125`).
+    #[must_use]
+    pub fn min_x(&self) -> f64 {
+        self.bounds().0
+    }
+
+    /// Vanilla `WorldBorder.getMaxX()` (`WorldBorder.java:139-141`).
+    #[must_use]
+    pub fn max_x(&self) -> f64 {
+        self.bounds().1
+    }
+
+    /// Vanilla `WorldBorder.getMinZ()` (`WorldBorder.java:131-133`).
+    #[must_use]
+    pub fn min_z(&self) -> f64 {
+        self.bounds().2
+    }
+
+    /// Vanilla `WorldBorder.getMaxZ()` (`WorldBorder.java:147-149`).
+    #[must_use]
+    pub fn max_z(&self) -> f64 {
+        self.bounds().3
+    }
+
     #[must_use]
     pub fn contains(&self, x: f64, z: f64) -> bool {
         self.contains_with_margin(x, z, 0.0)
