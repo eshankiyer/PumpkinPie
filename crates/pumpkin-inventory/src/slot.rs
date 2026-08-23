@@ -169,6 +169,34 @@ pub trait Slot: Send + Sync {
         })
     }
 
+    /// Called when an item is taken from this slot, for achievement/stat tracking.
+    ///
+    /// Mojang name: `checkTakeAchievements`
+    fn check_take_achievements<'a>(&'a self, _stack: &'a ItemStack) -> BoxFuture<'a, ()> {
+        Box::pin(async {})
+    }
+
+    /// Whether this slot is a fake/recipe-book slot.
+    ///
+    /// Mojang name: `isFake`
+    fn is_fake(&self) -> bool {
+        false
+    }
+
+    /// Whether this slot can be highlighted by the recipe book.
+    ///
+    /// Mojang name: `isHighlightable`
+    fn is_highlightable(&self) -> bool {
+        true
+    }
+
+    /// Called when items are swapped in a crafting grid.
+    ///
+    /// Mojang name: `onSwapCraft`
+    fn on_swap_craft(&self, _count: i32) -> BoxFuture<'_, ()> {
+        Box::pin(async {})
+    }
+
     /// Removes a specific amount of items from this slot.
     ///
     /// Mojang name: `remove`

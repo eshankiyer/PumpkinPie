@@ -54,4 +54,12 @@ impl ItemBasedSteering {
             1.0
         }
     }
+
+    /// Called when the boost time data is synced to the client.
+    /// Resets the boosting state to start a new boost animation.
+    /// Vanilla: `ItemBasedSteering.onSynced()` (ItemBasedSteering.java:21-24).
+    pub fn on_synced(&self) {
+        self.boosting.store(true, Ordering::Relaxed);
+        self.boost_time.store(0, Ordering::Relaxed);
+    }
 }

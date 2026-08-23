@@ -72,6 +72,12 @@ impl LecternScreenHandler {
 
         handler
     }
+
+    /// `LecternMenu.getBook` (LecternMenu.java:90-92): returns the book item
+    /// currently in the lectern's single slot.
+    pub async fn get_book(&self) -> ItemStack {
+        self.inventory.get_stack(0).await
+    }
 }
 
 impl ScreenHandler for LecternScreenHandler {
