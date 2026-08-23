@@ -213,6 +213,7 @@ use pumpkin_data::data_component_impl::{
 use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, ToolImpl, WeaponImpl};
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::{EntityPose, EntityStatus, EntityType};
+use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::particle::Particle;
 use pumpkin_data::sound::{Sound, SoundCategory};
@@ -1730,16 +1731,30 @@ impl Player {
 
         if is_mace_smash {
             let fall_distance = self.living_entity.fall_distance.load();
+            // `MaceItem.hurtEnemy` resets the attacker's vertical impulse and chooses the
+            // ground/air smash sound from the victim's on-ground state
+            // (`MaceItem.java:51-69`). The velocity dirty flag lets the normal entity update
+            // send the resulting motion to clients.
+            let mut velocity = self.living_entity.entity.velocity.load();
+            velocity.y = 0.01;
+            self.living_entity.entity.set_velocity(velocity);
             self.living_entity.fall_distance.store(0.0);
             world.play_sound(
-                if fall_distance > 5.0 {
-                    Sound::ItemMaceSmashGroundHeavy
+                if victim_entity.on_ground.load(Ordering::Relaxed) {
+                    if fall_distance > 5.0 {
+                        Sound::ItemMaceSmashGroundHeavy
+                    } else {
+                        Sound::ItemMaceSmashGround
+                    }
                 } else {
-                    Sound::ItemMaceSmashGround
+                    Sound::ItemMaceSmashAir
                 },
                 SoundCategory::Players,
                 &pos,
             );
+            // Vanilla additionally marks this impulse as fall-damage-immune and sends an
+            // immediate velocity packet (`MaceItem.java:54-58`). Pumpkin has no matching
+            // impulse marker; authoritative velocity is preserved above.
 
             combat::mace_smash_knockback(
                 &world,
@@ -2162,10 +2177,17 @@ impl Player {
             return;
         }
 
-        let damage = self
-            .inventory()
-            .held_item()
-            .await
+        let held = self.inventory().held_item().await;
+        // `ShearsItem.mineBlock` does not damage shears when the mined state is in
+        // `BlockTags.FIRE` (`ShearsItem.java:48-58`). The common Rust destroy path
+        // supplies the same tool damage for all tool components, so preserve that
+        // item-specific exception here.
+        if held.item.id == Item::SHEARS.id
+            && Block::from_state_id(state.id).has_tag(&tag::Block::MINECRAFT_FIRE)
+        {
+            return;
+        }
+        let damage = held
             .get_data_component::<ToolImpl>()
             .map_or(0, |tool| tool.damage_per_block as i32);
 

@@ -1,0 +1,188 @@
+[
+ {
+  "subsystem": "item",
+  "vanilla_class": "JukeboxSong",
+  "vanilla_path": "net/minecraft/world/item/JukeboxSong.java",
+  "rust_file": "crates/pumpkin-data/src/generated/jukebox_song.rs",
+  "absent": [
+   "fromStack",
+   "hasFinished"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "LingeringPotionItem",
+  "vanilla_path": "net/minecraft/world/item/LingeringPotionItem.java",
+  "rust_file": "crates/pumpkin/src/item/items/potions.rs",
+  "absent": [
+   "createPotion",
+   "use"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "MaceItem",
+  "vanilla_path": "net/minecraft/world/item/MaceItem.java",
+  "rust_file": "crates/pumpkin/src/item/items/mace.rs",
+  "absent": [
+   "createToolProperties",
+   "hurtEnemy"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "ShearsItem",
+  "vanilla_path": "net/minecraft/world/item/ShearsItem.java",
+  "rust_file": "crates/pumpkin/src/item/items/shears.rs",
+  "absent": [
+   "createToolProperties",
+   "mineBlock"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "SnowballItem",
+  "vanilla_path": "net/minecraft/world/item/SnowballItem.java",
+  "rust_file": "crates/pumpkin/src/item/items/snowball.rs",
+  "absent": [
+   "asProjectile",
+   "use"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "SplashPotionItem",
+  "vanilla_path": "net/minecraft/world/item/SplashPotionItem.java",
+  "rust_file": "crates/pumpkin/src/item/items/potions.rs",
+  "absent": [
+   "createPotion",
+   "use"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "BoatItem",
+  "vanilla_path": "net/minecraft/world/item/BoatItem.java",
+  "rust_file": "crates/pumpkin/src/item/items/boat.rs",
+  "absent": [
+   "use"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "BrushItem",
+  "vanilla_path": "net/minecraft/world/item/BrushItem.java",
+  "rust_file": "crates/pumpkin/src/item/items/brush.rs",
+  "absent": [
+   "getUseAnimation"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "Enchantments",
+  "vanilla_path": "net/minecraft/world/item/enchantment/Enchantments.java",
+  "rust_file": "crates/pumpkin-data/src/generated/enchantments.rs",
+  "absent": [
+   "bootstrap"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "EnderEyeItem",
+  "vanilla_path": "net/minecraft/world/item/EnderEyeItem.java",
+  "rust_file": "crates/pumpkin/src/item/items/ender_eye.rs",
+  "absent": [
+   "use"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "EnderpearlItem",
+  "vanilla_path": "net/minecraft/world/item/EnderpearlItem.java",
+  "rust_file": "crates/pumpkin/src/item/items/ender_pearl.rs",
+  "absent": [
+   "use"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "FishingRodItem",
+  "vanilla_path": "net/minecraft/world/item/FishingRodItem.java",
+  "rust_file": "crates/pumpkin/src/item/items/fishing_rod.rs",
+  "absent": [
+   "use"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "HangingSignItem",
+  "vanilla_path": "net/minecraft/world/item/HangingSignItem.java",
+  "rust_file": "crates/pumpkin/src/block/entities/hanging_sign.rs",
+  "absent": [
+   "canPlace"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "InkSacItem",
+  "vanilla_path": "net/minecraft/world/item/InkSacItem.java",
+  "rust_file": "crates/pumpkin/src/item/items/ink_sac.rs",
+  "absent": [
+   "tryApplyToSign"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "KnowledgeBookItem",
+  "vanilla_path": "net/minecraft/world/item/KnowledgeBookItem.java",
+  "rust_file": "crates/pumpkin/src/item/items/knowledge_book.rs",
+  "absent": [
+   "use"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "LeadItem",
+  "vanilla_path": "net/minecraft/world/item/LeadItem.java",
+  "rust_file": "crates/pumpkin/src/item/items/lead.rs",
+  "absent": [
+   "bindPlayerMobs"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "NameTagItem",
+  "vanilla_path": "net/minecraft/world/item/NameTagItem.java",
+  "rust_file": "crates/pumpkin/src/item/items/name_tag.rs",
+  "absent": [
+   "interactLivingEntity"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "PotionItem",
+  "vanilla_path": "net/minecraft/world/item/PotionItem.java",
+  "rust_file": "crates/pumpkin/src/item/items/potions.rs",
+  "absent": [
+   "getDefaultInstance"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "Potions",
+  "vanilla_path": "net/minecraft/world/item/alchemy/Potions.java",
+  "rust_file": "crates/pumpkin/src/item/items/potions.rs",
+  "absent": [
+   "bootstrap"
+  ]
+ },
+ {
+  "subsystem": "item",
+  "vanilla_class": "ScaffoldingBlockItem",
+  "vanilla_path": "net/minecraft/world/item/ScaffoldingBlockItem.java",
+  "rust_file": "crates/pumpkin/src/block/blocks/scaffolding.rs",
+  "absent": [
+   "mustSurvive"
+  ]
+ }
+]

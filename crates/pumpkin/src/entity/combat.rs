@@ -81,7 +81,7 @@ impl AttackType {
         let held_item = player.inventory().held_item().await;
         let is_mace = held_item.item.id == pumpkin_data::item::Item::MACE.id;
 
-        if is_mace && !on_ground && fall_distance > 1.5 {
+        if is_mace && !on_ground && fall_distance > 1.5 && !entity.is_fall_flying() {
             return Self::MaceSmash;
         }
 
@@ -366,7 +366,8 @@ pub async fn player_attack_sound(pos: &Vector3<f64>, world: &World, attack_type:
             world.play_sound(Sound::EntityPlayerAttackWeak, SoundCategory::Players, pos);
         }
         AttackType::MaceSmash => {
-            world.play_sound(Sound::ItemMaceSmashAir, SoundCategory::Players, pos);
+            // The impact sound is selected in Player.attack using the victim's on-ground
+            // state, matching `MaceItem.hurtEnemy` (`MaceItem.java:60-69`).
         }
     }
 }

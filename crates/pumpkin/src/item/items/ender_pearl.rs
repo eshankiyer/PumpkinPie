@@ -11,6 +11,7 @@ use crate::item::{ItemBehaviour, ItemMetadata};
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::sound::Sound;
+use pumpkin_data::statistic::StatisticCategory;
 
 pub struct EnderPearlItem;
 
@@ -75,6 +76,12 @@ impl ItemBehaviour for EnderPearlItem {
                         .await;
                 }
             }
+
+            // Vanilla `EnderpearlItem.use` awards ITEM_USED after spawning and consuming
+            // (`EnderpearlItem.java:22-40`).
+            player
+                .increment_stat(StatisticCategory::Used, Item::ENDER_PEARL.id as i32, 1)
+                .await;
         })
     }
 
