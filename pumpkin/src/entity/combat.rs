@@ -49,7 +49,13 @@ impl AttackType {
             return Self::Knockback;
         }
 
-        if is_strong && !on_ground && fall_distance > 0.0 {
+        // Vanilla also forbids crits while swimming, climbing, blinded, or riding.
+        let swimming = player.living_entity.is_in_water();
+        let blinded = player
+            .living_entity
+            .has_effect(&pumpkin_data::effect::StatusEffect::BLINDNESS)
+            .await;
+        if is_strong && !on_ground && fall_distance > 0.0 && !swimming && !blinded {
             return Self::Critical;
         }
 
