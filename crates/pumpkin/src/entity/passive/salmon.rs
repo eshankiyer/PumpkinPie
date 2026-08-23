@@ -137,6 +137,7 @@ impl SalmonEntity {
             width: base[0] * scale,
             height: base[1] * scale,
             eye_height: entity.entity_type.eye_height * scale,
+            fixed: false,
         };
         entity.base_dimension.store(dimensions);
         entity.entity_dimension.store(dimensions);

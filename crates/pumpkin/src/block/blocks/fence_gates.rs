@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, GetStateForNeighborUpdateArgs, NormalUseArgs,
+    BlockBehaviour, BlockFuture, ExplodeArgs, GetStateForNeighborUpdateArgs, NormalUseArgs,
     OnNeighborUpdateArgs, OnPlaceArgs,
 };
 use crate::entity::EntityBase;
@@ -98,6 +98,41 @@ pub async fn toggle_fence_gate(
 pub struct FenceGateBlock;
 
 impl BlockBehaviour for FenceGateBlock {
+    /// `FenceGateBlock.onExplosionHit` (`FenceGateBlock.java:166-179`): trigger-block
+    /// explosions open an unpowered gate and emit the corresponding block event. Destroying
+    /// explosions have already replaced the state with air before this hook is called, so the
+    /// state guard naturally limits this translation to the vanilla trigger path.
+    fn explode<'a>(&'a self, args: ExplodeArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            let state = args.world.get_block_state(args.position);
+            let mut properties = FenceGateProperties::from_state_id(state.id, args.block);
+            if properties.powered || state.is_air() {
+                return;
+            }
+
+            properties.open = true;
+            args.world
+                .set_block_state(
+                    args.position,
+                    properties.to_state_id(args.block),
+                    BlockFlags::NOTIFY_LISTENERS,
+                )
+                .await;
+            args.world.play_block_sound(
+                get_sound(args.block, true),
+                SoundCategory::Blocks,
+                *args.position,
+            );
+            emit_game_event(
+                args.world,
+                GameEvent::BlockOpen,
+                args.position.to_centered_f64(),
+                GameEventContext::none(),
+            )
+            .await;
+        })
+    }
+
     fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
         Box::pin(async move {
             let mut fence_gate_props = FenceGateProperties::default(args.block);

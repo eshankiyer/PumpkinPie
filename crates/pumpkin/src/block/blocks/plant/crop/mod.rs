@@ -11,9 +11,10 @@ use pumpkin_world::world::{BlockAccessor, BlockFlags};
 use rand::RngExt;
 
 use crate::{
-    block::blocks::plant::PlantBlockBase, plugin::api::events::block::block_grow::BlockGrowEvent,
-    world::World,
+    block::blocks::plant::PlantBlockBase, entity::EntityBase,
+    plugin::api::events::block::block_grow::BlockGrowEvent, world::World,
 };
+use pumpkin_data::entity::EntityType;
 
 type CropProperties = WheatLikeProperties;
 type FarmlandProperties = FarmlandLikeProperties;
@@ -111,6 +112,23 @@ trait CropBlockBase: PlantBlockBase {
                     .await;
             }
         }
+    }
+}
+
+/// `CropBlock.entityInside`
+///
+/// (`net/minecraft/world/level/block/CropBlock.java:154-162`): a ravager destroys the crop when
+/// `mobGriefing` is enabled. The collision dispatcher already supplies the server world and the
+/// colliding entity, so this is shared by the concrete crops that extend vanilla `CropBlock`.
+pub async fn ravager_destroy_crop(
+    world: &Arc<World>,
+    position: &BlockPos,
+    entity: &dyn EntityBase,
+) {
+    if entity.get_entity().entity_type == &EntityType::RAVAGER
+        && world.level_info.load().game_rules.mob_griefing
+    {
+        world.break_block(position, None, BlockFlags::empty()).await;
     }
 }
 

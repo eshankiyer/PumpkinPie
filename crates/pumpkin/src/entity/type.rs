@@ -900,6 +900,7 @@ fn ocelot_contains_any_liquid(
             width: entity_type.dimension[0],
             height: entity_type.dimension[1],
             eye_height: entity_type.eye_height,
+            fixed: false,
         },
     );
 
@@ -934,6 +935,7 @@ fn ocelot_has_entity_collision(
             width: entity_type.dimension[0],
             height: entity_type.dimension[1],
             eye_height: entity_type.eye_height,
+            fixed: false,
         },
     );
 

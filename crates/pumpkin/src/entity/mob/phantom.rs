@@ -126,6 +126,7 @@ impl PhantomEntity {
             width: original[0] * scale,
             height: original[1] * scale,
             eye_height: entity.entity_type.eye_height * scale,
+            fixed: false,
         };
         entity.base_dimension.store(dimensions);
         entity.entity_dimension.store(dimensions);

@@ -358,6 +358,28 @@ impl EquipmentSlot {
         name: Cow::Borrowed("saddle"),
     });
 
+    /// Vanilla `EquipmentSlot.limit` (`EquipmentSlot.java:57-59`).
+    pub fn limit(
+        &self,
+        mut to_equip: crate::item_stack::ItemStack,
+    ) -> crate::item_stack::ItemStack {
+        let max_count = match self {
+            Self::MainHand(data)
+            | Self::OffHand(data)
+            | Self::Feet(data)
+            | Self::Legs(data)
+            | Self::Chest(data)
+            | Self::Head(data)
+            | Self::Body(data)
+            | Self::Saddle(data) => data.max_count,
+        };
+        if max_count > 0 {
+            to_equip.split(max_count as u8)
+        } else {
+            to_equip
+        }
+    }
+
     #[must_use]
     pub const fn get_entity_slot_id(&self) -> i32 {
         match self {
@@ -433,6 +455,24 @@ impl EquipmentSlot {
     #[must_use]
     pub const fn get_offset_entity_slot_id(&self, offset: i32) -> i32 {
         self.get_entity_slot_id() + offset
+    }
+
+    /// Vanilla `EquipmentSlot.getFilterBit` (`EquipmentSlot.java:65-67`).
+    #[must_use]
+    pub const fn get_filter_bit(&self, offset: i32) -> i32 {
+        self.get_entity_slot_id() + offset
+    }
+
+    /// Vanilla `EquipmentSlot.getSerializedName` (`EquipmentSlot.java:77-80`).
+    #[must_use]
+    pub fn get_serialized_name(&self) -> &str {
+        self.to_name().as_ref()
+    }
+
+    /// Vanilla `EquipmentSlot.canIncreaseExperience` (`EquipmentSlot.java:82-84`).
+    #[must_use]
+    pub const fn can_increase_experience(&self) -> bool {
+        !matches!(self, Self::Saddle(_))
     }
 
     #[must_use]

@@ -112,6 +112,33 @@ impl GossipContainer {
         })
     }
 
+    /// `GossipContainer.getCountForType` (`GossipContainer.java:113-115`).
+    #[must_use]
+    pub fn get_count_for_type(
+        &self,
+        gossip_type: GossipType,
+        mut value_test: impl FnMut(i32) -> bool,
+    ) -> usize {
+        self.entries
+            .values()
+            .filter(|types| {
+                value_test(
+                    types.get(&gossip_type).copied().unwrap_or(0) * gossip_type.data().weight,
+                )
+            })
+            .count()
+    }
+
+    /// `GossipContainer.putAll` (`GossipContainer.java:156-158`).
+    pub fn put_all(&mut self, container: &Self) {
+        for (target, gossips) in &container.entries {
+            self.entries
+                .entry(*target)
+                .or_default()
+                .extend(gossips.iter().map(|(kind, value)| (*kind, *value)));
+        }
+    }
+
     /// `EntityGossips::decay` (`GossipContainer.java:191-203`).
     pub fn decay(&mut self) {
         self.entries.retain(|_, types| {

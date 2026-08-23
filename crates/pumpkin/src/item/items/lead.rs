@@ -51,6 +51,7 @@ impl ItemBehaviour for LeadItem {
                 width: 32.0,
                 height: 32.0,
                 eye_height: 16.0,
+                fixed: false,
             };
 
             let search_box = BoundingBox::new_from_pos(center.x, center.y, center.z, &search_dim);

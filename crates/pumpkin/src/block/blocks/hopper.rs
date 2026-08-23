@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::{
-    BlockFuture, GetComparatorOutputArgs, OnNeighborUpdateArgs, OnPlaceArgs, PlacedArgs,
+    BlockFuture, GetComparatorOutputArgs, OnEntityCollisionArgs, OnNeighborUpdateArgs, OnPlaceArgs,
+    PlacedArgs,
 };
 use crate::block::{
     registry::BlockActionResult,
@@ -58,6 +59,14 @@ pub struct HopperBlock;
 type HopperLikeProperties = pumpkin_data::block_properties::HopperLikeProperties;
 
 impl BlockBehaviour for HopperBlock {
+    /// `HopperBlock.entityInside` (`HopperBlock.java:163-169`) delegates item pickup to the
+    /// block entity's `entityInside` transfer path.
+    fn on_entity_collision<'a>(&'a self, args: OnEntityCollisionArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            HopperBlockEntity::entity_inside(args.world, args.position, args.entity).await;
+        })
+    }
+
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
             if let Some(block_entity) = args.world.get_block_entity(args.position)
