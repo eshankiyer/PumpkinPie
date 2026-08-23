@@ -261,6 +261,20 @@ pub trait BlockBehaviour: Send + Sync {
     ) -> &'static BlockState {
         block.rotate(state_id, rotation)
     }
+
+    /// Vanilla `Block#getCloneItemStack` (creative pick-block). Returns an optional item stack
+    /// to give the player when middle-clicking this block, overriding the block's registered
+    /// item. The default (`None`) falls back to the block's `item_id`, matching vanilla's base
+    /// implementation.
+    fn get_clone_item_stack(&self, _args: GetCloneItemStackArgs<'_>) -> Option<ItemStack> {
+        None
+    }
+}
+
+pub struct GetCloneItemStackArgs<'a> {
+    pub world: &'a Arc<World>,
+    pub block: &'a Block,
+    pub position: &'a BlockPos,
 }
 
 #[derive(Clone, Copy)]

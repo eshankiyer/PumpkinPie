@@ -9,6 +9,7 @@ use crate::item::{ItemBehaviour, ItemMetadata};
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::sound::Sound;
+use pumpkin_data::statistic::StatisticCategory;
 
 pub struct SnowBallItem;
 
@@ -64,6 +65,12 @@ impl ItemBehaviour for SnowBallItem {
                         .await;
                 }
             }
+
+            // Vanilla `SnowballItem.use` awards ITEM_USED after spawning and consuming
+            // (`SnowballItem.java:24-42`).
+            player
+                .increment_stat(StatisticCategory::Used, Item::SNOWBALL.id as i32, 1)
+                .await;
         })
     }
 

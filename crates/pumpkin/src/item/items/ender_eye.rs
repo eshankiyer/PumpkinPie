@@ -128,6 +128,17 @@ impl ItemBehaviour for EnderEyeItem {
             );
             eye.signal_to(target_vec).await;
 
+            // Vanilla emits PROJECTILE_SHOOT before adding the eye to the level
+            // (`EnderEyeItem.java:92-96`).
+            if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
+                crate::world::game_event::emit_game_event(
+                    &world,
+                    pumpkin_data::game_event::GameEvent::ProjectileShoot,
+                    spawn_pos,
+                    crate::world::game_event::GameEventContext::of_entity(player_arc),
+                )
+                .await;
+            }
             world.spawn_entity(eye).await;
 
             let pitch = 0.33f32 + rand::random::<f32>() * (0.5 - 0.33);
@@ -143,6 +154,13 @@ impl ItemBehaviour for EnderEyeItem {
             let mut stack = player.inventory.held_item().await;
             stack.decrement_unless_creative(player.gamemode.load(), 1);
             player.inventory.set_held_item(stack).await;
+            player
+                .increment_stat(
+                    pumpkin_data::statistic::StatisticCategory::Used,
+                    Item::ENDER_EYE.id as i32,
+                    1,
+                )
+                .await;
         })
     }
 

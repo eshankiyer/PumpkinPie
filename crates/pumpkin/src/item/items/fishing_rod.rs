@@ -11,6 +11,7 @@ use crate::item::{ItemBehaviour, ItemMetadata};
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::statistic::StatisticCategory;
 
 pub struct FishingRodItem;
 
@@ -65,6 +66,21 @@ impl ItemBehaviour for FishingRodItem {
 
                 let bobber_arc: Arc<FishingBobberEntity> = Arc::new(bobber);
                 world.spawn_entity(bobber_arc).await;
+
+                // Vanilla awards ITEM_USED and emits ITEM_INTERACT_START on the cast path
+                // (`FishingRodItem.java:52-59`).
+                player
+                    .increment_stat(StatisticCategory::Used, Item::FISHING_ROD.id as i32, 1)
+                    .await;
+                if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
+                    crate::world::game_event::emit_game_event(
+                        &world,
+                        pumpkin_data::game_event::GameEvent::ItemInteractStart,
+                        player.position(),
+                        crate::world::game_event::GameEventContext::of_entity(player_arc),
+                    )
+                    .await;
+                }
             } else {
                 // Reel in
                 if let Some(bobber_base) = world.get_entity_by_id(bobber_id) {
@@ -87,6 +103,18 @@ impl ItemBehaviour for FishingRodItem {
                     1.0,
                     bobber_sound_pitch(rand::random()),
                 );
+
+                // Vanilla emits ITEM_INTERACT_FINISH on the reel-in path
+                // (`FishingRodItem.java:24-40`).
+                if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
+                    crate::world::game_event::emit_game_event(
+                        &world,
+                        pumpkin_data::game_event::GameEvent::ItemInteractFinish,
+                        player.position(),
+                        crate::world::game_event::GameEventContext::of_entity(player_arc),
+                    )
+                    .await;
+                }
             }
         })
     }

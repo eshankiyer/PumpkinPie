@@ -14,15 +14,16 @@ impl JavaClient {
         let world = player.world();
         let block = world.get_block(&pick_item.pos);
 
-        if block.item_id == 0 {
-            // Invalid block id (blocks such as tall seagrass)
-            return;
-        }
-
-        let Some(item) = Item::from_id(block.item_id) else {
+        // Vanilla `Block#getCloneItemStack`: a block may override the item a player receives when
+        // middle-clicking it (e.g. attached stems give their seed). Otherwise fall back to the
+        // block's registered item; an `item_id` of 0 means the block cannot be picked.
+        let Some(stack) = world
+            .block_registry
+            .get_clone_item_stack(block, &world, &pick_item.pos)
+            .or_else(|| Item::from_id(block.item_id).map(|item| ItemStack::new(1, item)))
+        else {
             return;
         };
-        let stack = ItemStack::new(1, item);
 
         let slot_with_stack = player.inventory().get_slot_with_stack(&stack).await;
 

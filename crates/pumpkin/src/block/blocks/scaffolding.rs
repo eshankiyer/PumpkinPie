@@ -81,9 +81,14 @@ impl BlockBehaviour for ScaffoldingBlock {
         })
     }
 
-    /// `ScaffoldingBlock.canSurvive`: `getDistance(level, pos) < 7`.
+    /// `ScaffoldingBlockItem.mustSurvive` is false (`ScaffoldingBlockItem.java:66-69`),
+    /// so placement is allowed at distance 7 and the scheduled tick performs the vanilla
+    /// falling/destroying transition. The block's separate `canSurvive` predicate is
+    /// `getDistance(level, pos) < 7` (`ScaffoldingBlock.java:131-134`), but this hook is the
+    /// placement-time check in Pumpkin's block-item path.
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
-        Self::get_distance(args.block_accessor, args.position) < MAX_DISTANCE
+        let _ = args;
+        true
     }
 
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {

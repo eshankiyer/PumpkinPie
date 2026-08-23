@@ -1,6 +1,8 @@
 use pumpkin_data::{
     Block, BlockDirection, BlockStateId,
     block_properties::{BambooLeaves, BambooLikeProperties, BlockProperties},
+    item::Item,
+    item_stack::ItemStack,
     tag::Taggable,
 };
 use pumpkin_macros::pumpkin_block;
@@ -9,8 +11,8 @@ use pumpkin_world::world::{BlockAccessor, BlockFlags};
 use rand::RngExt;
 
 use crate::block::{
-    BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
-    OnNeighborUpdateArgs, blocks::plant::PlantBlockBase,
+    BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetCloneItemStackArgs,
+    GetStateForNeighborUpdateArgs, OnNeighborUpdateArgs, blocks::plant::PlantBlockBase,
 };
 
 #[pumpkin_block("minecraft:bamboo_sapling")]
@@ -75,6 +77,12 @@ impl BlockBehaviour for BambooSaplingBlock {
             }
             grow_bamboo(args.world, args.position).await;
         })
+    }
+
+    /// Vanilla `BambooSaplingBlock#getCloneItemStack` (BambooSaplingBlock.java:72): middle-clicking
+    /// a bamboo sapling yields a bamboo stalk rather than the (unobtainable) sapling block.
+    fn get_clone_item_stack(&self, _args: GetCloneItemStackArgs<'_>) -> Option<ItemStack> {
+        Some(ItemStack::new(1, &Item::BAMBOO))
     }
 }
 

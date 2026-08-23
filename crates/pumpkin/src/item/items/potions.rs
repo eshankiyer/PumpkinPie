@@ -11,6 +11,7 @@ use crate::item::{ItemBehaviour, ItemMetadata};
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::statistic::StatisticCategory;
 
 pub struct PotionItem;
 pub struct SplashPotionItem;
@@ -64,6 +65,15 @@ impl ItemBehaviour for SplashPotionItem {
         Box::pin(async move {
             let position = player.position();
             let world = player.world();
+            // Vanilla `SplashPotionItem.use` plays this sound before delegating to
+            // `ThrowablePotionItem.use` (`SplashPotionItem.java:21-32`).
+            world.play_sound_fine(
+                pumpkin_data::sound::Sound::EntitySplashPotionThrow,
+                pumpkin_data::sound::SoundCategory::Players,
+                &position,
+                0.5,
+                super::throw_sound_pitch(rand::random()),
+            );
             let entity = Entity::new(world.clone(), position, &EntityType::SPLASH_POTION);
             let splash = SplashPotionEntity::new_shot(entity, player.get_entity());
 
@@ -104,6 +114,12 @@ impl ItemBehaviour for SplashPotionItem {
                     .set_stack_in_hand(pumpkin_util::Hand::Left, s)
                     .await;
             }
+
+            // `ThrowablePotionItem.use` awards ITEM_USED after spawning and consuming
+            // (`ThrowablePotionItem.java:23-31`).
+            player
+                .increment_stat(StatisticCategory::Used, Item::SPLASH_POTION.id as i32, 1)
+                .await;
         })
     }
 
@@ -121,6 +137,15 @@ impl ItemBehaviour for LingeringPotionItem {
         Box::pin(async move {
             let position = player.position();
             let world = player.world();
+            // Vanilla `LingeringPotionItem.use` plays this sound before delegating to
+            // `ThrowablePotionItem.use` (`LingeringPotionItem.java:21-32`).
+            world.play_sound_fine(
+                pumpkin_data::sound::Sound::EntityLingeringPotionThrow,
+                pumpkin_data::sound::SoundCategory::Neutral,
+                &position,
+                0.5,
+                super::throw_sound_pitch(rand::random()),
+            );
             let entity = Entity::new(world.clone(), position, &EntityType::LINGERING_POTION);
             let ling = LingeringPotionEntity::new_shot(entity, player.get_entity());
 
@@ -161,6 +186,12 @@ impl ItemBehaviour for LingeringPotionItem {
                     .set_stack_in_hand(pumpkin_util::Hand::Left, s)
                     .await;
             }
+
+            // `ThrowablePotionItem.use` awards ITEM_USED after spawning and consuming
+            // (`ThrowablePotionItem.java:23-31`).
+            player
+                .increment_stat(StatisticCategory::Used, Item::LINGERING_POTION.id as i32, 1)
+                .await;
         })
     }
 
