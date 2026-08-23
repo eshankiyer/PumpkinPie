@@ -655,7 +655,9 @@ impl ChunkData {
             tick_comp.put_int("z", tick.position.0.z);
             tick_comp.put_int(
                 "t",
-                i32::try_from(tick.delay).expect("scheduled tick delay must fit vanilla's NBT int"),
+                i32::try_from(tick.delay).unwrap_or_else(|_| {
+                    unreachable!("scheduled tick delay must fit vanilla's NBT int")
+                }),
             );
             tick_comp.put_int("p", tick.priority as i32);
             tick_comp.put_string("i", tick.value.to_resource_location());
@@ -671,7 +673,9 @@ impl ChunkData {
             tick_comp.put_int("z", tick.position.0.z);
             tick_comp.put_int(
                 "t",
-                i32::try_from(tick.delay).expect("scheduled tick delay must fit vanilla's NBT int"),
+                i32::try_from(tick.delay).unwrap_or_else(|_| {
+                    unreachable!("scheduled tick delay must fit vanilla's NBT int")
+                }),
             );
             tick_comp.put_int("p", tick.priority as i32);
             tick_comp.put_string("i", tick.value.to_resource_location());

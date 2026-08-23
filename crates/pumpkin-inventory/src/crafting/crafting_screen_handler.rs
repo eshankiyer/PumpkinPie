@@ -278,13 +278,12 @@ async fn recipe_matches(
             if input_count != 1 || material_count != MATERIAL_COUNT {
                 return None;
             }
+            let input_stack = input_stack.as_ref()?;
 
             Some(RecipeResult::transmuted(
                 result.id.to_string(),
                 result.count,
-                input_stack
-                    .as_ref()
-                    .expect("matched transmute recipe has an input"),
+                input_stack,
             ))
         }
         GenericRecipe::Vanilla(CraftingRecipeTypes::CraftingDecoratedPot { .. }) => {
@@ -303,9 +302,9 @@ async fn recipe_matches(
                 }
                 decorations.push(std::borrow::Cow::Borrowed(slot.item.registry_key));
             }
-            let decorations = decorations
-                .try_into()
-                .expect("decorated pot recipe has exactly four ingredients");
+            let Ok(decorations) = decorations.try_into() else {
+                return None;
+            };
             Some(RecipeResult {
                 item_id: "minecraft:decorated_pot".to_string(),
                 count: 1,

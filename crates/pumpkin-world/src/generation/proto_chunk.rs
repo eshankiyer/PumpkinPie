@@ -1158,7 +1158,8 @@ impl ProtoChunk {
         y: i32,
         z: i32,
     ) -> &'static Biome {
-        Biome::from_id(self.get_terrain_gen_biome_id_in(neighborhood, x, y, z)).unwrap()
+        Biome::from_id(self.get_terrain_gen_biome_id_in(neighborhood, x, y, z))
+            .unwrap_or(&Biome::PLAINS)
     }
 
     #[expect(clippy::too_many_lines)]

@@ -144,7 +144,8 @@ impl<'a, T: std::hash::Hash + Eq + 'static> FromIterator<ScheduledTick<&'a T>>
         for (sub_tick_order, tick) in iter.into_iter().enumerate() {
             scheduler.schedule_tick(
                 &tick,
-                u64::try_from(sub_tick_order).expect("iterator index must fit into u64"),
+                u64::try_from(sub_tick_order)
+                    .unwrap_or_else(|_| unreachable!("iterator index must fit into u64")),
             );
         }
         scheduler

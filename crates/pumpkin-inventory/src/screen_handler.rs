@@ -1062,14 +1062,10 @@ pub trait ScreenHandler: Send + Sync {
                         // slot to be non-empty, matching `!other.isEmpty()`.
                         let intercepted = if !cursor_stack.is_empty()
                             && !slot_stack.is_empty()
-                            && cursor_stack
-                                .get_data_component::<pumpkin_data::data_component_impl::BundleContentsImpl>()
-                                .is_some()
+                            && let Some(bundle) = cursor_stack
+                                .get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
                         {
                             let mut inner_slot_stack = slot.get_stack().await;
-                            let bundle = cursor_stack
-                                .get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
-                                .expect("checked above");
                             let inserted = bundle.try_insert(&mut inner_slot_stack);
                             if inner_slot_stack.item_count == 0 {
                                 inner_slot_stack = ItemStack::EMPTY.clone();

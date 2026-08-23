@@ -132,7 +132,10 @@ impl ChunkSections {
     /// [`ChunkData::pad_sections_to`] grows the chunk.
     #[must_use]
     pub fn section_count(&self) -> usize {
-        self.block_sections.read().unwrap().len()
+        self.block_sections
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len()
     }
 
     #[cfg(test)]

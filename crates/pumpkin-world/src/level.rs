@@ -678,7 +678,10 @@ impl Level {
     /// `forceload add` would leave the chunk pinned after `forceload remove`.
     pub fn set_chunk_forced(&self, pos: Vector2<i32>, forced: bool) -> bool {
         let changed = {
-            let mut set = self.forced_chunks.lock().unwrap();
+            let mut set = self
+                .forced_chunks
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if forced {
                 set.insert(pos)
             } else {
@@ -686,7 +689,10 @@ impl Level {
             }
         };
         if changed {
-            let mut lock = self.chunk_loading.lock().unwrap();
+            let mut lock = self
+                .chunk_loading
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if forced {
                 lock.add_ticket(pos, Self::FORCED_CHUNK_LEVEL);
             } else {
@@ -700,11 +706,17 @@ impl Level {
     /// Drops every `/forceload` ticket. Returns the number of chunks that were forced.
     pub fn clear_forced_chunks(&self) -> usize {
         let removed: Vec<_> = {
-            let mut set = self.forced_chunks.lock().unwrap();
+            let mut set = self
+                .forced_chunks
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             set.drain().collect()
         };
         if !removed.is_empty() {
-            let mut lock = self.chunk_loading.lock().unwrap();
+            let mut lock = self
+                .chunk_loading
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             for pos in &removed {
                 lock.remove_ticket(*pos, Self::FORCED_CHUNK_LEVEL);
             }
@@ -715,17 +727,31 @@ impl Level {
 
     #[must_use]
     pub fn is_chunk_forced(&self, pos: &Vector2<i32>) -> bool {
-        self.forced_chunks.lock().unwrap().contains(pos)
+        self.forced_chunks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(pos)
     }
 
     #[must_use]
     pub fn forced_chunks(&self) -> Vec<Vector2<i32>> {
-        self.forced_chunks.lock().unwrap().iter().copied().collect()
+        self.forced_chunks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .copied()
+            .collect()
     }
 
     /// Allocation-free variant of `forced_chunks` for the per-tick active-chunk sweep.
     pub fn extend_with_forced_chunks(&self, out: &mut FxHashSet<Vector2<i32>>) {
-        out.extend(self.forced_chunks.lock().unwrap().iter().copied());
+        out.extend(
+            self.forced_chunks
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .copied(),
+        );
     }
 
     pub async fn get_or_fetch_chunk<R, F: Fn(&SyncChunk) -> R>(

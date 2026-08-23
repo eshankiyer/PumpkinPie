@@ -118,7 +118,9 @@ where
         nbt.put_int("z", self.position.0.z);
         nbt.put_int(
             "t",
-            i32::try_from(self.delay).expect("scheduled tick delay must fit vanilla's NBT int"),
+            i32::try_from(self.delay).unwrap_or_else(|_| {
+                unreachable!("scheduled tick delay must fit vanilla's NBT int")
+            }),
         );
         nbt.put_int("p", self.priority as i32);
         nbt.put_string("i", self.value.to_resource_location());

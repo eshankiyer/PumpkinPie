@@ -5,6 +5,7 @@ use crate::{
     value::{ErasedRegistryRef, LockedIterator, RegistryRef},
 };
 use pumpkin_util::identifier::Identifier;
+use rustc_hash::FxHashMap;
 use std::any::{Any, TypeId, type_name};
 use tokio::sync::{RwLock, RwLockReadGuard};
 pub struct MutableRegistry<T: Send + Sync + 'static>(pub(crate) RwLock<RegistryBuilder<T>>);
@@ -117,13 +118,16 @@ impl<T: Send + Sync + 'static> Registry for MutableRegistry<T> {
 
             match erased.downcast::<MutableRegistry<BoxedRegistry>>() {
                 Ok(registry) => Box::new(registry.into_nested_immutable().await) as BoxedRegistry,
-                Err(erased) => {
-                    let registry = erased
-                        .downcast::<Self>()
-                        .expect("downcast back to MutableRegistry<T> must succeed");
-
-                    Box::new(ImmutableRegistry::from(*registry)) as BoxedRegistry
-                }
+                Err(erased) => erased.downcast::<Self>().map_or_else(
+                    |_| {
+                        Box::new(ImmutableRegistry::<T>::new(
+                            &[],
+                            Box::new([]),
+                            FxHashMap::default(),
+                        )) as BoxedRegistry
+                    },
+                    |registry| Box::new(ImmutableRegistry::from(*registry)) as BoxedRegistry,
+                ),
             }
         })
     }

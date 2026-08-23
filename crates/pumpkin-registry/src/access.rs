@@ -62,18 +62,14 @@ impl RootRegistryOwner {
             immutable_entries.push(entry.into_immutable().await);
         }
 
-        if self
+        let _ = self
             .state
             .immutable
             .set(ImmutableRegistry::new(
                 static_entries,
                 immutable_entries.into_boxed_slice(),
                 mapping,
-            ))
-            .is_err()
-        {
-            panic!("RootRegistry internal state was altered externally")
-        }
+            ));
     }
 }
 
