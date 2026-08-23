@@ -202,16 +202,6 @@ impl ItemBehaviour for BoatItem {
                 )
                 .await;
             player.inventory.set_held_item(stack).await;
-
-            // TODO: world.emitGameEvent(user, GameEvent.ENTITY_PLACE, hitResult.getPos())
-            // TODO: user.incrementStat(Stats.USED.getOrCreateStat(this))
-            player
-                .increment_stat(
-                    pumpkin_data::statistic::StatisticCategory::Used,
-                    item.id as i32,
-                    1,
-                )
-                .await;
         })
     }
 

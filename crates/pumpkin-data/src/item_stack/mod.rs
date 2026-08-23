@@ -2,8 +2,8 @@ use crate::data_component::DataComponent;
 use crate::data_component::DataComponent::Enchantments;
 use crate::data_component_impl::{
     BlocksAttacksImpl, ConsumableImpl, CustomDataImpl, DamageImpl, DataComponentImpl,
-    EnchantmentsImpl, IDSet, MaxDamageImpl, MaxStackSizeImpl, ToolImpl, UnbreakableImpl,
-    UseCooldownImpl, get, get_mut, read_data,
+    EnchantmentsImpl, IDSet, MaxDamageImpl, MaxStackSizeImpl, PotionContentsImpl, ToolImpl,
+    UnbreakableImpl, UseCooldownImpl, get, get_mut, read_data,
 };
 use crate::item::Item;
 use crate::recipes::RecipeResultStruct;
@@ -99,10 +99,26 @@ static ITEM_STACK_ID_GEN: ItemStackIdGenerator = ItemStackIdGenerator::new();
 impl ItemStack {
     #[must_use]
     pub fn new(item_count: u8, item: &'static Item) -> Self {
+        let patch = if item.id == Item::POTION.id {
+            // `PotionItem.getDefaultInstance` installs `PotionContents(Potions.WATER)`
+            // (`PotionItem.java:28-32`). The generated item table carries the empty
+            // component shape, so new stacks need this item-specific default overlay.
+            vec![(
+                DataComponent::PotionContents,
+                Some(Box::new(PotionContentsImpl {
+                    potion_id: Some(crate::potion::Potion::WATER.id as i32),
+                    custom_color: None,
+                    custom_effects: Vec::new(),
+                    custom_name: None,
+                }) as Box<dyn DataComponentImpl>),
+            )]
+        } else {
+            Vec::new()
+        };
         Self {
             item_count,
             item,
-            patch: Vec::new(),
+            patch,
 
             uid: ITEM_STACK_ID_GEN.next_id(),
         }
