@@ -468,6 +468,10 @@ impl StructurePiece {
 
     /// Places a chest with a deferred loot table at the given local coordinates.
     ///
+    /// This preserves `StructurePiece.createChest`: it leaves an existing chest
+    /// untouched and reorients a new chest against its neighbours
+    /// (`net/minecraft/world/level/levelgen/structure/StructurePiece.java:450-471`).
+    ///
     /// Returns `true` if the chest was placed (i.e., the position is within the bounding box),
     /// `false` otherwise.
     #[allow(clippy::too_many_arguments)]
@@ -488,12 +492,12 @@ impl StructurePiece {
             return false;
         }
 
-        chunk.set_block_state(
-            world_pos.x,
-            world_pos.y,
-            world_pos.z,
-            Block::CHEST.default_state,
-        );
+        if chunk.get_block_state(&world_pos).to_block() == &Block::CHEST {
+            return false;
+        }
+
+        let chest_state = reorient(chunk, &world_pos, &Block::CHEST, Block::CHEST.default_state);
+        chunk.set_block_state(world_pos.x, world_pos.y, world_pos.z, chest_state);
 
         let mut nbt = NbtCompound::new();
         nbt.put_string("id", "minecraft:chest".to_string());
@@ -508,8 +512,10 @@ impl StructurePiece {
     }
 
     /// Places a dispenser facing `facing` with a deferred loot table at the given local
-    /// coordinates. Matches `StructurePiece.createDispenser`: placed through [`Self::place_block`]
-    /// so the piece's mirror/rotation apply to the facing, unlike [`Self::add_chest`].
+    /// coordinates. Matches `StructurePiece.createDispenser`: an existing dispenser is left
+    /// untouched, and the placement goes through [`Self::place_block`] so the piece's
+    /// mirror/rotation apply to the facing.
+    /// (`net/minecraft/world/level/levelgen/structure/StructurePiece.java:474-494`).
     ///
     /// Returns `true` if the dispenser was placed (i.e. the position is within the bounding box),
     /// `false` otherwise.
@@ -530,6 +536,10 @@ impl StructurePiece {
 
         let world_pos = self.offset_pos(x, y, z);
         if !bb.contains_pos(&world_pos) {
+            return false;
+        }
+
+        if chunk.get_block_state(&world_pos).to_block() == &Block::DISPENSER {
             return false;
         }
 

@@ -40,7 +40,7 @@ impl CoralClawFeature {
         ];
         shuffle(&mut possible_directions, random);
 
-        'branches: for &branch_direction in &possible_directions[..branch_count as usize] {
+        for &branch_direction in &possible_directions[..branch_count as usize] {
             let mut pos = pos;
             let sideway_length = random.next_bounded_i32(2) + 1;
             pos = pos.offset(branch_direction.to_offset());
@@ -74,7 +74,10 @@ impl CoralClawFeature {
             for _ in 0..inway_length {
                 pos = pos.offset(claw_direction.to_offset());
                 if !CoralFeature::generate_coral_piece(chunk, block_registry, random, block, pos) {
-                    continue 'branches;
+                    // Mirrors `CoralClawFeature.placeFeature` (`CoralClawFeature.java:54-58`):
+                    // a failed inway placement ends this branch, then the next shuffled branch
+                    // is attempted.
+                    break;
                 }
                 if random.next_f32() < 0.25 {
                     pos = pos.up();

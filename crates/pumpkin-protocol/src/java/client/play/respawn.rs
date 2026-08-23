@@ -29,6 +29,14 @@ impl CRespawn {
             data_kept,
         }
     }
+
+    /// Returns whether the respawn packet keeps the data selected by `mask`.
+    ///
+    /// Mirrors `ClientboundRespawnPacket.shouldKeep` (`ClientboundRespawnPacket.java:34-36`).
+    #[must_use]
+    pub const fn should_keep(&self, mask: u8) -> bool {
+        (self.data_kept & mask) != 0
+    }
 }
 
 impl ClientPacket for CRespawn {

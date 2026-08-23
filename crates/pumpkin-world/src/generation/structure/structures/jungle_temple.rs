@@ -101,7 +101,7 @@ impl StructurePieceBase for JungleTemplePiece {
         _seed: i64,
         chunk_box: &BlockBox,
     ) {
-        if !self.adjust_height(chunk, random) {
+        if !self.adjust_height(chunk, chunk_box) {
             return;
         }
         let bb = chunk_box;
@@ -760,27 +760,34 @@ const fn set_side_dir(props: &mut RedstoneWireLikeProperties, facing: Horizontal
     }
 }
 impl JungleTemplePiece {
-    fn adjust_height(&mut self, chunk: &ProtoChunk, random: &mut RandomGenerator) -> bool {
+    /// Matches `JungleTemplePiece.postProcess` calling
+    /// `ScatteredFeaturePiece.updateAverageGroundHeight`: average the heightmap
+    /// values for the part of this piece inside the current chunk, then move the
+    /// piece by that average (`net/minecraft/world/level/levelgen/structure/ScatteredFeaturePiece.java:50-75`,
+    /// called by `net/minecraft/world/level/levelgen/structure/structures/JungleTemplePiece.java:61-70`).
+    fn adjust_height(&mut self, chunk: &ProtoChunk, chunk_box: &BlockBox) -> bool {
         if self.height_adjusted {
             return true;
         }
 
-        let ground_offset = -(random.next_bounded_i32(3));
         let bb = self.piece.bounding_box;
-        let mut lowest = i32::MAX;
+        let mut total = 0;
+        let mut count = 0;
 
         for z in bb.min.z..=bb.max.z {
             for x in bb.min.x..=bb.max.x {
-                let y = chunk.get_top_y(&HeightMap::MotionBlockingNoLeaves, x, z);
-                lowest = lowest.min(y);
+                if chunk_box.contains(x, 64, z) {
+                    total += chunk.get_top_y(&HeightMap::MotionBlockingNoLeaves, x, z);
+                    count += 1;
+                }
             }
         }
 
-        if lowest == i32::MAX {
+        if count == 0 {
             return false;
         }
 
-        let shift_y = lowest - self.piece.bounding_box.min.y + ground_offset;
+        let shift_y = total / count - self.piece.bounding_box.min.y;
         self.piece.bounding_box.move_pos(0, shift_y, 0);
         self.height_adjusted = true;
         true

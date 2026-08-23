@@ -5,6 +5,7 @@ use crate::command::errors::command_syntax_error::CommandSyntaxError;
 use crate::command::errors::error_types::CommandErrorType;
 use crate::command::string_reader::StringReader;
 use crate::command::suggestion::suggestions::{Suggestions, SuggestionsBuilder};
+use pumpkin_data::configured_feature::ConfiguredFeature;
 use pumpkin_data::{Advancement, translation};
 use pumpkin_util::identifier::Identifier;
 use pumpkin_util::resource::ResourceKey;
@@ -14,6 +15,8 @@ use std::string::ToString;
 
 pub static ADVANCEMENT_REGISTRY: &Identifier = &Identifier::vanilla_static("advancement");
 pub static BIOME_REGISTRY: &Identifier = &Identifier::vanilla_static("worldgen/biome");
+pub static CONFIGURED_FEATURE_REGISTRY: &Identifier =
+    &Identifier::vanilla_static("worldgen/configured_feature");
 
 pub const ERROR_INVALID_ADVANCEMENT: CommandErrorType<1> = CommandErrorType::new(
     translation::java::ADVANCEMENT_ADVANCEMENTNOTFOUND,
@@ -22,6 +25,11 @@ pub const ERROR_INVALID_ADVANCEMENT: CommandErrorType<1> = CommandErrorType::new
 
 pub const ERROR_INVALID_BIOME: CommandErrorType<1> =
     CommandErrorType::new("commands.fillbiome.invalid", "commands.fillbiome.invalid");
+
+pub const ERROR_INVALID_CONFIGURED_FEATURE: CommandErrorType<1> = CommandErrorType::new(
+    "commands.place.feature.invalid",
+    "commands.place.feature.invalid",
+);
 
 pub const ERROR_NOT_SUMMONABLE_ENTITY: CommandErrorType<1> = CommandErrorType::new(
     translation::java::ENTITY_NOT_SUMMONABLE,
@@ -105,6 +113,28 @@ impl ResourceKeyArgument {
         )?;
         Advancement::from_name(resource_key.identifier.path()).ok_or_else(|| {
             ERROR_INVALID_ADVANCEMENT.create_without_context(TextComponent::text(
+                resource_key.identifier.path().to_string(),
+            ))
+        })
+    }
+
+    /// Returns a [`CommandContext`]'s parsed resource key argument as a [`ConfiguredFeature`].
+    ///
+    /// Mirrors vanilla `ResourceKeyArgument.getConfiguredFeature`
+    /// (`net/minecraft/commands/arguments/ResourceKeyArgument.java:87`), which resolves the
+    /// parsed key against the configured feature registry and throws on a missing entry.
+    pub fn get_configured_feature(
+        context: &CommandContext,
+        name: &str,
+    ) -> Result<ConfiguredFeature, CommandSyntaxError> {
+        let resource_key: &ResourceKey = Self::get_registry_key(
+            context,
+            name,
+            CONFIGURED_FEATURE_REGISTRY,
+            &ERROR_INVALID_CONFIGURED_FEATURE,
+        )?;
+        ConfiguredFeature::from_name(resource_key.identifier.path()).ok_or_else(|| {
+            ERROR_INVALID_CONFIGURED_FEATURE.create_without_context(TextComponent::text(
                 resource_key.identifier.path().to_string(),
             ))
         })
