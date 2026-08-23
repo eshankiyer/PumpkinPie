@@ -40,7 +40,13 @@ impl BlockBehaviour for MushroomPlantBlock {
 impl PlantBlockBase for MushroomPlantBlock {
     fn can_plant_on_top(&self, block_accessor: &dyn BlockAccessor, pos: &BlockPos) -> bool {
         let block = block_accessor.get_block(pos);
-        block.has_tag(&tag::Block::MINECRAFT_OVERRIDES_MUSHROOM_LIGHT_REQUIREMENT)
-        // TODO: Check light level and isOpaqueFullCube
+        if block.has_tag(&tag::Block::MINECRAFT_OVERRIDES_MUSHROOM_LIGHT_REQUIREMENT) {
+            return true;
+        }
+        let below_pos = pos.down();
+        let below_state = block_accessor.get_block_state(&below_pos);
+        below_state.is_solid()
+            && below_state.is_full_cube()
+            && block_accessor.get_block_light(pos) <= 12
     }
 }
