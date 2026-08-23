@@ -442,10 +442,16 @@ impl BlockBehaviour for SignBlock {
                 return BlockActionResult::Pass;
             };
 
-            // Vanilla executeClickCommandsIfPresent: run any RunCommand click event on the
-            // side of the sign the player is actually facing.
+            // Vanilla `SignBlockEntity.canExecuteClickCommands`
+            // (`SignBlockEntity.java:185-187`) requires `isWaxed()` before
+            // `executeClickCommandsIfPresent` (:189-215) ever runs - an unwaxed sign's click
+            // events are inert, only a waxed one's fire. Checked before the loop below so a
+            // click-styled unwaxed sign (settable via NBT/plugins even though the client's own
+            // sign-edit UI cannot produce one) can't run commands.
             let mut executed_command = false;
-            if let Some(server) = args.world.server.upgrade() {
+            if sign_entity.is_waxed.load(Ordering::Relaxed)
+                && let Some(server) = args.world.server.upgrade()
+            {
                 let is_facing_front =
                     is_facing_front_text(args.world, args.position, args.block, args.player);
                 let text = if is_facing_front {

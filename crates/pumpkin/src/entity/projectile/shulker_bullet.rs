@@ -73,6 +73,10 @@ impl ShulkerBulletEntity {
             &EntityType::SHULKER_BULLET,
         );
 
+        // `Projectile.getAddEntityPacket` (`Projectile.java:346-349`): the spawn packet's
+        // generic "data" int carries the owner's entity id.
+        entity.data.store(owner.entity_id, Ordering::Relaxed);
+
         let bullet = Self {
             entity,
             owner_id: owner.entity_id,

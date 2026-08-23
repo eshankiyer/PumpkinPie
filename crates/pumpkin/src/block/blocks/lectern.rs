@@ -9,14 +9,17 @@ use crate::block::{
     PlacedArgs, UseWithItemArgs,
 };
 use crate::entity::Entity;
+use crate::entity::EntityBase;
 use crate::entity::item::ItemEntity;
 use crate::world::World;
+use crate::world::game_event::{GameEventContext, emit_game_event};
 use pumpkin_data::block_properties::{BlockProperties, LecternLikeProperties};
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::Taggable;
 use pumpkin_data::world::WorldEvent;
-use pumpkin_data::{Block, BlockDirection, BlockStateId, tag, translation};
+use pumpkin_data::{Block, BlockDirection, BlockStateId, HorizontalFacingExt, tag, translation};
 use pumpkin_inventory::lectern_screen_handler::{LecternController, LecternScreenHandler};
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
@@ -72,7 +75,7 @@ impl LecternController for LecternPageController {
             if let Some(entity) = self.entity() {
                 entity.page.store(0, Ordering::Relaxed);
             }
-            LecternBlock::set_has_book(&self.world, &self.position, false).await;
+            LecternBlock::set_has_book(&self.world, &self.position, false, None).await;
         })
     }
 }
@@ -138,8 +141,18 @@ impl LecternBlock {
         world.sync_world_event(WorldEvent::SoundPageTurn, *position, 0);
     }
 
-    /// Sets `has_book`, dropping any pending pulse like vanilla `setHasBook`.
-    pub(crate) async fn set_has_book(world: &Arc<World>, position: &BlockPos, has_book: bool) {
+    /// `LecternBlock.resetBookState` (`LecternBlock.java:154-159`): drops any pending pulse,
+    /// sets `has_book`, and fires the `BLOCK_CHANGE` game event (sculk sensors/wardens key off
+    /// this). `source_entity` is `None` for the book-emptied path
+    /// (`LecternBlockEntity.onBookItemRemove`, `LecternBlockEntity.java:145-149`, which always
+    /// passes `null`) and `Some(player)` for the place-book path (`LecternBlock.placeBook`,
+    /// `LecternBlock.java:141-146`).
+    pub(crate) async fn set_has_book(
+        world: &Arc<World>,
+        position: &BlockPos,
+        has_book: bool,
+        source_entity: Option<Arc<dyn EntityBase>>,
+    ) {
         let (block, state_id) = world.get_block_and_state_id(position);
         if block != &Block::LECTERN {
             return;
@@ -147,10 +160,23 @@ impl LecternBlock {
         let mut props = LecternLikeProperties::from_state_id(state_id, block);
         props.powered = false;
         props.has_book = has_book;
+        let new_state_id = props.to_state_id(block);
         world
-            .set_block_state(position, props.to_state_id(block), BlockFlags::NOTIFY_ALL)
+            .set_block_state(position, new_state_id, BlockFlags::NOTIFY_ALL)
             .await;
         Self::update_neighbors_below(world, position).await;
+
+        let context = GameEventContext {
+            source_entity,
+            affected_block_state: Some(new_state_id),
+        };
+        emit_game_event(
+            world,
+            GameEvent::BlockChange,
+            position.to_centered_f64(),
+            context,
+        )
+        .await;
     }
 }
 
@@ -249,7 +275,13 @@ impl BlockBehaviour for LecternBlock {
             let _ = item_stack;
             lectern.set_stack(0, book).await;
 
-            Self::set_has_book(args.world, args.position, true).await;
+            Self::set_has_book(
+                args.world,
+                args.position,
+                true,
+                Some(args.player.clone() as Arc<dyn EntityBase>),
+            )
+            .await;
             args.world
                 .play_block_sound(Sound::ItemBookPut, SoundCategory::Blocks, *args.position);
 
@@ -325,13 +357,20 @@ impl BlockBehaviour for LecternBlock {
             {
                 let book = lectern_entity.remove_stack(0).await;
                 if !book.is_empty() {
-                    // Drop the book item
+                    // `LecternBlockEntity.preRemoveSideEffects`
+                    // (`LecternBlockEntity.java:227-236`): the dropped book is offset a
+                    // quarter-block toward the lectern's facing direction and sits a full
+                    // block above the base, not at the block centre.
+                    let facing = LecternLikeProperties::from_state_id(args.state.id, args.block)
+                        .facing
+                        .to_block_direction();
+                    let offset = facing.to_offset();
                     let entity = Entity::new(
                         args.world.clone(),
                         Vector3::new(
-                            f64::from(args.position.0.x) + 0.5,
-                            f64::from(args.position.0.y) + 0.5,
-                            f64::from(args.position.0.z) + 0.5,
+                            f64::from(args.position.0.x) + 0.5 + 0.25 * f64::from(offset.x),
+                            f64::from(args.position.0.y) + 1.0,
+                            f64::from(args.position.0.z) + 0.5 + 0.25 * f64::from(offset.z),
                         ),
                         &EntityType::ITEM,
                     );

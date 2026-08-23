@@ -257,6 +257,12 @@ impl Brain {
         self.memory.lock().unwrap().has_value::<K>()
     }
 
+    /// `Brain.getTimeUntilExpiry` (`Brain.java:225-227`).
+    #[must_use]
+    pub fn time_until_expiry<K: MemoryKey>(&self) -> i64 {
+        self.memory.lock().unwrap().time_until_expiry::<K>()
+    }
+
     /// `Behavior.hasRequiredMemories` (`behavior/Behavior.java:97-107`): every entry condition
     /// must hold. Checked under a single lock acquisition.
     #[must_use]
@@ -289,6 +295,19 @@ impl Brain {
             .unwrap()
             .active_activities
             .contains(&activity)
+    }
+
+    /// `Brain.getActiveNonCoreActivity` (`Brain.java:287-296`): the one non-core activity
+    /// alongside the always-active core set, if any is currently active.
+    #[must_use]
+    pub fn get_active_non_core_activity(&self) -> Option<Activity> {
+        self.runtime
+            .lock()
+            .unwrap()
+            .active_activities
+            .iter()
+            .find(|activity| !self.core_activities.contains(activity))
+            .copied()
     }
 
     /// `Brain.setActiveActivity` (`Brain.java:305-312`) plus

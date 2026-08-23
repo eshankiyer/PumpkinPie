@@ -105,6 +105,9 @@ impl DragonFireballEntity {
     pub fn new_shot(entity: Entity, owner_id: i32, direction: Vector3<f64>) -> Self {
         let mut this = Self::new(entity);
         this.thrown.owner_id = Some(owner_id);
+        // `Projectile.getAddEntityPacket` (`Projectile.java:346-349`): the spawn packet's
+        // generic "data" int carries the owner's entity id.
+        this.thrown.entity.data.store(owner_id, Ordering::Relaxed);
         this.thrown
             .entity
             .velocity

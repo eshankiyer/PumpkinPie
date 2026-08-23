@@ -49,6 +49,12 @@ impl ItemBehaviour for ArmorStandItem {
         _server: &'a Server,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
+            // `ArmorStandItem.useOn` (`world/item/ArmorStandItem.java:28-31`): clicking the
+            // underside of a block always fails, before any collision/entity check.
+            if face == BlockDirection::Down {
+                return;
+            }
+
             let world = player.world();
             let position = Self::calculate_placement_position(&location, face).to_f64();
 
