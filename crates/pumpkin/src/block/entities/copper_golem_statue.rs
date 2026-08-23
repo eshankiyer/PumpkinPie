@@ -46,6 +46,10 @@ impl BlockEntity for CopperGolemStatueBlockEntity {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn chunk_data_nbt(&self) -> Option<NbtCompound> {
+        Some(NbtCompound::new())
+    }
 }
 
 impl CopperGolemStatueBlockEntity {
