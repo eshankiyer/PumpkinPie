@@ -24,6 +24,7 @@ pub mod explosion;
 pub mod loot;
 pub mod map;
 pub mod portal;
+pub mod precipitation;
 pub mod time;
 
 use crate::block::RandomTickArgs;

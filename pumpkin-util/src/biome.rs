@@ -67,7 +67,6 @@ impl TemperatureModifier {
 /// Represents weather information for a biome, including temperature and precipitation.
 #[derive(Clone, Debug)]
 pub struct Weather {
-    #[expect(dead_code)]
     has_precipitation: bool,
     /// Base temperature of the biome.
     temperature: f32,
