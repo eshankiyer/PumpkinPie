@@ -1,4 +1,3 @@
-use crate::entity::EntityBase;
 use crate::entity::living::LivingEntity;
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::item_stack::ItemStack;
@@ -127,34 +126,18 @@ impl PotionContents {
                 || effect_type.id == pumpkin_data::effect::StatusEffect::INSTANT_DAMAGE.id;
 
             if is_instant {
-                // Instant potency scaling
-                let instant_scale = if source == PotionApplicationSource::AreaEffectCloud {
-                    scale * 0.5
+                // For instant effects, reduce amplifier by 1 for area effect clouds to halve potency
+                let adjusted_amplifier = if source == PotionApplicationSource::AreaEffectCloud {
+                    (amplifier as i32 - 1).max(0) as u8
                 } else {
-                    scale
+                    amplifier
                 };
-
-                // Apply instant effects logic directly as they don't tick
-                if effect_type.id == pumpkin_data::effect::StatusEffect::INSTANT_HEALTH.id {
-                    let amount = (4 * ((amplifier as i32) + 1)) as f32 * instant_scale;
-                    target.heal(amount);
-                } else if effect_type.id == pumpkin_data::effect::StatusEffect::INSTANT_DAMAGE.id {
-                    let amount = (6 * ((amplifier as i32) + 1)) as f32 * instant_scale;
-
-                    target
-                        .damage(
-                            target.get_entity(),
-                            amount,
-                            pumpkin_data::damage::DamageType::MAGIC,
-                        )
-                        .await;
-                }
 
                 // For instant effects, still add a short visual effect entry as before
                 let eff = pumpkin_data::potion::Effect {
                     effect_type,
                     duration: 1,
-                    amplifier,
+                    amplifier: adjusted_amplifier,
                     ambient,
                     show_particles,
                     show_icon,
