@@ -198,6 +198,19 @@ impl Inventory for LecternBlockEntity {
         self.dirty.store(true, Ordering::Relaxed);
     }
 
+    /// `LecternBlockEntity.bookAccess.canPlaceItem` (`LecternBlockEntity.java:98-100`): the
+    /// book slot never accepts an item through this container interface - a book only ever
+    /// gets in via `LecternBlock.tryPlaceBook`. Without this a hopper facing a lectern could
+    /// insert (or overwrite) whatever item it is holding into slot 0.
+    fn can_insert_through_face<'a>(
+        &'a self,
+        _slot: usize,
+        _stack: &'a ItemStack,
+        _direction: pumpkin_data::BlockDirection,
+    ) -> InventoryFuture<'a, bool> {
+        Box::pin(async { false })
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }

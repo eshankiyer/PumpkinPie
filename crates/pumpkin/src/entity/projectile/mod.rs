@@ -35,11 +35,22 @@ pub mod wither_skull;
 #[must_use]
 pub fn is_projectile(entity_type: &EntityType) -> bool {
     *entity_type == EntityType::ARROW
+        // Vanilla `SpectralArrow extends AbstractArrow extends Projectile`
+        // (`projectile/arrow/SpectralArrow.java`) - a distinct `EntityType` from `ARROW`
+        // (`ArrowEntity::entity_type_for_item` in arrow.rs picks it for spectral arrows), so it
+        // needs its own arm here or a spectral arrow hit falls through every `is_projectile`
+        // check in this module (base knockback direction, projectile-vs-projectile passthrough).
+        || *entity_type == EntityType::SPECTRAL_ARROW
         || *entity_type == EntityType::TRIDENT
         || *entity_type == EntityType::EGG
         || *entity_type == EntityType::SNOWBALL
         || *entity_type == EntityType::FIREWORK_ROCKET
         || *entity_type == EntityType::WIND_CHARGE
+        // Vanilla `BreezeWindCharge extends AbstractWindCharge extends Projectile`
+        // (`projectile/hurtingprojectile/windcharge/BreezeWindCharge.java`) - a Breeze's own
+        // wind charge is a distinct `EntityType` from the player-thrown `WIND_CHARGE`
+        // (`entity/mob/breeze.rs` spawns it directly), so it needs the same arm.
+        || *entity_type == EntityType::BREEZE_WIND_CHARGE
         || *entity_type == EntityType::SPLASH_POTION
         || *entity_type == EntityType::LINGERING_POTION
         || *entity_type == EntityType::ENDER_PEARL
@@ -245,6 +256,10 @@ impl ThrownItemEntity {
         let mut owner_pos = owner.pos.load();
         owner_pos.y += owner.get_eye_height() - 0.1;
         entity.pos.store(owner_pos);
+        // `Projectile.getAddEntityPacket` (`Projectile.java:346-349`): the spawn packet's
+        // generic "data" int carries the owner's entity id (0 with no owner), which the
+        // client uses to attribute the projectile to its shooter.
+        entity.data.store(owner.entity_id, Ordering::Relaxed);
         Self {
             entity,
             owner_id: Some(owner.entity_id),

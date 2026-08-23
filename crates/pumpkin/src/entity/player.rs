@@ -4994,6 +4994,28 @@ impl Player {
                     self.world().drop_stack(&block_pos, stack).await;
                 }
             }
+            drop(main_inv);
+
+            // `Inventory.dropAll` (`world/entity/player/Inventory.java:444-454`) drops the main
+            // items above, then unconditionally drops every equipped item via
+            // `this.equipment.dropAll(this.player)` (`EntityEquipment.dropAll`,
+            // `EntityEquipment.java:62-68`): every armour/off-hand slot, no chance roll and no
+            // damage randomization (unlike a mob's `dropCustomDeathLoot`), then clears the map.
+            // `player.drop(stack, true, false)` (`LivingEntity.java:780-795`, `randomly=true`
+            // branch of `createItemStackToDrop`, `LivingEntity.java:3436-3466`) spawns each item
+            // at eye height with a random horizontal direction, independent of look direction,
+            // and does not touch the drop/drop_count statistics. `World::drop_stack` (used for
+            // the main-inventory sweep just above, and already the established approximation for
+            // a mob's own death-equipment drop in `LivingEntity::drop_equipment`) spawns at the
+            // block position with a small jitter instead of the eye-height/random-direction
+            // vanilla formula; reused here for the same reason and to stay consistent with that
+            // precedent, not because it reproduces the exact vanilla velocity.
+            let mut equipment = self.inventory().entity_equipment.lock().await;
+            for stack in std::mem::take(&mut equipment.equipment).into_values() {
+                if !stack.is_empty() {
+                    self.world().drop_stack(&block_pos, stack).await;
+                }
+            }
         }
 
         // Reset air supply & drowning ticks on death

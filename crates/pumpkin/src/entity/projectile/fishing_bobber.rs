@@ -109,6 +109,11 @@ impl FishingBobberEntity {
         let mut owner_pos = owner.living_entity.entity.pos.load();
         owner_pos.y += owner.living_entity.entity.get_eye_height() - 0.1;
         entity.pos.store(owner_pos);
+        // `Projectile.getAddEntityPacket` (`Projectile.java:346-349`): the spawn packet's
+        // generic "data" int carries the owner's entity id.
+        entity
+            .data
+            .store(owner.living_entity.entity.entity_id, Ordering::Relaxed);
 
         Self {
             entity,
