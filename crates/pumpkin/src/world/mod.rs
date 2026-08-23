@@ -863,6 +863,46 @@ impl World {
         Self::broadcast_java_grouped(je_packet, recipients_by_version);
     }
 
+    /// Broadcasts the skin layers of a player, encoding the metadata for each Java client's own
+    /// protocol version since the tracked data index differs between versions.
+    fn broadcast_skin_parts_sync<B: BClientPacket>(
+        &self,
+        except: &[uuid::Uuid],
+        entity_id: i32,
+        skin_parts: u8,
+        be_packet: &B,
+    ) {
+        for p in self.players.load().iter() {
+            if except.contains(&p.gameprofile.id) {
+                continue;
+            }
+            match p.client.as_ref() {
+                ClientPlatform::Java(client) => {
+                    let version = client.version.load();
+                    let mut buf = Vec::new();
+                    for meta in [
+                        Metadata::new(
+                            TrackedData::PLAYER_MODE_CUSTOMISATION,
+                            MetaDataType::BYTE,
+                            skin_parts,
+                        ),
+                        Metadata::new(
+                            TrackedData::PLAYER_MODE_CUSTOMIZATION_ID,
+                            MetaDataType::BYTE,
+                            skin_parts,
+                        ),
+                    ] {
+                        meta.write(&mut buf, &version).unwrap();
+                    }
+                    buf.put_u8(255);
+                    client
+                        .try_enqueue_packet(&CSetEntityMetadata::new(entity_id.into(), buf.into()));
+                }
+                ClientPlatform::Bedrock(be_client) => be_client.try_enqueue_packet(be_packet),
+            }
+        }
+    }
+
     pub async fn broadcast_packet_except_editioned<J: ClientPacket, B: BClientPacket>(
         &self,
         except: &[uuid::Uuid],
@@ -2908,31 +2948,12 @@ impl World {
         );
 
         // Broadcast metadata to Java players so they can correctly interact with the new player
-        let config = player.config.load();
-        let mut java_meta_buf = Vec::new();
-        {
-            let meta = Metadata::new(
-                TrackedData::PLAYER_MODE_CUSTOMISATION,
-                MetaDataType::BYTE,
-                config.skin_parts,
-            );
-            meta.write(&mut java_meta_buf, &JavaMinecraftVersion::V_1_21_4)
-                .unwrap();
-        };
-        {
-            let meta = Metadata::new(
-                TrackedData::PLAYER_MODE_CUSTOMIZATION_ID,
-                MetaDataType::BYTE,
-                config.skin_parts,
-            );
-            meta.write(&mut java_meta_buf, &JavaMinecraftVersion::V_1_21_4)
-                .unwrap();
-        };
-        java_meta_buf.put_u8(255);
+        let skin_parts = player.config.load().skin_parts;
 
-        self.broadcast_packet_except_editioned_sync(
+        self.broadcast_skin_parts_sync(
             &[gameprofile.id],
-            &CSetEntityMetadata::new((runtime_id as i32).into(), java_meta_buf.into()),
+            runtime_id as i32,
+            skin_parts,
             &actor_data,
         );
 
@@ -3372,31 +3393,12 @@ impl World {
         );
 
         // Broadcast metadata to Java players so they can correctly interact with the new player
-        let config = player.config.load();
-        let mut java_meta_buf = Vec::new();
-        {
-            let meta = Metadata::new(
-                TrackedData::PLAYER_MODE_CUSTOMISATION,
-                MetaDataType::BYTE,
-                config.skin_parts,
-            );
-            meta.write(&mut java_meta_buf, &JavaMinecraftVersion::V_1_21_4)
-                .unwrap();
-        };
-        {
-            let meta = Metadata::new(
-                TrackedData::PLAYER_MODE_CUSTOMIZATION_ID,
-                MetaDataType::BYTE,
-                config.skin_parts,
-            );
-            meta.write(&mut java_meta_buf, &JavaMinecraftVersion::V_1_21_4)
-                .unwrap();
-        };
-        java_meta_buf.put_u8(255);
+        let skin_parts = player.config.load().skin_parts;
 
-        self.broadcast_packet_except_editioned_sync(
+        self.broadcast_skin_parts_sync(
             &[gameprofile.id],
-            &CSetEntityMetadata::new((entity_id).into(), java_meta_buf.into()),
+            entity_id,
+            skin_parts,
             &CSetActorData {
                 actor_runtime_id: VarULong(entity_id as u64),
                 metadata: player.get_entity().bedrock_metadata(),
@@ -5955,7 +5957,8 @@ impl World {
 
         if new_state_id != block_state_id {
             if is_air(new_state_id) {
-                self.break_block(block_pos, None, flags).await;
+                self.break_block(block_pos, None, flags | BlockFlags::NOTIFY_ALL)
+                    .await;
             } else {
                 self.set_block_state(block_pos, new_state_id, flags).await;
             }
