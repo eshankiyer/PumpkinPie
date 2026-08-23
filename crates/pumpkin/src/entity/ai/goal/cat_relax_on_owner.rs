@@ -12,6 +12,7 @@ use crate::entity::EntityBase;
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
 use crate::entity::passive::cat::CatEntity;
+use crate::entity::passive::tamable::TamableAnimal;
 use crate::entity::player::Player;
 
 /// `Cat.java:546`: `this.cat.distanceToSqr(this.ownerPlayer) > 100.0`.
@@ -114,7 +115,7 @@ impl Goal for CatRelaxOnOwnerGoal {
             if !Self::cat_is_relaxable(&cat) {
                 return false;
             }
-            let Some(owner_uuid) = cat.owner.load() else {
+            let Some(owner_uuid) = cat.get_owner() else {
                 return false;
             };
             let world = cat.get_entity().world.load_full();

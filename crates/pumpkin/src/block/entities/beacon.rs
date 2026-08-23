@@ -203,7 +203,7 @@ impl BeaconBlockEntity {
     }
 
     /// Vanilla `BeaconBlockEntity.validateEffects`.
-    fn validate_effects(
+    pub(crate) fn validate_effects(
         primary: Option<&'static StatusEffect>,
         secondary: Option<&'static StatusEffect>,
         levels: i32,

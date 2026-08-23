@@ -79304,7 +79304,7 @@ impl BedrockItem {
         component_based: false,
         definition_components: b"\n\0\0",
     };
-    pub const TORCHFLOWER_SEEDS : Self = Self { id : 296 , registry_key : "minecraft:torchflower_seeds" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:seed\x08\x0Bcrop_result\x1Aminecraft:torchflower_crop\t\x08plant_at\x08\x02\x12minecraft:farmland\x01\x1Aplant_at_any_solid_surface\0\x08\rplant_at_face\x02up\0\0\0" } ;
+    pub const TORCHFLOWER_SEEDS : Self = Self { id : 296 , registry_key : "minecraft:torchflower_seeds" , version : BedrockItemVersion :: Legacy , component_based : false , definition_components : b"\n\0\n\ncomponents\n\x0Eminecraft:seed\x01\x1Aplant_at_any_solid_surface\0\x08\rplant_at_face\x02up\t\x08plant_at\x08\x02\x12minecraft:farmland\x08\x0Bcrop_result\x1Aminecraft:torchflower_crop\0\0\0" } ;
     pub const TOTEM_OF_UNDYING: Self = Self {
         id: 578,
         registry_key: "minecraft:totem_of_undying",

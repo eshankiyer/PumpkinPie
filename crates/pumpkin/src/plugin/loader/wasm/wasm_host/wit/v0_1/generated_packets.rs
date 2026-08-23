@@ -1303,9 +1303,13 @@ pub fn deserialize_java_serverbound_packet(
         id if id == pumpkin_protocol::java::server::play::SSetGameRule::to_id(version) => {
             use pumpkin_protocol::ServerPacket;
             let p = <pumpkin_protocol::java::server::play::SSetGameRule as pumpkin_protocol::ServerPacket>::read(&mut payload, &version).ok()?;
+            // The wire format now batches multiple rules per packet (`entries`); the WIT
+            // plugin API still exposes a single rule/value pair. Only the first entry is
+            // forwarded to plugins until the WIT interface gains a list here.
+            let first = p.entries.first();
             Some(ServerboundPacket::SSetGameRule(crate::plugin::loader::wasm::wasm_host::wit::v0_1::pumpkin::plugin::java_packets::SSetGameRule {
-                rule: p.rule.into(),
-                value: p.value.into(),
+                rule: first.map_or(String::new(), |e| e.game_rule_key.into()),
+                value: first.map_or(String::new(), |e| e.value.into()),
             }))
         }
         id if id == pumpkin_protocol::java::server::play::SSetHeldItem::to_id(version) => {

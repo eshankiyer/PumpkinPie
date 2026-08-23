@@ -274,6 +274,10 @@ impl ShulkerBulletEntity {
 impl NBTStorage for ShulkerBulletEntity {}
 
 impl EntityBase for ShulkerBulletEntity {
+    fn as_nbt_storage(&self) -> &dyn NBTStorage {
+        self
+    }
+
     fn is_pickable(&self) -> bool {
         true
     }
@@ -285,11 +289,6 @@ impl EntityBase for ShulkerBulletEntity {
     fn get_living_entity(&self) -> Option<&crate::entity::living::LivingEntity> {
         None
     }
-
-    fn as_nbt_storage(&self) -> &dyn NBTStorage {
-        self
-    }
-
     fn cast_any(&self) -> &dyn std::any::Any {
         self
     }

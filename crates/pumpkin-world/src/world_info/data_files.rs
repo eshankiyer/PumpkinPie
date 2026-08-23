@@ -368,9 +368,70 @@ pub fn write_weather(level_folder: &Path, data: &WeatherData) -> Result<(), Worl
     data_comp.put_bool("raining", data.raining);
     data_comp.put_bool("thundering", data.thundering);
     let mut root = NbtCompound::new();
+    root.put_int("DataVersion", data.data_version);
     root.put_compound("data", data_comp);
     pumpkin_nbt::nbt_compress::write_gzip_compound_tag(root, BufWriter::new(file))
         .map_err(|e| WorldInfoError::SerializationError(e.to_string()))
+}
+
+#[must_use]
+pub fn json_to_nbt_tag(val: &serde_json::Value) -> NbtTag {
+    match val {
+        serde_json::Value::Null => NbtTag::End,
+        serde_json::Value::Bool(b) => NbtTag::Byte(i8::from(*b)),
+        serde_json::Value::Number(n) => n.as_i64().map_or_else(
+            || n.as_f64().map_or(NbtTag::End, NbtTag::Double),
+            |i| i32::try_from(i).map_or(NbtTag::Long(i), NbtTag::Int),
+        ),
+        serde_json::Value::String(s) => NbtTag::String(s.clone().into()),
+        serde_json::Value::Array(arr) => NbtTag::List(arr.iter().map(json_to_nbt_tag).collect()),
+        serde_json::Value::Object(map) => {
+            let mut compound = NbtCompound::new();
+            for (k, v) in map {
+                compound.put(k, json_to_nbt_tag(v));
+            }
+            NbtTag::Compound(compound)
+        }
+    }
+}
+
+#[must_use]
+pub fn nbt_tag_to_json(tag: &NbtTag) -> serde_json::Value {
+    match tag {
+        NbtTag::Byte(b) => serde_json::Value::Number((*b).into()),
+        NbtTag::Short(s) => serde_json::Value::Number((*s).into()),
+        NbtTag::Int(i) => serde_json::Value::Number((*i).into()),
+        NbtTag::Long(l) => serde_json::Value::Number((*l).into()),
+        NbtTag::Float(f) => serde_json::Number::from_f64(*f as f64)
+            .map_or(serde_json::Value::Null, serde_json::Value::Number),
+        NbtTag::Double(d) => serde_json::Number::from_f64(*d)
+            .map_or(serde_json::Value::Null, serde_json::Value::Number),
+        NbtTag::String(s) => serde_json::Value::String(s.to_string()),
+        NbtTag::List(list) => serde_json::Value::Array(list.iter().map(nbt_tag_to_json).collect()),
+        NbtTag::Compound(comp) => {
+            let mut map = serde_json::Map::new();
+            for (k, v) in &comp.child_tags {
+                map.insert(k.to_string(), nbt_tag_to_json(v));
+            }
+            serde_json::Value::Object(map)
+        }
+        NbtTag::ByteArray(arr) => serde_json::Value::Array(
+            arr.iter()
+                .map(|b| serde_json::Value::Number((*b).into()))
+                .collect(),
+        ),
+        NbtTag::IntArray(arr) => serde_json::Value::Array(
+            arr.iter()
+                .map(|i| serde_json::Value::Number((*i).into()))
+                .collect(),
+        ),
+        NbtTag::LongArray(arr) => serde_json::Value::Array(
+            arr.iter()
+                .map(|l| serde_json::Value::Number((*l).into()))
+                .collect(),
+        ),
+        NbtTag::End => serde_json::Value::Null,
+    }
 }
 
 pub fn read_world_gen_settings(level_folder: &Path) -> Option<WorldGenSettings> {
@@ -764,10 +825,20 @@ pub fn read_wandering_trader(level_folder: &Path) -> WanderingTraderData {
             Ok(compound) => {
                 let data_compound = compound.get_compound("data");
                 let c = data_compound.as_ref().map_or(&compound, |v| v);
+                let data_version = compound
+                    .get_int("DataVersion")
+                    .or_else(|| c.get_int("DataVersion"))
+                    .unwrap_or(0);
                 WanderingTraderData {
-                    spawn_delay: c.get_int("WanderingTraderSpawnDelay").unwrap_or(24_000),
-                    spawn_chance: c.get_int("WanderingTraderSpawnChance").unwrap_or(25),
-                    data_version: c.get_int("DataVersion").unwrap_or(0),
+                    spawn_delay: c
+                        .get_int("spawn_delay")
+                        .or_else(|| c.get_int("WanderingTraderSpawnDelay"))
+                        .unwrap_or(24_000),
+                    spawn_chance: c
+                        .get_int("spawn_chance")
+                        .or_else(|| c.get_int("WanderingTraderSpawnChance"))
+                        .unwrap_or(25),
+                    data_version,
                 }
             }
             Err(e) => {
@@ -776,7 +847,7 @@ pub fn read_wandering_trader(level_folder: &Path) -> WanderingTraderData {
             }
         },
         Err(e) => {
-            warn!("Failed to open wandering_trader.dat: {e}");
+            warn!("Failed to open wandering_trader.dat, using defaults: {e}");
             WanderingTraderData::default()
         }
     }
@@ -790,9 +861,10 @@ pub fn write_wandering_trader(
     let path = dir.join("wandering_trader.dat");
     let file = File::create(&path)?;
     let mut data_comp = NbtCompound::new();
-    data_comp.put_int("WanderingTraderSpawnDelay", data.spawn_delay);
-    data_comp.put_int("WanderingTraderSpawnChance", data.spawn_chance);
+    data_comp.put_int("spawn_delay", data.spawn_delay);
+    data_comp.put_int("spawn_chance", data.spawn_chance);
     let mut root = NbtCompound::new();
+    root.put_int("DataVersion", data.data_version);
     root.put_compound("data", data_comp);
     pumpkin_nbt::nbt_compress::write_gzip_compound_tag(root, BufWriter::new(file))
         .map_err(|e| WorldInfoError::SerializationError(e.to_string()))
@@ -804,18 +876,15 @@ pub fn write_custom_boss_events_stub(
 ) -> Result<(), WorldInfoError> {
     let dir = ensure_minecraft_data_dir(level_folder)?;
     let path = dir.join("custom_boss_events.dat");
-    // Only create if absent; actual boss-bar persistence lives elsewhere.
     if path.exists() {
         return Ok(());
     }
 
-    let mut inner = NbtCompound::new();
-    inner.put_int("DataVersion", data_version);
     let mut root = NbtCompound::new();
-    root.put_compound("data", inner);
+    root.put_int("DataVersion", data_version);
+    root.put_compound("data", NbtCompound::new());
 
     let file = File::create(&path)?;
-
     pumpkin_nbt::nbt_compress::write_gzip_compound_tag(root, file)
         .map_err(|e| WorldInfoError::SerializationError(e.to_string()))
 }
@@ -832,12 +901,70 @@ pub fn write_scheduled_events_stub(
 
     let mut inner = NbtCompound::new();
     inner.put("events", NbtTag::List(vec![]));
-    inner.put_int("DataVersion", data_version);
     let mut root = NbtCompound::new();
+    root.put_int("DataVersion", data_version);
     root.put_compound("data", inner);
 
     let file = File::create(&path)?;
+    pumpkin_nbt::nbt_compress::write_gzip_compound_tag(root, file)
+        .map_err(|e| WorldInfoError::SerializationError(e.to_string()))
+}
 
+pub fn write_random_sequences_stub(
+    level_folder: &Path,
+    data_version: i32,
+) -> Result<(), WorldInfoError> {
+    let dir = ensure_minecraft_data_dir(level_folder)?;
+    let path = dir.join("random_sequences.dat");
+    if path.exists() {
+        return Ok(());
+    }
+
+    let mut inner = NbtCompound::new();
+    inner.put_int("salt", 0);
+    inner.put_compound("sequences", NbtCompound::new());
+    let mut root = NbtCompound::new();
+    root.put_int("DataVersion", data_version);
+    root.put_compound("data", inner);
+
+    let file = File::create(&path)?;
+    pumpkin_nbt::nbt_compress::write_gzip_compound_tag(root, file)
+        .map_err(|e| WorldInfoError::SerializationError(e.to_string()))
+}
+
+pub fn write_scoreboard_stub(level_folder: &Path, data_version: i32) -> Result<(), WorldInfoError> {
+    let dir = ensure_minecraft_data_dir(level_folder)?;
+    let path = dir.join("scoreboard.dat");
+    if path.exists() {
+        return Ok(());
+    }
+
+    let mut root = NbtCompound::new();
+    root.put_int("DataVersion", data_version);
+    root.put_compound("data", NbtCompound::new());
+
+    let file = File::create(&path)?;
+    pumpkin_nbt::nbt_compress::write_gzip_compound_tag(root, file)
+        .map_err(|e| WorldInfoError::SerializationError(e.to_string()))
+}
+
+pub fn write_stopwatches_stub(
+    level_folder: &Path,
+    data_version: i32,
+) -> Result<(), WorldInfoError> {
+    let dir = ensure_minecraft_data_dir(level_folder)?;
+    let path = dir.join("stopwatches.dat");
+    if path.exists() {
+        return Ok(());
+    }
+
+    let mut inner = NbtCompound::new();
+    inner.put_compound("stopwatches", NbtCompound::new());
+    let mut root = NbtCompound::new();
+    root.put_int("DataVersion", data_version);
+    root.put_compound("data", inner);
+
+    let file = File::create(&path)?;
     pumpkin_nbt::nbt_compress::write_gzip_compound_tag(root, file)
         .map_err(|e| WorldInfoError::SerializationError(e.to_string()))
 }

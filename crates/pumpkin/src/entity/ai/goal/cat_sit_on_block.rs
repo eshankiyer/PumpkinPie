@@ -14,6 +14,7 @@ use super::move_to_target_pos::{MoveToTargetPos, MoveToTargetPosGoal};
 use super::{Controls, Goal, GoalFuture, ParentHandle};
 use crate::entity::mob::Mob;
 use crate::entity::passive::cat::CatEntity;
+use crate::entity::passive::tamable::TamableAnimal;
 use crate::world::World;
 
 /// `CatSitOnBlockGoal.java:18`: `super(cat, speedModifier, 8)`.

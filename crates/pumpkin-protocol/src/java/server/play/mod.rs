@@ -132,6 +132,12 @@ pub use container_slot_state_changed::*;
 mod entity_tag_query;
 pub use entity_tag_query::*;
 
+mod change_difficulty;
+pub use change_difficulty::*;
+
+mod chat_command_signed;
+pub use chat_command_signed::*;
+
 mod lock_difficulty;
 pub use lock_difficulty::*;
 

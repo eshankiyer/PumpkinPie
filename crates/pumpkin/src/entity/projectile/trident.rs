@@ -455,6 +455,10 @@ impl NBTStorage for TridentEntity {
 }
 
 impl EntityBase for TridentEntity {
+    fn as_nbt_storage(&self) -> &dyn NBTStorage {
+        self
+    }
+
     /// `ThrownTrident.defineSynchedData` (`ThrownTrident.java:56-60`) plus the constructor's
     /// `entityData.set(ID_LOYALTY, ...)` / `set(ID_FOIL, ...)` (`ThrownTrident.java:44-46`).
     /// Without `ID_LOYALTY` the client never animates the trident spiralling home.
@@ -570,11 +574,6 @@ impl EntityBase for TridentEntity {
     fn get_living_entity(&self) -> Option<&LivingEntity> {
         None
     }
-
-    fn as_nbt_storage(&self) -> &dyn NBTStorage {
-        self
-    }
-
     fn cast_any(&self) -> &dyn std::any::Any {
         self
     }

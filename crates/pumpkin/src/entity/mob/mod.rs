@@ -31,6 +31,7 @@ use pumpkin_data::potion::Effect;
 use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data;
+use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::{CHeadRot, CUpdateEntityRot, Metadata};
 use pumpkin_util::Difficulty;
 use pumpkin_util::math::boundingbox::BoundingBox;
@@ -452,6 +453,30 @@ impl MobEntity {
             .clear();
         for mut goal in running_target_goals {
             goal.goal.stop(mob).await;
+        }
+    }
+
+    pub fn write_mob_nbt(&self, nbt: &mut NbtCompound) {
+        if self.is_no_ai() {
+            nbt.put_bool("NoAI", true);
+        }
+        if self.is_left_handed() {
+            nbt.put_bool("LeftHanded", true);
+        }
+        if self.can_pick_up_loot() {
+            nbt.put_bool("CanPickUpLoot", true);
+        }
+    }
+
+    pub fn read_mob_nbt(&self, nbt: &NbtCompound) {
+        if let Some(no_ai) = nbt.get_bool("NoAI") {
+            self.set_no_ai(no_ai);
+        }
+        if let Some(left_handed) = nbt.get_bool("LeftHanded") {
+            self.set_left_handed(left_handed);
+        }
+        if let Some(can_pick_up_loot) = nbt.get_bool("CanPickUpLoot") {
+            self.set_can_pick_up_loot(can_pick_up_loot);
         }
     }
 
@@ -1747,6 +1772,18 @@ pub trait Mob: EntityBase + Send + Sync {
         true
     }
 
+    fn as_ageable(&self) -> Option<&dyn crate::entity::ageable::AgeableMob> {
+        None
+    }
+
+    fn as_animal(&self) -> Option<&dyn crate::entity::passive::animal::Animal> {
+        None
+    }
+
+    fn as_tamable(&self) -> Option<&dyn crate::entity::passive::tamable::TamableAnimal> {
+        None
+    }
+
     /// Set or clear the mob's target. Override to add side effects when targeting changes.
     fn set_mob_target(&self, target: Option<Arc<dyn EntityBase>>) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
@@ -2178,11 +2215,13 @@ pub trait Mob: EntityBase + Send + Sync {
     }
 
     fn get_owner_uuid(&self) -> Option<Uuid> {
-        self.get_mob_entity().owner.load()
+        self.as_tamable()
+            .and_then(crate::entity::passive::tamable::TamableAnimal::get_owner)
     }
 
     fn is_sitting(&self) -> bool {
-        self.get_mob_entity().is_ordered_to_sit()
+        self.as_tamable()
+            .is_some_and(crate::entity::passive::tamable::TamableAnimal::is_in_sitting_pose)
     }
 
     fn get_base_experience_reward(&self) -> u32 {
