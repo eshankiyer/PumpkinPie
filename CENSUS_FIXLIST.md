@@ -1138,3 +1138,99 @@ demand with no CPU cost involved at all. Whether the reported client was in that
 is the same **UNVERIFIABLE** noted below, and the same `trace!` at
 net/java/play.rs:2953 settles it. No claim is made here about how vanilla's own
 `PlayerChunkSender` paces itself; this is stated purely as a Pumpkin-side ceiling.
+
+---
+
+# Live differential probe expansion (2026-08-05)
+
+Method: `fork_delta.py` (copied to `conformance/fork_delta.py` in this worktree) run
+against three live servers over RCON - vanilla 26.2 oracle at `192.168.1.93:25576`,
+upstream Pumpkin at `127.0.0.1:25599`, PumpkinPie at `127.0.0.1:25598`. A field is
+scored only when vanilla itself answers it; fields where vanilla returns no value are
+dropped from the denominator rather than counted, and the suite is run twice with any
+field that a single server disagrees with itself on discarded as nondeterministic.
+Nothing random-tick-driven is probed: the oracle runs `random_tick_speed=1000` for other
+tests while both Pumpkin rigs run 3, so crop growth, farmland hydration, ice/snow melt,
+fire spread and leaf decay would measure rig config rather than code.
+
+## Confirmed divergences (both upstream and PumpkinPie)
+
+### 1. `execute if/unless block` and `execute if entity` are not implemented - HIGH
+
+    # vanilla oracle
+    execute if block 2000 100 2000 minecraft:stone   -> Test passed
+    execute if block 2000 100 2000 minecraft:air     -> Test failed
+    execute if entity @e[type=zombie]                -> Test passed. Count: 1
+    # both Pumpkins
+    execute if block 2000 100 2000 minecraft:stone
+      -> Unknown command: %s. Please check that the command exists ...
+    execute if entity @e[type=zombie]
+      -> Unknown command: %s. ...
+
+Confidence: HIGH. This is NOT the previously tracked "execute if block ignores its
+predicate" row in CLAUDE.md - that observation was made against the other rig on port
+25575. Here the subcommand does not exist at all. Every `if/unless block`, `if blocks`
+and `if entity` form fails, with and without a trailing `run`, namespaced or bare.
+Consequence for future probe work: with `data get block` also absent and blockstates
+rejected inside `clone ... filtered`, Pumpkin currently has NO command-surface primitive
+for reading a block state, so the whole door/cauldron/candle/campfire state-transition
+domain is unobservable over RCON.
+
+Sub-item, LOW severity but trivially fixable: Pumpkin's unknown-command message contains
+a literal unformatted `%s` where the command name should be interpolated.
+
+### 2. Namespaced entity-type selectors are rejected - HIGH
+
+    # vanilla
+    execute if entity @e[type=minecraft:zombie]  -> Test passed. Count: 1
+    attribute @e[type=minecraft:zombie,limit=1] minecraft:max_health get
+      -> The value of attribute Max Health for entity Zombie is 20.0
+    # both Pumpkins
+    attribute @e[type=minecraft:zombie,limit=1] minecraft:max_health get
+      -> Invalid or unknown entity type 'minecraft'
+
+Bare `@e[type=zombie]` works on both. The selector parser is evidently splitting the
+argument on `:` and treating the namespace as the type. Vanilla accepts both forms and
+the namespaced form is the canonical one emitted by datapacks and most command
+generators. Confidence: HIGH.
+
+Instrument note: the PREVIOUS revision of `fork_delta.py` used namespaced selectors
+throughout `p_mob_attributes`. Every attribute field therefore read `UNSUPPORTED` on
+both subjects and, because the old scorer only dropped fields at probe granularity, each
+was scored as a match against vanilla's own `UNSUPPORTED`. That is exactly the fake-match
+class its docstring claimed to have eliminated. The scorer now drops dead sentinels at
+field granularity.
+
+### 3. Entity-type tag selectors are unsupported - MEDIUM
+
+    # vanilla
+    execute if entity @e[type=#minecraft:zombies]   -> Test passed. Count: 1
+    # both Pumpkins
+    attribute @e[type=#minecraft:zombies,limit=1] minecraft:max_health get
+      -> Invalid or unknown entity type ''
+
+Confidence: HIGH that it diverges. Grouped separately from #2 because the fix is a
+different code path (tag resolution, not namespace splitting), though both live in the
+selector type parser.
+
+### 4. `fill` reports blocks it did not change - MEDIUM
+
+    fill 2010 100 2010 2012 100 2012 minecraft:stone   # twice in a row
+    # vanilla: "Successfully filled 9 block(s)" then "No blocks were filled"
+    # both Pumpkins: "9 blocks filled" then "9 blocks filled"
+
+Vanilla counts only blocks whose state actually changed. Pumpkin counts every block in
+the region unconditionally. The count is the command's return value and feeds
+`execute store result`, so this is a semantic divergence, not wording. Confidence: HIGH.
+
+## Divergences present on upstream Pumpkin but already fixed in the fork
+
+Recorded for completeness; not actionable here.
+
+- `loot spawn <dst> mine <src>` on `minecraft:iron_ore` drops 0 items on upstream where
+  vanilla and pie both drop 1.
+- `fill <region> <block> replace <filter>` reports "No blocks filled" on upstream where
+  vanilla and pie both fill 9.
+- `clone ... filtered ...` and `item replace block ...` return "That position is not
+  loaded" on upstream after the identical forceload sequence that succeeds on vanilla
+  and pie - an upstream forceload-ticket issue.
