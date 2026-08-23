@@ -32,6 +32,7 @@ use pumpkin_data::Enchantment;
 use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::tag::Taggable;
 use pumpkin_world::inventory::Inventory;
 
 /// Type alias for async slot operations.
@@ -477,6 +478,124 @@ impl Slot for ArmorSlot {
                 .await
                 .get_enchantment_level(&Enchantment::BINDING_CURSE)
                 <= 0
+        })
+    }
+}
+
+/// The beacon's single payment slot.
+///
+/// Vanilla `BeaconMenu.PaymentSlot` (`BeaconMenu.java:166-180`): `mayPlace` restricts
+/// insertion to `ItemTags.BEACON_PAYMENT_ITEMS`, and `getMaxStackSize` caps it at 1. The
+/// same restriction is duplicated on the anonymous `SimpleContainer`'s `canPlaceItem`
+/// override backing the slot (`BeaconMenu.java:26-36`).
+// BeaconMenu.PaymentSlot
+pub struct BeaconPaymentSlot {
+    /// The inventory containing this slot (the beacon block entity).
+    pub inventory: Arc<dyn Inventory>,
+    /// Index of this slot within its inventory (always 0).
+    pub index: usize,
+    /// Protocol ID for this slot (assigned by screen handler).
+    pub id: AtomicU8,
+}
+
+impl BeaconPaymentSlot {
+    #[must_use]
+    pub fn new(inventory: Arc<dyn Inventory>, index: usize) -> Self {
+        Self {
+            inventory,
+            index,
+            id: AtomicU8::new(0),
+        }
+    }
+}
+
+impl Slot for BeaconPaymentSlot {
+    fn get_inventory(&self) -> Arc<dyn Inventory> {
+        self.inventory.clone()
+    }
+
+    fn get_index(&self) -> usize {
+        self.index
+    }
+
+    fn set_id(&self, id: usize) {
+        self.id.store(id as u8, Ordering::Relaxed);
+    }
+
+    /// `BeaconMenu.PaymentSlot.mayPlace` (`BeaconMenu.java:171-174`).
+    fn can_insert<'a>(&'a self, stack: &'a ItemStack) -> BoxFuture<'a, bool> {
+        Box::pin(async move {
+            stack
+                .item
+                .has_tag(&pumpkin_data::tag::Item::MINECRAFT_BEACON_PAYMENT_ITEMS)
+        })
+    }
+
+    fn mark_dirty(&self) -> BoxFuture<'_, ()> {
+        Box::pin(async move {
+            self.inventory.mark_dirty();
+        })
+    }
+
+    /// `BeaconMenu.PaymentSlot.getMaxStackSize` (`BeaconMenu.java:177-179`).
+    fn get_max_item_count(&self) -> BoxFuture<'_, u8> {
+        Box::pin(async move { 1 })
+    }
+}
+
+/// A slot whose `mayPlace` is a plain predicate function.
+///
+/// For the many vanilla menus that define an anonymous `Slot` subclass purely to override
+/// `mayPlace` (e.g. `CartographyTableMenu.java:49-60`'s map/paper slots, and its
+/// always-`false` result slot at `CartographyTableMenu.java:61-65`).
+pub struct PredicateSlot {
+    /// The inventory containing this slot.
+    pub inventory: Arc<dyn Inventory>,
+    /// Index of this slot within its inventory.
+    pub index: usize,
+    /// Protocol ID for this slot (assigned by screen handler).
+    pub id: AtomicU8,
+    /// The `mayPlace` predicate.
+    pub may_place: fn(&ItemStack) -> bool,
+}
+
+impl PredicateSlot {
+    #[must_use]
+    pub fn new(
+        inventory: Arc<dyn Inventory>,
+        index: usize,
+        may_place: fn(&ItemStack) -> bool,
+    ) -> Self {
+        Self {
+            inventory,
+            index,
+            id: AtomicU8::new(0),
+            may_place,
+        }
+    }
+}
+
+impl Slot for PredicateSlot {
+    fn get_inventory(&self) -> Arc<dyn Inventory> {
+        self.inventory.clone()
+    }
+
+    fn get_index(&self) -> usize {
+        self.index
+    }
+
+    fn set_id(&self, id: usize) {
+        self.id.store(id as u8, Ordering::Relaxed);
+    }
+
+    fn can_insert<'a>(&'a self, stack: &'a ItemStack) -> BoxFuture<'a, bool> {
+        let may_place = self.may_place;
+        Box::pin(async move { may_place(stack) })
+    }
+
+    fn mark_dirty(&self) -> BoxFuture<'_, ()> {
+        Box::pin(async move {
+            self.inventory.mark_dirty();
         })
     }
 }

@@ -200,6 +200,12 @@ impl EntityBase for EyeOfEnder {
         Box::pin(async {})
     }
 
+    /// `EyeOfEnder.isAttackable` (`EyeOfEnder.java:167-169`): always `false`, so
+    /// `Player.attack` is a complete no-op against it (no sound, no cooldown reset).
+    fn is_attackable(&self) -> bool {
+        false
+    }
+
     fn get_entity(&self) -> &Entity {
         &self.entity
     }

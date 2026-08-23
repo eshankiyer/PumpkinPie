@@ -114,16 +114,23 @@ impl ScreenHandler for LecternScreenHandler {
     ) -> ScreenHandlerFuture<'a, bool> {
         Box::pin(async move {
             match id {
+                // `LecternMenu.clickMenuButton` cases 1/2/100+ (`LecternMenu.java:46-56,40-44`)
+                // all go through `this.setData(0, ...)`, whose override
+                // (`LecternMenu.java:79-83`) always calls `broadcastChanges()` immediately
+                // after the base `setData` write, rather than waiting for the next periodic
+                // sync. `send_content_updates` is that broadcast here.
                 Self::PREVIOUS_PAGE_BUTTON_ID => {
                     self.controller
                         .set_page(self.controller.current_page() - 1)
                         .await;
+                    self.send_content_updates().await;
                     true
                 }
                 Self::NEXT_PAGE_BUTTON_ID => {
                     self.controller
                         .set_page(self.controller.current_page() + 1)
                         .await;
+                    self.send_content_updates().await;
                     true
                 }
                 Self::TAKE_BOOK_BUTTON_ID => {
@@ -141,6 +148,7 @@ impl ScreenHandler for LecternScreenHandler {
                     self.controller
                         .set_page(id - Self::JUMP_TO_PAGE_OFFSET)
                         .await;
+                    self.send_content_updates().await;
                     true
                 }
                 _ => false,

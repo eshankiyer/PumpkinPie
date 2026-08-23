@@ -1509,6 +1509,14 @@ impl Player {
 
     #[expect(clippy::too_many_lines)]
     pub async fn attack(&self, victim: Arc<dyn EntityBase>) {
+        // `Player.attack` (`Player.java:951-1002`) guards its entire body on
+        // `!cannotAttack(entity)`; `cannotAttack` is `!isAttackable() || skipAttackInteraction()`
+        // (`Player.java:1017-1018`). Only the `isAttackable` half is ported here: when it is
+        // `false` (e.g. `EyeOfEnder`), the attack is a complete no-op -- no sound, no cooldown
+        // reset, no swing side effects -- not merely no damage.
+        if !victim.is_attackable() {
+            return;
+        }
         let world = self.world();
         let Some(server) = world.server.upgrade() else {
             return;
