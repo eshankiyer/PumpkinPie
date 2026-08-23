@@ -200,18 +200,23 @@ cd pumpkinpie
 
   <h2>How it compares</h2>
   <p>
-    The same instrument, run unchanged against each project's own checkout. It discovers source
-    roots per repository, so SteelMC's <code>steel-core/</code> layout is measured as fairly as a
-    <code>crates/</code> one. Measured against decompiled 26.2.
+    The same instrument, run unchanged against each project's own checkout (no per-repo tuning, no
+    alias tables) &mdash; a type counts as covered if some <code>struct</code>/<code>enum</code>/
+    <code>trait</code> declared anywhere in the repo matches the vanilla class's name (a common
+    suffix like <code>Entity</code> or <code>Block</code> may be stripped on either side), and a
+    method counts as present if its name appears in the file(s) declaring that type. It discovers
+    source roots per repository by scanning every <code>.rs</code> file under the checkout, so
+    SteelMC's <code>steel-core/</code> layout is measured the same way as a <code>crates/</code>
+    one. Measured against decompiled 26.2, refreshed 2026-08-23.
   </p>
 
   <table>
     <thead><tr><th></th><th>PumpkinPie</th><th>SteelMC</th><th>Pumpkin</th></tr></thead>
     <tbody>
-      <tr><td>Vanilla classes with an analogue</td><td><strong>1111</strong></td><td>895</td><td>968</td></tr>
-      <tr><td>Vanilla methods matched, absolute</td><td><strong>4504</strong></td><td>3386</td><td>3178</td></tr>
-      <tr><td>Methods scored against</td><td>8572</td><td>5423</td><td>7764</td></tr>
-      <tr><td>Depth per class claimed</td><td>52.5%</td><td><strong>62.4%</strong></td><td>40.9%</td></tr>
+      <tr><td>Vanilla classes with an analogue</td><td><strong>741</strong></td><td>703</td><td>625</td></tr>
+      <tr><td>Vanilla methods matched, absolute</td><td><strong>2237</strong></td><td>2285</td><td>1001</td></tr>
+      <tr><td>Methods scored against</td><td>8682</td><td>5871</td><td>7873</td></tr>
+      <tr><td>Depth per class claimed</td><td>25.8%</td><td><strong>38.9%</strong></td><td>12.7%</td></tr>
     </tbody>
   </table>
 
@@ -219,16 +224,24 @@ cd pumpkinpie
     <strong>Read the rows together.</strong> The last one disagrees with the first two, and that is
     the interesting part. PumpkinPie covers the most of vanilla and matches the most methods
     outright. SteelMC matches a higher <em>share</em> of what it takes on, because it takes on
-    less: its percentage is over 5423 methods where PumpkinPie's is over 8572. A project
-    implementing fewer classes scores higher per class while covering less of the game, so no one
-    number settles it. Against the upstream it forked from, PumpkinPie leads on every measure here.
+    less: its percentage is over 5871 methods where PumpkinPie's is over 8682, and it also edges
+    out PumpkinPie on raw methods matched despite covering fewer classes. A project implementing
+    fewer classes scores higher per class while covering less of the game, so no one number
+    settles it. Against the upstream it forked from, PumpkinPie leads on every measure here.
   </div>
 
   <p>
-    Two caveats. The instrument carries 18 negative-control probes; only 9 apply to SteelMC, and
-    upstream needed <code>--no-probes</code> because one failed against its layout, so cross-repo
-    confidence is weaker than same-repo confidence. And this is name-level matching: it does not
-    prove any of the three behaves correctly.
+    Two caveats. This instrument is deliberately simple &mdash; a straight name match with one
+    suffix-stripping rule, no negative controls, no per-repo tuning &mdash; specifically so the
+    same code treats an unrelated codebase (SteelMC) exactly like one that shares Pumpkin's
+    ancestry. That fairness costs recall: it misses renamed methods, methods reached only through
+    trait defaults, and multi-file implementations, so every number above is a floor, not a
+    ceiling, and is not comparable to a differently-tuned instrument's numbers (including this
+    page's own numbers from before this refresh, which used a since-lost stricter generator with
+    its own alias tables). The source is
+    <a href="https://github.com/eshankiyer/PumpkinPie/blob/master/docs/tracker/scan.py">
+    <code>docs/tracker/scan.py</code></a>. And this is still name-level matching: it does not prove
+    any of the three behaves correctly.
   </p>
 
   <h2>Parity, measured</h2>
@@ -259,17 +272,24 @@ cd pumpkinpie
   <h3>Method-level conformance: how much of each class's surface is covered?</h3>
   <table>
     <tbody>
-      <tr><td>Strict, counterpart in the one mapped file</td><td>22.4%</td></tr>
-      <tr><td>Loose, counterpart anywhere in <code>crates/</code></td><td>52.5%</td></tr>
-      <tr><td>Remaining leads</td><td>4068</td></tr>
+      <tr><td>Strict, counterpart in the one mapped file</td><td>17.9%</td></tr>
+      <tr><td>Loose, counterpart anywhere in <code>crates/</code></td><td>47.5%</td></tr>
+      <tr><td>Remaining leads</td><td>4045</td></tr>
     </tbody>
   </table>
   <p>
     The truth is between the two: strict under-credits behaviour split across modules and trait
     impls, loose over-credits trait defaults. And a lead is <strong>not</strong> a confirmed gap
     &mdash; measured yield runs around one in five, the rest being renames, methods inlined into
-    their callers, or client-only code a dedicated server never reaches. Audits so far: 1 real gap
-    in 207 block leads, 3 in 14 worldgen leads, 4 in 118 item leads, 1 in 30 protocol leads.
+    their callers, or client-only code a dedicated server never reaches.
+  </p>
+  <p>
+    These two numbers read lower than they used to on this page, and that is the enumerator
+    getting more thorough, not the implementation getting smaller: it now scans 2824 vanilla
+    classes and 17309 methods, up from a narrower earlier pass, so the percentage's denominator
+    grew faster than any one session's fixes could keep pace with. Read the trend from the
+    <a href="tracker/">tracker</a>'s own re-runs over time, not from this page's number against
+    its own past self.
   </p>
   <p>
     Neither number is behavioural proof. The
