@@ -76,7 +76,7 @@ impl BlockEntity for HopperBlockEntity {
         Box::pin(async move {
             self.ticked_game_time
                 .store(world.get_world_age().await, Ordering::Relaxed);
-            if self.cooldown_time.fetch_sub(1, Ordering::Relaxed) <= 0 {
+            if self.cooldown_time.fetch_sub(1, Ordering::Relaxed) <= 1 {
                 self.cooldown_time.store(0, Ordering::Relaxed);
                 let state = HopperLikeProperties::from_state_id(
                     world.get_block_state(&self.position).id,
