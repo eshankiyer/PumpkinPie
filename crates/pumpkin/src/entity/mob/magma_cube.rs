@@ -11,13 +11,8 @@ use crate::world::World;
 ///
 /// `SlimeEntity` branches internally on `EntityType::MAGMA_CUBE` for the handful of
 /// overrides that differ (sounds, jump delay, squish decay, attack damage/armor scaling,
-/// fire-render suppression in `Entity::tick`).
-///
-/// Not ported: `MagmaCube.jumpInLiquid` (extra upward velocity while jumping in lava) and
-/// `MagmaCube.jumpFromGround`'s size-scaled jump boost. Both hook into `LivingEntity`'s
-/// liquid-jump/jump-from-ground physics, which this codebase does not implement for any
-/// mob (jumping only ever comes from the `JUMP_STRENGTH` attribute via `LivingEntity::jump`).
-/// Porting them would mean building that physics hook first, which is out of scope here.
+/// and fire-render suppression in `Entity::tick`). Its jump overrides are applied in
+/// `LivingEntity`, where the shared movement code owns the liquid and ground jump hooks.
 pub struct MagmaCubeEntity {
     pub slime: Arc<SlimeEntity>,
 }

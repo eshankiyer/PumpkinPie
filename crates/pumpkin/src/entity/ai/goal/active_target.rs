@@ -23,6 +23,7 @@ pub struct ActiveTargetGoal {
     target_type: Option<&'static EntityType>,
     target_types: Option<&'static [&'static EntityType]>,
     target_predicate: TargetPredicate,
+    follow_distance_multiplier: f64,
 }
 
 impl ActiveTargetGoal {
@@ -55,6 +56,7 @@ impl ActiveTargetGoal {
             target_type: Some(target_type),
             target_types: None,
             target_predicate,
+            follow_distance_multiplier: 1.0,
         }
     }
 
@@ -87,6 +89,7 @@ impl ActiveTargetGoal {
             target_type: None,
             target_types: Some(target_types),
             target_predicate,
+            follow_distance_multiplier: 1.0,
         }
     }
 
@@ -120,6 +123,7 @@ impl ActiveTargetGoal {
             target_type: Some(target_type),
             target_types: None,
             target_predicate,
+            follow_distance_multiplier: 1.0,
         })
     }
 
@@ -153,7 +157,19 @@ impl ActiveTargetGoal {
             target_type: None,
             target_types: Some(target_types),
             target_predicate,
+            follow_distance_multiplier: 1.0,
         })
+    }
+
+    /// Vanilla `PolarBearAttackPlayersGoal.getFollowDistance`: the bear tracks targets at half
+    /// its `FOLLOW_RANGE` attribute (PolarBear.java:276-279).
+    #[must_use]
+    pub fn set_follow_distance_multiplier(mut self, multiplier: f64) -> Self {
+        self.follow_distance_multiplier = multiplier;
+        self.track_target_goal = self
+            .track_target_goal
+            .set_follow_distance_multiplier(multiplier);
+        self
     }
 
     pub fn set_target(&mut self, target: Option<Arc<dyn EntityBase>>) {
@@ -164,7 +180,8 @@ impl ActiveTargetGoal {
         let mob_entity = mob.get_mob_entity();
         let follow_range = mob_entity
             .living_entity
-            .get_attribute_value(&Attributes::FOLLOW_RANGE);
+            .get_attribute_value(&Attributes::FOLLOW_RANGE)
+            * self.follow_distance_multiplier;
 
         // Vanilla updates the target conditions with the current follow distance on every search
         self.target_predicate.base_max_distance = follow_range;

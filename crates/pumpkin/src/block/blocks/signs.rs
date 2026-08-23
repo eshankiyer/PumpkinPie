@@ -17,6 +17,7 @@ use pumpkin_inventory::screen_handler::InventoryPlayer;
 use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
+use pumpkin_util::text::{TextComponent, TextContent};
 use uuid::Uuid;
 
 use crate::block::BlockBehaviour;
@@ -432,7 +433,10 @@ impl BlockBehaviour for SignBlock {
         })
     }
 
-    /// Handles normal use (right-click) on the sign block.
+    /// Mirrors `SignBlock.useWithoutItem` and `hasEditableText` from
+    /// `net/minecraft/world/level/block/SignBlock.java:128-159`: execute the sign's click
+    /// commands first, refuse waxed signs, and only claim the editor for a player who may build
+    /// when every line has plain-text contents.
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
             let Some(block_entity) = args.world.get_block_entity(args.position) else {
@@ -488,8 +492,8 @@ impl BlockBehaviour for SignBlock {
             }
 
             let mut currently_editing = sign_entity.currently_editing_player.lock().await;
-            if !try_claim_sign(
-                &mut currently_editing,
+            if other_player_is_editing_sign(
+                *currently_editing,
                 &args.player.gameprofile.id,
                 args.world,
                 args.position,
@@ -499,6 +503,18 @@ impl BlockBehaviour for SignBlock {
 
             let is_facing_front_text =
                 is_facing_front_text(args.world, args.position, args.block, args.player);
+            let text = if is_facing_front_text {
+                &sign_entity.front_text
+            } else {
+                &sign_entity.back_text
+            };
+            let may_build = args.player.abilities.lock().await.allow_modify_world;
+            if !has_editable_text(text) || !may_build {
+                return BlockActionResult::Pass;
+            }
+
+            *currently_editing = Some(args.player.gameprofile.id);
+            drop(currently_editing);
             match args.player.client.as_ref() {
                 ClientPlatform::Java(java) => {
                     java.send_sign_packet(*args.position, is_facing_front_text)
@@ -511,7 +527,9 @@ impl BlockBehaviour for SignBlock {
         })
     }
 
-    /// Handles use with an item on the sign block.
+    /// Mirrors `SignBlock.useItemOn` from
+    /// `net/minecraft/world/level/block/SignBlock.java:91-125`: only a build-capable sign
+    /// applicator may mutate the text, and an item attempt must not claim the text editor.
     fn use_with_item<'a>(
         &'a self,
         args: UseWithItemArgs<'a>,
@@ -528,29 +546,44 @@ impl BlockBehaviour for SignBlock {
                 return BlockActionResult::PassToDefaultBlockAction;
             }
 
-            let mut currently_editing = sign_entity.currently_editing_player.lock().await;
-            if !try_claim_sign(
-                &mut currently_editing,
-                &args.player.gameprofile.id,
-                args.world,
-                args.position,
-            ) {
-                // I don't think that makes sense, since it will also just return in normal_use, but vanilla does it like this
-                return BlockActionResult::PassToDefaultBlockAction;
-            }
-
-            let text = if is_facing_front_text(args.world, args.position, args.block, args.player) {
-                &sign_entity.front_text
-            } else {
-                &sign_entity.back_text
-            };
-
             let Some(pumpkin_item) = args
                 .server
                 .item_registry
                 .get_pumpkin_item(args.item_stack.item.id)
             else {
                 return BlockActionResult::PassToDefaultBlockAction;
+            };
+
+            let is_sign_applicator = pumpkin_item
+                .as_any()
+                .downcast_ref::<HoneyCombItem>()
+                .is_some()
+                || pumpkin_item
+                    .as_any()
+                    .downcast_ref::<GlowingInkSacItem>()
+                    .is_some()
+                || pumpkin_item.as_any().downcast_ref::<InkSacItem>().is_some()
+                || pumpkin_item.as_any().downcast_ref::<DyeItem>().is_some();
+            let may_build = args.player.abilities.lock().await.allow_modify_world;
+            if !is_sign_applicator || !may_build {
+                return BlockActionResult::PassToDefaultBlockAction;
+            }
+
+            let currently_editing = sign_entity.currently_editing_player.lock().await;
+            if other_player_is_editing_sign(
+                *currently_editing,
+                &args.player.gameprofile.id,
+                args.world,
+                args.position,
+            ) {
+                return BlockActionResult::PassToDefaultBlockAction;
+            }
+            drop(currently_editing);
+
+            let text = if is_facing_front_text(args.world, args.position, args.block, args.player) {
+                &sign_entity.front_text
+            } else {
+                &sign_entity.back_text
             };
 
             let result = pumpkin_item
@@ -602,7 +635,6 @@ impl BlockBehaviour for SignBlock {
                 if !args.player.has_infinite_materials() {
                     args.item_stack.decrement(1);
                 }
-                *currently_editing = None;
             }
 
             result
@@ -685,22 +717,34 @@ fn get_yaw_from_rotation_16(rotation: u8) -> f32 {
     f32::from(rotation) * 22.5
 }
 
-fn try_claim_sign(
-    currently_editing: &mut Option<Uuid>,
+fn other_player_is_editing_sign(
+    currently_editing: Option<Uuid>,
     uuid: &Uuid,
     world: &World,
     position: &BlockPos,
 ) -> bool {
-    if let Some(editing_player_id) = *currently_editing
+    if let Some(editing_player_id) = currently_editing
         && editing_player_id != *uuid
         && let Some(editing_player) = world.get_player_by_uuid(editing_player_id)
         && editing_player
             .as_ref()
             .can_interact_with_block_at(position, 4.0f64)
     {
-        return false;
+        return true;
     }
 
-    *currently_editing = Some(*uuid);
-    true
+    false
+}
+
+fn has_editable_text(text: &crate::block::entities::sign::Text) -> bool {
+    text.messages
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .all(|line| {
+            line.is_empty()
+                || serde_json::from_str::<TextComponent>(line).is_ok_and(|component| {
+                    matches!(&*component.0.content, TextContent::Text { .. })
+                })
+        })
 }
