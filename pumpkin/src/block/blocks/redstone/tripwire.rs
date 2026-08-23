@@ -139,10 +139,14 @@ impl BlockBehaviour for TripwireBlock {
             }
 
             let aabb = BoundingBox::from_block(args.position);
-            // TODO entity.canAvoidTraps()
-            if args.world.get_entities_at_box(&aabb).is_empty()
-                && args.world.get_players_at_box(&aabb).is_empty()
-            {
+            let triggering_entities: Vec<_> = args
+                .world
+                .get_entities_at_box(&aabb)
+                .into_iter()
+                .filter(|entity| !entity_ignores_block_triggers(entity.get_entity().entity_type()))
+                .collect();
+
+            if triggering_entities.is_empty() && args.world.get_players_at_box(&aabb).is_empty() {
                 props.powered = false;
                 let state_id = props.to_state_id(args.block);
                 args.world
@@ -158,6 +162,13 @@ impl BlockBehaviour for TripwireBlock {
                 );
             }
         })
+    }
+
+    /// Returns whether an entity type ignores block triggers such as tripwires.
+    ///
+    /// Vanilla exempts foxes and cats from powering tripwires.
+    fn entity_ignores_block_triggers(entity_type: &'static EntityType) -> bool {
+        matches!(entity_type, EntityType::FOX | EntityType::CAT)
     }
 
     fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
