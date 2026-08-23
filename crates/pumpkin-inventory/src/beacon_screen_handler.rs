@@ -9,8 +9,17 @@ use crate::{
         InventoryPlayer, ItemStackFuture, ScreenHandler, ScreenHandlerBehaviour,
         ScreenHandlerFuture, ScreenProperty,
     },
-    slot::NormalSlot,
+    slot::BeaconPaymentSlot,
 };
+
+/// `BeaconMenu.INV_SLOT_START` (`BeaconMenu.java:21`).
+const INV_SLOT_START: i32 = 1;
+/// `BeaconMenu.INV_SLOT_END` (`BeaconMenu.java:22`).
+const INV_SLOT_END: i32 = 28;
+/// `BeaconMenu.USE_ROW_SLOT_START` (`BeaconMenu.java:23`).
+const USE_ROW_SLOT_START: i32 = 28;
+/// `BeaconMenu.USE_ROW_SLOT_END` (`BeaconMenu.java:24`).
+const USE_ROW_SLOT_END: i32 = 37;
 
 /// Creates a beacon container screen handler.
 ///
@@ -76,13 +85,21 @@ impl BeaconScreenHandler {
         handler.add_listener(Arc::new(BeaconScreenListener)).await;
 
         // Add the single payment slot for the beacon (slot 0)
-        handler.add_slot(Arc::new(NormalSlot::new(handler.inventory.clone(), 0)));
+        handler.add_slot(Arc::new(BeaconPaymentSlot::new(
+            handler.inventory.clone(),
+            0,
+        )));
 
         // Add the player's inventory slots (27 slots + 9 hotbar)
         let player_inventory_arc: Arc<dyn Inventory> = player_inventory.clone();
         handler.add_player_slots(&player_inventory_arc);
 
         handler
+    }
+
+    /// `BeaconMenu.hasPayment` (`BeaconMenu.java:162-164`).
+    pub async fn has_payment(&self) -> bool {
+        !self.inventory.get_stack(0).await.is_empty()
     }
 }
 
@@ -112,17 +129,19 @@ impl ScreenHandler for BeaconScreenHandler {
         &mut self.behaviour
     }
 
+    /// `BeaconMenu.removed` (`BeaconMenu.java:56-65`): unlike a block-entity container
+    /// (chest, barrel, ...) the payment slot's contents are not left in the beacon when the
+    /// GUI closes -- they are dropped back to the player, since payment is only actually
+    /// spent through `updateEffects`.
     fn on_closed<'a>(&'a mut self, player: &'a dyn InventoryPlayer) -> ScreenHandlerFuture<'a, ()> {
         Box::pin(async move {
             self.default_on_closed(player).await;
+            self.drop_inventory(player, self.inventory.clone()).await;
             self.inventory.on_close().await;
         })
     }
 
-    /// Quick move logic specifically for the beacon UI.
-    ///
-    /// - From beacon payment slot (0): Move to player inventory
-    /// - From player inventory (1+): Move to beacon payment slot
+    /// `BeaconMenu.quickMoveStack` (`BeaconMenu.java:79-121`).
     fn quick_move<'a>(
         &'a mut self,
         _player: &'a dyn InventoryPlayer,
@@ -131,27 +150,57 @@ impl ScreenHandler for BeaconScreenHandler {
         Box::pin(async move {
             let mut stack_left = ItemStack::EMPTY.clone();
             let slot = self.get_behaviour().slots[slot_index as usize].clone();
+            let total_slots = self.get_behaviour().slots.len() as i32;
 
             if slot.has_stack().await {
                 let mut slot_stack = slot.get_stack().await;
                 stack_left = slot_stack.clone();
 
                 if slot_index == 0 {
-                    // Move from the single beacon slot to the player inventory (slots 1 to end)
+                    // `slotIndex == 0`: move out of the payment slot into the full player
+                    // inventory (`BeaconMenu.java:86`).
                     if !self
-                        .insert_item(
-                            &mut slot_stack,
-                            1,
-                            self.get_behaviour().slots.len() as i32,
-                            true,
-                        )
+                        .insert_item(&mut slot_stack, 1, total_slots, true)
                         .await
                     {
                         return ItemStack::EMPTY.clone();
                     }
                 } else {
-                    // Move from player inventory into the beacon payment slot (slot 0)
-                    if !self.insert_item(&mut slot_stack, 0, 1, false).await {
+                    let payment_slot = self.get_behaviour().slots[0].clone();
+                    let payment_empty = !payment_slot.has_stack().await;
+                    let may_pay = payment_slot.can_insert(&slot_stack).await;
+                    if payment_empty && may_pay && slot_stack.item_count == 1 {
+                        // Eligible payment item, and the payment slot is free: offer it there
+                        // first (`BeaconMenu.java:91-94`).
+                        if !self.insert_item(&mut slot_stack, 0, 1, false).await {
+                            return ItemStack::EMPTY.clone();
+                        }
+                    } else if (INV_SLOT_START..INV_SLOT_END).contains(&slot_index) {
+                        // From the main inventory: shift into the hotbar (`BeaconMenu.java:95-98`).
+                        if !self
+                            .insert_item(
+                                &mut slot_stack,
+                                USE_ROW_SLOT_START,
+                                USE_ROW_SLOT_END,
+                                false,
+                            )
+                            .await
+                        {
+                            return ItemStack::EMPTY.clone();
+                        }
+                    } else if (USE_ROW_SLOT_START..USE_ROW_SLOT_END).contains(&slot_index) {
+                        // From the hotbar: shift into the main inventory (`BeaconMenu.java:99-102`).
+                        if !self
+                            .insert_item(&mut slot_stack, INV_SLOT_START, INV_SLOT_END, false)
+                            .await
+                        {
+                            return ItemStack::EMPTY.clone();
+                        }
+                    } else if !self
+                        .insert_item(&mut slot_stack, 1, total_slots, false)
+                        .await
+                    {
+                        // Fallback: anywhere in the player inventory (`BeaconMenu.java:103-105`).
                         return ItemStack::EMPTY.clone();
                     }
                 }

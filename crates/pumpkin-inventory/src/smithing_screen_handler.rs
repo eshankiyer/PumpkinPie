@@ -119,6 +119,30 @@ impl SmithingScreenHandler {
         let result = Self::compute_result(&template, &base, &addition);
         self.output_inventory.set_stack(0, result).await;
     }
+
+    /// `SmithingMenu.canMoveIntoInputSlots` (`SmithingMenu.java:134-140`): a shift-click from
+    /// the player's inventory only tries the input slots at all if the stack fills a role
+    /// (template/base/addition) whose slot is still empty.
+    async fn can_move_into_input_slots(&self, stack: &ItemStack) -> bool {
+        let template_empty = self
+            .input_inventory
+            .get_stack(TEMPLATE_SLOT)
+            .await
+            .is_empty();
+        if is_template_candidate(stack.item) && template_empty {
+            return true;
+        }
+        let base_empty = self.input_inventory.get_stack(BASE_SLOT).await.is_empty();
+        if is_base_candidate(stack.item) && base_empty {
+            return true;
+        }
+        let addition_empty = self
+            .input_inventory
+            .get_stack(ADDITION_SLOT)
+            .await
+            .is_empty();
+        is_addition_candidate(stack.item) && addition_empty
+    }
 }
 
 impl ScreenHandler for SmithingScreenHandler {
@@ -196,7 +220,21 @@ impl ScreenHandler for SmithingScreenHandler {
                         }
                         slot.on_quick_move_crafted(slot_stack.clone(), stack.clone())
                             .await;
-                    } else if !self.insert_item(&mut slot_stack, 0, 3, false).await {
+                    } else if self.can_move_into_input_slots(&slot_stack).await
+                        && (4..40).contains(&slot_index)
+                    {
+                        if !self.insert_item(&mut slot_stack, 0, 3, false).await {
+                            return ItemStack::EMPTY.clone();
+                        }
+                    } else if (4..31).contains(&slot_index) {
+                        // Main inventory -> hotbar (`ItemCombinerMenu.java:137-140`).
+                        if !self.insert_item(&mut slot_stack, 31, 40, false).await {
+                            return ItemStack::EMPTY.clone();
+                        }
+                    } else if (31..40).contains(&slot_index)
+                        && !self.insert_item(&mut slot_stack, 4, 31, false).await
+                    {
+                        // Hotbar -> main inventory (`ItemCombinerMenu.java:141-144`).
                         return ItemStack::EMPTY.clone();
                     }
 

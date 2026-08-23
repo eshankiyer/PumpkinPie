@@ -179,7 +179,7 @@ use crate::block::fluid::lava::FlowingLava;
 use crate::block::fluid::water::FlowingWater;
 use crate::block::{
     AttackArgs, BlockBehaviour, BlockHitResult, BlockMetadata, BonemealArgs, FluidMetadata,
-    GetInsideCollisionShapeArgs, OnEntityCollisionArgs, OnLandedUponArgs,
+    GetCloneItemStackArgs, GetInsideCollisionShapeArgs, OnEntityCollisionArgs, OnLandedUponArgs,
     UpdateEntityMovementAfterFallOnArgs, stop_vertical_movement_after_fall,
 };
 use crate::entity::EntityBase;
@@ -922,6 +922,24 @@ impl BlockRegistry {
                 .await;
         }
         BlockActionResult::Pass
+    }
+
+    /// Vanilla `Block#getCloneItemStack` (creative pick-block). Returns the item stack a player
+    /// receives when middle-clicking this block, delegating to the block's behaviour override if
+    /// it defines one. The default (`None`) falls back to the block's registered `item_id`.
+    pub fn get_clone_item_stack(
+        &self,
+        block: &Block,
+        world: &Arc<World>,
+        position: &BlockPos,
+    ) -> Option<ItemStack> {
+        self.get_pumpkin_block(block.id).and_then(|behaviour| {
+            behaviour.get_clone_item_stack(GetCloneItemStackArgs {
+                world,
+                block,
+                position,
+            })
+        })
     }
 
     /// Opens the menu provider exposed by a block to a spectator.

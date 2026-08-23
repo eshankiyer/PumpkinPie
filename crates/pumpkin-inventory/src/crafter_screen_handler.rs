@@ -10,6 +10,7 @@
 
 use std::{
     any::Any,
+    pin::Pin,
     sync::{
         Arc,
         atomic::{AtomicU8, Ordering},
@@ -17,9 +18,14 @@ use std::{
 };
 
 use pumpkin_data::{item_stack::ItemStack, screen::WindowType};
-use pumpkin_world::{block::entities::PropertyDelegate, inventory::Inventory};
+use pumpkin_world::inventory::InventoryFuture;
+use pumpkin_world::{
+    block::entities::PropertyDelegate,
+    inventory::{Clearable, Inventory},
+};
 
 use crate::{
+    crafting::{crafting_screen_handler::match_crafting_recipe, recipes::RecipeInputInventory},
     player::player_inventory::PlayerInventory,
     screen_handler::{
         InventoryPlayer, ItemStackFuture, ScreenHandler, ScreenHandlerBehaviour,
@@ -176,6 +182,51 @@ impl Slot for NonInteractiveResultSlot {
     }
 }
 
+/// Adapts the crafter's type-erased nine-slot `Inventory` to `RecipeInputInventory` (a fixed
+/// 3x3 grid) so [`match_crafting_recipe`] can be reused for the recipe-preview slot, the same
+/// function `CrafterBlockEntity`'s own redstone-triggered crafting already calls.
+struct CrafterRecipeInput(Arc<dyn Inventory>);
+
+impl Clearable for CrafterRecipeInput {
+    fn clear(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        self.0.clear()
+    }
+}
+
+impl Inventory for CrafterRecipeInput {
+    fn size(&self) -> usize {
+        self.0.size()
+    }
+    fn is_empty(&self) -> InventoryFuture<'_, bool> {
+        self.0.is_empty()
+    }
+    fn get_stack(&self, slot: usize) -> InventoryFuture<'_, ItemStack> {
+        self.0.get_stack(slot)
+    }
+    fn remove_stack(&self, slot: usize) -> InventoryFuture<'_, ItemStack> {
+        self.0.remove_stack(slot)
+    }
+    fn remove_stack_specific(&self, slot: usize, amount: u8) -> InventoryFuture<'_, ItemStack> {
+        self.0.remove_stack_specific(slot, amount)
+    }
+    fn set_stack(&self, slot: usize, stack: ItemStack) -> InventoryFuture<'_, ()> {
+        self.0.set_stack(slot, stack)
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl RecipeInputInventory for CrafterRecipeInput {
+    /// `CrafterMenu.java:27`: `new TransientCraftingContainer(this, 3, 3)`.
+    fn get_width(&self) -> usize {
+        3
+    }
+    fn get_height(&self) -> usize {
+        3
+    }
+}
+
 /// Screen handler for a crafter block (`CrafterMenu.java`).
 pub struct CrafterScreenHandler {
     /// The crafter's nine input slots.
@@ -227,7 +278,24 @@ impl CrafterScreenHandler {
             handler.add_property(ScreenProperty::new(properties.clone(), index as u8));
         }
 
+        // `CrafterMenu.java:53`: this.refreshRecipeResult().
+        handler.refresh_recipe_result().await;
+
         handler
+    }
+
+    /// `CrafterMenu.refreshRecipeResult` (`CrafterMenu.java:106-113`), called from
+    /// `slotChanged` (`CrafterMenu.java:119-122`) whenever an input slot changes. Populates the
+    /// non-interactive recipe-preview slot; it does not affect actual crafting, which
+    /// `CrafterBlockEntity`'s redstone-triggered tick already resolves independently via the
+    /// same [`match_crafting_recipe`].
+    async fn refresh_recipe_result(&self) {
+        let input = CrafterRecipeInput(self.inventory.clone());
+        let result = match_crafting_recipe(&input, None).await.map_or_else(
+            || ItemStack::EMPTY.clone(),
+            |matched| matched.to_item_stack(),
+        );
+        self.result_inventory.set_stack(0, result).await;
     }
 
     /// `CrafterMenu.java:62-64`.
@@ -287,6 +355,24 @@ impl ScreenHandler for CrafterScreenHandler {
         })
     }
 
+    /// `CrafterMenu.slotChanged` (`CrafterMenu.java:119-122`), fired here after any click that
+    /// could have touched one of the nine input slots.
+    fn on_slot_click<'a>(
+        &'a mut self,
+        slot_index: i32,
+        button: i32,
+        action_type: pumpkin_protocol::java::server::play::SlotActionType,
+        player: &'a dyn InventoryPlayer,
+    ) -> ScreenHandlerFuture<'a, ()> {
+        Box::pin(async move {
+            self.internal_on_slot_click(slot_index, button, action_type, player)
+                .await;
+            if (0..CRAFTER_SLOT_COUNT as i32).contains(&slot_index) {
+                self.refresh_recipe_result().await;
+            }
+        })
+    }
+
     /// `CrafterMenu.java:70-99`. Input slots push to the whole player area
     /// (reversed); everything else pushes back into the nine input slots. The
     /// result slot sits at index 45 but yields nothing, because
@@ -323,6 +409,10 @@ impl ScreenHandler for CrafterScreenHandler {
                 } else {
                     slot.set_stack(slot_stack.clone()).await;
                 }
+
+                // Either branch above may have touched an input slot (`slot_index < 9`, or a
+                // successful insert into `[0, 9)` from the player side): refresh the preview.
+                self.refresh_recipe_result().await;
 
                 // `CrafterMenu.java:91-95`.
                 if slot_stack.item_count == stack_left.item_count {

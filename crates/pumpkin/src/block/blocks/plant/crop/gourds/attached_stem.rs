@@ -1,14 +1,16 @@
 use pumpkin_data::{
     Block, BlockId, BlockStateId,
     block_properties::{BlockProperties, WallTorchLikeProperties, WheatLikeProperties},
+    item::Item,
+    item_stack::ItemStack,
     tag::{self, Taggable},
 };
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockAccessor;
 
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
-    blocks::plant::PlantBlockBase,
+    BlockBehaviour, BlockFuture, BlockMetadata, CanPlaceAtArgs, GetCloneItemStackArgs,
+    GetStateForNeighborUpdateArgs, blocks::plant::PlantBlockBase,
 };
 
 type AttachedStemProperties = WallTorchLikeProperties;
@@ -66,6 +68,17 @@ impl BlockBehaviour for AttachedStemBlock {
             )
             .await
         })
+    }
+
+    /// Vanilla `AttachedStemBlock#getCloneItemStack` (AttachedStemBlock.java:97): middle-clicking
+    /// an attached stem yields its seed (pumpkin seeds / melon seeds) rather than the stem block.
+    fn get_clone_item_stack(&self, args: GetCloneItemStackArgs<'_>) -> Option<ItemStack> {
+        let seed = if args.block.id == Block::ATTACHED_PUMPKIN_STEM.id {
+            &Item::PUMPKIN_SEEDS
+        } else {
+            &Item::MELON_SEEDS
+        };
+        Some(ItemStack::new(1, seed))
     }
 }
 
