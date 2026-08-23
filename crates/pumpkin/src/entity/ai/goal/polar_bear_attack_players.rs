@@ -13,8 +13,7 @@ use pumpkin_data::entity::EntityType;
 /// Vanilla checks an `inflate(8.0, 4.0, 8.0)` box;
 /// approximated here by querying an 8-block radius sphere (since `World` only exposes
 /// radius-based entity queries) and re-applying the box's vertical half-range of 4.0 per
-/// candidate. The `getFollowDistance() * 0.5` override (forget the target sooner once
-/// tracking) has no hook point in `TrackTargetGoal` and is not ported.
+/// candidate. The `getFollowDistance() * 0.5` override is applied by the inner target goal.
 pub struct PolarBearAttackPlayersGoal {
     inner: ActiveTargetGoal,
 }
@@ -33,7 +32,8 @@ impl PolarBearAttackPlayersGoal {
                     |_target: crate::entity::ai::target_predicate::TargetData,
                      _world: Arc<World>| async move { true },
                 ),
-            ),
+            )
+            .set_follow_distance_multiplier(0.5),
         })
     }
 }

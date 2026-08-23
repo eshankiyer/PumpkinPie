@@ -1756,7 +1756,13 @@ impl LivingEntity {
 
                 let mut velo = self.entity.velocity.load();
 
-                velo.y += 0.04;
+                // `MagmaCube.jumpInLiquid` (`net/minecraft/world/entity/monster/cubemob/MagmaCube.java:102-109`)
+                // replaces the ordinary liquid jump impulse in lava with a size-scaled value.
+                if in_lava && self.entity.entity_type == &EntityType::MAGMA_CUBE {
+                    velo.y = 0.22 + f64::from(self.entity.data.load(Relaxed)) * 0.05;
+                } else {
+                    velo.y += 0.04;
+                }
 
                 self.entity.velocity.store(velo);
             } else if (on_ground || in_water && fluid_height <= swim_height)
@@ -2305,6 +2311,18 @@ impl LivingEntity {
     async fn jump(&self) {
         let jump = self.get_jump_velocity(1.0).await;
 
+        // `MagmaCube.jumpFromGround` (`net/minecraft/world/entity/monster/cubemob/MagmaCube.java:94-99`)
+        // uses the cube size as an additional jump boost and does not apply the generic
+        // sprinting impulse. Unlike the base implementation, the override has no small-power
+        // early return.
+        if self.entity.entity_type == &EntityType::MAGMA_CUBE {
+            let mut velo = self.entity.velocity.load();
+            velo.y = jump + f64::from(self.entity.data.load(Relaxed)) * 0.1;
+            self.entity.velocity.store(velo);
+            self.entity.velocity_dirty.store(true, SeqCst);
+            return;
+        }
+
         if jump <= 1.0e-5 {
             return;
         }
@@ -2774,6 +2792,18 @@ impl LivingEntity {
     ) {
         let world = self.entity.world.load();
         let show_death_messages = { world.level_info.load().game_rules.show_death_messages };
+        // `TamableAnimal.die` (`net/minecraft/world/entity/TamableAnimal.java:223-230`)
+        // sends the combat death message to a server-player owner before delegating to
+        // `LivingEntity.die`. The generic player broadcast below does not cover pets.
+        if show_death_messages
+            && let Some(owner_uuid) = dyn_self
+                .get_mob()
+                .and_then(crate::entity::mob::Mob::get_owner_uuid)
+            && let Some(owner) = world.get_player_by_uuid(owner_uuid)
+        {
+            let death_message = Self::get_death_message(dyn_self, damage_type, source, cause).await;
+            owner.send_system_message(&death_message).await;
+        }
         if self.entity.entity_type == &EntityType::PLAYER && show_death_messages {
             //TODO: KillCredit
             let death_message = Self::get_death_message(dyn_self, damage_type, source, cause).await;

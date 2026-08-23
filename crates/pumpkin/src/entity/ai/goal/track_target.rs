@@ -68,6 +68,7 @@ pub struct TrackTargetGoal {
     time_without_visibility: AtomicI32,
     pub max_time_without_visibility: i32,
     target_predicate: TargetPredicate,
+    follow_distance_multiplier: f64,
 }
 
 impl TrackTargetGoal {
@@ -82,6 +83,7 @@ impl TrackTargetGoal {
             time_without_visibility: AtomicI32::new(0),
             max_time_without_visibility: 60,
             target_predicate: TargetPredicate::create_attackable().ignore_visibility(),
+            follow_distance_multiplier: 1.0,
         }
     }
 
@@ -119,6 +121,13 @@ impl TrackTargetGoal {
         self
     }
 
+    /// Vanilla `PolarBearAttackPlayersGoal.getFollowDistance`: the target goal's follow
+    /// distance is half the bear's `FOLLOW_RANGE` attribute (PolarBear.java:276-279).
+    pub const fn set_follow_distance_multiplier(mut self, multiplier: f64) -> Self {
+        self.follow_distance_multiplier = multiplier;
+        self
+    }
+
     async fn can_navigate_to_entity(&self, mob: &dyn Mob, target: &LivingEntity) -> bool {
         let cooldown = to_goal_ticks(10 + mob.get_random().random_range(0..5));
         self.check_can_navigate_cooldown
@@ -145,12 +154,7 @@ impl TrackTargetGoal {
     }
 
     /// Equivalent to Vanilla's `canAttack` check inside `TargetGoal`
-    pub async fn can_track(
-        &self,
-        mob: &dyn Mob,
-        target: Option<&LivingEntity>,
-        target_predicate: &TargetPredicate,
-    ) -> bool {
+    pub async fn can_track(&mut self, mob: &dyn Mob, target: Option<&LivingEntity>) -> bool {
         let Some(target) = target else {
             return false;
         };
@@ -158,13 +162,20 @@ impl TrackTargetGoal {
         let mob_entity = mob.get_mob_entity();
         let world = mob_entity.living_entity.entity.world.load();
 
+        let follow_distance = mob_entity
+            .living_entity
+            .get_attribute_value(&Attributes::FOLLOW_RANGE)
+            * self.follow_distance_multiplier;
+        self.target_predicate.base_max_distance = follow_distance;
+
         // Vanilla `TargetingConditions.test`'s combat branch (`TargetingConditions.java:78`)
         // consults `targeter.canAttack(target)`.
         if !mob.can_attack(&target.entity) {
             return false;
         }
 
-        if !target_predicate
+        if !self
+            .target_predicate
             .test(&world, Some(&mob_entity.living_entity), target)
             .await
         {
@@ -222,10 +233,7 @@ impl Goal for TrackTargetGoal {
                 return false;
             }
 
-            if !self
-                .can_track(mob, Some(target), &self.target_predicate)
-                .await
-            {
+            if !self.can_track(mob, Some(target)).await {
                 return false;
             }
 
@@ -243,7 +251,8 @@ impl Goal for TrackTargetGoal {
             // Get follow range attribute value and check if target is within range
             let follow_range = mob_entity
                 .living_entity
-                .get_attribute_value(&Attributes::FOLLOW_RANGE);
+                .get_attribute_value(&Attributes::FOLLOW_RANGE)
+                * self.follow_distance_multiplier;
 
             if dist_sq > follow_range * follow_range {
                 return false;

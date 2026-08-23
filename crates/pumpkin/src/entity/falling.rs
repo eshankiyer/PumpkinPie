@@ -35,6 +35,7 @@ pub struct FallingEntity {
     drop_item: AtomicBool,
     cancel_drop: AtomicBool,
     hurt_entities: AtomicBool,
+    start_pos: AtomicCell<BlockPos>,
     fall_damage_per_distance: AtomicCell<f32>,
     fall_damage_max: AtomicI32,
     block_data: Mutex<Option<NbtCompound>>,
@@ -47,6 +48,7 @@ pub struct FallingEntity {
 impl FallingEntity {
     pub fn new(entity: Entity, block_state_id: BlockStateId) -> Self {
         let is_anvil = Block::from_state_id(block_state_id).has_tag(&tag::Block::MINECRAFT_ANVIL);
+        let start_pos = entity.block_pos.load();
         // `AnvilBlock.falling`: `entity.setHurtsEntities(2.0F, 40)`, applied at spawn time since
         // it is unconditional for every anvil falling entity.
         let (fall_damage_per_distance, fall_damage_max) = if is_anvil {
@@ -61,6 +63,7 @@ impl FallingEntity {
             drop_item: AtomicBool::new(true),
             cancel_drop: AtomicBool::new(false),
             hurt_entities: AtomicBool::new(is_anvil),
+            start_pos: AtomicCell::new(start_pos),
             fall_damage_per_distance: AtomicCell::new(fall_damage_per_distance),
             fall_damage_max: AtomicI32::new(fall_damage_max),
             block_data: Mutex::new(None),
@@ -74,6 +77,29 @@ impl FallingEntity {
         self.hurt_entities.store(true, Ordering::Relaxed);
         self.fall_damage_per_distance.store(damage_per_distance);
         self.fall_damage_max.store(damage_max, Ordering::Relaxed);
+    }
+
+    /// Vanilla `FallingBlockEntity.setStartPos` (`net/minecraft/world/entity/item/FallingBlockEntity.java:119-121`).
+    pub fn set_start_pos(&self, pos: BlockPos) {
+        self.start_pos.store(pos);
+        self.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::falling_block::START_POS,
+                pos,
+            )],
+            None,
+        );
+    }
+
+    /// Vanilla `FallingBlockEntity.getStartPos` (`net/minecraft/world/entity/item/FallingBlockEntity.java:123-125`).
+    #[must_use]
+    pub fn get_start_pos(&self) -> BlockPos {
+        self.start_pos.load()
+    }
+
+    /// Vanilla `FallingBlockEntity.disableDrop` (`net/minecraft/world/entity/item/FallingBlockEntity.java:315-317`).
+    pub fn disable_drop(&self) {
+        self.cancel_drop.store(true, Ordering::Relaxed);
     }
 
     /// Replaced the current Block and Spawns a new Falling one
@@ -105,6 +131,7 @@ impl FallingEntity {
             .data
             .store(i32::from(block_state.as_u16()), Ordering::Relaxed);
         let entity = Arc::new(Self::new(entity, block_state));
+        entity.set_start_pos(position);
         if let Some((damage_per_distance, damage_max)) = hurts_entities {
             entity.set_hurts_entities(damage_per_distance, damage_max);
         }
@@ -470,7 +497,7 @@ impl EntityBase for FallingEntity {
             self.entity.send_meta_data(
                 &[Metadata::new(
                     pumpkin_data::tracked_data::falling_block::START_POS,
-                    self.entity.block_pos.load(),
+                    self.get_start_pos(),
                 )],
                 None,
             );

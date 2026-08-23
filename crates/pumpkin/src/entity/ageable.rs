@@ -1,4 +1,5 @@
 use pumpkin_data::tracked_data;
+use pumpkin_data::{item::Item, item_stack::ItemStack, tag, tag::Taggable};
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::{
     boundingbox::{BoundingBox, EntityDimensions},
@@ -10,6 +11,23 @@ use crate::entity::mob::Mob;
 
 pub const BABY_START_AGE: i32 = -24000;
 pub const FORCED_AGE_PARTICLE_TICKS: i32 = 40;
+
+/// Equivalent to `AgeableMob.canUseGoldenDandelion` (`AgeableMob.java:78-80`).
+#[must_use]
+pub fn can_use_golden_dandelion(
+    item_in_hand: &ItemStack,
+    is_baby: bool,
+    cooldown: i32,
+    mob: &dyn Mob,
+) -> bool {
+    item_in_hand.item.id == Item::GOLDEN_DANDELION.id
+        && is_baby
+        && cooldown == 0
+        && !mob
+            .get_entity()
+            .entity_type
+            .has_tag(&tag::EntityType::MINECRAFT_CANNOT_BE_AGE_LOCKED)
+}
 
 pub struct AgeableData {
     pub forced_age: AtomicI32,

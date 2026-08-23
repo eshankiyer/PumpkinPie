@@ -21,7 +21,32 @@ pub struct ExperienceOrbEntity {
 
 impl ExperienceOrbEntity {
     pub fn new(entity: Entity, amount: u32) -> Self {
+        Self::new_with_direction(entity, Vector3::default(), amount)
+    }
+
+    /// Vanilla `ExperienceOrb`'s directional constructor (`net/minecraft/world/entity/ExperienceOrb.java:51-72`).
+    pub fn new_with_direction(entity: Entity, rough_direction: Vector3<f64>, amount: u32) -> Self {
         entity.yaw.store(rand::random::<f32>() * 360.0);
+        let mut random_movement = Vector3::new(
+            rand::random_range(-0.2..0.2),
+            rand::random_range(0.0..0.4),
+            rand::random_range(-0.2..0.2),
+        );
+        if rough_direction.length_squared() > 0.0 && rough_direction.dot(&random_movement) < 0.0 {
+            random_movement = random_movement.multiply(-1.0, -1.0, -1.0);
+        }
+        // `AABB.getSize` (`world/phys/AABB.java:267-272`): the average of the bounding box's
+        // x/y/z extents, not the maximum. The entity's footprint is square, so x-size and
+        // z-size both equal `width`.
+        let dimensions = entity.entity_dimension.load();
+        let size = (2.0 * f64::from(dimensions.width) + f64::from(dimensions.height)) / 3.0;
+        entity.set_pos(
+            entity.pos.load()
+                + rough_direction
+                    .normalize()
+                    .multiply(size * 0.5, size * 0.5, size * 0.5),
+        );
+        entity.velocity.store(random_movement);
         Self {
             entity,
             amount: AtomicU32::new(amount),
@@ -31,6 +56,16 @@ impl ExperienceOrbEntity {
     }
 
     pub async fn spawn(world: &Arc<World>, position: Vector3<f64>, amount: u32) {
+        Self::spawn_with_direction(world, position, Vector3::default(), amount).await;
+    }
+
+    /// Vanilla `ExperienceOrb.awardWithDirection` (`net/minecraft/world/entity/ExperienceOrb.java:196-203`).
+    pub async fn spawn_with_direction(
+        world: &Arc<World>,
+        position: Vector3<f64>,
+        rough_direction: Vector3<f64>,
+        amount: u32,
+    ) {
         let mut amount = amount;
         while amount > 0 {
             let i = Self::round_to_orb_size(amount);
@@ -42,7 +77,7 @@ impl ExperienceOrbEntity {
                 continue;
             }
             let entity = Entity::new(world.clone(), position, &EntityType::EXPERIENCE_ORB);
-            let orb = Arc::new(Self::new(entity, i));
+            let orb = Arc::new(Self::new_with_direction(entity, rough_direction, i));
             world.spawn_entity(orb).await;
         }
     }
