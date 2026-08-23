@@ -87,7 +87,7 @@ use crate::{Context, ItemStack, Server};
 /// - A specific item ID (e.g. `"minecraft:diamond"` or `"diamond"`).
 /// - A tag representing a group of items (e.g. `"#minecraft:logs"` or `"#logs"`).
 /// - One of multiple specific items.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Ingredient {
     /// A specific item by registry key (e.g., `"minecraft:diamond"`).
     Item(String),

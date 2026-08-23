@@ -61,6 +61,16 @@ enum CloneMode {
     Move,
 }
 
+impl CloneMode {
+    /// Vanilla `CloneCommands.Mode#canOverlap` (`CloneCommands.java:329-331`): `FORCE` and
+    /// `MOVE` are allowed to overlap the source region, only `NORMAL` must error with
+    /// `commands.clone.overlap`.
+    #[must_use]
+    const fn can_overlap(self) -> bool {
+        matches!(self, Self::Force | Self::Move)
+    }
+}
+
 struct CloneExecutor {
     mask_mode: MaskMode,
     clone_mode: CloneMode,
@@ -122,7 +132,7 @@ impl CommandExecutor for CloneExecutor {
                 || dest_max_z < min_z
                 || dest_min_z > max_z);
 
-            if overlap && self.clone_mode != CloneMode::Force {
+            if overlap && !self.clone_mode.can_overlap() {
                 return Err(OVERLAP_ERROR.create_without_context());
             }
 

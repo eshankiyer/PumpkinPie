@@ -42,6 +42,9 @@ impl SSetStructureBlock<'_> {
     pub const FLAG_IGNORE_ENTITIES: u8 = 0x01;
     pub const FLAG_SHOW_AIR: u8 = 0x02;
     pub const FLAG_SHOW_BOUNDING_BOX: u8 = 0x04;
+    // Vanilla `ServerboundSetStructureBlockPacket` (ServerboundSetStructureBlockPacket.java:22)
+    // also defines FLAG_STRICT = 8, used by the structure block update/load path.
+    pub const FLAG_STRICT: u8 = 0x08;
 
     #[must_use]
     pub const fn ignore_entities(&self) -> bool {
@@ -56,6 +59,13 @@ impl SSetStructureBlock<'_> {
     #[must_use]
     pub const fn show_bounding_box(&self) -> bool {
         (self.flags & Self::FLAG_SHOW_BOUNDING_BOX) != 0
+    }
+
+    /// Whether the structure block operation is in *strict* mode (only matching blocks of the same
+    /// mode). Mirrors vanilla `isStrict()` (ServerboundSetStructureBlockPacket.java:179-181).
+    #[must_use]
+    pub const fn strict(&self) -> bool {
+        (self.flags & Self::FLAG_STRICT) != 0
     }
 }
 

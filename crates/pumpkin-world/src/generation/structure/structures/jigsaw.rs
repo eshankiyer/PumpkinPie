@@ -14,7 +14,7 @@ use pumpkin_util::random::RandomImpl;
 use serde::Deserialize;
 use std::sync::Arc;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum JigsawProjection {
     Rigid,
     TerrainMatching,
@@ -621,6 +621,32 @@ pub struct JigsawJunction {
     pub source_z: i32,
     pub delta_y: i32,
     pub projection: JigsawProjection,
+}
+
+// Vanilla `JigsawJunction.equals` (net/minecraft/world/level/levelgen/structure/pools/JigsawJunction.java:63-81)
+// compares only sourceX, sourceZ, deltaY and destProjection, deliberately ignoring sourceGroundY.
+impl PartialEq for JigsawJunction {
+    fn eq(&self, other: &Self) -> bool {
+        self.source_x == other.source_x
+            && self.source_z == other.source_z
+            && self.delta_y == other.delta_y
+            && self.projection == other.projection
+    }
+}
+
+impl Eq for JigsawJunction {}
+
+// Mirrors vanilla `JigsawJunction.hashCode` (JigsawJunction.java:83-90), which *does* fold in
+// sourceGroundY even though `equals` ignores it. Replicated for parity; note this makes `Hash`
+// and `PartialEq` inconsistent, matching a long-standing vanilla quirk.
+impl std::hash::Hash for JigsawJunction {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.source_x.hash(state);
+        self.source_ground_y.hash(state);
+        self.source_z.hash(state);
+        self.delta_y.hash(state);
+        self.projection.hash(state);
+    }
 }
 
 pub struct PoolElementStructurePiece {
