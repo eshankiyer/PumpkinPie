@@ -18,6 +18,7 @@ use std::collections::HashSet;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
+use std::sync::MutexGuard as StdMutexGuard;
 use std::sync::atomic::{AtomicI32, AtomicI64, Ordering};
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -270,8 +271,8 @@ pub struct TrialSpawnerBlockEntity {
     pub position: BlockPos,
     normal_config_nbt: Mutex<Option<NbtTag>>,
     ominous_config_nbt: Mutex<Option<NbtTag>>,
-    normal_config: TrialSpawnerConfig,
-    ominous_config: TrialSpawnerConfig,
+    normal_config: StdMutex<TrialSpawnerConfig>,
+    ominous_config: StdMutex<TrialSpawnerConfig>,
     target_cooldown_length: i64,
     required_player_range: f64,
     detected_players: Mutex<HashSet<Uuid>>,
@@ -302,8 +303,8 @@ impl TrialSpawnerBlockEntity {
             position,
             normal_config_nbt: Mutex::const_new(None),
             ominous_config_nbt: Mutex::const_new(None),
-            normal_config: TrialSpawnerConfig::default(),
-            ominous_config: TrialSpawnerConfig::default(),
+            normal_config: StdMutex::new(TrialSpawnerConfig::default()),
+            ominous_config: StdMutex::new(TrialSpawnerConfig::default()),
             target_cooldown_length: DEFAULT_TARGET_COOLDOWN_LENGTH,
             required_player_range: DEFAULT_REQUIRED_PLAYER_RANGE,
             detected_players: Mutex::const_new(HashSet::new()),
@@ -317,11 +318,11 @@ impl TrialSpawnerBlockEntity {
         }
     }
 
-    const fn active_config(&self, is_ominous: bool) -> &TrialSpawnerConfig {
+    fn active_config(&self, is_ominous: bool) -> StdMutexGuard<'_, TrialSpawnerConfig> {
         if is_ominous {
-            &self.ominous_config
+            self.ominous_config.lock().unwrap()
         } else {
-            &self.normal_config
+            self.normal_config.lock().unwrap()
         }
     }
 
@@ -338,6 +339,49 @@ impl TrialSpawnerBlockEntity {
         *self.next_spawn_data.lock().unwrap() = None;
         *self.ejecting_loot_table.lock().unwrap() = None;
         self.reset_statistics().await;
+    }
+
+    // TrialSpawnerConfig.java:74-87 (`withSpawning`): replaces the spawn potentials
+    // with a single weight-1 entry whose SpawnData carries only the entity id.
+    fn with_spawning(
+        config: &TrialSpawnerConfig,
+        entity_type: &'static EntityType,
+    ) -> TrialSpawnerConfig {
+        let mut entity = NbtCompound::new();
+        entity.put_string("id", format!("minecraft:{}", entity_type.resource_name));
+        let mut data = NbtCompound::new();
+        data.put_compound("entity", entity);
+        let mut overridden = config.clone();
+        overridden.spawn_potentials = vec![(entity_type, 1, data)];
+        overridden
+    }
+
+    /// Vanilla `TrialSpawnerBlockEntity#setEntityId` (TrialSpawnerBlockEntity.java:57-65):
+    /// delegates to `TrialSpawner#overrideEntityToSpawn` (TrialSpawner.java:340-344),
+    /// which resets the state data, swaps the spawn entity in both configs through
+    /// `FullConfig#overrideEntity` (TrialSpawner.java:394-401), and forces the block
+    /// state back to INACTIVE.
+    pub async fn set_entity_id(&self, world: &Arc<World>, entity_type: &'static EntityType) {
+        self.reset().await;
+        let normal = Self::with_spawning(&self.active_config(false), entity_type);
+        *self.normal_config.lock().unwrap() = normal;
+        let ominous = Self::with_spawning(&self.active_config(true), entity_type);
+        *self.ominous_config.lock().unwrap() = ominous;
+
+        // TrialSpawner.java:343 (`setState(level, TrialSpawnerState.INACTIVE)`)
+        let state_id = world.get_block_state_id(&self.position);
+        let block = Block::from_state_id(state_id);
+        if TrialSpawnerLikeProperties::handles_block_id(block.id) {
+            let mut props = TrialSpawnerLikeProperties::from_state_id(state_id, block);
+            props.trial_spawner_state = TrialSpawnerState::Inactive;
+            world
+                .set_block_state(
+                    &self.position,
+                    props.to_state_id(block),
+                    BlockFlags::NOTIFY_ALL,
+                )
+                .await;
+        }
     }
 
     async fn count_additional_players(&self) -> i32 {
@@ -772,8 +816,8 @@ impl BlockEntity for TrialSpawnerBlockEntity {
             position,
             normal_config_nbt: Mutex::new(normal_config_nbt),
             ominous_config_nbt: Mutex::new(ominous_config_nbt),
-            normal_config,
-            ominous_config,
+            normal_config: StdMutex::new(normal_config),
+            ominous_config: StdMutex::new(ominous_config),
             target_cooldown_length,
             required_player_range,
             detected_players: Mutex::new(detected_players),

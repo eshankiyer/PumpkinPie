@@ -3,6 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::block::entities::mob_spawner::MobSpawnerBlockEntity;
+use crate::block::entities::trial_spawner::TrialSpawnerBlockEntity;
 use crate::entity::EntityBase;
 use crate::entity::player::Player;
 use crate::entity::r#type::from_type;
@@ -173,6 +174,19 @@ impl ItemBehaviour for SpawnEggItem {
                         .downcast_ref::<MobSpawnerBlockEntity>()
                 {
                     spawner.set_entity_type(entity_type);
+                    world.update_block_entity(&block_entity);
+                    item.decrement_unless_creative(player.gamemode.load(), 1);
+                    return;
+                }
+                // Vanilla `SpawnEggItem#useOn` (SpawnEggItem.java:54): the `Spawner`
+                // check also matches trial spawner block entities, whose
+                // `setEntityId` overrides the entity they spawn.
+                if let Some(block_entity) = player.world().get_block_entity(&location)
+                    && let Some(trial_spawner) = block_entity
+                        .as_any()
+                        .downcast_ref::<TrialSpawnerBlockEntity>()
+                {
+                    trial_spawner.set_entity_id(&world, entity_type).await;
                     world.update_block_entity(&block_entity);
                     item.decrement_unless_creative(player.gamemode.load(), 1);
                     return;
