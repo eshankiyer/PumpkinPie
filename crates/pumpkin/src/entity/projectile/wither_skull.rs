@@ -14,6 +14,16 @@ use pumpkin_data::potion::Effect;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::Difficulty;
 
+/// `AbstractHurtingProjectile.getInertia` (`AbstractHurtingProjectile.java:155-157`).
+pub const AIR_INERTIA: f64 = 0.95;
+/// `AbstractHurtingProjectile.getLiquidInertia` (`AbstractHurtingProjectile.java:159-161`).
+pub const WATER_INERTIA: f64 = 0.8;
+/// `WitherSkull.getInertia` (`WitherSkull.java:41-44`): a `dangerous` (charged-boss) skull
+/// decelerates much harder in air.
+pub const DANGEROUS_INERTIA: f64 = 0.73;
+/// `AbstractHurtingProjectile.accelerationPower` default (`AbstractHurtingProjectile.java:24`).
+const ACCELERATION_POWER: f64 = 0.1;
+
 const EXPLOSION_POWER: f32 = 1.0;
 const GRAVITY: f64 = 0.0;
 const OWNER_DAMAGE: f32 = 8.0;
@@ -95,7 +105,37 @@ impl EntityBase for WitherSkullEntity {
         caller: &'a Arc<dyn EntityBase>,
         server: &'a Server,
     ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move { self.thrown.process_tick(caller, server).await })
+        Box::pin(async move {
+            // `AbstractHurtingProjectile.applyInertia`
+            // (`AbstractHurtingProjectile.java:102-127`): v' = (v + normalize(v) *
+            // accelerationPower) * inertia. `WitherSkull.getInertia`
+            // (`WitherSkull.java:41-44`) overrides the base 0.95F with 0.73F while the
+            // skull is `dangerous`; water always uses the liquid inertia 0.8F
+            // (`AbstractHurtingProjectile.java:159-161`), which the dangerous override
+            // does not touch.
+            let entity = self.get_entity();
+            let velocity = entity.velocity.load();
+
+            let inertia = if entity.touching_water.load(Ordering::Relaxed) {
+                WATER_INERTIA
+            } else if self.is_dangerous() {
+                DANGEROUS_INERTIA
+            } else {
+                AIR_INERTIA
+            };
+
+            // `Vec3::normalize()` already returns a zero vector for a zero-length input, so
+            // this needs no separate near-zero-speed guard - vanilla applies the inertia
+            // multiply unconditionally, even when velocity is (near) zero.
+            let norm = velocity.normalize();
+            let velocity = norm
+                .multiply(ACCELERATION_POWER, ACCELERATION_POWER, ACCELERATION_POWER)
+                .add(&velocity)
+                .multiply(inertia, inertia, inertia);
+            entity.velocity.store(velocity);
+
+            self.thrown.process_tick(caller, server).await;
+        })
     }
 
     fn get_entity(&self) -> &Entity {

@@ -267,3 +267,77 @@ pub fn can_plant_dripleaf_on_top(support_block: &Block) -> bool {
 
     support_block.has_tag(&tag::Block::MINECRAFT_SUPPORTS_BIG_DRIPLEAF)
 }
+
+#[must_use]
+/// Vanilla `BigDripleafBlock.canReplace` (`BigDripleafBlock.java:100-102`): a growing
+/// dripleaf column may replace air, water and small dripleaves.
+fn can_replace(block: &Block) -> bool {
+    block == &Block::AIR || block == &Block::WATER || block == &Block::SMALL_DRIPLEAF
+}
+
+/// Vanilla `BigDripleafBlock.canGrowInto` (`BigDripleafBlock.java:107-110`): inside build
+/// height and replaceable.
+fn can_grow_into(world: &Arc<World>, pos: &BlockPos) -> bool {
+    world.is_in_height_limit(pos.0.y) && can_replace(world.get_block(pos))
+}
+
+/// Vanilla `BigDripleafStemBlock.place` (`BigDripleafStemBlock.java:67-72`): places a stem
+/// with `facing`, waterlogged when the target position holds water.
+async fn place_stem(world: &Arc<World>, pos: &BlockPos, facing: HorizontalFacing) {
+    let mut stem_props = BigDripleafStemLikeProperties::default(&Block::BIG_DRIPLEAF_STEM);
+    stem_props.facing = facing;
+    stem_props.waterlogged = world.get_block(pos) == &Block::WATER;
+    world
+        .set_block_state(
+            pos,
+            stem_props.to_state_id(&Block::BIG_DRIPLEAF_STEM),
+            BlockFlags::NOTIFY_ALL,
+        )
+        .await;
+}
+
+/// Vanilla `BigDripleafBlock.place` (`BigDripleafBlock.java:110-113`): places a leaf with
+/// `facing`, waterlogged when the target position holds water.
+async fn place_leaf(world: &Arc<World>, pos: &BlockPos, facing: HorizontalFacing) {
+    let mut dripleaf_props = BigDripleafLikeProperties::default(&Block::BIG_DRIPLEAF);
+    dripleaf_props.facing = facing;
+    dripleaf_props.waterlogged = world.get_block(pos) == &Block::WATER;
+    world
+        .set_block_state(
+            pos,
+            dripleaf_props.to_state_id(&Block::BIG_DRIPLEAF),
+            BlockFlags::NOTIFY_ALL,
+        )
+        .await;
+}
+
+/// Vanilla `BigDripleafBlock.placeWithRandomHeight` (`BigDripleafBlock.java:89-108`).
+///
+/// Grows a column of `nextInt(2, 5)` blocks up from `stem_bottom_pos`, stems underneath
+/// with a single leaf on top, stopping early where `canGrowInto` fails. Called from small
+/// dripleaf bone meal growth (`SmallDripleafBlock.performBonemeal`,
+/// `SmallDripleafBlock.java:125-133`).
+pub async fn place_with_random_height(
+    world: &Arc<World>,
+    stem_bottom_pos: &BlockPos,
+    facing: HorizontalFacing,
+) {
+    let desired_height = rand::rng().random_range(2..=5);
+    let mut height = 0u32;
+    let mut pos = *stem_bottom_pos;
+    while height < desired_height && can_grow_into(world, &pos) {
+        height += 1;
+        pos = pos.up();
+    }
+
+    // Stems occupy every position below the topmost one; the leaf sits at the top
+    // (`BigDripleafBlock.java:101-107`). With `height == 0` nothing grows.
+    let mut current = *stem_bottom_pos;
+    for _ in 1..height {
+        place_stem(world, &current, facing).await;
+        current = current.up();
+    }
+    if height > 0 {
+        place_leaf(world, &current, facing).await;
+    }
+}

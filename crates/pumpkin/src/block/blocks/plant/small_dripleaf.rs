@@ -1,7 +1,7 @@
 use crate::block::blocks::plant::PlantBlockBase;
 use crate::block::{
-    BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
-    PlacedArgs,
+    BlockBehaviour, BlockFuture, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
+    OnPlaceArgs, PlacedArgs,
 };
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{
@@ -17,6 +17,59 @@ use pumpkin_world::world::{BlockAccessor, BlockFlags};
 pub struct SmallDripleafBlock;
 
 impl BlockBehaviour for SmallDripleafBlock {
+    /// Vanilla `SmallDripleafBlock.isValidBonemealTarget`
+    /// (`SmallDripleafBlock.java:115-117`): always a valid target.
+    fn is_valid_bonemeal_target(&self, _args: BonemealArgs<'_>) -> bool {
+        true
+    }
+
+    /// Vanilla `SmallDripleafBlock.isBonemealSuccess`
+    /// (`SmallDripleafBlock.java:120-122`): always succeeds.
+    fn is_bonemeal_success(&self, _args: BonemealArgs<'_>) -> bool {
+        true
+    }
+
+    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // Vanilla `SmallDripleafBlock.performBonemeal`
+            // (`SmallDripleafBlock.java:125-133`): bone-mealing the lower half clears the
+            // upper half to its fluid's legacy block and grows a big dripleaf column of
+            // random height in its place; bone-mealing the upper half re-runs against the
+            // lower half.
+            let props = SmallDripleafLikeProperties::from_state_id(args.state_id, args.block);
+            if props.half != DoubleBlockHalf::Lower {
+                let below_pos = args.position.down();
+                let (below_block, below_state_id) = args.world.get_block_and_state_id(&below_pos);
+                self.perform_bonemeal(BonemealArgs {
+                    world: args.world,
+                    block: below_block,
+                    position: &below_pos,
+                    state_id: below_state_id,
+                })
+                .await;
+                return;
+            }
+
+            // `level.setBlock(above, level.getFluidState(above).createLegacyBlock(), 18)`
+            // (`SmallDripleafBlock.java:128`): restore air or source water above. Flag 18
+            // suppresses neighbor reactions so the upper-half removal does not cascade
+            // before the column below is replaced; NOTIFY_LISTENERS alone keeps clients in
+            // sync here.
+            let above = args.position.up();
+            let cleared = if args.world.get_block(&above) == &Block::WATER {
+                Block::WATER.default_state.id
+            } else {
+                BlockStateId::AIR
+            };
+            args.world
+                .set_block_state(&above, cleared, BlockFlags::NOTIFY_LISTENERS)
+                .await;
+
+            super::big_dripleaf::place_with_random_height(args.world, args.position, props.facing)
+                .await;
+        })
+    }
+
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
         <Self as PlantBlockBase>::can_place_at(self, args.block_accessor, args.position)
     }

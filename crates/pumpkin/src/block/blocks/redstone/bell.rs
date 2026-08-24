@@ -4,8 +4,8 @@ use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::entities::bell::BellBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockHitResult, BrokenArgs, CanPlaceAtArgs, NormalUseArgs,
-    OnNeighborUpdateArgs, OnPlaceArgs, PlacedArgs,
+    BlockBehaviour, BlockFuture, BlockHitResult, BrokenArgs, CanPlaceAtArgs, ExplodeArgs,
+    NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs, PlacedArgs,
 };
 use crate::world::World;
 use crate::world::game_event::{GameEventContext, emit_game_event};
@@ -237,6 +237,16 @@ impl BlockBehaviour for BellBlock {
                 if is_receiving_power {
                     ring_bell(*args.position, args.world, None, None).await;
                 }
+            }
+        })
+    }
+
+    /// Vanilla `onExplosionHit` (BellBlock.java:147-152): a blast that can trigger blocks
+    /// (wind charges, `ServerExplosion.java:297-302`) rings the bell with no hit direction.
+    fn explode<'a>(&'a self, args: ExplodeArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if args.can_trigger_blocks {
+                ring_bell(*args.position, args.world, None, None).await;
             }
         })
     }
