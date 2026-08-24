@@ -106,6 +106,15 @@ impl FrogEntity {
             is_pregnant: AtomicBool::new(false),
         };
         let mob_arc = Arc::new(frog);
+        // `Frog.<init>` (`Frog.java:92`): `SmoothSwimmingMoveControl<>(this, 85, 10, 0.02F, 0.1F, true)`.
+        *mob_arc
+            .mob_entity
+            .move_control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Box::new(crate::entity::ai::control::smooth_swimming_move_control::SmoothSwimmingMoveControl::new(
+                85, 10, 0.02, 0.1, true,
+            ));
         let frog_weak = Arc::downgrade(&mob_arc);
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
