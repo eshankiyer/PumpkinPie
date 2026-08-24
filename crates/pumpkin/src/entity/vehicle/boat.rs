@@ -8,6 +8,7 @@ use crate::entity::{Entity, EntityBase, EntityBaseFuture, NBTStorage, living::Li
 use crate::server::Server;
 
 use pumpkin_data::damage::DamageType;
+use pumpkin_data::entity::EntityType;
 use pumpkin_data::item_stack::ItemStack;
 
 use pumpkin_protocol::java::client::play::Metadata;
@@ -168,8 +169,18 @@ impl EntityBase for BoatEntity {
     }
 
     /// `Boat.rideHeight` (`Boat.java:14-17`): passengers sit at `dimensions.height() / 3.0`
-    /// above the boat's base, not on its full top surface.
+    /// above the boat's base, not on its full top surface. Both raft variants override this to
+    /// `dimensions.height() * 0.8888889` instead (`Raft.rideHeight`, `Raft.java:14-17`;
+    /// `ChestRaft.rideHeight`, `ChestRaft.java:14-17`) -- `ChestBoat` keeps the plain-boat ratio
+    /// (`ChestBoat.java:14-17`), so only the raft family needs the special case.
     fn get_passengers_riding_offset(&self) -> f64 {
-        f64::from(self.vehicle.entity.entity_dimension.load().height) / 3.0
+        let height = f64::from(self.vehicle.entity.entity_dimension.load().height);
+        let entity_type = self.vehicle.entity.entity_type;
+        if entity_type == &EntityType::BAMBOO_RAFT || entity_type == &EntityType::BAMBOO_CHEST_RAFT
+        {
+            height * 0.888_888_9
+        } else {
+            height / 3.0
+        }
     }
 }
