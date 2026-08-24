@@ -1,6 +1,11 @@
-use std::sync::{Arc, Weak};
+use std::sync::{
+    Arc, Weak,
+    atomic::{AtomicI8, Ordering},
+};
 
 use pumpkin_data::entity::EntityType;
+use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
     Entity, NBTStorage,
@@ -14,12 +19,50 @@ use crate::entity::{
 
 pub struct SnowGolemEntity {
     pub mob_entity: MobEntity,
+    pumpkin_flags: AtomicI8,
 }
 
 impl SnowGolemEntity {
+    /// Vanilla `SnowGolem.hasPumpkin` (`SnowGolem.java:164-166`).
+    #[must_use]
+    pub fn has_pumpkin(&self) -> bool {
+        self.pumpkin_flags.load(Ordering::Relaxed) & 16 != 0
+    }
+
+    /// Vanilla `SnowGolem.setPumpkin` (`SnowGolem.java:168-175`).
+    pub fn set_pumpkin(&self, pumpkin: bool) {
+        let next = if pumpkin {
+            self.pumpkin_flags.fetch_or(16, Ordering::Relaxed) | 16
+        } else {
+            self.pumpkin_flags.fetch_and(!16, Ordering::Relaxed) & !16
+        };
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::snow_golem::PUMPKIN_ID,
+                next,
+            )],
+            None,
+        );
+    }
+
+    /// Vanilla `SnowGolem.getLeashOffset` (`SnowGolem.java:192-195`).
+    #[must_use]
+    pub fn get_leash_offset(&self) -> Vector3<f64> {
+        let entity = &self.mob_entity.living_entity.entity;
+        let dimensions = entity.entity_dimension.load();
+        Vector3::new(
+            0.0,
+            entity.get_eye_height() * 0.75,
+            f64::from(dimensions.width) * 0.4,
+        )
+    }
+
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
-        let snow_golem = Self { mob_entity };
+        let snow_golem = Self {
+            mob_entity,
+            pumpkin_flags: AtomicI8::new(16),
+        };
         let mob_arc = Arc::new(snow_golem);
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();

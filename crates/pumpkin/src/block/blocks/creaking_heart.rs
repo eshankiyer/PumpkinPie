@@ -5,15 +5,18 @@ use pumpkin_data::block_properties::{
 use pumpkin_data::tag;
 use pumpkin_data::tag::Taggable;
 use pumpkin_data::{BlockDirection, BlockId, BlockStateId};
+use pumpkin_util::GameMode;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockFlags;
+use rand::RngExt;
 
 use crate::block::entities::creaking_heart::CreakingHeartBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, GetComparatorOutputArgs,
+    BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, ExplodeArgs, GetComparatorOutputArgs,
     GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs,
 };
+use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::world::World;
 
 /// `net.minecraft.world.level.block.CreakingHeartBlock`.
@@ -84,6 +87,38 @@ async fn update_state(
 }
 
 impl BlockBehaviour for CreakingHeartBlock {
+    /// `CreakingHeartBlock.playerWillDestroy` (`CreakingHeartBlock.java:175-187`): a natural
+    /// heart broken by a non-creative/non-spectator player awards 20 through 24 experience.
+    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            let properties = CreakingHeartLikeProperties::from_state_id(args.state.id, args.block);
+            if properties.r#natural
+                && !matches!(
+                    args.player.gamemode.load(),
+                    GameMode::Creative | GameMode::Spectator
+                )
+            {
+                let amount = rand::rng().random_range(20..=24);
+                ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), amount)
+                    .await;
+            }
+        })
+    }
+
+    /// `CreakingHeartBlock.onExplosionHit` (`CreakingHeartBlock.java:159-172`): a
+    /// trigger-block explosion removes the protector before the block remains in place.
+    fn explode<'a>(&'a self, args: ExplodeArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if let Some(block_entity) = args.world.get_block_entity(args.position)
+                && let Some(heart) = block_entity
+                    .as_any()
+                    .downcast_ref::<CreakingHeartBlockEntity>()
+            {
+                heart.remove_protector_on_removal(args.world).await;
+            }
+        })
+    }
+
     /// `getStateForPlacement`: AXIS from the clicked face, then `updateState`.
     fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
         Box::pin(async move {

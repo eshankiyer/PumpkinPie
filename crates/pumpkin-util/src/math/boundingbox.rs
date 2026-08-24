@@ -442,6 +442,8 @@ pub struct EntityDimensions {
     pub height: f32,
     /// Eye height relative to the bottom of the entity.
     pub eye_height: f32,
+    /// Whether this dimension set ignores non-uniform scaling.
+    pub fixed: bool,
 }
 
 impl EntityDimensions {
@@ -457,6 +459,50 @@ impl EntityDimensions {
             width,
             height,
             eye_height,
+            fixed: false,
+        }
+    }
+
+    /// `EntityDimensions.scalable` (`EntityDimensions.java:41-43`).
+    #[must_use]
+    pub const fn scalable(width: f32, height: f32) -> Self {
+        Self::new(width, height, height * 0.85)
+    }
+
+    /// `EntityDimensions.fixed` (`EntityDimensions.java:45-47`).
+    #[must_use]
+    pub const fn fixed(width: f32, height: f32) -> Self {
+        Self {
+            width,
+            height,
+            eye_height: height * 0.85,
+            fixed: true,
+        }
+    }
+
+    /// `EntityDimensions.makeBoundingBox` (`EntityDimensions.java:15-22`).
+    #[must_use]
+    pub fn make_bounding_box(&self, pos: Vector3<f64>) -> BoundingBox {
+        BoundingBox::new_from_pos(pos.x, pos.y, pos.z, self)
+    }
+
+    /// `EntityDimensions.withEyeHeight` (`EntityDimensions.java:49-51`).
+    #[must_use]
+    pub const fn with_eye_height(self, eye_height: f32) -> Self {
+        Self { eye_height, ..self }
+    }
+
+    /// `EntityDimensions.scale` (`EntityDimensions.java:27-37`).
+    #[must_use]
+    pub fn scale(self, width_scale: f32, height_scale: f32) -> Self {
+        if self.fixed || (width_scale == 1.0 && height_scale == 1.0) {
+            return self;
+        }
+        Self {
+            width: self.width * width_scale,
+            height: self.height * height_scale,
+            eye_height: self.eye_height * height_scale,
+            fixed: false,
         }
     }
 }

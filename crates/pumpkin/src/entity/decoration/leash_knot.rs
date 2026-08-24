@@ -44,6 +44,7 @@ impl LeashKnotEntity {
             width: 2.0,
             height: 2.0,
             eye_height: 1.0,
+            fixed: false,
         };
 
         let search_box = BoundingBox::new_from_pos(center.x, center.y, center.z, &search_dim);
@@ -113,6 +114,7 @@ impl EntityBase for LeashKnotEntity {
                     width: 32.0,
                     height: 32.0,
                     eye_height: 16.0,
+                    fixed: false,
                 };
                 let pos = self.entity.pos.load();
                 let search_box = BoundingBox::new_from_pos(pos.x, pos.y, pos.z, &search_dim);
@@ -162,6 +164,7 @@ impl EntityBase for LeashKnotEntity {
                 width: 32.0,
                 height: 32.0,
                 eye_height: 16.0,
+                fixed: false,
             };
             let pos = self.entity.pos.load();
             let search_box = BoundingBox::new_from_pos(pos.x, pos.y, pos.z, &search_dim);

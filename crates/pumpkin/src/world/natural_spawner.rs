@@ -1121,6 +1121,7 @@ pub(crate) fn spawn_dimensions(entity_type: &'static EntityType) -> EntityDimens
         // `getSpawnAABB` does not use eye height, but preserving it keeps this
         // value suitable for callers that carry the complete dimensions.
         eye_height: entity_type.eye_height,
+        fixed: false,
     }
 }
 

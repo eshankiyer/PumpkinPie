@@ -56,6 +56,20 @@ impl ZombieHorseEntity {
             horse_data: AbstractHorseData::default(),
         };
         let mob_arc = Arc::new(horse);
+        // `ZombieHorse.createAttributes` (`ZombieHorse.java:53-55`) adds a fixed
+        // MAX_HEALTH attribute of 25 to the base horse attributes.
+        if let Some(attribute) = mob_arc
+            .mob_entity
+            .living_entity
+            .attributes
+            .write()
+            .unwrap()
+            .get_mut(&Attributes::MAX_HEALTH.id)
+        {
+            attribute.base_value = 25.0;
+            attribute.dirty.store(true, Relaxed);
+        }
+        mob_arc.mob_entity.living_entity.health.store(25.0);
         AbstractHorse::randomize_attributes(mob_arc.as_ref(), &mut rand::rng());
 
         let mob_weak: Weak<dyn Mob> = {

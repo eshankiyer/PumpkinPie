@@ -16,6 +16,7 @@ use rand::RngExt;
 use uuid::Uuid;
 
 use crate::block::blocks::creaking_heart::{creaking_active, has_required_logs};
+use crate::entity::mob::creaking::CreakingEntity;
 use crate::world::World;
 
 use super::BlockEntity;
@@ -136,6 +137,19 @@ impl BlockEntity for CreakingHeartBlockEntity {
         Some(nbt)
     }
 
+    fn on_block_replaced<'a>(
+        self: Arc<Self>,
+        world: Arc<World>,
+        _position: BlockPos,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
+    where
+        Self: 'a,
+    {
+        Box::pin(async move {
+            self.remove_protector_on_removal(&world).await;
+        })
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -175,6 +189,20 @@ impl CreakingHeartBlockEntity {
     /// reference stored here to compare identity against, only the persisted UUID.
     pub fn is_protector(&self, creaking_uuid: Uuid) -> bool {
         self.creaking_uuid.load() == Some(creaking_uuid)
+    }
+
+    /// `CreakingHeartBlockEntity.removeProtector(null)`
+    /// (`CreakingHeartBlockEntity.java:309-327`): removal without a damage source tears down
+    /// the bound creaking and clears the persisted binding atomically.
+    pub async fn remove_protector_on_removal(&self, world: &Arc<World>) {
+        let Some(uuid) = self.creaking_uuid.swap(None) else {
+            return;
+        };
+        if let Some(entity) = world.get_entity_by_uuid(uuid)
+            && let Some(creaking) = entity.cast_any().downcast_ref::<CreakingEntity>()
+        {
+            creaking.tear_down().await;
+        }
     }
 
     /// `CreakingHeartBlockEntity.creakingHurt`. The particle/resin-spread effects this drives

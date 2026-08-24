@@ -501,6 +501,7 @@ impl PaintingEntity {
                 width,
                 height,
                 eye_height: 0.0,
+                fixed: false,
             };
             self.entity.base_dimension.store(dimensions);
             self.entity.entity_dimension.store(dimensions);

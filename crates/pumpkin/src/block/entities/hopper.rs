@@ -1,11 +1,12 @@
 use crate::block::blocks::composter;
 use crate::block::entities::BlockEntity;
+use crate::entity::EntityBase;
 use crate::world::World;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BlockProperties, FacingHopper, HopperLikeProperties};
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::tag::Taggable;
-use pumpkin_data::{Block, BlockDirection, tag};
+use pumpkin_data::{Block, BlockDirection, entity::EntityType, tag};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::boundingbox::BoundingBox;
@@ -171,6 +172,91 @@ impl BlockEntity for HopperBlockEntity {
 impl HopperBlockEntity {
     pub const INVENTORY_SIZE: usize = 5;
     pub const ID: &'static str = "minecraft:hopper";
+
+    /// `HopperBlockEntity.entityInside` (`HopperBlockEntity.java:446-452`): an item entity
+    /// intersecting the hopper's suction box is offered to the hopper immediately, using the
+    /// same transfer cooldown path as the regular hopper tick.
+    pub async fn entity_inside(world: &Arc<World>, position: &BlockPos, entity: &dyn EntityBase) {
+        if entity.get_entity().entity_type != &EntityType::ITEM {
+            return;
+        }
+
+        let item_entity = world
+            .get_entity_by_id(entity.get_entity().entity_id)
+            .and_then(EntityBase::get_item_entity);
+        let Some(item_entity) = item_entity else {
+            return;
+        };
+
+        let local_offset = BoundingBox::new(
+            Vector3::new(
+                -f64::from(position.0.x),
+                -f64::from(position.0.y),
+                -f64::from(position.0.z),
+            ),
+            Vector3::new(
+                -f64::from(position.0.x),
+                -f64::from(position.0.y),
+                -f64::from(position.0.z),
+            ),
+        );
+        if !item_entity
+            .get_entity()
+            .bounding_box
+            .load()
+            .offset(local_offset)
+            .intersects(&suck_box(*position))
+        {
+            return;
+        }
+
+        let Some(block_entity) = world.get_block_entity(position) else {
+            return;
+        };
+        let Some(hopper) = block_entity.as_any().downcast_ref::<Self>() else {
+            return;
+        };
+        let state =
+            HopperLikeProperties::from_state_id(world.get_block_state(position).id, &Block::HOPPER);
+        if !state.enabled || hopper.cooldown_time.load(Ordering::Relaxed) > 0 {
+            return;
+        }
+
+        let mut item = item_entity.get_item_stack().lock().await;
+        if item.is_empty() {
+            return;
+        }
+        let one_item = item.split(1);
+        let mut inserted = false;
+        for slot in 0..Self::INVENTORY_SIZE {
+            if !hopper.is_valid_slot_for(slot, &one_item) {
+                continue;
+            }
+            let mut destination = hopper.get_stack(slot).await;
+            if destination.is_empty() {
+                hopper.set_stack(slot, one_item.clone()).await;
+                inserted = true;
+                break;
+            }
+            if can_merge_hopper_stack(&destination, &one_item) {
+                destination.item_count += 1;
+                hopper.set_stack(slot, destination).await;
+                inserted = true;
+                break;
+            }
+        }
+        if inserted {
+            hopper.mark_dirty();
+            hopper.cooldown_time.store(8, Ordering::Relaxed);
+            let item_empty = item.is_empty();
+            drop(item);
+            if item_empty {
+                item_entity.get_entity().remove().await;
+            } else {
+                item_entity.init_data_tracker().await;
+            }
+        }
+    }
 
     #[must_use]
     pub fn new(position: BlockPos, facing: FacingHopper) -> Self {

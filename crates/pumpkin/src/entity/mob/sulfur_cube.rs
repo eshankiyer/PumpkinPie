@@ -130,6 +130,7 @@ impl SulfurCubeEntity {
             width: entity.entity_type.dimension[0] * actual_size as f32,
             height: entity.entity_type.dimension[1] * actual_size as f32,
             eye_height: entity.entity_type.eye_height * actual_size as f32,
+            fixed: false,
         };
         entity.base_dimension.store(scaled_dimensions);
         entity.entity_dimension.store(scaled_dimensions);

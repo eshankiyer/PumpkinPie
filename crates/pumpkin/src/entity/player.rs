@@ -7496,6 +7496,28 @@ impl Default for Abilities {
 }
 
 impl Abilities {
+    /// Vanilla `Abilities.getFlyingSpeed` (`Abilities.java:23-25`).
+    #[must_use]
+    pub const fn get_flying_speed(&self) -> f32 {
+        self.fly_speed
+    }
+
+    /// Vanilla `Abilities.setFlyingSpeed` (`Abilities.java:27-29`).
+    pub const fn set_flying_speed(&mut self, value: f32) {
+        self.fly_speed = value;
+    }
+
+    /// Vanilla `Abilities.getWalkingSpeed` (`Abilities.java:31-33`).
+    #[must_use]
+    pub const fn get_walking_speed(&self) -> f32 {
+        self.walk_speed
+    }
+
+    /// Vanilla `Abilities.setWalkingSpeed` (`Abilities.java:35-37`).
+    pub const fn set_walking_speed(&mut self, value: f32) {
+        self.walk_speed = value;
+    }
+
     pub fn read_nbt(&mut self, nbt: &NbtCompound) {
         if let Some(component) = nbt.get_compound("abilities") {
             self.invulnerable = component.get_bool("invulnerable").unwrap_or(false);

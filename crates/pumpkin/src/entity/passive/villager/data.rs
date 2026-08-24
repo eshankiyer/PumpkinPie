@@ -188,7 +188,7 @@ impl VillagerData {
         Self {
             r#type: VarInt(r#type as i32),
             profession: VarInt(profession as i32),
-            level: VarInt(level),
+            level: VarInt(if level < 1 { 1 } else { level }),
         }
     }
 
@@ -200,6 +200,75 @@ impl VillagerData {
     #[must_use]
     pub fn profession_enum(&self) -> VillagerProfession {
         VillagerProfession::from_i32(self.profession.0).unwrap_or(VillagerProfession::None)
+    }
+
+    /// `VillagerData.withType` (`VillagerData.java:50-55`).
+    #[must_use]
+    pub const fn with_type(self, r#type: VillagerType) -> Self {
+        Self {
+            r#type: VarInt(r#type as i32),
+            ..self
+        }
+    }
+
+    /// `VillagerData.withProfession` (`VillagerData.java:58-63`).
+    #[must_use]
+    pub const fn with_profession(self, profession: VillagerProfession) -> Self {
+        Self {
+            profession: VarInt(profession as i32),
+            ..self
+        }
+    }
+
+    /// `VillagerData.withLevel` (`VillagerData.java:66-68`).
+    #[must_use]
+    pub const fn with_level(self, level: i32) -> Self {
+        Self {
+            level: VarInt(if level < 1 { 1 } else { level }),
+            ..self
+        }
+    }
+
+    /// `VillagerData.getMinXpPerLevel` (`VillagerData.java:70-72`).
+    #[must_use]
+    pub const fn get_min_xp_per_level(level: i32) -> i32 {
+        if Self::can_level_up(level) {
+            if level == 1 {
+                0
+            } else if level == 2 {
+                10
+            } else if level == 3 {
+                70
+            } else {
+                150
+            }
+        } else {
+            0
+        }
+    }
+
+    /// `VillagerData.getMaxXpPerLevel` (`VillagerData.java:74-76`).
+    #[must_use]
+    pub const fn get_max_xp_per_level(level: i32) -> i32 {
+        if Self::can_level_up(level) {
+            if level == 1 {
+                10
+            } else if level == 2 {
+                70
+            } else if level == 3 {
+                150
+            } else {
+                250
+            }
+        } else {
+            0
+        }
+    }
+
+    /// `VillagerData.canLevelUp` (`VillagerData.java:78-80`).
+    #[must_use]
+    pub const fn can_level_up(current_level: i32) -> bool {
+        current_level >= 1 && current_level < 5
     }
 }
 

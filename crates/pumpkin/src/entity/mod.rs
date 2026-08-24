@@ -1395,6 +1395,7 @@ impl Entity {
             width: entity_type.dimension[0],
             height: entity_type.dimension[1],
             eye_height: entity_type.eye_height,
+            fixed: false,
         };
 
         Self {
@@ -1740,13 +1741,8 @@ impl Entity {
         base: EntityDimensions,
         pose: EntityPose,
     ) -> Option<EntityDimensions> {
-        matches!(pose, EntityPose::Digging | EntityPose::Emerging).then(|| {
-            EntityDimensions::new(
-                base.width,
-                Self::WARDEN_EMERGING_HEIGHT,
-                Self::WARDEN_EMERGING_HEIGHT * 0.85,
-            )
-        })
+        matches!(pose, EntityPose::Digging | EntityPose::Emerging)
+            .then(|| EntityDimensions::fixed(base.width, Self::WARDEN_EMERGING_HEIGHT))
     }
 
     /// Vanilla `LivingEntity.getDimensions` (`LivingEntity.java:3727-3729`): sleeping is a fixed

@@ -8,9 +8,10 @@ use std::sync::Arc;
 
 use crate::block::entities::sculk_shrieker::SculkShriekerBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, OnEntityStepArgs, OnPlaceArgs, OnScheduledTickArgs,
-    OnStateReplacedArgs, PlacedArgs,
+    BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, OnEntityStepArgs, OnPlaceArgs,
+    OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs,
 };
+use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::entity::player::Player;
 use crate::world::World;
 use crate::world::game_event::{
@@ -118,6 +119,19 @@ async fn try_get_player(
 }
 
 impl BlockBehaviour for SculkShriekerBlock {
+    /// `SculkShriekerBlock.spawnAfterBreak` (`SculkShriekerBlock.java:128-133`): after the
+    /// normal player-break path, a break eligible for experience emits five XP.
+    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if args.player.gamemode.load() != pumpkin_util::GameMode::Creative
+                && args.player.gamemode.load() != pumpkin_util::GameMode::Spectator
+                && args.world.level_info.load().game_rules.block_drops
+            {
+                ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), 5).await;
+            }
+        })
+    }
+
     /// `getStateForPlacement` (lines 117-120).
     fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
         Box::pin(async move {

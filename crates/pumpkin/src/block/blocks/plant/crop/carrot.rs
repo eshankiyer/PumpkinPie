@@ -5,14 +5,20 @@ use pumpkin_world::world::BlockAccessor;
 
 use crate::block::blocks::plant::PlantBlockBase;
 use crate::block::blocks::plant::crop::CropBlockBase;
+use crate::block::blocks::plant::crop::ravager_destroy_crop;
 use crate::block::{
-    BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, RandomTickArgs,
+    BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
+    OnEntityCollisionArgs, RandomTickArgs,
 };
 
 #[pumpkin_block("minecraft:carrots")]
 pub struct CarrotBlock;
 
 impl BlockBehaviour for CarrotBlock {
+    fn on_entity_collision<'a>(&'a self, args: OnEntityCollisionArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move { ravager_destroy_crop(args.world, args.position, args.entity).await })
+    }
+
     fn is_valid_bonemeal_target(&self, args: crate::block::BonemealArgs<'_>) -> bool {
         <Self as CropBlockBase>::is_valid_bonemeal_target(self, args.world, args.position)
     }
