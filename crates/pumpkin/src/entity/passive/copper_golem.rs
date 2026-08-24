@@ -206,7 +206,7 @@ impl CopperGolemEntity {
         self.weather_state.load()
     }
 
-    fn set_weather_state(&self, state: CopperWeatherState) {
+    pub(crate) fn set_weather_state(&self, state: CopperWeatherState) {
         self.weather_state.store(state);
         self.mob_entity.living_entity.entity.send_meta_data(
             &[Metadata::new(

@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+use crate::block::blocks::carved_pumpkin::CarvedPumpkinBlock;
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::blocks::tnt::TNTBlock;
 use crate::block::registry::BlockActionResult;
@@ -321,6 +322,11 @@ impl DispenserBlock {
         } else if item.item.id == Item::FLINT_AND_STEEL.id {
             // Flint and steel light fires and prime TNT
             Self::dispense_flint_and_steel(ctx, item).await;
+        } else if item.item.id == Item::CARVED_PUMPKIN.id {
+            // Vanilla registers a dedicated behavior for this item
+            // (DispenseItemBehavior.java:249-265): it only places when doing so completes
+            // a golem build.
+            Self::dispense_carved_pumpkin(ctx, item).await;
         } else if item.item.id == Item::HONEYCOMB.id {
             // Honeycombs wax copper blocks
             Self::dispense_honeycomb(ctx, item).await;
@@ -824,6 +830,40 @@ impl DispenserBlock {
         if ignited {
             // `damage_item` already consumes the tool from the stack when it breaks.
             let _ = item.damage_item(1);
+            Self::play_dispense_effects(ctx, WorldEvent::SoundDispenserDispense);
+        } else {
+            Self::play_dispense_effects(ctx, WorldEvent::SoundDispenserFail);
+        }
+    }
+
+    /// Vanilla `DispenseItemBehavior`'s carved-pumpkin behavior
+    /// (DispenseItemBehavior.java:249-265): when the target block is empty and placing a
+    /// carved pumpkin there would complete a golem (`CarvedPumpkinBlock.canSpawnGolem`,
+    /// CarvedPumpkinBlock.java:59-63), place the default state with update flag 3, fire
+    /// `BLOCK_PLACE` and consume the stack - the resulting `onPlace` spawns the golem. On
+    /// failure vanilla falls back to equipping the pumpkin as head armor
+    /// (`EquipmentDispenseItemBehavior.dispenseEquipment`), which is not ported here, so
+    /// the stack stays in the dispenser with the fail animation instead.
+    async fn dispense_carved_pumpkin(ctx: &DispenseContext<'_>, item: &mut ItemStack) {
+        let target = Self::target_position(ctx);
+        if ctx.world.get_block_state(&target).is_air()
+            && CarvedPumpkinBlock::can_spawn_golem(ctx.world, &target)
+        {
+            let _ = item.split(1);
+            ctx.world
+                .set_block_state(
+                    &target,
+                    Block::CARVED_PUMPKIN.default_state.id,
+                    BlockFlags::NOTIFY_ALL,
+                )
+                .await;
+            emit_game_event(
+                ctx.world,
+                GameEvent::BlockPlace,
+                target.to_centered_f64(),
+                GameEventContext::none(),
+            )
+            .await;
             Self::play_dispense_effects(ctx, WorldEvent::SoundDispenserDispense);
         } else {
             Self::play_dispense_effects(ctx, WorldEvent::SoundDispenserFail);
