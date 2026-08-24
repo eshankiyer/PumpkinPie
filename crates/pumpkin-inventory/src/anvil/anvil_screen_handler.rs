@@ -11,11 +11,6 @@
 //!   onto the result (`AnvilMenu.java:255-264`) cannot persist across repeated anvil uses here.
 //!   Every use effectively starts from a base cost of 0 for that term; the doubling formula
 //!   itself (`calculate_increased_repair_cost`) is implemented and unit-tested.
-//! - `RepairableImpl` (`pumpkin-data`) carries no item set, so `ItemStack.isValidRepairItem`
-//!   (material repair, e.g. an iron ingot restoring an iron pickaxe) cannot be evaluated and is
-//!   stubbed to `false`. This fails safe: such a pairing falls through to the same-item combine
-//!   branch, which vanilla also takes for any non-matching, non-repair-material addition, so the
-//!   result is "no repair happens" rather than a wrong repair amount.
 //! - The 12% anvil-damage-on-use effect (`AnvilMenu.java:100-114`) needs the block position and
 //!   world RNG, neither of which this crate has access to (same boundary noted in
 //!   `grindstone_screen_handler.rs`'s module docs). Not implemented here.
@@ -101,12 +96,6 @@ fn can_store_enchantments(stack: &ItemStack) -> bool {
     } else {
         stack.get_data_component::<EnchantmentsImpl>().is_some()
     }
-}
-
-/// `ItemStack.isValidRepairItem` (ItemStack.java:1117-1120). See module docs: `RepairableImpl`
-/// carries no item set in `pumpkin-data`, so this cannot be evaluated yet.
-const fn is_valid_repair_item(_input: &ItemStack, _addition: &ItemStack) -> bool {
-    false
 }
 
 /// Merges the addition's enchantments into `enchantments`, accumulating the level cost into
@@ -251,7 +240,7 @@ pub struct AnvilScreenHandler {
     pub rename_text: String,
     pub repair_cost: i16,
     /// `AnvilMenu.repairItemCountCost` (AnvilMenu.java:31): how many of the addition stack a
-    /// material repair consumes. Always 0 while [`is_valid_repair_item`] is stubbed.
+    /// material repair consumes.
     repair_item_count_cost: i32,
     /// `AnvilMenu.onlyRenaming` (AnvilMenu.java:34).
     only_renaming: bool,
@@ -385,7 +374,7 @@ impl AnvilScreenHandler {
             .get_data_component::<StoredEnchantmentsImpl>()
             .is_some();
 
-        if result.is_damageable() && is_valid_repair_item(input, addition) {
+        if result.is_damageable() && input.is_valid_repair_item(addition) {
             let mut repair_amount = result
                 .get_damage()
                 .min(result.get_max_damage().unwrap_or(0) / 4);

@@ -4,6 +4,8 @@ use crate::Block;
 use crate::BlockId;
 use crate::data_component::DataComponent;
 use crate::entity_type::EntityType;
+#[cfg(feature = "item")]
+use crate::item::Item;
 use crate::sound::Sound;
 use crate::tag::Taggable;
 use crc_fast::CrcAlgorithm::Crc32Iscsi;
@@ -218,6 +220,25 @@ impl IDSetContent for Block {
 
     fn to_string(&self) -> String {
         self.name.to_string()
+    }
+}
+
+#[cfg(feature = "item")]
+impl IDSetContent for Item {
+    fn registry_id(&self) -> u16 {
+        Taggable::registry_id(self)
+    }
+
+    fn to_string(&self) -> String {
+        Taggable::registry_key(self).to_string()
+    }
+
+    fn from_id(id: u16) -> Option<&'static Self> {
+        Item::from_id(id)
+    }
+
+    fn from_str(name: &str) -> Option<&'static Self> {
+        Item::from_registry_key(name)
     }
 }
 
@@ -662,6 +683,8 @@ pub fn read_data(id: DataComponent, data: &NbtTag) -> Option<Box<dyn DataCompone
         DataComponent::Trim => Some(TrimImpl::read_data(data)?.to_dyn()),
         DataComponent::CanPlaceOn => Some(CanPlaceOnImpl::read_data(data)?.to_dyn()),
         DataComponent::CanBreak => Some(CanBreakImpl::read_data(data)?.to_dyn()),
+        #[cfg(feature = "item")]
+        DataComponent::Repairable => Some(RepairableImpl::read_data(data)?.to_dyn()),
         _ => None,
     }
 }
