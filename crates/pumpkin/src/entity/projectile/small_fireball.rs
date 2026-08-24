@@ -104,7 +104,17 @@ impl EntityBase for SmallFireballEntity {
                             .get_block_state_if_loaded(&block_to_place)
                             .is_some_and(pumpkin_data::BlockState::is_air)
                         {
-                            let fire_state = pumpkin_data::Block::FIRE.default_state.id;
+                            // `SmallFireball#onHitBlock` (SmallFireball.java:58) places
+                            // `BaseFireBlock.getState(level, pos)`, which yields SOUL_FIRE
+                            // when the block below can host soul fire
+                            // (BaseFireBlock.java:45-48).
+                            let fire_state =
+                                crate::block::blocks::fire::FireBlockBase::get_fire_type(
+                                    &world,
+                                    &block_to_place,
+                                )
+                                .default_state
+                                .id;
                             world
                                 .set_block_state(
                                     &block_to_place,
