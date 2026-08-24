@@ -54,7 +54,7 @@ use pumpkin_data::data_component_impl::food::{
 use pumpkin_data::data_component_impl::{
     AttributeModifiersImpl, BlocksAttacksImpl, DamageResistantImpl, DamageResistantType,
     DeathProtectionImpl, EnchantmentsImpl, EquipmentSlot, EquippableImpl, FoodImpl, GliderImpl,
-    OminousBottleAmplifierImpl,
+    OminousBottleAmplifierImpl, WeaponImpl,
 };
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::{EntityPose, EntityStatus, EntityType, MobCategory};
@@ -4788,28 +4788,30 @@ impl EntityBase for LivingEntity {
                         player.trigger_advancement(crate::entity::player::advancement::trigger::AdvancementTrigger::DeflectedDamage).await;
                     }
 
-                    if let Some(attacker_player) = cause.and_then(|c| c.get_player()) {
-                        let held_item = attacker_player.inventory().held_item().await;
-                        let is_axe = held_item.is_axe();
-                        if is_axe {
-                            let mut disable_chance = 0.25;
-                            let is_sprinting = attacker_player
-                                .living_entity
-                                .entity
-                                .sprinting
-                                .load(Ordering::Relaxed);
-                            if is_sprinting {
-                                disable_chance = 1.0;
-                            }
-
-                            if rand::random::<f32>() < disable_chance
-                                && let Some(victim_player) = caller.get_player()
-                            {
-                                victim_player
-                                    .start_cooldown("minecraft:shield".to_string(), 100)
-                                    .await;
+                    // `LivingEntity.getSecondsToDisableBlocking` (`LivingEntity.java:3967-3971`)
+                    // reads the active attacker's `Weapon.disableBlockingForSeconds`, and
+                    // `Player.blockUsingItem` (`Player.java:716-720`) passes it to
+                    // `BlocksAttacks.disable` (`BlocksAttacks.java:81-99`).
+                    if let Some(attacker) = cause
+                        && let Some(victim_player) = caller.get_player()
+                    {
+                        let held_item = self.held_item(attacker).await;
+                        if let Some(weapon) = held_item.get_data_component::<WeaponImpl>() {
+                            let cooldown_ticks =
+                                (weapon.disable_blocking_for_seconds * 20.0).round() as i32;
+                            if cooldown_ticks > 0 {
+                                let active_hand = *self.active_hand.lock().await;
+                                if let Some(hand) = active_hand {
+                                    let blocking_item =
+                                        victim_player.inventory().get_stack_in_hand(hand).await;
+                                    victim_player
+                                        .start_cooldown(
+                                            blocking_item.item.registry_key.to_string(),
+                                            cooldown_ticks,
+                                        )
+                                        .await;
+                                }
                                 self.clear_active_hand().await;
-
                                 world.broadcast_packet_all(&CEntityStatus::new(
                                     self.entity.entity_id,
                                     30,

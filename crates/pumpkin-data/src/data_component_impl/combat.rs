@@ -3,8 +3,8 @@ use crate::Enchantment;
 use crate::attributes::Attributes;
 use crate::data_component_impl::basic::SoundEvent;
 use crate::data_component_impl::{
-    DataComponentImpl, EquipmentSlot, IDSet, IdOr, get_i32_hash, get_idor, get_idor_hash,
-    get_idset_hash, get_str_hash, put_idor,
+    DataComponentImpl, EquipmentSlot, IDSet, IdOr, get_f32_hash, get_i32_hash, get_idor,
+    get_idor_hash, get_idset_hash, get_str_hash, put_idor,
 };
 use crate::entity_type::EntityType;
 use crate::sound::Sound;
@@ -453,19 +453,28 @@ impl Hash for ToolImpl {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+/// Server-side representation of vanilla `Weapon` (`Weapon.java:10-25`).
+#[derive(Clone, Debug, PartialEq)]
 pub struct WeaponImpl {
     pub item_damage_per_attack: u32,
+    pub disable_blocking_for_seconds: f32,
 }
 impl WeaponImpl {
+    /// Reads vanilla `Weapon`'s optional `disable_blocking_for_seconds` field
+    /// (`Weapon.java:12-17`), retaining the codec's non-negative constraint.
     pub fn read_data(data: &NbtTag) -> Option<Self> {
         let compound = data.extract_compound()?;
         let item_damage_per_attack = compound
             .get_int("item_damage_per_attack")
             .unwrap_or(1)
             .max(0) as u32;
+        let disable_blocking_for_seconds = compound
+            .get_float("disable_blocking_for_seconds")
+            .unwrap_or(0.0)
+            .max(0.0);
         Some(Self {
             item_damage_per_attack,
+            disable_blocking_for_seconds,
         })
     }
 }
@@ -473,10 +482,14 @@ impl DataComponentImpl for WeaponImpl {
     fn write_data(&self) -> NbtTag {
         let mut compound = NbtCompound::new();
         compound.put_int("item_damage_per_attack", self.item_damage_per_attack as i32);
+        compound.put_float(
+            "disable_blocking_for_seconds",
+            self.disable_blocking_for_seconds,
+        );
         NbtTag::Compound(compound)
     }
     fn get_hash(&self) -> i32 {
-        self.item_damage_per_attack as i32
+        self.item_damage_per_attack as i32 ^ get_f32_hash(self.disable_blocking_for_seconds) as i32
     }
     default_impl!(Weapon);
 }

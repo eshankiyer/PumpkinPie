@@ -483,7 +483,14 @@ impl ToTokens for ItemComponents {
                 &weapon.item_damage_per_attack.to_string(),
                 Span::call_site(),
             );
-            tokens.extend(quote! { (Weapon, &WeaponImpl { item_damage_per_attack: #damage }), });
+            let disable_blocking_for_seconds = LitFloat::new(
+                &format!("{:?}", weapon.disable_blocking_for_seconds),
+                Span::call_site(),
+            );
+            tokens.extend(quote! { (Weapon, &WeaponImpl {
+                item_damage_per_attack: #damage,
+                disable_blocking_for_seconds: #disable_blocking_for_seconds,
+            }), });
         }
 
         if let Some(damage_resistant) = &self.damage_resistant {
@@ -1046,13 +1053,13 @@ pub struct DeathProtection {
     // TODO
 }
 
-/// Deserialized attack-blocking component (e.g., shield); fields are unimplemented.
+/// Deserialized weapon component used for attack durability and shield disabling.
 #[derive(Deserialize, Clone)]
 pub struct WeaponComponent {
     #[serde(default = "default_item_damage")]
     pub item_damage_per_attack: u32,
-    // TODO: Add disable_blocking_for_seconds parsing when shield-disable mechanic is implemented.
-    // This preserves round-trip fidelity for vanilla items and datapacks.
+    #[serde(default)]
+    pub disable_blocking_for_seconds: f32,
 }
 
 #[derive(Deserialize, Clone)]
