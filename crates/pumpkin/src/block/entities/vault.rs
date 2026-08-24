@@ -566,6 +566,31 @@ impl BlockEntity for VaultBlockEntity {
         {
             nbt.put_compound("config", cfg.clone());
         }
+
+        // Vanilla `getUpdateTag` (VaultBlockEntity.java:59-63): the client sync payload is
+        // the shared state stored under "shared_data" (`VaultSharedData.TAG_NAME`,
+        // VaultSharedData.java:16), holding the displayed reward item, the connected-player
+        // UUIDs and the connection-particle range (`VaultSharedData.java:17-27`). Without it
+        // clients cannot render the caged display item or idle particles for loaded vaults.
+        // Snapshot under try_lock like `config` above; on contention the section is skipped
+        // and the client keeps its defaults until the next block-entity update.
+        if let (Ok(display), Ok(connected)) = (
+            self.display_item.try_lock(),
+            self.connected_players.try_lock(),
+        ) {
+            let mut shared = NbtCompound::new();
+            if let Some(stack) = display.as_ref() {
+                let mut item_nbt = NbtCompound::new();
+                stack.write_item_stack(&mut item_nbt);
+                shared.put_compound("display_item", item_nbt);
+            }
+            shared.put_list(
+                "connected_players",
+                connected.iter().map(|u| uuid_to_int_array(*u)).collect(),
+            );
+            shared.put_double("connected_particles_range", self.config.deactivation_range);
+            nbt.put_compound("shared_data", shared);
+        }
         Some(nbt)
     }
 

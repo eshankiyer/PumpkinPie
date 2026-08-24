@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
 use pumpkin_data::Block;
+use pumpkin_data::BlockState;
+use pumpkin_data::block_properties::{
+    BlockProperties, HorizontalFacing, OakStairsLikeProperties, StairsShape,
+};
 use pumpkin_util::{
     BlockDirection,
     math::{block_box::BlockBox, position::BlockPos},
@@ -25,6 +29,16 @@ use crate::{
 
 #[derive(Deserialize)]
 pub struct SwampHutGenerator;
+
+/// Builds a spruce-stair state with the given facing and shape
+/// (vanilla `SwampHutPiece.java:78-89` uses `SPRUCE_STAIRS` defaults plus these two
+/// properties; `half` stays bottom and `waterlogged` false).
+fn spruce_stairs(facing: HorizontalFacing, shape: StairsShape) -> &'static BlockState {
+    let mut props = OakStairsLikeProperties::default(&Block::SPRUCE_STAIRS);
+    props.facing = facing;
+    props.shape = shape;
+    BlockState::from_id(props.to_state_id(&Block::SPRUCE_STAIRS))
+}
 
 impl StructureGenerator for SwampHutGenerator {
     fn get_structure_position(
@@ -210,20 +224,58 @@ impl StructurePieceBase for SwampHutPiece {
         p.add_block(chunk, oak_fence, 1, 2, 1, &box_limit);
         p.add_block(chunk, oak_fence, 5, 2, 1, &box_limit);
 
-        // let stairs_n = Block::SPRUCE_STAIRS.default_state.with("facing", "north");
-        // let stairs_e = Block::SPRUCE_STAIRS.default_state.with("facing", "east");
-        // let stairs_w = Block::SPRUCE_STAIRS.default_state.with("facing", "west");
-        // let stairs_s = Block::SPRUCE_STAIRS.default_state.with("facing", "south");
+        // Roof: a ring of spruce stairs with outer corner shapes
+        // (`SwampHutPiece.postProcess`, `SwampHutPiece.java:78-89`).
+        let stairs_n = spruce_stairs(HorizontalFacing::North, StairsShape::Straight);
+        let stairs_e = spruce_stairs(HorizontalFacing::East, StairsShape::Straight);
+        let stairs_w = spruce_stairs(HorizontalFacing::West, StairsShape::Straight);
+        let stairs_s = spruce_stairs(HorizontalFacing::South, StairsShape::Straight);
 
-        // p.fill_with_outline(chunk, &box_limit, false, 0, 4, 1, 6, 4, 1, &stairs_n, &stairs_n);
-        // p.fill_with_outline(chunk, &box_limit, false, 0, 4, 2, 0, 4, 7, &stairs_e, &stairs_e);
-        // p.fill_with_outline(chunk, &box_limit, false, 6, 4, 2, 6, 4, 7, &stairs_w, &stairs_w);
-        // p.fill_with_outline(chunk, &box_limit, false, 0, 4, 8, 6, 4, 8, &stairs_s, &stairs_s);
+        p.fill_with_outline(
+            chunk, &box_limit, false, 0, 4, 1, 6, 4, 1, stairs_n, stairs_n,
+        );
+        p.fill_with_outline(
+            chunk, &box_limit, false, 0, 4, 2, 0, 4, 7, stairs_e, stairs_e,
+        );
+        p.fill_with_outline(
+            chunk, &box_limit, false, 6, 4, 2, 6, 4, 7, stairs_w, stairs_w,
+        );
+        p.fill_with_outline(
+            chunk, &box_limit, false, 0, 4, 8, 6, 4, 8, stairs_s, stairs_s,
+        );
 
-        // p.add_block(chunk, &stairs_n.with("shape", "outer_right"), 0, 4, 1, &box_limit);
-        // p.add_block(chunk, &stairs_n.with("shape", "outer_left"), 6, 4, 1, &box_limit);
-        // p.add_block(chunk, &stairs_s.with("shape", "outer_left"), 0, 4, 8, &box_limit);
-        // p.add_block(chunk, &stairs_s.with("shape", "outer_right"), 6, 4, 8, &box_limit);
+        p.add_block(
+            chunk,
+            spruce_stairs(HorizontalFacing::North, StairsShape::OuterRight),
+            0,
+            4,
+            1,
+            &box_limit,
+        );
+        p.add_block(
+            chunk,
+            spruce_stairs(HorizontalFacing::North, StairsShape::OuterLeft),
+            6,
+            4,
+            1,
+            &box_limit,
+        );
+        p.add_block(
+            chunk,
+            spruce_stairs(HorizontalFacing::South, StairsShape::OuterLeft),
+            0,
+            4,
+            8,
+            &box_limit,
+        );
+        p.add_block(
+            chunk,
+            spruce_stairs(HorizontalFacing::South, StairsShape::OuterRight),
+            6,
+            4,
+            8,
+            &box_limit,
+        );
 
         for i in [2, 7] {
             for j in [1, 5] {
@@ -231,14 +283,11 @@ impl StructurePieceBase for SwampHutPiece {
             }
         }
 
-        // if !self.has_witch {
-        //     let world_coords = p.get_world_coords(2, 2, 5);
-        //     if box_limit.contains(world_coords.0, world_coords.1, world_coords.2) {
-        //         self.has_witch = true;
-        //         // TODO: chunk.add_entity(Witch, world_coords)
-        //     }
-        // }
-        // TODO: self.spawn_cat(chunk, &box_limit);
+        // Vanilla also spawns one witch and one cat on first generation
+        // (`SwampHutPiece.java:97-111` and `SwampHutPiece.java:115-129`). Structure-time
+        // living-entity spawning is not supported by this fork's generation pipeline
+        // (`ProtoChunk` carries block/structure entities only), so those spawns remain
+        // unported rather than faked.
     }
     fn get_structure_piece(&self) -> &super::StructurePiece {
         &self.shiftable_structure_piece.piece
