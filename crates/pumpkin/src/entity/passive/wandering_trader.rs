@@ -20,8 +20,9 @@ use crate::entity::{
     Entity, EntityBase, NBTStorage,
     ai::goal::{
         avoid_entity::AvoidEntityGoal, escape_danger::EscapeDangerGoal, interact::InteractGoal,
-        look_at_entity::LookAtEntityGoal, move_towards_restriction::MoveTowardsRestrictionGoal,
-        swim::SwimGoal, trade_with_player::TradeWithPlayerGoal, wander_around::WanderAroundGoal,
+        look_at_entity::LookAtEntityGoal, look_at_trading_player,
+        move_towards_restriction::MoveTowardsRestrictionGoal, swim::SwimGoal,
+        trade_with_player::TradeWithPlayerGoal, wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
 };
@@ -72,8 +73,8 @@ const AVOIDED: &[(&EntityType, f64)] = &[
 ///   is always absent, so the goal could never fire; left out rather than registered dead.
 /// - The two `UseItemGoal`s (`WanderingTrader.java:62-78`, drink invisibility after dark and
 ///   milk at dawn) -- vanilla's generic `UseItemGoal` has no Rust counterpart yet.
-/// - `LookAtTradingPlayerGoal` (`WanderingTrader.java:88`) remains deferred because it depends
-///   on the merchant's trading-player state and has no generic Rust sibling yet.
+/// - `LookAtTradingPlayerGoal` (`WanderingTrader.java:88`) is ported as
+///   [`crate::entity::ai::goal::look_at_trading_player::LookAtTradingPlayerGoal`].
 pub struct WanderingTraderEntity {
     pub mob_entity: MobEntity,
     pub offers: Mutex<Vec<pumpkin_protocol::java::client::play::MerchantOffer>>,
@@ -116,6 +117,13 @@ impl WanderingTraderEntity {
             // `WanderingTrader.registerGoals` (`WanderingTrader.java:60-94`).
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, Box::new(TradeWithPlayerGoal::new(0.5)));
+            // `WanderingTrader.java:89`: `addGoal(1, new LookAtTradingPlayerGoal(this))`.
+            goal_selector.add_goal(
+                1,
+                Box::new(look_at_trading_player::LookAtTradingPlayerGoal::new(
+                    mob_weak.clone(),
+                )),
+            );
             for (flee_type, flee_distance) in AVOIDED {
                 goal_selector.add_goal(
                     1,

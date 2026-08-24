@@ -77,6 +77,7 @@ pub mod llama_hurt_by_target;
 pub mod long_jump_to_random_pos;
 pub mod look_around;
 pub mod look_at_entity;
+pub mod look_at_trading_player;
 pub mod melee_attack;
 pub mod move_back_to_village;
 pub mod move_to_target_pos;
