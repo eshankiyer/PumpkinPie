@@ -70,6 +70,86 @@ pub(super) fn should_grow_plant_head(age: u8, roll: f64, grow_per_tick_probabili
     age < MAX_PLANT_HEAD_AGE && roll < grow_per_tick_probability
 }
 
+/// `NetherVines.getBlocksToGrowWhenBonemealed` (`NetherVines.java:14-22`).
+pub(super) fn nether_vines_blocks_to_grow() -> usize {
+    use rand::RngExt;
+
+    let mut random = rand::rng();
+    let mut probability = 1.0;
+    let mut count = 0;
+    while random.random::<f64>() < probability {
+        count += 1;
+        probability *= 0.826;
+    }
+    count
+}
+
+/// Finds the connected head used by `GrowingPlantBodyBlock.performBonemeal`
+/// (`GrowingPlantBodyBlock.java:84-89`).
+pub(super) fn connected_plant_head(
+    world: &crate::world::World,
+    position: &BlockPos,
+    head: &'static Block,
+    body: &'static Block,
+    growth_direction: pumpkin_data::BlockDirection,
+) -> Option<(BlockPos, BlockStateId)> {
+    let mut head_pos = *position;
+    while world.get_block(&head_pos) == body {
+        head_pos = head_pos.offset(growth_direction.to_offset());
+    }
+    (world.get_block(&head_pos) == head).then_some((head_pos, world.get_block_state_id(&head_pos)))
+}
+
+/// Shared `GrowingPlantHeadBlock` bonemeal implementation
+/// (`GrowingPlantHeadBlock.java:125-134`).
+pub(super) async fn bonemeal_grow_plant_head(
+    world: &std::sync::Arc<crate::world::World>,
+    mut head_pos: BlockPos,
+    head: &'static Block,
+    body: &'static Block,
+    growth_direction: pumpkin_data::BlockDirection,
+) {
+    use pumpkin_data::block_properties::{BlockProperties, KelpLikeProperties};
+    use pumpkin_world::world::BlockFlags;
+
+    let state_id = world.get_block_state_id(&head_pos);
+    let state = KelpLikeProperties::from_state_id(state_id, head);
+    let mut forward_pos = head_pos.offset(growth_direction.to_offset());
+    let blocks_to_grow = nether_vines_blocks_to_grow();
+    let mut next_age = state.age.saturating_add(1).min(MAX_PLANT_HEAD_AGE);
+
+    for _ in 0..blocks_to_grow {
+        if !world.is_in_height_limit(forward_pos.0.y)
+            || !world.get_block_state(&forward_pos).is_air()
+        {
+            break;
+        }
+
+        let mut grown = KelpLikeProperties::default(head);
+        grown.age = next_age;
+        world
+            .set_block_state(
+                &forward_pos,
+                grown.to_state_id(head),
+                BlockFlags::NOTIFY_NEIGHBORS,
+            )
+            .await;
+        world
+            .set_block_state(
+                &head_pos,
+                body.default_state.id,
+                BlockFlags::NOTIFY_NEIGHBORS,
+            )
+            .await;
+        // `forward_pos` now holds the head we just placed; advancing `head_pos` to match
+        // is what makes each earlier segment convert to body in turn instead of leaving a
+        // stack of head blocks behind when `blocks_to_grow` > 1.
+        head_pos = forward_pos;
+        forward_pos = forward_pos.offset(growth_direction.to_offset());
+        next_age = next_age.saturating_add(1).min(MAX_PLANT_HEAD_AGE);
+    }
+}
+
 /// Shared `GrowingPlantHeadBlock` growth step (`GrowingPlantHeadBlock.java:50-57`).
 ///
 /// The head advances one block along `growth_direction`, taking `state.cycle(AGE)` as its

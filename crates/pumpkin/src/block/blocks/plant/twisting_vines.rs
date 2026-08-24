@@ -1,6 +1,8 @@
-use crate::block::blocks::plant::{PlantBlockBase, grow_plant_head};
+use crate::block::blocks::plant::{
+    PlantBlockBase, bonemeal_grow_plant_head, connected_plant_head, grow_plant_head,
+};
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, CanPlaceAtArgs,
+    BlockBehaviour, BlockFuture, BlockMetadata, BonemealArgs, BrokenArgs, CanPlaceAtArgs,
     GetStateForNeighborUpdateArgs, PlacedArgs, RandomTickArgs,
 };
 use pumpkin_data::BlockStateId;
@@ -20,6 +22,48 @@ impl BlockMetadata for TwistingVinesBlock {
 const GROW_PER_TICK_PROBABILITY: f64 = 0.1;
 
 impl BlockBehaviour for TwistingVinesBlock {
+    fn is_valid_bonemeal_target(&self, args: BonemealArgs<'_>) -> bool {
+        let Some((head_pos, _)) = connected_plant_head(
+            args.world,
+            args.position,
+            &Block::TWISTING_VINES,
+            &Block::TWISTING_VINES_PLANT,
+            pumpkin_data::BlockDirection::Up,
+        ) else {
+            return false;
+        };
+        args.world.is_in_height_limit(head_pos.0.y + 1)
+            && args.world.get_block_state(&head_pos.up()).is_air()
+    }
+
+    fn is_bonemeal_success(&self, _args: BonemealArgs<'_>) -> bool {
+        true
+    }
+
+    /// `TwistingVinesBlock` inherits `GrowingPlantHeadBlock.performBonemeal`
+    /// (`GrowingPlantHeadBlock.java:125-134`) and uses `NetherVines.java:14-22` for
+    /// the geometric growth count.
+    fn perform_bonemeal<'a>(&'a self, args: crate::block::BonemealArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if let Some((head_pos, _)) = connected_plant_head(
+                args.world,
+                args.position,
+                &Block::TWISTING_VINES,
+                &Block::TWISTING_VINES_PLANT,
+                pumpkin_data::BlockDirection::Up,
+            ) {
+                bonemeal_grow_plant_head(
+                    args.world,
+                    head_pos,
+                    &Block::TWISTING_VINES,
+                    &Block::TWISTING_VINES_PLANT,
+                    pumpkin_data::BlockDirection::Up,
+                )
+                .await;
+            }
+        })
+    }
+
     /// `GrowingPlantHeadBlock.randomTick` with `NetherVines.isValidGrowthState`
     /// (`NetherVines.java:10-12`: the target must be air).
     fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
