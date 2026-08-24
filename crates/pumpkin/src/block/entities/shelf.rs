@@ -1,13 +1,18 @@
 use crate::block::entities::BlockEntity;
+use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture, sync_write_items_to_nbt};
+use pumpkin_world::world::BlockFlags;
 use std::any::Any;
 use std::array::from_fn;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+use crate::world::World;
+use crate::world::game_event::{GameEventContext, emit_game_event};
 
 pub struct ShelfBlockEntity {
     pub position: BlockPos,
@@ -99,6 +104,49 @@ impl ShelfBlockEntity {
             align_items_to_bottom: AtomicBool::new(false),
             dirty: AtomicBool::new(false),
         }
+    }
+
+    /// `ShelfBlockEntity.getAlignItemsToBottom` (`ShelfBlockEntity.java:135-137`).
+    pub fn get_align_items_to_bottom(&self) -> bool {
+        self.align_items_to_bottom.load(Ordering::Relaxed)
+    }
+
+    /// `ShelfBlockEntity.swapItemNoUpdate` (`ShelfBlockEntity.java:81-85`): returns the stack
+    /// currently in `slot` and puts `held_item_stack` in its place.
+    pub async fn swap_item_no_update(&self, slot: usize, held_item_stack: ItemStack) -> ItemStack {
+        let retrieved_item = self.remove_stack(slot).await;
+        self.set_stack(slot, held_item_stack).await;
+        retrieved_item
+    }
+
+    /// `ShelfBlockEntity.setChanged(GameEvent)` (`ShelfBlockEntity.java:87-97`): flags the chunk,
+    /// optionally posts a vibration, and re-sends the block entity data to viewers
+    /// (`sendBlockUpdated(pos, state, state, 3)`), which is how clients see shelf contents change
+    /// without a block-state edit.
+    ///
+    /// The vanilla caller (`ShelfBlock.swapSingleItem`, `ShelfBlock.java:213-217`) suppresses the
+    /// vibration only when the new item carries a `minecraft:use_effects` component with
+    /// `interact_vibrations=false`; that flag is not modelled in this fork's component data
+    /// (vanilla defaults it to `true`, `UseEffects.java:9`), so callers here always pass
+    /// [`Some`] to keep the default vibration behaviour.
+    pub async fn set_changed_with_game_event(&self, world: &Arc<World>, event: Option<GameEvent>) {
+        self.mark_dirty();
+        let state_id = world.get_block_state_id(&self.position);
+        if let Some(event) = event {
+            emit_game_event(
+                world,
+                event,
+                self.position.to_centered_f64(),
+                GameEventContext {
+                    source_entity: None,
+                    affected_block_state: Some(state_id),
+                },
+            )
+            .await;
+        }
+        world
+            .set_block_state(&self.position, state_id, BlockFlags::NOTIFY_ALL)
+            .await;
     }
 }
 
