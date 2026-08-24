@@ -107,6 +107,36 @@ impl CopperWeatherState {
             _ => Self::Unaffected,
         }
     }
+
+    /// The hurt-sound column of vanilla's per-stage `CopperGolemOxidationLevel` record
+    /// (`CopperGolemOxidationLevel.java:6-8`), resolved through the hardcoded table
+    /// `CopperGolemOxidationLevels.getOxidationLevel`
+    /// (`CopperGolemOxidationLevels.java:9-54`). Unaffected and exposed share the base
+    /// sounds (`CopperGolemOxidationLevels.java:9-24`); weathered and oxidized swap in
+    /// their own sets (`CopperGolemOxidationLevels.java:25-40`). Consumed server-side by
+    /// `CopperGolem.getHurtSound` (`CopperGolem.java:389-391`), which Pumpkin reaches via
+    /// the [`Mob::get_hurt_sound`] override below.
+    #[must_use]
+    pub(crate) const fn oxidation_level_hurt_sound(self) -> Sound {
+        match self {
+            Self::Weathered => Sound::EntityCopperGolemWeatheredHurt,
+            Self::Oxidized => Sound::EntityCopperGolemOxidizedHurt,
+            // Unaffected and Exposed both use the base set.
+            Self::Unaffected | Self::Exposed => Sound::EntityCopperGolemHurt,
+        }
+    }
+
+    /// The step-sound column of the same table, consumed server-side by
+    /// `CopperGolem.playStepSound` (`CopperGolem.java:399-401`), which Pumpkin reaches via
+    /// the [`Mob::get_step_sound`] override below.
+    #[must_use]
+    pub(crate) const fn oxidation_level_step_sound(self) -> Sound {
+        match self {
+            Self::Weathered => Sound::EntityCopperGolemWeatheredStep,
+            Self::Oxidized => Sound::EntityCopperGolemOxidizedStep,
+            Self::Unaffected | Self::Exposed => Sound::EntityCopperGolemStep,
+        }
+    }
 }
 
 /// `CopperGolem.CopperGolemState`, the synched animation state.
@@ -382,6 +412,20 @@ impl Mob for CopperGolemEntity {
         &self.mob_entity
     }
 
+    /// `CopperGolem.getHurtSound` (`CopperGolem.java:389-391`): the hurt sound follows the
+    /// oxidation stage through `CopperGolemOxidationLevels.getOxidationLevel`. The generated
+    /// `COPPER_GOLEM.hurt_sound` is `None`, so without this override the mob plays the
+    /// generic hurt sound.
+    fn get_hurt_sound(&self) -> Option<Sound> {
+        Some(self.weather_state().oxidation_level_hurt_sound())
+    }
+
+    /// `CopperGolem.playStepSound` (`CopperGolem.java:399-401`): the step sound also
+    /// follows the oxidation stage, replacing the generic block-step path.
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(self.weather_state().oxidation_level_step_sound())
+    }
+
     /// `CopperGolem.thunderHit`: a lightning strike scrubs the golem back to unaffected.
     fn mob_on_lightning_strike<'a>(
         &'a self,
@@ -458,8 +502,8 @@ impl Mob for CopperGolemEntity {
 #[cfg(test)]
 mod tests {
     use super::{
-        CopperWeatherState, IGNORE_WEATHERING_TICK, UNSET_WEATHERING_TICK, WEATHERING_TICK_FROM,
-        WEATHERING_TICK_TO,
+        CopperWeatherState, IGNORE_WEATHERING_TICK, Sound, UNSET_WEATHERING_TICK,
+        WEATHERING_TICK_FROM, WEATHERING_TICK_TO,
     };
 
     #[test]
@@ -523,5 +567,43 @@ mod tests {
             assert!(WEATHERING_TICK_FROM > 0);
         }
         assert_ne!(UNSET_WEATHERING_TICK, IGNORE_WEATHERING_TICK);
+    }
+
+    #[test]
+    fn oxidation_level_sounds_match_the_vanilla_table() {
+        // CopperGolemOxidationLevels.java:9-24: unaffected and exposed share the base set.
+        assert_eq!(
+            CopperWeatherState::Unaffected.oxidation_level_hurt_sound(),
+            Sound::EntityCopperGolemHurt
+        );
+        assert_eq!(
+            CopperWeatherState::Exposed.oxidation_level_hurt_sound(),
+            Sound::EntityCopperGolemHurt
+        );
+        assert_eq!(
+            CopperWeatherState::Unaffected.oxidation_level_step_sound(),
+            Sound::EntityCopperGolemStep
+        );
+        assert_eq!(
+            CopperWeatherState::Exposed.oxidation_level_step_sound(),
+            Sound::EntityCopperGolemStep
+        );
+        // CopperGolemOxidationLevels.java:25-40: weathered and oxidized swap sets.
+        assert_eq!(
+            CopperWeatherState::Weathered.oxidation_level_hurt_sound(),
+            Sound::EntityCopperGolemWeatheredHurt
+        );
+        assert_eq!(
+            CopperWeatherState::Oxidized.oxidation_level_hurt_sound(),
+            Sound::EntityCopperGolemOxidizedHurt
+        );
+        assert_eq!(
+            CopperWeatherState::Weathered.oxidation_level_step_sound(),
+            Sound::EntityCopperGolemWeatheredStep
+        );
+        assert_eq!(
+            CopperWeatherState::Oxidized.oxidation_level_step_sound(),
+            Sound::EntityCopperGolemOxidizedStep
+        );
     }
 }

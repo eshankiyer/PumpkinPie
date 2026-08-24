@@ -1233,6 +1233,14 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
+    /// Instance-specific override of the server-played hurt sound, or `None` to keep the
+    /// static `EntityType::hurt_sound` table consulted by `LivingEntity::hurt_sound`.
+    /// Only mobs whose hurt sound depends on instance state override this, e.g. the copper
+    /// golem's oxidation stage (`CopperGolem.getHurtSound`, `CopperGolem.java:389-391`).
+    fn get_hurt_sound(&self) -> Option<Sound> {
+        None
+    }
+
     /// Vanilla `Mob.getAmbientSoundInterval` (Mob.java:274-276).
     fn get_ambient_sound_interval(&self) -> i32 {
         DEFAULT_AMBIENT_SOUND_INTERVAL
