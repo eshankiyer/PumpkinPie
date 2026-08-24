@@ -1,6 +1,7 @@
 pub mod function_loader;
 pub mod recipe_loader;
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,11 +9,28 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
+use pumpkin_data::game_rules::{GameRule, GameRuleRegistry, GameRuleValue};
 use pumpkin_protocol::codec::recipe::DynamicRecipe;
 
 use crate::command::context::command_source::CommandSource;
 use crate::server::Server;
 use crate::server::recipe::RecipeManager;
+
+tokio::task_local! {
+    /// Remaining command quota of the currently running function chain.
+    ///
+    /// Vanilla executes every function line through an `ExecutionContext` holding a
+    /// `Deque<CommandQueueEntry>` and a `commandQuota` decremented once per queued
+    /// command; when the quota reaches zero the whole chain stops
+    /// (`ExecutionContext.java:88-92`, entries run at `:100-102`). The limit comes
+    /// from the `max_command_sequence_length` gamerule, read when the outermost
+    /// execution context is created (`Commands.java:399-403`). Vanilla keeps that
+    /// context in a thread-local so nested calls join the ambient chain instead of
+    /// getting a fresh quota (`Commands.java:396-414`). A tokio task-local is the
+    /// direct analogue here: every nesting level between `execute_function` and the
+    /// dispatcher runs on one task through inline `.await`s.
+    static REMAINING_COMMAND_QUOTA: Cell<i64>;
+}
 
 #[derive(Clone, Debug)]
 pub struct LoadedDatapack {
@@ -186,6 +204,49 @@ impl DatapackManager {
         source: &CommandSource,
         name: &str,
     ) -> Result<usize, String> {
+        // Vanilla clamps the chain limit to at least 1
+        // (`Commands.java:400`).
+        let fallback_registry = GameRuleRegistry::default();
+        let default_limit = fallback_registry.max_command_sequence_length.max(1);
+        let limit = source.world.as_ref().map_or(default_limit, |world| {
+            match world.get_game_rule(&GameRule::MaxCommandSequenceLength) {
+                GameRuleValue::Int(v) => v.max(1),
+                GameRuleValue::Bool(_) => default_limit,
+            }
+        });
+
+        // A nested call (function invoking `function ...`) joins the ambient
+        // chain and shares its quota, like vanilla reuses the ambient
+        // ExecutionContext (`Commands.java:412-414`).
+        if REMAINING_COMMAND_QUOTA.try_with(Cell::get).is_ok() {
+            return self
+                .execute_function_in_context(server, source, name, limit)
+                .await;
+        }
+
+        REMAINING_COMMAND_QUOTA
+            .scope(
+                Cell::new(limit),
+                self.execute_function_in_context(server, source, name, limit),
+            )
+            .await
+    }
+
+    /// Runs one function or function tag inside the current command chain.
+    ///
+    /// Port of the per-entry execution of vanilla's command queue
+    /// (`ExecutionContext.runCommandQueue`, `ExecutionContext.java:88-105`,
+    /// entries dispatched through `CommandQueueEntry.execute`,
+    /// `CommandQueueEntry.java:4-6`): every executed line costs one unit of the
+    /// chain quota, and an exhausted quota aborts the whole remaining chain with
+    /// vanilla's log message.
+    async fn execute_function_in_context(
+        &self,
+        server: &Arc<Server>,
+        source: &CommandSource,
+        name: &str,
+        limit: i64,
+    ) -> Result<usize, String> {
         let (functions_to_run, is_tag) = if let Some(tag_name) = name.strip_prefix('#') {
             let tags = self.function_tags.read().await;
             let Some(fns) = tags.get(tag_name) else {
@@ -208,6 +269,18 @@ impl DatapackManager {
             };
 
             for line in lines {
+                // Vanilla checks the quota before polling each queued entry and
+                // breaks out of the entire queue once it is spent
+                // (`ExecutionContext.java:89-92`).
+                let remaining = REMAINING_COMMAND_QUOTA.with(Cell::get);
+                if remaining <= 0 {
+                    // Vanilla logs the configured limit here
+                    // (`ExecutionContext.java:89-91`).
+                    info!("Command execution stopped due to limit (executed {limit} commands)");
+                    return Ok(total_executed);
+                }
+                REMAINING_COMMAND_QUOTA.with(|quota| quota.set(remaining - 1));
+
                 server
                     .command_dispatcher
                     .load()

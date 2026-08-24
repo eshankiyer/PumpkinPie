@@ -5117,11 +5117,15 @@ impl EntityBase for LivingEntity {
                         .ambient_sound_time
                         .store(-mob.get_ambient_sound_interval(), Relaxed);
                 }
-                world.play_sound(
-                    self.hurt_sound(),
-                    SoundCategory::Players,
-                    &self.entity.pos.load(),
-                );
+                // `LivingEntity.playHurtSound` resolves `getHurtSound` on the concrete mob
+                // first so instance-dependent sounds win (e.g. the copper golem's oxidation
+                // stage, `CopperGolem.java:389-391`), then falls back to the static
+                // per-entity-type table.
+                let hurt_sound = caller
+                    .get_mob()
+                    .and_then(Mob::get_hurt_sound)
+                    .unwrap_or_else(|| self.hurt_sound());
+                world.play_sound(hurt_sound, SoundCategory::Players, &self.entity.pos.load());
 
                 // `LivingEntity.hurtServer` gates the default 0.4 knockback on the
                 // `no_knockback` damage-type tag (LivingEntity.java:1247-1249) before calling

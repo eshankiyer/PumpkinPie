@@ -1233,6 +1233,14 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
+    /// Instance-specific override of the server-played hurt sound, or `None` to keep the
+    /// static `EntityType::hurt_sound` table consulted by `LivingEntity::hurt_sound`.
+    /// Only mobs whose hurt sound depends on instance state override this, e.g. the copper
+    /// golem's oxidation stage (`CopperGolem.getHurtSound`, `CopperGolem.java:389-391`).
+    fn get_hurt_sound(&self) -> Option<Sound> {
+        None
+    }
+
     /// Vanilla `Mob.getAmbientSoundInterval` (Mob.java:274-276).
     fn get_ambient_sound_interval(&self) -> i32 {
         DEFAULT_AMBIENT_SOUND_INTERVAL
@@ -1536,6 +1544,15 @@ pub trait Mob: EntityBase + Send + Sync {
     fn apply_raid_buffs(&self, _wave: i32, _is_captain: bool) -> EntityBaseFuture<'_, ()> {
         Box::pin(async {})
     }
+
+    /// Vanilla `Mob.enchantSpawnedWeapon` override seam (`Mob.java:1065-1067`). The generic
+    /// spawn-equipment pass (`equipment::equip_mob_on_spawn`) already runs the base roll
+    /// (`0.25F * special multiplier` via the `MOB_SPAWN_EQUIPMENT` provider); this hook is then
+    /// invoked with the freshly rolled main-hand stack so subclasses can chain their own
+    /// provider roll exactly as vanilla's virtual dispatch does. Default no-op; Pillager
+    /// overrides this with its 1-in-300 `PILLAGER_SPAWN_CROSSBOW` Piercing roll
+    /// (`Pillager.java:172-181`).
+    fn enchant_spawned_weapon(&self, _main_hand: &mut ItemStack) {}
 
     /// Vanilla `LivingEntity.blockedByItem`: called on the attacker (`self`) when `defender`
     /// successfully shield-blocks one of `self`'s attacks. Default no-op; Ravager overrides this

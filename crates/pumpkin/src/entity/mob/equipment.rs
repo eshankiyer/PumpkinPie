@@ -481,7 +481,12 @@ pub static EQUIPMENT_REGISTRY: LazyLock<HashMap<&'static str, MobEquipmentDef>> 
                 entity_type: "pillager",
                 weapon: WeaponConfig::Always(&Item::CROSSBOW),
                 armor: ArmorConfig::None,
-                enchanted: false,
+                // `Pillager.finalizeSpawn` calls
+                // `populateDefaultEquipmentEnchantments` unconditionally
+                // (`Pillager.java:161`), so the crossbow takes the generic
+                // `MOB_SPAWN_EQUIPMENT` roll; the mob-specific 1-in-300 Piercing roll
+                // chains on top via `Mob::enchant_spawned_weapon`.
+                enchanted: true,
                 can_pick_up_loot: false,
             },
         );
@@ -1072,7 +1077,20 @@ pub async fn equip_mob_on_spawn(mob: &dyn EntityBase, world: &Arc<crate::world::
 
     let mut equipment = living.entity_equipment.lock().await;
     let mut drop_chances = living.equipment_drop_chances.lock().await;
-    let changes_with_drops = equip_mob_from_def(def, &difficulty);
+    let mut changes_with_drops = equip_mob_from_def(def, &difficulty);
+
+    // Vanilla dispatches subclass weapon-enchant overrides through the virtual
+    // `Mob.enchantSpawnedWeapon` (`Mob.java:1065-1067`), which Pillager extends with its own
+    // provider roll (`Pillager.java:172-181`). Run the override on the freshly rolled
+    // main-hand stack, after [`enchant_spawned_weapon`]'s generic pass and before the stack
+    // is stored or broadcast — vanilla's `finalizeSpawn` -> `applyRaidBuffs` order.
+    if let Some((_, stack, _)) = changes_with_drops
+        .iter_mut()
+        .find(|(slot, _, _)| *slot == EquipmentSlot::MAIN_HAND)
+        && let Some(mob) = mob.get_mob()
+    {
+        mob.enchant_spawned_weapon(stack);
+    }
 
     let mut equipment_changes: Vec<(EquipmentSlot, ItemStack)> = Vec::new();
 
