@@ -8,6 +8,7 @@ use crate::entity::{
     ai::goal::{
         active_target::ActiveTargetGoal,
         avoid_entity::AvoidEntityGoal,
+        back_up_if_too_close::BackUpIfTooCloseGoal,
         go_to_wanted_item::GoToWantedItemGoal,
         look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal,
@@ -274,6 +275,10 @@ impl PiglinEntity {
             3,
             GoToWantedItemGoal::new(WANTED_ITEM_WALK_SPEED, WANTED_ITEM_MAX_DISTANCE),
         );
+        // `BackUpIfTooClose.create(5, 0.75F)` (`PiglinAi.java:177`) is a one-shot Brain
+        // behavior. It must outrank the crossbow goal so a close visible target can interrupt
+        // an already-running ranged attack.
+        goal_selector.add_goal(3, Box::new(BackUpIfTooCloseGoal::new(5.0, 0.75)));
         // `initFightActivity` runs `MeleeAttack.create(20)` and `new CrossbowAttack()` side by
         // side (`PiglinAi.java:182-183`); the crossbow goal gates itself on the piglin actually
         // holding one, which `mob/equipment.rs` already gives it a chance of.
