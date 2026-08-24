@@ -25,7 +25,10 @@ impl ItemBehaviour for NameTagItem {
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
             let entity = entity.get_entity();
+            // Vanilla `NameTagItem#interactLivingEntity` requires `target.isAlive()` before
+            // mutating the entity or consuming the tag (`NameTagItem.java:19-27`).
             if entity.entity_type.saveable
+                && entity.is_alive()
                 && let Some(name) = item.get_data_component::<CustomNameImpl>()
             {
                 // Vanilla `NameTagItem#interactLivingEntity` only calls `setCustomName`; it never

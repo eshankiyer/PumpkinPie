@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::block::blocks::copper_weathering;
 use crate::block::{
     BlockBehaviour, BlockFuture, EmitsRedstonePowerArgs, GetRedstonePowerArgs, OnPlaceArgs,
-    OnScheduledTickArgs, PlacedArgs, RandomTickArgs,
+    OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs, RandomTickArgs,
 };
 use crate::world::World;
 use pumpkin_data::block_properties::{BlockProperties, LightningRodLikeProperties};
@@ -49,6 +49,14 @@ impl LightningRodBlock {
         props: &LightningRodLikeProperties,
     ) {
         world.update_neighbors(pos, None).await;
+        Self::update_attached_neighbor(world, pos, props).await;
+    }
+
+    async fn update_attached_neighbor(
+        world: &Arc<World>,
+        pos: &BlockPos,
+        props: &LightningRodLikeProperties,
+    ) {
         // The block it is attached to is in the opposite of the facing direction
         let attached_pos = pos.offset(props.facing.opposite().to_block_direction().to_offset());
         world.update_neighbors(&attached_pos, None).await;
@@ -132,6 +140,18 @@ impl BlockBehaviour for LightningRodBlock {
                     )
                     .await;
                 Self::update_neighbors(args.world, args.position, &props).await;
+            }
+        })
+    }
+
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // Vanilla `LightningRodBlock.affectNeighborsAfterRemoval`
+            // (`LightningRodBlock.java:112-116`) updates the attached block when a powered rod
+            // is removed, so it no longer leaves stale redstone power behind.
+            let props = LightningRodLikeProperties::from_state_id(args.old_state_id, args.block);
+            if props.powered {
+                Self::update_attached_neighbor(args.world, args.position, &props).await;
             }
         })
     }
