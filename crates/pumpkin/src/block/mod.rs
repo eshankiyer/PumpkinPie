@@ -175,6 +175,12 @@ pub trait BlockBehaviour: Send + Sync {
         Box::pin(async {})
     }
 
+    /// Called before a player destroys a block, matching vanilla's
+    /// `BlockBehaviour.playerWillDestroy` hook.
+    fn player_will_destroy<'a>(&'a self, _args: PlayerWillDestroyArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async {})
+    }
+
     fn on_neighbor_update<'a>(&'a self, _args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async {})
     }
@@ -438,6 +444,14 @@ pub struct BrokenArgs<'a> {
     pub player: &'a Arc<Player>,
     pub position: &'a BlockPos,
     pub server: &'a Server,
+    pub world: &'a Arc<World>,
+    pub state: &'a BlockState,
+}
+
+pub struct PlayerWillDestroyArgs<'a> {
+    pub block: &'a Block,
+    pub player: &'a Arc<Player>,
+    pub position: &'a BlockPos,
     pub world: &'a Arc<World>,
     pub state: &'a BlockState,
 }

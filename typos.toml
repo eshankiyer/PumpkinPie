@@ -19,3 +19,6 @@ Mergable = "Mergable"
 # `ThrownTrident.isAcceptibleReturnOwner` (verified at ThrownTrident.java:99). Correcting the
 # spelling here would falsify a citation of a real vanilla method name.
 Acceptible = "Acceptible"
+# Mojang's own spelling: `IronBarsBlock.attachsTo` (verified at IronBarsBlock.java:101).
+# Correcting this to "attaches" would falsify a citation of a real vanilla method name.
+attachs = "attachs"

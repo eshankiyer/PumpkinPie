@@ -3,6 +3,7 @@ use std::sync::Arc;
 use pumpkin_data::{
     Block, BlockDirection, BlockStateId,
     block_properties::{BlockProperties, HorizontalFacing},
+    game_event::GameEvent,
     item::Item,
 };
 use pumpkin_macros::pumpkin_block;
@@ -12,10 +13,12 @@ use pumpkin_world::{tick::TickPriority, world::BlockFlags};
 use crate::block::BlockFuture;
 use crate::{
     block::{
-        BlockBehaviour, BrokenArgs, GetStateForNeighborUpdateArgs, OnEntityCollisionArgs,
-        OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs,
+        BlockBehaviour, GetInsideCollisionShapeArgs, GetStateForNeighborUpdateArgs,
+        OnEntityCollisionArgs, OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs,
+        PlayerWillDestroyArgs,
     },
     world::World,
+    world::game_event::{GameEventContext, emit_game_event},
 };
 
 use super::tripwire_hook::TripwireHookBlock;
@@ -112,7 +115,23 @@ impl BlockBehaviour for TripwireBlock {
         })
     }
 
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+    /// `TripWireBlock.getEntityInsideCollisionShape` (`TripWireBlock.java:143-146`) uses the
+    /// state’s outline shape, rather than the full block cube, for entity-inside processing.
+    fn get_inside_collision_shape<'a>(
+        &'a self,
+        args: GetInsideCollisionShapeArgs<'a>,
+    ) -> BlockFuture<'a, BoundingBox> {
+        Box::pin(async move {
+            args.state
+                .get_block_outline_shapes()
+                .next()
+                .unwrap_or_else(BoundingBox::full_block)
+        })
+    }
+
+    /// `TripWireBlock.playerWillDestroy` (`TripWireBlock.java:115-122`) marks the wire disarmed
+    /// and emits `SHEAR` before the generic destroy path removes it.
+    fn player_will_destroy<'a>(&'a self, args: PlayerWillDestroyArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             let has_shears = args.player.inventory().held_item().await.get_item() == &Item::SHEARS;
             if has_shears {
@@ -122,13 +141,20 @@ impl BlockBehaviour for TripwireBlock {
                     .set_block_state(
                         args.position,
                         props.to_state_id(args.block),
+                        // Vanilla's literal 260 is Block.UPDATE_NONE.
                         BlockFlags::empty(),
                     )
                     .await;
-                // `TripWireBlock.playerWillDestroy` (TripWireBlock.java:115-122) only writes
-                // DISARMED and fires a game event; it never touches durability, and the generic
-                // mining path skips damage on a zero-hardness block, so vanilla shears lose
-                // nothing to cutting a tripwire.
+                // `LevelAccessor.gameEvent(Entity, Holder<GameEvent>, BlockPos)`
+                // (`LevelAccessor.java:94-99`) resolves the BlockPos overload through
+                // `Vec3.atCenterOf(pos)`, so the emitted position is the block's center.
+                emit_game_event(
+                    args.world,
+                    GameEvent::Shear,
+                    args.position.to_centered_f64(),
+                    GameEventContext::of_entity(args.player.clone()),
+                )
+                .await;
             }
         })
     }
@@ -155,14 +181,18 @@ impl BlockBehaviour for TripwireBlock {
 
     fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            let state_id = args.world.get_block_state_id(args.position);
+            let state = args.world.get_block_state(args.position);
 
-            let mut props = TripwireProperties::from_state_id(state_id, args.block);
+            let mut props = TripwireProperties::from_state_id(state.id, args.block);
             if !props.powered {
                 return;
             }
 
-            let aabb = BoundingBox::from_block(args.position);
+            let aabb = state
+                .get_block_outline_shapes()
+                .next()
+                .unwrap_or_else(BoundingBox::full_block)
+                .at_pos(*args.position);
             // Vanilla `Entity.isIgnoringBlockTriggers`: markers, interaction entities,
             // display entities, and ominous item spawners never trip a tripwire.
             let triggering_entities = args

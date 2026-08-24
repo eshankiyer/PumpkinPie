@@ -88,10 +88,10 @@ pub fn compute_bars_state(
         let other_block_pos = block_pos.offset(direction.to_offset());
         let (other_block, other_block_state) = world.get_block_and_state(&other_block_pos);
 
-        let connected = other_block == block
-            || other_block_state.is_side_solid(direction.opposite().to_block_direction())
-            || other_block.has_tag(&tag::Block::C_GLASS_PANES)
-            || other_block.has_tag(&tag::Block::MINECRAFT_WALLS);
+        let connected = attachs_to(
+            other_block,
+            other_block_state.is_side_solid(direction.opposite().to_block_direction()),
+        );
 
         match direction {
             HorizontalFacing::North => bars_props.north = connected,
@@ -102,4 +102,23 @@ pub fn compute_bars_state(
     }
 
     bars_props.to_state_id(block)
+}
+
+/// `IronBarsBlock.attachsTo` (`IronBarsBlock.java:101-103`), with the shared
+/// `Block.isExceptionForConnection` predicate (`Block.java:252-260`).
+fn attachs_to(state_block: &Block, face_solid: bool) -> bool {
+    (!is_exception_for_connection(state_block) && face_solid)
+        || state_block.has_tag(&tag::Block::MINECRAFT_BARS)
+        || state_block.has_tag(&tag::Block::MINECRAFT_WALLS)
+}
+
+/// `Block.isExceptionForConnection` (`Block.java:252-260`).
+fn is_exception_for_connection(block: &Block) -> bool {
+    block.has_tag(&tag::Block::MINECRAFT_LEAVES)
+        || block == &Block::BARRIER
+        || block == &Block::CARVED_PUMPKIN
+        || block == &Block::JACK_O_LANTERN
+        || block == &Block::MELON
+        || block == &Block::PUMPKIN
+        || block.has_tag(&tag::Block::MINECRAFT_SHULKER_BOXES)
 }

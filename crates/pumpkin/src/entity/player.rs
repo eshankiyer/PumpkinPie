@@ -2142,6 +2142,10 @@ impl Player {
             pumpkin_world::world::BlockFlags::SKIP_DROPS
                 | pumpkin_world::world::BlockFlags::NOTIFY_NEIGHBORS
         };
+        server
+            .block_registry
+            .player_will_destroy(world, block, self, &position, state)
+            .await;
         if world
             .break_block(&position, Some(self.clone()), flags)
             .await

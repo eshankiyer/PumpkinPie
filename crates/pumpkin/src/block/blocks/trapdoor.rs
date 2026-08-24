@@ -2,7 +2,8 @@ use crate::block::blocks::copper_weathering;
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs, RandomTickArgs,
+    BlockBehaviour, BlockFuture, ExplodeArgs, NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs,
+    RandomTickArgs,
 };
 use crate::entity::EntityBase;
 use crate::entity::player::Player;
@@ -22,17 +23,25 @@ use std::sync::Arc;
 
 type TrapDoorProperties = pumpkin_data::block_properties::OakTrapdoorLikeProperties;
 
-async fn toggle_trapdoor(player: &Arc<Player>, world: &Arc<World>, block_pos: &BlockPos) {
+async fn toggle_trapdoor(player: Option<&Arc<Player>>, world: &Arc<World>, block_pos: &BlockPos) {
     let (block, block_state) = world.get_block_and_state_id(block_pos);
     let mut trapdoor_props = TrapDoorProperties::from_state_id(block_state, block);
     trapdoor_props.open = !trapdoor_props.open;
 
-    world.play_block_sound_expect(
-        player,
-        get_sound(block, trapdoor_props.open),
-        SoundCategory::Blocks,
-        *block_pos,
-    );
+    if let Some(player) = player {
+        world.play_block_sound_expect(
+            player,
+            get_sound(block, trapdoor_props.open),
+            SoundCategory::Blocks,
+            *block_pos,
+        );
+    } else {
+        world.play_block_sound(
+            get_sound(block, trapdoor_props.open),
+            SoundCategory::Blocks,
+            *block_pos,
+        );
+    }
 
     // TrapDoorBlock.java:122 (`playSound`, called from the click-triggered `toggle`): fires
     // BLOCK_OPEN/BLOCK_CLOSE with the player as source entity.
@@ -44,7 +53,9 @@ async fn toggle_trapdoor(player: &Arc<Player>, world: &Arc<World>, block_pos: &B
             GameEvent::BlockClose
         },
         block_pos.to_centered_f64(),
-        GameEventContext::of_entity(player.clone()),
+        player.map_or(GameEventContext::none(), |player| {
+            GameEventContext::of_entity(player.clone())
+        }),
     )
     .await;
 
@@ -92,9 +103,27 @@ impl BlockBehaviour for TrapDoorBlock {
                 return BlockActionResult::Pass;
             }
 
-            toggle_trapdoor(args.player, args.world, args.position).await;
+            toggle_trapdoor(Some(args.player), args.world, args.position).await;
 
             BlockActionResult::Success
+        })
+    }
+
+    /// `TrapDoorBlock.onExplosionHit` (`TrapDoorBlock.java:98-106`) toggles an unpowered
+    /// hand-openable trapdoor when a trigger-block explosion, such as a wind charge, reaches it.
+    fn explode<'a>(&'a self, args: ExplodeArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if !args.can_trigger_blocks {
+                return;
+            }
+
+            let state = args.world.get_block_state(args.position);
+            let props = TrapDoorProperties::from_state_id(state.id, args.block);
+            if props.powered || !can_open_trapdoor(args.block) {
+                return;
+            }
+
+            toggle_trapdoor(None, args.world, args.position).await;
         })
     }
 
