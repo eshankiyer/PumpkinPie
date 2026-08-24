@@ -140,6 +140,7 @@ pub(crate) mod track_target;
 pub mod trade_with_player;
 pub mod trader_llama_defend_wandering_trader;
 pub mod transport_items;
+pub mod try_find_land;
 pub mod try_find_water;
 pub mod turtle_go_home;
 pub mod turtle_go_to_water;

@@ -23,6 +23,7 @@ use crate::entity::{
         look_at_entity::LookAtEntityGoal,
         swim::SwimGoal,
         tempt::TemptGoal,
+        try_find_land::TryFindLandGoal,
         wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
@@ -130,6 +131,13 @@ impl FrogEntity {
             // `FrogAi.initLaySpawnActivity` (`FrogAi.java:143-168`) outranks the idle bundle,
             // and `AnimalMakeLove(FROG)` (`FrogAi.java:90`) is what `BreedGoal` stands in for.
             goal_selector.add_goal(1, FrogLaySpawnGoal::new(frog_weak, 1.0));
+            // `FrogAi.initIdleActivity` / `initSwimActivity` register two separate instances,
+            // `TryFindLand.create(6, 1.0F)` and `TryFindLand.create(8, 1.5F)`
+            // (`FrogAi.java:93,120`), picked by which Brain activity is active. Pumpkin has no
+            // per-activity dispatch for the frog, so this wires only the swim variant's wider
+            // range/speed; a frog in the idle activity searches slightly farther and faster
+            // than vanilla until activity-aware dispatch exists.
+            goal_selector.add_goal(2, Box::new(TryFindLandGoal::new(8, 1.5)));
             goal_selector.add_goal(2, BreedGoal::new(1.0));
             goal_selector.add_goal(2, Box::new(WanderAroundGoal::new(1.0)));
             goal_selector.add_goal(
