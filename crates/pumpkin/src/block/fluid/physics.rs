@@ -77,7 +77,27 @@ pub fn waterlogged_replacement_state(
         .matches_type(&Fluid::WATER)
         .then(|| block.with_waterlogged(block_state.id))
         .flatten()
-        .map(|state| state.id)
+        .map(|state| {
+            if block.has_tag(&tag::Block::MINECRAFT_CANDLES) {
+                // Vanilla `CandleBlock.placeLiquid` extinguishes a lit candle as water enters
+                // it (`CandleBlock.java:150-160`), rather than preserving the lit state. Not
+                // ported: vanilla's `extinguish` (`AbstractCandleBlock.java:83-96`) also plays
+                // smoke particles, the CANDLE_EXTINGUISH sound, and a BLOCK_CHANGE event; this
+                // pure state-computation helper has no world/async access to do the same, and
+                // its caller (`flowing_trait.rs`) applies the returned state generically with
+                // no such side effects for any waterlogged block.
+                let mut props = block
+                    .properties(state.id)
+                    .expect("waterlogged candle state has properties")
+                    .to_props();
+                if let Some((_, value)) = props.iter_mut().find(|(key, _)| *key == "lit") {
+                    *value = "false";
+                }
+                block.from_properties(&props).to_state_id(block)
+            } else {
+                state.id
+            }
+        })
 }
 
 #[cfg(test)]

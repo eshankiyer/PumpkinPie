@@ -62,6 +62,16 @@ fn can_be_lit(block: &Block, state_id: BlockStateId) -> Option<BlockStateId> {
         props.to_props()
     };
 
+    if block.has_tag(&tag::Block::MINECRAFT_CANDLES)
+        && props
+            .iter()
+            .any(|(key, value)| *key == "waterlogged" && *value == "true")
+    {
+        // Vanilla `CandleBlock.canLight` rejects waterlogged candles
+        // (`CandleBlock.java:166-169`).
+        return None;
+    }
+
     let (_, value) = props.iter_mut().find(|(k, _)| *k == "lit")?;
     *value = "true";
 

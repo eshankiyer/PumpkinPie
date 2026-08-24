@@ -18,6 +18,7 @@ use crate::entity::passive::sheep::SheepEntity;
 use crate::entity::projectile::ThrownItemEntity;
 use crate::entity::projectile::arrow::{ArrowEntity, ArrowPickup};
 use crate::entity::projectile::egg::EggEntity;
+use crate::entity::projectile::experience_bottle::ExperienceBottleEntity;
 use crate::entity::projectile::firework_rocket::FireworkRocketEntity;
 use crate::entity::projectile::lingering_potion::LingeringPotionEntity;
 use crate::entity::projectile::small_fireball::SmallFireballEntity;
@@ -247,6 +248,8 @@ impl DispenserBlock {
     // Velocity values match the vanilla dispenser projectile settings.
     const DEFAULT_PROJECTILE_POWER: f64 = 1.1;
     const DEFAULT_PROJECTILE_UNCERTAINTY: f64 = 6.0;
+    const EXPERIENCE_BOTTLE_PROJECTILE_POWER: f64 = 1.375;
+    const EXPERIENCE_BOTTLE_PROJECTILE_UNCERTAINTY: f64 = 3.0;
     const POTION_PROJECTILE_POWER: f64 = 1.375;
     const POTION_PROJECTILE_UNCERTAINTY: f64 = 3.0;
     // Fire charges and wind charges share these values.
@@ -304,6 +307,8 @@ impl DispenserBlock {
             Self::dispense_snowball(ctx, item).await;
         } else if item.item.id == Item::EGG.id {
             Self::dispense_egg(ctx, item).await;
+        } else if item.item.id == Item::EXPERIENCE_BOTTLE.id {
+            Self::dispense_experience_bottle(ctx, item).await;
         } else if item.item.id == Item::SPLASH_POTION.id {
             Self::dispense_splash_potion(ctx, item).await;
         } else if item.item.id == Item::LINGERING_POTION.id {
@@ -630,6 +635,31 @@ impl DispenserBlock {
         Self::finish_projectile_launch(
             ctx,
             Arc::new(egg),
+            WorldEvent::SoundDispenserProjectileLaunch,
+        )
+        .await;
+    }
+
+    /// Implements `ExperienceBottleItem.asProjectile` and its dispenser configuration
+    /// (`ExperienceBottleItem.java:44-53`): create a thrown experience bottle and use half
+    /// the default projectile uncertainty with 1.25 times the default projectile power.
+    async fn dispense_experience_bottle(ctx: &DispenseContext<'_>, item: &mut ItemStack) {
+        let _ = item.split(1);
+        let entity = Entity::new(
+            ctx.world.clone(),
+            Self::projectile_spawn_position(ctx).add(&Vector3::new(0.0, 0.1, 0.0)),
+            &EntityType::EXPERIENCE_BOTTLE,
+        );
+        let bottle = ExperienceBottleEntity::new(entity);
+        Self::launch_thrown(
+            ctx,
+            &bottle.thrown,
+            Self::EXPERIENCE_BOTTLE_PROJECTILE_POWER,
+            Self::EXPERIENCE_BOTTLE_PROJECTILE_UNCERTAINTY,
+        );
+        Self::finish_projectile_launch(
+            ctx,
+            Arc::new(bottle),
             WorldEvent::SoundDispenserProjectileLaunch,
         )
         .await;
