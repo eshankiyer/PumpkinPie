@@ -516,7 +516,9 @@ impl ConfiguredFeature {
                 random,
                 pos,
             ),
-            Self::NoOp => false,
+            // Vanilla `NoOpFeature.place` succeeds without changing the level
+            // (`NoOpFeature.java:11-14`).
+            Self::NoOp => true,
         }
     }
 }
