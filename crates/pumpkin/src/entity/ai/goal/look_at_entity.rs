@@ -81,6 +81,14 @@ impl LookAtEntityGoal {
         Box::new(Self::new_any_mob(mob_weak, range, 0.02, false))
     }
 
+    /// Pins `lookAt` directly, bypassing `can_use`'s probability roll and nearest-entity scan.
+    /// Vanilla subclasses that override `canUse` wholesale use exactly this shape:
+    /// `LookAtTradingPlayerGoal.canUse` (`LookAtTradingPlayerGoal.java:15-22`) assigns
+    /// `this.lookAt` itself before returning `true`.
+    pub fn set_look_target(&mut self, target: Arc<dyn EntityBase>) {
+        self.target = Some(target);
+    }
+
     fn create_target_predicate(
         mob_weak: Weak<dyn Mob>,
         target_type: Option<&'static EntityType>,
