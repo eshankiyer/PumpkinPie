@@ -75,8 +75,12 @@ impl DolphinEntity {
             // `DolphinSwimToTreasureGoal.tick` (`Dolphin.java:458`), not a constructor arg.
             goal_selector.add_goal(1, DolphinSwimToTreasureGoal::new(1.3));
             goal_selector.add_goal(2, DolphinSwimWithPlayerGoal::new(4.0));
-            // Vanilla: `Dolphin.registerGoals` uses `RandomSwimmingGoal(this, 1.0, 10)`.
-            goal_selector.add_goal(4, Box::new(WanderAroundGoal::new_with_interval(1.0, 10)));
+            // Vanilla: `Dolphin.registerGoals` uses `RandomSwimmingGoal(this, 1.0, 10)`
+            // (`Dolphin.java:162`, `RandomSwimmingGoal.java:8-16`).
+            goal_selector.add_goal(
+                4,
+                Box::new(WanderAroundGoal::new_swimming_with_interval(1.0, 10)),
+            );
             goal_selector.add_goal(4, Box::new(RandomLookAroundGoal::default()));
             goal_selector.add_goal(
                 5,

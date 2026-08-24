@@ -215,7 +215,9 @@ impl Goal for DolphinJumpGoal {
     }
 
     fn controls(&self) -> Controls {
-        Controls::empty()
+        // `DolphinJumpGoal` extends `JumpGoal`, whose constructor claims MOVE and JUMP
+        // (`JumpGoal.java:5-8`).
+        Controls::MOVE | Controls::JUMP
     }
 }
 
