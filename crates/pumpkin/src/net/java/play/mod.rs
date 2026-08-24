@@ -34,7 +34,6 @@ use crate::plugin::player::player_toggle_sneak_event::PlayerToggleSneakEvent;
 
 use crate::block::entities::command_block::CommandBlockEntity;
 use crate::block::entities::jigsaw_block::JigsawBlockEntity;
-use crate::block::entities::sign::SignBlockEntity;
 use crate::plugin::player::player_toggle_sprint_event::PlayerToggleSprintEvent;
 use crate::server::{Server, seasonal_events};
 use crate::world::{BlockBreakingProgress, World, chunker};

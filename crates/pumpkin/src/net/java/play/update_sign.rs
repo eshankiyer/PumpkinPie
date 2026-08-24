@@ -1,23 +1,28 @@
 #[allow(clippy::wildcard_imports)]
 use super::*;
 
+use crate::block::blocks::signs::as_sign_text_access;
+
 impl JavaClient {
     pub async fn handle_sign_update(&self, player: &Player, sign_data: SUpdateSign<'_>) {
         let world = player.get_entity().world.load_full();
         let Some(block_entity) = world.get_block_entity(&sign_data.location) else {
             return;
         };
-        let Some(sign_entity) = block_entity.as_any().downcast_ref::<SignBlockEntity>() else {
+        // Vanilla's edit path accepts any `SignBlockEntity`, hanging signs included
+        // (SignBlockEntity.java:131-134); route both Pumpkin structs through
+        // `SignTextAccess`.
+        let Some(sign_entity) = as_sign_text_access(block_entity.as_any()) else {
             return;
         };
-        if sign_entity.is_waxed.load(Ordering::Relaxed) {
+        if sign_entity.sign_is_waxed() {
             return;
         }
 
         // Vanilla `SignBlockEntity.updateSignText` only accepts the edit from the player
         // holding the edit lock (`playerWhoMayEdit`); anyone else's packet is dropped with a
         // warning. Without this check any player could rewrite any unwaxed sign's text.
-        let mut currently_editing = sign_entity.currently_editing_player.lock().await;
+        let mut currently_editing = sign_entity.editing_player().lock().await;
         if *currently_editing != Some(player.gameprofile.id) {
             tracing::warn!(
                 "Player {} just tried to change non-editable sign",
@@ -48,9 +53,9 @@ impl JavaClient {
         }
 
         let text = if sign_data.is_front_text {
-            &sign_entity.front_text
+            sign_entity.front_text()
         } else {
-            &sign_entity.back_text
+            sign_entity.back_text()
         };
 
         *text
