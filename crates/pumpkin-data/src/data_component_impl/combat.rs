@@ -7,7 +7,11 @@ use crate::data_component_impl::{
     get_idor_hash, get_idset_hash, get_str_hash, put_idor,
 };
 use crate::entity_type::EntityType;
+#[cfg(feature = "item")]
+use crate::item::Item;
 use crate::sound::Sound;
+#[cfg(feature = "item")]
+use crate::tag::Taggable;
 use crc_fast::CrcAlgorithm::Crc32Iscsi;
 use crc_fast::Digest;
 use pumpkin_nbt::compound::NbtCompound;
@@ -663,9 +667,38 @@ impl DataComponentImpl for EquippableImpl {
     default_impl!(Equippable);
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct RepairableImpl;
+#[cfg(feature = "item")]
+#[derive(Clone, Hash, PartialEq)]
+pub struct RepairableImpl {
+    pub items: IDSet<Item>,
+}
+#[cfg(feature = "item")]
+impl RepairableImpl {
+    /// Vanilla `Repairable.isValidRepairItem` (`Repairable.java:23-25`) accepts a repair
+    /// stack when its item belongs to the component's homogeneous item set.
+    #[must_use]
+    pub fn is_valid_repair_item(&self, repair_item: &Item) -> bool {
+        match &self.items {
+            IDSet::Tag(tag) => repair_item.is_tagged_with(tag).unwrap_or(false),
+            IDSet::IDs(items) => items.contains(&repair_item),
+        }
+    }
+    /// Decodes the vanilla `Repairable.CODEC` record (`Repairable.java:14-17`) from component NBT.
+    pub fn read_data(data: &NbtTag) -> Option<Self> {
+        let compound = data.extract_compound()?;
+        Some(Self {
+            items: IDSet::read(compound.get("items")?)?,
+        })
+    }
+}
+#[cfg(feature = "item")]
 impl DataComponentImpl for RepairableImpl {
+    /// Encodes the vanilla `Repairable.CODEC` record (`Repairable.java:14-17`) to component NBT.
+    fn write_data(&self) -> NbtTag {
+        let mut compound = NbtCompound::new();
+        self.items.write(&mut compound, "items");
+        NbtTag::Compound(compound)
+    }
     default_impl!(Repairable);
 }
 

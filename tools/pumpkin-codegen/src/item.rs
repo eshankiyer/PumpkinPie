@@ -145,7 +145,7 @@ pub struct ItemComponents {
     #[serde(rename = "minecraft:repair_cost")]
     pub repair_cost: Option<serde_json::Value>,
     #[serde(rename = "minecraft:repairable")]
-    pub repairable: Option<serde_json::Value>,
+    pub repairable: Option<RepairableComponent>,
     #[serde(rename = "minecraft:stored_enchantments")]
     pub stored_enchantments: Option<serde_json::Value>,
     #[serde(rename = "minecraft:suspicious_stew_effects")]
@@ -901,7 +901,38 @@ impl ToTokens for ItemComponents {
             tokens.extend(quote! { (RepairCost, &RepairCostImpl), });
         }
         if self.repairable.is_some() {
-            tokens.extend(quote! { (Repairable, &RepairableImpl), });
+            let repairable = self.repairable.as_ref().unwrap();
+            let items = match &repairable.items {
+                StringOrList::String(item) => {
+                    if item.starts_with('#') {
+                        let tag = item
+                            .strip_prefix('#')
+                            .unwrap();
+                        quote! { IDSet::Tag(Cow::Borrowed(#tag)) }
+                    } else {
+                        let ident = format_ident!(
+                            "{}",
+                            item.strip_prefix("minecraft:").unwrap().to_uppercase()
+                        );
+                        quote! {
+                            IDSet::IDs(Cow::Borrowed(&[&crate::item::Item::#ident]))
+                        }
+                    }
+                }
+                StringOrList::List(items) => {
+                    let ids = items.iter().map(|item| {
+                        let ident = format_ident!(
+                            "{}",
+                            item.strip_prefix("minecraft:").unwrap().to_uppercase()
+                        );
+                        quote! { &crate::item::Item::#ident, }
+                    });
+                    quote! { IDSet::IDs(Cow::Borrowed(&[#(#ids)*])) }
+                }
+            };
+            tokens.extend(quote! {
+                (Repairable, &RepairableImpl { items: #items }),
+            });
         }
         if self.stored_enchantments.is_some() {
             tokens.extend(quote! { (StoredEnchantments, &StoredEnchantmentsImpl { enchantment: Cow::Borrowed(&[]) }), });
@@ -1078,6 +1109,12 @@ pub struct DamageResistantComponent {
 pub enum StringOrList {
     String(String),
     List(Vec<String>),
+}
+
+/// Deserialized repair-material set from the `minecraft:repairable` component.
+#[derive(Deserialize, Clone)]
+pub struct RepairableComponent {
+    pub items: StringOrList,
 }
 
 /// Deserialized equippable component describing how an item is worn or equipped.

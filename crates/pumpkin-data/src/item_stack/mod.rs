@@ -2,8 +2,8 @@ use crate::data_component::DataComponent;
 use crate::data_component::DataComponent::Enchantments;
 use crate::data_component_impl::{
     BlocksAttacksImpl, ConsumableImpl, CustomDataImpl, DamageImpl, DataComponentImpl,
-    EnchantmentsImpl, IDSet, MaxDamageImpl, MaxStackSizeImpl, PotionContentsImpl, ToolImpl,
-    UnbreakableImpl, UseCooldownImpl, get, get_mut, read_data,
+    EnchantmentsImpl, IDSet, MaxDamageImpl, MaxStackSizeImpl, PotionContentsImpl, RepairableImpl,
+    ToolImpl, UnbreakableImpl, UseCooldownImpl, get, get_mut, read_data,
 };
 use crate::item::Item;
 use crate::recipes::RecipeResultStruct;
@@ -321,6 +321,14 @@ impl ItemStack {
     #[must_use]
     pub fn is_damageable(&self) -> bool {
         self.get_max_damage().unwrap_or(0) > 0
+    }
+
+    /// Vanilla `ItemStack.isValidRepairItem` (`ItemStack.java:1117-1120`) delegates to the
+    /// input stack's `Repairable` component and tests the added stack's item against its set.
+    #[must_use]
+    pub fn is_valid_repair_item(&self, repair_item: &Self) -> bool {
+        self.get_data_component::<RepairableImpl>()
+            .is_some_and(|repairable| repairable.is_valid_repair_item(repair_item.item))
     }
 
     pub fn repair_item(&mut self, amount: i32) -> i32 {
@@ -1230,6 +1238,20 @@ mod tests {
                 .iter()
                 .any(|(id, _)| *id == DataComponent::Damage)
         );
+    }
+
+    #[test]
+    fn valid_repair_item_matches_component_item_sets() {
+        let iron_sword = ItemStack::new(1, &Item::IRON_SWORD);
+        let iron_ingot = ItemStack::new(1, &Item::IRON_INGOT);
+        let diamond = ItemStack::new(1, &Item::DIAMOND);
+        assert!(iron_sword.is_valid_repair_item(&iron_ingot));
+        assert!(!iron_sword.is_valid_repair_item(&diamond));
+
+        let elytra = ItemStack::new(1, &Item::ELYTRA);
+        let phantom_membrane = ItemStack::new(1, &Item::PHANTOM_MEMBRANE);
+        assert!(elytra.is_valid_repair_item(&phantom_membrane));
+        assert!(!elytra.is_valid_repair_item(&iron_ingot));
     }
 
     // ── stacked item breaking ────────────────────────────────────────
