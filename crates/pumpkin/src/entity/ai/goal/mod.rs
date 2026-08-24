@@ -68,6 +68,7 @@ pub mod golem_random_stroll_in_village;
 pub mod guardian_attack;
 pub mod horse_breed;
 pub mod illusioner_spell;
+pub mod interact;
 pub mod interact_with_door;
 pub mod johnny_attack;
 pub mod leap_at_target;

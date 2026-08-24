@@ -19,7 +19,7 @@ use crate::entity::player::Player;
 use crate::entity::{
     Entity, EntityBase, NBTStorage,
     ai::goal::{
-        avoid_entity::AvoidEntityGoal, escape_danger::EscapeDangerGoal,
+        avoid_entity::AvoidEntityGoal, escape_danger::EscapeDangerGoal, interact::InteractGoal,
         look_at_entity::LookAtEntityGoal, move_towards_restriction::MoveTowardsRestrictionGoal,
         swim::SwimGoal, trade_with_player::TradeWithPlayerGoal, wander_around::WanderAroundGoal,
     },
@@ -72,9 +72,8 @@ const AVOIDED: &[(&EntityType, f64)] = &[
 ///   is always absent, so the goal could never fire; left out rather than registered dead.
 /// - The two `UseItemGoal`s (`WanderingTrader.java:62-78`, drink invisibility after dark and
 ///   milk at dawn) -- vanilla's generic `UseItemGoal` has no Rust counterpart yet.
-/// - `InteractGoal` (`WanderingTrader.java:92`) and `LookAtTradingPlayerGoal`
-///   (`WanderingTrader.java:88`) -- neither goal exists in this codebase; `VillagerEntity`
-///   has the same two gaps.
+/// - `LookAtTradingPlayerGoal` (`WanderingTrader.java:88`) remains deferred because it depends
+///   on the merchant's trading-player state and has no generic Rust sibling yet.
 pub struct WanderingTraderEntity {
     pub mob_entity: MobEntity,
     pub offers: Mutex<Vec<pumpkin_protocol::java::client::play::MerchantOffer>>,
@@ -126,6 +125,12 @@ impl WanderingTraderEntity {
             goal_selector.add_goal(1, EscapeDangerGoal::new(0.5));
             goal_selector.add_goal(4, MoveTowardsRestrictionGoal::new(0.35));
             goal_selector.add_goal(8, Box::new(WanderAroundGoal::new_water_avoiding(0.35)));
+            // `new InteractGoal(this, Player.class, 3.0F, 1.0F)`
+            // (`WanderingTrader.java:92`, `InteractGoal.java:13-16`).
+            goal_selector.add_goal(
+                9,
+                InteractGoal::new(mob_weak.clone(), &EntityType::PLAYER, 3.0, 1.0, false),
+            );
             // `LookAtPlayerGoal(this, Mob.class, 8.0F)` -- any mob, not only players.
             goal_selector.add_goal(10, LookAtEntityGoal::with_default_any_mob(mob_weak, 8.0));
         };

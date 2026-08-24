@@ -1,4 +1,5 @@
 use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use crate::block::pathfindable::{PathComputationType, is_pathfindable};
 use crate::entity::{ai::pathfinder::NavigatorGoal, mob::Mob};
 use pumpkin_data::tag::Taggable;
 use pumpkin_util::math::position::BlockPos;
@@ -15,6 +16,9 @@ pub struct WanderAroundGoal {
     /// Vanilla: `WaterAvoidingRandomStrollGoal` overrides `getPosition()` to reject candidate
     /// positions inside a liquid.
     avoid_water: bool,
+    /// Vanilla: `RandomSwimmingGoal.getPosition()` keeps only positions that are pathfindable
+    /// for WATER through `BehaviorUtils.getRandomSwimmablePos`.
+    swim_only: bool,
     probability: f32,
 }
 
@@ -38,6 +42,7 @@ impl WanderAroundGoal {
             chance: to_goal_ticks(interval),
             force_trigger: false,
             avoid_water: false,
+            swim_only: false,
             probability: 0.0,
         }
     }
@@ -52,6 +57,7 @@ impl WanderAroundGoal {
             chance: to_goal_ticks(Self::DEFAULT_INTERVAL),
             force_trigger: false,
             avoid_water: true,
+            swim_only: false,
             probability: 0.001,
         }
     }
@@ -66,7 +72,25 @@ impl WanderAroundGoal {
             chance: to_goal_ticks(Self::DEFAULT_INTERVAL),
             force_trigger: false,
             avoid_water: true,
+            swim_only: false,
             probability,
+        }
+    }
+
+    /// `RandomSwimmingGoal(PathfinderMob, speedModifier, interval)`
+    /// (`RandomSwimmingGoal.java:8-11`) uses the ordinary random-stroll lifecycle but replaces
+    /// its target search with `BehaviorUtils.getRandomSwimmablePos` (`BehaviorUtils.java:159-168`).
+    #[must_use]
+    pub const fn new_swimming_with_interval(speed: f64, interval: i32) -> Self {
+        Self {
+            goal_control: Controls::MOVE,
+            speed,
+            target: None,
+            chance: to_goal_ticks(interval),
+            force_trigger: false,
+            avoid_water: false,
+            swim_only: true,
+            probability: 0.0,
         }
     }
 
@@ -104,6 +128,10 @@ impl WanderAroundGoal {
         dx.mul_add(dx, dy.mul_add(dy, dz * dz)) < f64::from(radius_squared)
     }
 
+    fn is_swimmable(world: &crate::world::World, pos: &BlockPos) -> bool {
+        is_pathfindable(world.get_block_state(pos), PathComputationType::Water)
+    }
+
     /// Mirrors vanilla `DefaultRandomPos` and `LandRandomPos` for the two random-stroll goals.
     /// The client-visible result is the selected bottom-center block, not an unchecked offset.
     fn find_random_target(
@@ -111,6 +139,7 @@ impl WanderAroundGoal {
         horizontal_range: i32,
         vertical_range: i32,
         land_only: bool,
+        swim_only: bool,
     ) -> Option<Vector3<f64>> {
         let entity = &mob.get_mob_entity().living_entity.entity;
         let origin = entity.pos.load();
@@ -163,6 +192,10 @@ impl WanderAroundGoal {
             if !(world.get_bottom_y()..=world.get_top_y()).contains(&candidate.0.y)
                 || (restrict && !Self::is_within_home(mob, &candidate))
             {
+                continue;
+            }
+
+            if swim_only && !Self::is_swimmable(&world, &candidate) {
                 continue;
             }
 
@@ -238,15 +271,15 @@ impl Goal for WanderAroundGoal {
             if self.avoid_water {
                 let in_water = mob.get_entity().was_touching_water.load(Ordering::Relaxed);
                 self.target = if in_water {
-                    Self::find_random_target(mob, 15, 7, true)
-                        .or_else(|| Self::find_random_target(mob, 10, 7, false))
+                    Self::find_random_target(mob, 15, 7, true, false)
+                        .or_else(|| Self::find_random_target(mob, 10, 7, false, false))
                 } else if mob.get_random().random::<f32>() >= self.probability {
-                    Self::find_random_target(mob, 10, 7, true)
+                    Self::find_random_target(mob, 10, 7, true, false)
                 } else {
-                    Self::find_random_target(mob, 10, 7, false)
+                    Self::find_random_target(mob, 10, 7, false, false)
                 };
             } else {
-                self.target = Self::find_random_target(mob, 10, 7, false);
+                self.target = Self::find_random_target(mob, 10, 7, false, self.swim_only);
             }
             if self.target.is_some() {
                 self.force_trigger = false;
