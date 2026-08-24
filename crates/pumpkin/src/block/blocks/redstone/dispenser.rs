@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::block::blocks::carved_pumpkin::CarvedPumpkinBlock;
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::blocks::tnt::TNTBlock;
+use crate::block::blocks::wither_skull::can_spawn_mob as can_spawn_wither;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
     BlockBehaviour, BlockFuture, GetComparatorOutputArgs, NormalUseArgs, OnNeighborUpdateArgs,
@@ -327,6 +328,8 @@ impl DispenserBlock {
             // (DispenseItemBehavior.java:249-265): it only places when doing so completes
             // a golem build.
             Self::dispense_carved_pumpkin(ctx, item).await;
+        } else if item.item.id == Item::WITHER_SKELETON_SKULL.id {
+            Self::dispense_wither_skull(ctx, item).await;
         } else if item.item.id == Item::HONEYCOMB.id {
             // Honeycombs wax copper blocks
             Self::dispense_honeycomb(ctx, item).await;
@@ -854,6 +857,38 @@ impl DispenserBlock {
                 .set_block_state(
                     &target,
                     Block::CARVED_PUMPKIN.default_state.id,
+                    BlockFlags::NOTIFY_ALL,
+                )
+                .await;
+            emit_game_event(
+                ctx.world,
+                GameEvent::BlockPlace,
+                target.to_centered_f64(),
+                GameEventContext::none(),
+            )
+            .await;
+            Self::play_dispense_effects(ctx, WorldEvent::SoundDispenserDispense);
+        } else {
+            Self::play_dispense_effects(ctx, WorldEvent::SoundDispenserFail);
+        }
+    }
+
+    /// Vanilla `DispenseItemBehavior`'s wither-skull behavior
+    /// (`DispenseItemBehavior.java:229-247`) places the skull only when
+    /// `WitherSkullBlock.canSpawnMob` accepts the target. Not ported: vanilla orients the
+    /// placed skull with `RotationSegment.convertToSegment(direction)`, matching the
+    /// dispenser's facing; this always places it at the default rotation. Cosmetic only -
+    /// `check_spawn` (triggered via `placed()` from `set_block_state`) doesn't look at
+    /// rotation.
+    async fn dispense_wither_skull(ctx: &DispenseContext<'_>, item: &mut ItemStack) {
+        let target = Self::target_position(ctx);
+        if ctx.world.get_block_state(&target).is_air() && can_spawn_wither(ctx.world, &target, item)
+        {
+            item.decrement(1);
+            ctx.world
+                .set_block_state(
+                    &target,
+                    Block::WITHER_SKELETON_SKULL.default_state.id,
                     BlockFlags::NOTIFY_ALL,
                 )
                 .await;
