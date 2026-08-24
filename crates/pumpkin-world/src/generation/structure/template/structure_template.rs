@@ -118,6 +118,14 @@ impl StructurePlaceSettings {
         self
     }
 
+    /// Clears all processors, matching `StructurePlaceSettings.clearProcessors`
+    /// (`StructurePlaceSettings.java:83-86`).
+    #[must_use]
+    pub fn clear_processors(mut self) -> Self {
+        self.processors.clear();
+        self
+    }
+
     #[must_use]
     pub const fn set_finalize_entities(mut self, finalize_entities: bool) -> Self {
         self.finalize_entities = finalize_entities;

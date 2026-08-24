@@ -10,6 +10,7 @@ use pumpkin_util::{
     math::{block_box::BlockBox, position::BlockPos},
     random::{
         RandomDeriverImpl, RandomGenerator, RandomImpl, hash_block_pos, legacy_rand::LegacyRand,
+        xoroshiro128::Xoroshiro,
     },
 };
 
@@ -55,6 +56,8 @@ impl StructureGenerator for DesertPyramidGenerator {
             piece,
             height_adjusted: false,
             has_placed_chest: [false; 4],
+            potential_suspicious_sand_world_positions: Vec::new(),
+            random_collapsed_roof_pos: BlockPos::ZERO,
         }));
 
         Some(StructurePosition {
@@ -68,6 +71,8 @@ pub struct DesertPyramidPiece {
     piece: StructurePiece,
     height_adjusted: bool,
     has_placed_chest: [bool; 4],
+    potential_suspicious_sand_world_positions: Vec<BlockPos>,
+    random_collapsed_roof_pos: BlockPos,
 }
 
 impl DesertPyramidPiece {
@@ -103,14 +108,20 @@ impl DesertPyramidPiece {
         true
     }
 
-    fn place_sand(&self, chunk: &mut ProtoChunk, bb: &BlockBox, x: i32, y: i32, z: i32) {
+    /// Vanilla `DesertPyramidPiece.placeSand` records every sand position for the structure's
+    /// archaeology pass (`DesertPyramidPiece.java:390-393`).
+    fn place_sand(&mut self, chunk: &mut ProtoChunk, bb: &BlockBox, x: i32, y: i32, z: i32) {
+        self.potential_suspicious_sand_world_positions.push({
+            let world_pos = self.piece.offset_pos(x, y, z);
+            BlockPos::new(world_pos.x, world_pos.y, world_pos.z)
+        });
         self.piece
             .add_block(chunk, Block::SAND.default_state, x, y, z, bb);
     }
 
     #[expect(clippy::too_many_arguments)]
     fn place_sand_box(
-        &self,
+        &mut self,
         chunk: &mut ProtoChunk,
         bb: &BlockBox,
         x0: i32,
@@ -149,10 +160,11 @@ impl DesertPyramidPiece {
 
     #[expect(clippy::too_many_arguments)]
     fn place_collapsed_roof(
-        &self,
+        &mut self,
         chunk: &mut ProtoChunk,
         bb: &BlockBox,
         random: &mut RandomGenerator,
+        seed: i64,
         x0: i32,
         y0: i32,
         z0: i32,
@@ -164,8 +176,14 @@ impl DesertPyramidPiece {
                 self.place_collapsed_roof_piece(chunk, bb, random, x, y0, z);
             }
         }
-        // TODO: Pick a random collapsed roof position for sus sand placement in
-        // the structure-level afterPlace pass when brushable support exists.
+        let origin = self.piece.offset_pos(x0, y0, z0);
+        let mut seed_random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(seed as u64));
+        let positional_random = seed_random.next_splitter();
+        let mut roof_random = positional_random.split_pos(origin.x, origin.y, origin.z);
+        let roof_x = roof_random.next_inbetween_i32(x0, x1);
+        let roof_z = roof_random.next_inbetween_i32(z0, z1);
+        let roof_pos = self.piece.offset_pos(roof_x, y0, roof_z);
+        self.random_collapsed_roof_pos = BlockPos::new(roof_pos.x, roof_pos.y, roof_pos.z);
     }
 
     fn try_place_chest(
@@ -204,9 +222,15 @@ impl DesertPyramidPiece {
         self.has_placed_chest[index] = true;
     }
 
-    fn add_cellar(&self, chunk: &mut ProtoChunk, bb: &BlockBox, random: &mut RandomGenerator) {
+    fn add_cellar(
+        &mut self,
+        chunk: &mut ProtoChunk,
+        bb: &BlockBox,
+        random: &mut RandomGenerator,
+        seed: i64,
+    ) {
         self.add_cellar_stairs(chunk, bb, random);
-        self.add_cellar_room(chunk, bb, random);
+        self.add_cellar_room(chunk, bb, random, seed);
     }
 
     fn add_cellar_stairs(
@@ -253,7 +277,13 @@ impl DesertPyramidPiece {
     }
 
     #[expect(clippy::too_many_lines)]
-    fn add_cellar_room(&self, chunk: &mut ProtoChunk, bb: &BlockBox, random: &mut RandomGenerator) {
+    fn add_cellar_room(
+        &mut self,
+        chunk: &mut ProtoChunk,
+        bb: &BlockBox,
+        random: &mut RandomGenerator,
+        seed: i64,
+    ) {
         let (x, y, z) = (16, -4, 13);
         let cut = Block::CUT_SANDSTONE.default_state;
         let chiseled = Block::CHISELED_SANDSTONE.default_state;
@@ -417,7 +447,7 @@ impl DesertPyramidPiece {
         );
 
         self.place_sand_box(chunk, bb, x - 2, y + 1, z - 2, x + 2, y + 3, z + 2);
-        self.place_collapsed_roof(chunk, bb, random, x - 2, y + 4, z - 2, x + 2, z + 2);
+        self.place_collapsed_roof(chunk, bb, random, seed, x - 2, y + 4, z - 2, x + 2, z + 2);
         self.piece.add_block(chunk, blue, x, y, z, bb);
         self.piece.add_block(chunk, orange, x + 1, y, z - 1, bb);
         self.piece.add_block(chunk, orange, x + 1, y, z + 1, bb);
@@ -450,6 +480,30 @@ impl DesertPyramidPiece {
         self.piece.add_block(chunk, cut, x, y + 1, z - 4, bb);
         self.piece.add_block(chunk, chiseled, x, -2, z - 4, bb);
     }
+
+    /// Returns the sand positions collected for the structure archaeology pass. Not yet
+    /// consumed: vanilla's structure-level `afterPlace` step samples this list (plus
+    /// [`Self::get_random_collapsed_roof_pos`]) to convert a subset into `suspicious_sand`
+    /// with archaeology loot; no caller here does that conversion yet, so desert pyramids
+    /// currently generate with plain sand and no archaeology loot, same as before this data
+    /// was collected.
+    ///
+    /// Vanilla `DesertPyramidPiece.getPotentialSuspiciousSandWorldPositions` returns this list
+    /// (`DesertPyramidPiece.java:428-430`).
+    #[must_use]
+    pub fn get_potential_suspicious_sand_world_positions(&self) -> &[BlockPos] {
+        &self.potential_suspicious_sand_world_positions
+    }
+
+    /// Returns the positional-random collapsed-roof sand position. See the not-yet-consumed
+    /// note on [`Self::get_potential_suspicious_sand_world_positions`].
+    ///
+    /// Vanilla `DesertPyramidPiece.getRandomCollapsedRoofPos` returns this position
+    /// (`DesertPyramidPiece.java:432-434`).
+    #[must_use]
+    pub const fn get_random_collapsed_roof_pos(&self) -> BlockPos {
+        self.random_collapsed_roof_pos
+    }
 }
 
 impl StructurePieceBase for DesertPyramidPiece {
@@ -473,8 +527,6 @@ impl StructurePieceBase for DesertPyramidPiece {
         seed: i64,
         chunk_box: &BlockBox,
     ) {
-        use pumpkin_util::random::xoroshiro128::Xoroshiro;
-
         if !self.adjust_height(chunk, random) {
             return;
         }
@@ -798,6 +850,6 @@ impl StructurePieceBase for DesertPyramidPiece {
             self.try_place_chest(chunk, bb, index, x, -11, z);
         }
 
-        self.add_cellar(chunk, bb, &mut level_random);
+        self.add_cellar(chunk, bb, &mut level_random, seed);
     }
 }

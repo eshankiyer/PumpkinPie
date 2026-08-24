@@ -3,6 +3,8 @@ use pumpkin_data::{
     BlockDirection, BlockStateId,
     block_properties::{BlockProperties, CandleLikeProperties},
     entity::EntityPose,
+    game_event::GameEvent,
+    sound::{Sound, SoundCategory},
 };
 use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_util::math::position::BlockPos;
@@ -21,6 +23,7 @@ use crate::{
         },
     },
     entity::EntityBase,
+    world::game_event::{GameEventContext, emit_game_event},
 };
 
 #[pumpkin_block_from_tag("minecraft:candles")]
@@ -103,9 +106,13 @@ impl BlockBehaviour for CandleBlock {
             let state_id = args.world.get_block_state_id(args.position);
             let mut properties = CandleLikeProperties::from_state_id(state_id, args.block);
 
-            if properties.lit {
-                properties.lit = false;
+            // Vanilla `CandleBlock.useItemOn` (`CandleBlock.java:80-94`) only handles an empty
+            // hand when the player may build and the candle is lit.
+            if !args.player.abilities.lock().await.allow_modify_world || !properties.lit {
+                return BlockActionResult::Pass;
             }
+
+            properties.lit = false;
 
             args.world
                 .set_block_state(
@@ -115,7 +122,20 @@ impl BlockBehaviour for CandleBlock {
                 )
                 .await;
 
-            BlockActionResult::Consume
+            args.world.play_sound(
+                Sound::BlockCandleExtinguish,
+                SoundCategory::Blocks,
+                &args.position.to_centered_f64(),
+            );
+            emit_game_event(
+                args.world,
+                GameEvent::BlockChange,
+                args.position.to_centered_f64(),
+                GameEventContext::of_entity(args.player.clone()),
+            )
+            .await;
+
+            BlockActionResult::Success
         })
     }
 
