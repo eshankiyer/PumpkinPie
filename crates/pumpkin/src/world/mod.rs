@@ -6621,6 +6621,12 @@ impl World {
             return fluid.to_flowing();
         }
         let block = Block::from_state_id(id);
+        // `TallSeagrassBlock.getFluidState` (TallSeagrassBlock.java:78-80) always reports a full
+        // water source for tall seagrass, which has no `waterlogged` property to derive the fluid
+        // from. Like the waterlogged path below, water presence is reported as FLOWING_WATER.
+        if block.name == "tall_seagrass" {
+            return &Fluid::FLOWING_WATER;
+        }
         block
             .properties(id)
             .and_then(|props| {
@@ -6681,6 +6687,12 @@ impl World {
 
         let Some(raw_fluid) = Fluid::from_state_id(id) else {
             let block = Block::from_state_id(id);
+            // `TallSeagrassBlock.getFluidState` (TallSeagrassBlock.java:78-80) always reports a
+            // full water source; tall seagrass has no `waterlogged` property, so mirror the
+            // waterlogged branch below by reporting the source WATER fluid state.
+            if block.name == "tall_seagrass" {
+                return (&Fluid::WATER, &Fluid::WATER.states[0]);
+            }
             if let Some(properties) = block.properties(id) {
                 for (name, value) in properties.to_props() {
                     if name == "waterlogged" {

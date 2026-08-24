@@ -43,6 +43,79 @@ use crate::world::World;
 #[pumpkin_block_from_tag("minecraft:all_signs")]
 pub struct SignBlock;
 
+/// Field access shared by every text-carrying sign block entity. Vanilla models hanging
+/// signs as a subclass of `SignBlockEntity` (HangingSignBlockEntity.java:8), so the whole
+/// `SignBlock` interaction flow applies to both; Pumpkin keeps two separate structs, which
+/// this adapter unifies. The only genuinely per-type behaviour is the waxed-interaction
+/// fail sound: `SignBlock.useWithoutItem` plays `getSignInteractionFailedSoundEvent()`
+/// (SignBlock.java:135-137), which resolves to `WAXED_SIGN_INTERACT_FAIL`
+/// (SignBlockEntity.java:278-280) or `WAXED_HANGING_SIGN_INTERACT_FAIL`
+/// (HangingSignBlockEntity.java:27-29).
+pub(crate) trait SignTextAccess: Send + Sync {
+    fn sign_is_waxed(&self) -> bool;
+    fn front_text(&self) -> &crate::block::entities::sign::Text;
+    fn back_text(&self) -> &crate::block::entities::sign::Text;
+    fn editing_player(&self) -> &Arc<tokio::sync::Mutex<Option<Uuid>>>;
+    fn waxed_interact_fail_sound(&self) -> pumpkin_data::sound::Sound;
+}
+
+impl SignTextAccess for SignBlockEntity {
+    fn sign_is_waxed(&self) -> bool {
+        self.is_waxed.load(Ordering::Relaxed)
+    }
+
+    fn front_text(&self) -> &crate::block::entities::sign::Text {
+        &self.front_text
+    }
+
+    fn back_text(&self) -> &crate::block::entities::sign::Text {
+        &self.back_text
+    }
+
+    fn editing_player(&self) -> &Arc<tokio::sync::Mutex<Option<Uuid>>> {
+        &self.currently_editing_player
+    }
+
+    fn waxed_interact_fail_sound(&self) -> pumpkin_data::sound::Sound {
+        pumpkin_data::sound::Sound::BlockSignWaxedInteractFail
+    }
+}
+
+impl SignTextAccess for HangingSignBlockEntity {
+    fn sign_is_waxed(&self) -> bool {
+        self.is_waxed.load(Ordering::Relaxed)
+    }
+
+    fn front_text(&self) -> &crate::block::entities::sign::Text {
+        &self.front_text
+    }
+
+    fn back_text(&self) -> &crate::block::entities::sign::Text {
+        &self.back_text
+    }
+
+    fn editing_player(&self) -> &Arc<tokio::sync::Mutex<Option<Uuid>>> {
+        &self.currently_editing_player
+    }
+
+    fn waxed_interact_fail_sound(&self) -> pumpkin_data::sound::Sound {
+        pumpkin_data::sound::Sound::BlockHangingSignWaxedInteractFail
+    }
+}
+
+/// Downcasts a sign block entity to its concrete Pumpkin type and views it through
+/// [`SignTextAccess`], mirroring vanilla's single polymorphic `SignBlockEntity` receiver.
+pub(crate) fn as_sign_text_access(entity: &dyn std::any::Any) -> Option<&dyn SignTextAccess> {
+    entity.downcast_ref::<SignBlockEntity>().map_or_else(
+        || {
+            entity
+                .downcast_ref::<HangingSignBlockEntity>()
+                .map(|sign| sign as &dyn SignTextAccess)
+        },
+        |sign| Some(sign as &dyn SignTextAccess),
+    )
+}
+
 /// Helper struct to hold support detection results
 struct SupportInfo {
     above_is_valid: bool,
@@ -442,7 +515,10 @@ impl BlockBehaviour for SignBlock {
             let Some(block_entity) = args.world.get_block_entity(args.position) else {
                 return BlockActionResult::Pass;
             };
-            let Some(sign_entity) = block_entity.as_any().downcast_ref::<SignBlockEntity>() else {
+            // Vanilla receives any `SignBlockEntity` here, hanging signs included
+            // (SignBlock.java:128-159); the two Pumpkin structs are unified by
+            // `SignTextAccess`.
+            let Some(sign_entity) = as_sign_text_access(block_entity.as_any()) else {
                 return BlockActionResult::Pass;
             };
 
@@ -453,15 +529,15 @@ impl BlockBehaviour for SignBlock {
             // click-styled unwaxed sign (settable via NBT/plugins even though the client's own
             // sign-edit UI cannot produce one) can't run commands.
             let mut executed_command = false;
-            if sign_entity.is_waxed.load(Ordering::Relaxed)
+            if sign_entity.sign_is_waxed()
                 && let Some(server) = args.world.server.upgrade()
             {
                 let is_facing_front =
                     is_facing_front_text(args.world, args.position, args.block, args.player);
                 let text = if is_facing_front {
-                    &sign_entity.front_text
+                    sign_entity.front_text()
                 } else {
-                    &sign_entity.back_text
+                    sign_entity.back_text()
                 };
                 let lines = text.messages.lock().unwrap().clone();
                 for line in &lines {
@@ -488,16 +564,19 @@ impl BlockBehaviour for SignBlock {
                 return BlockActionResult::SuccessServer;
             }
 
-            if sign_entity.is_waxed.load(Ordering::Relaxed) {
+            if sign_entity.sign_is_waxed() {
+                // Vanilla plays `getSignInteractionFailedSoundEvent()`, which differs per
+                // sign type (SignBlock.java:135-137, SignBlockEntity.java:278-280,
+                // HangingSignBlockEntity.java:27-29).
                 args.world.play_block_sound(
-                    pumpkin_data::sound::Sound::BlockSignWaxedInteractFail,
+                    sign_entity.waxed_interact_fail_sound(),
                     pumpkin_data::sound::SoundCategory::Blocks,
                     *args.position,
                 );
                 return BlockActionResult::SuccessServer;
             }
 
-            let mut currently_editing = sign_entity.currently_editing_player.lock().await;
+            let mut currently_editing = sign_entity.editing_player().lock().await;
             if other_player_is_editing_sign(
                 *currently_editing,
                 &args.player.gameprofile.id,
@@ -510,9 +589,9 @@ impl BlockBehaviour for SignBlock {
             let is_facing_front_text =
                 is_facing_front_text(args.world, args.position, args.block, args.player);
             let text = if is_facing_front_text {
-                &sign_entity.front_text
+                sign_entity.front_text()
             } else {
-                &sign_entity.back_text
+                sign_entity.back_text()
             };
             let may_build = args.player.abilities.lock().await.allow_modify_world;
             if !has_editable_text(text) || !may_build {

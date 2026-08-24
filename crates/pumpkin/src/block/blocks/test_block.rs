@@ -1,11 +1,19 @@
 use pumpkin_data::BlockId;
-use pumpkin_data::block_properties::{BlockProperties, TestBlockLikeProperties, TestBlockMode};
+use pumpkin_data::block_properties::{
+    BlockProperties, EnumVariants, TestBlockLikeProperties, TestBlockMode,
+};
+use pumpkin_data::data_component::DataComponent;
+use pumpkin_data::data_component_impl::BlockStateImpl;
+use pumpkin_data::item::Item;
+use pumpkin_data::item_stack::ItemStack;
+use pumpkin_util::PermissionLvl;
 
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::entities::test_block::TestBlockBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, EmitsRedstonePowerArgs, GetRedstonePowerArgs,
-    OnNeighborUpdateArgs, OnScheduledTickArgs,
+    BlockBehaviour, BlockFuture, BlockMetadata, EmitsRedstonePowerArgs, GetCloneItemStackArgs,
+    GetRedstonePowerArgs, NormalUseArgs, OnNeighborUpdateArgs, OnScheduledTickArgs,
+    registry::BlockActionResult,
 };
 
 /// `net.minecraft.world.level.block.TestBlock`.
@@ -82,5 +90,41 @@ impl BlockBehaviour for TestBlock {
                 });
             if powered { 15 } else { 0 }
         })
+    }
+
+    /// `TestBlock.useWithoutItem` (TestBlock.java:61-75): only a game master may open the test
+    /// block; the server validates permissions and reports success while the client opens its
+    /// own screen. `Player.canUseGameMasterBlocks` (Player.java:1863-1865) requires instabuild
+    /// and permission level 2.
+    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
+        Box::pin(async move {
+            if args.world.get_block_entity(args.position).is_none() {
+                return BlockActionResult::Pass;
+            }
+            let instabuild = args.player.abilities.lock().await.creative;
+            if !instabuild || args.player.permission_lvl.load() < PermissionLvl::Two {
+                return BlockActionResult::Pass;
+            }
+            BlockActionResult::SuccessServer
+        })
+    }
+
+    /// `TestBlock.getCloneItemStack` + `setModeOnStack` (TestBlock.java:122-130): pick-block
+    /// carries the block's current mode on the item's `block_state` component so a re-placed
+    /// copy restores it.
+    fn get_clone_item_stack(&self, args: GetCloneItemStackArgs<'_>) -> Option<ItemStack> {
+        let state = args.world.get_block_state(args.position);
+        let props = TestBlockLikeProperties::from_state_id(state.id, args.block);
+        let mut stack = ItemStack::new(1, Item::from_id(args.block.item_id)?);
+        stack.patch.push((
+            DataComponent::BlockState,
+            Some(Box::new(BlockStateImpl {
+                properties: std::borrow::Cow::Owned(vec![(
+                    std::borrow::Cow::Borrowed("mode"),
+                    std::borrow::Cow::Borrowed(props.mode.to_value()),
+                )]),
+            })),
+        ));
+        Some(stack)
     }
 }
