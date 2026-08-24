@@ -20,6 +20,13 @@ impl Default for DragonFlightHistory {
 }
 
 impl DragonFlightHistory {
+    /// Copies the complete ring-buffer state, matching vanilla
+    /// `DragonFlightHistory.copyFrom` (`net/minecraft/world/entity/boss/enderdragon/DragonFlightHistory.java:16-19`).
+    pub const fn copy_from(&mut self, history: &Self) {
+        self.samples = history.samples;
+        self.head = history.head;
+    }
+
     pub const fn record(&mut self, y: f64, y_rot: f32) {
         self.head += 1;
         if self.head >= 64 {

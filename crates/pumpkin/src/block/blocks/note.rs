@@ -14,6 +14,7 @@ use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::{
     Block,
     block_properties::{BlockProperties, NoteBlockLikeProperties},
+    tag::{self, Taggable},
 };
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
@@ -178,11 +179,22 @@ impl BlockBehaviour for NoteBlock {
 
     fn use_with_item<'a>(
         &'a self,
-        _args: UseWithItemArgs<'a>,
+        args: UseWithItemArgs<'a>,
     ) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
-            // TODO
-            BlockActionResult::PassToDefaultBlockAction
+            // Vanilla `NoteBlock.useItemOn` (`NoteBlock.java:109-120`) leaves the
+            // interaction to the item when a top-instrument item is used on the top face;
+            // every other item falls through to the note block's empty-hand action.
+            if args
+                .item_stack
+                .item
+                .has_tag(&tag::Item::MINECRAFT_NOTEBLOCK_TOP_INSTRUMENTS)
+                && *args.hit.face == pumpkin_data::BlockDirection::Up
+            {
+                BlockActionResult::Pass
+            } else {
+                BlockActionResult::PassToDefaultBlockAction
+            }
         })
     }
 
