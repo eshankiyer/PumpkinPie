@@ -3,14 +3,14 @@ use std::sync::Arc;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BlockProperties, StructureBlockLikeProperties};
 use pumpkin_macros::pumpkin_block;
-use pumpkin_util::PermissionLvl;
+use pumpkin_util::{GameMode, PermissionLvl};
 
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::entities::structure_block::StructureBlockBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs, PlacedArgs,
-    PlayerPlacedArgs,
+    BlockBehaviour, BlockFuture, CanPlaceAtArgs, NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs,
+    PlacedArgs, PlayerPlacedArgs,
 };
 
 /// `net.minecraft.world.level.block.StructureBlock`.
@@ -23,6 +23,21 @@ use crate::block::{
 pub struct StructureBlock;
 
 impl BlockBehaviour for StructureBlock {
+    /// Vanilla `GameMasterBlockItem.getPlacementState` (GameMasterBlockItem.java:15-18): the
+    /// structure block item is a `GameMasterBlockItem`, so a player who cannot use game-master
+    /// blocks gets no placement state and the block is never placed.
+    /// `Player.canUseGameMasterBlocks` (Player.java:1863-1865) requires instabuild plus
+    /// permission level 2; Pumpkin models instabuild through creative mode (the same mapping
+    /// `CommandBlock::can_place_at` uses). A `None` player context (no player involved in the
+    /// placement) passes, matching vanilla's null-player branch of the same check.
+    fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
+        let Some(player) = args.player else {
+            return true;
+        };
+        player.gamemode.load() == GameMode::Creative
+            && player.permission_lvl.load() >= PermissionLvl::Two
+    }
+
     fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
         Box::pin(async move {
             let props = StructureBlockLikeProperties::default(args.block);
