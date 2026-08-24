@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use pumpkin_data::block_rotation::Rotation;
+use pumpkin_data::{Block, block_rotation::Rotation};
 use pumpkin_util::{
     math::{block_box::BlockBox, position::BlockPos, vector3::Vector3},
     random::RandomGenerator,
@@ -140,6 +140,71 @@ pub struct IglooPiece {
     ladder_segments: u8,
 }
 
+/// Applies the entrance post-processing from `IglooPieces.postProcess`
+/// (`IglooPieces.java:138-143`).
+fn place_igloo_entrance_snow(
+    chunk: &mut ProtoChunk,
+    origin: Vector3<i32>,
+    rotation: Rotation,
+    top_template: &StructureTemplate,
+) {
+    let trapdoor_local = rotation.transform_pos(Vector3::new(3, 0, 5), top_template.size);
+    let trapdoor_pos = origin + trapdoor_local;
+    let below_state = chunk.get_block_state(&Vector3::new(
+        trapdoor_pos.x,
+        trapdoor_pos.y - 1,
+        trapdoor_pos.z,
+    ));
+    if below_state.to_block() != &Block::AIR && below_state.to_block() != &Block::LADDER {
+        chunk.set_block_state(
+            trapdoor_pos.x,
+            trapdoor_pos.y,
+            trapdoor_pos.z,
+            Block::SNOW_BLOCK.default_state,
+        );
+    }
+}
+
+/// Applies `IglooPieces.handleDataMarker` to the bottom template
+/// (`IglooPieces.java:108-116`).
+fn apply_igloo_chest_marker(
+    chunk: &mut ProtoChunk,
+    bottom: &StructureTemplate,
+    rotation: Rotation,
+    placement_origin: Vector3<i32>,
+    random: &mut RandomGenerator,
+) {
+    for block in &bottom.blocks {
+        let Some(marker_nbt) = &block.nbt else {
+            continue;
+        };
+        let Some(palette_entry) = bottom.palette.get(block.state as usize) else {
+            continue;
+        };
+        if palette_entry.name != "minecraft:structure_block"
+            || marker_nbt.get_string("metadata") != Some("chest")
+        {
+            continue;
+        }
+
+        let marker_local = rotation.transform_pos(block.pos, bottom.size);
+        let marker_pos = placement_origin + marker_local;
+        let chest_pos = Vector3::new(marker_pos.x, marker_pos.y - 1, marker_pos.z);
+        let pending_entities = chunk.take_pending_block_entities();
+        for mut nbt in pending_entities {
+            if nbt.get_string("id") == Some("minecraft:chest")
+                && nbt.get_int("x") == Some(chest_pos.x)
+                && nbt.get_int("y") == Some(chest_pos.y)
+                && nbt.get_int("z") == Some(chest_pos.z)
+            {
+                nbt.put_string("LootTable", "minecraft:chests/igloo_chest".to_string());
+                nbt.put_long("LootTableSeed", random.next_i64());
+            }
+            chunk.add_block_entity(nbt);
+        }
+    }
+}
+
 impl StructurePieceBase for IglooPiece {
     fn as_any(&self) -> &dyn std::any::Any {
         self
@@ -148,7 +213,7 @@ impl StructurePieceBase for IglooPiece {
         &mut self,
         chunk: &mut ProtoChunk,
         _block_registry: &dyn WorldPortalExt,
-        _random: &mut RandomGenerator,
+        random: &mut RandomGenerator,
         _seed: i64,
         chunk_box: &BlockBox,
     ) {
@@ -189,6 +254,8 @@ impl StructurePieceBase for IglooPiece {
             self.rotation,
             chunk_box,
         );
+
+        place_igloo_entrance_snow(chunk, origin, self.rotation, &self.top_template);
 
         // Place basement components if present
         if self.has_basement {
@@ -255,6 +322,10 @@ impl StructurePieceBase for IglooPiece {
                     self.rotation,
                     chunk_box,
                 );
+
+                // `place_template` consumes the structure marker itself, matching vanilla's
+                // AIR replacement; this helper attaches its chest loot table.
+                apply_igloo_chest_marker(chunk, bottom, self.rotation, placement_origin, random);
             }
         }
     }

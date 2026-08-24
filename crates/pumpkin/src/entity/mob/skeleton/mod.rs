@@ -87,6 +87,17 @@ pub const BOGGED_ARROW_EFFECTS: &[StatusEffectInstance] = &[StatusEffectInstance
     show_icon: true,
 }];
 
+/// `Stray.getArrow` adds `new MobEffectInstance(MobEffects.SLOWNESS, 600)` to ordinary arrows.
+/// Vanilla: `Stray.java:60-64`.
+pub const STRAY_ARROW_EFFECTS: &[StatusEffectInstance] = &[StatusEffectInstance {
+    effect_id: std::borrow::Cow::Borrowed("minecraft:slowness"),
+    amplifier: 0,
+    duration: 600,
+    ambient: false,
+    show_particles: true,
+    show_icon: true,
+}];
+
 pub struct SkeletonEntityBase {
     pub mob_entity: MobEntity,
     weapon_goal_is_bow: AtomicBool,
@@ -97,6 +108,7 @@ impl SkeletonEntityBase {
         let uses_bow = entity.entity_type != &EntityType::WITHER_SKELETON;
         let is_parched = entity.entity_type == &EntityType::PARCHED;
         let is_bogged = entity.entity_type == &EntityType::BOGGED;
+        let is_stray = entity.entity_type == &EntityType::STRAY;
         let mob_entity = MobEntity::new(entity);
         let mob = Self {
             mob_entity,
@@ -158,6 +170,8 @@ impl SkeletonEntityBase {
                     PARCHED_ARROW_EFFECTS
                 } else if is_bogged {
                     BOGGED_ARROW_EFFECTS
+                } else if is_stray {
+                    STRAY_ARROW_EFFECTS
                 } else {
                     &[][..]
                 };
@@ -224,6 +238,8 @@ impl SkeletonEntityBase {
                 PARCHED_ARROW_EFFECTS
             } else if entity.entity_type == &EntityType::BOGGED {
                 BOGGED_ARROW_EFFECTS
+            } else if entity.entity_type == &EntityType::STRAY {
+                STRAY_ARROW_EFFECTS
             } else {
                 &[][..]
             };
