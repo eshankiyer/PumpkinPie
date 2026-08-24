@@ -1045,6 +1045,22 @@ impl VillagerEntity {
             return;
         }
 
+        // `ResetProfession.create` (`ResetProfession.java:11-17`) fires a novice villager
+        // whenever its JOB_SITE memory is absent, including the interval in which no new POI
+        // can be acquired. The nearby-POI validation below handles the invalid-existing-site
+        // case; this branch covers the genuinely absent-site case before acquisition runs.
+        if self.get_job_site().is_none()
+            && profession != VillagerProfession::None
+            && profession != VillagerProfession::Nitwit
+            && self.xp.load(Ordering::Relaxed) == 0
+            && data.level.0 <= 1
+        {
+            let r#type = data.type_enum();
+            self.set_villager_data(VillagerData::new(r#type, VillagerProfession::None, 1))
+                .await;
+            return;
+        }
+
         let Some(owner) = self.poi_owner() else {
             return;
         };
