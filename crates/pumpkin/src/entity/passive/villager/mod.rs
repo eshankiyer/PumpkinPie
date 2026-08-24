@@ -47,6 +47,7 @@ use crate::entity::{
             interact_with_door::InteractWithDoorGoal,
             look_around::RandomLookAroundGoal,
             look_at_entity::LookAtEntityGoal,
+            stroll_around_poi::{StrollAroundPoiGoal, StrollPoi},
             swim::SwimGoal,
             trade_with_player::TradeWithPlayerGoal,
             villager_schedule::{self, VillagerScheduleGoal},
@@ -490,6 +491,21 @@ impl VillagerEntity {
             goal_selector.add_goal(2, Box::new(VillagerBreedGoal::new(0.5)));
             // Basic movement and looking (Vanilla uses 0.5 speed)
             goal_selector.add_goal(3, Box::new(WorkAtJobSiteGoal::new(0.5)));
+            // `VillagerGoalPackages.getWorkPackage`/`getMeetPackage`: once already near the
+            // claimed POI, mill about it instead of standing still or free-wandering.
+            // `StrollAroundPoi.create(MemoryModuleType.JOB_SITE, 0.4F, 4)` /
+            // `StrollAroundPoi.create(MemoryModuleType.MEETING_POINT, 0.4F, 40)`
+            // (`VillagerGoalPackages.java:86,152`). Priority 3, alongside WorkAtJobSiteGoal:
+            // both are only reachable once VillagerScheduleGoal (priority 1) has stopped
+            // holding MOVE, i.e. the villager has already arrived.
+            goal_selector.add_goal(
+                3,
+                Box::new(StrollAroundPoiGoal::new(StrollPoi::JobSite, 0.4, 4)),
+            );
+            goal_selector.add_goal(
+                3,
+                Box::new(StrollAroundPoiGoal::new(StrollPoi::MeetingPoint, 0.4, 40)),
+            );
             goal_selector.add_goal(4, Box::new(WanderAroundGoal::new(0.5)));
             goal_selector.add_goal(
                 5,
