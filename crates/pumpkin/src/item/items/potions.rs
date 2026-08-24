@@ -8,10 +8,18 @@ use crate::entity::projectile::{
     lingering_potion::LingeringPotionEntity, splash_potion::SplashPotionEntity,
 };
 use crate::item::{ItemBehaviour, ItemMetadata};
+use pumpkin_data::BlockDirection;
+use pumpkin_data::data_component_impl::PotionContentsImpl;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::statistic::StatisticCategory;
+use pumpkin_data::tag::Taggable;
+use pumpkin_data::{Block, game_event::GameEvent, particle::Particle};
+use pumpkin_util::GameMode;
+use pumpkin_util::math::position::BlockPos;
+use pumpkin_util::math::vector3::Vector3;
+use pumpkin_world::world::BlockFlags;
 
 pub struct PotionItem;
 pub struct SplashPotionItem;
@@ -53,6 +61,94 @@ impl ItemBehaviour for PotionItem {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    /// Vanilla `PotionItem.useOn` (`PotionItem.java:35-69`): a water potion clicked on a
+    /// non-downward convertible block creates five splash particles, returns a glass bottle,
+    /// emits `FLUID_PLACE`, and replaces the block with mud.
+    fn use_on_block<'a>(
+        &'a self,
+        item: &'a mut ItemStack,
+        player: &'a Player,
+        location: BlockPos,
+        face: BlockDirection,
+        _cursor_pos: Vector3<f32>,
+        block: &'a Block,
+        _server: &'a crate::server::Server,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            let is_water =
+                item.get_data_component::<PotionContentsImpl>()
+                    .is_some_and(|contents| {
+                        contents.potion_id == Some(pumpkin_data::potion::Potion::WATER.id as i32)
+                            && contents.custom_effects.is_empty()
+                    });
+            if face == BlockDirection::Down
+                || !block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_CONVERTABLE_TO_MUD)
+                || !is_water
+            {
+                return;
+            }
+
+            let world = player.world();
+            world.play_block_sound(
+                pumpkin_data::sound::Sound::EntityGenericSplash,
+                pumpkin_data::sound::SoundCategory::Blocks,
+                location,
+            );
+
+            for _ in 0..5 {
+                world.spawn_particle(
+                    Vector3::new(
+                        f64::from(location.0.x) + rand::random::<f64>(),
+                        f64::from(location.0.y + 1),
+                        f64::from(location.0.z) + rand::random::<f64>(),
+                    ),
+                    Vector3::new(0.0, 0.0, 0.0),
+                    1.0,
+                    1,
+                    Particle::Splash,
+                );
+            }
+
+            let glass_bottle = ItemStack::new(1, &Item::GLASS_BOTTLE);
+            if player.gamemode.load() == GameMode::Creative {
+                if !player.inventory.contains_item(&Item::GLASS_BOTTLE) {
+                    player
+                        .inventory
+                        .offer_or_drop_stack(glass_bottle, player)
+                        .await;
+                }
+            } else if item.item_count == 1 {
+                *item = glass_bottle;
+            } else {
+                item.decrement(1);
+                player
+                    .inventory
+                    .offer_or_drop_stack(glass_bottle, player)
+                    .await;
+            }
+
+            world.play_block_sound(
+                pumpkin_data::sound::Sound::ItemBottleEmpty,
+                pumpkin_data::sound::SoundCategory::Blocks,
+                location,
+            );
+            crate::world::game_event::emit_game_event(
+                &world,
+                GameEvent::FluidPlace,
+                location.to_centered_f64(),
+                crate::world::game_event::GameEventContext::none(),
+            )
+            .await;
+            world
+                .set_block_state(
+                    &location,
+                    Block::MUD.default_state.id,
+                    BlockFlags::NOTIFY_ALL,
+                )
+                .await;
+        })
     }
 }
 
