@@ -6,14 +6,14 @@ use pumpkin_data::data_component::DataComponent;
 use pumpkin_data::data_component_impl::BlockStateImpl;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_util::PermissionLvl;
+use pumpkin_util::{GameMode, PermissionLvl};
 
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::entities::test_block::TestBlockBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, EmitsRedstonePowerArgs, GetCloneItemStackArgs,
-    GetRedstonePowerArgs, NormalUseArgs, OnNeighborUpdateArgs, OnScheduledTickArgs,
-    registry::BlockActionResult,
+    BlockBehaviour, BlockFuture, BlockMetadata, CanPlaceAtArgs, EmitsRedstonePowerArgs,
+    GetCloneItemStackArgs, GetRedstonePowerArgs, NormalUseArgs, OnNeighborUpdateArgs,
+    OnScheduledTickArgs, registry::BlockActionResult,
 };
 
 /// `net.minecraft.world.level.block.TestBlock`.
@@ -26,6 +26,21 @@ impl BlockMetadata for TestBlock {
 }
 
 impl BlockBehaviour for TestBlock {
+    /// Vanilla `GameMasterBlockItem.getPlacementState` (GameMasterBlockItem.java:15-18): the
+    /// test block item is a `GameMasterBlockItem`, so a player who cannot use game-master
+    /// blocks gets no placement state and the block is never placed.
+    /// `Player.canUseGameMasterBlocks` (Player.java:1863-1865) requires instabuild plus
+    /// permission level 2; Pumpkin models instabuild through creative mode (the same mapping
+    /// `CommandBlock::can_place_at` uses). A `None` player context (no player involved in the
+    /// placement) passes, matching vanilla's null-player branch of the same check.
+    fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
+        let Some(player) = args.player else {
+            return true;
+        };
+        player.gamemode.load() == GameMode::Creative
+            && player.permission_lvl.load() >= PermissionLvl::Two
+    }
+
     /// `TestBlock.tick`: the scheduled tick resets the block entity.
     fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {

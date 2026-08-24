@@ -324,14 +324,19 @@ impl BlockBehaviour for CommandBlock {
         })
     }
 
+    /// Vanilla `GameMasterBlockItem.getPlacementState` (GameMasterBlockItem.java:15-18): only
+    /// blocks placement when a player IS present and cannot use game-master blocks -
+    /// `player != null && !canUseGameMasterBlocks() ? null : super.getPlacementState(...)`, so a
+    /// `None` player (a dispenser or other non-player placement) proceeds normally, matching
+    /// `JigsawBlock::can_place_at`. `Player.canUseGameMasterBlocks` (Player.java:1863-1865)
+    /// requires instabuild plus permission level 2.
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
-        if let Some(player) = args.player
-            && player.gamemode.load() == GameMode::Creative
-        {
+        let Some(player) = args.player else {
             return true;
-        }
+        };
 
-        false
+        player.gamemode.load() == GameMode::Creative
+            && player.permission_lvl.load() >= PermissionLvl::Two
     }
 
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
