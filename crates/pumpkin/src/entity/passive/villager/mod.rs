@@ -5,12 +5,12 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, Ordering};
 use std::sync::{Arc, Weak};
 use uuid::Uuid;
 
-use crate::block::blocks::bed::BedBlock;
+use crate::block::blocks::{bed::BedBlock, composter::ComposterBlock};
 use pumpkin_data::Block;
 use pumpkin_data::Enchantment;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::block_properties::{
-    BedPart, BlockProperties, WhiteBedLikeProperties as BedProperties,
+    BedPart, BlockProperties, ComposterLikeProperties, WhiteBedLikeProperties as BedProperties,
 };
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::effect::StatusEffect;
@@ -950,7 +950,7 @@ impl VillagerEntity {
             .store(game_time, Ordering::Relaxed);
     }
 
-    async fn work_at_job_site(&self, game_time: i64, day_time: i64, day: i64) {
+    async fn work_at_job_site(&self, world: &Arc<World>, game_time: i64, day_time: i64, day: i64) {
         use rand::RngExt;
 
         if !(2_000..9_000).contains(&day_time)
@@ -975,6 +975,10 @@ impl VillagerEntity {
         let profession = self.villager_data.lock().await.profession_enum();
         if let Some(sound) = profession.work_sound() {
             self.get_entity().play_sound(sound);
+        }
+
+        if profession == VillagerProfession::Farmer {
+            self.work_at_composter(world, job_site).await;
         }
 
         let last_restock = self.last_restock_time.load(Ordering::Relaxed);
@@ -1021,6 +1025,149 @@ impl VillagerEntity {
         self.restocks_today.fetch_add(1, Ordering::Relaxed);
         drop(offers);
         self.resend_offers_to_trading_player().await;
+    }
+
+    /// `WorkAtComposter.useWorkstation` (`WorkAtComposter.java:23-31`) is the farmer-specific
+    /// workstation effect that the generic work/re-stock path does not provide. It is called
+    /// only after the existing `WorkAtPoi`-equivalent distance, cooldown, and random checks have
+    /// succeeded, so the behavior remains reachable through the villager's normal work path.
+    async fn work_at_composter(&self, world: &Arc<World>, job_site: BlockPos) {
+        let (block, state_id) = world.get_block_and_state_id(&job_site);
+        if block != &Block::COMPOSTER {
+            return;
+        }
+
+        let mut initial_level = ComposterLikeProperties::from_state_id(state_id, block).level;
+        if initial_level == 8 {
+            // `WorkAtComposter.compostItems` (`WorkAtComposter.java:35-39`) extracts bone meal
+            // before using seeds, exactly as a player empty-handedly uses a full composter.
+            ComposterBlock
+                .clear_composter(world, &job_site, state_id, block)
+                .await;
+            let (_, cleared_state_id) = world.get_block_and_state_id(&job_site);
+            initial_level = ComposterLikeProperties::from_state_id(cleared_state_id, block).level;
+        }
+
+        self.make_bread(world).await;
+
+        // `WorkAtComposter.compostItems` (`WorkAtComposter.java:41-70`) keeps ten items of each
+        // supported seed type in the inventory and uses at most twenty excess items, scanning
+        // the inventory from its last slot to its first.
+        let compostable = [Item::WHEAT_SEEDS, Item::BEETROOT_SEEDS];
+        let mut total_items_to_use = 20u8;
+        let mut items_seen = [0u8; 2];
+        let inventory = self.inventory.lock().await;
+        for slot in inventory.iter().rev() {
+            if total_items_to_use == 0 {
+                break;
+            }
+            let mut stack = slot.lock().await;
+            let Some(index) = compostable.iter().position(|item| item.id == stack.item.id) else {
+                continue;
+            };
+            let stack_size = stack.item_count;
+            items_seen[index] = items_seen[index].saturating_add(stack_size);
+            let available = items_seen[index].saturating_sub(10);
+            let items_to_use = available.min(total_items_to_use).min(stack_size);
+            for _ in 0..items_to_use {
+                if !ComposterBlock::insert_item_from_villager(world, &job_site, &mut stack).await {
+                    let (_, current_state_id) = world.get_block_and_state_id(&job_site);
+                    let current_level =
+                        ComposterLikeProperties::from_state_id(current_state_id, block).level;
+                    if current_level == 7 {
+                        world.sync_world_event(
+                            pumpkin_data::world::WorldEvent::ComposterFill,
+                            job_site,
+                            i32::from(current_level != initial_level),
+                        );
+                        return;
+                    }
+                    break;
+                }
+                total_items_to_use -= 1;
+                if stack.item_count == 0 {
+                    stack.clear();
+                }
+                let (_, current_state_id) = world.get_block_and_state_id(&job_site);
+                let current_level =
+                    ComposterLikeProperties::from_state_id(current_state_id, block).level;
+                if current_level == 7 {
+                    world.sync_world_event(
+                        pumpkin_data::world::WorldEvent::ComposterFill,
+                        job_site,
+                        i32::from(current_level != initial_level),
+                    );
+                    return;
+                }
+            }
+        }
+        drop(inventory);
+
+        let (_, final_state_id) = world.get_block_and_state_id(&job_site);
+        let final_level = ComposterLikeProperties::from_state_id(final_state_id, block).level;
+        world.sync_world_event(
+            pumpkin_data::world::WorldEvent::ComposterFill,
+            job_site,
+            i32::from(final_level != initial_level),
+        );
+    }
+
+    /// `WorkAtComposter.makeBread` (`WorkAtComposter.java:77-90`): farmers craft at most three
+    /// loaves when carrying no more than thirty-six bread, consume three wheat per loaf, and
+    /// drop any loaf that does not fit in their inventory.
+    async fn make_bread(&self, world: &Arc<World>) {
+        let (bread_count, wheat_count) = {
+            let inventory = self.inventory.lock().await;
+            let mut bread = 0u16;
+            let mut wheat = 0u16;
+            for slot in inventory.iter() {
+                let stack = slot.lock().await;
+                if stack.item.id == Item::BREAD.id {
+                    bread += u16::from(stack.item_count);
+                } else if stack.item.id == Item::WHEAT.id {
+                    wheat += u16::from(stack.item_count);
+                }
+            }
+            (bread, wheat)
+        };
+        if bread_count > 36 || wheat_count < 3 {
+            return;
+        }
+
+        let loaves = (wheat_count / 3).min(3) as u8;
+        let mut wheat_to_remove = loaves * 3;
+        {
+            let inventory = self.inventory.lock().await;
+            for slot in inventory.iter() {
+                if wheat_to_remove == 0 {
+                    break;
+                }
+                let mut stack = slot.lock().await;
+                if stack.item.id != Item::WHEAT.id {
+                    continue;
+                }
+                let removed = wheat_to_remove.min(stack.item_count);
+                stack.decrement(removed);
+                wheat_to_remove -= removed;
+                if stack.item_count == 0 {
+                    stack.clear();
+                }
+            }
+        }
+
+        let bread = ItemStack::new(loaves, &Item::BREAD);
+        let inserted = self.add_to_inventory(&bread);
+        if inserted == loaves {
+            return;
+        }
+
+        let leftover = bread.copy_with_count(loaves - inserted);
+        let position = self.get_entity().pos.load().add_raw(0.0, 0.5, 0.0);
+        let entity = crate::entity::item::ItemEntity::new(
+            Entity::new(world.clone(), position, &EntityType::ITEM),
+            leftover,
+        );
+        world.spawn_entity(Arc::new(entity)).await;
     }
 
     #[expect(clippy::too_many_lines)]
@@ -2669,7 +2816,8 @@ impl Mob for VillagerEntity {
                 (time.world_age, time.query_daytime(), time.query_day())
             };
             self.decay_gossips(game_time).await;
-            self.work_at_job_site(game_time, day_time, day).await;
+            self.work_at_job_site(&world, game_time, day_time, day)
+                .await;
 
             // `AgeableMob.aiStep`: babies grow up, and a post-breed cooldown counts back
             // down to 0. Must run every tick, ahead of the sensor-cadence gate below.

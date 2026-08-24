@@ -143,6 +143,37 @@ impl BlockBehaviour for ComposterBlock {
 }
 
 impl ComposterBlock {
+    /// `ComposterBlock.insertItem` (`ComposterBlock.java:285-295`), for a villager's
+    /// workstation inventory. Accepted compostable items are consumed even when the random
+    /// fill roll does not raise the level; full composters reject the item without consuming it.
+    pub async fn insert_item_from_villager(
+        world: &Arc<World>,
+        location: &BlockPos,
+        item_stack: &mut ItemStack,
+    ) -> bool {
+        let (block, state_id) = world.get_block_and_state_id(location);
+        if block != &Block::COMPOSTER {
+            return false;
+        }
+
+        let level = ComposterLikeProperties::from_state_id(state_id, block).level;
+        if level >= 7 {
+            return false;
+        }
+
+        let Some(chance) = get_composter_increase_chance_from_item_id(item_stack.item.id) else {
+            return false;
+        };
+
+        let rose = level == 0 || rand::rng().random_bool(f64::from(chance));
+        if rose {
+            Self.update_level_composter(world, location, state_id, block, level + 1)
+                .await;
+        }
+        item_stack.decrement(1);
+        true
+    }
+
     pub async fn update_level_composter(
         &self,
         world: &Arc<World>,
