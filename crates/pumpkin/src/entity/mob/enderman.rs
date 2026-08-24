@@ -8,6 +8,7 @@ use crate::entity::attributes::ModifierOperation;
 use pumpkin_data::{Block, BlockState, BlockStateId, attributes::Attributes};
 
 use crossbeam::atomic::AtomicCell;
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::{
     damage::DamageType,
     data_component_impl::EquipmentSlot,
@@ -26,6 +27,7 @@ use pumpkin_protocol::{
 use pumpkin_util::math::{boundingbox::BoundingBox, position::BlockPos, vector3::Vector3};
 use rand::RngExt;
 
+use crate::entity::mob::equipment::enchant_item_from_single_enchantment;
 use crate::entity::{
     Entity, EntityBase, NBTStorage, NbtFuture,
     ai::{
@@ -619,12 +621,24 @@ impl Mob for EndermanEntity {
                 let world = living.entity.world.load();
                 let block_pos = living.entity.block_pos.load();
                 let position = living.entity.pos.load();
+                // `EnderMan.dropCustomDeathLoot` (`EnderMan.java:320-339`): loot is gathered
+                // with a fake diamond axe enchanted through the `enderman_loot_drop`
+                // provider (`VanillaEnchantmentProviders.java:20,30`) — a
+                // `SingleEnchantment(SilkTouch, ConstantInt.of(1))` — so silk-touch-sensitive
+                // blocks (stone, grass_block, glass, ...) drop their silk-touch variant.
+                let mut fake_tool = ItemStack::new(1, &Item::DIAMOND_AXE);
+                enchant_item_from_single_enchantment(
+                    &mut fake_tool,
+                    &pumpkin_data::Enchantment::SILK_TOUCH,
+                    1,
+                );
                 let params = LootContextParameters {
                     block_state: Some(BlockState::from_id(block_state)),
                     position: Some(position),
                     world_time: world.level_info.load().day_time as u64,
                     is_raining: Some(world.is_raining().await),
                     is_thundering: Some(world.is_thundering().await),
+                    tool: Some(fake_tool),
                     ..Default::default()
                 };
                 crate::block::drop_loot(
@@ -674,6 +688,25 @@ mod tests {
         let state = block_state_nbt("minecraft:oak_stairs", &properties);
 
         assert_eq!(decode_carried_block_state(&state), Some(expected.id));
+    }
+
+    /// `EnderMan.dropCustomDeathLoot` (`EnderMan.java:324-331`) enchants the fake loot tool
+    /// through the `enderman_loot_drop` provider — `SingleEnchantment(SilkTouch,
+    /// ConstantInt.of(1))` (`VanillaEnchantmentProviders.java:20,30`,
+    /// `data/minecraft/enchantment_provider/enderman_loot_drop.json`) — so the carried
+    /// block's drops resolve through silk-touch loot alternatives.
+    #[test]
+    fn death_drop_fake_tool_carries_the_enderman_loot_drop_provider_enchantment() {
+        let mut fake_tool = ItemStack::new(1, &Item::DIAMOND_AXE);
+        enchant_item_from_single_enchantment(
+            &mut fake_tool,
+            &pumpkin_data::Enchantment::SILK_TOUCH,
+            1,
+        );
+        assert_eq!(
+            fake_tool.get_enchantment_level(&pumpkin_data::Enchantment::SILK_TOUCH),
+            1
+        );
     }
 
     #[test]
