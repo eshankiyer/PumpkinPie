@@ -33,6 +33,7 @@ use crate::entity::attributes::AttributeInstance;
 use crate::entity::attributes::Modifier;
 use crate::entity::attributes::ModifierOperation;
 use crate::entity::combat::{breach_armor_fraction, knockback_after_resistance};
+use crate::entity::mob::Mob;
 use crate::entity::mob::equipment::DEFAULT_EQUIPMENT_DROP_CHANCE;
 use crate::entity::mob::slime::SlimeEntity;
 use crate::entity::mob::sulfur_cube::SulfurCubeEntity;
@@ -3965,10 +3966,9 @@ impl LivingEntity {
     /// `Entity.applyMovementEmissionAndPlaySound` (Entity.java:867-901): the horizontal distance
     /// moved is accumulated into `moveDist`, and each time it passes `nextStep` the entity emits
     /// either a step sound or, when it is in water and produced no step side effects, the swim
-    /// sound (Entity.java:889-893). Pumpkin has no step-sound path, so only the water branch
-    /// plays; `nextStep` still advances in the other case (`Entity.nextStep`,
-    /// Entity.java:1259-1261) so a mob that walks ashore does not fire the instant it gets back
-    /// in. Volume comes from `Entity.waterSwimSound` (Entity.java:1428-1437) and the pitch
+    /// sound (Entity.java:889-893). `nextStep` still advances in the other case
+    /// (`Entity.nextStep`, Entity.java:1259-1261). Volume comes from
+    /// `Entity.waterSwimSound` (Entity.java:1428-1437) and the pitch
     /// spread from `Entity.playSwimSound` (Entity.java:1475-1477).
     ///
     /// Players are skipped: their client simulates its own movement and plays this sound
@@ -3986,33 +3986,46 @@ impl LivingEntity {
             return;
         }
         self.next_step.store(move_dist.floor() + 1.0);
-        if !self.entity.touching_water.load(Relaxed)
-            || self.entity.on_ground.load(Relaxed)
-            || self.entity.is_silent()
-            || !Self::movement_emits_sounds(self.entity.entity_type)
-        {
+        if self.entity.is_silent() || !Self::movement_emits_sounds(self.entity.entity_type) {
             return;
         }
-        let velocity = self.entity.velocity.load();
-        let volume = ((velocity.x * velocity.x)
-            .mul_add(
-                0.2,
-                velocity
-                    .y
-                    .mul_add(velocity.y, velocity.z * velocity.z * 0.2),
-            )
-            .sqrt() as f32
-            * 0.35)
-            .min(1.0);
-        let mut rng = rand::rng();
-        let pitch = (rng.random::<f32>() - rng.random::<f32>()).mul_add(0.4, 1.0);
-        self.entity.world.load().play_sound_fine(
-            Self::swim_sound(caller),
-            SoundCategory::Neutral,
-            &self.entity.pos.load(),
-            volume,
-            pitch,
-        );
+        if self.entity.touching_water.load(Relaxed) && !self.entity.on_ground.load(Relaxed) {
+            let velocity = self.entity.velocity.load();
+            let volume = ((velocity.x * velocity.x)
+                .mul_add(
+                    0.2,
+                    velocity
+                        .y
+                        .mul_add(velocity.y, velocity.z * velocity.z * 0.2),
+                )
+                .sqrt() as f32
+                * 0.35)
+                .min(1.0);
+            let mut rng = rand::rng();
+            let pitch = (rng.random::<f32>() - rng.random::<f32>()).mul_add(0.4, 1.0);
+            self.entity.world.load().play_sound_fine(
+                Self::swim_sound(caller),
+                SoundCategory::Neutral,
+                &self.entity.pos.load(),
+                volume,
+                pitch,
+            );
+        } else if self.entity.on_ground.load(Relaxed)
+            && let Some(sound) = caller.get_mob().and_then(Mob::get_step_sound)
+        {
+            // `vibrationAndSoundEffectsFromBlock` only calls `walkingStepSound` ->
+            // `playStepSound` when `onGround() || climbable || (crouching && no vertical
+            // movement) || onRails()` (Entity.java:993-994); this checks only the common
+            // `onGround()` case, so a skeleton mid-air (falling, not swimming) no longer
+            // plays its step sound, but climbing/crouching/on-rails still won't.
+            self.entity.world.load().play_sound_fine(
+                sound,
+                SoundCategory::Neutral,
+                &self.entity.pos.load(),
+                0.15,
+                1.0,
+            );
+        }
     }
 
     fn hurt_sound(&self) -> Sound {

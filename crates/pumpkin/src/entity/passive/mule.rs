@@ -130,6 +130,20 @@ impl AbstractHorse for MuleEntity {
         Some(Sound::EntityMuleEat)
     }
 
+    /// `Mule.playJumpSound`: vanilla uses the mule-specific jump sound at volume 0.4 and pitch
+    /// 1.0 instead of `AbstractHorse`'s horse sound (`Mule.java:45-47`).
+    fn play_jump_sound(&self) {
+        let entity = self.get_entity();
+        let world = entity.world.load();
+        world.play_sound_fine(
+            Sound::EntityMuleJump,
+            SoundCategory::Neutral,
+            &entity.pos.load(),
+            0.4,
+            1.0,
+        );
+    }
+
     /// `AbstractChestedHorse.randomizeAttributes`: only max-health is rolled.
     fn randomize_attributes(&self, random: &mut impl RngExt)
     where

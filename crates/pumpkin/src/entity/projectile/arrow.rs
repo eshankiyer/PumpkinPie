@@ -5,7 +5,7 @@ use pumpkin_data::BlockStateId;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, Ordering};
 use tokio::sync::RwLock;
 
 use crate::block::blocks::redstone::target_block::TargetBlock;
@@ -25,8 +25,7 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::particle::Particle;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_protocol::IdOr;
-use pumpkin_protocol::java::client::play::CEntityVelocity;
-use pumpkin_protocol::java::client::play::CSoundEffect;
+use pumpkin_protocol::java::client::play::{CEntityVelocity, CSoundEffect, Metadata};
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
@@ -63,6 +62,7 @@ pub struct ArrowEntity {
     pub entity: Entity,
     pub owner_id: Option<i32>,
     pub item_stack: RwLock<ItemStack>,
+    effect_color: AtomicI32,
     pub base_damage: AtomicCell<f64>,
     pub pickup: AtomicCell<ArrowPickup>,
     pub is_critical: AtomicBool,
@@ -106,6 +106,7 @@ impl ArrowEntity {
             entity,
             owner_id,
             item_stack: RwLock::new(item_stack.copy_with_count(1)),
+            effect_color: AtomicI32::new(Self::potion_effect_color(item_stack)),
             base_damage: AtomicCell::new(Self::ARROW_BASE_DAMAGE),
             pickup: AtomicCell::new(pickup),
             is_critical: AtomicBool::new(false),
@@ -152,6 +153,7 @@ impl ArrowEntity {
             entity,
             owner_id: Some(shooter.entity_id),
             item_stack: RwLock::new(item_stack.copy_with_count(1)),
+            effect_color: AtomicI32::new(Self::potion_effect_color(item_stack)),
             base_damage: AtomicCell::new(Self::ARROW_BASE_DAMAGE),
             pickup: AtomicCell::new(pickup),
             is_critical: AtomicBool::new(false),
@@ -201,6 +203,67 @@ impl ArrowEntity {
 
     fn pickup_item_stack(item_stack: &ItemStack) -> ItemStack {
         item_stack.copy_with_count(1)
+    }
+
+    /// `Arrow.setPickupItemStack` and `Arrow.updateColor`
+    /// (`Arrow.java:53-62`) keep the tracked particle color synchronized with the arrow's
+    /// current pickup payload. The server-side entity has no separate `PotionContents` object, so
+    /// the color is derived from the same data component used when applying arrow effects.
+    fn potion_effect_color(item_stack: &ItemStack) -> i32 {
+        let Some(contents) = item_stack
+            .get_data_component::<pumpkin_data::data_component_impl::PotionContentsImpl>()
+        else {
+            return -1;
+        };
+
+        if let Some(color) = contents.custom_color {
+            return color;
+        }
+
+        let mut red = 0i64;
+        let mut green = 0i64;
+        let mut blue = 0i64;
+        let mut total_weight = 0i64;
+        for (effect, _, amplifier, _, show_particles, _) in
+            crate::item::potion::PotionContents::read_potion_effects(item_stack)
+        {
+            if !show_particles {
+                continue;
+            }
+            let weight = i64::from(amplifier) + 1;
+            red += i64::from((effect.color >> 16) & 0xff) * weight;
+            green += i64::from((effect.color >> 8) & 0xff) * weight;
+            blue += i64::from(effect.color & 0xff) * weight;
+            total_weight += weight;
+        }
+
+        if total_weight == 0 {
+            -13_083_194
+        } else {
+            (((red / total_weight) << 16) | ((green / total_weight) << 8) | (blue / total_weight))
+                as i32
+        }
+    }
+
+    /// `Arrow.setPickupItemStack` (`Arrow.java:53-57`).
+    pub async fn set_pickup_item_stack(&self, item_stack: ItemStack) {
+        let item_stack = item_stack.copy_with_count(1);
+        let color = Self::potion_effect_color(&item_stack);
+        *self.item_stack.write().await = item_stack;
+        self.effect_color.store(color, Ordering::Relaxed);
+        self.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::arrow::ID_EFFECT_COLOR,
+                color,
+            )],
+            None,
+        );
+    }
+
+    /// `Arrow.getDefaultPickupItem` (`Arrow.java:122-125`).
+    #[must_use]
+    pub fn default_pickup_item() -> ItemStack {
+        ItemStack::new(1, &Item::ARROW)
     }
 
     const fn spectral_glowing_effect() -> pumpkin_data::potion::Effect {
@@ -341,7 +404,7 @@ impl NBTStorage for ArrowEntity {
         Box::pin(async move {
             self.entity.read_nbt_non_mut(nbt).await;
             if let Some(item_stack) = Self::read_item_stack_nbt(nbt) {
-                *self.item_stack.write().await = item_stack;
+                self.set_pickup_item_stack(item_stack).await;
             }
 
             self.life.store(
@@ -370,6 +433,19 @@ impl NBTStorage for ArrowEntity {
 }
 
 impl EntityBase for ArrowEntity {
+    /// `Arrow.defineSynchedData` (`Arrow.java:68-72`).
+    fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            self.entity.send_meta_data(
+                &[Metadata::new(
+                    pumpkin_data::tracked_data::arrow::ID_EFFECT_COLOR,
+                    self.effect_color.load(Ordering::Relaxed),
+                )],
+                None,
+            );
+        })
+    }
+
     #[allow(clippy::too_many_lines)]
     fn tick<'a>(
         &'a self,
@@ -407,8 +483,21 @@ impl EntityBase for ArrowEntity {
                     self.life.store(0, Ordering::Relaxed);
                 } else {
                     // Increment in-ground time and life
-                    let _in_ground_time = self.in_ground_time.fetch_add(1, Ordering::Relaxed);
+                    let in_ground_time = self.in_ground_time.fetch_add(1, Ordering::Relaxed) + 1;
                     let life = self.life.fetch_add(1, Ordering::Relaxed);
+
+                    if in_ground_time >= 600
+                        && self
+                            .item_stack
+                            .read()
+                            .await
+                            .get_data_component::<
+                                pumpkin_data::data_component_impl::PotionContentsImpl,
+                            >()
+                            .is_some()
+                    {
+                        self.set_pickup_item_stack(Self::default_pickup_item()).await;
+                    }
 
                     // Despawn after enough time
                     if life >= Self::DESPAWN_TIME {

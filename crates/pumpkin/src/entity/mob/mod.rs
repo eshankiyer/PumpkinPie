@@ -1226,6 +1226,13 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
+    /// Sound emitted by the mob's `playStepSound` hook, or `None` when the mob uses the generic
+    /// block step path. Concrete skeleton variants override this where vanilla overrides
+    /// `getStepSound`.
+    fn get_step_sound(&self) -> Option<Sound> {
+        None
+    }
+
     /// Vanilla `Mob.getAmbientSoundInterval` (Mob.java:274-276).
     fn get_ambient_sound_interval(&self) -> i32 {
         DEFAULT_AMBIENT_SOUND_INTERVAL

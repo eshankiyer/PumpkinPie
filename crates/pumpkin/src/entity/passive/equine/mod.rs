@@ -354,6 +354,25 @@ pub trait AbstractHorse: Animal {
         Sound::EntityHorseSaddle
     }
 
+    /// Plays the mount jump sound from `AbstractHorse.handleStartJump`.
+    ///
+    /// Vanilla: `AbstractHorse.java:897-901` calls `playJumpSound`; the base implementation is
+    /// `AbstractHorse.java:783-785`. Not yet wired up: `handleStartJump` itself - the
+    /// player-controlled charge-and-release mounted jump - has no equivalent here (only
+    /// `generate_jump_strength`, an unrelated attribute roll, exists), so nothing calls this
+    /// yet.
+    fn play_jump_sound(&self) {
+        let entity = self.get_entity();
+        let world = entity.world.load();
+        world.play_sound_fine(
+            Sound::EntityHorseJump,
+            SoundCategory::Neutral,
+            &entity.pos.load(),
+            0.4,
+            1.0,
+        );
+    }
+
     /// `randomizeAttributes` -- a no-op default; species override and call this from their
     /// `new()` (before any NBT read overwrites the rolled base values on load, see
     /// `write_horse_attributes_nbt`/`read_horse_attributes_nbt`).

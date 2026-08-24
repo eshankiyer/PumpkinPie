@@ -1,6 +1,9 @@
 use pumpkin_data::{
     Block, BlockState,
-    block_properties::{BlockProperties, OakFenceLikeProperties},
+    block_properties::{
+        BlockProperties, DoubleBlockHalf, HorizontalFacing, OakDoorLikeProperties,
+        OakFenceLikeProperties,
+    },
 };
 use pumpkin_util::{
     BlockDirection,
@@ -56,6 +59,31 @@ impl PrisonHallPiece {
         piece.entry_door = EntranceType::get_random(random);
 
         Some(Box::new(Self { piece }))
+    }
+
+    /// Places the two iron-door halves at both prison-cell entrances.
+    /// Vanilla: `StrongholdPieces.java:960-965`.
+    fn place_iron_doors(&self, chunk: &mut ProtoChunk, box_limit: &BlockBox) {
+        let mut door_bottom = OakDoorLikeProperties::default(&Block::IRON_DOOR);
+        door_bottom.facing = HorizontalFacing::West;
+        let door_bottom = BlockState::from_id(door_bottom.to_state_id(&Block::IRON_DOOR));
+        let mut door_top = OakDoorLikeProperties::default(&Block::IRON_DOOR);
+        door_top.facing = HorizontalFacing::West;
+        door_top.half = DoubleBlockHalf::Upper;
+        let door_top = BlockState::from_id(door_top.to_state_id(&Block::IRON_DOOR));
+
+        self.piece
+            .piece
+            .add_block(chunk, door_bottom, 4, 1, 2, box_limit);
+        self.piece
+            .piece
+            .add_block(chunk, door_top, 4, 2, 2, box_limit);
+        self.piece
+            .piece
+            .add_block(chunk, door_bottom, 4, 1, 8, box_limit);
+        self.piece
+            .piece
+            .add_block(chunk, door_top, 4, 2, 8, box_limit);
     }
 }
 
@@ -215,16 +243,6 @@ impl StructurePieceBase for PrisonHallPiece {
         inner.add_block(chunk, bar_ns, 4, 3, 2, &box_limit);
         inner.add_block(chunk, bar_ns, 4, 3, 8, &box_limit);
 
-        // // 6. Iron Doors (2-block high structure)
-        // let door_bottom = Block::IRON_DOOR.default_state.with("facing", "west").with("half", "lower");
-        // let door_top = Block::IRON_DOOR.default_state.with("facing", "west").with("half", "upper");
-
-        // // Door 1
-        // inner.add_block(chunk, &door_bottom, 4, 1, 2, &box_limit);
-        // inner.add_block(chunk, &door_top, 4, 2, 2, &box_limit);
-
-        // // Door 2
-        // inner.add_block(chunk, &door_bottom, 4, 1, 8, &box_limit);
-        // inner.add_block(chunk, &door_top, 4, 2, 8, &box_limit);
+        self.place_iron_doors(chunk, &box_limit);
     }
 }
