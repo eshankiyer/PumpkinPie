@@ -38,6 +38,9 @@ impl BlockBehaviour for ComposterBlock {
             if props.level == 8 {
                 self.clear_composter(args.world, args.position, state_id, args.block)
                     .await;
+                // Vanilla `ComposterBlock.useWithoutItem` returns SUCCESS for a full
+                // composter (`ComposterBlock.java:273-285`).
+                return BlockActionResult::Success;
             }
 
             BlockActionResult::Pass
@@ -53,20 +56,21 @@ impl BlockBehaviour for ComposterBlock {
             let props = ComposterLikeProperties::from_state_id(state_id, args.block);
             let level = props.level;
 
-            // Check if the composter is full
-            if level == 8 {
-                self.clear_composter(args.world, args.position, state_id, args.block)
-                    .await;
-                return BlockActionResult::Consume;
-            }
-
             let item_stack = &mut *args.item_stack;
             let item_id = item_stack.item.id;
 
             // Check if the item is consumable by the composter
             let Some(chance) = get_composter_increase_chance_from_item_id(item_id) else {
-                return BlockActionResult::Pass;
+                // Vanilla `ComposterBlock.useItemOn` delegates non-compostables to
+                // `super.useItemOn` (`ComposterBlock.java:248-270`).
+                return BlockActionResult::PassToDefaultBlockAction;
             };
+
+            if level == 8 {
+                // Vanilla delegates full-composter extraction to the empty-hand fallback;
+                // `useWithoutItem` performs it for the main hand (`ComposterBlock.java:248-279`).
+                return BlockActionResult::PassToDefaultBlockAction;
+            }
 
             // Consume one item from the stack (if in survival mode). Vanilla only
             // consumes below the "full" level (7); at 7 the interaction is a no-op
@@ -97,8 +101,10 @@ impl BlockBehaviour for ComposterBlock {
                 );
             }
 
-            // Consume the item
-            BlockActionResult::Consume
+            // Vanilla `useItemOn` returns SUCCESS unconditionally once the item is
+            // accepted as compostable, not just when the level actually rises
+            // (`ComposterBlock.java:257-267`).
+            BlockActionResult::Success
         })
     }
 
