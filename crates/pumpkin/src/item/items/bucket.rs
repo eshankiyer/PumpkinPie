@@ -184,6 +184,20 @@ pub(crate) async fn try_pickup_fluid_at(
         return Some(&Item::POWDER_SNOW_BUCKET);
     }
 
+    // `BubbleColumnBlock.pickupBlock` (`BubbleColumnBlock.java:203-206`): the only other
+    // vanilla `BucketPickup` implementor; picking up a bubble column replaces it with air
+    // and yields a water bucket. The column below reconciles through its neighbour update.
+    if block == &Block::BUBBLE_COLUMN {
+        world
+            .set_block_state(
+                &block_pos,
+                Block::AIR.default_state.id,
+                BlockFlags::NOTIFY_NEIGHBORS,
+            )
+            .await;
+        return Some(&Item::WATER_BUCKET);
+    }
+
     if is_waterlogged(block, state) {
         let state_id = set_waterlogged(block, state, false);
         world
