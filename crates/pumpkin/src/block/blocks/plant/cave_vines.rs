@@ -3,12 +3,18 @@ use std::sync::Arc;
 use pumpkin_data::block_properties::{
     BlockProperties, CaveVinesLikeProperties, CaveVinesPlantLikeProperties,
 };
-use pumpkin_data::{Block, BlockId};
+use pumpkin_data::game_event::GameEvent;
+use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::{Block, BlockId, BlockStateId};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
 
-use crate::block::{BlockBehaviour, BlockFuture, BlockMetadata, RandomTickArgs};
+use crate::block::{
+    BlockBehaviour, BlockFuture, BlockMetadata, BonemealArgs, NormalUseArgs, RandomTickArgs,
+    registry::BlockActionResult,
+};
 use crate::world::World;
 
 /// `CaveVinesBlock`'s `growPerTickProbability`, passed to the `GrowingPlantHeadBlock`
@@ -37,6 +43,78 @@ impl BlockMetadata for CaveVinesBlock {
 }
 
 impl BlockBehaviour for CaveVinesBlock {
+    /// `CaveVinesBlock.isValidBonemealTarget` and `CaveVinesPlantBlock.isValidBonemealTarget`
+    /// (`CaveVinesBlock.java:77-79`, `CaveVinesPlantBlock.java:59-62`).
+    fn is_valid_bonemeal_target(&self, args: BonemealArgs<'_>) -> bool {
+        has_berries(args.block, args.state_id).is_some_and(|berries| !berries)
+    }
+
+    /// Both vanilla cave-vine classes return true from `isBonemealSuccess`
+    /// (`CaveVinesBlock.java:81-84`, `CaveVinesPlantBlock.java:64-67`).
+    fn is_bonemeal_success(&self, _args: BonemealArgs<'_>) -> bool {
+        true
+    }
+
+    /// `CaveVinesBlock.performBonemeal` and `CaveVinesPlantBlock.performBonemeal`
+    /// (`CaveVinesBlock.java:86-89`, `CaveVinesPlantBlock.java:69-72`) set BERRIES directly;
+    /// this is deliberately not the inherited stem-growth operation.
+    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            let Some(false) = has_berries(args.block, args.state_id) else {
+                return;
+            };
+            let state_id = set_berries(args.block, args.state_id, true);
+            args.world
+                .set_block_state(args.position, state_id, BlockFlags::NOTIFY_LISTENERS)
+                .await;
+        })
+    }
+
+    /// `CaveVines.useWithoutItem` delegates to `CaveVines.use`
+    /// (`CaveVinesBlock.java:63-68`, `CaveVinesPlantBlock.java:47-52`).
+    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
+        Box::pin(async move {
+            let state_id = args.world.get_block_state_id(args.position);
+            let Some(true) = has_berries(args.block, state_id) else {
+                return BlockActionResult::Pass;
+            };
+
+            // `CaveVines.use` (`CaveVines.java:23-45`) drops the harvest loot, plays the
+            // pick-berries sound, clears BERRIES, and emits BLOCK_CHANGE with the new state.
+            args.world
+                .drop_stack(
+                    args.position,
+                    ItemStack::new(1, &pumpkin_data::item::Item::GLOW_BERRIES),
+                )
+                .await;
+            let pitch = rand::rng().random_range(0.8f32..1.2f32);
+            args.world.play_sound_fine(
+                Sound::BlockCaveVinesPickBerries,
+                SoundCategory::Blocks,
+                &args.position.to_centered_f64(),
+                1.0,
+                pitch,
+            );
+
+            let new_state_id = set_berries(args.block, state_id, false);
+            args.world
+                .set_block_state(args.position, new_state_id, BlockFlags::NOTIFY_LISTENERS)
+                .await;
+            crate::world::game_event::emit_game_event(
+                args.world,
+                GameEvent::BlockChange,
+                args.position.to_centered_f64(),
+                crate::world::game_event::GameEventContext::of_entity_with_block_state(
+                    args.player.clone(),
+                    new_state_id,
+                ),
+            )
+            .await;
+
+            BlockActionResult::Success
+        })
+    }
+
     fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             if args.block != &Block::CAVE_VINES {
@@ -44,6 +122,28 @@ impl BlockBehaviour for CaveVinesBlock {
             }
             grow(args.world.clone(), args.position).await;
         })
+    }
+}
+
+fn has_berries(block: &Block, state_id: BlockStateId) -> Option<bool> {
+    if block == &Block::CAVE_VINES {
+        Some(CaveVinesLikeProperties::from_state_id(state_id, block).berries)
+    } else if block == &Block::CAVE_VINES_PLANT {
+        Some(CaveVinesPlantLikeProperties::from_state_id(state_id, block).berries)
+    } else {
+        None
+    }
+}
+
+fn set_berries(block: &Block, state_id: BlockStateId, berries: bool) -> BlockStateId {
+    if block == &Block::CAVE_VINES {
+        let mut props = CaveVinesLikeProperties::from_state_id(state_id, block);
+        props.berries = berries;
+        props.to_state_id(block)
+    } else if block == &Block::CAVE_VINES_PLANT {
+        CaveVinesPlantLikeProperties { berries }.to_state_id(block)
+    } else {
+        state_id
     }
 }
 

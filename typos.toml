@@ -22,3 +22,7 @@ Acceptible = "Acceptible"
 # Mojang's own spelling: `IronBarsBlock.attachsTo` (verified at IronBarsBlock.java:101).
 # Correcting this to "attaches" would falsify a citation of a real vanilla method name.
 attachs = "attachs"
+# Mojang's own spelling: `BlockTags.CONVERTABLE_TO_MUD` (verified at BlockTags.java:187,
+# `data/minecraft/tags/block/convertable_to_mud.json`). This is the generated constant's
+# real registry id, not a typo to fix.
+CONVERTABLE = "CONVERTABLE"
