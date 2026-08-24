@@ -5,9 +5,12 @@ use std::sync::Arc;
 use crate::block::entities::calibrated_sculk_sensor::CalibratedSculkSensorBlockEntity;
 use crate::block::entities::sculk_sensor::SculkSensorBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, EmitsRedstonePowerArgs, GetComparatorOutputArgs,
-    GetRedstonePowerArgs, OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs,
+    BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, EmitsRedstonePowerArgs,
+    GetComparatorOutputArgs, GetRedstonePowerArgs, OnEntityStepArgs, OnPlaceArgs,
+    OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs,
 };
+use crate::entity::boss::ender_dragon::Vector3Ext;
+use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::world::World;
 use crate::world::game_event::{
     GameEventContext, GameEventFuture, GameEventListener, PositionSource,
@@ -17,8 +20,12 @@ use pumpkin_data::block_properties::{
     BlockProperties, CalibratedSculkSensorLikeProperties, HorizontalFacing,
     SculkSensorLikeProperties, SculkSensorPhase,
 };
+use pumpkin_data::entity::EntityType;
 use pumpkin_data::game_event::GameEvent;
+use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::tag::Taggable;
 use pumpkin_data::{Block, BlockDirection, BlockId, BlockStateId, HorizontalFacingExt};
+use pumpkin_util::GameMode;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::tick::TickPriority;
@@ -98,7 +105,70 @@ const fn horizontal_facing_to_dir(facing: HorizontalFacing) -> BlockDirection {
     }
 }
 
+/// Vanilla `VibrationSystem.getResonanceEventByFrequency`: frequency N maps to
+/// `RESONATE_N` (1-15).
+const fn resonance_event_by_frequency(frequency: i32) -> GameEvent {
+    match frequency {
+        1 => GameEvent::Resonate1,
+        2 => GameEvent::Resonate2,
+        3 => GameEvent::Resonate3,
+        4 => GameEvent::Resonate4,
+        5 => GameEvent::Resonate5,
+        6 => GameEvent::Resonate6,
+        7 => GameEvent::Resonate7,
+        8 => GameEvent::Resonate8,
+        9 => GameEvent::Resonate9,
+        10 => GameEvent::Resonate10,
+        11 => GameEvent::Resonate11,
+        12 => GameEvent::Resonate12,
+        13 => GameEvent::Resonate13,
+        14 => GameEvent::Resonate14,
+        _ => GameEvent::Resonate15,
+    }
+}
+
+/// Vanilla `SculkSensorBlock.RESONANCE_PITCH_BEND` (`SculkSensorBlock.java:53-59`).
+///
+/// `NoteBlock.getPitchFromNote(toneMap[frequency])`, where
+/// `getPitchFromNote(note) = 2^((note - 12) / 12)` (`NoteBlock.java:143-145`).
+#[must_use]
+pub fn resonance_pitch_bend(frequency: i32) -> f32 {
+    const TONE_MAP: [i32; 16] = [0, 0, 2, 4, 6, 7, 9, 10, 12, 14, 15, 18, 19, 21, 22, 24];
+    let index = frequency.clamp(0, 15) as usize;
+    f32::powf(2.0, (TONE_MAP[index] - 12) as f32 / 12.0)
+}
+
 impl SculkSensorBlock {
+    /// Vanilla `SculkSensorBlock.tryResonateVibration` (`SculkSensorBlock.java:233-243`):
+    /// every adjacent `minecraft:vibration_resonators` block (amethyst) re-emits the
+    /// `RESONATE_<frequency>` game event and plays the resonating sound at the frequency's
+    /// pitch bend (`RESONANCE_PITCH_BEND`, `SculkSensorBlock.java:53-59`, pitch via
+    /// `NoteBlock.getPitchFromNote`, `NoteBlock.java:143-145`).
+    pub async fn try_resonate_vibration(world: &Arc<World>, pos: &BlockPos, frequency: i32) {
+        for direction in BlockDirection::all() {
+            let relative_pos = pos.offset(direction.to_offset());
+            let neighbor_state = world.get_block_state(&relative_pos);
+            let neighbor_block = Block::from_state_id(neighbor_state.id);
+            if !neighbor_block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_VIBRATION_RESONATORS) {
+                continue;
+            }
+            crate::world::game_event::emit_game_event(
+                world,
+                resonance_event_by_frequency(frequency),
+                relative_pos.to_centered_f64(),
+                GameEventContext::none(),
+            )
+            .await;
+            world.play_sound_fine(
+                Sound::BlockAmethystBlockResonate,
+                SoundCategory::Blocks,
+                &relative_pos.to_centered_f64(),
+                1.0,
+                resonance_pitch_bend(frequency),
+            );
+        }
+    }
+
     pub async fn trigger(
         world: &Arc<World>,
         pos: &BlockPos,
@@ -130,6 +200,7 @@ impl SculkSensorBlock {
                 {
                     sculk_sensor.set_last_vibration_frequency(frequency).await;
                 }
+                Self::try_resonate_vibration(world, pos, frequency).await;
             }
         } else if block.id == BlockId::CALIBRATED_SCULK_SENSOR {
             let state = world.get_block_state(pos);
@@ -172,6 +243,9 @@ impl SculkSensorBlock {
                 {
                     calibrated.set_last_vibration_frequency(frequency).await;
                 }
+                // The calibrated sensor extends `SculkSensorBlock` in vanilla and inherits
+                // `activate`, so it resonates adjacent amethyst the same way.
+                Self::try_resonate_vibration(world, pos, frequency).await;
             }
         }
     }
@@ -208,11 +282,74 @@ impl BlockBehaviour for SculkSensorBlock {
         })
     }
 
+    /// Vanilla `SculkSensorBlock.spawnAfterBreak` (`SculkSensorBlock.java:289-294`): breaking
+    /// a sensor with drops enabled pops 5 experience (`tryDropExperience(ConstantInt.of(5))`).
+    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if !matches!(
+                args.player.gamemode.load(),
+                GameMode::Creative | GameMode::Spectator
+            ) {
+                ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), 5).await;
+            }
+        })
+    }
+
     fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             args.world
                 .unregister_game_event_listener_at(args.position)
                 .await;
+            // Vanilla `SculkSensorBlock.affectNeighborsAfterRemoval`
+            // (`SculkSensorBlock.java:121-125`): a sensor broken while ACTIVE re-notifies
+            // its own and the block below's neighbors so stale redstone power clears.
+            let phase = if args.block.id == BlockId::SCULK_SENSOR {
+                SculkSensorLikeProperties::from_state_id(args.old_state_id, args.block)
+                    .sculk_sensor_phase
+            } else {
+                CalibratedSculkSensorLikeProperties::from_state_id(args.old_state_id, args.block)
+                    .sculk_sensor_phase
+            };
+            if phase == SculkSensorPhase::Active {
+                args.world.update_neighbors(args.position, None).await;
+                args.world
+                    .update_neighbors(&args.position.down(), None)
+                    .await;
+            }
+        })
+    }
+
+    /// Vanilla `SculkSensorBlock.stepOn` (`SculkSensorBlock.java:98-109`): an entity (other
+    /// than the warden) walking on top of an INACTIVE sensor force-schedules a STEP
+    /// vibration at the sensor, i.e. triggers it regardless of distance/occlusion.
+    fn on_entity_step<'a>(&'a self, args: OnEntityStepArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if args.entity.get_entity().entity_type == &EntityType::WARDEN {
+                return;
+            }
+            let phase = if args.block.id == BlockId::SCULK_SENSOR {
+                SculkSensorLikeProperties::from_state_id(args.state.id, args.block)
+                    .sculk_sensor_phase
+            } else {
+                CalibratedSculkSensorLikeProperties::from_state_id(args.state.id, args.block)
+                    .sculk_sensor_phase
+            };
+            if phase != SculkSensorPhase::Inactive {
+                return;
+            }
+            let listener_pos = args.position.to_centered_f64();
+            let distance = listener_pos
+                .distance_squared(args.entity.get_entity().pos.load())
+                .sqrt();
+            let power = redstone_strength_for_distance(distance as f32, LISTENER_RANGE);
+            Self::trigger(
+                args.world,
+                args.position,
+                args.block,
+                power,
+                crate::world::game_event::vibration_frequency(&GameEvent::Step),
+            )
+            .await;
         })
     }
 

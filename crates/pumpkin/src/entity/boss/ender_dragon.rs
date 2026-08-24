@@ -570,6 +570,33 @@ impl EnderDragonEntity {
         }
     }
 
+    /// Vanilla `EnderDragon.isFlapping` (`EnderDragon.java:123-128`): a wing beat is the
+    /// `cos(flapTime * 2π)` wave crossing -0.3 upward between the previous and current
+    /// sample of the flap phase.
+    async fn is_flapping(&self) -> bool {
+        let flap = *self.flap_time.lock().await;
+        let old_flap = *self.o_flap_time.lock().await;
+        (old_flap * std::f32::consts::TAU).cos() <= -0.3
+            && (flap * std::f32::consts::TAU).cos() >= -0.3
+    }
+
+    /// Vanilla `EnderDragon.aiStep` calls `processFlappingMovement`
+    /// (`EnderDragon.java:148`, `Entity.java:1037-1043`): on a flap crossing, the server
+    /// emits `GameEvent.FLAP` (the dragon does not override `getMovementEmission`, whose
+    /// default `ALL` emits events - `Entity.java:1533-1535`), which sculk vibration
+    /// listeners receive at frequency 1. The client-only local flap sound inside
+    /// `onFlap` (`EnderDragon.java:131-138`) has no server counterpart.
+    async fn on_flap(&self, caller: &Arc<dyn EntityBase>) {
+        let world = self.mob_entity.living_entity.entity.world.load();
+        crate::world::game_event::emit_game_event(
+            &world,
+            pumpkin_data::game_event::GameEvent::Flap,
+            self.mob_entity.living_entity.entity.pos.load(),
+            crate::world::game_event::GameEventContext::of_entity(caller.clone()),
+        )
+        .await;
+    }
+
     async fn tick_growl(&self) {
         if self.phase.lock().await.is_sitting() {
             return;
@@ -773,7 +800,7 @@ impl EnderDragonEntity {
         }
     }
 
-    pub async fn ai_step(&self) {
+    pub async fn ai_step(&self, caller: &Arc<dyn EntityBase>) {
         if !self.parts_registered.swap(true, Ordering::AcqRel) {
             let world = self.mob_entity.living_entity.entity.world.load();
             for part in &self.parts {
@@ -786,6 +813,9 @@ impl EnderDragonEntity {
         self.mob_entity.living_entity.entity.update_last_pos();
         self.ensure_nodes_initialized().await;
         self.update_flap_time().await;
+        if self.is_flapping().await {
+            self.on_flap(caller).await;
+        }
 
         {
             let y = self.mob_entity.living_entity.entity.pos.load().y;
@@ -945,9 +975,9 @@ impl Mob for EnderDragonEntity {
         false
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+    fn mob_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
-            self.ai_step().await;
+            self.ai_step(caller).await;
         })
     }
 

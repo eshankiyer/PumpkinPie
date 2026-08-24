@@ -1,4 +1,5 @@
 use crate::entity::Entity;
+use crate::entity::EntityBase;
 use crate::entity::item::ItemEntity;
 use crate::entity::player::Player;
 use crate::item::{ItemBehaviour, ItemMetadata};
@@ -84,13 +85,27 @@ impl ItemBehaviour for HoeItem {
                         SoundCategory::Blocks,
                         location,
                     );
+                    let new_state_id = future_block.default_state.id;
                     world
-                        .set_block_state(
-                            &location,
-                            future_block.default_state.id,
-                            BlockFlags::NOTIFY_ALL,
+                        .set_block_state(&location, new_state_id, BlockFlags::NOTIFY_ALL)
+                        .await;
+                    // Vanilla's till actions end with
+                    // `gameEvent(GameEvent.BLOCK_CHANGE, pos, Context.of(player, state))`
+                    // (`HoeItem.java:73` for plain tills and `HoeItem.java:80` for the
+                    // rooted-dirt drop variant).
+                    if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id)
+                    {
+                        crate::world::game_event::emit_game_event(
+                            &world,
+                            pumpkin_data::game_event::GameEvent::BlockChange,
+                            location.to_centered_f64(),
+                            crate::world::game_event::GameEventContext::of_entity_with_block_state(
+                                player_arc,
+                                new_state_id,
+                            ),
                         )
                         .await;
+                    }
                 }
 
                 //Also rooted_dirt drop a hanging_root

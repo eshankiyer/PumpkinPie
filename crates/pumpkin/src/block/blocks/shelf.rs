@@ -1,20 +1,27 @@
 use pumpkin_data::block_properties::{
     AcaciaShelfLikeProperties, BlockProperties, HorizontalFacing, SideChainPart,
 };
+use pumpkin_data::data_component_impl::EquipmentSlot;
+use pumpkin_data::game_event::GameEvent;
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{Block, BlockStateId, HorizontalFacingExt};
+use pumpkin_inventory::player::player_inventory::PlayerInventory;
+use pumpkin_inventory::screen_handler::InventoryPlayer;
 use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_util::math::position::BlockPos;
+use pumpkin_world::inventory::Inventory;
 use pumpkin_world::world::BlockFlags;
 
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::entities::shelf::ShelfBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, GetComparatorOutputArgs, OnNeighborUpdateArgs, OnPlaceArgs,
-    OnStateReplacedArgs, PlacedArgs,
+    BlockBehaviour, BlockFuture, BlockHitResult, GetComparatorOutputArgs, OnNeighborUpdateArgs,
+    OnPlaceArgs, OnStateReplacedArgs, PlacedArgs, UseWithItemArgs, registry::BlockActionResult,
 };
 use crate::entity::EntityBase;
+use crate::entity::player::Player;
 use crate::world::World;
 use std::sync::Arc;
 
@@ -22,6 +29,12 @@ type ShelfProperties = AcaciaShelfLikeProperties;
 
 /// `ShelfBlock.getMaxChainLength` (`ShelfBlock.java:272-274`).
 const MAX_CHAIN_LENGTH: i32 = 3;
+
+/// `ShelfBlock.getRows` (`ShelfBlock.java:146-148`).
+const ROWS: i32 = 1;
+
+/// `ShelfBlock.getColumns` (`ShelfBlock.java:151-153`).
+const COLUMNS: i32 = 3;
 
 #[pumpkin_block_from_tag("minecraft:wooden_shelves")]
 pub struct ShelfBlock;
@@ -150,16 +163,16 @@ async fn set_part(world: &Arc<World>, pos: &BlockPos, new_part: SideChainPart) {
         .await;
 }
 
-/// `SideChainPartBlock.addBlocksConnectingTowards` (`SideChainPartBlock.java:40-53`), reduced to
-/// the chain length, which is all `updateSelfAndNeighborsOnPoweringUp` needs.
-fn count_blocks_connecting_towards(
+/// `SideChainPartBlock.addBlocksConnectingTowards` (`SideChainPartBlock.java:40-53`): the
+/// connectable blocks from the centre outwards towards `end_part`, in outward order.
+fn blocks_connecting_towards(
     world: &World,
     center: &BlockPos,
     facing: HorizontalFacing,
     towards_left: bool,
     end_part: SideChainPart,
-) -> i32 {
-    let mut count = 0;
+) -> Vec<BlockPos> {
+    let mut found = Vec::new();
     for steps in 1..MAX_CHAIN_LENGTH {
         let pos = if towards_left {
             left_pos(center, facing, steps)
@@ -168,25 +181,37 @@ fn count_blocks_connecting_towards(
         };
         let neighbor = read_neighbor(world, pos, facing);
         if neighbor.connects_towards(end_part) {
-            count += 1;
+            found.push(pos);
         }
         if neighbor.is_unconnectable_or_chain_end() {
             break;
         }
     }
-    count
+    found
 }
 
-/// `SideChainPartBlock.getAllBlocksConnectedTo(...).size()` (`SideChainPartBlock.java:26-38`).
-fn connected_chain_length(world: &World, pos: &BlockPos) -> i32 {
+/// `SideChainPartBlock.getAllBlocksConnectedTo` (`SideChainPartBlock.java:22-38`). The centre is
+/// first; blocks connecting towards LEFT are prepended (so they end up leftmost, furthest first)
+/// and blocks connecting towards RIGHT are appended, yielding leftmost..rightmost order.
+fn get_all_blocks_connected_to(world: &World, pos: &BlockPos) -> Vec<BlockPos> {
     let block = world.get_block(pos);
     let state_id = world.get_block_state_id(pos);
     if !is_connectable(block, state_id) {
-        return 0;
+        return Vec::new();
     }
     let facing = ShelfProperties::from_state_id(state_id, block).facing;
-    1 + count_blocks_connecting_towards(world, pos, facing, true, SideChainPart::Left)
-        + count_blocks_connecting_towards(world, pos, facing, false, SideChainPart::Right)
+    let mut results = vec![*pos];
+    let mut left = blocks_connecting_towards(world, pos, facing, true, SideChainPart::Left);
+    left.reverse();
+    results.extend(left);
+    results.extend(blocks_connecting_towards(
+        world,
+        pos,
+        facing,
+        false,
+        SideChainPart::Right,
+    ));
+    results
 }
 
 /// `SideChainPartBlock.canConnect` (`SideChainPartBlock.java:85-87`).
@@ -245,12 +270,12 @@ async fn update_self_and_neighbors_on_powering_up(
     let right = read_neighbor(world, right_pos(pos, facing, 1), facing);
 
     let existing_chain_on_the_left = if left.is_connectable() {
-        connected_chain_length(world, &left.pos)
+        get_all_blocks_connected_to(world, &left.pos).len() as i32
     } else {
         0
     };
     let existing_chain_on_the_right = if right.is_connectable() {
-        connected_chain_length(world, &right.pos)
+        get_all_blocks_connected_to(world, &right.pos).len() as i32
     } else {
         0
     };
@@ -377,6 +402,81 @@ impl BlockBehaviour for ShelfBlock {
         })
     }
 
+    /// `ShelfBlock.useItemOn` (`ShelfBlock.java:156-204`): right-clicking a shelf face swaps the
+    /// clicked slot with the held item; while the shelf is powered it instead swaps the whole
+    /// hotbar across every shelf connected to its chain.
+    ///
+    /// Vanilla returns `SUCCESS.heldItemTransformedTo(...)`; Pumpkin drops the held-stack
+    /// mutation when the action is consumed, so the inventory writes and client syncs happen
+    /// directly inside [`Self::swap_single_item`] / [`Self::swap_hotbar`].
+    fn use_with_item<'a>(
+        &'a self,
+        args: UseWithItemArgs<'a>,
+    ) -> BlockFuture<'a, BlockActionResult> {
+        Box::pin(async move {
+            // `!hand.equals(InteractionHand.OFF_HAND)` (`ShelfBlock.java:165`): only the main
+            // hand interacts with shelves.
+            if matches!(args.equipment_slot, EquipmentSlot::OffHand(_)) {
+                return BlockActionResult::Pass;
+            }
+
+            let state_id = args.world.get_block_state_id(args.position);
+            let properties = ShelfProperties::from_state_id(state_id, args.block);
+
+            let Some(block_entity) = args.world.get_block_entity(args.position) else {
+                return BlockActionResult::Pass;
+            };
+            let Some(shelf) = block_entity.as_any().downcast_ref::<ShelfBlockEntity>() else {
+                return BlockActionResult::Pass;
+            };
+
+            let Some(hit_slot) = get_hit_slot(args.hit, properties.facing) else {
+                return BlockActionResult::Pass;
+            };
+
+            let player = args.player;
+
+            if !properties.powered {
+                let placed_was_empty = args.item_stack.is_empty();
+                let item_removed =
+                    swap_single_item(args.world, shelf, hit_slot, args.item_stack.clone(), player)
+                        .await;
+                if item_removed {
+                    args.world.play_sound(
+                        if placed_was_empty {
+                            Sound::BlockShelfTakeItem
+                        } else {
+                            Sound::BlockShelfSingleSwap
+                        },
+                        SoundCategory::Blocks,
+                        &args.position.to_f64(),
+                    );
+                } else {
+                    if placed_was_empty {
+                        return BlockActionResult::Pass;
+                    }
+                    args.world.play_sound(
+                        Sound::BlockShelfPlaceItem,
+                        SoundCategory::Blocks,
+                        &args.position.to_f64(),
+                    );
+                }
+                return BlockActionResult::SuccessServer;
+            }
+
+            let any_swapped = swap_hotbar(args.world, args.position, player).await;
+            if !any_swapped {
+                return BlockActionResult::Consume;
+            }
+            args.world.play_sound(
+                Sound::BlockShelfMultiSwap,
+                SoundCategory::Blocks,
+                &args.position.to_f64(),
+            );
+            BlockActionResult::SuccessServer
+        })
+    }
+
     /// `ShelfBlock.getAnalogOutputSignal` (`ShelfBlock.java:314-327`): one bit per occupied slot,
     /// so a full shelf reads 7.
     ///
@@ -406,4 +506,141 @@ impl BlockBehaviour for ShelfBlock {
             Some(signal)
         })
     }
+}
+
+/// `SelectableSlotContainer.getHitSlot` (`SelectableSlotContainer.java:15-22`) with the shelf's
+/// 1x3 grid: slot = column + row * columns.
+fn get_hit_slot(hit: &BlockHitResult<'_>, facing: HorizontalFacing) -> Option<usize> {
+    let (hit_x, hit_y) = relative_hit_coordinates_for_block_face(hit, facing)?;
+    let row = get_section(1.0 - hit_y, ROWS);
+    let column = get_section(hit_x, COLUMNS);
+    Some((column + row * COLUMNS) as usize)
+}
+
+/// `SelectableSlotContainer.getRelativeHitCoordinatesForBlockFace`
+/// (`SelectableSlotContainer.java:25-52`): only the front face of the shelf carries slots; the
+/// packet's cursor position is already relative to the clicked block, so only the per-face
+/// mirroring is needed here.
+fn relative_hit_coordinates_for_block_face(
+    hit: &BlockHitResult<'_>,
+    facing: HorizontalFacing,
+) -> Option<(f32, f32)> {
+    let direction = hit.face.to_horizontal_facing()?;
+    if facing != direction {
+        return None;
+    }
+    match direction {
+        HorizontalFacing::North => Some((1.0 - hit.cursor_pos.x, hit.cursor_pos.y)),
+        HorizontalFacing::South => Some((hit.cursor_pos.x, hit.cursor_pos.y)),
+        HorizontalFacing::West => Some((hit.cursor_pos.z, hit.cursor_pos.y)),
+        HorizontalFacing::East => Some((1.0 - hit.cursor_pos.z, hit.cursor_pos.y)),
+    }
+}
+
+/// `SelectableSlotContainer.getSection` (`SelectableSlotContainer.java:55-58`).
+fn get_section(relative_coordinate: f32, max_sections: i32) -> i32 {
+    let targeted_pixel = relative_coordinate * 16.0;
+    let section_size = 16.0 / max_sections as f32;
+    (targeted_pixel / section_size)
+        .floor()
+        .clamp(0.0, (max_sections - 1) as f32) as i32
+}
+
+/// `ShelfBlock.swapSingleItem` (`ShelfBlock.java:206-219`): swaps the held stack with the stack
+/// in `hit_slot`, writing the removed stack back to the player's selected hotbar slot and syncing
+/// it to their client.
+///
+/// The vanilla vibration opt-out for items carrying a `minecraft:use_effects` component with
+/// `interact_vibrations=false` is not modelled (the flag defaults to `true`, `UseEffects.java:9`),
+/// so the `ITEM_INTERACT_FINISH` vibration always fires.
+async fn swap_single_item(
+    world: &Arc<World>,
+    shelf: &ShelfBlockEntity,
+    hit_slot: usize,
+    placed_stack: ItemStack,
+    player: &Arc<Player>,
+) -> bool {
+    let removed_item = shelf
+        .swap_item_no_update(hit_slot, placed_stack.clone())
+        .await;
+
+    // A creative player placing onto an empty slot keeps a copy of what they placed
+    // (`ShelfBlock.java:210`).
+    let new_inventory_item = if player.has_infinite_materials() && removed_item.is_empty() {
+        placed_stack.clone()
+    } else {
+        removed_item.clone()
+    };
+
+    let inventory = player.inventory();
+    let selected_slot = usize::from(inventory.get_selected_slot());
+    inventory
+        .set_stack(selected_slot, new_inventory_item.clone())
+        .await;
+    player
+        .sync_hand_slot(selected_slot, new_inventory_item)
+        .await;
+
+    // `shelfBlockEntity.setChanged(...)` (`ShelfBlock.java:213-217`).
+    shelf
+        .set_changed_with_game_event(world, Some(GameEvent::ItemInteractFinish))
+        .await;
+
+    !removed_item.is_empty()
+}
+
+/// `ShelfBlock.swapHotbar` (`ShelfBlock.java:221-250`): while powered, every shelf in the chain
+/// (leftmost first) swaps its three slots against consecutive hotbar slots, so a full chain of
+/// three shelves covers slots 0-8.
+async fn swap_hotbar(world: &Arc<World>, pos: &BlockPos, player: &Arc<Player>) -> bool {
+    let connected_blocks = get_all_blocks_connected_to(world, pos);
+    if connected_blocks.is_empty() {
+        return false;
+    }
+
+    let inventory = player.inventory();
+    let mut any_swapped = false;
+
+    for (shelf_part_index, shelf_part_pos) in connected_blocks.iter().enumerate() {
+        let Some(block_entity) = world.get_block_entity(shelf_part_pos) else {
+            continue;
+        };
+        let Some(shelf_part) = block_entity.as_any().downcast_ref::<ShelfBlockEntity>() else {
+            continue;
+        };
+
+        for slot in 0..ShelfBlockEntity::INVENTORY_SIZE {
+            // Hotbar slot bound to this shelf slot (`ShelfBlock.java:233`); the vanilla
+            // `inventorySlot >= 0 && <= size` guard can never bite because chains are capped at
+            // [`MAX_CHAIN_LENGTH`] shelves of three slots each.
+            let inventory_slot = 9
+                - (connected_blocks.len() - shelf_part_index) * ShelfBlockEntity::INVENTORY_SIZE
+                + slot;
+            if inventory_slot >= PlayerInventory::MAIN_SIZE {
+                continue;
+            }
+
+            let placed_inventory_item = inventory.remove_stack(inventory_slot).await;
+            let removed_shelf_item = shelf_part
+                .swap_item_no_update(slot, placed_inventory_item.clone())
+                .await;
+            if !placed_inventory_item.is_empty() || !removed_shelf_item.is_empty() {
+                inventory
+                    .set_stack(inventory_slot, removed_shelf_item.clone())
+                    .await;
+                player
+                    .sync_hand_slot(inventory_slot, removed_shelf_item.clone())
+                    .await;
+                any_swapped = true;
+            }
+        }
+
+        // `inventory.setChanged(); shelfPart.setChanged(GameEvent.ENTITY_INTERACT)`
+        // (`ShelfBlock.java:244-245`).
+        shelf_part
+            .set_changed_with_game_event(world, Some(GameEvent::EntityInteract))
+            .await;
+    }
+
+    any_swapped
 }
