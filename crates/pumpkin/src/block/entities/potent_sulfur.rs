@@ -169,6 +169,46 @@ impl PotentSulfurBlockEntity {
         self.waiting_countdown.store(-1, Ordering::Relaxed);
     }
 
+    /// `PotentSulfurBlockEntity.canBeReachedByNoxiousGas`
+    /// (`net/minecraft/world/level/block/entity/PotentSulfurBlockEntity.java:229-243`).
+    /// The gas reaches only passable positions within three blocks of the source, whose
+    /// one-block-below position is a water source and has an unobstructed collision ray to the
+    /// block below the geyser.
+    ///
+    /// Not yet wired up: vanilla's `SERVER_NOXIOUS_GAS_TICKER`
+    /// (`PotentSulfurBlockEntity.java:47-61`) runs every 20 ticks, finds nearby living
+    /// entities, and applies nausea to any this returns true for. No caller here does that
+    /// yet - this check alone has no observable effect until a ticker calls it.
+    pub async fn can_be_reached_by_noxious_gas(
+        world: &Arc<World>,
+        source_block: &BlockPos,
+        pos: Vector3<f64>,
+    ) -> bool {
+        let block_pos = BlockPos::floored(pos.x, pos.y, pos.z);
+        if !crate::block::blocks::potent_sulfur::is_geyser_passable(world, &block_pos) {
+            return false;
+        }
+
+        let source_center = source_block.to_centered_f64();
+        if pos.squared_distance_to_vec(&source_center) > 9.0 {
+            return false;
+        }
+
+        let below_source = source_block.down().to_centered_f64();
+        let below_pos = Vector3::new(pos.x, pos.y - 1.0, pos.z);
+        if !crate::block::blocks::potent_sulfur::is_water_source(
+            world,
+            &BlockPos::floored(below_pos.x, below_pos.y, below_pos.z),
+        ) {
+            return false;
+        }
+
+        world
+            .raycast_collision(below_source, below_pos, async |_, _| true)
+            .await
+            .is_none()
+    }
+
     /// `geyserPositional`: `new XoroshiroRandomSource(level.getSeed() ^ GEYSER_SALT)
     /// .forkPositional().at(pos)`, so a given geyser's timing is deterministic.
     fn geyser_positional(&self, world: &World) -> RandomGenerator {
