@@ -3,6 +3,7 @@
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::{Arc, Weak};
 
+use pumpkin_data::Enchantment;
 use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
@@ -11,17 +12,20 @@ use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::difficulty::Difficulty;
+use rand::RngExt;
 use tokio::sync::Mutex;
 
 use crate::entity::{
-    Entity, NBTStorage, NbtFuture,
+    Entity, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal,
         look_at_entity::LookAtEntityGoal, ranged_crossbow_attack::RangedCrossbowAttackGoal,
         revenge::RevengeGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
     },
-    mob::{Mob, MobEntity},
+    mob::{Mob, MobEntity, equipment::enchant_item_from_single_enchantment},
 };
+use crate::world::raid::num_groups_for_difficulty;
 
 const BANNER_INVENTORY_SIZE: usize = 5;
 
@@ -165,6 +169,73 @@ impl NBTStorage for PillagerEntity {
 impl Mob for PillagerEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// Vanilla: `Pillager.enchantSpawnedWeapon` (`Pillager.java:172-181`). After the generic
+    /// `MOB_SPAWN_EQUIPMENT` weapon roll has run on the freshly equipped crossbow,
+    /// `this.random.nextInt(300) == 0` enchants it through the `pillager_spawn_crossbow`
+    /// provider (`VanillaEnchantmentProviders.java:25`) — a `SingleEnchantment(Piercing,
+    /// ConstantInt.of(1))` (`VanillaEnchantmentProviders.java:28`, `piercing` at level 1), so
+    /// the crossbow carries exactly Piercing I.
+    fn enchant_spawned_weapon(&self, main_hand: &mut ItemStack) {
+        if self.get_random().random_range(0..300) == 0 {
+            enchant_item_from_single_enchantment(main_hand, &Enchantment::PIERCING, 1);
+        }
+    }
+
+    /// Vanilla: `Pillager.applyRaidBuffs` (`Pillager.java:234-256`). Rolls
+    /// `random.nextFloat() <= raid.getEnchantOdds()` against the raider's own raid, and only
+    /// on success builds a fresh crossbow enchanted through the wave-selected provider
+    /// (`VanillaEnchantmentProviders.java:26-27`): waves past `getNumGroups(NORMAL)` use
+    /// `raid/pillager_post_wave_5` (Quick Charge II), waves past `getNumGroups(EASY)` use
+    /// `raid/pillager_post_wave_3` (Quick Charge I); below those thresholds no provider
+    /// applies and the pillager keeps its current crossbow. Unlike a vindicator's axe, an
+    /// unenchanted roll leaves the slot untouched (`Pillager.java:248-253`).
+    fn apply_raid_buffs(&self, wave: i32, _is_captain: bool) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            // `this.getCurrentRaid()` / `raid.getEnchantOdds()` (`Pillager.java:238-239`).
+            // Pumpkin keeps only the raid membership cached on the entity, so a missing
+            // membership/raid skips the roll entirely (vanilla can never reach this method
+            // without an active raid).
+            let living = &self.mob_entity.living_entity;
+            let should_enchant = {
+                let world = living.entity.world.load();
+                let raids = world.raids.lock().await;
+                living
+                    .raid_membership
+                    .load()
+                    .and_then(|membership| raids.raid(membership.raid_id))
+                    .is_some_and(|raid| self.get_random().random::<f32>() <= raid.enchant_odds())
+            };
+            if !should_enchant {
+                return;
+            }
+
+            // `Pillager.java:240-245`: provider selection by wave threshold; `null` keeps
+            // the existing crossbow.
+            let quick_charge_level = if wave > num_groups_for_difficulty(Difficulty::Normal) {
+                2
+            } else if wave > num_groups_for_difficulty(Difficulty::Easy) {
+                1
+            } else {
+                return;
+            };
+
+            let mut crossbow = ItemStack::new(1, &Item::CROSSBOW);
+            enchant_item_from_single_enchantment(
+                &mut crossbow,
+                &Enchantment::QUICK_CHARGE,
+                quick_charge_level,
+            );
+            // `this.setItemSlot(EquipmentSlot.MAINHAND, crossbow)` (`Pillager.java:252`),
+            // synced to observers the same way other direct equipment writes broadcast.
+            living
+                .entity_equipment
+                .lock()
+                .await
+                .put(&EquipmentSlot::MAIN_HAND, crossbow.clone());
+            living.send_equipment_changes(&[(EquipmentSlot::MAIN_HAND, crossbow)]);
+        })
     }
 
     /// Vanilla: `Pillager.setChargingCrossbow`. Drives `getArmPose()`'s `CROSSBOW_CHARGE` state

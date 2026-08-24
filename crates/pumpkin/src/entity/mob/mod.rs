@@ -1545,6 +1545,15 @@ pub trait Mob: EntityBase + Send + Sync {
         Box::pin(async {})
     }
 
+    /// Vanilla `Mob.enchantSpawnedWeapon` override seam (`Mob.java:1065-1067`). The generic
+    /// spawn-equipment pass (`equipment::equip_mob_on_spawn`) already runs the base roll
+    /// (`0.25F * special multiplier` via the `MOB_SPAWN_EQUIPMENT` provider); this hook is then
+    /// invoked with the freshly rolled main-hand stack so subclasses can chain their own
+    /// provider roll exactly as vanilla's virtual dispatch does. Default no-op; Pillager
+    /// overrides this with its 1-in-300 `PILLAGER_SPAWN_CROSSBOW` Piercing roll
+    /// (`Pillager.java:172-181`).
+    fn enchant_spawned_weapon(&self, _main_hand: &mut ItemStack) {}
+
     /// Vanilla `LivingEntity.blockedByItem`: called on the attacker (`self`) when `defender`
     /// successfully shield-blocks one of `self`'s attacks. Default no-op; Ravager overrides this
     /// to sometimes stun itself, Hoglin/Zoglin have their own vanilla overrides not yet ported.
