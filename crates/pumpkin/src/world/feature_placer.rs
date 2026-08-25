@@ -46,9 +46,8 @@ use pumpkin_world::world::{BlockAccessor, BlockFlags};
 
 use crate::world::{World, WorldPortal};
 
-/// `feature_name` is threaded through `ConfiguredFeature::generate` purely so nested features can
-/// pass it on; no feature reads it (every implementation binds it as `_feature_name`). Runtime
-/// placement has no placed feature at all, so it hands over a fixed placeholder.
+/// Most runtime placement has no placed feature, so it hands over a fixed placeholder. Huge
+/// fungus is the exception: its generator needs the crimson/warped variant.
 const RUNTIME_PLACED_FEATURE: pumpkin_data::placed_feature::PlacedFeature =
     pumpkin_data::placed_feature::PlacedFeature::Acacia;
 
@@ -61,6 +60,7 @@ pub struct FeatureCache<'a> {
     /// the blocks they rest on.
     writes: Vec<(BlockPos, BlockStateId)>,
     block_entities: Vec<(BlockPos, NbtCompound)>,
+    runtime_bonemeal: bool,
     /// Set when any access left the loaded region; makes [`Self::commit`] discard everything.
     escaped: AtomicBool,
 }
@@ -73,6 +73,7 @@ impl<'a> FeatureCache<'a> {
             overlay: HashMap::new(),
             writes: Vec::new(),
             block_entities: Vec::new(),
+            runtime_bonemeal: false,
             escaped: AtomicBool::new(false),
         }
     }
@@ -127,15 +128,34 @@ impl<'a> FeatureCache<'a> {
         let portal = WorldPortal(self.world.clone());
         let min_y = self.world.dimension.min_y as i8;
         let height = self.world.dimension.height as u16;
-        configured.generate(
+        let runtime_placed_feature = match &feature {
+            pumpkin_data::configured_feature::ConfiguredFeature::CrimsonFungus
+            | pumpkin_data::configured_feature::ConfiguredFeature::CrimsonFungusPlanted => {
+                pumpkin_data::placed_feature::PlacedFeature::CrimsonFungi
+            }
+            pumpkin_data::configured_feature::ConfiguredFeature::WarpedFungus
+            | pumpkin_data::configured_feature::ConfiguredFeature::WarpedFungusPlanted => {
+                pumpkin_data::placed_feature::PlacedFeature::WarpedFungi
+            }
+            _ => RUNTIME_PLACED_FEATURE,
+        };
+        let was_runtime_bonemeal = self.runtime_bonemeal;
+        self.runtime_bonemeal = matches!(
+            feature,
+            pumpkin_data::configured_feature::ConfiguredFeature::CrimsonFungusPlanted
+                | pumpkin_data::configured_feature::ConfiguredFeature::WarpedFungusPlanted
+        );
+        let generated = configured.generate(
             self,
             &portal,
             min_y,
             height,
-            RUNTIME_PLACED_FEATURE,
+            runtime_placed_feature,
             random,
             pos,
-        )
+        );
+        self.runtime_bonemeal = was_runtime_bonemeal;
+        generated
     }
 
     /// Heightmaps are read from the chunk, so they do not see this placement's own buffered
@@ -226,6 +246,10 @@ impl GenerationCache for FeatureCache<'_> {
 
     fn add_block_entity(&mut self, pos: &Vector3<i32>, nbt: NbtCompound) {
         self.block_entities.push((BlockPos(*pos), nbt));
+    }
+
+    fn is_runtime_bonemeal(&self) -> bool {
+        self.runtime_bonemeal
     }
 
     fn top_motion_blocking_block_height_exclusive(&self, x: i32, z: i32) -> i32 {

@@ -92,6 +92,11 @@ pub trait GenerationCache: HeightLimitView + BlockAccessor {
     fn ocean_floor_height_exclusive(&self, x: i32, z: i32) -> i32;
     fn is_air(&self, local_pos: &Vector3<i32>) -> bool;
     fn get_biome_for_terrain_gen(&self, x: i32, y: i32, z: i32) -> &'static Biome;
+
+    /// Runtime feature placement uses this to select vanilla's planted huge-fungus rules.
+    fn is_runtime_bonemeal(&self) -> bool {
+        false
+    }
 }
 
 /// Access to the chunk graph a generation pass is working over.
