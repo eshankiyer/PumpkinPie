@@ -218,6 +218,20 @@ pub enum LootFunctionTypes {
     },
     /// Applies decay to items in case of an explosion.
     ExplosionDecay,
+    /// Sets the written-book cover fields while preserving its pages and resolved state.
+    SetBookCover {
+        title: Option<&'static str>,
+        author: Option<&'static str>,
+        generation: Option<i32>,
+    },
+    /// Sets firework explosion fields while preserving unspecified values.
+    SetFireworkExplosion {
+        shape: Option<&'static str>,
+        colors: Option<&'static [i32]>,
+        fade_colors: Option<&'static [i32]>,
+        trail: Option<bool>,
+        twinkle: Option<bool>,
+    },
 }
 
 /// Numeric providers for loot function counts.

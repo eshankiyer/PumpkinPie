@@ -726,6 +726,29 @@ impl ToTokens for LootFunctionStruct {
     }
 }
 
+/// The vanilla `Filterable<String>` codec accepts either a plain string or an
+/// object containing a raw string.  The headless loot path has no text-filtering
+/// service, so code generation preserves the raw value.
+#[derive(Deserialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum LootFilterableStringStruct {
+    Simple(String),
+    Structured {
+        raw: String,
+        #[serde(default)]
+        filtered: Option<String>,
+    },
+}
+
+impl LootFilterableStringStruct {
+    fn raw(&self) -> &str {
+        match self {
+            Self::Simple(value) => value,
+            Self::Structured { raw, .. } => raw,
+        }
+    }
+}
+
 /// Deserialized loot function variant, tagged by the `"function"` field.
 #[derive(Deserialize, Clone, Debug)]
 #[serde(tag = "function")]
@@ -789,6 +812,22 @@ pub enum LootFunctionTypesStruct {
     /// Randomly removes items from the stack to simulate explosion damage.
     #[serde(rename = "minecraft:explosion_decay")]
     ExplosionDecay,
+    /// Sets written-book cover fields while preserving unspecified component fields.
+    #[serde(rename = "minecraft:set_book_cover")]
+    SetBookCover {
+        title: Option<LootFilterableStringStruct>,
+        author: Option<String>,
+        generation: Option<i32>,
+    },
+    /// Sets firework explosion fields while preserving unspecified component fields.
+    #[serde(rename = "minecraft:set_firework_explosion")]
+    SetFireworkExplosion {
+        shape: Option<String>,
+        colors: Option<Vec<i32>>,
+        fade_colors: Option<Vec<i32>>,
+        trail: Option<bool>,
+        twinkle: Option<bool>,
+    },
 }
 
 impl ToTokens for LootFunctionTypesStruct {
@@ -873,6 +912,68 @@ impl ToTokens for LootFunctionTypesStruct {
             }
             Self::ExplosionDecay => {
                 quote! { LootFunctionTypes::ExplosionDecay }
+            }
+            Self::SetBookCover {
+                title,
+                author,
+                generation,
+            } => {
+                let title = title
+                    .as_ref()
+                    .map(|value| LitStr::new(value.raw(), Span::call_site()))
+                    .map(|value| quote! { Some(#value) })
+                    .unwrap_or_else(|| quote! { None });
+                let author = author
+                    .as_ref()
+                    .map(|value| LitStr::new(value, Span::call_site()))
+                    .map(|value| quote! { Some(#value) })
+                    .unwrap_or_else(|| quote! { None });
+                let generation = generation
+                    .map(|value| quote! { Some(#value) })
+                    .unwrap_or_else(|| quote! { None });
+                quote! {
+                    LootFunctionTypes::SetBookCover {
+                        title: #title,
+                        author: #author,
+                        generation: #generation,
+                    }
+                }
+            }
+            Self::SetFireworkExplosion {
+                shape,
+                colors,
+                fade_colors,
+                trail,
+                twinkle,
+            } => {
+                let shape = shape
+                    .as_ref()
+                    .map(|value| LitStr::new(value, Span::call_site()))
+                    .map(|value| quote! { Some(#value) })
+                    .unwrap_or_else(|| quote! { None });
+                let colors = colors
+                    .as_ref()
+                    .map(|values| quote! { Some(&[#(#values),*]) })
+                    .unwrap_or_else(|| quote! { None });
+                let fade_colors = fade_colors
+                    .as_ref()
+                    .map(|values| quote! { Some(&[#(#values),*]) })
+                    .unwrap_or_else(|| quote! { None });
+                let trail = trail
+                    .map(|value| quote! { Some(#value) })
+                    .unwrap_or_else(|| quote! { None });
+                let twinkle = twinkle
+                    .map(|value| quote! { Some(#value) })
+                    .unwrap_or_else(|| quote! { None });
+                quote! {
+                    LootFunctionTypes::SetFireworkExplosion {
+                        shape: #shape,
+                        colors: #colors,
+                        fade_colors: #fade_colors,
+                        trail: #trail,
+                        twinkle: #twinkle,
+                    }
+                }
             }
         };
 

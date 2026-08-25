@@ -1,4 +1,8 @@
 use pumpkin_data::damage::DamageType;
+use pumpkin_data::data_component::DataComponent;
+use pumpkin_data::data_component_impl::{
+    DataComponentImpl, FireworkExplosionImpl, FireworkExplosionShape, WrittenBookContentImpl,
+};
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::tag;
@@ -220,6 +224,84 @@ fn apply_bonus(
     }
 }
 
+/// Implements `SetBookCoverFunction.run` and `apply` from
+/// `net/minecraft/world/level/storage/loot/functions/SetBookCoverFunction.java:42-54`.
+/// The raw title is retained because Pumpkin has no server-side text-filtering service;
+/// pages and the component's other fields remain unchanged when their loot fields are absent.
+fn apply_set_book_cover(
+    stack: &mut ItemStack,
+    title: Option<&str>,
+    author: Option<&str>,
+    generation: Option<i32>,
+) {
+    let original = stack
+        .get_data_component::<WrittenBookContentImpl>()
+        .cloned()
+        .unwrap_or_else(|| WrittenBookContentImpl {
+            title: String::new(),
+            author: String::new(),
+            pages: Vec::new(),
+            generation: 0,
+        });
+    let updated = WrittenBookContentImpl {
+        title: title.map_or(original.title.clone(), str::to_owned),
+        author: author.map_or(original.author.clone(), str::to_owned),
+        pages: original.pages,
+        generation: generation.unwrap_or(original.generation),
+    };
+
+    if let Some(content) = stack.get_data_component_mut::<WrittenBookContentImpl>() {
+        *content = updated;
+    } else {
+        stack
+            .patch
+            .push((DataComponent::WrittenBookContent, Some(updated.to_dyn())));
+    }
+}
+
+/// Implements `SetFireworkExplosion.run` and `apply` from
+/// `net/minecraft/world/level/storage/loot/functions/SetFireworkExplosionFunction.java:53-65`.
+/// The vanilla default is the small-ball explosion with empty colors and both flags false
+/// (`SetFireworkExplosionFunction.java:29`), matching the component representation here.
+fn apply_set_firework_explosion(
+    stack: &mut ItemStack,
+    shape: Option<&str>,
+    colors: Option<&[i32]>,
+    fade_colors: Option<&[i32]>,
+    trail: Option<bool>,
+    twinkle: Option<bool>,
+) {
+    let original = stack
+        .get_data_component::<FireworkExplosionImpl>()
+        .cloned()
+        .unwrap_or_else(|| {
+            FireworkExplosionImpl::new(
+                FireworkExplosionShape::SmallBall,
+                Vec::new(),
+                Vec::new(),
+                false,
+                false,
+            )
+        });
+    let updated = FireworkExplosionImpl::new(
+        shape
+            .and_then(FireworkExplosionShape::from_name)
+            .unwrap_or(original.shape),
+        colors.map_or(original.colors.clone(), <[i32]>::to_vec),
+        fade_colors.map_or(original.fade_colors.clone(), <[i32]>::to_vec),
+        trail.unwrap_or(original.has_trail),
+        twinkle.unwrap_or(original.has_twinkle),
+    );
+
+    if let Some(explosion) = stack.get_data_component_mut::<FireworkExplosionImpl>() {
+        *explosion = updated;
+    } else {
+        stack
+            .patch
+            .push((DataComponent::FireworkExplosion, Some(updated.to_dyn())));
+    }
+}
+
 impl LootFunctionExt for LootFunction {
     #[allow(clippy::too_many_lines)]
     fn apply(&self, stacks: &mut Vec<ItemStack>, params: &LootContextParameters) {
@@ -404,6 +486,33 @@ impl LootFunctionExt for LootFunction {
                             break;
                         }
                     }
+                }
+            }
+            LootFunctionTypes::SetBookCover {
+                title,
+                author,
+                generation,
+            } => {
+                for stack in stacks {
+                    apply_set_book_cover(stack, *title, *author, *generation);
+                }
+            }
+            LootFunctionTypes::SetFireworkExplosion {
+                shape,
+                colors,
+                fade_colors,
+                trail,
+                twinkle,
+            } => {
+                for stack in stacks {
+                    apply_set_firework_explosion(
+                        stack,
+                        *shape,
+                        *colors,
+                        *fade_colors,
+                        *trail,
+                        *twinkle,
+                    );
                 }
             }
         }
@@ -966,6 +1075,55 @@ mod tests {
         assert_eq!(out[0].item_count, 16);
         assert_eq!(out[1].item_count, 16);
         assert_eq!(out[2].item_count, 8);
+    }
+
+    #[test]
+    fn set_book_cover_updates_only_requested_fields() {
+        let function = LootFunction {
+            content: LootFunctionTypes::SetBookCover {
+                title: Some("Treasure"),
+                author: None,
+                generation: Some(2),
+            },
+            conditions: None,
+        };
+        let mut stacks = vec![ItemStack::new(1, &Item::WRITTEN_BOOK)];
+
+        function.apply(&mut stacks, &LootContextParameters::default());
+
+        let content = stacks[0]
+            .get_data_component::<WrittenBookContentImpl>()
+            .expect("set_book_cover installs written book content");
+        assert_eq!(content.title, "Treasure");
+        assert_eq!(content.author, "");
+        assert_eq!(content.generation, 2);
+        assert!(content.pages.is_empty());
+    }
+
+    #[test]
+    fn set_firework_explosion_uses_vanilla_defaults_for_missing_component() {
+        let function = LootFunction {
+            content: LootFunctionTypes::SetFireworkExplosion {
+                shape: Some("burst"),
+                colors: Some(&[0x12_3456]),
+                fade_colors: None,
+                trail: Some(true),
+                twinkle: None,
+            },
+            conditions: None,
+        };
+        let mut stacks = vec![ItemStack::new(1, &Item::FIREWORK_STAR)];
+
+        function.apply(&mut stacks, &LootContextParameters::default());
+
+        let explosion = stacks[0]
+            .get_data_component::<FireworkExplosionImpl>()
+            .expect("set_firework_explosion installs explosion content");
+        assert_eq!(explosion.shape, FireworkExplosionShape::Burst);
+        assert_eq!(explosion.colors, vec![0x12_3456]);
+        assert!(explosion.fade_colors.is_empty());
+        assert!(explosion.has_trail);
+        assert!(!explosion.has_twinkle);
     }
 
     /// Vanilla `TagEntry.expandTag` (`TagEntry.java:50-65`), driven from
