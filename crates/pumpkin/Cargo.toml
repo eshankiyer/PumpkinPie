@@ -80,6 +80,7 @@ wasm-encoder = "0.257"
 ureq = { workspace = true, features = ["json"] }
 
 sha1.workspace = true
+md5.workspace = true
 
 # velocity en
 hmac.workspace = true

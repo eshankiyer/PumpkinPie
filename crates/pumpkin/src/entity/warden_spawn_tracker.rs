@@ -398,6 +398,30 @@ pub async fn warning_level_of(world: &Arc<World>, uuid: Uuid) -> i32 {
     registry.advanced(uuid, now).warning_level()
 }
 
+/// Implements the state mutation performed by
+/// `WardenSpawnTrackerCommand.setWarningLevel` (`WardenSpawnTrackerCommand.java:34-43`).
+pub async fn set_warning_level_of(world: &Arc<World>, uuid: Uuid, warning_level: i32) {
+    let now = world.level_time.lock().await.world_age;
+    let mut registry = REGISTRY.lock().await;
+    registry.ensure_loaded(world);
+    let mut tracker = registry.advanced(uuid, now);
+    tracker.set_warning_level(warning_level);
+    registry.store(uuid, tracker, now);
+    registry.save();
+}
+
+/// Implements the tracker reset performed by
+/// `WardenSpawnTrackerCommand.resetTracker` (`WardenSpawnTrackerCommand.java:47-58`).
+pub async fn reset_tracker_of(world: &Arc<World>, uuid: Uuid) {
+    let now = world.level_time.lock().await.world_age;
+    let mut registry = REGISTRY.lock().await;
+    registry.ensure_loaded(world);
+    let mut tracker = registry.advanced(uuid, now);
+    tracker.reset();
+    registry.store(uuid, tracker, now);
+    registry.save();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
