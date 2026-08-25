@@ -698,12 +698,22 @@ impl StructurePieceBase for PoolElementStructurePiece {
                     origin.y,
                     origin.z + corner.1.min(0),
                 );
-                let processors = match processor_list {
-                    ProcessorListRef::Named(name) => {
-                        crate::generation::structure::template::processor::load_processor_list(name)
-                    }
-                    ProcessorListRef::Empty => Arc::from([]),
+                // Vanilla appends the projection's processors after the element's own list
+                // (`SinglePoolElement.java:180`); `TERRAIN_MATCHING` carries a
+                // `GravityProcessor(WORLD_SURFACE_WG, -1)`
+                // (`StructureTemplatePool.java:118`).
+                let mut resolved_processors = match processor_list {
+                    ProcessorListRef::Named(name) => crate::generation::structure::template::processor::load_processor_list(name).to_vec(),
+                    ProcessorListRef::Empty => Vec::new(),
                 };
+                if self.projection == JigsawProjection::TerrainMatching {
+                    resolved_processors.push(
+                        crate::generation::structure::template::processor::StructureProcessor::Gravity {
+                            heightmap: crate::generation::structure::template::processor::HeightmapType::WorldSurfaceWg,
+                            offset: -1,
+                        },
+                    );
+                }
                 crate::generation::structure::template::place_template(
                     chunk,
                     &template,
@@ -712,7 +722,7 @@ impl StructurePieceBase for PoolElementStructurePiece {
                     self.rotation,
                     legacy,
                     self.liquid_settings == LiquidSettings::ApplyWaterlog,
-                    processors.as_ref(),
+                    &resolved_processors,
                     Some(chunk_box),
                 );
                 crate::generation::structure::template::place_template_entities(

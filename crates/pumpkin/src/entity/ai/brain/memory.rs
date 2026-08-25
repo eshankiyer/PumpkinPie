@@ -20,7 +20,7 @@
 //!   same as vanilla's "the sensor stopped re-populating this memory".
 
 use std::any::Any;
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
 use pumpkin_data::damage::DamageType;
 use pumpkin_util::math::position::BlockPos;
@@ -58,10 +58,12 @@ pub enum MemoryKeyId {
     LikedNoteblockCooldownTicks,
     ItemPickupCooldownTicks,
     NearestVisibleWantedItem,
+    NearestLivingEntities,
+    NearestVisibleLivingEntities,
 }
 
 impl MemoryKeyId {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::WalkTarget,
         Self::LookTarget,
         Self::CantReachWalkTargetSince,
@@ -72,6 +74,8 @@ impl MemoryKeyId {
         Self::LikedNoteblockCooldownTicks,
         Self::ItemPickupCooldownTicks,
         Self::NearestVisibleWantedItem,
+        Self::NearestLivingEntities,
+        Self::NearestVisibleLivingEntities,
     ];
     pub const COUNT: usize = Self::ALL.len();
 
@@ -116,6 +120,8 @@ memory_keys! {
     LikedNoteblockCooldownTicksMemory => LikedNoteblockCooldownTicks: i32, "liked_noteblock_cooldown_ticks";
     ItemPickupCooldownTicksMemory => ItemPickupCooldownTicks: i32, "item_pickup_cooldown_ticks";
     NearestVisibleWantedItemMemory => NearestVisibleWantedItem: Weak<dyn EntityBase>, "nearest_visible_wanted_item";
+    NearestLivingEntitiesMemory => NearestLivingEntities: Vec<Weak<dyn EntityBase>>, "nearest_living_entities";
+    NearestVisibleLivingEntitiesMemory => NearestVisibleLivingEntities: NearestVisibleLivingEntities, "nearest_visible_living_entities";
 }
 
 /// `PositionTracker` (`behavior/PositionTracker.java`) with its two concrete implementations,
@@ -238,6 +244,86 @@ impl WalkTarget {
             speed_modifier,
             close_enough_dist,
         }
+    }
+}
+
+/// `NearestVisibleLivingEntities` (`memory/NearestVisibleLivingEntities.java:14-71`).
+///
+/// The living entities a mob saw on its last scan, nearest first
+/// (`NearestLivingEntitySensor.java:21`), each flagged with whether line of sight existed at
+/// scan time.
+///
+/// DEVIATION: vanilla computes visibility lazily per query through a per-scan cached
+/// predicate (`NearestVisibleLivingEntities.java:26-28`) that re-tests
+/// `Sensor.isEntityTargetable`; this port evaluates the flag once during the sensor scan and
+/// stores it, because the flag's inputs (positions, blocks between) are exactly what the scan
+/// already read. Both forms are allowed up to one 20-tick scan interval of staleness by
+/// vanilla's own design (`sensing/Sensor.java:14`). A despawned entity's `Weak` fails to
+/// upgrade and is skipped at query time, matching the module-wide weak-reference rule.
+#[derive(Clone, Default)]
+pub struct NearestVisibleLivingEntities {
+    entities: Vec<(Weak<dyn EntityBase>, bool)>,
+}
+
+impl NearestVisibleLivingEntities {
+    /// `NearestVisibleLivingEntities.empty()` (`NearestVisibleLivingEntities.java:31-33`).
+    #[must_use]
+    pub fn empty() -> Self {
+        Self {
+            entities: Vec::new(),
+        }
+    }
+
+    /// Built once per scan by [`crate::entity::ai::brain::sensor::nearest_living_entities`],
+    /// with entries already sorted nearest-first.
+    #[must_use]
+    pub fn new(entities: Vec<(Weak<dyn EntityBase>, bool)>) -> Self {
+        Self { entities }
+    }
+
+    /// `findClosest(filter)` (`NearestVisibleLivingEntities.java:40-48`): the nearest entity
+    /// passing `filter` whose stored visibility flag held.
+    #[must_use]
+    pub fn find_closest(
+        &self,
+        filter: impl Fn(&dyn EntityBase) -> bool,
+    ) -> Option<Arc<dyn EntityBase>> {
+        self.entities.iter().find_map(|(weak, visible)| {
+            if !*visible {
+                return None;
+            }
+            let entity = weak.upgrade()?;
+            filter(entity.as_ref()).then_some(entity)
+        })
+    }
+
+    /// `findAll(filter)` (`NearestVisibleLivingEntities.java:50-52`), preserving the
+    /// nearest-first order.
+    #[must_use]
+    pub fn find_all(&self, filter: impl Fn(&dyn EntityBase) -> bool) -> Vec<Arc<dyn EntityBase>> {
+        self.entities
+            .iter()
+            .filter_map(|(weak, visible)| {
+                if !*visible {
+                    return None;
+                }
+                let entity = weak.upgrade()?;
+                filter(entity.as_ref()).then_some(entity)
+            })
+            .collect()
+    }
+
+    /// `contains(targetEntity)` (`NearestVisibleLivingEntities.java:58-60`), compared by
+    /// entity id.
+    #[must_use]
+    pub fn contains(&self, other: &Arc<dyn EntityBase>) -> bool {
+        let other_id = other.get_entity().entity_id;
+        self.entities.iter().any(|(weak, visible)| {
+            *visible
+                && weak
+                    .upgrade()
+                    .is_some_and(|entity| entity.get_entity().entity_id == other_id)
+        })
     }
 }
 

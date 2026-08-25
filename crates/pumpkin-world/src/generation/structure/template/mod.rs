@@ -34,10 +34,13 @@ use pumpkin_data::BlockStateId;
 use pumpkin_data::Mirror;
 use pumpkin_data::Rotation;
 use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
+use pumpkin_util::HeightMap;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::random::{RandomImpl, hash_block_pos, legacy_rand::LegacyRand};
 
 use crate::ProtoChunk;
+
+use processor::HeightmapType;
 
 pub use block_state_resolver::BlockStateResolver;
 pub use cache::{
@@ -58,6 +61,12 @@ pub trait BlockPlacer {
     fn get_block_state(&self, pos: &Vector3<i32>) -> BlockStateId;
     fn set_block_state(&mut self, pos: &Vector3<i32>, state: &BlockState);
     fn add_block_entity(&mut self, nbt: NbtCompound);
+
+    /// Heightmap query for the given world column, mirroring `LevelReader.getHeight`
+    /// (`net/minecraft/world/level/LevelReader.java`), which
+    /// `GravityProcessor.processBlock` uses to re-anchor blocks
+    /// (`GravityProcessor.java:51`).
+    fn get_top_y(&self, heightmap: &HeightMap, x: i32, z: i32) -> i32;
 }
 
 /// Places a template at a world origin with an un-rotated XZ offset.
@@ -188,10 +197,43 @@ pub fn place_template_with_options(
 
         // Apply processors
         let mut should_place = true;
+        let mut wy = wy;
         let mut capped_idx = 0;
         let mut rng =
             LegacyRand::from_seed(hash_block_pos(world_pos.x, world_pos.y, world_pos.z) as u64);
         for processor in processors {
+            if let StructureProcessor::Gravity { heightmap, offset } = processor {
+                // Vanilla `GravityProcessor.processBlock` (`GravityProcessor.java:29-56`):
+                // server-side placement resolves WG heightmaps to their post-generation
+                // variants (`:38-48`), then re-anchors the block at
+                // `getHeight(x, z) + offset + template-relative Y` (`:50-55`). XZ stays at
+                // the current target position; subsequent processors see the shifted one.
+                let heightmap = match heightmap {
+                    HeightmapType::WorldSurfaceWg | HeightmapType::WorldSurface => {
+                        HeightMap::WorldSurface
+                    }
+                    HeightmapType::OceanFloorWg | HeightmapType::OceanFloor => {
+                        HeightMap::OceanFloor
+                    }
+                    HeightmapType::MotionBlocking => HeightMap::MotionBlocking,
+                    HeightmapType::MotionBlockingNoLeaves => HeightMap::MotionBlockingNoLeaves,
+                };
+                wy = placer.get_top_y(&heightmap, wx, wz) + offset + block.pos.y;
+                // Vanilla re-checks the placement box against the *processed* position
+                // before setting blocks (`StructureTemplate.java:283`).
+                if let Some(bbox) = chunk_box
+                    && (wx < bbox.min.x
+                        || wx > bbox.max.x
+                        || wy < bbox.min.y
+                        || wy > bbox.max.y
+                        || wz < bbox.min.z
+                        || wz > bbox.max.z)
+                {
+                    should_place = false;
+                    break;
+                }
+            }
+            let world_pos = Vector3::new(wx, wy, wz);
             let Some(processed_state) = processor.process_with_context(
                 placer,
                 world_pos,
@@ -393,6 +435,10 @@ mod tests {
         }
 
         fn add_block_entity(&mut self, _nbt: NbtCompound) {}
+
+        fn get_top_y(&self, _heightmap: &HeightMap, _x: i32, _z: i32) -> i32 {
+            0
+        }
     }
 
     use std::collections::HashMap;
@@ -409,6 +455,10 @@ mod tests {
         }
 
         fn add_block_entity(&mut self, _nbt: NbtCompound) {}
+
+        fn get_top_y(&self, _heightmap: &HeightMap, _x: i32, _z: i32) -> i32 {
+            0
+        }
     }
 
     fn entry(name: &str, properties: &[(&str, &str)]) -> PaletteEntry {
@@ -560,5 +610,95 @@ mod tests {
         }
 
         assert!(placed_templates > 0);
+    }
+
+    /// Vanilla `GravityProcessor.processBlock`
+    /// (`net/minecraft/world/level/levelgen/structure/templatesystem/GravityProcessor.java:29-56`)
+    /// re-anchors every block at `getHeight(x, z) + offset + template-relative Y`,
+    /// resolving WG heightmaps to their post-generation variants server-side
+    /// (`GravityProcessor.java:38-48`).
+    #[test]
+    fn gravity_processor_reanchors_blocks_to_the_heightmap() {
+        use crate::generation::structure::template::processor::HeightmapType;
+
+        struct HeightPlacer {
+            top_y: i32,
+            placed: Vec<(i32, i32, i32)>,
+        }
+
+        impl BlockPlacer for HeightPlacer {
+            fn get_block_state(&self, _pos: &Vector3<i32>) -> BlockStateId {
+                Block::AIR.default_state.id
+            }
+
+            fn set_block_state(&mut self, pos: &Vector3<i32>, _state: &BlockState) {
+                self.placed.push((pos.x, pos.y, pos.z));
+            }
+
+            fn add_block_entity(&mut self, _nbt: NbtCompound) {}
+
+            fn get_top_y(&self, _heightmap: &HeightMap, _x: i32, _z: i32) -> i32 {
+                self.top_y
+            }
+        }
+
+        let template = StructureTemplate {
+            size: Vector3::new(1, 3, 1),
+            palette: vec![entry("minecraft:stone", &[])],
+            blocks: vec![
+                TemplateBlock {
+                    pos: Vector3::new(0, 0, 0),
+                    state: 0,
+                    nbt: None,
+                },
+                TemplateBlock {
+                    pos: Vector3::new(0, 1, 0),
+                    state: 0,
+                    nbt: None,
+                },
+                TemplateBlock {
+                    pos: Vector3::new(0, 2, 0),
+                    state: 0,
+                    nbt: None,
+                },
+            ],
+            entities: Vec::new(),
+            ..StructureTemplate::default()
+        };
+
+        for (heightmap, expected_base) in [
+            (
+                HeightmapType::WorldSurfaceWg,
+                // WG variant resolves to the post-generation WORLD_SURFACE server-side.
+                64,
+            ),
+            (HeightmapType::MotionBlocking, 70),
+        ] {
+            let mut placer = HeightPlacer {
+                top_y: expected_base,
+                placed: Vec::new(),
+            };
+            place_template(
+                &mut placer,
+                &template,
+                Vector3::new(10, 200, 10),
+                (0, 0),
+                Rotation::None,
+                false,
+                false,
+                &[StructureProcessor::Gravity {
+                    heightmap,
+                    offset: -1,
+                }],
+                None,
+            );
+
+            let base = expected_base - 1;
+            assert_eq!(
+                placer.placed,
+                vec![(10, base, 10), (10, base + 1, 10), (10, base + 2, 10)],
+                "gravity shift wrong for {heightmap:?}"
+            );
+        }
     }
 }

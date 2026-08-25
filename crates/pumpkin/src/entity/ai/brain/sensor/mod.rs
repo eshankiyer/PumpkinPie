@@ -4,6 +4,7 @@
 //! intent memories (`WALK_TARGET`, `LOOK_TARGET`, ...).
 
 pub mod nearest_item;
+pub mod nearest_living_entities;
 
 use std::pin::Pin;
 

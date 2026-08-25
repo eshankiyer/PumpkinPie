@@ -2079,6 +2079,10 @@ impl BlockPlacer for ProtoChunk {
     fn add_block_entity(&mut self, nbt: NbtCompound) {
         self.add_block_entity(nbt);
     }
+
+    fn get_top_y(&self, heightmap: &HeightMap, x: i32, z: i32) -> i32 {
+        Self::get_top_y(self, heightmap, x, z)
+    }
 }
 
 impl ProtoChunkCache for ProtoChunk {
