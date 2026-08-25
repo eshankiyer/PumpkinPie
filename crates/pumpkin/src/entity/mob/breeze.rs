@@ -8,9 +8,9 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, breeze_jump::BreezeJumpGoal,
-        breeze_shoot::BreezeShootGoal, breeze_slide::BreezeSlideGoal,
-        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal, swim::SwimGoal,
-        wander_around::WanderAroundGoal,
+        breeze_shoot::BreezeShootGoal, breeze_shoot_when_stuck::BreezeShootWhenStuckGoal,
+        breeze_slide::BreezeSlideGoal, look_around::RandomLookAroundGoal,
+        look_at_entity::LookAtEntityGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
     projectile_deflection::ProjectileDeflectionType,
@@ -54,8 +54,12 @@ impl BreezeEntity {
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             // Priorities mirror BreezeAi's FIGHT activity ordering (Shoot, LongJump, Slide).
-            // `ShootWhenStuck` (passenger/water/levitation fallback) is skipped: it only
-            // matters for edge cases Pumpkin doesn't yet model (riding, levitation).
+            // `ShootWhenStuck` opens the same short-lived shoot window as vanilla when the
+            // Breeze is a passenger, in water, or affected by Levitation.
+            goal_selector.add_goal(
+                1,
+                Box::new(BreezeShootWhenStuckGoal::new(breeze_weak.clone())),
+            );
             goal_selector.add_goal(1, Box::new(BreezeShootGoal::new(breeze_weak.clone())));
             goal_selector.add_goal(2, Box::new(BreezeJumpGoal::new(breeze_weak.clone())));
             goal_selector.add_goal(3, Box::new(BreezeSlideGoal::new(breeze_weak)));

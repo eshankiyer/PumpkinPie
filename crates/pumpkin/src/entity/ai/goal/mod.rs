@@ -15,6 +15,7 @@ pub mod breath_air;
 pub mod breed;
 pub mod breeze_jump;
 pub mod breeze_shoot;
+pub mod breeze_shoot_when_stuck;
 pub mod breeze_slide;
 pub mod breeze_util;
 pub mod camel_sit;
