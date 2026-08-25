@@ -181,7 +181,7 @@ pub struct ChunkLight {
     pub block_light: Box<[LightContainer]>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChunkHeightmapType {
     WorldSurface = 0,
     MotionBlocking = 1,
