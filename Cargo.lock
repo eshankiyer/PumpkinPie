@@ -3342,6 +3342,7 @@ dependencies = [
  "image",
  "indexmap",
  "libloading 0.9.0",
+ "md5",
  "notify",
  "num-bigint 0.5.1",
  "ordered-float",

@@ -19,6 +19,8 @@ mod damage;
 mod data;
 mod datapack;
 mod debug;
+mod debug_mob_spawning;
+mod debug_path;
 pub mod defaultgamemode;
 mod deop;
 mod dialog;
@@ -63,6 +65,7 @@ mod saveon;
 mod say;
 mod scoreboard;
 mod seed;
+mod serverpack;
 mod setblock;
 mod setidletimeout;
 mod setworldspawn;
@@ -86,6 +89,7 @@ mod tps;
 mod transfer;
 mod trigger;
 mod version;
+mod warden_spawn_tracker;
 mod waypoint;
 mod weather;
 mod whitelist;
@@ -184,6 +188,8 @@ pub fn default_dispatcher(
     banlist::register(&mut dispatcher, registry);
     difficulty::register(&mut dispatcher, registry);
     debug::register(&mut dispatcher, registry);
+    debug_mob_spawning::register(&mut dispatcher, registry);
+    debug_path::register(&mut dispatcher, registry);
     dialog::register(&mut dispatcher, registry);
     execute::register(&mut dispatcher, registry);
     fillbiome::register(&mut dispatcher, registry);
@@ -202,6 +208,7 @@ pub fn default_dispatcher(
     saveall::register(&mut dispatcher, registry);
     saveoff::register(&mut dispatcher, registry);
     saveon::register(&mut dispatcher, registry);
+    serverpack::register(&mut dispatcher, registry);
     setidletimeout::register(&mut dispatcher, registry);
     spreadplayers::register(&mut dispatcher, registry);
     stop::register(&mut dispatcher, registry);
@@ -220,6 +227,7 @@ pub fn default_dispatcher(
     fetchprofile::register(&mut dispatcher, registry);
     version::register(&mut dispatcher, registry);
     stopwatch::register(&mut dispatcher, registry);
+    warden_spawn_tracker::register(&mut dispatcher, registry);
 
     apply_command_overrides(&mut dispatcher, registry, commands_config);
 
