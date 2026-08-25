@@ -111,7 +111,8 @@ pub fn build() -> TokenStream {
             };
             use crate::generation::height_provider::{
                 HeightProvider, TrapezoidHeightProvider, UniformHeightProvider,
-                VeryBiasedToBottomHeightProvider,
+                VeryBiasedToBottomHeightProvider, WeightedHeightEntry,
+                WeightedListHeightProvider,
             };
             use pumpkin_util::y_offset::{AboveBottom, Absolute, BelowTop, YOffset};
             use pumpkin_util::math::int_provider::{
@@ -537,6 +538,25 @@ pub fn value_to_height_provider(v: &Value) -> TokenStream {
                 HeightProvider::Uniform(UniformHeightProvider {
                     min_inclusive: #y,
                     max_inclusive: #y,
+                })
+            }
+        }
+        "minecraft:weighted_list" => {
+            let entries: Vec<TokenStream> = v["distribution"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .map(|entry| {
+                            let data = value_to_height_provider(&entry["data"]);
+                            let weight = entry["weight"].as_i64().unwrap_or(1) as i32;
+                            quote! { WeightedHeightEntry { data: #data, weight: #weight } }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            quote! {
+                HeightProvider::WeightedList(WeightedListHeightProvider {
+                    distribution: vec![#(#entries),*],
                 })
             }
         }
