@@ -48,6 +48,7 @@ use crate::entity::{
             look_around::RandomLookAroundGoal,
             look_at_entity::LookAtEntityGoal,
             ring_bell::RingBellGoal,
+            show_trades_to_player::ShowTradesToPlayerGoal,
             socialize_at_bell::SocializeAtBellGoal,
             stroll_around_poi::{StrollAroundPoiGoal, StrollPoi},
             swim::SwimGoal,
@@ -490,6 +491,11 @@ impl VillagerEntity {
             goal_selector.add_goal(1, Box::new(VillagerScheduleGoal::new(0.5)));
 
             goal_selector.add_goal(2, Box::new(TradeWithPlayerGoal::new(0.5)));
+            // `VillagerGoalPackages.getWorkPackage`/`getMeetPackage`/`getIdlePackage`
+            // register `ShowTradesToPlayer(400, 1600)` in all three
+            // (`VillagerGoalPackages.java:94,155,195`); see `show_trades_to_player.rs`
+            // for what the port does.
+            goal_selector.add_goal(2, Box::new(ShowTradesToPlayerGoal::new()));
             // `VillagerGoalPackages.getIdlePackage` runs `VillagerMakeLove` behind the
             // `InteractWith` that sets `BREED_TARGET`; see `breed.rs` for what the port does
             // and does not carry across.
