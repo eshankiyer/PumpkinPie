@@ -579,6 +579,35 @@ impl BlockRegistry {
         })
     }
 
+    /// Ports `DoubleHighBlockItem.placeBlock` (`DoubleHighBlockItem.java:16-21`) for the
+    /// server's generic block-item placement path. Vanilla writes water back to the upper
+    /// position when it was water and otherwise clears the replaceable position to air before
+    /// placing the lower half. `TallPlantBlock::placed` then installs the upper half.
+    async fn prepare_double_high_block_placement(
+        world: &Arc<World>,
+        block: &Block,
+        position: &BlockPos,
+    ) {
+        if !TallPlantBlock::ids().contains(&block.id) {
+            return;
+        }
+
+        let above = position.up();
+        let (above_block, above_state) = world.get_block_and_state(&above);
+        if !above_state.replaceable() {
+            return;
+        }
+
+        let replacement = if above_block == &Block::WATER {
+            Block::WATER.default_state.id
+        } else {
+            Block::AIR.default_state.id
+        };
+        world
+            .set_block_state(&above, replacement, BlockFlags::NOTIFY_ALL)
+            .await;
+    }
+
     #[expect(clippy::too_many_lines)]
     pub async fn place_block(
         &self,
@@ -763,6 +792,8 @@ impl BlockRegistry {
         if event.cancelled {
             return Ok(None);
         }
+
+        Self::prepare_double_high_block_placement(&world, placed_block, &final_block_pos).await;
 
         let _replaced_id = world
             .set_block_state(&final_block_pos, new_state, BlockFlags::NOTIFY_ALL)

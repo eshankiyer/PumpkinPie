@@ -33,6 +33,10 @@ impl BlockMetadata for TallPlantBlock {
 }
 
 impl BlockBehaviour for TallPlantBlock {
+    /// Mirrors `DoublePlantBlock.getStateForPlacement` (`DoublePlantBlock.java:64-68`):
+    /// the upper position only needs to be replaceable, not already air. The companion
+    /// `DoubleHighBlockItem.placeBlock` reset (`DoubleHighBlockItem.java:16-21`) clears that
+    /// replaceable position immediately before the lower half is committed.
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
         let up_pos = args.position.up();
 
@@ -42,14 +46,14 @@ impl BlockBehaviour for TallPlantBlock {
                 self,
                 args.block_accessor,
                 args.position,
-            ) && upper_state.is_air();
+            ) && upper_state.replaceable();
         };
 
         if up_pos.0.y > world.get_top_y() {
             return false;
         }
         <Self as PlantBlockBase>::can_place_at(self, args.block_accessor, args.position)
-            && upper_state.is_air()
+            && upper_state.replaceable()
     }
 
     fn get_state_for_neighbor_update<'a>(
