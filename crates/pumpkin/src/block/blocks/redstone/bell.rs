@@ -72,6 +72,12 @@ async fn ring_bell(
     true
 }
 
+/// Goal-system entry point for the vanilla `RingBell` behavior
+/// (`RingBell.java:21-30`).
+pub(crate) async fn ring_bell_from_ai(position: BlockPos, world: &Arc<World>) -> bool {
+    ring_bell(position, world, None, None).await
+}
+
 fn is_point_on_bell(
     hit: &BlockHitResult,
     attachment: BellAttachment,
