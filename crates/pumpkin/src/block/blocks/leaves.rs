@@ -1,8 +1,10 @@
 use crate::block::{
-    BlockBehaviour, BlockFuture, GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs,
-    RandomTickArgs,
+    BlockBehaviour, BlockFuture, BonemealArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
+    OnScheduledTickArgs, RandomTickArgs,
 };
-use pumpkin_data::block_properties::{BlockProperties, OakLeavesLikeProperties};
+use pumpkin_data::block_properties::{
+    BlockProperties, MangrovePropaguleLikeProperties, OakLeavesLikeProperties,
+};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{Block, BlockDirection, BlockStateId};
 use pumpkin_macros::pumpkin_block_from_tag;
@@ -47,6 +49,44 @@ fn compute_distance(world: &World, position: &BlockPos) -> u8 {
 }
 
 impl BlockBehaviour for LeavesBlock {
+    /// `MangroveLeavesBlock.isValidBonemealTarget` (`MangroveLeavesBlock.java:32-35`): the
+    /// block below must be empty and inside the build height.
+    fn is_valid_bonemeal_target(&self, args: BonemealArgs<'_>) -> bool {
+        if args.block != &Block::MANGROVE_LEAVES {
+            return false;
+        }
+        let below = args.position.down();
+        args.world.is_in_height_limit(below.0.y)
+            && args.world.is_loaded(&below)
+            && args.world.get_block_state(&below).is_air()
+    }
+
+    /// `MangroveLeavesBlock.isBonemealSuccess` (`MangroveLeavesBlock.java:37-39`) always
+    /// succeeds.
+    fn is_bonemeal_success(&self, args: BonemealArgs<'_>) -> bool {
+        args.block == &Block::MANGROVE_LEAVES
+    }
+
+    /// `MangroveLeavesBlock.performBonemeal` (`MangroveLeavesBlock.java:41-43`) places
+    /// `MangrovePropaguleBlock.createNewHangingPropagule` (`MangrovePropaguleBlock.java:142-144`)
+    /// below the leaves.
+    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if args.block != &Block::MANGROVE_LEAVES {
+                return;
+            }
+            let mut props = MangrovePropaguleLikeProperties::default(&Block::MANGROVE_PROPAGULE);
+            props.hanging = true;
+            args.world
+                .set_block_state(
+                    &args.position.down(),
+                    props.to_state_id(&Block::MANGROVE_PROPAGULE),
+                    BlockFlags::NOTIFY_ALL,
+                )
+                .await;
+        })
+    }
+
     fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
         Box::pin(async move {
             let mut props = LeavesProperties::default(args.block);
