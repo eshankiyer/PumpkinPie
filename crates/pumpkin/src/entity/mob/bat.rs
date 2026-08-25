@@ -122,6 +122,13 @@ impl Mob for BatEntity {
         &self.mob_entity
     }
 
+    /// Vanilla `AmbientCreature.canBeLeashed` (`AmbientCreature.java:13-15`) returns `false`
+    /// for the whole ambient superclass; `Bat` is its only subclass (`Bat.java:31`), so this
+    /// override is where that behavior lands in Pumpkin's flattened entity hierarchy.
+    fn can_be_leashed(&self) -> bool {
+        false
+    }
+
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             self.set_roosting_metadata(self.is_roosting());

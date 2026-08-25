@@ -1,9 +1,10 @@
 use std::sync::Arc;
-use std::sync::atomic::Ordering::Relaxed;
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering::Relaxed};
 
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::tag::Taggable;
 use pumpkin_data::tag::WorldgenBiome::MINECRAFT_WITHOUT_WANDERING_TRADER_SPAWNS;
+use pumpkin_data::tag::WorldgenBiome::MINECRAFT_WITHOUT_ZOMBIE_SIEGES;
 use pumpkin_util::GameMode;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector2::Vector2;
@@ -11,6 +12,7 @@ use pumpkin_util::math::vector3::Vector3;
 use uuid::Uuid;
 
 use crate::entity::EntityBase;
+use crate::entity::mob::MobEntity;
 use crate::entity::mob::equipment::RegionalDifficulty;
 use crate::entity::passive::cat::select_natural_cat_variant;
 use crate::entity::player::statistics::{CustomStatistic, StatisticCategory};
@@ -331,6 +333,208 @@ pub async fn tick_wandering_trader_spawner(world: &Arc<World>) {
     if try_spawn_wandering_trader(world).await {
         world.trader_spawn_chance.store(25, Relaxed);
     }
+}
+
+/// Per-level state of the village siege spawner, mirroring vanilla's private fields on
+/// `VillageSiege` (`VillageSiege.java:26-32`).
+///
+/// Pumpkin's other custom spawners keep their counters directly on `World`; this one needs
+/// seven of them, so they are grouped into a single struct that lives in one `World` field
+/// instead.
+pub struct VillageSiegeState {
+    /// 0 = `State.SIEGE_DONE`, 1 = `State.SIEGE_TONIGHT`. Vanilla's third constant
+    /// `SIEGE_CAN_ACTIVATE` (`VillageSiege.java:130`) is never read by `tick`, so it is not
+    /// modelled.
+    siege_tonight: AtomicBool,
+    has_setup_siege: AtomicBool,
+    zombies_to_spawn: AtomicI32,
+    next_spawn_time: AtomicI32,
+    spawn_x: AtomicI32,
+    spawn_y: AtomicI32,
+    spawn_z: AtomicI32,
+}
+
+impl VillageSiegeState {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            siege_tonight: AtomicBool::new(false),
+            has_setup_siege: AtomicBool::new(false),
+            zombies_to_spawn: AtomicI32::new(0),
+            next_spawn_time: AtomicI32::new(0),
+            spawn_x: AtomicI32::new(0),
+            spawn_y: AtomicI32::new(0),
+            spawn_z: AtomicI32::new(0),
+        }
+    }
+}
+
+impl Default for VillageSiegeState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The `roll_village_siege` time marker: tick 18000 of the overworld clock's 24000-tick day
+/// (`data/minecraft/timeline/day.json`: `"minecraft:roll_village_siege": 18000`,
+/// `"period_ticks": 24000`; `ClockTimeMarker.occursAt` fires when
+/// `ticks == totalTicks % periodTicks`, `ClockTimeMarker.java:29-31`).
+const ROLL_VILLAGE_SIEGE_TIME_OF_DAY: i64 = 18_000;
+
+const OVERWORLD_DAY_LENGTH: i64 = 24_000;
+
+/// `VillageSiege.tick` (`VillageSiege.java:35-67`).
+///
+/// Runs only while it is dark outside (`!Level.isBrightOutside`, which is `skyDarken < 4`
+/// for non-fixed-time dimensions, `Level.java:385-387`) and while hostile spawning is
+/// enabled; any bright/enabled-off tick tears the siege state back down (L63-66).
+///
+/// At the roll marker a 1-in-10 roll schedules tonight's siege (L37-40); otherwise, once per
+/// two ticks, one zombie is spawned until twenty have been placed (L51-61).
+///
+/// Scope reduction: vanilla's `trySpawn` runs `Zombie.finalizeSpawn(..., EVENT, ...)`
+/// (`VillageSiege.java:100-106`) to give siege zombies difficulty-scaled equipment and
+/// jockey rolls; Pumpkin has no finalize-spawn hook and the other custom spawners here
+/// (`tick_phantom_spawner`, `tick_cat_spawner`) likewise spawn bare mobs.
+pub async fn tick_village_siege(world: &Arc<World>, spawn_enemies: bool) {
+    let siege = &world.village_siege;
+    // Vanilla `Level.isBrightOutside` (`Level.java:385-387`): fixed-time dimensions never
+    // count as bright. They also contain no villages, so their sieges would die out in
+    // `try_to_setup_siege` anyway; the sky-darken test below is what matters for the
+    // overworld.
+    let is_bright_outside =
+        world.dimension.fixed_time.is_none() && world.sky_darken.load(Relaxed) < 4;
+
+    if !is_bright_outside && spawn_enemies {
+        if world.get_time_of_day().await % OVERWORLD_DAY_LENGTH == ROLL_VILLAGE_SIEGE_TIME_OF_DAY {
+            let tonight = rand::random_range(0..10) == 0;
+            siege.siege_tonight.store(tonight, Relaxed);
+        }
+
+        if siege.siege_tonight.load(Relaxed) {
+            if !siege.has_setup_siege.load(Relaxed) {
+                if !try_to_setup_siege(world).await {
+                    return;
+                }
+                siege.has_setup_siege.store(true, Relaxed);
+            }
+
+            // L51-54: `if nextSpawnTime > 0 { nextSpawnTime-- } else { ... }`. These fields
+            // are only touched from this spawner inside the serialized world tick, so a
+            // plain load/store pair preserves vanilla's exact countdown shape.
+            if siege.next_spawn_time.load(Relaxed) > 0 {
+                siege.next_spawn_time.fetch_sub(1, Relaxed);
+            } else {
+                siege.next_spawn_time.store(2, Relaxed);
+                if siege.zombies_to_spawn.load(Relaxed) > 0 {
+                    siege.zombies_to_spawn.fetch_sub(1, Relaxed);
+                    let pos = Vector3::new(
+                        f64::from(siege.spawn_x.load(Relaxed)) + 0.5,
+                        f64::from(siege.spawn_y.load(Relaxed)),
+                        f64::from(siege.spawn_z.load(Relaxed)) + 0.5,
+                    );
+                    try_spawn_zombie(world, pos).await;
+                } else {
+                    siege.siege_tonight.store(false, Relaxed);
+                }
+            }
+        }
+    } else {
+        siege.siege_tonight.store(false, Relaxed);
+        siege.has_setup_siege.store(false, Relaxed);
+    }
+}
+
+/// `VillageSiege.tryToSetupSiege` (`VillageSiege.java:69-94`): find a non-spectator player
+/// standing inside a village whose biome does not exclude sieges, then ring it with up to
+/// ten random points 32 blocks out and take the first that lands on a valid zombie spot.
+///
+/// Note the vanilla quirk kept here: once a qualifying player is found the method returns
+/// `true` even if none of the ten points worked (L88), so a failed setup still consumes this
+/// night's attempt and the state machine waits for the next dark period to retry.
+async fn try_to_setup_siege(world: &Arc<World>) -> bool {
+    let players = world.players.load();
+    for player in players.iter() {
+        if player.gamemode.load() == GameMode::Spectator {
+            continue;
+        }
+
+        let center = player.get_entity().block_pos.load();
+        // Vanilla `level.isVillage(center)` is `isCloseToVillage(center, 1)`
+        // (`ServerLevel.java:1542-1544`).
+        if !world.is_close_to_village(center, 1).await {
+            continue;
+        }
+        if world
+            .get_biome(&center)
+            .is_some_and(|biome| biome.has_tag(&MINECRAFT_WITHOUT_ZOMBIE_SIEGES))
+        {
+            continue;
+        }
+
+        let siege = &world.village_siege;
+        for _ in 0..10 {
+            let angle = rand::random::<f32>() * (std::f64::consts::PI as f32 * 2.0);
+            let x = center.0.x + (angle.cos() * 32.0).floor() as i32;
+            let z = center.0.z + (angle.sin() * 32.0).floor() as i32;
+            let y = center.0.y;
+            siege.spawn_x.store(x, Relaxed);
+            siege.spawn_y.store(y, Relaxed);
+            siege.spawn_z.store(z, Relaxed);
+            let anchor = BlockPos::new(x, y, z);
+            if find_random_spawn_pos(world, anchor).await.is_some() {
+                siege.next_spawn_time.store(0, Relaxed);
+                siege.zombies_to_spawn.store(20, Relaxed);
+                break;
+            }
+        }
+
+        return true;
+    }
+
+    false
+}
+
+/// `VillageSiege.trySpawn` (`VillageSiege.java:96-111`) minus the dropped
+/// `finalizeSpawn` pass (see the scope note on [`tick_village_siege`]): place one zombie at
+/// the bottom-center of a valid spot with a uniformly random yaw.
+async fn try_spawn_zombie(world: &Arc<World>, spawn_pos: Vector3<f64>) {
+    let yaw = rand::random::<f32>() * 360.0;
+    let zombie = from_type(&EntityType::ZOMBIE, spawn_pos, world, Uuid::new_v4());
+    zombie.get_entity().set_rotation(yaw, 0.0);
+    world.spawn_entity(zombie).await;
+}
+
+/// `VillageSiege.findRandomSpawnPos` (`VillageSiege.java:113-127`): jitter the anchor by
+/// eight blocks on each horizontal axis, drop onto the world surface, and accept the first
+/// position that is both inside the village and dark enough for an event-spawned zombie.
+///
+/// Vanilla's `Monster.checkMonsterSpawnRules(ZOMBIE, ..., EVENT, ...)` keeps the darkness
+/// requirements because only `TRIAL_SPAWNER` ignores them
+/// (`EntitySpawnReason.java:28-30`), and its trailing `checkMobSpawnRules` block-placement
+/// predicate is covered by `is_spawn_position_ok`.
+async fn find_random_spawn_pos(world: &Arc<World>, pos: BlockPos) -> Option<Vector3<f64>> {
+    let is_thundering = world.weather.lock().await.thundering;
+    for _ in 0..10 {
+        let x = pos.0.x + rand::random_range(0..16) - 8;
+        let z = pos.0.z + rand::random_range(0..16) - 8;
+        // Vanilla `level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z)`; same heightmap
+        // read the wandering-trader path uses via `get_top_block`.
+        let y = world.get_top_block(Vector2::new(x, z));
+        let offset = BlockPos::new(x, y, z);
+        if world.is_close_to_village(offset, 1).await
+            && MobEntity::check_monster_spawn_rules(world, &offset, is_thundering)
+            && is_spawn_position_ok(world, &offset, &EntityType::ZOMBIE)
+        {
+            return Some(Vector3::new(
+                f64::from(x) + 0.5,
+                f64::from(y),
+                f64::from(z) + 0.5,
+            ));
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]
