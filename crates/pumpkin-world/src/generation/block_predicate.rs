@@ -1,4 +1,5 @@
 use itertools::Itertools;
+use pumpkin_data::chunk::Biome;
 use pumpkin_data::fluid::{Fluid, FluidState};
 use pumpkin_data::tag::{self};
 use pumpkin_data::{Block, BlockDirection, BlockState, BlockStateId};
@@ -9,6 +10,7 @@ use crate::{block::BlockStateCodec, world::WorldPortalExt};
 
 pub enum BlockPredicate {
     MatchingBlocks(MatchingBlocksBlockPredicate),
+    MatchingBiomes(MatchingBiomesBlockPredicate),
     MatchingBlockTag(MatchingBlockTagPredicate),
     MatchingFluids(MatchingFluidsBlockPredicate),
     HasSturdyFace(HasSturdyFacePredicate),
@@ -33,6 +35,7 @@ impl BlockPredicate {
     ) -> bool {
         match self {
             Self::MatchingBlocks(predicate) => predicate.test(chunk, pos),
+            Self::MatchingBiomes(predicate) => predicate.test(chunk, pos),
             Self::MatchingBlockTag(predicate) => predicate.test(chunk, pos),
             Self::MatchingFluids(predicate) => predicate.test(chunk, pos),
             Self::HasSturdyFace(predicate) => predicate.test(chunk, pos),
@@ -51,6 +54,25 @@ impl BlockPredicate {
 pub struct MatchingBlocksBlockPredicate {
     pub offset: OffsetBlocksBlockPredicate,
     pub blocks: MatchingBlocksWrapper,
+}
+
+pub struct MatchingBiomesBlockPredicate {
+    pub biomes: MatchingBiomesWrapper,
+}
+
+impl MatchingBiomesBlockPredicate {
+    /// Tests the biome at the origin against the configured holder set.
+    ///
+    /// This ports `MatchingBiomesPredicate.test` from
+    /// `net/minecraft/world/level/levelgen/blockpredicates/MatchingBiomesPredicate.java:22-24`.
+    pub fn test<T: GenerationCache>(&self, chunk: &T, pos: &BlockPos) -> bool {
+        let biome = chunk.get_biome_for_terrain_gen(pos.0.x, pos.0.y, pos.0.z);
+        match &self.biomes {
+            MatchingBiomesWrapper::Single(expected) => biome == *expected,
+            MatchingBiomesWrapper::Multiple(expected) => expected.contains(&biome),
+            MatchingBiomesWrapper::Tag(expected) => expected.contains(&(biome.id as u16)),
+        }
+    }
 }
 
 impl MatchingBlocksBlockPredicate {
@@ -267,4 +289,10 @@ impl OffsetBlocksBlockPredicate {
 pub enum MatchingBlocksWrapper {
     Single(String),
     Multiple(Vec<String>),
+}
+
+pub enum MatchingBiomesWrapper {
+    Single(&'static Biome),
+    Multiple(&'static [&'static Biome]),
+    Tag(&'static [u16]),
 }

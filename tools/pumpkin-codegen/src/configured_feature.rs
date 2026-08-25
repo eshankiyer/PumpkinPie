@@ -103,7 +103,8 @@ pub fn build() -> TokenStream {
                 AllOfBlockPredicate, AnyOfBlockPredicate, BlockPredicate,
                 HasSturdyFacePredicate, InsideWorldBoundsBlockPredicate,
                 MatchingBlockTagPredicate, MatchingBlocksBlockPredicate, MatchingBlocksWrapper,
-                MatchingFluidsBlockPredicate, NotBlockPredicate, OffsetBlocksBlockPredicate,
+                MatchingBiomesBlockPredicate, MatchingBiomesWrapper, MatchingFluidsBlockPredicate,
+                NotBlockPredicate, OffsetBlocksBlockPredicate,
                 ReplaceableBlockPredicate, SolidBlockPredicate, WouldSurviveBlockPredicate,
             };
             use crate::generation::height_provider::{
@@ -835,7 +836,31 @@ pub fn value_to_configured_feature(v: &Value) -> TokenStream {
             }
         }
         "minecraft:multiface_growth" => {
-            quote! { ConfiguredFeature::MultifaceGrowth(crate::generation::feature::features::multiface_growth::MultifaceGrowthFeature {}) }
+            let block = value_to_block_id(&config["block"]);
+            let can_be_placed_on = config["can_be_placed_on"]
+                .as_array()
+                .map(|blocks| blocks.iter().map(value_to_block_id).collect::<Vec<_>>())
+                .unwrap_or_default();
+            let search_range = config["search_range"].as_i64().unwrap_or(10) as i32;
+            let can_place_on_floor = config["can_place_on_floor"].as_bool().unwrap_or(false);
+            let can_place_on_ceiling = config["can_place_on_ceiling"].as_bool().unwrap_or(false);
+            let can_place_on_wall = config["can_place_on_wall"].as_bool().unwrap_or(false);
+            let chance_of_spreading = config["chance_of_spreading"].as_f64().unwrap_or(0.5) as f32;
+            quote! {
+                ConfiguredFeature::MultifaceGrowth(
+                    crate::generation::feature::features::multiface_growth::MultifaceGrowthFeature {
+                        configuration: crate::generation::feature::features::multiface_growth::MultifaceGrowthConfiguration::new(
+                            #block,
+                            #search_range,
+                            #can_place_on_floor,
+                            #can_place_on_ceiling,
+                            #can_place_on_wall,
+                            #chance_of_spreading,
+                            vec![#(#can_be_placed_on),*],
+                        ),
+                    }
+                )
+            }
         }
         "minecraft:blue_ice" => {
             quote! { ConfiguredFeature::BlueIce(crate::generation::feature::features::blue_ice::BlueIceFeature {}) }
@@ -1374,6 +1399,17 @@ fn value_to_block_list(v: &Value) -> TokenStream {
         }
     }
     quote! { &[#(#blocks),*] }
+}
+
+fn value_to_block_id(v: &Value) -> TokenStream {
+    let name = v
+        .as_str()
+        .unwrap_or("minecraft:air")
+        .strip_prefix("minecraft:")
+        .unwrap_or("air")
+        .to_uppercase();
+    let ident = syn::Ident::new(&name, proc_macro2::Span::call_site());
+    quote! { pumpkin_data::BlockId::#ident }
 }
 
 /// Converts a trunk-placer JSON object into a `TrunkPlacer` token stream.

@@ -4,6 +4,7 @@ use std::sync::{
 };
 
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::sound::Sound;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::vector3::Vector3;
 
@@ -114,6 +115,12 @@ impl NBTStorage for SnowGolemEntity {}
 impl Mob for SnowGolemEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// Vanilla `SnowGolem.getAmbientSound` (`SnowGolem.java:178-180`), overriding
+    /// `AbstractGolem`'s silent default.
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(Sound::EntitySnowGolemAmbient)
     }
 
     /// `SnowGolem.isSensitiveToWater` (`SnowGolem.java:86-88`).

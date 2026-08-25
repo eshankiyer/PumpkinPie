@@ -106,12 +106,14 @@ pub fn build() -> TokenStream {
                 AllOfBlockPredicate, AnyOfBlockPredicate, BlockPredicate,
                 HasSturdyFacePredicate, InsideWorldBoundsBlockPredicate,
                 MatchingBlockTagPredicate, MatchingBlocksBlockPredicate, MatchingBlocksWrapper,
-                MatchingFluidsBlockPredicate, NotBlockPredicate, OffsetBlocksBlockPredicate,
+                MatchingBiomesBlockPredicate, MatchingBiomesWrapper, MatchingFluidsBlockPredicate,
+                NotBlockPredicate, OffsetBlocksBlockPredicate,
                 ReplaceableBlockPredicate, SolidBlockPredicate, WouldSurviveBlockPredicate,
             };
             use crate::generation::height_provider::{
                 HeightProvider, TrapezoidHeightProvider, UniformHeightProvider,
-                VeryBiasedToBottomHeightProvider,
+                VeryBiasedToBottomHeightProvider, WeightedHeightEntry,
+                WeightedListHeightProvider,
             };
             use pumpkin_util::y_offset::{AboveBottom, Absolute, BelowTop, YOffset};
             use pumpkin_util::math::int_provider::{
@@ -374,6 +376,14 @@ pub fn value_to_block_predicate(v: &Value) -> TokenStream {
                 })
             }
         }
+        "minecraft:matching_biomes" => {
+            let biomes = value_to_matching_biomes_wrapper(&v["biomes"]);
+            quote! {
+                BlockPredicate::MatchingBiomes(MatchingBiomesBlockPredicate {
+                    biomes: #biomes,
+                })
+            }
+        }
         "minecraft:matching_block_tag" => {
             let offset = value_to_offset_predicate(&v["offset"]);
             let tag = v["tag"].as_str().unwrap_or("");
@@ -537,6 +547,25 @@ pub fn value_to_height_provider(v: &Value) -> TokenStream {
                 HeightProvider::Uniform(UniformHeightProvider {
                     min_inclusive: #y,
                     max_inclusive: #y,
+                })
+            }
+        }
+        "minecraft:weighted_list" => {
+            let entries: Vec<TokenStream> = v["distribution"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .map(|entry| {
+                            let data = value_to_height_provider(&entry["data"]);
+                            let weight = entry["weight"].as_i64().unwrap_or(1) as i32;
+                            quote! { WeightedHeightEntry { data: #data, weight: #weight } }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            quote! {
+                HeightProvider::WeightedList(WeightedListHeightProvider {
+                    distribution: vec![#(#entries),*],
                 })
             }
         }
@@ -760,6 +789,45 @@ fn value_to_matching_blocks_wrapper(v: &Value) -> TokenStream {
             quote! { MatchingBlocksWrapper::Multiple(vec![#(#items),*]) }
         }
         _ => quote! { MatchingBlocksWrapper::Single(String::new()) },
+    }
+}
+
+/// Converts a biome holder-set JSON value into a generated biome predicate wrapper.
+fn value_to_matching_biomes_wrapper(v: &Value) -> TokenStream {
+    let biome_ident = |name: &str| {
+        let name = name.strip_prefix("minecraft:").unwrap_or(name);
+        quote::format_ident!("{}", name.to_uppercase().replace([':', '-', '/'], "_"))
+    };
+
+    match v {
+        Value::String(s) if s.starts_with('#') => {
+            let tag_ident = biome_ident(&s[1..]);
+            quote! {
+                MatchingBiomesWrapper::Tag(pumpkin_data::tag::WorldgenBiome::#tag_ident.1)
+            }
+        }
+        Value::String(s) => {
+            let ident = biome_ident(s);
+            quote! {
+                MatchingBiomesWrapper::Single(&pumpkin_data::chunk::Biome::#ident)
+            }
+        }
+        Value::Array(arr) => {
+            let items: Vec<TokenStream> = arr
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| {
+                    let ident = biome_ident(s);
+                    quote! { &pumpkin_data::chunk::Biome::#ident }
+                })
+                .collect();
+            quote! {
+                MatchingBiomesWrapper::Multiple(&[#(#items),*])
+            }
+        }
+        _ => quote! {
+            MatchingBiomesWrapper::Multiple(&[])
+        },
     }
 }
 

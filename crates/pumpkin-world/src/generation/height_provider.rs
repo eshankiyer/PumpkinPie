@@ -10,6 +10,7 @@ pub enum HeightProvider {
     Uniform(UniformHeightProvider),
     Trapezoid(TrapezoidHeightProvider),
     VeryBiasedToBottom(VeryBiasedToBottomHeightProvider),
+    WeightedList(WeightedListHeightProvider),
 }
 
 impl HeightProvider {
@@ -18,7 +19,39 @@ impl HeightProvider {
             Self::Uniform(provider) => provider.get(random, min_y, height),
             Self::Trapezoid(provider) => provider.get(random, min_y, height),
             Self::VeryBiasedToBottom(provider) => provider.get(random, min_y, height),
+            Self::WeightedList(provider) => provider.get(random, min_y, height),
         }
+    }
+}
+
+pub struct WeightedListHeightProvider {
+    pub distribution: Vec<WeightedHeightEntry>,
+}
+
+pub struct WeightedHeightEntry {
+    pub data: HeightProvider,
+    pub weight: i32,
+}
+
+impl WeightedListHeightProvider {
+    /// Selects one weighted provider and samples it, matching
+    /// `WeightedListHeight.sample` (`WeightedListHeight.java:20-22`).
+    pub fn get(&self, random: &mut RandomGenerator, min_y: i8, height: u16) -> i32 {
+        let total_weight: i32 = self.distribution.iter().map(|entry| entry.weight).sum();
+        assert!(
+            total_weight > 0,
+            "weighted height provider must not be empty"
+        );
+
+        let mut selection = random.next_bounded_i32(total_weight);
+        for entry in &self.distribution {
+            selection -= entry.weight;
+            if selection < 0 {
+                return entry.data.get(random, min_y, height);
+            }
+        }
+
+        unreachable!("weighted height provider selection exceeded its total weight")
     }
 }
 
