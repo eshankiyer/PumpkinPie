@@ -20,6 +20,12 @@ pub enum RecipeTypes {
     /// Shapeless crafting table recipe.
     #[serde(rename = "minecraft:crafting_shapeless")]
     CraftingShapeless(CraftingShapelessRecipeStruct),
+    /// Component-aware dyeing recipe.
+    #[serde(rename = "minecraft:crafting_dye")]
+    CraftingDye(CraftingDyeRecipeStruct),
+    /// Potion imbuing recipe.
+    #[serde(rename = "minecraft:crafting_imbue")]
+    CraftingImbue(CraftingImbueRecipeStruct),
     /// Transmute crafting recipe (preserves NBT/components from one slot to another).
     #[serde(rename = "minecraft:crafting_transmute")]
     CraftingTransmute(CraftingTransmuteRecipeStruct),
@@ -286,6 +292,76 @@ impl ToTokens for CraftingShapelessRecipeStruct {
                 category: #category,
                 group: #group,
                 ingredients: &[#(#ingredients),*],
+                result: #result,
+            }
+        });
+    }
+}
+
+/// Deserialized component-aware dyeing recipe.
+#[derive(Deserialize)]
+pub struct CraftingDyeRecipeStruct {
+    category: Option<RecipeCategoryTypes>,
+    group: Option<String>,
+    target: RecipeIngredientTypes,
+    dye: RecipeIngredientTypes,
+    result: RecipeResultStruct,
+}
+
+impl ToTokens for CraftingDyeRecipeStruct {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let category = self
+            .category
+            .as_ref()
+            .map_or_else(|| RecipeCategoryTypes::Misc.to_token_stream(), ToTokens::to_token_stream);
+        let group = self
+            .group
+            .as_ref()
+            .map_or_else(|| quote! { None }, |group| quote! { Some(#group) });
+        let target = self.target.to_token_stream();
+        let dye = self.dye.to_token_stream();
+        let result = self.result.to_token_stream();
+        tokens.extend(quote! {
+            CraftingRecipeTypes::CraftingDye {
+                category: #category,
+                group: #group,
+                target: #target,
+                dye: #dye,
+                result: #result,
+            }
+        });
+    }
+}
+
+/// Deserialized potion imbuing recipe.
+#[derive(Deserialize)]
+pub struct CraftingImbueRecipeStruct {
+    category: Option<RecipeCategoryTypes>,
+    group: Option<String>,
+    source: RecipeIngredientTypes,
+    material: RecipeIngredientTypes,
+    result: RecipeResultStruct,
+}
+
+impl ToTokens for CraftingImbueRecipeStruct {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
+        let category = self
+            .category
+            .as_ref()
+            .map_or_else(|| RecipeCategoryTypes::Misc.to_token_stream(), ToTokens::to_token_stream);
+        let group = self
+            .group
+            .as_ref()
+            .map_or_else(|| quote! { None }, |group| quote! { Some(#group) });
+        let source = self.source.to_token_stream();
+        let material = self.material.to_token_stream();
+        let result = self.result.to_token_stream();
+        tokens.extend(quote! {
+            CraftingRecipeTypes::CraftingImbue {
+                category: #category,
+                group: #group,
+                source: #source,
+                material: #material,
                 result: #result,
             }
         });
@@ -562,6 +638,12 @@ pub fn build() -> TokenStream {
             RecipeTypes::CraftingShapeless(recipe) => {
                 crafting_recipes.push(recipe.to_token_stream());
             }
+            RecipeTypes::CraftingDye(recipe) => {
+                crafting_recipes.push(recipe.to_token_stream());
+            }
+            RecipeTypes::CraftingImbue(recipe) => {
+                crafting_recipes.push(recipe.to_token_stream());
+            }
             RecipeTypes::CraftingTransmute(recipe) => {
                 crafting_recipes.push(recipe.to_token_stream());
             }
@@ -621,6 +703,20 @@ pub fn build() -> TokenStream {
                 category: RecipeCategoryTypes,
                 group: Option<&'static str>,
                 ingredients: &'static [RecipeIngredientTypes],
+                result: RecipeResultStruct,
+            },
+            CraftingDye {
+                category: RecipeCategoryTypes,
+                group: Option<&'static str>,
+                target: RecipeIngredientTypes,
+                dye: RecipeIngredientTypes,
+                result: RecipeResultStruct,
+            },
+            CraftingImbue {
+                category: RecipeCategoryTypes,
+                group: Option<&'static str>,
+                source: RecipeIngredientTypes,
+                material: RecipeIngredientTypes,
                 result: RecipeResultStruct,
             },
             CraftingTransmute {
@@ -902,7 +998,9 @@ pub fn build() -> TokenStream {
                     let result = match recipe {
                         CraftingRecipeTypes::CraftingShaped { result, .. }
                         | CraftingRecipeTypes::CraftingShapeless { result, .. }
-                        | CraftingRecipeTypes::CraftingTransmute { result, .. } => result,
+                        | CraftingRecipeTypes::CraftingTransmute { result, .. }
+                        | CraftingRecipeTypes::CraftingDye { result, .. }
+                        | CraftingRecipeTypes::CraftingImbue { result, .. } => result,
                         _ => continue,
                     };
                     if !result.components.is_empty() {

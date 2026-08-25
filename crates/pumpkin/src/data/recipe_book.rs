@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use pumpkin_data::item::Item;
 use pumpkin_data::recipes::{
     CookingRecipeType, CraftingRecipeTypes, RECIPES_COOKING, RECIPES_CRAFTING,
-    RecipeIngredientTypes,
+    RecipeIngredientTypes, RecipeResultStruct,
 };
 use pumpkin_data::tag::{RegistryKey, get_tag_ids};
 use pumpkin_nbt::compound::NbtCompound;
@@ -413,6 +413,66 @@ fn ingredient_item_ids(ingredient: &RecipeIngredientTypes, out: &mut Vec<u16>) {
     }
 }
 
+/// Resolves one `RECIPES_CRAFTING` entry's book-registration result, appending its ingredient
+/// item ids into `ingredients`. Returns `None` for the two special-recipe kinds, which vanilla's
+/// `ServerRecipeBook` never assigns a display id to (`ServerRecipeBook.java:66`).
+fn crafting_recipe_book_result<'a>(
+    recipe: &'a CraftingRecipeTypes,
+    ingredients: &mut Vec<u16>,
+) -> Option<&'a RecipeResultStruct> {
+    match recipe {
+        CraftingRecipeTypes::CraftingShaped { key, result, .. } => {
+            for (_, ingredient) in *key {
+                ingredient_item_ids(ingredient, ingredients);
+            }
+            Some(result)
+        }
+        CraftingRecipeTypes::CraftingShapeless {
+            ingredients: list,
+            result,
+            ..
+        } => {
+            for ingredient in *list {
+                ingredient_item_ids(ingredient, ingredients);
+            }
+            Some(result)
+        }
+        CraftingRecipeTypes::CraftingTransmute {
+            input,
+            material,
+            result,
+            ..
+        } => {
+            ingredient_item_ids(input, ingredients);
+            ingredient_item_ids(material, ingredients);
+            Some(result)
+        }
+        CraftingRecipeTypes::CraftingDye {
+            target,
+            dye,
+            result,
+            ..
+        } => {
+            ingredient_item_ids(target, ingredients);
+            ingredient_item_ids(dye, ingredients);
+            Some(result)
+        }
+        CraftingRecipeTypes::CraftingImbue {
+            source,
+            material,
+            result,
+            ..
+        } => {
+            ingredient_item_ids(source, ingredients);
+            ingredient_item_ids(material, ingredients);
+            Some(result)
+        }
+        CraftingRecipeTypes::CraftingDecoratedPot { .. } | CraftingRecipeTypes::CraftingSpecial => {
+            None
+        }
+    }
+}
+
 fn build_registry() -> RecipeRegistry {
     let mut registry = RecipeRegistry::default();
     let mut ingredients = Vec::new();
@@ -457,38 +517,8 @@ fn build_registry() -> RecipeRegistry {
 
     for recipe in RECIPES_CRAFTING {
         ingredients.clear();
-        let result = match recipe {
-            CraftingRecipeTypes::CraftingShaped { key, result, .. } => {
-                for (_, ingredient) in *key {
-                    ingredient_item_ids(ingredient, &mut ingredients);
-                }
-                result
-            }
-            CraftingRecipeTypes::CraftingShapeless {
-                ingredients: list,
-                result,
-                ..
-            } => {
-                for ingredient in *list {
-                    ingredient_item_ids(ingredient, &mut ingredients);
-                }
-                result
-            }
-            CraftingRecipeTypes::CraftingTransmute {
-                input,
-                material,
-                result,
-                ..
-            } => {
-                ingredient_item_ids(input, &mut ingredients);
-                ingredient_item_ids(material, &mut ingredients);
-                result
-            }
-            // `Recipe.isSpecial` recipes are never put in the book
-            // (`ServerRecipeBook.java:66`) and are skipped by `CRecipeBookAdd`, so
-            // they consume no display id either.
-            CraftingRecipeTypes::CraftingDecoratedPot { .. }
-            | CraftingRecipeTypes::CraftingSpecial => continue,
+        let Some(result) = crafting_recipe_book_result(recipe, &mut ingredients) else {
+            continue;
         };
         ingredients.sort_unstable();
         ingredients.dedup();

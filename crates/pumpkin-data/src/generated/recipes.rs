@@ -23,6 +23,20 @@ pub enum CraftingRecipeTypes {
         ingredients: &'static [RecipeIngredientTypes],
         result: RecipeResultStruct,
     },
+    CraftingDye {
+        category: RecipeCategoryTypes,
+        group: Option<&'static str>,
+        target: RecipeIngredientTypes,
+        dye: RecipeIngredientTypes,
+        result: RecipeResultStruct,
+    },
+    CraftingImbue {
+        category: RecipeCategoryTypes,
+        group: Option<&'static str>,
+        source: RecipeIngredientTypes,
+        material: RecipeIngredientTypes,
+        result: RecipeResultStruct,
+    },
     CraftingTransmute {
         category: RecipeCategoryTypes,
         group: Option<&'static str>,
@@ -8324,12 +8338,34 @@ pub static RECIPES_CRAFTING: &[CraftingRecipeTypes] = &[
             components: &[],
         },
     },
+    CraftingRecipeTypes::CraftingDye {
+        category: RecipeCategoryTypes::Misc,
+        group: Some("dyed_armor"),
+        target: RecipeIngredientTypes::Simple("minecraft:leather_boots"),
+        dye: RecipeIngredientTypes::Tagged("#minecraft:dyes"),
+        result: RecipeResultStruct {
+            id: "minecraft:leather_boots",
+            count: 1u8,
+            components: &[],
+        },
+    },
     CraftingRecipeTypes::CraftingShaped {
         category: RecipeCategoryTypes::Equipment,
         group: None,
         show_notification: true,
         key: &[('X', RecipeIngredientTypes::Simple("minecraft:leather"))],
         pattern: &["X X", "XXX", "XXX"],
+        result: RecipeResultStruct {
+            id: "minecraft:leather_chestplate",
+            count: 1u8,
+            components: &[],
+        },
+    },
+    CraftingRecipeTypes::CraftingDye {
+        category: RecipeCategoryTypes::Misc,
+        group: Some("dyed_armor"),
+        target: RecipeIngredientTypes::Simple("minecraft:leather_chestplate"),
+        dye: RecipeIngredientTypes::Tagged("#minecraft:dyes"),
         result: RecipeResultStruct {
             id: "minecraft:leather_chestplate",
             count: 1u8,
@@ -8348,6 +8384,17 @@ pub static RECIPES_CRAFTING: &[CraftingRecipeTypes] = &[
             components: &[],
         },
     },
+    CraftingRecipeTypes::CraftingDye {
+        category: RecipeCategoryTypes::Misc,
+        group: Some("dyed_armor"),
+        target: RecipeIngredientTypes::Simple("minecraft:leather_helmet"),
+        dye: RecipeIngredientTypes::Tagged("#minecraft:dyes"),
+        result: RecipeResultStruct {
+            id: "minecraft:leather_helmet",
+            count: 1u8,
+            components: &[],
+        },
+    },
     CraftingRecipeTypes::CraftingShaped {
         category: RecipeCategoryTypes::Misc,
         group: None,
@@ -8360,12 +8407,34 @@ pub static RECIPES_CRAFTING: &[CraftingRecipeTypes] = &[
             components: &[],
         },
     },
+    CraftingRecipeTypes::CraftingDye {
+        category: RecipeCategoryTypes::Misc,
+        group: Some("dyed_armor"),
+        target: RecipeIngredientTypes::Simple("minecraft:leather_horse_armor"),
+        dye: RecipeIngredientTypes::Tagged("#minecraft:dyes"),
+        result: RecipeResultStruct {
+            id: "minecraft:leather_horse_armor",
+            count: 1u8,
+            components: &[],
+        },
+    },
     CraftingRecipeTypes::CraftingShaped {
         category: RecipeCategoryTypes::Equipment,
         group: None,
         show_notification: true,
         key: &[('X', RecipeIngredientTypes::Simple("minecraft:leather"))],
         pattern: &["XXX", "X X", "X X"],
+        result: RecipeResultStruct {
+            id: "minecraft:leather_leggings",
+            count: 1u8,
+            components: &[],
+        },
+    },
+    CraftingRecipeTypes::CraftingDye {
+        category: RecipeCategoryTypes::Misc,
+        group: Some("dyed_armor"),
+        target: RecipeIngredientTypes::Simple("minecraft:leather_leggings"),
+        dye: RecipeIngredientTypes::Tagged("#minecraft:dyes"),
         result: RecipeResultStruct {
             id: "minecraft:leather_leggings",
             count: 1u8,
@@ -14549,6 +14618,17 @@ pub static RECIPES_CRAFTING: &[CraftingRecipeTypes] = &[
             components: &[],
         },
     },
+    CraftingRecipeTypes::CraftingImbue {
+        category: RecipeCategoryTypes::Misc,
+        group: None,
+        source: RecipeIngredientTypes::Simple("minecraft:lingering_potion"),
+        material: RecipeIngredientTypes::Simple("minecraft:arrow"),
+        result: RecipeResultStruct {
+            id: "minecraft:tipped_arrow",
+            count: 8u8,
+            components: &[],
+        },
+    },
     CraftingRecipeTypes::CraftingShaped {
         category: RecipeCategoryTypes::Restone,
         group: None,
@@ -16506,6 +16586,17 @@ pub static RECIPES_CRAFTING: &[CraftingRecipeTypes] = &[
             RecipeIngredientTypes::Simple("minecraft:armadillo_scute"),
         )],
         pattern: &["X  ", "XXX", "X X"],
+        result: RecipeResultStruct {
+            id: "minecraft:wolf_armor",
+            count: 1u8,
+            components: &[],
+        },
+    },
+    CraftingRecipeTypes::CraftingDye {
+        category: RecipeCategoryTypes::Misc,
+        group: Some("dyed_armor"),
+        target: RecipeIngredientTypes::Simple("minecraft:wolf_armor"),
+        dye: RecipeIngredientTypes::Tagged("#minecraft:dyes"),
         result: RecipeResultStruct {
             id: "minecraft:wolf_armor",
             count: 1u8,
@@ -21416,7 +21507,9 @@ mod recipe_result_component_tests {
             let result = match recipe {
                 CraftingRecipeTypes::CraftingShaped { result, .. }
                 | CraftingRecipeTypes::CraftingShapeless { result, .. }
-                | CraftingRecipeTypes::CraftingTransmute { result, .. } => result,
+                | CraftingRecipeTypes::CraftingTransmute { result, .. }
+                | CraftingRecipeTypes::CraftingDye { result, .. }
+                | CraftingRecipeTypes::CraftingImbue { result, .. } => result,
                 _ => continue,
             };
             if !result.components.is_empty() {

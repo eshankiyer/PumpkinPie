@@ -410,6 +410,25 @@ pub fn write_recipe_display(
                 write_result_slot_display(write, result, version)?;
                 write_item_slot_display(write, crafting_table, version)?;
             }
+            CraftingRecipeTypes::CraftingDye {
+                target,
+                dye,
+                result,
+                ..
+            }
+            | CraftingRecipeTypes::CraftingImbue {
+                source: target,
+                material: dye,
+                result,
+                ..
+            } => {
+                write.write_var_int(&VarInt(RECIPE_DISPLAY_SHAPELESS))?;
+                write.write_var_int(&VarInt(2))?;
+                write_ingredient_slot_display(write, target, version)?;
+                write_ingredient_slot_display(write, dye, version)?;
+                write_result_slot_display(write, result, version)?;
+                write_item_slot_display(write, crafting_table, version)?;
+            }
             // Skip special/decorated_pot recipes as they have no useful display
             CraftingRecipeTypes::CraftingDecoratedPot { .. }
             | CraftingRecipeTypes::CraftingSpecial => {
@@ -450,6 +469,7 @@ pub fn write_recipe_display(
 /// Write a single `RecipeDisplayEntry` + flags byte.
 /// Returns `Ok(true)` if written, `Ok(false)` if skipped (special recipe).
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
 fn write_entry(
     write: &mut impl Write,
     display_id: i32,
@@ -534,6 +554,26 @@ fn write_entry(
                 write.write_var_int(&VarInt(crafting_category(category)))?;
                 // craftingRequirements: input + material
                 write_crafting_requirements(write, &[input, material], version)?;
+            }
+            CraftingRecipeTypes::CraftingDye {
+                category,
+                target,
+                dye,
+                ..
+            } => {
+                write_optional_var_int(write, group_id)?;
+                write.write_var_int(&VarInt(crafting_category(category)))?;
+                write_crafting_requirements(write, &[target, dye], version)?;
+            }
+            CraftingRecipeTypes::CraftingImbue {
+                category,
+                source,
+                material,
+                ..
+            } => {
+                write_optional_var_int(write, group_id)?;
+                write.write_var_int(&VarInt(crafting_category(category)))?;
+                write_crafting_requirements(write, &[source, material], version)?;
             }
             // Excluded by the guard above.
             CraftingRecipeTypes::CraftingDecoratedPot { .. }
@@ -628,7 +668,9 @@ impl ClientPacket for CRecipeBookAdd<'_> {
                     ..
                 } => (group.map(Cow::Borrowed), *show_notification),
                 CraftingRecipeTypes::CraftingShapeless { group, .. }
-                | CraftingRecipeTypes::CraftingTransmute { group, .. } => {
+                | CraftingRecipeTypes::CraftingTransmute { group, .. }
+                | CraftingRecipeTypes::CraftingDye { group, .. }
+                | CraftingRecipeTypes::CraftingImbue { group, .. } => {
                     (group.map(Cow::Borrowed), true)
                 }
                 CraftingRecipeTypes::CraftingDecoratedPot { .. }
@@ -712,7 +754,9 @@ impl ClientPacket for CRecipeBookAdd<'_> {
                             group.as_deref().map(Cow::Borrowed),
                             entry_flags(self.replace, *show_notification, highlight),
                         ),
-                        crate::codec::recipe::OwnedCraftingRecipe::Shapeless { group, .. } => (
+                        crate::codec::recipe::OwnedCraftingRecipe::Shapeless { group, .. }
+                        | crate::codec::recipe::OwnedCraftingRecipe::Dye { group, .. }
+                        | crate::codec::recipe::OwnedCraftingRecipe::Imbue { group, .. } => (
                             group.as_deref().map(Cow::Borrowed),
                             entry_flags(self.replace, true, highlight),
                         ),
@@ -977,6 +1021,25 @@ pub fn write_dynamic_recipe_display(
             write_dynamic_result_slot_display(write, result, version)?;
             write_item_slot_display(write, crafting_table, version)?;
         }
+        crate::codec::recipe::OwnedCraftingRecipe::Dye {
+            target,
+            dye,
+            result,
+            ..
+        }
+        | crate::codec::recipe::OwnedCraftingRecipe::Imbue {
+            source: target,
+            material: dye,
+            result,
+            ..
+        } => {
+            write.write_var_int(&VarInt(RECIPE_DISPLAY_SHAPELESS))?;
+            write.write_var_int(&VarInt(2))?;
+            write_dynamic_ingredient_slot_display(write, target, version)?;
+            write_dynamic_ingredient_slot_display(write, dye, version)?;
+            write_dynamic_result_slot_display(write, result, version)?;
+            write_item_slot_display(write, crafting_table, version)?;
+        }
     }
     Ok(())
 }
@@ -1032,6 +1095,25 @@ fn write_dynamic_crafting_entry(
             for ing in ingredients {
                 write_dynamic_ingredient_holderset(write, ing, version)?;
             }
+        }
+        crate::codec::recipe::OwnedCraftingRecipe::Dye {
+            category,
+            target,
+            dye,
+            ..
+        }
+        | crate::codec::recipe::OwnedCraftingRecipe::Imbue {
+            category,
+            source: target,
+            material: dye,
+            ..
+        } => {
+            write_optional_var_int(write, group_id)?;
+            write.write_var_int(&VarInt(crafting_category(category)))?;
+            write.write_bool(true)?;
+            write.write_var_int(&VarInt(2))?;
+            write_dynamic_ingredient_holderset(write, target, version)?;
+            write_dynamic_ingredient_holderset(write, dye, version)?;
         }
     }
     write.write_u8(flags)?;
@@ -1134,7 +1216,9 @@ fn show_notification(display_id: i32) -> bool {
                 show_notification, ..
             } => *show_notification,
             CraftingRecipeTypes::CraftingShapeless { .. }
-            | CraftingRecipeTypes::CraftingTransmute { .. } => true,
+            | CraftingRecipeTypes::CraftingTransmute { .. }
+            | CraftingRecipeTypes::CraftingDye { .. }
+            | CraftingRecipeTypes::CraftingImbue { .. } => true,
             CraftingRecipeTypes::CraftingDecoratedPot { .. }
             | CraftingRecipeTypes::CraftingSpecial => continue,
         };
@@ -1219,7 +1303,9 @@ impl SubsetWriter<'_> {
             let group = match recipe {
                 CraftingRecipeTypes::CraftingShaped { group, .. }
                 | CraftingRecipeTypes::CraftingShapeless { group, .. }
-                | CraftingRecipeTypes::CraftingTransmute { group, .. } => group.map(Cow::Borrowed),
+                | CraftingRecipeTypes::CraftingTransmute { group, .. }
+                | CraftingRecipeTypes::CraftingDye { group, .. }
+                | CraftingRecipeTypes::CraftingImbue { group, .. } => group.map(Cow::Borrowed),
                 // No display, no display id: `CRecipeBookAdd` skips these too.
                 CraftingRecipeTypes::CraftingDecoratedPot { .. }
                 | CraftingRecipeTypes::CraftingSpecial => continue,

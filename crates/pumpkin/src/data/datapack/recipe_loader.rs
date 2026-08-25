@@ -14,6 +14,8 @@ pub fn parse_recipe(namespace: &str, name: &str, json_str: &str) -> Option<Dynam
     match recipe_type {
         "crafting_shaped" => parse_shaped(recipe_id, &value).map(DynamicRecipe::Crafting),
         "crafting_shapeless" => parse_shapeless(recipe_id, &value).map(DynamicRecipe::Crafting),
+        "crafting_dye" => parse_dye(recipe_id, &value).map(DynamicRecipe::Crafting),
+        "crafting_imbue" => parse_imbue(recipe_id, &value).map(DynamicRecipe::Crafting),
         "smelting" => parse_cooking(recipe_id, &value, 200)
             .map(|c| DynamicRecipe::Cooking(OwnedCookingRecipeType::Smelting(c))),
         "blasting" => parse_cooking(recipe_id, &value, 100)
@@ -161,6 +163,40 @@ fn parse_shapeless(recipe_id: String, value: &Value) -> Option<OwnedCraftingReci
         category,
         group,
         ingredients,
+        result,
+    })
+}
+
+fn parse_dye(recipe_id: String, value: &Value) -> Option<OwnedCraftingRecipe> {
+    let target = parse_ingredient(value.get("target")?)?;
+    let dye = parse_ingredient(value.get("dye")?)?;
+    let result = parse_result(value.get("result")?)?;
+    Some(OwnedCraftingRecipe::Dye {
+        recipe_id: Some(recipe_id),
+        category: parse_category(value.get("category")),
+        group: value
+            .get("group")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        target,
+        dye,
+        result,
+    })
+}
+
+fn parse_imbue(recipe_id: String, value: &Value) -> Option<OwnedCraftingRecipe> {
+    let source = parse_ingredient(value.get("source")?)?;
+    let material = parse_ingredient(value.get("material")?)?;
+    let result = parse_result(value.get("result")?)?;
+    Some(OwnedCraftingRecipe::Imbue {
+        recipe_id: Some(recipe_id),
+        category: parse_category(value.get("category")),
+        group: value
+            .get("group")
+            .and_then(Value::as_str)
+            .map(ToString::to_string),
+        source,
+        material,
         result,
     })
 }
