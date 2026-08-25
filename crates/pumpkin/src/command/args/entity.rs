@@ -8,6 +8,7 @@ use crate::command::tree::RawArgs;
 use crate::entity::EntityBase;
 use crate::server::Server;
 use pumpkin_protocol::java::client::play::{ArgumentType, SuggestionProviders};
+use pumpkin_util::text::TextComponent;
 use tracing::debug;
 
 use super::super::args::ArgumentConsumer;
@@ -107,6 +108,65 @@ impl<'a> FindArg<'a> for EntityArgumentConsumer {
         match args.get(name) {
             Some(Arg::Entity(data)) => Ok(data.clone()),
             _ => Err(CommandError::InvalidConsumption(Some(name.to_string()))),
+        }
+    }
+}
+
+/// Restricts an entity argument to Pumpkin's waypoint-capable entity family.
+pub struct WaypointArgumentConsumer;
+
+impl GetClientSideArgParser for WaypointArgumentConsumer {
+    fn get_client_side_parser(&self) -> ArgumentType {
+        EntityArgumentConsumer.get_client_side_parser()
+    }
+
+    fn get_client_side_suggestion_type_override(&self) -> Option<SuggestionProviders> {
+        EntityArgumentConsumer.get_client_side_suggestion_type_override()
+    }
+}
+
+impl ArgumentConsumer for WaypointArgumentConsumer {
+    fn consume<'a>(
+        &'a self,
+        sender: &'a CommandSender,
+        server: &'a Server,
+        args: &mut RawArgs<'a>,
+    ) -> ConsumeResult<'a> {
+        EntityArgumentConsumer.consume(sender, server, args)
+    }
+
+    fn consume_with_syntax<'a>(
+        &'a self,
+        sender: &'a CommandSender,
+        server: &'a Server,
+        args: &mut RawArgs<'a>,
+    ) -> ConsumeResultWithSyntax<'a> {
+        EntityArgumentConsumer.consume_with_syntax(sender, server, args)
+    }
+}
+
+impl DefaultNameArgConsumer for WaypointArgumentConsumer {
+    fn default_name(&self) -> &'static str {
+        "waypoint"
+    }
+}
+
+impl<'a> FindArg<'a> for WaypointArgumentConsumer {
+    type Data = Arc<dyn EntityBase>;
+
+    /// Vanilla `WaypointArgument.getWaypoint` (`WaypointArgument.java:14-19`)
+    /// accepts the selected entity only when it implements `WaypointTransmitter`.
+    /// Pumpkin's `LivingEntity` is the corresponding waypoint-capable family.
+    fn find_arg(args: &'a super::ConsumedArgs, name: &str) -> Result<Self::Data, CommandError> {
+        let entity = EntityArgumentConsumer::find_arg(args, name)?;
+        if entity.get_living_entity().is_some() {
+            Ok(entity)
+        } else {
+            Err(CommandError::CommandFailed(TextComponent::translate_cross(
+                "argument.waypoint.invalid",
+                "argument.waypoint.invalid",
+                [],
+            )))
         }
     }
 }

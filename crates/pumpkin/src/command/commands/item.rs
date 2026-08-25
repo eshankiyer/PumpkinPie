@@ -96,8 +96,7 @@ impl CommandExecutor for BlockReplaceExecutor {
                 )));
             }
 
-            let mut item_stack = parsed_stack.clone();
-            item_stack.item_count = count as u8;
+            let item_stack = ItemArgumentConsumer::create_item_stack(&parsed_stack, count)?;
             inventory.set_stack(slot, item_stack.clone()).await;
 
             let msg = TextComponent::translate_cross(
@@ -144,8 +143,7 @@ impl CommandExecutor for EntityReplaceExecutor {
             };
 
             let mut modified_count = 0;
-            let mut item_stack = parsed_stack.clone();
-            item_stack.item_count = count as u8;
+            let item_stack = ItemArgumentConsumer::create_item_stack(&parsed_stack, count)?;
 
             for target in targets {
                 if let Some(player) = target.get_player() {

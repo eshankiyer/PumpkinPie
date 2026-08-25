@@ -4,7 +4,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::text::TextComponent;
 
 use crate::command::args::{
-    FindArg, entity::EntityArgumentConsumer, hex_color::HexColorArgumentConsumer,
+    FindArg, entity::WaypointArgumentConsumer, hex_color::HexColorArgumentConsumer,
     resource_location::ResourceLocationArgumentConsumer, team_color::TeamColorArgumentConsumer,
 };
 use crate::command::tree::builder::{argument, literal};
@@ -60,7 +60,7 @@ impl CommandExecutor for ColorExecutor {
         args: &'a ConsumedArgs<'a>,
     ) -> CommandResult<'a> {
         Box::pin(async move {
-            let waypoint_entity = EntityArgumentConsumer::find_arg(args, ARG_WAYPOINT)?;
+            let waypoint_entity = WaypointArgumentConsumer::find_arg(args, ARG_WAYPOINT)?;
             let entity = waypoint_entity.get_entity();
             let pos = entity.pos.load();
             let block_pos = BlockPos::new(
@@ -149,7 +149,7 @@ impl CommandExecutor for StyleExecutor {
         args: &'a ConsumedArgs<'a>,
     ) -> CommandResult<'a> {
         Box::pin(async move {
-            let waypoint_entity = EntityArgumentConsumer::find_arg(args, ARG_WAYPOINT)?;
+            let waypoint_entity = WaypointArgumentConsumer::find_arg(args, ARG_WAYPOINT)?;
             let entity = waypoint_entity.get_entity();
             let pos = entity.pos.load();
             let block_pos = BlockPos::new(
@@ -216,7 +216,7 @@ pub fn init_command_tree() -> CommandTree {
         );
 
     let modify_node = literal("modify").then(
-        argument(ARG_WAYPOINT, EntityArgumentConsumer)
+        argument(ARG_WAYPOINT, WaypointArgumentConsumer)
             .then(color_node)
             .then(style_node),
     );
