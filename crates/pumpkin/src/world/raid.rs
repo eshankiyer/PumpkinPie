@@ -266,6 +266,13 @@ impl Raid {
         self.groups_spawned > 0
     }
 
+    /// `Raid.isBetweenWaves` (`Raid.java:169-171`): a spawned raid with no living raiders and a
+    /// positive inter-wave cooldown is still in the pre-raid activity package.
+    #[must_use]
+    pub fn is_between_waves(&self) -> bool {
+        self.has_first_wave_spawned() && self.total_raiders_alive() == 0 && self.cooldown_ticks > 0
+    }
+
     #[must_use]
     pub const fn center(&self) -> BlockPos {
         self.center
@@ -975,6 +982,17 @@ impl RaidManager {
     #[must_use]
     pub fn raid(&self, id: i32) -> Option<&Raid> {
         self.raids.get(&id)
+    }
+
+    /// `ServerLevel.getRaidAt` plus the pre-raid activity selection used by
+    /// `VillagerGoalPackages.getPreRaidPackage` (`VillagerGoalPackages.java:231-245`).
+    #[must_use]
+    pub fn is_pre_raid_at(&self, pos: BlockPos) -> bool {
+        self.raids
+            .values()
+            .filter(|raid| raid.is_active())
+            .filter(|raid| (raid.center.squared_distance(&pos) as f64) < VALID_RAID_RADIUS_SQR)
+            .any(|raid| !raid.has_first_wave_spawned() || raid.is_between_waves())
     }
 
     fn find_active_raid_near(&self, pos: BlockPos) -> Option<i32> {

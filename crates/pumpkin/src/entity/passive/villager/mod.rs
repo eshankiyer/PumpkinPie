@@ -47,6 +47,8 @@ use crate::entity::{
             interact_with_door::InteractWithDoorGoal,
             look_around::RandomLookAroundGoal,
             look_at_entity::LookAtEntityGoal,
+            ring_bell::RingBellGoal,
+            socialize_at_bell::SocializeAtBellGoal,
             stroll_around_poi::{StrollAroundPoiGoal, StrollPoi},
             swim::SwimGoal,
             trade_with_player::TradeWithPlayerGoal,
@@ -430,6 +432,9 @@ impl VillagerEntity {
             // goal-based port, same as `CopperGolemEntity` does for its own `InteractWithDoor`
             // core-activity entry.
             goal_selector.add_goal(0, Box::new(InteractWithDoorGoal::new(true)));
+            // `RingBell.create` (`RingBell.java:15-31`) belongs to the vanilla pre-raid package.
+            // The goal gates itself on the same nearby pre-raid/inter-wave raid state.
+            goal_selector.add_goal(0, Box::new(RingBellGoal));
             // Villagers avoid threats
             goal_selector.add_goal(
                 1,
@@ -489,6 +494,9 @@ impl VillagerEntity {
             // `InteractWith` that sets `BREED_TARGET`; see `breed.rs` for what the port does
             // and does not carry across.
             goal_selector.add_goal(2, Box::new(VillagerBreedGoal::new(0.5)));
+            // `SocializeAtBell.create` (`SocializeAtBell.java:14-41`) is one of the two
+            // shuffled MEET behaviors (`VillagerGoalPackages.java:147-153`).
+            goal_selector.add_goal(2, Box::new(SocializeAtBellGoal::new()));
             // Basic movement and looking (Vanilla uses 0.5 speed)
             goal_selector.add_goal(3, Box::new(WorkAtJobSiteGoal::new(0.5)));
             // `VillagerGoalPackages.getWorkPackage`/`getMeetPackage`: once already near the

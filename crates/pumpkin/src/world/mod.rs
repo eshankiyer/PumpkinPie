@@ -2641,6 +2641,13 @@ impl World {
         self.level_time.lock().await.world_age
     }
 
+    /// `ServerLevel.getRaidAt` (`ServerLevel.java:1562-1565`) narrowed to the pre-raid activity
+    /// needed by `RingBell` (`VillagerGoalPackages.java:231-245`).
+    #[must_use]
+    pub async fn is_raid_pre_raid_at(&self, position: BlockPos) -> bool {
+        self.raids.lock().await.is_pre_raid_at(position)
+    }
+
     pub async fn get_time_of_day(&self) -> i64 {
         self.level_time.lock().await.time_of_day
     }
