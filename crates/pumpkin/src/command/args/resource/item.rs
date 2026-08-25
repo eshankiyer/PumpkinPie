@@ -20,6 +20,37 @@ use crate::server::Server;
 
 pub struct ItemArgumentConsumer;
 
+fn malformed_item_error(error: impl Into<String>) -> CommandError {
+    CommandError::CommandFailed(TextComponent::translate_cross(
+        "arguments.item.malformed",
+        "arguments.item.malformed",
+        [TextComponent::text(error.into())],
+    ))
+}
+
+impl ItemArgumentConsumer {
+    /// Vanilla `ItemInput.createItemStack` (`ItemInput.java:21-28`) constructs the
+    /// requested count, rejects overstacked results, and validates component data.
+    pub fn create_item_stack(stack: &ItemStack, count: i32) -> Result<ItemStack, CommandError> {
+        let max_stack_size = i32::from(stack.get_max_stack_size());
+        if count > max_stack_size {
+            return Err(CommandError::CommandFailed(TextComponent::translate_cross(
+                "arguments.item.overstacked",
+                "arguments.item.overstacked",
+                [
+                    TextComponent::text(stack.item.registry_key.to_string()),
+                    TextComponent::text(max_stack_size.to_string()),
+                ],
+            )));
+        }
+
+        let mut result = stack.clone();
+        result.item_count = u8::try_from(count)
+            .map_err(|_| malformed_item_error(format!("invalid item count {count}")))?;
+        Ok(result)
+    }
+}
+
 impl GetClientSideArgParser for ItemArgumentConsumer {
     fn get_client_side_parser(&self) -> ArgumentType {
         ArgumentType::ItemStack
@@ -77,7 +108,10 @@ impl<'a> FindArg<'a> for ItemArgumentConsumer {
 
                 let mut patch = Vec::new();
                 // Parse optional components inside brackets `[...]`
-                if let Some(start_idx) = raw_name.find('[').filter(|_| raw_name.ends_with(']')) {
+                if let Some(start_idx) = raw_name.find('[') {
+                    if !raw_name.ends_with(']') {
+                        return Err(malformed_item_error(*raw_name));
+                    }
                     let inner = &raw_name[start_idx + 1..raw_name.len() - 1];
                     // Split components by comma, but we must ignore commas inside curly braces/brackets!
                     let mut components = Vec::new();
@@ -106,32 +140,31 @@ impl<'a> FindArg<'a> for ItemArgumentConsumer {
                             continue;
                         }
                         let mut parts = comp.splitn(2, '=');
-                        if let Some(comp_key) = parts.next() {
-                            let comp_key = comp_key.trim();
-                            if let Some(comp_val_str) = parts.next() {
-                                let comp_val_str = comp_val_str.trim();
-                                // Parse value string as SNBT
-                                let mut reader =
-                                    crate::command::string_reader::StringReader::new(comp_val_str);
-                                if let Ok(nbt_tag) =
-                                    crate::command::snbt::SnbtParser::parse_for_commands(
-                                        &mut reader,
-                                    )
-                                {
-                                    // Match the DataComponent key
-                                    if let (Some(data_comp), Some(comp_impl)) = (
-                                        DataComponent::try_from_name(comp_key),
-                                        pumpkin_data::data_component_impl::read_data(
-                                            DataComponent::try_from_name(comp_key)
-                                                .unwrap_or(DataComponent::CustomData),
-                                            &nbt_tag,
-                                        ),
-                                    ) {
-                                        patch.push((data_comp, Some(comp_impl)));
-                                    }
-                                }
-                            }
+                        let comp_key = parts
+                            .next()
+                            .map(str::trim)
+                            .filter(|key| !key.is_empty())
+                            .ok_or_else(|| malformed_item_error(comp))?;
+                        let comp_val_str = parts
+                            .next()
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                            .ok_or_else(|| malformed_item_error(comp))?;
+                        // Parse value string as SNBT.
+                        let mut reader =
+                            crate::command::string_reader::StringReader::new(comp_val_str);
+                        let data_comp = DataComponent::try_from_name(comp_key)
+                            .ok_or_else(|| malformed_item_error(comp_key))?;
+                        let nbt_tag =
+                            crate::command::snbt::SnbtParser::parse_for_commands(&mut reader)
+                                .map_err(|_| malformed_item_error(comp_val_str))?;
+                        if reader.remaining_length() != 0 {
+                            return Err(malformed_item_error(comp_val_str));
                         }
+                        let comp_impl =
+                            pumpkin_data::data_component_impl::read_data(data_comp, &nbt_tag)
+                                .ok_or_else(|| malformed_item_error(comp_val_str))?;
+                        patch.push((data_comp, Some(comp_impl)));
                     }
                 }
 
@@ -302,5 +335,19 @@ mod test {
         assert_eq!(stack.item.registry_key, "stick");
         assert_eq!(stack.patch.len(), 1);
         assert_eq!(stack.patch[0].0.to_id(), DataComponent::CustomName.to_id());
+    }
+
+    #[test]
+    fn reject_overstacked_item_input() {
+        let stack = ItemStack::new(1, &Item::ENDER_PEARL);
+        assert!(ItemArgumentConsumer::create_item_stack(&stack, 17).is_err());
+        assert!(ItemArgumentConsumer::create_item_stack(&stack, 16).is_ok());
+    }
+
+    #[test]
+    fn reject_malformed_item_component() {
+        let mut args = HashMap::new();
+        args.insert("item", Arg::Item("stick[minecraft:custom_name]"));
+        assert!(ItemArgumentConsumer::find_arg(&args, "item").is_err());
     }
 }
