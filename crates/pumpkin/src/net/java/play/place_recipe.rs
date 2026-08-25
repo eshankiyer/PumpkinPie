@@ -106,6 +106,21 @@ impl JavaClient {
                         ingredient_slots[1] = Some(GenericIngredient::Vanilla(material));
                     }
                 }
+                CraftingRecipeTypes::CraftingDye { target, dye, .. } => {
+                    if grid_size >= 2 {
+                        ingredient_slots[0] = Some(GenericIngredient::Vanilla(target));
+                        ingredient_slots[1] = Some(GenericIngredient::Vanilla(dye));
+                    }
+                }
+                CraftingRecipeTypes::CraftingImbue {
+                    source, material, ..
+                } => {
+                    if grid_width != 3 {
+                        return;
+                    }
+                    ingredient_slots.fill(Some(GenericIngredient::Vanilla(material)));
+                    ingredient_slots[4] = Some(GenericIngredient::Vanilla(source));
+                }
                 _ => return,
             }
         } else if target_id < crafting_display_count + cooking_display_count {
@@ -145,6 +160,25 @@ impl JavaClient {
                     for (i, ing) in ingredients.iter().enumerate().take(grid_size) {
                         ingredient_slots[i] = Some(GenericIngredient::Dynamic(ing));
                     }
+                }
+                pumpkin_protocol::codec::recipe::OwnedCraftingRecipe::Dye {
+                    target, dye, ..
+                } => {
+                    if grid_size >= 2 {
+                        ingredient_slots[0] = Some(GenericIngredient::Dynamic(target));
+                        ingredient_slots[1] = Some(GenericIngredient::Dynamic(dye));
+                    }
+                }
+                pumpkin_protocol::codec::recipe::OwnedCraftingRecipe::Imbue {
+                    source,
+                    material,
+                    ..
+                } => {
+                    if grid_width != 3 {
+                        return;
+                    }
+                    ingredient_slots.fill(Some(GenericIngredient::Dynamic(material)));
+                    ingredient_slots[4] = Some(GenericIngredient::Dynamic(source));
                 }
             }
         }

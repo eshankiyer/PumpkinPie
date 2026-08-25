@@ -52,6 +52,22 @@ pub enum OwnedCraftingRecipe {
         ingredients: Vec<OwnedRecipeIngredient>,
         result: OwnedRecipeResult,
     },
+    Dye {
+        recipe_id: Option<String>,
+        category: RecipeCategoryTypes,
+        group: Option<String>,
+        target: OwnedRecipeIngredient,
+        dye: OwnedRecipeIngredient,
+        result: OwnedRecipeResult,
+    },
+    Imbue {
+        recipe_id: Option<String>,
+        category: RecipeCategoryTypes,
+        group: Option<String>,
+        source: OwnedRecipeIngredient,
+        material: OwnedRecipeIngredient,
+        result: OwnedRecipeResult,
+    },
 }
 
 #[derive(Clone, Debug)]

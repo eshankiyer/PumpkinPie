@@ -32,9 +32,11 @@ use crate::slot::{BoxFuture, NormalSlot, Slot};
 use pumpkin_data::Enchantment;
 use pumpkin_data::data_component::DataComponent;
 use pumpkin_data::data_component_impl::{
-    DamageImpl, DataComponentImpl, EnchantmentsImpl, FireworkExplosionImpl, FireworkExplosionShape,
-    FireworksImpl, MaxDamageImpl, PotDecorationsImpl, WrittenBookContentImpl,
+    DamageImpl, DataComponentImpl, DyeImpl, DyedColorImpl, EnchantmentsImpl, FireworkExplosionImpl,
+    FireworkExplosionShape, FireworksImpl, MaxDamageImpl, PotDecorationsImpl, PotionContentsImpl,
+    WrittenBookContentImpl,
 };
+use pumpkin_data::dye_color::DyeColor;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::recipe_remainder::get_recipe_remainder_id;
@@ -267,6 +269,32 @@ async fn recipe_matches(
                     .with_component_patch(result.component_patch()),
             )
         }
+        GenericRecipe::Vanilla(CraftingRecipeTypes::CraftingDye {
+            target,
+            dye,
+            result,
+            ..
+        }) => match_dye_recipe(inventory, count, target, dye, result.id, result.count).await,
+        GenericRecipe::Vanilla(CraftingRecipeTypes::CraftingImbue {
+            source,
+            material,
+            result,
+            ..
+        }) => {
+            match_imbue_recipe(
+                inventory,
+                input_height,
+                input_width,
+                top_x,
+                top_y,
+                count,
+                source,
+                material,
+                result.id,
+                result.count,
+            )
+            .await
+        }
         GenericRecipe::Vanilla(CraftingRecipeTypes::CraftingTransmute {
             input,
             material,
@@ -416,8 +444,210 @@ async fn recipe_matches(
             }
             Some(RecipeResult::new(result.item_id.clone(), result.count))
         }
+        GenericRecipe::Dynamic(OwnedCraftingRecipe::Dye {
+            target,
+            dye,
+            result,
+            ..
+        }) => match_dye_recipe(inventory, count, target, dye, &result.item_id, result.count).await,
+        GenericRecipe::Dynamic(OwnedCraftingRecipe::Imbue {
+            source,
+            material,
+            result,
+            ..
+        }) => {
+            match_imbue_recipe(
+                inventory,
+                input_height,
+                input_width,
+                top_x,
+                top_y,
+                count,
+                source,
+                material,
+                &result.item_id,
+                result.count,
+            )
+            .await
+        }
         _ => None,
     }
+}
+
+/// Vanilla `DyeRecipe::matches`/`assemble`, `DyeRecipe.java:62-125`: exactly one target is
+/// accepted, every other occupied slot must be a dye carrying `DataComponents.DYE`, and the
+/// result receives the vanilla weighted-average `DyedItemColor` calculation from
+/// `DyedItemColor.java:32-78`.
+async fn match_dye_recipe<I>(
+    inventory: &dyn RecipeInputInventory,
+    count: usize,
+    target: &I,
+    dye: &I,
+    result_id: &str,
+    result_count: u8,
+) -> Option<RecipeResult>
+where
+    I: RecipeIngredientMatcher + ?Sized,
+{
+    if count < 2 {
+        return None;
+    }
+    let mut target_stack = None;
+    let mut colors = Vec::new();
+    for index in 0..inventory.size() {
+        let stack = inventory.get_stack(index).await;
+        if stack.is_empty() {
+            continue;
+        }
+        if target.matches(stack.item) {
+            if target_stack.is_some() {
+                return None;
+            }
+            target_stack = Some(stack);
+        } else if dye.matches(stack.item) && stack.get_data_component::<DyeImpl>().is_some() {
+            colors.push(dye_color(stack.item)?);
+        } else {
+            return None;
+        }
+    }
+    let target_stack = target_stack?;
+    Some(dyed_result(&target_stack, result_id, result_count, &colors))
+}
+
+/// Vanilla `ImbueRecipe::matches`/`assemble`, `ImbueRecipe.java:59-86`: the source occupies the
+/// center of a full 3x3 grid, the material occupies the other eight slots, and the source potion
+/// contents are copied onto the result.
+#[expect(clippy::too_many_arguments)]
+async fn match_imbue_recipe<I>(
+    inventory: &dyn RecipeInputInventory,
+    input_height: usize,
+    input_width: usize,
+    top_x: usize,
+    top_y: usize,
+    count: usize,
+    source: &I,
+    material: &I,
+    result_id: &str,
+    result_count: u8,
+) -> Option<RecipeResult>
+where
+    I: RecipeIngredientMatcher + ?Sized,
+{
+    if input_width != 3 || input_height != 3 || count != 9 {
+        return None;
+    }
+    let mut source_stack = None;
+    for y in 0..3 {
+        for x in 0..3 {
+            let stack = inventory
+                .get_stack((y + top_y) * inventory.get_width() + x + top_x)
+                .await;
+            if stack.is_empty() {
+                return None;
+            }
+            if x == 1 && y == 1 {
+                if !source.matches(stack.item) {
+                    return None;
+                }
+                source_stack = Some(stack);
+            } else if !material.matches(stack.item) {
+                return None;
+            }
+        }
+    }
+    let source_stack = source_stack?;
+    let potion = source_stack
+        .get_data_component::<PotionContentsImpl>()?
+        .clone();
+    Some(
+        RecipeResult::new(result_id.to_owned(), result_count)
+            .with_component_patch(vec![(DataComponent::PotionContents, Some(potion.to_dyn()))]),
+    )
+}
+
+trait RecipeIngredientMatcher {
+    fn matches(&self, item: &Item) -> bool;
+}
+
+impl RecipeIngredientMatcher for pumpkin_data::recipes::RecipeIngredientTypes {
+    fn matches(&self, item: &Item) -> bool {
+        self.match_item(item)
+    }
+}
+
+impl RecipeIngredientMatcher for pumpkin_protocol::codec::recipe::OwnedRecipeIngredient {
+    fn matches(&self, item: &Item) -> bool {
+        self.match_item(item)
+    }
+}
+
+fn dye_color(item: &Item) -> Option<DyeColor> {
+    Some(match item.registry_key {
+        "white_dye" => DyeColor::White,
+        "orange_dye" => DyeColor::Orange,
+        "magenta_dye" => DyeColor::Magenta,
+        "light_blue_dye" => DyeColor::LightBlue,
+        "yellow_dye" => DyeColor::Yellow,
+        "lime_dye" => DyeColor::Lime,
+        "pink_dye" => DyeColor::Pink,
+        "gray_dye" => DyeColor::Gray,
+        "light_gray_dye" => DyeColor::LightGray,
+        "cyan_dye" => DyeColor::Cyan,
+        "purple_dye" => DyeColor::Purple,
+        "blue_dye" => DyeColor::Blue,
+        "brown_dye" => DyeColor::Brown,
+        "green_dye" => DyeColor::Green,
+        "red_dye" => DyeColor::Red,
+        "black_dye" => DyeColor::Black,
+        _ => return None,
+    })
+}
+
+/// Vanilla `DyedItemColor.applyDyes`, `DyedItemColor.java:40-78`.
+fn dyed_result(
+    target: &ItemStack,
+    result_id: &str,
+    result_count: u8,
+    dyes: &[DyeColor],
+) -> RecipeResult {
+    let mut red_total = 0;
+    let mut green_total = 0;
+    let mut blue_total = 0;
+    let mut intensity_total = 0;
+    let mut color_count = 0;
+    if let Some(current) = target.get_data_component::<DyedColorImpl>() {
+        let color = current.rgb as u32;
+        let (red, green, blue) = ((color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff);
+        intensity_total += red.max(green).max(blue);
+        red_total += red;
+        green_total += green;
+        blue_total += blue;
+        color_count += 1;
+    }
+    for dye in dyes {
+        let color = dye.texture_diffuse_color();
+        let (red, green, blue) = ((color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff);
+        intensity_total += red.max(green).max(blue);
+        red_total += red;
+        green_total += green;
+        blue_total += blue;
+        color_count += 1;
+    }
+    let red = red_total / color_count;
+    let green = green_total / color_count;
+    let blue = blue_total / color_count;
+    let average_intensity = intensity_total as f32 / color_count as f32;
+    let result_intensity = red.max(green).max(blue) as f32;
+    let rgb = (((red as f32 * average_intensity / result_intensity) as u32) << 16)
+        | (((green as f32 * average_intensity / result_intensity) as u32) << 8)
+        | (blue as f32 * average_intensity / result_intensity) as u32;
+    let mut patch = target.patch.clone();
+    patch.retain(|(id, _)| *id != DataComponent::DyedColor);
+    patch.push((
+        DataComponent::DyedColor,
+        Some(DyedColorImpl { rgb: rgb as i32 }.to_dyn()),
+    ));
+    RecipeResult::new(result_id.to_owned(), result_count).with_component_patch(patch)
 }
 
 /// Dye item -> vanilla firework explosion color. 26.2 decompile

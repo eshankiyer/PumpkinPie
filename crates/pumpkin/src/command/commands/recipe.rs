@@ -34,6 +34,14 @@ fn get_recipe_id(recipe: &DynamicRecipe) -> String {
                 recipe_id,
                 result,
                 ..
+            }
+            | pumpkin_protocol::codec::recipe::OwnedCraftingRecipe::Dye {
+                recipe_id, result, ..
+            }
+            | pumpkin_protocol::codec::recipe::OwnedCraftingRecipe::Imbue {
+                recipe_id,
+                result,
+                ..
             } => recipe_id.clone().unwrap_or_else(|| result.item_id.clone()),
         },
         DynamicRecipe::Cooking(cooking) => match cooking {
