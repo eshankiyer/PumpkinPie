@@ -13,6 +13,7 @@ use crate::entity::{
             EvokerWololoSpellGoal,
         },
         look_at_entity::LookAtEntityGoal,
+        pathfind_to_raid::PathfindToRaidGoal,
         revenge::RevengeGoal,
         spellcaster::SpellcasterState,
         swim::SwimGoal,
@@ -64,6 +65,8 @@ impl EvokerEntity {
                 3,
                 Box::new(AvoidEntityGoal::new(&EntityType::CREAKING, 8.0, 0.6, 1.0)),
             );
+            // Raider.java:65, via `super.registerGoals()`: `PathfindToRaidGoal<>(this)`.
+            goal_selector.add_goal(3, PathfindToRaidGoal::new());
             goal_selector.add_goal(4, Box::new(EvokerSummonSpellGoal::new(evoker_weak.clone())));
             goal_selector.add_goal(5, Box::new(EvokerAttackSpellGoal::new(evoker_weak.clone())));
             goal_selector.add_goal(6, Box::new(EvokerWololoSpellGoal::new(evoker_weak)));

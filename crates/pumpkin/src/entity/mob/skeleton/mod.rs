@@ -19,7 +19,7 @@ use crate::entity::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal, flee_sun::FleeSunGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
         melee_attack::MeleeAttackGoal, ranged_bow_attack::RangedBowAttackGoal,
-        revenge::RevengeGoal, wander_around::WanderAroundGoal,
+        restrict_sun::RestrictSunGoal, revenge::RevengeGoal, wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
 };
@@ -146,6 +146,8 @@ impl SkeletonEntityBase {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
+            // AbstractSkeleton.java:76: `addGoal(2, new RestrictSunGoal(this))`.
+            goal_selector.add_goal(2, RestrictSunGoal::new());
             goal_selector.add_goal(3, FleeSunGoal::new(1.0));
             // AbstractSkeleton.java:79: `AvoidEntityGoal<>(this, Wolf.class, 6.0F, 1.0, 1.2)`.
             goal_selector.add_goal(

@@ -495,7 +495,9 @@ impl Raid {
         self.update_bossbar_health(world).await;
     }
 
-    fn join_raid(
+    /// `Raid.joinRaid` (`Raid.java`). `pub(crate)` so raider-side AI (`PathfindToRaidGoal`'s
+    /// `recruitNearby`, and `Raider.aiStep`'s self-recruitment path) can enlist mid-raid.
+    pub(crate) fn join_raid(
         &mut self,
         wave: i32,
         uuid: Uuid,
@@ -516,6 +518,12 @@ impl Raid {
                 wave,
                 is_patrol_leader,
             }));
+    }
+
+    /// `Raid.getGroupsSpawned` (`Raid.java:207`).
+    #[must_use]
+    pub(crate) const fn groups_spawned(&self) -> i32 {
+        self.groups_spawned
     }
 
     fn health_of_living_raiders(&self, world: &Arc<World>) -> f32 {

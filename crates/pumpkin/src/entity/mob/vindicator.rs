@@ -22,6 +22,7 @@ use crate::entity::{
         johnny_attack::JohnnyAttackGoal,
         look_at_entity::LookAtEntityGoal,
         melee_attack::MeleeAttackGoal,
+        pathfind_to_raid::PathfindToRaidGoal,
         revenge::RevengeGoal,
         swim::SwimGoal,
         wander_around::WanderAroundGoal,
@@ -82,6 +83,8 @@ impl VindicatorEntity {
                 3,
                 Box::new(InteractWithDoorGoal::new(false).raid_gated(true)),
             );
+            // Raider.java:65, via `super.registerGoals()`: `PathfindToRaidGoal<>(this)`.
+            goal_selector.add_goal(3, PathfindToRaidGoal::new());
             // Vindicator.java:68: `MeleeAttackGoal(this, 1.0, false)`.
             goal_selector.add_goal(5, Box::new(MeleeAttackGoal::new(1.0, false)));
             // Vindicator.java:74-76: `RandomStrollGoal(this, 0.6)` at 8,

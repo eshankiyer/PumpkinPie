@@ -191,7 +191,19 @@ impl PlacementModifier {
             Self::HeightRange(modifier) => modifier.get_positions(min_y, height, random, pos),
             Self::InSquare(_) => SquarePlacementModifier::get_positions(random, pos),
             Self::RandomOffset(modifier) => modifier.get_positions(random, pos),
-            Self::FixedPlacement(positions) => Box::new(positions.clone().into_iter()),
+            Self::FixedPlacement(positions) => {
+                // Vanilla only emits the fixed positions that lie inside the chunk
+                // currently being decorated (net/minecraft/world/level/levelgen/placement/FixedPlacement.java:26-43).
+                let chunk_x = pos.0.x >> 4;
+                let chunk_z = pos.0.z >> 4;
+                let mut filtered = Vec::with_capacity(positions.len());
+                for position in positions {
+                    if position.0.x >> 4 == chunk_x && position.0.z >> 4 == chunk_z {
+                        filtered.push(*position);
+                    }
+                }
+                Box::new(filtered.into_iter())
+            }
         }
     }
 }
