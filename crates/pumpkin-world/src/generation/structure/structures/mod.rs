@@ -750,6 +750,30 @@ pub trait HeightSampler {
     }
 }
 
+/// Port of `Structure.getLowestY(GenerationContext, int sizeX, int sizeZ)` and its
+/// four-argument overload
+/// (`net/minecraft/world/level/levelgen/structure/Structure.java:171-182`).
+///
+/// Returns the minimum of the `WORLD_SURFACE_WG` first-occupied heights sampled by
+/// `Structure.getCornerHeights`
+/// (`net/minecraft/world/level/levelgen/structure/Structure.java:154-167`) at the four corners
+/// `(minX, minZ)`, `(minX, minZ + sizeZ)`, `(minX + sizeX, minZ)` and
+/// `(minX + sizeX, minZ + sizeZ)` of a `size_x` × `size_z` box.
+#[must_use]
+pub fn get_lowest_y(
+    sampler: &mut dyn HeightSampler,
+    min_x: i32,
+    min_z: i32,
+    size_x: i32,
+    size_z: i32,
+) -> i32 {
+    let corner_a = sampler.estimate_height(min_x, min_z);
+    let corner_b = sampler.estimate_height(min_x, min_z + size_z);
+    let corner_c = sampler.estimate_height(min_x + size_x, min_z);
+    let corner_d = sampler.estimate_height(min_x + size_x, min_z + size_z);
+    corner_a.min(corner_b).min(corner_c).min(corner_d)
+}
+
 impl HeightSampler
     for crate::generation::noise::router::surface_height_sampler::SurfaceHeightEstimateSampler<'_>
 {
