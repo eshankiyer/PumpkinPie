@@ -310,10 +310,11 @@ impl HugeFungusFeature {
         // The generated configured-feature table constructs this feature with
         // no configuration at all, so the crimson/warped variant is recovered
         // from the placed feature that referenced it.
-        let config = match feature {
+        let mut config = match feature {
             pumpkin_data::placed_feature::PlacedFeature::WarpedFungi => FungusConfig::warped(),
             _ => FungusConfig::crimson(),
         };
+        config.planted = chunk.is_runtime_bonemeal();
 
         let below = GenerationCache::get_block_state(chunk, &pos.down().0).to_block_id();
         if below != config.valid_base {
