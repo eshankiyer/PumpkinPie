@@ -78,7 +78,6 @@ impl BlockMetadata for WallSkullBlock {
     fn ids() -> Box<[BlockId]> {
         [
             BlockId::SKELETON_WALL_SKULL,
-            BlockId::WITHER_SKELETON_WALL_SKULL,
             BlockId::PLAYER_WALL_HEAD,
             BlockId::ZOMBIE_WALL_HEAD,
             BlockId::CREEPER_WALL_HEAD,
