@@ -136,6 +136,8 @@ pub mod zombified_piglin;
 
 /// Vanilla `Mob.getAmbientSoundInterval` (Mob.java:274-276).
 pub const DEFAULT_AMBIENT_SOUND_INTERVAL: i32 = 80;
+/// Vanilla `AbstractGolem.getAmbientSoundInterval` (`AbstractGolem.java:29-31`).
+const GOLEM_AMBIENT_SOUND_INTERVAL: i32 = 120;
 
 pub struct MobEntity {
     pub living_entity: LivingEntity,
@@ -1241,9 +1243,18 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
-    /// Vanilla `Mob.getAmbientSoundInterval` (Mob.java:274-276).
+    /// Vanilla `Mob.getAmbientSoundInterval` (Mob.java:274-276), with the
+    /// `AbstractGolem` override (`AbstractGolem.java:29-31`) for every concrete golem.
     fn get_ambient_sound_interval(&self) -> i32 {
-        DEFAULT_AMBIENT_SOUND_INTERVAL
+        match self.get_entity().entity_type.id {
+            id if id == pumpkin_data::entity::EntityType::IRON_GOLEM.id
+                || id == pumpkin_data::entity::EntityType::SNOW_GOLEM.id
+                || id == pumpkin_data::entity::EntityType::COPPER_GOLEM.id =>
+            {
+                GOLEM_AMBIENT_SOUND_INTERVAL
+            }
+            _ => DEFAULT_AMBIENT_SOUND_INTERVAL,
+        }
     }
 
     /// `Mob.baseTick` (Mob.java:282-292): while alive, `ambientSoundTime` counts up once per
@@ -1409,8 +1420,9 @@ pub trait Mob: EntityBase + Send + Sync {
         self.get_mob_entity().is_persistence_required()
     }
 
-    /// Vanilla `Mob.removeWhenFarAway`, including the current species
-    /// overrides whose state is represented by Pumpkin.
+    /// Vanilla `Mob.removeWhenFarAway`, including the `AbstractGolem` override
+    /// (`AbstractGolem.java:34-36`) and the current species overrides whose state is
+    /// represented by Pumpkin.
     fn remove_when_far_away(&self, _dist_sqr: f64) -> bool {
         let category = self.get_entity().entity_type.category;
         let mob_entity = self.get_mob_entity();
@@ -1440,6 +1452,13 @@ pub trait Mob: EntityBase + Send + Sync {
                 (**mob_entity.living_entity.entity.custom_name.load()).is_none()
             }
             id if id == pumpkin_data::entity::EntityType::ZOMBIE_HORSE.id => true,
+            // AbstractGolem.java:34-36: golems never despawn because of distance.
+            id if id == pumpkin_data::entity::EntityType::IRON_GOLEM.id
+                || id == pumpkin_data::entity::EntityType::SNOW_GOLEM.id
+                || id == pumpkin_data::entity::EntityType::COPPER_GOLEM.id =>
+            {
+                false
+            }
             // Animal and non-despawning MISC mob implementations in the
             // generated registry use the persistent far-away behavior.
             _ if category == &MobCategory::CREATURE || category == &MobCategory::MISC => false,
