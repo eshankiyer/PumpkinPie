@@ -159,6 +159,7 @@ pub mod turtle_travel;
 pub mod vex_charge_attack;
 pub mod vex_copy_owner_target;
 pub mod vex_random_move;
+pub mod villager_panic;
 pub mod villager_schedule;
 pub mod wander_around;
 pub mod witch_attack;
