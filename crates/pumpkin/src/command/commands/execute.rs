@@ -3,8 +3,8 @@ use crate::command::argument_types::block::BlockArgumentType;
 use crate::command::argument_types::coordinates::block_pos::BlockPosArgumentType;
 use crate::command::argument_types::coordinates::block_pos::NOT_LOADED_ERROR_TYPE;
 use crate::command::argument_types::coordinates::rotation::RotationArgumentType;
+use crate::command::argument_types::coordinates::swizzle::SwizzleArgumentType;
 use crate::command::argument_types::coordinates::vec3::Vec3ArgumentType;
-use crate::command::argument_types::core::string::StringArgumentType;
 use crate::command::argument_types::entity::EntityArgumentType;
 use crate::command::argument_types::entity_anchor::EntityAnchorArgumentType;
 use crate::command::argument_types::heightmap::HeightmapTypeArgumentType;
@@ -21,6 +21,7 @@ use pumpkin_util::PermissionLvl;
 use pumpkin_util::identifier::Identifier;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector2::Vector2;
+use pumpkin_util::math::vector3::Axis;
 use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
 use pumpkin_util::text::TextComponent;
 use std::sync::Arc;
@@ -210,20 +211,16 @@ fn execute_align_modifier<'a>(
     context: &'a CommandContext,
 ) -> crate::command::node::RedirectModifierResult<'a> {
     Box::pin(async move {
-        let axes = StringArgumentType::get(context, "axes")?;
+        let axes = SwizzleArgumentType::get(context, "axes")?;
         let mut source = context.source.as_ref().clone();
 
-        let has_x = axes.contains('x');
-        let has_y = axes.contains('y');
-        let has_z = axes.contains('z');
-
-        if has_x {
+        if axes.contains(Axis::X) {
             source.position.x = source.position.x.floor();
         }
-        if has_y {
+        if axes.contains(Axis::Y) {
             source.position.y = source.position.y.floor();
         }
-        if has_z {
+        if axes.contains(Axis::Z) {
             source.position.z = source.position.z.floor();
         }
 
@@ -485,7 +482,7 @@ pub fn register(dispatcher: &mut CommandDispatcher, registry: &PermissionRegistr
                 ),
         )
         .then(literal("align").then(
-            argument("axes", StringArgumentType::SingleWord).redirect_with_modifier(
+            argument("axes", SwizzleArgumentType).redirect_with_modifier(
                 Redirection::Root,
                 RedirectModifier::Custom(Arc::new(execute_align_modifier)),
             ),

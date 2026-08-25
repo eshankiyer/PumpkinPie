@@ -11,6 +11,7 @@ use pumpkin_util::math::vector3::{Axis, Vector3};
 pub mod block_pos;
 pub mod column_pos;
 pub mod rotation;
+pub mod swizzle;
 pub mod vec3;
 
 pub const MIXED_TYPE_ERROR_TYPE: CommandErrorType<0> = CommandErrorType::new(
