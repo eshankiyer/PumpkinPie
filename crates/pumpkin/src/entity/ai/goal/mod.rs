@@ -128,6 +128,7 @@ pub mod restrict_sun;
 pub mod revenge;
 pub mod ring_bell;
 pub mod run_around_like_crazy;
+pub mod show_trades_to_player;
 pub mod silverfish_merge_with_stone;
 pub mod silverfish_util;
 pub mod silverfish_wake_up_friends;
