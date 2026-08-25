@@ -106,7 +106,8 @@ pub fn build() -> TokenStream {
                 AllOfBlockPredicate, AnyOfBlockPredicate, BlockPredicate,
                 HasSturdyFacePredicate, InsideWorldBoundsBlockPredicate,
                 MatchingBlockTagPredicate, MatchingBlocksBlockPredicate, MatchingBlocksWrapper,
-                MatchingFluidsBlockPredicate, NotBlockPredicate, OffsetBlocksBlockPredicate,
+                MatchingBiomesBlockPredicate, MatchingBiomesWrapper, MatchingFluidsBlockPredicate,
+                NotBlockPredicate, OffsetBlocksBlockPredicate,
                 ReplaceableBlockPredicate, SolidBlockPredicate, WouldSurviveBlockPredicate,
             };
             use crate::generation::height_provider::{
@@ -372,6 +373,14 @@ pub fn value_to_block_predicate(v: &Value) -> TokenStream {
                 BlockPredicate::MatchingBlocks(MatchingBlocksBlockPredicate {
                     offset: #offset,
                     blocks: #blocks,
+                })
+            }
+        }
+        "minecraft:matching_biomes" => {
+            let biomes = value_to_matching_biomes_wrapper(&v["biomes"]);
+            quote! {
+                BlockPredicate::MatchingBiomes(MatchingBiomesBlockPredicate {
+                    biomes: #biomes,
                 })
             }
         }
@@ -780,6 +789,45 @@ fn value_to_matching_blocks_wrapper(v: &Value) -> TokenStream {
             quote! { MatchingBlocksWrapper::Multiple(vec![#(#items),*]) }
         }
         _ => quote! { MatchingBlocksWrapper::Single(String::new()) },
+    }
+}
+
+/// Converts a biome holder-set JSON value into a generated biome predicate wrapper.
+fn value_to_matching_biomes_wrapper(v: &Value) -> TokenStream {
+    let biome_ident = |name: &str| {
+        let name = name.strip_prefix("minecraft:").unwrap_or(name);
+        quote::format_ident!("{}", name.to_uppercase().replace([':', '-', '/'], "_"))
+    };
+
+    match v {
+        Value::String(s) if s.starts_with('#') => {
+            let tag_ident = biome_ident(&s[1..]);
+            quote! {
+                MatchingBiomesWrapper::Tag(pumpkin_data::tag::WorldgenBiome::#tag_ident.1)
+            }
+        }
+        Value::String(s) => {
+            let ident = biome_ident(s);
+            quote! {
+                MatchingBiomesWrapper::Single(&pumpkin_data::chunk::Biome::#ident)
+            }
+        }
+        Value::Array(arr) => {
+            let items: Vec<TokenStream> = arr
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| {
+                    let ident = biome_ident(s);
+                    quote! { &pumpkin_data::chunk::Biome::#ident }
+                })
+                .collect();
+            quote! {
+                MatchingBiomesWrapper::Multiple(&[#(#items),*])
+            }
+        }
+        _ => quote! {
+            MatchingBiomesWrapper::Multiple(&[])
+        },
     }
 }
 

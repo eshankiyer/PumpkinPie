@@ -2405,7 +2405,28 @@ fn build_configured_features()
     map.insert(
         pumpkin_data::configured_feature::ConfiguredFeature::GlowLichen,
         ConfiguredFeature::MultifaceGrowth(
-            crate::generation::feature::features::multiface_growth::MultifaceGrowthFeature {},
+            crate::generation::feature::features::multiface_growth::MultifaceGrowthFeature {
+                configuration: crate::generation::feature::features::multiface_growth::MultifaceGrowthConfiguration::new(
+                    pumpkin_data::BlockId::GLOW_LICHEN,
+                    20i32,
+                    false,
+                    true,
+                    true,
+                    0.5f32,
+                    vec![
+                        pumpkin_data::BlockId::STONE,
+                        pumpkin_data::BlockId::ANDESITE,
+                        pumpkin_data::BlockId::DIORITE,
+                        pumpkin_data::BlockId::GRANITE,
+                        pumpkin_data::BlockId::DRIPSTONE_BLOCK,
+                        pumpkin_data::BlockId::CALCITE,
+                        pumpkin_data::BlockId::TUFF,
+                        pumpkin_data::BlockId::DEEPSLATE,
+                        pumpkin_data::BlockId::SULFUR,
+                        pumpkin_data::BlockId::CINNABAR,
+                    ],
+                ),
+            },
         ),
     );
     map.insert(
@@ -4048,7 +4069,26 @@ fn build_configured_features()
     map.insert(
         pumpkin_data::configured_feature::ConfiguredFeature::SculkVein,
         ConfiguredFeature::MultifaceGrowth(
-            crate::generation::feature::features::multiface_growth::MultifaceGrowthFeature {},
+            crate::generation::feature::features::multiface_growth::MultifaceGrowthFeature {
+                configuration: crate::generation::feature::features::multiface_growth::MultifaceGrowthConfiguration::new(
+                    pumpkin_data::BlockId::SCULK_VEIN,
+                    20i32,
+                    true,
+                    true,
+                    true,
+                    1.0f32,
+                    vec![
+                        pumpkin_data::BlockId::STONE,
+                        pumpkin_data::BlockId::ANDESITE,
+                        pumpkin_data::BlockId::DIORITE,
+                        pumpkin_data::BlockId::GRANITE,
+                        pumpkin_data::BlockId::DRIPSTONE_BLOCK,
+                        pumpkin_data::BlockId::CALCITE,
+                        pumpkin_data::BlockId::TUFF,
+                        pumpkin_data::BlockId::DEEPSLATE,
+                    ],
+                ),
+            },
         ),
     );
     map.insert(
