@@ -227,6 +227,7 @@ pub mod entity;
 pub mod entity_anchor;
 pub mod entity_selector;
 pub mod game_profile;
+pub mod heightmap;
 pub mod hex_color;
 pub mod identifier;
 pub mod nbt;

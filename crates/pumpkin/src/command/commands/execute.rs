@@ -1,11 +1,13 @@
 use crate::command::argument_builder::{ArgumentBuilder, argument, command, literal};
 use crate::command::argument_types::block::BlockArgumentType;
 use crate::command::argument_types::coordinates::block_pos::BlockPosArgumentType;
+use crate::command::argument_types::coordinates::block_pos::NOT_LOADED_ERROR_TYPE;
 use crate::command::argument_types::coordinates::rotation::RotationArgumentType;
 use crate::command::argument_types::coordinates::vec3::Vec3ArgumentType;
 use crate::command::argument_types::core::string::StringArgumentType;
 use crate::command::argument_types::entity::EntityArgumentType;
 use crate::command::argument_types::entity_anchor::EntityAnchorArgumentType;
+use crate::command::argument_types::heightmap::HeightmapTypeArgumentType;
 use crate::command::argument_types::resource::{ENTITY_TYPE_ARGUMENT, ResourceArgument};
 use crate::command::argument_types::resource_key::ResourceKeyArgument;
 use crate::command::context::command_context::CommandContext;
@@ -17,6 +19,7 @@ use crate::command::node::{RedirectModifier, Redirection};
 use crate::entity::r#type::from_type;
 use pumpkin_util::PermissionLvl;
 use pumpkin_util::identifier::Identifier;
+use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector2::Vector2;
 use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
 use pumpkin_util::text::TextComponent;
@@ -122,6 +125,30 @@ fn execute_positioned_as_modifier<'a>(
             sources.push(Arc::new(source));
         }
         Ok(sources)
+    })
+}
+
+/// Ported from vanilla `ExecuteCommand.executeOver`
+/// (`net/minecraft/server/commands/ExecuteCommand.java:192-203`): moves the source
+/// to the Y of the given heightmap type at the source's current X/Z, erroring when
+/// the containing chunk is not loaded.
+fn execute_over_modifier<'a>(
+    context: &'a CommandContext,
+) -> crate::command::node::RedirectModifierResult<'a> {
+    Box::pin(async move {
+        let heightmap_type = HeightmapTypeArgumentType::get(context, "heightmap")?;
+        let world = context.source.world();
+        let x = context.source.position.x.floor() as i32;
+        let z = context.source.position.z.floor() as i32;
+        // Vanilla throws `BlockPosArgument.ERROR_NOT_LOADED` from `level.hasChunk`
+        // (`net/minecraft/server/commands/ExecuteCommand.java:197-199`).
+        if !world.is_loaded(&BlockPos::new(x, world.min_y, z)) {
+            return Err(NOT_LOADED_ERROR_TYPE.create_without_context());
+        }
+        let height = world.get_heightmap_height(heightmap_type, x, z);
+        let mut source = context.source.as_ref().clone();
+        source.position.y = f64::from(height);
+        Ok(vec![Arc::new(source)])
     })
 }
 
@@ -434,7 +461,13 @@ pub fn register(dispatcher: &mut CommandDispatcher, registry: &PermissionRegistr
                         Redirection::Root,
                         RedirectModifier::Custom(Arc::new(execute_positioned_modifier)),
                     ),
-                ),
+                )
+                .then(literal("over").then(
+                    argument("heightmap", HeightmapTypeArgumentType).redirect_with_modifier(
+                        Redirection::Root,
+                        RedirectModifier::Custom(Arc::new(execute_over_modifier)),
+                    ),
+                )),
         )
         .then(
             literal("rotated")
