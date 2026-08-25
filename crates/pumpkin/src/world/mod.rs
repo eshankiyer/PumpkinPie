@@ -358,6 +358,9 @@ pub struct World {
     pub trader_tick_delay: AtomicI32,
     pub trader_spawn_delay: AtomicI32,
     pub trader_spawn_chance: AtomicI32,
+    /// Per-level state of the village siege spawner (`VillageSiege`).
+    /// See `world::custom_spawners::VillageSiegeState`.
+    pub village_siege: custom_spawners::VillageSiegeState,
     /// Persistent custom data for the world (matching Bukkit's `PersistentDataHolder`)
     pub custom_data: std::sync::Mutex<NbtCompound>,
     /// Persistent custom data for block entities at specific positions
@@ -525,6 +528,7 @@ impl World {
             trader_tick_delay: AtomicI32::new(1200),
             trader_spawn_delay: AtomicI32::new(24000),
             trader_spawn_chance: AtomicI32::new(25),
+            village_siege: custom_spawners::VillageSiegeState::new(),
             custom_data: std::sync::Mutex::new(custom_data),
             custom_block_entity_data: DashMap::new(),
         }
@@ -2057,10 +2061,14 @@ impl World {
         ));
 
         // Custom per-tick spawners (`PhantomSpawner`, `CatSpawner`,
-        // `WanderingTraderSpawner`), independent of the biome-based spawn list above.
+        // `WanderingTraderSpawner`, `VillageSiege`), independent of the biome-based
+        // spawn list above. Vanilla passes `spawnEnemies` into every
+        // `CustomSpawner.tick`; the phantom and siege spawners are the two that
+        // consume it.
         if spawn_mobs {
             if spawn_enemies {
                 custom_spawners::tick_phantom_spawner(self).await;
+                custom_spawners::tick_village_siege(self, spawn_enemies).await;
             }
             custom_spawners::tick_cat_spawner(self).await;
             custom_spawners::tick_wandering_trader_spawner(self).await;
