@@ -186,6 +186,15 @@ pub enum LootFunctionTypes {
         count: LootFunctionNumberProvider,
         add: bool,
     },
+    /// Sets item durability from a number provider, optionally relative to current durability.
+    /// Mirrors `SetItemDamageFunction.run` (`SetItemDamageFunction.java:46-56`).
+    SetItemDamage {
+        damage: LootFunctionNumberProvider,
+        add: bool,
+    },
+    /// Attaches a seeded container-loot reference to a non-empty item stack.
+    /// Mirrors `SetContainerLootTable.run` (`SetContainerLootTable.java:50-57`).
+    SetContainerLootTable { name: &'static str, seed: i64 },
     /// Increases the count of items based on the item's enchantments.
     EnchantedCountIncrease {
         enchantment: &'static str,

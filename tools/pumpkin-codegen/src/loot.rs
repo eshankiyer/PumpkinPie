@@ -761,6 +761,25 @@ pub enum LootFunctionTypesStruct {
         /// If `true`, adds to the existing count instead of replacing it.
         add: Option<bool>,
     },
+    /// Sets item durability from a number provider.
+    #[serde(rename = "minecraft:set_damage")]
+    SetItemDamage {
+        /// Number provider determining the damage fraction.
+        damage: LootFunctionNumberProviderStruct,
+        /// If `true`, applies the value relative to current durability.
+        add: Option<bool>,
+    },
+    /// Attaches a seeded container-loot reference to the item.
+    #[serde(rename = "minecraft:set_loot_table")]
+    SetContainerLootTable {
+        /// Loot table key stored in the container-loot component.
+        name: String,
+        /// Optional seed; vanilla defaults it to zero.
+        seed: Option<i64>,
+        /// Vanilla block-entity type discriminator, retained for decoding.
+        #[serde(rename = "type")]
+        container_type: String,
+    },
     /// Increases count based on the level of a relevant enchantment.
     #[serde(rename = "minecraft:enchanted_count_increase")]
     EnchantedCountIncrease {
@@ -873,6 +892,16 @@ impl ToTokens for LootFunctionTypesStruct {
                 let count = count.to_token_stream();
                 let add = add.unwrap_or(false);
                 quote! { LootFunctionTypes::SetCount { count: #count, add: #add } }
+            }
+            Self::SetItemDamage { damage, add } => {
+                let damage = damage.to_token_stream();
+                let add = add.unwrap_or(false);
+                quote! { LootFunctionTypes::SetItemDamage { damage: #damage, add: #add } }
+            }
+            Self::SetContainerLootTable { name, seed, .. } => {
+                let name = LitStr::new(name, Span::call_site());
+                let seed = seed.unwrap_or(0);
+                quote! { LootFunctionTypes::SetContainerLootTable { name: #name, seed: #seed } }
             }
             Self::SetOminousBottleAmplifier => {
                 quote! { LootFunctionTypes::SetOminousBottleAmplifier }
