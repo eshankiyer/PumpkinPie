@@ -23,7 +23,7 @@ use crate::{
             piece::StructurePieceType,
             structures::{
                 StructureGenerator, StructureGeneratorContext, StructurePiece, StructurePieceBase,
-                StructurePiecesCollector, StructurePosition, WorldPortalExt,
+                StructurePiecesCollector, StructurePosition, WorldPortalExt, get_lowest_y,
             },
         },
     },
@@ -45,6 +45,17 @@ impl StructureGenerator for JungleTempleGenerator {
     ) -> Option<StructurePosition> {
         let x = start_block_x(context.chunk_x);
         let z = start_block_z(context.chunk_z);
+
+        // Port of `SinglePieceStructure.findGenerationPoint`
+        // (`net/minecraft/world/level/levelgen/structure/SinglePieceStructure.java:24-29`):
+        // the structure is rejected when the lowest corner surface height of its
+        // 12x15 footprint (`getLowestY`, see [`get_lowest_y`]) is below sea level. Like
+        // vanilla, this runs before any random values are consumed.
+        if let Some(sampler) = context.height_sampler.as_deref_mut()
+            && get_lowest_y(sampler, x, z, WIDTH, DEPTH) < context.sea_level
+        {
+            return None;
+        }
 
         let facing = BlockDirection::get_random_horizontal_direction(&mut context.random);
 
