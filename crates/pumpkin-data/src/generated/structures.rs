@@ -270,6 +270,7 @@ pub struct SpawnOverride {
 pub enum HeightProvider {
     Uniform(UniformHeightProvider),
     Trapezoid(TrapezoidHeightProvider),
+    BiasedToBottom(BiasedToBottomHeightProvider),
     VeryBiasedToBottom(VeryBiasedToBottomHeightProvider),
 }
 impl HeightProvider {
@@ -278,6 +279,7 @@ impl HeightProvider {
         match self {
             Self::Uniform(provider) => provider.get(random, min_y, height),
             Self::Trapezoid(provider) => provider.get(random, min_y, height),
+            Self::BiasedToBottom(provider) => provider.get(random, min_y, height),
             Self::VeryBiasedToBottom(provider) => provider.get(random, min_y, height),
         }
     }
@@ -321,6 +323,28 @@ impl TrapezoidHeightProvider {
         let l = (k - plateau) / 2;
         let m = k - l;
         i + random.next_inbetween_i32(0, m) + random.next_inbetween_i32(0, l)
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BiasedToBottomHeightProvider {
+    pub min_inclusive: YOffset,
+    pub max_inclusive: YOffset,
+    pub inner: Option<std::num::NonZero<u32>>,
+}
+impl BiasedToBottomHeightProvider {
+    /// Samples the lower-biased vertical range from vanilla `sample`.
+    ///
+    /// Source: `net/minecraft/world/level/levelgen/heightproviders/BiasedToBottomHeight.java:37-46`.
+    #[must_use]
+    pub fn get(&self, random: &mut RandomGenerator, min_y: i8, height: u16) -> i32 {
+        let min = self.min_inclusive.get_y(min_y as i16, height);
+        let max = self.max_inclusive.get_y(min_y as i16, height);
+        let inner = self.inner.map_or(1, std::num::NonZero::get) as i32;
+        if max - min - inner < 0 {
+            return min;
+        }
+        let limit = random.next_bounded_i32(max - min - inner + 1);
+        random.next_bounded_i32(limit + inner) + min
     }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

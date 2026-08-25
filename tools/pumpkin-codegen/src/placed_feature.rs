@@ -111,7 +111,8 @@ pub fn build() -> TokenStream {
                 ReplaceableBlockPredicate, SolidBlockPredicate, WouldSurviveBlockPredicate,
             };
             use crate::generation::height_provider::{
-                HeightProvider, TrapezoidHeightProvider, UniformHeightProvider,
+                BiasedToBottomHeightProvider, HeightProvider, TrapezoidHeightProvider,
+                UniformHeightProvider,
                 VeryBiasedToBottomHeightProvider, WeightedHeightEntry,
                 WeightedListHeightProvider,
             };
@@ -519,6 +520,23 @@ pub fn value_to_height_provider(v: &Value) -> TokenStream {
                     min_inclusive: #min,
                     max_inclusive: #max,
                     plateau: #plateau,
+                })
+            }
+        }
+        "minecraft:biased_to_bottom" => {
+            let min = value_to_y_offset(&v["min_inclusive"]);
+            let max = value_to_y_offset(&v["max_inclusive"]);
+            let inner = if v["inner"].is_null() || !v["inner"].is_number() {
+                quote! { None }
+            } else {
+                let n = v["inner"].as_u64().unwrap_or(1) as u32;
+                quote! { std::num::NonZero::new(#n) }
+            };
+            quote! {
+                HeightProvider::BiasedToBottom(BiasedToBottomHeightProvider {
+                    min_inclusive: #min,
+                    max_inclusive: #max,
+                    inner: #inner,
                 })
             }
         }
