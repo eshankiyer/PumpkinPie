@@ -174,7 +174,7 @@ use crate::block::blocks::turtle_egg::TurtleEggBlock;
 use crate::block::blocks::vault::VaultBlock;
 use crate::block::blocks::vine::VineBlock;
 use crate::block::blocks::walls::WallBlock;
-use crate::block::blocks::wither_skull::WitherSkeletonSkullBlock;
+use crate::block::blocks::wither_skull::{WitherSkeletonSkullBlock, WitherWallSkullBlock};
 use crate::block::fluid::lava::FlowingLava;
 use crate::block::fluid::water::FlowingWater;
 use crate::block::{
@@ -253,6 +253,7 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(CarpetBlock);
     manager.register(CarvedPumpkinBlock);
     manager.register(WitherSkeletonSkullBlock);
+    manager.register(WitherWallSkullBlock);
     manager.register(CampfireBlock);
     manager.register(MossCarpetBlock);
     manager.register(PaleMossCarpetBlock);

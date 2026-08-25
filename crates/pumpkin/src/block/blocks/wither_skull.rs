@@ -14,7 +14,8 @@ use std::sync::Arc;
 
 use crate::{
     block::{
-        BlockBehaviour, BlockFuture, OnPlaceArgs, PlacedArgs, blocks::skull_block::SkullBlock,
+        BlockBehaviour, BlockFuture, OnPlaceArgs, PlacedArgs,
+        blocks::{skull_block::SkullBlock, skull_block::WallSkullBlock},
     },
     entity::{Entity, boss::wither::WitherEntity},
 };
@@ -27,6 +28,35 @@ impl BlockBehaviour for WitherSkeletonSkullBlock {
         SkullBlock::on_place(&SkullBlock, args)
     }
 
+    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            let entity = crate::block::entities::skull::SkullBlockEntity::new(*args.position);
+            args.world.add_block_entity(std::sync::Arc::new(entity));
+            check_spawn(args.world, args.position).await;
+        })
+    }
+}
+
+/// The wall-mounted counterpart of `WitherSkeletonSkullBlock`.
+///
+/// Vanilla `WitherWallSkullBlock` keeps the wall-skull placement state from
+/// `WallSkullBlock`, but overrides `setPlacedBy` to call
+/// `WitherSkullBlock.checkSpawn` (`WitherWallSkullBlock.java:12-27`).
+#[pumpkin_block("wither_skeleton_wall_skull")]
+pub struct WitherWallSkullBlock;
+
+impl BlockBehaviour for WitherWallSkullBlock {
+    /// `WitherWallSkullBlock` inherits `WallSkullBlock` placement state and
+    /// horizontal facing (`WallSkullBlock.java:41-58`; constructor selected by
+    /// `WitherWallSkullBlock.java:20-22`).
+    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
+        WallSkullBlock::on_place(&WallSkullBlock, args)
+    }
+
+    /// `WitherWallSkullBlock.setPlacedBy` calls `WitherSkullBlock.checkSpawn`
+    /// (`WitherWallSkullBlock.java:24-27`). Pumpkin's placement lifecycle exposes
+    /// this as `BlockBehaviour::placed`, so retain the wall skull block entity
+    /// setup and run the spawn check immediately afterward.
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             let entity = crate::block::entities::skull::SkullBlockEntity::new(*args.position);
