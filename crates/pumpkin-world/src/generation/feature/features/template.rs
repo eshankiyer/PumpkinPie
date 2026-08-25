@@ -1,6 +1,7 @@
 use pumpkin_data::{BlockState, BlockStateId, Rotation};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::{
+    HeightMap,
     math::{position::BlockPos, vector3::Vector3},
     random::{RandomGenerator, RandomImpl},
 };
@@ -49,6 +50,10 @@ impl<T: GenerationCache> BlockPlacer for CachePlacer<'_, T> {
             nbt.get_int("z").unwrap_or(0),
         );
         GenerationCache::add_block_entity(self.0, &pos, nbt);
+    }
+
+    fn get_top_y(&self, heightmap: &HeightMap, x: i32, z: i32) -> i32 {
+        GenerationCache::get_top_y(self.0, heightmap, x, z)
     }
 }
 

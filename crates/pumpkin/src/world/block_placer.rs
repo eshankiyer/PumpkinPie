@@ -1,7 +1,9 @@
 use pumpkin_data::{BlockState, BlockStateId};
 use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_util::HeightMap;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
+use pumpkin_world::chunk::ChunkHeightmapType;
 use pumpkin_world::generation::structure::template::BlockPlacer;
 use pumpkin_world::level::Level;
 use std::collections::HashMap;
@@ -75,5 +77,15 @@ impl BlockPlacer for WorldBlockPlacer<'_> {
 
     fn add_block_entity(&mut self, nbt: NbtCompound) {
         self.block_entity_nbts.push(nbt);
+    }
+
+    fn get_top_y(&self, heightmap: &HeightMap, x: i32, z: i32) -> i32 {
+        let chunk_heightmap = match heightmap {
+            HeightMap::WorldSurfaceWg | HeightMap::WorldSurface => ChunkHeightmapType::WorldSurface,
+            HeightMap::OceanFloorWg | HeightMap::OceanFloor => ChunkHeightmapType::OceanFloor,
+            HeightMap::MotionBlocking => ChunkHeightmapType::MotionBlocking,
+            HeightMap::MotionBlockingNoLeaves => ChunkHeightmapType::MotionBlockingNoLeaves,
+        };
+        self.world.get_heightmap_height(chunk_heightmap, x, z)
     }
 }
