@@ -23,8 +23,9 @@ use crate::entity::{
     ai::goal::{
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
         nearest_attackable_witch_target::NearestAttackableWitchTargetGoal,
-        nearest_healable_raider_target::NearestHealableRaiderTargetGoal, revenge::RevengeGoal,
-        swim::SwimGoal, wander_around::WanderAroundGoal, witch_attack::WitchAttackGoal,
+        nearest_healable_raider_target::NearestHealableRaiderTargetGoal,
+        pathfind_to_raid::PathfindToRaidGoal, revenge::RevengeGoal, swim::SwimGoal,
+        wander_around::WanderAroundGoal, witch_attack::WitchAttackGoal,
     },
     mob::{Mob, MobEntity},
 };
@@ -86,6 +87,8 @@ impl WitchEntity {
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 8.0),
             );
             goal_selector.add_goal(3, Box::new(RandomLookAroundGoal::default()));
+            // Raider.java:65, via `super.registerGoals()`: `PathfindToRaidGoal<>(this)`.
+            goal_selector.add_goal(3, PathfindToRaidGoal::new());
 
             // Witch.java:72: `HurtByTargetGoal(this, Raider.class)`.
             target_selector.add_goal(1, Box::new(RevengeGoal::new(true).exclude_raiders()));

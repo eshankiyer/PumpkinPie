@@ -20,8 +20,9 @@ use crate::entity::{
     Entity, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal,
-        look_at_entity::LookAtEntityGoal, ranged_crossbow_attack::RangedCrossbowAttackGoal,
-        revenge::RevengeGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
+        look_at_entity::LookAtEntityGoal, pathfind_to_raid::PathfindToRaidGoal,
+        ranged_crossbow_attack::RangedCrossbowAttackGoal, revenge::RevengeGoal, swim::SwimGoal,
+        wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity, equipment::enchant_item_from_single_enchantment},
 };
@@ -80,6 +81,8 @@ impl PillagerEntity {
                 1,
                 Box::new(AvoidEntityGoal::new(&EntityType::CREAKING, 8.0, 1.0, 1.2)),
             );
+            // Raider.java:65, via `super.registerGoals()`: `PathfindToRaidGoal<>(this)`.
+            goal_selector.add_goal(3, PathfindToRaidGoal::new());
             // Pillager.java:74: `RangedCrossbowAttackGoal<>(this, 1.0, 8.0F)`.
             goal_selector.add_goal(3, Box::new(RangedCrossbowAttackGoal::new(8.0)));
             // Pillager.java:75-77: `RandomStrollGoal(this, 0.6)` at 8,

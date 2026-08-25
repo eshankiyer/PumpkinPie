@@ -19,6 +19,7 @@ use crate::entity::{
         },
         look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal,
+        pathfind_to_raid::PathfindToRaidGoal,
         ranged_bow_attack::RangedBowAttackGoal,
         revenge::RevengeGoal,
         spellcaster::SpellcasterState,
@@ -72,6 +73,8 @@ impl IllusionerEntity {
                 3,
                 Box::new(AvoidEntityGoal::new(&EntityType::CREAKING, 8.0, 1.0, 1.2)),
             );
+            // Raider.java:65, via `super.registerGoals()`: `PathfindToRaidGoal<>(this)`.
+            goal_selector.add_goal(3, PathfindToRaidGoal::new());
             goal_selector.add_goal(
                 4,
                 Box::new(IllusionerMirrorSpellGoal::new(illusioner_weak.clone())),

@@ -78,9 +78,13 @@ pub struct Navigator {
     wall_climber: bool,
     wall_climber_target: Option<BlockPos>,
     wall_climber_direct: bool,
+    /// `GroundPathNavigation.avoidSun` (`GroundPathNavigation.java:20`). Set by
+    /// `RestrictSunGoal` while the mob is in daylight without head armor; while set, paths are
+    /// truncated before their first sky-exposed node (see `Navigator::trim_avoiding_sun`).
+    avoid_sun: bool,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum NavigationKind {
     #[default]
     Ground,
@@ -111,6 +115,7 @@ impl Default for Navigator {
             wall_climber: false,
             wall_climber_target: None,
             wall_climber_direct: false,
+            avoid_sun: false,
         }
     }
 }
@@ -352,6 +357,47 @@ impl Navigator {
         self.wall_climber = wall_climber;
     }
 
+    /// `GroundPathNavigation.setAvoidSun` (`GroundPathNavigation.java:138-140`). While set,
+    /// every navigation tick truncates the current path before its first sky-exposed node
+    /// (see `Navigator::trim_avoiding_sun`).
+    pub const fn set_avoid_sun(&mut self, avoid_sun: bool) {
+        self.avoid_sun = avoid_sun;
+    }
+
+    /// `GroundPathNavigation.trimPath` (`GroundPathNavigation.java:116-131`).
+    ///
+    /// Runs on ground navigators while `avoid_sun` is set. If the mob itself already stands in
+    /// open sky the path is left alone (vanilla's early `return`); otherwise the path is cut at
+    /// its first node that can see the sky, so following it never walks the mob into daylight.
+    fn trim_avoiding_sun(&mut self, entity: &LivingEntity) {
+        if !self.avoid_sun || self.navigation_kind != NavigationKind::Ground {
+            return;
+        }
+        let world = entity.entity.world.load();
+        let pos = entity.entity.pos.load();
+        // Vanilla checks `BlockPos.containing(mob.getX(), mob.getY() + 0.5, mob.getZ())`.
+        let mob_pos = BlockPos::new(
+            pos.x.floor() as i32,
+            (pos.y + 0.5).floor() as i32,
+            pos.z.floor() as i32,
+        );
+        if world.can_see_sky(&mob_pos) {
+            return;
+        }
+        let Some(path) = &mut self.current_path else {
+            return;
+        };
+        for i in 0..path.get_node_count() {
+            let Some(node) = path.get_node(i) else {
+                continue;
+            };
+            if world.can_see_sky(&node.pos) {
+                path.truncate_nodes(i);
+                return;
+            }
+        }
+    }
+
     #[must_use]
     pub fn get_pathfinding_malus(&self, path_type: PathType) -> f32 {
         self.path_type_overrides
@@ -405,6 +451,7 @@ impl Navigator {
             wall_climber: self.wall_climber,
             wall_climber_target: None,
             wall_climber_direct: false,
+            avoid_sun: self.avoid_sun,
         }
     }
 
@@ -772,24 +819,31 @@ impl Navigator {
             return;
         }
 
-        if let Some(path) = &mut self.current_path {
-            if path.is_done() || !path.is_valid() {
-                // Path finished or was invalidated: same "must signal idle" reasoning as
-                // above (vanilla `PathNavigation.isDone()`'s `path.isDone()` half). This is
-                // the case that fires every tick after a path completes normally, so without
-                // it a mob freezes in place permanently after reaching its very first target.
-                if self.wall_climber {
-                    self.current_path = None;
-                    self.wall_climber_direct = true;
-                    self.is_idle.store(false, Ordering::Relaxed);
-                } else {
-                    self.is_idle.store(true, Ordering::Relaxed);
-                }
-                entity.movement_input.store(Vector3::new(0.0, 0.0, 0.0));
-                self.current_goal = Some(goal);
-                return;
+        if let Some(path) = &mut self.current_path
+            && (path.is_done() || !path.is_valid())
+        {
+            // Path finished or was invalidated: same "must signal idle" reasoning as
+            // above (vanilla `PathNavigation.isDone()`'s `path.isDone()` half). This is
+            // the case that fires every tick after a path completes normally, so without
+            // it a mob freezes in place permanently after reaching its very first target.
+            if self.wall_climber {
+                self.current_path = None;
+                self.wall_climber_direct = true;
+                self.is_idle.store(false, Ordering::Relaxed);
+            } else {
+                self.is_idle.store(true, Ordering::Relaxed);
             }
+            entity.movement_input.store(Vector3::new(0.0, 0.0, 0.0));
+            self.current_goal = Some(goal);
+            return;
+        }
 
+        // Vanilla runs `GroundPathNavigation.trimPath` every navigation tick before following
+        // the path (`PathNavigation.tick` -> `trimPath`), so the avoid-sun cut applies to an
+        // already-computed path the moment `RestrictSunGoal` starts, not only on repath.
+        self.trim_avoiding_sun(entity);
+
+        if let Some(path) = &mut self.current_path {
             let current_node_index = path.get_next_node_index();
             if current_node_index == self.last_node_index {
                 self.ticks_on_current_node += 1;
