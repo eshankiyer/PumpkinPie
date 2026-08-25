@@ -53,6 +53,7 @@ use crate::entity::{
             stroll_around_poi::{StrollAroundPoiGoal, StrollPoi},
             swim::SwimGoal,
             trade_with_player::TradeWithPlayerGoal,
+            villager_panic::VillagerPanicGoal,
             villager_schedule::{self, VillagerScheduleGoal},
             wander_around::WanderAroundGoal,
             work_at_job_site::WorkAtJobSiteGoal,
@@ -433,6 +434,10 @@ impl VillagerEntity {
             // goal-based port, same as `CopperGolemEntity` does for its own `InteractWithDoor`
             // core-activity entry.
             goal_selector.add_goal(0, Box::new(InteractWithDoorGoal::new(true)));
+            // `VillagerGoalPackages.java:39`, `Pair.of(0, new VillagerPanicTrigger())`: the
+            // panic-state holder (hurt/hostile gate + 100-tick golem-summon cadence). Runs
+            // alongside the flee goals below; see `villager_panic.rs` for the split.
+            goal_selector.add_goal(0, VillagerPanicGoal::new());
             // `RingBell.create` (`RingBell.java:15-31`) belongs to the vanilla pre-raid package.
             // The goal gates itself on the same nearby pre-raid/inter-wave raid state.
             goal_selector.add_goal(0, Box::new(RingBellGoal));
