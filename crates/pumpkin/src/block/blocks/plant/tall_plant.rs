@@ -1,4 +1,4 @@
-use crate::block::{BrokenArgs, PlacedArgs};
+use crate::block::{BlockFuture, BonemealArgs, BrokenArgs, PlacedArgs};
 use pumpkin_data::Block;
 use pumpkin_data::BlockDirection;
 use pumpkin_data::BlockId;
@@ -8,11 +8,12 @@ use pumpkin_data::block_properties::{
 };
 use pumpkin_world::world::BlockFlags;
 
-use crate::block::BlockFuture;
 use crate::block::{
     BlockBehaviour, BlockMetadata, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
     blocks::plant::PlantBlockBase,
 };
+use pumpkin_data::item::Item;
+use pumpkin_data::item_stack::ItemStack;
 
 pub struct TallPlantBlock;
 
@@ -33,6 +34,33 @@ impl BlockMetadata for TallPlantBlock {
 }
 
 impl BlockBehaviour for TallPlantBlock {
+    /// `TallFlowerBlock.isValidBonemealTarget` (`TallFlowerBlock.java:25-28`)
+    /// returns true for the four tall-flower registrations. The other ids in
+    /// this shared behaviour are different vanilla classes and must not inherit
+    /// that bonemeal capability.
+    fn is_valid_bonemeal_target(&self, args: BonemealArgs<'_>) -> bool {
+        is_tall_flower(args.block.id)
+    }
+
+    /// `TallFlowerBlock.isBonemealSuccess` (`TallFlowerBlock.java:30-33`) always
+    /// succeeds for a tall flower.
+    fn is_bonemeal_success(&self, args: BonemealArgs<'_>) -> bool {
+        is_tall_flower(args.block.id)
+    }
+
+    /// `TallFlowerBlock.performBonemeal` (`TallFlowerBlock.java:35-38`) drops one
+    /// item stack of the flower at the block position.
+    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            let Some(item) = Item::from_id(args.block.item_id) else {
+                return;
+            };
+            args.world
+                .drop_stack(args.position, ItemStack::new(1, item))
+                .await;
+        })
+    }
+
     /// Mirrors `DoublePlantBlock.getStateForPlacement` (`DoublePlantBlock.java:64-68`):
     /// the upper position only needs to be replaceable, not already air. The companion
     /// `DoubleHighBlockItem.placeBlock` reset (`DoubleHighBlockItem.java:16-21`) clears that
@@ -131,6 +159,13 @@ impl BlockBehaviour for TallPlantBlock {
             }
         })
     }
+}
+
+const fn is_tall_flower(id: BlockId) -> bool {
+    matches!(
+        id,
+        BlockId::SUNFLOWER | BlockId::LILAC | BlockId::PEONY | BlockId::ROSE_BUSH
+    )
 }
 
 impl PlantBlockBase for TallPlantBlock {}

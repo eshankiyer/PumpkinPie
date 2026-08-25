@@ -1,13 +1,13 @@
 use std::sync::Arc;
 
-use pumpkin_data::BlockId;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_data::{BlockId, BlockStateId};
 use pumpkin_util::GameMode;
 
-use crate::block::BrokenArgs;
-use crate::block::{BlockBehaviour, BlockFuture, BlockMetadata};
+use crate::block::{BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, OnPlaceArgs};
 use crate::entity::Entity;
+use pumpkin_data::block_properties::{BlockProperties, PaleOakWoodLikeProperties};
 
 pub struct InfestedBlock;
 
@@ -31,6 +31,22 @@ impl BlockMetadata for InfestedBlock {
 }
 
 impl BlockBehaviour for InfestedBlock {
+    /// `InfestedRotatedPillarBlock.getStateForPlacement`
+    /// (`InfestedRotatedPillarBlock.java:39-40`) stores the clicked face axis on
+    /// infested deepslate. The normal infested blocks have no axis property and
+    /// retain the generated default state.
+    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
+        Box::pin(async move {
+            if args.block.id == BlockId::INFESTED_DEEPSLATE {
+                let mut props = PaleOakWoodLikeProperties::default(args.block);
+                props.axis = args.direction.to_axis();
+                props.to_state_id(args.block)
+            } else {
+                args.block.default_state.id
+            }
+        })
+    }
+
     fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             if args.player.gamemode.load() == GameMode::Creative {
