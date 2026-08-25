@@ -1,8 +1,8 @@
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::data_component::DataComponent;
 use pumpkin_data::data_component_impl::{
-    DataComponentImpl, FireworkExplosionImpl, FireworkExplosionShape, FireworksImpl,
-    WrittenBookContentImpl,
+    ContainerLootImpl, DataComponentImpl, FireworkExplosionImpl, FireworkExplosionShape,
+    FireworksImpl, WrittenBookContentImpl,
 };
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item_stack::ItemStack;
@@ -369,6 +369,44 @@ impl LootFunctionExt for LootFunction {
                         stack.item_count += count.generate().round() as u8;
                     } else {
                         stack.item_count = count.generate().round() as u8;
+                    }
+                }
+            }
+            // `SetItemDamageFunction.run` (`SetItemDamageFunction.java:46-56`) computes a
+            // remaining-durability fraction, then floors it into the item's damage component.
+            LootFunctionTypes::SetItemDamage { damage, add } => {
+                for stack in stacks {
+                    let Some(max_damage) = stack.get_max_damage() else {
+                        tracing::warn!("Couldn't set damage of loot item");
+                        continue;
+                    };
+                    let base = if *add {
+                        1.0 - stack.get_damage() as f32 / max_damage as f32
+                    } else {
+                        0.0
+                    };
+                    let remaining = 1.0 - (damage.generate() + base).clamp(0.0, 1.0);
+                    stack.set_damage((remaining * max_damage as f32).floor() as i32);
+                }
+            }
+            // `SetContainerLootTable.run` (`SetContainerLootTable.java:50-57`) stores the
+            // table key and seed and leaves empty stacks unchanged.
+            LootFunctionTypes::SetContainerLootTable { name, seed } => {
+                for stack in stacks {
+                    if stack.is_empty() {
+                        continue;
+                    }
+                    if let Some(loot) = stack.get_data_component_mut::<ContainerLootImpl>() {
+                        (*name).clone_into(&mut loot.loot_table);
+                        loot.seed = *seed;
+                    } else {
+                        stack.patch.push((
+                            DataComponent::ContainerLoot,
+                            Some(Box::new(ContainerLootImpl {
+                                loot_table: (*name).to_owned(),
+                                seed: *seed,
+                            })),
+                        ));
                     }
                 }
             }
@@ -1107,7 +1145,8 @@ mod tests {
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
     use pumpkin_data::{
-        data_component_impl::FireworkExplosionShape, data_component_impl::FireworksImpl,
+        data_component_impl::ContainerLootImpl, data_component_impl::FireworkExplosionShape,
+        data_component_impl::FireworksImpl,
     };
     use pumpkin_util::loot_table::{LootFireworkExplosion, LootListOperation};
 
@@ -1133,6 +1172,57 @@ mod tests {
 
         assert_eq!(stacks[0].item.registry_key, "stone");
         assert_eq!(stacks[0].item_count, 3);
+    }
+
+    #[test]
+    fn set_item_damage_matches_vanilla_fraction_and_add_mode() {
+        let mut stacks = vec![ItemStack::new(1, &Item::DIAMOND_SWORD)];
+        let function = LootFunction {
+            content: LootFunctionTypes::SetItemDamage {
+                damage: LootFunctionNumberProvider::Constant { value: 0.25 },
+                add: false,
+            },
+            conditions: None,
+        };
+
+        function.apply(&mut stacks, &LootContextParameters::default());
+        assert_eq!(stacks[0].get_damage(), 1170);
+
+        stacks[0].set_damage(1500);
+        let function = LootFunction {
+            content: LootFunctionTypes::SetItemDamage {
+                damage: LootFunctionNumberProvider::Constant { value: 0.1 },
+                add: true,
+            },
+            conditions: None,
+        };
+        function.apply(&mut stacks, &LootContextParameters::default());
+        assert_eq!(stacks[0].get_damage(), 1343);
+    }
+
+    #[test]
+    fn set_container_loot_table_installs_component_and_skips_empty_stack() {
+        let function = LootFunction {
+            content: LootFunctionTypes::SetContainerLootTable {
+                name: "minecraft:chests/simple_dungeon",
+                seed: 42,
+            },
+            conditions: None,
+        };
+        let mut stacks = vec![ItemStack::new(1, &Item::CHEST), ItemStack::EMPTY.clone()];
+
+        function.apply(&mut stacks, &LootContextParameters::default());
+
+        let loot = stacks[0]
+            .get_data_component::<ContainerLootImpl>()
+            .expect("set_loot_table installs container loot");
+        assert_eq!(loot.loot_table, "minecraft:chests/simple_dungeon");
+        assert_eq!(loot.seed, 42);
+        assert!(
+            stacks[1]
+                .get_data_component::<ContainerLootImpl>()
+                .is_none()
+        );
     }
 
     #[test]
