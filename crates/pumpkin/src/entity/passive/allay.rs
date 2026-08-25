@@ -82,6 +82,7 @@ use crate::entity::ai::brain::memory::{
     LikedPlayerMemory, NearestVisibleWantedItemMemory, PositionTracker,
 };
 use crate::entity::ai::brain::sensor::nearest_item::NearestItemSensor;
+use crate::entity::ai::brain::sensor::nearest_living_entities::NearestLivingEntitySensor;
 use crate::entity::ai::brain::{Activity, ActivityData, Brain};
 use crate::entity::player::Player;
 use crate::entity::{
@@ -182,11 +183,14 @@ impl AllayEntity {
         mob_arc
     }
 
-    /// `Allay.BRAIN_PROVIDER` / `AllayAi.getActivities()` (`AllayAi.java:57-59`). The Allay has
-    /// no goals: every entry below is a `Behavior`, not a `Goal`.
+    /// `Allay.BRAIN_PROVIDER` (`Allay.java:83-85`) / `AllayAi.getActivities()`
+    /// (`AllayAi.java:57-59`). The Allay has no goals: every entry below is a `Behavior`, not
+    /// a `Goal`. Sensor list per `Allay.java:84` minus `NEAREST_PLAYERS`
+    /// (`PlayerSensor` unported); `HURT_BY`'s effect is written from the damage path
+    /// (`living.rs`, see the `HurtBySensor` comment there).
     fn make_brain() -> Brain {
         let brain = Brain::new(
-            vec![NearestItemSensor::new()],
+            vec![NearestLivingEntitySensor::new(), NearestItemSensor::new()],
             vec![Self::init_core_activity(), Self::init_idle_activity()],
         );
         // Memories read through `getMemory` rather than declared as a behavior's required

@@ -22,6 +22,7 @@ use crate::entity::{
     passive::animal::Animal,
     player::Player,
 };
+use crate::world::World;
 use pumpkin_nbt::compound::NbtCompound;
 
 const TEMPT_ITEMS: &[&Item] = &[
@@ -32,6 +33,44 @@ const TEMPT_ITEMS: &[&Item] = &[
     &Item::TORCHFLOWER_SEEDS,
     &Item::PITCHER_POD,
 ];
+
+/// Sentinel meaning "no variant rolled yet" -- `mob_init_data_tracker` rolls a biome-based
+/// variant the same way `SheepEntity`'s `COLOR_UNSET` does (sheep.rs:48-63): NBT restore runs
+/// before `init_data_tracker` (entity/mod.rs:4916-4921), so a loaded chicken keeps its stored
+/// variant while a fresh spawn gets rolled.
+const VARIANT_UNSET: u8 = 0xFF;
+
+/// Vanilla registry ids of the `minecraft:chicken_variant` entries
+/// (`data/minecraft/chicken_variant/{cold,temperate,warm}.json`; identical ordering in
+/// Pumpkin's generated `registry.rs`): cold = 0, temperate = 1, warm = 2. This is the value
+/// vanilla syncs through `DATA_VARIANT_ID` (Chicken.java:62) and stores under the `variant`
+/// NBT key via `VariantUtils.writeVariant`/`readVariant` (VariantUtils.java:26-32,
+/// Chicken.java:216,227). The existing cold/temperate/warm mapping below predates this
+/// module-level naming and matches it exactly.
+mod chicken_variant {
+    pub const COLD: u8 = 0;
+    pub const TEMPERATE: u8 = 1;
+    pub const WARM: u8 = 2;
+
+    /// Vanilla `Chicken.finalizeSpawn`'s `VariantUtils.selectVariantToSpawn` over
+    /// `Registries.CHICKEN_VARIANT` (Chicken.java:188): `cold.json`'s priority-1 selector
+    /// gates on `#minecraft:spawns_cold_variant_farm_animals`, `warm.json`'s on
+    /// `#minecraft:spawns_warm_variant_farm_animals`, and temperate is the unconditional
+    /// priority-0 fallback. The two tags are disjoint in vanilla data, so a positive test of
+    /// each in order reproduces `PriorityProvider.pick`; an unresolved biome is in neither,
+    /// which selects temperate.
+    pub fn select_spawn_variant(biome: Option<&'static pumpkin_data::biome::Biome>) -> u8 {
+        use pumpkin_data::tag::{Taggable, WorldgenBiome};
+        let has = |t: &'static pumpkin_data::tag::Tag| biome.is_some_and(|b| b.has_tag(t));
+        if has(&WorldgenBiome::MINECRAFT_SPAWNS_WARM_VARIANT_FARM_ANIMALS) {
+            WARM
+        } else if has(&WorldgenBiome::MINECRAFT_SPAWNS_COLD_VARIANT_FARM_ANIMALS) {
+            COLD
+        } else {
+            TEMPERATE
+        }
+    }
+}
 
 /// Represents a Chicken, a passive mob that lays eggs and is immune to fall damage.
 ///
@@ -49,7 +88,7 @@ impl ChickenEntity {
         let egg_lay_time = rand::rng().random_range(6000..12000);
         let chicken = Self {
             mob_entity,
-            variant: AtomicU8::new(1), // Default to temperate
+            variant: AtomicU8::new(VARIANT_UNSET), // rolled from the spawn biome
             egg_lay_time: AtomicI32::new(egg_lay_time),
             ageable_data: crate::entity::ageable::AgeableData::default(),
         };
@@ -155,9 +194,58 @@ impl Mob for ChickenEntity {
         self.variant.store(variant, Ordering::Relaxed);
     }
 
+    /// Vanilla `Chicken.getBreedOffspring` (Chicken.java:178): the chick takes one of its
+    /// parents' variants at random.
+    fn create_offspring<'a>(
+        &'a self,
+        mate: &'a dyn EntityBase,
+        world: &'a Arc<World>,
+    ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
+        Box::pin(async move {
+            let entity = self.get_entity();
+            let baby = crate::entity::r#type::from_type(
+                entity.entity_type,
+                entity.pos.load(),
+                world,
+                uuid::Uuid::new_v4(),
+            );
+
+            if let Some(mate_chicken) = mate.cast_any().downcast_ref::<Self>() {
+                // Normalize through the same table write_nbt uses so an unset parent
+                // contributes temperate rather than the raw sentinel.
+                let normalize = |v: u8| match v {
+                    0 => chicken_variant::COLD,
+                    2 => chicken_variant::WARM,
+                    _ => chicken_variant::TEMPERATE,
+                };
+                let picked = if rand::rng().random_bool(0.5) {
+                    normalize(self.variant.load(Ordering::Relaxed))
+                } else {
+                    normalize(mate_chicken.variant.load(Ordering::Relaxed))
+                };
+                if let Some(chick) = baby.cast_any().downcast_ref::<Self>() {
+                    chick.variant.store(picked, Ordering::Relaxed);
+                }
+            }
+
+            Some(baby)
+        })
+    }
+
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             let entity = self.get_entity();
+
+            // `Chicken.finalizeSpawn` (Chicken.java:188): roll the variant from the spawn
+            // biome once, before first sync. A value already settled by NBT restore,
+            // `mob_set_variant_name` or `create_offspring` is kept as-is.
+            if self.variant.load(Ordering::Relaxed) == VARIANT_UNSET {
+                let world = entity.world.load();
+                let pos = entity.block_pos.load();
+                let variant = chicken_variant::select_spawn_variant(world.get_biome(&pos));
+                self.variant.store(variant, Ordering::Relaxed);
+            }
+
             let is_baby = entity.age.load(Ordering::Relaxed) < 0;
             if is_baby {
                 entity.send_meta_data(
