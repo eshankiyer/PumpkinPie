@@ -1,7 +1,8 @@
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::data_component::DataComponent;
 use pumpkin_data::data_component_impl::{
-    DataComponentImpl, FireworkExplosionImpl, FireworkExplosionShape, WrittenBookContentImpl,
+    DataComponentImpl, FireworkExplosionImpl, FireworkExplosionShape, FireworksImpl,
+    WrittenBookContentImpl,
 };
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item_stack::ItemStack;
@@ -9,8 +10,9 @@ use pumpkin_data::tag;
 use pumpkin_data::{Block, BlockState, item::Item};
 use pumpkin_util::{
     loot_table::{
-        LootCondition, LootFunction, LootFunctionBonusParameter, LootFunctionNumberProvider,
-        LootFunctionTypes, LootPoolEntry, LootPoolEntryTypes, LootTable,
+        LootCondition, LootFireworkExplosionOperation, LootFunction, LootFunctionBonusParameter,
+        LootFunctionNumberProvider, LootFunctionTypes, LootPoolEntry, LootPoolEntryTypes,
+        LootTable,
     },
     random::{RandomGenerator, RandomImpl, get_seed, xoroshiro128::Xoroshiro},
 };
@@ -302,6 +304,55 @@ fn apply_set_firework_explosion(
     }
 }
 
+/// Implements `SetFireworksFunction.run` and `apply` from
+/// `net/minecraft/world/level/storage/loot/functions/SetFireworksFunction.java:39-49`.
+/// Its default component is `new Fireworks(0, List.of())` from line 26; list behavior follows
+/// `ListOperation.java:35-39,55-62,77-91,108-110,132-153`.
+fn apply_set_fireworks(
+    stack: &mut ItemStack,
+    explosions: Option<&LootFireworkExplosionOperation>,
+    flight_duration: Option<u8>,
+) {
+    let original = stack
+        .get_data_component::<FireworksImpl>()
+        .cloned()
+        .unwrap_or_else(|| FireworksImpl::new(0, Vec::new()));
+    let explosions = explosions.map_or_else(
+        || original.explosions.clone(),
+        |operation| {
+            let values = operation
+                .values
+                .iter()
+                .map(|value| {
+                    FireworkExplosionImpl::new(
+                        FireworkExplosionShape::from_name(value.shape)
+                            .unwrap_or(FireworkExplosionShape::SmallBall),
+                        value.colors.to_vec(),
+                        value.fade_colors.to_vec(),
+                        value.has_trail,
+                        value.has_twinkle,
+                    )
+                })
+                .collect::<Vec<_>>();
+            operation
+                .operation
+                .apply(&original.explosions, &values, 256)
+        },
+    );
+    let updated = FireworksImpl::new(
+        flight_duration.map_or(original.flight_duration, i32::from),
+        explosions,
+    );
+
+    if let Some(fireworks) = stack.get_data_component_mut::<FireworksImpl>() {
+        *fireworks = updated;
+    } else {
+        stack
+            .patch
+            .push((DataComponent::Fireworks, Some(updated.to_dyn())));
+    }
+}
+
 impl LootFunctionExt for LootFunction {
     #[allow(clippy::too_many_lines)]
     fn apply(&self, stacks: &mut Vec<ItemStack>, params: &LootContextParameters) {
@@ -513,6 +564,21 @@ impl LootFunctionExt for LootFunction {
                         *trail,
                         *twinkle,
                     );
+                }
+            }
+            LootFunctionTypes::SetItem { item } => {
+                if let Some(item) = Item::from_registry_key(item) {
+                    for stack in stacks {
+                        stack.item = item;
+                    }
+                }
+            }
+            LootFunctionTypes::SetFireworks {
+                explosions,
+                flight_duration,
+            } => {
+                for stack in stacks {
+                    apply_set_fireworks(stack, explosions.as_ref(), *flight_duration);
                 }
             }
         }
@@ -1040,6 +1106,10 @@ mod tests {
     use pumpkin_data::entity::EntityType;
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
+    use pumpkin_data::{
+        data_component_impl::FireworkExplosionShape, data_component_impl::FireworksImpl,
+    };
+    use pumpkin_util::loot_table::{LootFireworkExplosion, LootListOperation};
 
     #[test]
     fn stack_splitter_passes_through_a_stack_below_max() {
@@ -1047,6 +1117,53 @@ mod tests {
         push_split_stack(&mut out, ItemStack::new(40, &Item::COBBLESTONE));
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].item_count, 40);
+    }
+
+    #[test]
+    fn set_item_preserves_count_and_changes_item() {
+        let mut stacks = vec![ItemStack::new(3, &Item::DIRT)];
+        let function = LootFunction {
+            content: LootFunctionTypes::SetItem {
+                item: "minecraft:stone",
+            },
+            conditions: None,
+        };
+
+        function.apply(&mut stacks, &LootContextParameters::default());
+
+        assert_eq!(stacks[0].item.registry_key, "stone");
+        assert_eq!(stacks[0].item_count, 3);
+    }
+
+    #[test]
+    fn set_fireworks_applies_values_and_flight_duration() {
+        let mut stacks = vec![ItemStack::new(1, &Item::FIREWORK_ROCKET)];
+        let function = LootFunction {
+            content: LootFunctionTypes::SetFireworks {
+                explosions: Some(LootFireworkExplosionOperation {
+                    values: &[LootFireworkExplosion {
+                        shape: "star",
+                        colors: &[11_743_532],
+                        fade_colors: &[],
+                        has_trail: true,
+                        has_twinkle: false,
+                    }],
+                    operation: LootListOperation::ReplaceAll,
+                }),
+                flight_duration: Some(2),
+            },
+            conditions: None,
+        };
+
+        function.apply(&mut stacks, &LootContextParameters::default());
+
+        let fireworks = stacks[0]
+            .get_data_component::<FireworksImpl>()
+            .expect("set_fireworks installs its component");
+        assert_eq!(fireworks.flight_duration, 2);
+        assert_eq!(fireworks.explosions.len(), 1);
+        assert_eq!(fireworks.explosions[0].shape, FireworkExplosionShape::Star);
+        assert!(fireworks.explosions[0].has_trail);
     }
 
     #[test]

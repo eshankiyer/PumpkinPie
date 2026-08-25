@@ -232,6 +232,82 @@ pub enum LootFunctionTypes {
         trail: Option<bool>,
         twinkle: Option<bool>,
     },
+    /// Replaces an item while preserving the stack's count and component patch.
+    SetItem { item: &'static str },
+    /// Updates the fireworks component, including its vanilla list operation.
+    SetFireworks {
+        explosions: Option<LootFireworkExplosionOperation>,
+        flight_duration: Option<u8>,
+    },
+}
+
+/// One serialized `FireworkExplosion` value accepted by `SetFireworksFunction`.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct LootFireworkExplosion {
+    pub shape: &'static str,
+    pub colors: &'static [i32],
+    pub fade_colors: &'static [i32],
+    pub has_trail: bool,
+    pub has_twinkle: bool,
+}
+
+/// The four modes of vanilla `ListOperation` used by `SetFireworksFunction`.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum LootListOperation {
+    ReplaceAll,
+    ReplaceSection { offset: usize, size: Option<usize> },
+    Insert { offset: usize },
+    Append,
+}
+
+impl LootListOperation {
+    #[must_use]
+    pub fn apply<T: Clone>(&self, original: &[T], replacement: &[T], max_size: usize) -> Vec<T> {
+        match self {
+            Self::ReplaceAll => replacement.to_vec(),
+            Self::Append => {
+                if original.len() + replacement.len() > max_size {
+                    original.to_vec()
+                } else {
+                    original.iter().chain(replacement).cloned().collect()
+                }
+            }
+            Self::Insert { offset } => {
+                if *offset > original.len() || original.len() + replacement.len() > max_size {
+                    return original.to_vec();
+                }
+                let mut result = Vec::with_capacity(original.len() + replacement.len());
+                result.extend_from_slice(&original[..*offset]);
+                result.extend_from_slice(replacement);
+                result.extend_from_slice(&original[*offset..]);
+                result
+            }
+            Self::ReplaceSection { offset, size } => {
+                if *offset > original.len() {
+                    return original.to_vec();
+                }
+                let resume = offset.saturating_add(size.unwrap_or(replacement.len()));
+                let mut result = Vec::with_capacity(original.len() + replacement.len());
+                result.extend_from_slice(&original[..*offset]);
+                result.extend_from_slice(replacement);
+                if resume < original.len() {
+                    result.extend_from_slice(&original[resume..]);
+                }
+                if result.len() > max_size {
+                    original.to_vec()
+                } else {
+                    result
+                }
+            }
+        }
+    }
+}
+
+/// Values plus the operation from vanilla `ListOperation.StandAlone`.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct LootFireworkExplosionOperation {
+    pub values: &'static [LootFireworkExplosion],
+    pub operation: LootListOperation,
 }
 
 /// Numeric providers for loot function counts.

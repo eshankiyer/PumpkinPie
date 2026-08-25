@@ -828,6 +828,41 @@ pub enum LootFunctionTypesStruct {
         trail: Option<bool>,
         twinkle: Option<bool>,
     },
+    /// Replaces the selected stack's item while preserving its component patch.
+    #[serde(rename = "minecraft:set_item")]
+    SetItem { item: String },
+    /// Updates fireworks data using vanilla's standalone list operation.
+    #[serde(rename = "minecraft:set_fireworks")]
+    SetFireworks {
+        explosions: Option<FireworkExplosionOperationStruct>,
+        flight_duration: Option<u8>,
+    },
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct FireworkExplosionStruct {
+    shape: String,
+    #[serde(default)]
+    colors: Vec<i32>,
+    #[serde(default)]
+    fade_colors: Vec<i32>,
+    #[serde(default)]
+    has_trail: bool,
+    #[serde(default)]
+    has_twinkle: bool,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct ListOperationStruct {
+    mode: String,
+    offset: Option<usize>,
+    size: Option<usize>,
+}
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct FireworkExplosionOperationStruct {
+    values: Vec<FireworkExplosionStruct>,
+    operation: ListOperationStruct,
 }
 
 impl ToTokens for LootFunctionTypesStruct {
@@ -972,6 +1007,67 @@ impl ToTokens for LootFunctionTypesStruct {
                         fade_colors: #fade_colors,
                         trail: #trail,
                         twinkle: #twinkle,
+                    }
+                }
+            }
+            Self::SetItem { item } => {
+                let item = LitStr::new(item, Span::call_site());
+                quote! { LootFunctionTypes::SetItem { item: #item } }
+            }
+            Self::SetFireworks {
+                explosions,
+                flight_duration,
+            } => {
+                let explosions = explosions.as_ref().map_or_else(
+                    || quote! { None },
+                    |operation| {
+                        let values = operation.values.iter().map(|value| {
+                            let shape = LitStr::new(&value.shape, Span::call_site());
+                            let colors = &value.colors;
+                            let fade_colors = &value.fade_colors;
+                            let has_trail = value.has_trail;
+                            let has_twinkle = value.has_twinkle;
+                            quote! {
+                                LootFireworkExplosion {
+                                    shape: #shape,
+                                    colors: &[#(#colors),*],
+                                    fade_colors: &[#(#fade_colors),*],
+                                    has_trail: #has_trail,
+                                    has_twinkle: #has_twinkle,
+                                }
+                            }
+                        });
+                        let operation = match operation.operation.mode.as_str() {
+                            "replace_all" => quote! { LootListOperation::ReplaceAll },
+                            "append" => quote! { LootListOperation::Append },
+                            "insert" => {
+                                let offset = operation.operation.offset.unwrap_or(0);
+                                quote! { LootListOperation::Insert { offset: #offset } }
+                            }
+                            "replace_section" => {
+                                let offset = operation.operation.offset.unwrap_or(0);
+                                let size = operation
+                                    .operation
+                                    .size
+                                    .map_or_else(|| quote! { None }, |size| quote! { Some(#size) });
+                                quote! { LootListOperation::ReplaceSection { offset: #offset, size: #size } }
+                            }
+                            mode => panic!("unsupported SetFireworks list operation: {mode}"),
+                        };
+                        quote! {
+                            Some(LootFireworkExplosionOperation {
+                                values: &[#(#values),*],
+                                operation: #operation,
+                            })
+                        }
+                    },
+                );
+                let flight_duration = flight_duration
+                    .map_or_else(|| quote! { None }, |value| quote! { Some(#value) });
+                quote! {
+                    LootFunctionTypes::SetFireworks {
+                        explosions: #explosions,
+                        flight_duration: #flight_duration,
                     }
                 }
             }
