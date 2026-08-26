@@ -28,7 +28,6 @@ use super::features::{
     end_gateway::EndGatewayFeature,
     end_island::EndIslandFeature,
     end_platform::EndPlatformFeature,
-    end_spike::EndSpikeFeature,
     fallen_tree::FallenTreeFeature,
     fill_layer::FillLayerFeature,
     forest_rock::ForestRockFeature,
@@ -74,6 +73,8 @@ use super::features::{
     weeping_vines::WeepingVinesFeature,
     weighted_random_selector::WeightedRandomFeature,
 };
+
+pub use super::features::end_spike::{EndSpikeFeature, Spike};
 use crate::generation::proto_chunk::GenerationCache;
 use crate::world::WorldPortalExt;
 

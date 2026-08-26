@@ -15,6 +15,7 @@ use pumpkin_util::{
     math::{position::BlockPos, vector2::Vector2, vector3::Vector3},
     text::TextComponent,
 };
+use pumpkin_world::generation::feature::configured_features::Spike;
 use pumpkin_world::world::BlockFlags;
 
 use super::{
@@ -370,11 +371,19 @@ impl DragonFight {
     }
 
     fn update_crystal_count(&mut self, world: &Arc<World>) {
+        let spikes = Spike::for_level_seed(world.level.seed.0);
         self.crystals_alive = world
             .entities
             .load()
             .iter()
-            .filter(|e| e.get_entity().entity_type == &EntityType::END_CRYSTAL)
+            .filter(|e| {
+                e.get_entity().entity_type == &EntityType::END_CRYSTAL
+                    && spikes.iter().any(|spike| {
+                        spike
+                            .top_bounding_box()
+                            .intersects(&e.get_entity().bounding_box.load())
+                    })
+            })
             .count() as u32;
         debug!("Found {} end crystals still alive.", self.crystals_alive);
     }

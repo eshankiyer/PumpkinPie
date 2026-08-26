@@ -4,7 +4,8 @@ use pumpkin_data::{
 };
 use pumpkin_util::{
     math::position::BlockPos,
-    random::{RandomGenerator, RandomImpl},
+    math::{boundingbox::BoundingBox, vector3::Vector3},
+    random::{RandomGenerator, RandomImpl, legacy_rand::LegacyRand},
 };
 
 use crate::generation::proto_chunk::GenerationCache;
@@ -25,10 +26,62 @@ pub struct Spike {
 }
 
 impl Spike {
+    /// Returns the spike list selected by vanilla's `getSpikesForLevel`.
+    ///
+    /// Vanilla first derives a 16-bit cache key from the level seed, then uses
+    /// that key to shuffle the ten possible spike sizes.
+    #[must_use]
+    pub fn for_level_seed(seed: u64) -> Vec<Self> {
+        let mut seed_random = RandomGenerator::Legacy(LegacyRand::from_seed(seed));
+        let cache_key = seed_random.next_i64() as u64 & 65_535;
+        let mut random = RandomGenerator::Legacy(LegacyRand::from_seed(cache_key));
+        let mut sizes: Vec<i32> = (0..10).collect();
+
+        for i in (1..10usize).rev() {
+            let j = random.next_bounded_i32(i as i32 + 1) as usize;
+            sizes.swap(i, j);
+        }
+
+        sizes
+            .into_iter()
+            .enumerate()
+            .map(|(i, size)| {
+                let angle =
+                    2.0 * (-std::f64::consts::PI + (std::f64::consts::PI / 10.0) * i as f64);
+                Self {
+                    center_x: (42.0 * angle.cos()).floor() as i32,
+                    center_z: (42.0 * angle.sin()).floor() as i32,
+                    radius: 2 + size / 3,
+                    height: 76 + size * 3,
+                    guarded: size == 1 || size == 2,
+                }
+            })
+            .collect()
+    }
+
+    #[must_use]
     pub const fn is_in_chunk(&self, pos: &BlockPos) -> bool {
         section_coords::block_to_section(pos.0.x) == section_coords::block_to_section(self.center_x)
             && section_coords::block_to_section(pos.0.z)
                 == section_coords::block_to_section(self.center_z)
+    }
+
+    /// Vanilla `EndSpike.getTopBoundingBox`: all world heights over the
+    /// spike's X/Z footprint, used when scanning for spike crystals.
+    #[must_use]
+    pub const fn top_bounding_box(&self) -> BoundingBox {
+        BoundingBox::new(
+            Vector3::new(
+                (self.center_x - self.radius) as f64,
+                -2032.0,
+                (self.center_z - self.radius) as f64,
+            ),
+            Vector3::new(
+                (self.center_x + self.radius) as f64,
+                2031.0,
+                (self.center_z + self.radius) as f64,
+            ),
+        )
     }
 }
 
@@ -52,21 +105,14 @@ impl EndSpikeFeature {
                 sizes.swap(i, j);
             }
 
-            for (i, &l) in sizes.iter().enumerate() {
+            for (i, &size) in sizes.iter().enumerate() {
                 let angle = 2.0 * (-std::f64::consts::PI + 0.3141592653589793 * i as f64);
-                let center_x = (42.0 * angle.cos()).floor() as i32;
-                let center_z = (42.0 * angle.sin()).floor() as i32;
-
-                let radius = 2 + l / 3;
-                let height = 76 + l * 3;
-                let guarded = l == 1 || l == 2;
-
                 spikes.push(Spike {
-                    center_x,
-                    center_z,
-                    radius,
-                    height,
-                    guarded,
+                    center_x: (42.0 * angle.cos()).floor() as i32,
+                    center_z: (42.0 * angle.sin()).floor() as i32,
+                    radius: 2 + size / 3,
+                    height: 76 + size * 3,
+                    guarded: size == 1 || size == 2,
                 });
             }
         }
