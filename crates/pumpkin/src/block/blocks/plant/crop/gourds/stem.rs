@@ -1,6 +1,6 @@
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
-    RandomTickArgs,
+    BlockBehaviour, BlockFuture, BlockMetadata, CanPlaceAtArgs, GetCloneItemStackArgs,
+    GetStateForNeighborUpdateArgs, RandomTickArgs,
     blocks::plant::{
         PlantBlockBase,
         crop::{CropBlockBase, MIN_GROWTH_LIGHT, get_available_moisture},
@@ -11,6 +11,8 @@ use pumpkin_data::{
     block_properties::{
         BlockProperties, HorizontalFacing, WallTorchLikeProperties, WheatLikeProperties,
     },
+    item::Item,
+    item_stack::ItemStack,
     tag::{self, Taggable},
 };
 use pumpkin_util::{
@@ -61,6 +63,17 @@ impl StemBlock {
 impl BlockBehaviour for StemBlock {
     fn is_valid_bonemeal_target(&self, args: crate::block::BonemealArgs<'_>) -> bool {
         <Self as CropBlockBase>::is_valid_bonemeal_target(self, args.world, args.position)
+    }
+
+    /// `StemBlock.getCloneItemStack` (StemBlock.java:110-112): middle-clicking a stem block
+    /// yields its seed item (pumpkin seeds / melon seeds) rather than the stem block itself.
+    fn get_clone_item_stack(&self, args: GetCloneItemStackArgs<'_>) -> Option<ItemStack> {
+        let seed = if args.block.id == Block::PUMPKIN_STEM.id {
+            &Item::PUMPKIN_SEEDS
+        } else {
+            &Item::MELON_SEEDS
+        };
+        Some(ItemStack::new(1, seed))
     }
 
     fn perform_bonemeal<'a>(&'a self, args: crate::block::BonemealArgs<'a>) -> BlockFuture<'a, ()> {

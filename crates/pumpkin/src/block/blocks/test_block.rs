@@ -1,4 +1,3 @@
-use pumpkin_data::BlockId;
 use pumpkin_data::block_properties::{
     BlockProperties, EnumVariants, TestBlockLikeProperties, TestBlockMode,
 };
@@ -6,13 +5,14 @@ use pumpkin_data::data_component::DataComponent;
 use pumpkin_data::data_component_impl::BlockStateImpl;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::{BlockId, BlockStateId};
 use pumpkin_util::{GameMode, PermissionLvl};
 
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::entities::test_block::TestBlockBlockEntity;
 use crate::block::{
     BlockBehaviour, BlockFuture, BlockMetadata, CanPlaceAtArgs, EmitsRedstonePowerArgs,
-    GetCloneItemStackArgs, GetRedstonePowerArgs, NormalUseArgs, OnNeighborUpdateArgs,
+    GetCloneItemStackArgs, GetRedstonePowerArgs, NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs,
     OnScheduledTickArgs, registry::BlockActionResult,
 };
 
@@ -39,6 +39,32 @@ impl BlockBehaviour for TestBlock {
         };
         player.gamemode.load() == GameMode::Creative
             && player.permission_lvl.load() >= PermissionLvl::Two
+    }
+
+    /// `TestBlock.getStateForPlacement` (TestBlock.java:42-53): reads the block's current mode
+    /// from the item's `block_state` data component so that a creative pick-block → place cycle
+    /// preserves the mode.
+    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
+        Box::pin(async move {
+            let mut props = TestBlockLikeProperties::default(args.block);
+            let held = args.player.inventory.held_item().await;
+            if let Some(block_state) =
+                held.get_data_component::<pumpkin_data::data_component_impl::BlockStateImpl>()
+                && let Some((_, mode_val)) = block_state
+                    .properties
+                    .iter()
+                    .find(|(k, _)| k.as_ref() == "mode")
+            {
+                props.mode = match mode_val.as_ref() {
+                    "start" => TestBlockMode::Start,
+                    "log" => TestBlockMode::Log,
+                    "fail" => TestBlockMode::Fail,
+                    "accept" => TestBlockMode::Accept,
+                    _ => props.mode,
+                };
+            }
+            props.to_state_id(args.block)
+        })
     }
 
     /// `TestBlock.tick`: the scheduled tick resets the block entity.
