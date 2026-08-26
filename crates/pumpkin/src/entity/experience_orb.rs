@@ -202,6 +202,12 @@ impl NBTStorage for ExperienceOrbEntity {
 }
 
 impl EntityBase for ExperienceOrbEntity {
+    /// Vanilla `ExperienceOrb.isAttackable` (`ExperienceOrb.java:375-378`).
+    /// Experience orbs are collected by touching them, not admitted to player attacks.
+    fn is_attackable(&self) -> bool {
+        false
+    }
+
     fn tick<'a>(
         &'a self,
         caller: &'a Arc<dyn EntityBase>,

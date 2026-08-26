@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::sound::Sound;
 use pumpkin_inventory::merchant::merchant_screen_handler::MerchantScreenHandler;
 use pumpkin_inventory::screen_handler::{
     BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
@@ -238,6 +239,35 @@ impl ScreenHandlerFactory for WanderingTraderEntity {
             )
             .await;
 
+            // `AbstractVillager.notifyTradeUpdated` (`AbstractVillager.java:152-157)`)
+            // calls the concrete `getTradeUpdatedSound` after the payment slots change,
+            // while suppressing repeats during the ambient-sound cooldown window.
+            let update_sound_weak = self_weak.clone();
+            handler.on_trade_updated = Some(Box::new(move |has_result| {
+                if let Some(trader) = update_sound_weak.upgrade() {
+                    let interval = trader.get_ambient_sound_interval();
+                    let current = trader.mob_entity.ambient_sound_time.load(Ordering::Relaxed);
+                    if current > -interval + 20
+                        && trader
+                            .mob_entity
+                            .ambient_sound_time
+                            .compare_exchange(
+                                current,
+                                -interval,
+                                Ordering::Relaxed,
+                                Ordering::Relaxed,
+                            )
+                            .is_ok()
+                    {
+                        trader.get_entity().play_sound(if has_result {
+                            Sound::EntityWanderingTraderYes
+                        } else {
+                            Sound::EntityWanderingTraderNo
+                        });
+                    }
+                }
+            }));
+
             // `AbstractVillager.startTrading` sets `tradingPlayer`; `stopTrading` clears it.
             // With it set, `isTrading()` suppresses despawn and `TradeWithPlayerGoal` holds
             // the trader still (`WanderingTrader.java:79, 212`).
@@ -419,6 +449,15 @@ impl Mob for WanderingTraderEntity {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner))?;
         self.get_entity().world.load().get_player_by_uuid(uuid)
+    }
+
+    /// Vanilla `WanderingTrader.getAmbientSound` (`WanderingTrader.java:165-168`).
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(if self.get_trading_player().is_some() {
+            Sound::EntityWanderingTraderTrade
+        } else {
+            Sound::EntityWanderingTraderAmbient
+        })
     }
 
     /// Vanilla `WanderingTrader::maybeDespawn` (`WanderingTrader.java:211-215`): decrements
