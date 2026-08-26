@@ -5,6 +5,8 @@ use pumpkin_data::{
     data_component_impl::EquipmentSlot,
     effect::StatusEffect,
     fluid::Fluid,
+    game_event::GameEvent,
+    sound::{Sound, SoundCategory},
 };
 use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_world::tick::TickPriority;
@@ -19,12 +21,66 @@ use crate::{
         UseWithItemArgs,
     },
     entity::EntityBase,
+    world::game_event::{GameEventContext, emit_game_event},
 };
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 #[pumpkin_block_from_tag("minecraft:campfires")]
 pub struct CampfireBlock;
+
+impl CampfireBlock {
+    /// `CampfireBlock.placeLiquid` (`CampfireBlock.java:203-220`): water extinguishes a dry
+    /// campfire, emits the block-change event, and schedules the water fluid tick.
+    pub(crate) async fn place_liquid(
+        world: &Arc<crate::world::World>,
+        position: &pumpkin_util::math::position::BlockPos,
+        block: &Block,
+        state_id: BlockStateId,
+        fluid: &Fluid,
+    ) -> bool {
+        if !fluid.matches_type(&Fluid::WATER) {
+            return false;
+        }
+
+        let mut properties = CampfireLikeProperties::from_state_id(state_id, block);
+        if properties.waterlogged {
+            return false;
+        }
+
+        if properties.lit {
+            world.play_block_sound(
+                Sound::EntityGenericExtinguishFire,
+                SoundCategory::Blocks,
+                *position,
+            );
+            emit_game_event(
+                world,
+                GameEvent::BlockChange,
+                position.to_centered_f64(),
+                GameEventContext::none(),
+            )
+            .await;
+        }
+
+        properties.waterlogged = true;
+        properties.lit = false;
+        world
+            .set_block_state(
+                position,
+                properties.to_state_id(block),
+                BlockFlags::NOTIFY_ALL,
+            )
+            .await;
+        world.schedule_fluid_tick(
+            &Fluid::WATER,
+            *position,
+            Fluid::WATER.flow_speed as u8,
+            TickPriority::Normal,
+        );
+        true
+    }
+}
 
 impl BlockBehaviour for CampfireBlock {
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {

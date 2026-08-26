@@ -2814,6 +2814,11 @@ impl<T: Mob + Send + 'static> EntityBase for T {
                 .damage_with_context(caller, amount, damage_type, position, source, cause)
                 .await;
             if damaged {
+                // `Animal.actuallyHurt` (`Animal.java:87-90`) clears love mode after damage is
+                // accepted. Only animals currently use `love_ticks`, so keeping this in the
+                // shared successful-mob-damage path applies the hook to every Animal implementor
+                // without duplicating damage overrides across the species.
+                self.get_mob_entity().reset_love_ticks();
                 self.on_damage(damage_type, source).await;
                 if rescue_lethal {
                     self.mob_on_lethal_rescue().await;

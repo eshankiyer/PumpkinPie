@@ -381,6 +381,15 @@ pub trait FlowingFluid: Send + Sync {
                 // Replace non-fluid blocks
                 let block = world.get_block(pos);
                 let state = world.get_block_state(pos);
+                if fluid.matches_type(&Fluid::WATER)
+                    && (block == &Block::CAMPFIRE || block == &Block::SOUL_CAMPFIRE)
+                {
+                    crate::block::blocks::campfire::CampfireBlock::place_liquid(
+                        world, pos, block, state.id, fluid,
+                    )
+                    .await;
+                    return;
+                }
                 if let Some(waterlogged_state) =
                     physics::waterlogged_replacement_state(state, block, fluid)
                 {
