@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use proc_macro2::{Span, TokenStream};
-use pumpkin_util::loot_table::LootNumberProviderTypes;
+use pumpkin_util::loot_table::{LootNumberProviderTypes, LootNameTarget};
 use quote::{ToTokens, quote};
 use serde::Deserialize;
 use syn::LitStr;
@@ -856,6 +856,23 @@ pub enum LootFunctionTypesStruct {
         explosions: Option<FireworkExplosionOperationStruct>,
         flight_duration: Option<u8>,
     },
+    /// Writes the item's custom or item-name component from a text component.
+    #[serde(rename = "minecraft:set_name")]
+    SetName {
+        /// The vanilla text component (object or plain string), emitted as raw JSON.
+        name: serde_json::Value,
+        /// Which component to write; vanilla defaults to `custom_name`.
+        target: Option<String>,
+    },
+    /// Fills a container item's contents component from nested loot entries.
+    #[serde(rename = "minecraft:set_contents")]
+    SetContainerContents {
+        /// The container-component manipulator; only `minecraft:container` is modelled.
+        #[serde(rename = "component")]
+        manipulator: String,
+        /// Nested entries expanded into the item's container slots in order.
+        entries: Vec<LootPoolEntryStruct>,
+    },
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -1042,6 +1059,27 @@ impl ToTokens for LootFunctionTypesStruct {
             Self::SetItem { item } => {
                 let item = LitStr::new(item, Span::call_site());
                 quote! { LootFunctionTypes::SetItem { item: #item } }
+            }
+            Self::SetName { name, target } => {
+                let raw = serde_json::to_string(name).unwrap_or_default();
+                let name = LitStr::new(&raw, Span::call_site());
+                let target = match target.as_deref() {
+                    Some("item_name") => quote! { LootNameTarget::ItemName },
+                    // `SetNameFunction.Target.CODEC` defaults to `CUSTOM_NAME`
+                    // (`SetNameFunction.java:38`).
+                    _ => quote! { LootNameTarget::CustomName },
+                };
+                quote! { LootFunctionTypes::SetName { name: #name, target: #target } }
+            }
+            Self::SetContainerContents {
+                manipulator,
+                entries,
+            } => {
+                if manipulator != "minecraft:container" {
+                    panic!("unsupported SetContainerContents manipulator: {manipulator}");
+                }
+                let entries = entries.iter().map(ToTokens::to_token_stream);
+                quote! { LootFunctionTypes::SetContainerContents { entries: &[#(#entries),*] } }
             }
             Self::SetFireworks {
                 explosions,

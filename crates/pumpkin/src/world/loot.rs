@@ -1,8 +1,8 @@
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::data_component::DataComponent;
 use pumpkin_data::data_component_impl::{
-    ContainerLootImpl, DataComponentImpl, FireworkExplosionImpl, FireworkExplosionShape,
-    FireworksImpl, WrittenBookContentImpl,
+    ContainerImpl, ContainerLootImpl, CustomNameImpl, DataComponentImpl, FireworkExplosionImpl,
+    FireworkExplosionShape, FireworksImpl, ItemNameImpl, WrittenBookContentImpl,
 };
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item_stack::ItemStack;
@@ -11,10 +11,11 @@ use pumpkin_data::{Block, BlockState, item::Item};
 use pumpkin_util::{
     loot_table::{
         LootCondition, LootFireworkExplosionOperation, LootFunction, LootFunctionBonusParameter,
-        LootFunctionNumberProvider, LootFunctionTypes, LootPoolEntry, LootPoolEntryTypes,
-        LootTable,
+        LootFunctionNumberProvider, LootFunctionTypes, LootNameTarget, LootPoolEntry,
+        LootPoolEntryTypes, LootTable,
     },
     random::{RandomGenerator, RandomImpl, get_seed, xoroshiro128::Xoroshiro},
+    text::TextComponent,
 };
 use rand::RngExt;
 
@@ -353,6 +354,52 @@ fn apply_set_fireworks(
     }
 }
 
+/// Implements `SetNameFunction.run` plus the `Target.component()` mapping from
+/// `net/minecraft/world/level/storage/loot/functions/SetNameFunction.java:91-94,106-128`.
+/// The name arrives exactly as codegen captured it: text-component JSON or a plain
+/// string. Vanilla's optional entity-resolution half (`createResolver`,
+/// `SetNameFunction.java:69-88`) needs a command source stack the headless loot
+/// context does not carry, and no shipped loot table passes `entity`.
+fn apply_set_name(stack: &mut ItemStack, raw_name: &str, target: LootNameTarget) {
+    match target {
+        LootNameTarget::CustomName => {
+            let name = serde_json::from_str::<TextComponent>(raw_name)
+                .unwrap_or_else(|_| TextComponent::text(raw_name.to_string()));
+            if let Some(component) = stack.get_data_component_mut::<CustomNameImpl>() {
+                component.name = name;
+            } else {
+                stack.patch.push((
+                    DataComponent::CustomName,
+                    Some(Box::new(CustomNameImpl { name }).to_dyn()),
+                ));
+            }
+        }
+        LootNameTarget::ItemName => {
+            // Mirrors what `ItemNameImpl.read_data` accepts: a translate key, a literal
+            // text key, or a bare string (see `ItemNameImpl` in
+            // `crates/pumpkin-data/src/data_component_impl/basic.rs`).
+            let name = match serde_json::from_str::<serde_json::Value>(raw_name) {
+                Ok(serde_json::Value::Object(map)) => map
+                    .get("translate")
+                    .or_else(|| map.get("text"))
+                    .and_then(serde_json::Value::as_str)
+                    .map_or_else(|| raw_name.to_string(), ToString::to_string),
+                Ok(serde_json::Value::String(value)) => value,
+                _ => raw_name.to_string(),
+            };
+            let name = std::borrow::Cow::Owned(name);
+            if let Some(component) = stack.get_data_component_mut::<ItemNameImpl>() {
+                component.name = name;
+            } else {
+                stack.patch.push((
+                    DataComponent::ItemName,
+                    Some(Box::new(ItemNameImpl { name }).to_dyn()),
+                ));
+            }
+        }
+    }
+}
+
 impl LootFunctionExt for LootFunction {
     #[allow(clippy::too_many_lines)]
     fn apply(&self, stacks: &mut Vec<ItemStack>, params: &LootContextParameters) {
@@ -617,6 +664,47 @@ impl LootFunctionExt for LootFunction {
             } => {
                 for stack in stacks {
                     apply_set_fireworks(stack, explosions.as_ref(), *flight_duration);
+                }
+            }
+            LootFunctionTypes::SetName { name, target } => {
+                for stack in stacks {
+                    apply_set_name(stack, name, *target);
+                }
+            }
+            // `SetContainerContents.run`
+            // (`net/minecraft/world/level/storage/loot/functions/SetContainerContents.java:47-56`):
+            // expand every entry through the regular pool-entry machinery, split oversized
+            // stacks with the table splitter (`LootTable.createStackSplitter`), and store
+            // them slot-indexed in the container component; empty stacks are untouched
+            // (:48-50).
+            LootFunctionTypes::SetContainerContents { entries } => {
+                for stack in stacks.iter_mut() {
+                    if stack.is_empty() {
+                        continue;
+                    }
+                    let mut contents: Vec<ItemStack> = Vec::new();
+                    for entry in *entries {
+                        if let Some(loot) = entry.get_loot(params) {
+                            for item_stack in loot {
+                                if item_stack.item_count > 0 {
+                                    push_split_stack(&mut contents, item_stack);
+                                }
+                            }
+                        }
+                    }
+                    let items: Vec<(u8, ItemStack)> = contents
+                        .into_iter()
+                        .enumerate()
+                        .map(|(slot, item_stack)| (slot as u8, item_stack))
+                        .collect();
+                    if let Some(container) = stack.get_data_component_mut::<ContainerImpl>() {
+                        container.items = items;
+                    } else {
+                        stack.patch.push((
+                            DataComponent::Container,
+                            Some(Box::new(ContainerImpl { items }).to_dyn()),
+                        ));
+                    }
                 }
             }
         }
@@ -1145,10 +1233,93 @@ mod tests {
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
     use pumpkin_data::{
-        data_component_impl::ContainerLootImpl, data_component_impl::FireworkExplosionShape,
-        data_component_impl::FireworksImpl,
+        data_component_impl::ContainerImpl, data_component_impl::ContainerLootImpl,
+        data_component_impl::CustomNameImpl, data_component_impl::FireworkExplosionShape,
+        data_component_impl::FireworksImpl, data_component_impl::ItemNameImpl,
     };
     use pumpkin_util::loot_table::{LootFireworkExplosion, LootListOperation};
+
+    #[test]
+    fn set_name_custom_name_accepts_json_and_plain_strings() {
+        let mut stacks = vec![ItemStack::new(1, &Item::MAP)];
+        let function = LootFunction {
+            content: LootFunctionTypes::SetName {
+                name: r#""Exotic Map""#,
+                target: LootNameTarget::CustomName,
+            },
+            conditions: None,
+        };
+
+        function.apply(&mut stacks, &LootContextParameters::default());
+
+        let name = stacks[0]
+            .get_data_component::<CustomNameImpl>()
+            .expect("set_name installs custom_name")
+            .name
+            .clone()
+            .get_text();
+        assert_eq!(name, "Exotic Map");
+
+        // The translate-object form must also parse instead of falling back to raw JSON.
+        let mut stacks = vec![ItemStack::new(1, &Item::MAP)];
+        let function = LootFunction {
+            content: LootFunctionTypes::SetName {
+                name: r#"{"translate":"filled_map.buried_treasure"}"#,
+                target: LootNameTarget::CustomName,
+            },
+            conditions: None,
+        };
+        function.apply(&mut stacks, &LootContextParameters::default());
+        assert!(stacks[0].get_data_component::<CustomNameImpl>().is_some());
+    }
+
+    #[test]
+    fn set_name_item_name_extracts_translate_key() {
+        let mut stacks = vec![ItemStack::new(1, &Item::MAP)];
+        let function = LootFunction {
+            content: LootFunctionTypes::SetName {
+                name: r#"{"translate":"filled_map.buried_treasure"}"#,
+                target: LootNameTarget::ItemName,
+            },
+            conditions: None,
+        };
+
+        function.apply(&mut stacks, &LootContextParameters::default());
+
+        let component = stacks[0]
+            .get_data_component::<ItemNameImpl>()
+            .expect("set_name installs item_name");
+        assert_eq!(component.name, "filled_map.buried_treasure");
+    }
+
+    #[test]
+    fn set_container_contents_fills_slots_and_skips_empty_stacks() {
+        let entries: &'static [LootPoolEntry] = &[LootPoolEntry {
+            content: LootPoolEntryTypes::Item(pumpkin_util::loot_table::ItemEntry {
+                name: "minecraft:diamond",
+            }),
+            weight: 1,
+            quality: 0,
+            conditions: None,
+            functions: None,
+        }];
+        let function = LootFunction {
+            content: LootFunctionTypes::SetContainerContents { entries },
+            conditions: None,
+        };
+        let mut stacks = vec![ItemStack::new(1, &Item::CHEST), ItemStack::EMPTY.clone()];
+
+        function.apply(&mut stacks, &LootContextParameters::default());
+
+        let container = stacks[0]
+            .get_data_component::<ContainerImpl>()
+            .expect("set_contents installs the container component");
+        assert_eq!(container.items.len(), 1);
+        assert_eq!(container.items[0].0, 0);
+        assert_eq!(container.items[0].1.item.registry_key, "diamond");
+        assert_eq!(container.items[0].1.item_count, 1);
+        assert!(stacks[1].get_data_component::<ContainerImpl>().is_none());
+    }
 
     #[test]
     fn stack_splitter_passes_through_a_stack_below_max() {

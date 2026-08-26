@@ -40,39 +40,39 @@ pub struct ItemEntry {
 }
 
 /// Represents an alternative loot entry, which chooses one of its children.
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct AlternativeEntry {
     /// Child entries for this alternative.
     pub children: &'static [LootPoolEntry],
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct TagEntry {
     pub name: &'static str,
     pub expand: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct SequenceEntry {
     pub children: &'static [LootPoolEntry],
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct GroupEntry {
     pub children: &'static [LootPoolEntry],
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct LootTableEntry {
     pub value: &'static str,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct DynamicEntry {
     pub name: &'static str,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum LootPoolEntryTypes {
     Empty,
     Item(ItemEntry),
@@ -248,6 +248,33 @@ pub enum LootFunctionTypes {
         explosions: Option<LootFireworkExplosionOperation>,
         flight_duration: Option<u8>,
     },
+    /// Writes one of the item's name components from a raw text-component JSON string.
+    /// Mirrors `SetNameFunction.run` (`net/minecraft/world/level/storage/loot/functions/SetNameFunction.java:91-94`).
+    SetName {
+        /// The vanilla text component as raw JSON (object form) or a plain string.
+        name: &'static str,
+        /// Which name component to write.
+        target: LootNameTarget,
+    },
+    /// Fills a container item's contents component by expanding nested loot entries.
+    /// Mirrors `SetContainerContents.run`
+    /// (`net/minecraft/world/level/storage/loot/functions/SetContainerContents.java:47-56`).
+    SetContainerContents {
+        /// Nested entries expanded into container slots in order.
+        entries: &'static [LootPoolEntry],
+    },
+}
+
+/// Which name component [`LootFunctionTypes::SetName`] writes.
+///
+/// Mirrors `SetNameFunction.Target`
+/// (`net/minecraft/world/level/storage/loot/functions/SetNameFunction.java:106-128`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LootNameTarget {
+    /// The renameable display name (`DataComponents.CUSTOM_NAME`).
+    CustomName,
+    /// The immutable item identity name (`DataComponents.ITEM_NAME`).
+    ItemName,
 }
 
 /// One serialized `FireworkExplosion` value accepted by `SetFireworksFunction`.
@@ -340,7 +367,7 @@ pub enum LootFunctionBonusParameter {
 }
 
 /// Single entry in a loot pool with optional conditions and functions.
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct LootPoolEntry {
     /// The type of entry.
     pub content: LootPoolEntryTypes,
