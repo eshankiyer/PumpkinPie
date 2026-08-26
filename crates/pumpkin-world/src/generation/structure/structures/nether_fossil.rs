@@ -238,8 +238,8 @@ impl NetherFossilPiece {
             return;
         }
 
-        let block_count_x = (bbox.max.x - bbox.min.x + 1).max(1);
-        let block_count_z = (bbox.max.z - bbox.min.z + 1).max(1);
+        let block_count_x = bbox.get_block_count_x().max(1);
+        let block_count_z = bbox.get_block_count_z().max(1);
         let x = bbox.min.x + rng.next_bounded_i32(block_count_x);
         let y = bbox.min.y;
         let z = bbox.min.z + rng.next_bounded_i32(block_count_z);

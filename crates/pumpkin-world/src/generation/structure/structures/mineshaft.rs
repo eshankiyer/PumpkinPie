@@ -590,9 +590,9 @@ fn create_random_shaft_piece(
         let has_rails = random.next_bounded_i32(3) == 0;
         let spider_corridor = !has_rails && random.next_bounded_i32(23) == 0;
         let num_sections = if matches!(direction, BlockDirection::North | BlockDirection::South) {
-            (b.max.z - b.min.z + 1) / 5
+            b.get_block_count_z() / 5
         } else {
-            (b.max.x - b.min.x + 1) / 5
+            b.get_block_count_x() / 5
         };
         Some(MineshaftPiece {
             piece,
@@ -1101,8 +1101,8 @@ fn add_children_room(
 ) -> Vec<BlockBox> {
     let mut entrances = Vec::new();
     let extra = [room_bb];
-    let x_span = room_bb.max.x - room_bb.min.x + 1;
-    let z_span = room_bb.max.z - room_bb.min.z + 1;
+    let x_span = room_bb.get_block_count_x();
+    let z_span = room_bb.get_block_count_z();
     let mut height_space = room_bb.get_block_count_y() - 3 - 1;
     if height_space <= 0 {
         height_space = 1;
@@ -2056,9 +2056,9 @@ impl StructureGenerator for MineshaftGenerator {
             let bounds = collector.get_bounding_box();
             // `BoundingBox.getCenter` (`BoundingBox.java:237-239`) is
             // `min + (max - min + 1) / 2`, not the midpoint of the two bounds.
-            let center_x = bounds.min.x + (bounds.max.x - bounds.min.x + 1) / 2;
-            let center_z = bounds.min.z + (bounds.max.z - bounds.min.z + 1) / 2;
-            let center_y = bounds.min.y + (bounds.max.y - bounds.min.y + 1) / 2;
+            let center_x = bounds.min.x + bounds.get_block_count_x() / 2;
+            let center_z = bounds.min.z + bounds.get_block_count_z() / 2;
+            let center_y = bounds.min.y + bounds.get_block_count_y() / 2;
             let surface = context
                 .height_sampler
                 .as_mut()

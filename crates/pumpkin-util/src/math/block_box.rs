@@ -232,6 +232,20 @@ impl BlockBox {
         self.max.y - self.min.y + 1
     }
 
+    /// `BoundingBox.getXSpan` (`levelgen/structure/BoundingBox.java:225-227`): inclusive span
+    /// along X.
+    #[must_use]
+    pub const fn get_block_count_x(&self) -> i32 {
+        self.max.x - self.min.x + 1
+    }
+
+    /// `BoundingBox.getZSpan` (`levelgen/structure/BoundingBox.java:233-235`): inclusive span
+    /// along Z.
+    #[must_use]
+    pub const fn get_block_count_z(&self) -> i32 {
+        self.max.z - self.min.z + 1
+    }
+
     /// Expands this box to encompass another box.
     ///
     /// # Arguments
@@ -299,3 +313,21 @@ impl FlatTryFrom<IntStream> for BlockBox {
 }
 
 comap_flat_map_codec_impl!(IntStream => BlockBox, BlockBox::flat_try_from, IntStream::from);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn block_counts_are_inclusive_spans() {
+        let box1 = BlockBox::new(-2, 3, 5, 4, 3, 9);
+        assert_eq!(box1.get_block_count_x(), 7);
+        assert_eq!(box1.get_block_count_y(), 1);
+        assert_eq!(box1.get_block_count_z(), 5);
+
+        // A single-block box spans exactly one block on every axis.
+        let single = BlockBox::from_pos(BlockPos(Vector3::new(6, -1, 2)));
+        assert_eq!(single.get_block_count_x(), 1);
+        assert_eq!(single.get_block_count_z(), 1);
+    }
+}

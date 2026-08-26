@@ -180,8 +180,8 @@ impl SmallCorridorPiece {
     #[must_use]
     pub const fn new(chain_length: u32, bbox: BlockBox, orientation: BlockDirection) -> Self {
         let length = match orientation {
-            BlockDirection::North | BlockDirection::South => bbox.max.z - bbox.min.z + 1,
-            _ => bbox.max.x - bbox.min.x + 1,
+            BlockDirection::North | BlockDirection::South => bbox.get_block_count_z(),
+            _ => bbox.get_block_count_x(),
         };
 
         let mut piece = StrongholdPiece::new(
