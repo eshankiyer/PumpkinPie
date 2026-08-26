@@ -1,10 +1,10 @@
-use crate::block::blocks::plant::{PlantBlockBase, grow_plant_head};
+use crate::block::blocks::plant::{PlantBlockBase, connected_plant_head, grow_plant_head};
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, CanPlaceAtArgs,
+    BlockBehaviour, BlockFuture, BlockMetadata, BonemealArgs, BrokenArgs, CanPlaceAtArgs,
     GetStateForNeighborUpdateArgs, PlacedArgs, RandomTickArgs,
 };
 use pumpkin_data::BlockStateId;
-use pumpkin_data::block_properties::{BlockProperties, WaterLikeProperties};
+use pumpkin_data::block_properties::{BlockProperties, KelpLikeProperties, WaterLikeProperties};
 use pumpkin_data::tag::Taggable;
 use pumpkin_data::{Block, BlockId, tag};
 use pumpkin_util::math::position::BlockPos;
@@ -35,6 +35,73 @@ impl BlockBehaviour for KelpBlock {
                 |block| block == &Block::WATER,
             )
             .await;
+        })
+    }
+
+    fn is_valid_bonemeal_target(&self, args: BonemealArgs<'_>) -> bool {
+        // `GrowingPlantBodyBlock.isValidBonemealTarget` (`GrowingPlantBodyBlock.java:68-76`)
+        // resolves the head first via `getHeadPos`, then applies the head-side check
+        // `GrowingPlantHeadBlock.isValidBonemealTarget` (`GrowingPlantHeadBlock.java:117-120`)
+        // with `KelpBlock.canGrowInto` (`KelpBlock.java:36-38`: the target must be water).
+        let Some((head_pos, _)) = connected_plant_head(
+            args.world,
+            args.position,
+            &Block::KELP,
+            &Block::KELP_PLANT,
+            pumpkin_data::BlockDirection::Up,
+        ) else {
+            return false;
+        };
+        args.world.is_in_height_limit(head_pos.0.y + 1)
+            && args.world.get_block(&head_pos.up()) == &Block::WATER
+    }
+
+    /// `GrowingPlantHeadBlock.isBonemealSuccess` (`GrowingPlantHeadBlock.java:122-124`),
+    /// inherited unchanged by the body (`GrowingPlantBodyBlock.java:78-81`).
+    fn is_bonemeal_success(&self, _args: BonemealArgs<'_>) -> bool {
+        true
+    }
+
+    /// `GrowingPlantBodyBlock.performBonemeal` (`GrowingPlantBodyBlock.java:84-90`) delegates
+    /// to the head's `GrowingPlantHeadBlock.performBonemeal` (`GrowingPlantHeadBlock.java:126-140`)
+    /// with `KelpBlock.getBlocksToGrowWhenBonemealed` = 1 (`KelpBlock.java:66-68`). Vanilla
+    /// converts the old head to body through `updateShape`; pumpkin has no such update chain
+    /// for these blocks, so it is applied explicitly, exactly as `bonemeal_grow_plant_head` does.
+    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            let Some((head_pos, head_state_id)) = connected_plant_head(
+                args.world,
+                args.position,
+                &Block::KELP,
+                &Block::KELP_PLANT,
+                pumpkin_data::BlockDirection::Up,
+            ) else {
+                return;
+            };
+
+            let forward_pos = head_pos.up();
+            if !args.world.is_in_height_limit(forward_pos.0.y)
+                || args.world.get_block(&forward_pos) != &Block::WATER
+            {
+                return;
+            }
+
+            let mut grown = KelpLikeProperties::from_state_id(head_state_id, &Block::KELP);
+            grown.age = grown.age.saturating_add(1).min(25);
+            args.world
+                .set_block_state(
+                    &forward_pos,
+                    grown.to_state_id(&Block::KELP),
+                    BlockFlags::NOTIFY_NEIGHBORS,
+                )
+                .await;
+            args.world
+                .set_block_state(
+                    &head_pos,
+                    Block::KELP_PLANT.default_state.id,
+                    BlockFlags::NOTIFY_NEIGHBORS,
+                )
+                .await;
         })
     }
 
