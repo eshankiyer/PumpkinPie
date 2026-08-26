@@ -16,17 +16,19 @@ use rand::RngExt;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
-        defend_village_target::DefendVillageTargetGoal,
+        active_target::ActiveTargetGoal, defend_village_target::DefendVillageTargetGoal,
         golem_random_stroll_in_village::GolemRandomStrollInVillageGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
         melee_attack::MeleeAttackGoal, move_back_to_village::MoveBackToVillageGoal,
         move_towards_target::MoveTowardsTargetGoal,
         nearest_hostile_target::NearestHostileTargetGoal, offer_flower::OfferFlowerGoal,
-        revenge::RevengeGoal,
+        reset_universal_anger_target::ResetUniversalAngerTargetGoal, revenge::RevengeGoal,
     },
     mob::{Mob, MobEntity},
+    persistent_anger::PersistentAnger,
     player::Player,
 };
+use crate::world::World;
 
 /// `IronGolem.IRON_INGOT_HEAL_AMOUNT` (`IronGolem.java:54`).
 const IRON_INGOT_HEAL_AMOUNT: f32 = 25.0;
@@ -89,6 +91,9 @@ pub struct IronGolemEntity {
     pub attack_animation_tick: AtomicI32,
     /// Vanilla `IronGolem.offerFlowerTick`, counted down every tick.
     pub offer_flower_tick: AtomicI32,
+    /// Vanilla `NeutralMob` anger end time/target, represented by Pumpkin's shared timed-grudge
+    /// state (`NeutralMob.java:18-30, 34-55`).
+    pub persistent_anger: PersistentAnger,
 }
 
 impl IronGolemEntity {
@@ -100,6 +105,7 @@ impl IronGolemEntity {
             health_before_damage: AtomicCell::new(0.0),
             attack_animation_tick: AtomicI32::new(0),
             offer_flower_tick: AtomicI32::new(0),
+            persistent_anger: PersistentAnger::default(),
         };
         let mob_arc = Arc::new(iron_golem);
         let mob_weak: Weak<dyn Mob> = {
@@ -128,9 +134,10 @@ impl IronGolemEntity {
             goal_selector.add_goal(2, MoveBackToVillageGoal::new(0.6, false));
             goal_selector.add_goal(4, GolemRandomStrollInVillageGoal::new(0.6));
             goal_selector.add_goal(5, OfferFlowerGoal::new());
+            let look_weak = mob_weak.clone();
             goal_selector.add_goal(
                 7,
-                LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
+                LookAtEntityGoal::with_default(look_weak, &EntityType::PLAYER, 6.0),
             );
             goal_selector.add_goal(8, Box::new(RandomLookAroundGoal::default()));
 
@@ -140,16 +147,46 @@ impl IronGolemEntity {
             target_selector.add_goal(1, DefendVillageTargetGoal::new());
             // Vanilla priority 2: `HurtByTargetGoal(this)`.
             target_selector.add_goal(2, Box::new(RevengeGoal::new(true)));
-            // Vanilla targets players through `NearestAttackableTargetGoal<>(..., this::isAngryAt)`,
-            // so a golem only goes after a player it already holds a grudge against. We have no
-            // per player anger state yet, so we leave players to `RevengeGoal` instead of
-            // attacking every player on sight.
-            //
+            // Vanilla `IronGolem.java:77` targets players through `isAngryAt`, so a golem only
+            // goes after a player it already holds a grudge against (or every player while the
+            // universal-anger rule is active).
+            let angry_weak = mob_weak.clone();
+            target_selector.add_goal(
+                3,
+                Box::new(ActiveTargetGoal::new(
+                    &mob_arc.mob_entity,
+                    &EntityType::PLAYER,
+                    10,
+                    true,
+                    false,
+                    Some(
+                        move |target: crate::entity::ai::target_predicate::TargetData,
+                              world: Arc<World>| {
+                            let angry_weak = angry_weak.clone();
+                            async move {
+                                let Some(mob) = angry_weak.upgrade() else {
+                                    return false;
+                                };
+                                let Some(anger) = mob.persistent_anger() else {
+                                    return false;
+                                };
+                                if anger.is_angry_at(target.entity_uuid).await {
+                                    return true;
+                                }
+                                let universal_anger =
+                                    world.level_info.load().game_rules.universal_anger;
+                                anger.is_angry_at_all_players(universal_anger).await
+                            }
+                        },
+                    ),
+                )),
+            );
             // Vanilla priority 3: `NearestAttackableTargetGoal<Mob>(this, Mob.class, 5, false,
             // false, (target, level) -> target instanceof Enemy && !(target instanceof Creeper))`
             // -- attacks the nearest hostile mob (excluding creepers) within follow range. This
             // has no village-proximity condition in vanilla; see `nearest_hostile_target.rs`.
             target_selector.add_goal(3, NearestHostileTargetGoal::new(&mob_arc.mob_entity));
+            target_selector.add_goal(4, ResetUniversalAngerTargetGoal::new(false));
         };
 
         mob_arc
@@ -180,6 +217,7 @@ impl NBTStorage for IronGolemEntity {
             self.mob_entity.living_entity.write_nbt(nbt).await;
             // `IronGolem.java:147`.
             nbt.put_bool("PlayerCreated", self.player_created.load(Ordering::Relaxed));
+            self.persistent_anger.write_nbt(nbt).await;
         })
     }
 
@@ -191,6 +229,7 @@ impl NBTStorage for IronGolemEntity {
                 nbt.get_bool("PlayerCreated").unwrap_or(false),
                 Ordering::Relaxed,
             );
+            self.persistent_anger.read_nbt(nbt).await;
         })
     }
 }
@@ -209,6 +248,10 @@ impl Mob for IronGolemEntity {
             return false;
         }
         target_type != &EntityType::CREEPER
+    }
+
+    fn persistent_anger(&self) -> Option<&PersistentAnger> {
+        Some(&self.persistent_anger)
     }
 
     /// Vanilla `IronGolem.doHurtTarget` (`IronGolem.java:187-204`): a randomized damage roll
@@ -300,6 +343,19 @@ impl Mob for IronGolemEntity {
 
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
+            self.persistent_anger.tick().await;
+
+            // Vanilla `IronGolem.aiStep` calls `updatePersistentAnger(level, true)`
+            // (`IronGolem.java:125-127`), refreshing the grudge while a target remains present.
+            let current_target = self.mob_entity.target.lock().await.clone();
+            if let Some(target) = current_target {
+                let target_uuid = target.get_entity().entity_uuid;
+                if !self.persistent_anger.is_angry_at(target_uuid).await {
+                    self.persistent_anger.set_angry_at(Some(target_uuid)).await;
+                    self.persistent_anger.start_timer();
+                }
+            }
+
             let attack_tick = self.attack_animation_tick.load(Ordering::Relaxed);
             if attack_tick > 0 {
                 self.attack_animation_tick.fetch_sub(1, Ordering::Relaxed);

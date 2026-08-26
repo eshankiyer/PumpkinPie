@@ -5,6 +5,8 @@ use pumpkin_data::{
     BlockDirection::{East, North, South, West},
     BlockStateId,
     block_properties::{BlockProperties, FarmlandLikeProperties, WheatLikeProperties},
+    item::Item,
+    item_stack::ItemStack,
 };
 use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
 use pumpkin_world::world::{BlockAccessor, BlockFlags};
@@ -113,6 +115,14 @@ trait CropBlockBase: PlantBlockBase {
             }
         }
     }
+}
+
+/// `CropBlock.getCloneItemStack` (`CropBlock.java:164-170`) uses the crop's
+/// planting item rather than the crop block item. Concrete crops expose this
+/// through their block-behaviour override; this helper keeps the stack shape
+/// consistent with the server pick-block handler.
+pub(super) fn clone_seed_stack(item: &'static Item) -> ItemStack {
+    ItemStack::new(1, item)
 }
 
 /// `CropBlock.entityInside`

@@ -1,4 +1,4 @@
-use pumpkin_data::BlockStateId;
+use pumpkin_data::{BlockStateId, item::Item, item_stack::ItemStack};
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockAccessor;
@@ -7,8 +7,8 @@ use crate::block::blocks::plant::PlantBlockBase;
 use crate::block::blocks::plant::crop::CropBlockBase;
 use crate::block::blocks::plant::crop::ravager_destroy_crop;
 use crate::block::{
-    BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
-    OnEntityCollisionArgs, RandomTickArgs,
+    BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetCloneItemStackArgs,
+    GetStateForNeighborUpdateArgs, OnEntityCollisionArgs, RandomTickArgs,
 };
 
 #[pumpkin_block("minecraft:potatoes")]
@@ -17,6 +17,14 @@ pub struct PotatoBlock;
 impl BlockBehaviour for PotatoBlock {
     fn on_entity_collision<'a>(&'a self, args: OnEntityCollisionArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move { ravager_destroy_crop(args.world, args.position, args.entity).await })
+    }
+
+    /// `PotatoBlock.getBaseSeedId` (`PotatoBlock.java:27-29`) supplies potatoes to the inherited
+    /// `CropBlock.getCloneItemStack` (`CropBlock.java:169-170`).
+    fn get_clone_item_stack(&self, _args: GetCloneItemStackArgs<'_>) -> Option<ItemStack> {
+        Some(crate::block::blocks::plant::crop::clone_seed_stack(
+            &Item::POTATO,
+        ))
     }
 
     fn is_valid_bonemeal_target(&self, args: crate::block::BonemealArgs<'_>) -> bool {

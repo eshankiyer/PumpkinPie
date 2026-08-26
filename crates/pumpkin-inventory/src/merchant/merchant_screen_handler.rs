@@ -31,6 +31,8 @@ pub struct MerchantScreenHandler {
     active_offer: Option<usize>,
     pub offers: Vec<pumpkin_protocol::java::client::play::MerchantOffer>,
     pub on_trade: Option<Box<dyn Fn(usize) -> ScreenHandlerFuture<'static, ()> + Send + Sync>>,
+    /// Vanilla `MerchantMenu.playTradeSound`, used only by quick-move trades.
+    pub on_quick_move_trade: Option<Box<dyn Fn() + Send + Sync>>,
     pub on_trade_updated: Option<Box<dyn Fn(bool) + Send + Sync>>,
     pub on_close: Option<Box<dyn Fn() -> ScreenHandlerFuture<'static, ()> + Send + Sync>>,
     pub validity_check: Option<MerchantValidityCheck>,
@@ -54,6 +56,7 @@ impl MerchantScreenHandler {
             active_offer: None,
             offers,
             on_trade: None,
+            on_quick_move_trade: None,
             on_trade_updated: None,
             on_close: None,
             validity_check: None,
@@ -447,6 +450,9 @@ impl ScreenHandler for MerchantScreenHandler {
                 self.result_taken.store(false, Ordering::Relaxed);
                 if !self.complete_trade(player).await {
                     return ItemStack::EMPTY.clone();
+                }
+                if let Some(on_quick_move_trade) = &self.on_quick_move_trade {
+                    on_quick_move_trade();
                 }
                 self.update_result_slot().await;
             }

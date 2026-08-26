@@ -198,6 +198,24 @@ impl Mob for PolarBearEntity {
         &self.mob_entity
     }
 
+    /// `PolarBear.getAmbientSound` (`PolarBear.java:157-159`). Ambient sounds are
+    /// emitted by the shared server-side `Mob::tick_ambient_sound` cadence.
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(
+            if self.mob_entity.living_entity.entity.age.load(Relaxed) < 0 {
+                Sound::EntityPolarBearAmbientBaby
+            } else {
+                Sound::EntityPolarBearAmbient
+            },
+        )
+    }
+
+    /// `PolarBear.playStepSound` (`PolarBear.java:171-174`). The shared living
+    /// movement sound path calls this hook for grounded movement.
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityPolarBearStep)
+    }
+
     fn persistent_anger(&self) -> Option<&PersistentAnger> {
         Some(&self.persistent_anger)
     }
