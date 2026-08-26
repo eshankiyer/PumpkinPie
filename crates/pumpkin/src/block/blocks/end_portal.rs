@@ -2,11 +2,13 @@ use std::sync::Arc;
 
 use crate::block::BlockBehaviour;
 use crate::block::BlockFuture;
+use crate::block::GetInsideCollisionShapeArgs;
 use crate::block::OnEntityCollisionArgs;
 use crate::block::PlacedArgs;
 use crate::block::entities::end_portal::EndPortalBlockEntity;
 use pumpkin_data::dimension::Dimension;
 use pumpkin_macros::pumpkin_block;
+use pumpkin_util::math::boundingbox::BoundingBox;
 
 #[pumpkin_block("minecraft:end_portal")]
 pub struct EndPortalBlock;
@@ -32,6 +34,21 @@ impl BlockBehaviour for EndPortalBlock {
                 .get_entity()
                 .try_use_portal(0, target_world, *args.position)
                 .await;
+        })
+    }
+
+    /// `EndPortalBlock.getEntityInsideCollisionShape` (EndPortalBlock.java:56-58) uses the
+    /// portal's outline shape (the six-pixel-high slab), rather than the full block cube used by
+    /// the generic block-behaviour default.
+    fn get_inside_collision_shape<'a>(
+        &'a self,
+        args: GetInsideCollisionShapeArgs<'a>,
+    ) -> BlockFuture<'a, BoundingBox> {
+        Box::pin(async move {
+            args.state
+                .get_block_outline_shapes()
+                .next()
+                .unwrap_or_else(BoundingBox::full_block)
         })
     }
 

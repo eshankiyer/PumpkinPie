@@ -478,6 +478,17 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         true
     }
 
+    /// Vanilla `Projectile.calculateHorizontalHurtKnockbackDirection` defaults to the
+    /// projectile's horizontal movement. Projectile subclasses may override this when their
+    /// damage uses a different horizontal direction.
+    fn calculate_horizontal_hurt_knockback_direction(
+        &self,
+        _hurt_entity: &living::LivingEntity,
+    ) -> (f64, f64) {
+        let velocity = self.get_entity().velocity.load();
+        (velocity.x, velocity.z)
+    }
+
     fn is_flutterer(&self) -> bool {
         false
     }
