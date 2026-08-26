@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use pumpkin_data::block_properties::{BlockProperties, BubbleColumnLikeProperties};
-use pumpkin_data::fluid::Fluid;
+use pumpkin_data::fluid::{Fluid, FluidState};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{Block, BlockId, BlockStateId};
 use pumpkin_util::math::position::BlockPos;
@@ -27,6 +27,14 @@ const DOWNWARD_MIN_SPEED: f64 = -0.3;
 const SURFACE_DOWNWARD_MIN_SPEED: f64 = -0.9;
 
 pub struct BubbleColumnBlock;
+
+impl BubbleColumnBlock {
+    /// `BubbleColumnBlock.getFluidState` (`BubbleColumnBlock.java:72-75`) reports a full water
+    /// source even though the block has its own block-state IDs rather than fluid-state IDs.
+    pub(crate) const fn fluid_state() -> (&'static Fluid, &'static FluidState) {
+        (&Fluid::WATER, &Fluid::WATER.states[0])
+    }
+}
 
 impl BlockMetadata for BubbleColumnBlock {
     fn ids() -> Box<[BlockId]> {
