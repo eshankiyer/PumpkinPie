@@ -195,6 +195,12 @@ pub enum LootFunctionTypes {
     /// Attaches a seeded container-loot reference to a non-empty item stack.
     /// Mirrors `SetContainerLootTable.run` (`SetContainerLootTable.java:50-57`).
     SetContainerLootTable { name: &'static str, seed: i64 },
+    /// Sets enchantment levels, optionally adding to existing levels.
+    /// Mirrors `SetEnchantmentsFunction.run` (`SetEnchantmentsFunction.java:53-75`).
+    SetEnchantments {
+        enchantments: &'static [(&'static str, LootFunctionNumberProvider)],
+        add: bool,
+    },
     /// Increases the count of items based on the item's enchantments.
     EnchantedCountIncrease {
         enchantment: &'static str,

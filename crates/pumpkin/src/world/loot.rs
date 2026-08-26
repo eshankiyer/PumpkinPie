@@ -2,7 +2,7 @@ use pumpkin_data::damage::DamageType;
 use pumpkin_data::data_component::DataComponent;
 use pumpkin_data::data_component_impl::{
     ContainerLootImpl, DataComponentImpl, FireworkExplosionImpl, FireworkExplosionShape,
-    FireworksImpl, WrittenBookContentImpl,
+    FireworksImpl, StoredEnchantmentsImpl, WrittenBookContentImpl,
 };
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item_stack::ItemStack;
@@ -304,6 +304,81 @@ fn apply_set_firework_explosion(
     }
 }
 
+/// Implements `SetEnchantmentsFunction.run` from
+/// `net/minecraft/world/level/storage/loot/functions/SetEnchantmentsFunction.java:53-75`.
+/// Books are transmuted to enchanted books (`SetEnchantmentsFunction.java:54-56`), which use
+/// stored enchantments; all other items use the ordinary enchantments component. Levels are
+/// rounded by `NumberProvider.getInt` (`NumberProvider.java:7-12`) and clamped to 0..255 as in
+/// `SetEnchantmentsFunction.java:61-72`.
+fn apply_set_enchantments(
+    stack: &mut ItemStack,
+    enchantments: &[(&str, LootFunctionNumberProvider)],
+    add: bool,
+) {
+    if stack.item.id == Item::BOOK.id {
+        stack.item = &Item::ENCHANTED_BOOK;
+    }
+
+    let stored = stack.item.id == Item::ENCHANTED_BOOK.id;
+    for (name, provider) in enchantments {
+        let Some(enchantment) = pumpkin_data::Enchantment::from_name(name) else {
+            continue;
+        };
+        let level = provider.generate().round().clamp(0.0, 255.0) as i32;
+
+        if stored {
+            if let Some(data) = stack.get_data_component_mut::<StoredEnchantmentsImpl>() {
+                set_enchantment_level(&mut data.enchantment, enchantment, level, add);
+            } else {
+                stack.patch.push((
+                    DataComponent::StoredEnchantments,
+                    Some(
+                        StoredEnchantmentsImpl {
+                            enchantment: std::borrow::Cow::Owned(vec![(enchantment, level)]),
+                        }
+                        .to_dyn(),
+                    ),
+                ));
+            }
+        } else if let Some(data) =
+            stack.get_data_component_mut::<pumpkin_data::data_component_impl::EnchantmentsImpl>()
+        {
+            set_enchantment_level(&mut data.enchantment, enchantment, level, add);
+        } else {
+            stack.patch.push((
+                DataComponent::Enchantments,
+                Some(
+                    pumpkin_data::data_component_impl::EnchantmentsImpl {
+                        enchantment: std::borrow::Cow::Owned(vec![(enchantment, level)]),
+                    }
+                    .to_dyn(),
+                ),
+            ));
+        }
+    }
+}
+
+fn set_enchantment_level(
+    levels: &mut std::borrow::Cow<'static, [(&'static pumpkin_data::Enchantment, i32)]>,
+    enchantment: &'static pumpkin_data::Enchantment,
+    level: i32,
+    add: bool,
+) {
+    if let Some((_, current)) = levels
+        .to_mut()
+        .iter_mut()
+        .find(|(existing, _)| *existing == enchantment)
+    {
+        *current = if add {
+            (*current + level).clamp(0, 255)
+        } else {
+            level
+        };
+    } else {
+        levels.to_mut().push((enchantment, level));
+    }
+}
+
 /// Implements `SetFireworksFunction.run` and `apply` from
 /// `net/minecraft/world/level/storage/loot/functions/SetFireworksFunction.java:39-49`.
 /// Its default component is `new Fireworks(0, List.of())` from line 26; list behavior follows
@@ -408,6 +483,11 @@ impl LootFunctionExt for LootFunction {
                             })),
                         ));
                     }
+                }
+            }
+            LootFunctionTypes::SetEnchantments { enchantments, add } => {
+                for stack in stacks {
+                    apply_set_enchantments(stack, enchantments, *add);
                 }
             }
             LootFunctionTypes::LimitCount { min, max } => {
@@ -1146,7 +1226,7 @@ mod tests {
     use pumpkin_data::item_stack::ItemStack;
     use pumpkin_data::{
         data_component_impl::ContainerLootImpl, data_component_impl::FireworkExplosionShape,
-        data_component_impl::FireworksImpl,
+        data_component_impl::FireworksImpl, data_component_impl::StoredEnchantmentsImpl,
     };
     use pumpkin_util::loot_table::{LootFireworkExplosion, LootListOperation};
 
@@ -1223,6 +1303,49 @@ mod tests {
                 .get_data_component::<ContainerLootImpl>()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn set_enchantments_transmutes_books_and_clamps_levels() {
+        let function = LootFunction {
+            content: LootFunctionTypes::SetEnchantments {
+                enchantments: &[(
+                    "minecraft:sharpness",
+                    LootFunctionNumberProvider::Constant { value: 300.0 },
+                )],
+                add: false,
+            },
+            conditions: None,
+        };
+        let mut stacks = vec![ItemStack::new(1, &Item::BOOK)];
+
+        function.apply(&mut stacks, &LootContextParameters::default());
+
+        assert_eq!(stacks[0].item.id, Item::ENCHANTED_BOOK.id);
+        let stored = stacks[0]
+            .get_data_component::<StoredEnchantmentsImpl>()
+            .expect("book enchantment is stored on the enchanted book");
+        assert_eq!(stored.enchantment[0].1, 255);
+    }
+
+    #[test]
+    fn set_enchantments_add_mode_updates_existing_level() {
+        let function = LootFunction {
+            content: LootFunctionTypes::SetEnchantments {
+                enchantments: &[(
+                    "minecraft:sharpness",
+                    LootFunctionNumberProvider::Constant { value: 2.0 },
+                )],
+                add: true,
+            },
+            conditions: None,
+        };
+        let mut stacks = vec![ItemStack::new(1, &Item::DIAMOND_SWORD)];
+        stacks[0].enchant(&Enchantment::SHARPNESS, 3);
+
+        function.apply(&mut stacks, &LootContextParameters::default());
+
+        assert_eq!(stacks[0].get_enchantment_level(&Enchantment::SHARPNESS), 5);
     }
 
     #[test]
