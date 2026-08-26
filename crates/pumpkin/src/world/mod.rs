@@ -6639,10 +6639,11 @@ impl World {
             return fluid.to_flowing();
         }
         let block = Block::from_state_id(id);
-        // `TallSeagrassBlock.getFluidState` (TallSeagrassBlock.java:78-80) always reports a full
-        // water source for tall seagrass, which has no `waterlogged` property to derive the fluid
-        // from. Like the waterlogged path below, water presence is reported as FLOWING_WATER.
-        if block.name == "tall_seagrass" {
+        // `SeagrassBlock.getFluidState` (SeagrassBlock.java:85-88) and
+        // `TallSeagrassBlock.getFluidState` (TallSeagrassBlock.java:78-80) always report a full
+        // water source; neither block has a `waterlogged` property to derive the fluid from.
+        // Like the waterlogged path below, water presence is reported as FLOWING_WATER.
+        if block.name == "seagrass" || block.name == "tall_seagrass" {
             return &Fluid::FLOWING_WATER;
         }
         block
@@ -6677,27 +6678,31 @@ impl World {
             return (block, Fluid::FLOWING_WATER.to_flowing());
         }
 
-        let fluid = Fluid::from_state_id(id)
-            .map(Fluid::to_flowing)
-            .ok_or(&Fluid::EMPTY)
-            .unwrap_or_else(|_| {
-                block
-                    .properties(id)
-                    .and_then(|props| {
-                        props
-                            .to_props()
-                            .into_iter()
-                            .find(|p| p.0 == "waterlogged")
-                            .map(|(_, value)| {
-                                if value == "true" {
-                                    &Fluid::FLOWING_WATER
-                                } else {
-                                    &Fluid::EMPTY
-                                }
-                            })
-                    })
-                    .unwrap_or(&Fluid::EMPTY)
-            });
+        let fluid = if block.name == "seagrass" || block.name == "tall_seagrass" {
+            &Fluid::FLOWING_WATER
+        } else {
+            Fluid::from_state_id(id)
+                .map(Fluid::to_flowing)
+                .ok_or(&Fluid::EMPTY)
+                .unwrap_or_else(|_| {
+                    block
+                        .properties(id)
+                        .and_then(|props| {
+                            props
+                                .to_props()
+                                .into_iter()
+                                .find(|p| p.0 == "waterlogged")
+                                .map(|(_, value)| {
+                                    if value == "true" {
+                                        &Fluid::FLOWING_WATER
+                                    } else {
+                                        &Fluid::EMPTY
+                                    }
+                                })
+                        })
+                        .unwrap_or(&Fluid::EMPTY)
+                })
+        };
         (block, fluid)
     }
 
@@ -6712,10 +6717,11 @@ impl World {
             if block == &Block::BUBBLE_COLUMN {
                 return crate::block::blocks::bubble_column::BubbleColumnBlock::fluid_state();
             }
-            // `TallSeagrassBlock.getFluidState` (TallSeagrassBlock.java:78-80) always reports a
-            // full water source; tall seagrass has no `waterlogged` property, so mirror the
+            // `SeagrassBlock.getFluidState` (SeagrassBlock.java:85-88) and
+            // `TallSeagrassBlock.getFluidState` (TallSeagrassBlock.java:78-80) always report a
+            // full water source; neither block has a `waterlogged` property, so mirror the
             // waterlogged branch below by reporting the source WATER fluid state.
-            if block.name == "tall_seagrass" {
+            if block.name == "seagrass" || block.name == "tall_seagrass" {
                 return (&Fluid::WATER, &Fluid::WATER.states[0]);
             }
             if let Some(properties) = block.properties(id) {

@@ -3141,16 +3141,23 @@ impl Entity {
 
         let mut manager = self.portal_manager.lock().await;
         let world = self.world.load();
-        if manager.is_none() {
-            let portal_type = if portal_world.dimension == Dimension::THE_END
-                || self.world.load().dimension == Dimension::THE_END
-            {
-                PortalType::End
-            } else {
-                PortalType::Nether
-            };
+        let portal_type = if portal_world.dimension == Dimension::THE_END
+            || self.world.load().dimension == Dimension::THE_END
+        {
+            PortalType::End
+        } else {
+            PortalType::Nether
+        };
 
-            let mut new_manager = PortalProcessor::new(portal_type, pos, portal_world);
+        let replace_manager = if let Some(existing) = manager.as_ref() {
+            let existing = existing.lock().await;
+            !existing.is_same_portal(portal_type)
+        } else {
+            true
+        };
+
+        if replace_manager {
+            let mut new_manager = PortalProcessor::new(portal_type, pos, portal_world.clone());
 
             if let Some(portal) = NetherPortal::get_on_axis(
                 &world,
