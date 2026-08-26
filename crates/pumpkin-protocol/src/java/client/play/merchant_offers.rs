@@ -60,6 +60,11 @@ impl MerchantOffer {
         self.uses = 0;
     }
 
+    /// Vanilla `MerchantOffer::setToOutOfStock` (`MerchantOffer.java:201-203`).
+    pub const fn set_to_out_of_stock(&mut self) {
+        self.uses = self.max_uses;
+    }
+
     pub fn write(
         &self,
         mut write: impl std::io::Write,
@@ -81,7 +86,14 @@ impl MerchantOffer {
                 write.write_bool(false)?;
             }
         }
-        write.write_bool(self.reward_exp)?;
+        // Vanilla `MerchantOffer::writeToStream` (`MerchantOffer.java:238-249`) sends the
+        // out-of-stock flag here, not `rewardExp`; clients use it to grey out exhausted
+        // trades.
+        write.write_bool(if *version >= JavaMinecraftVersion::V_1_20_5 {
+            self.is_out_of_stock()
+        } else {
+            self.reward_exp
+        })?;
         write.write_i32_be(self.uses)?;
         write.write_i32_be(self.max_uses)?;
         write.write_i32_be(self.xp)?;
@@ -203,7 +215,12 @@ impl<'a> crate::ServerPacket<'a> for CMerchantOffers {
                 (base_cost_a, output, cost_b)
             };
 
-            let reward_exp = bytebuf.get_bool()?;
+            // Vanilla `MerchantOffer::createFromStream` (`MerchantOffer.java:251-269`): on
+            // modern versions the boolean after the three stacks is the out-of-stock flag
+            // and the offer is constructed with `rewardExp = true`
+            // (`MerchantOffer.java:97`); a flagged offer is then put out of stock.
+            let trade_flag = bytebuf.get_bool()?;
+            let legacy_reward_exp = trade_flag;
             let uses = bytebuf.get_i32_be()?;
             let max_uses = bytebuf.get_i32_be()?;
             let xp = bytebuf.get_i32_be()?;
@@ -211,18 +228,26 @@ impl<'a> crate::ServerPacket<'a> for CMerchantOffers {
             let price_multiplier = bytebuf.get_f32_be()?;
             let demand = bytebuf.get_i32_be()?;
 
-            offers.push(MerchantOffer {
+            let mut offer = MerchantOffer {
                 base_cost_a,
                 output,
                 cost_b,
-                reward_exp,
+                reward_exp: if *version >= JavaMinecraftVersion::V_1_20_5 {
+                    true
+                } else {
+                    legacy_reward_exp
+                },
                 uses,
                 max_uses,
                 xp,
                 special_price,
                 price_multiplier,
                 demand,
-            });
+            };
+            if *version >= JavaMinecraftVersion::V_1_20_5 && trade_flag {
+                offer.set_to_out_of_stock();
+            }
+            offers.push(offer);
         }
 
         let villager_level = bytebuf.get_var_int()?;
@@ -320,6 +345,35 @@ mod tests {
         assert!(!offer.is_out_of_stock());
         offer.uses += 1;
         assert!(offer.is_out_of_stock());
+    }
+
+    #[test]
+    fn out_of_stock_flag_survives_a_round_trip_and_sets_to_out_of_stock() {
+        let version = JavaMinecraftVersion::V_26_2;
+
+        let mut exhausted = offer();
+        exhausted.set_to_out_of_stock();
+        let packet =
+            CMerchantOffers::new(VarInt(1), vec![exhausted], VarInt(1), VarInt(0), true, true);
+        let mut bytes = Vec::new();
+        packet.write_packet_data(&mut bytes, &version).unwrap();
+        let read_back =
+            <CMerchantOffers as crate::ServerPacket>::read(&mut bytes.as_slice(), &version)
+                .unwrap();
+        assert!(read_back.offers[0].is_out_of_stock());
+        assert_eq!(read_back.offers[0].uses, read_back.offers[0].max_uses);
+        assert!(read_back.offers[0].reward_exp);
+
+        // An in-stock trade keeps `uses` untouched and stays in stock.
+        let packet =
+            CMerchantOffers::new(VarInt(1), vec![offer()], VarInt(1), VarInt(0), true, true);
+        let mut bytes = Vec::new();
+        packet.write_packet_data(&mut bytes, &version).unwrap();
+        let read_back =
+            <CMerchantOffers as crate::ServerPacket>::read(&mut bytes.as_slice(), &version)
+                .unwrap();
+        assert!(!read_back.offers[0].is_out_of_stock());
+        assert!(!read_back.offers[0].needs_restock());
     }
 
     #[test]

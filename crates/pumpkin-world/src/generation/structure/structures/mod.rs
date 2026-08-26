@@ -684,7 +684,7 @@ impl StructurePiecesCollector {
         let i = top_y - top_penalty;
         let bounding_box = self.get_bounding_box();
 
-        let mut j = (bounding_box.max.y - bounding_box.min.y + 1) + bottom_y + 1;
+        let mut j = bounding_box.get_block_count_y() + bottom_y + 1;
 
         if j < i {
             j += random.next_bounded_i32(i - j);

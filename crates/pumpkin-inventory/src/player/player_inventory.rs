@@ -321,13 +321,25 @@ impl PlayerInventory {
 
     /// Finds an empty hotbar slot to swap an item to.
     ///
-    /// First looks for empty slots, then slots without enchantments.
+    /// First looks for empty slots, then slots without enchantments, and finally
+    /// falls back to the currently selected slot.
+    ///
+    /// Vanilla: `Inventory.getSuitableHotbarSlot` (Inventory.java:162-178).
     async fn get_swappable_hotbar_slot(&self) -> usize {
         let inv = self.main_inventory.read().await;
         let selected_slot = self.get_selected_slot() as usize;
         for i in 0..Self::HOTBAR_SIZE {
-            let check_index = (i + selected_slot) % 9;
+            let check_index = (i + selected_slot) % Self::HOTBAR_SIZE;
             if inv[check_index].is_empty() {
+                return check_index;
+            }
+        }
+
+        // Second vanilla pass (Inventory.java:170-175): when the whole hotbar is
+        // occupied, prefer replacing a non-enchanted item over the selected one.
+        for i in 0..Self::HOTBAR_SIZE {
+            let check_index = (i + selected_slot) % Self::HOTBAR_SIZE;
+            if !inv[check_index].has_enchantments() {
                 return check_index;
             }
         }

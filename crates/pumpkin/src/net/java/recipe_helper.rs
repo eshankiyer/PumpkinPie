@@ -1,8 +1,20 @@
+use pumpkin_data::data_component_impl::CustomNameImpl;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::recipes::RecipeIngredientTypes;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_protocol::codec::recipe::OwnedRecipeIngredient;
+
+/// Vanilla: `Inventory.isUsableForCrafting` (Inventory.java:144-146).
+///
+/// Recipe-book placement must not consume items that are damaged, enchanted,
+/// or have a custom name.
+#[must_use]
+fn is_usable_for_crafting(stack: &ItemStack) -> bool {
+    stack.get_damage() == 0
+        && !stack.has_enchantments()
+        && stack.get_data_component::<CustomNameImpl>().is_none()
+}
 
 #[derive(Clone, Copy)]
 pub enum GenericIngredient<'a> {
@@ -30,7 +42,7 @@ pub async fn take_n_ingredient(
 
     let mut main_inventory = inventory.main_inventory.write().await;
     for stack in main_inventory.iter_mut() {
-        if !stack.is_empty() && ingredient.match_item(stack.item) {
+        if !stack.is_empty() && ingredient.match_item(stack.item) && is_usable_for_crafting(stack) {
             let to_take = (count - taken).min(stack.item_count);
             let sub_stack = stack.split(to_take);
             taken += sub_stack.item_count;
