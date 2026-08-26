@@ -18,7 +18,12 @@
 
 use std::{any::Any, pin::Pin, sync::Arc};
 
-use pumpkin_data::{fuels::is_fuel, item_stack::ItemStack, screen::WindowType};
+use pumpkin_data::{
+    fuels::is_fuel,
+    item_stack::ItemStack,
+    recipes::{CookingRecipeKind, get_cooking_recipe_with_ingredient},
+    screen::WindowType,
+};
 use pumpkin_world::{
     block::entities::{ExperienceContainer, PropertyDelegate},
     inventory::Inventory,
@@ -34,6 +39,24 @@ use crate::{
 use tracing::debug;
 
 use super::furnace_like_slot::{FurnaceLikeSlot, FurnaceLikeSlotType, FurnaceOutputSlot};
+
+/// Vanilla `AbstractFurnaceMenu.canSmelt` (`AbstractFurnaceMenu.java:134-136`): tests the
+/// item against the station's accepted-input `RecipePropertySet`. Those sets are built by
+/// `RecipeManager.RECIPE_PROPERTY_SETS` (`RecipeManager.java:41-56`) as "every input
+/// ingredient of at least one recipe of this station's cooking type" and collected in
+/// `finalizeRecipeLoading` (`RecipeManager.java:88-120`); here that membership test is
+/// computed directly from the static cooking recipe table. Each station filters its own
+/// type: a blast furnace only accepts blastable ores, a smoker only smokeable food, a
+/// furnace anything smeltable (`FurnaceMenu`/`BlastFurnaceMenu`/`SmokerMenu` pass their
+/// respective `RecipePropertySet` key, `AbstractFurnaceMenu.java:40-53`).
+fn can_smelt(item: &pumpkin_data::item::Item, window_type: Option<WindowType>) -> bool {
+    let kind = match window_type {
+        Some(WindowType::BlastFurnace) => CookingRecipeKind::Blasting,
+        Some(WindowType::Smoker) => CookingRecipeKind::Smoking,
+        _ => CookingRecipeKind::Smelting,
+    };
+    get_cooking_recipe_with_ingredient(item, kind).is_some()
+}
 
 /// Screen handler for furnace-like containers.
 ///
@@ -168,15 +191,19 @@ impl ScreenHandler for FurnaceLikeScreenHandler {
     /// Quick move logic for furnace-like containers.
     ///
     /// - From furnace slots (0-2): Move to player inventory
+    /// - Smeltable items: Move to input slot (0)
     /// - Fuel items: Move to fuel slot (1)
-    /// - Other items: Move to input slot (0)
+    /// - Other items: Swap between main inventory (3..30) and hotbar (30..39)
     fn quick_move<'a>(
         &'a mut self,
         player: &'a dyn InventoryPlayer,
         slot_index: i32,
     ) -> ItemStackFuture<'a> {
         Box::pin(async move {
-            const FUEL_SLOT: i32 = 1; // Note: Slots 0, 1, 2 are Furnace slots.
+            const INPUT_SLOT_RANGE: std::ops::Range<i32> = 0..1;
+            const FUEL_SLOT_RANGE: std::ops::Range<i32> = 1..2;
+            const MAIN_INV_SLOT_RANGE: std::ops::Range<i32> = 3..30;
+            const HOTBAR_SLOT_RANGE: std::ops::Range<i32> = 30..39;
             const OUTPUT_SLOT: i32 = 2;
 
             debug!("FurnaceLikeScreenHandler::quick_move slot_index={slot_index}");
@@ -192,19 +219,52 @@ impl ScreenHandler for FurnaceLikeScreenHandler {
             let mut stack = slot.get_stack().await;
             stack_left = stack.clone();
 
+            // Routing order mirrors `AbstractFurnaceMenu.quickMoveStack`
+            // (`AbstractFurnaceMenu.java:97-121`): smeltable items go to the input
+            // slot before fuel is considered, and leftovers shuffle between the
+            // player's main inventory and hotbar instead of entering the furnace.
             let success = if slot_index < 3 {
                 // If clicked slot is one of the Furnace slots (0, 1, 2):
                 // Try to move to player inventory (slots 3 onwards, starting from the end)
                 self.insert_item(&mut stack, 3, self.get_behaviour().slots.len() as i32, true)
                     .await
+            } else if can_smelt(stack.item, self.get_behaviour().window_type) {
+                self.insert_item(
+                    &mut stack,
+                    INPUT_SLOT_RANGE.start,
+                    INPUT_SLOT_RANGE.end,
+                    false,
+                )
+                .await
             } else if is_fuel(stack.item.id) {
-                // If clicked slot is in the player inventory (3+) and contains fuel:
-                // Try to move to the Furnace's Fuel slot (slot 1)
-                self.insert_item(&mut stack, FUEL_SLOT, 3, false).await
+                self.insert_item(
+                    &mut stack,
+                    FUEL_SLOT_RANGE.start,
+                    FUEL_SLOT_RANGE.end,
+                    false,
+                )
+                .await
+            } else if MAIN_INV_SLOT_RANGE.contains(&slot_index) {
+                self.insert_item(
+                    &mut stack,
+                    HOTBAR_SLOT_RANGE.start,
+                    HOTBAR_SLOT_RANGE.end,
+                    false,
+                )
+                .await
+            } else if HOTBAR_SLOT_RANGE.contains(&slot_index)
+                && !self
+                    .insert_item(
+                        &mut stack,
+                        MAIN_INV_SLOT_RANGE.start,
+                        MAIN_INV_SLOT_RANGE.end,
+                        false,
+                    )
+                    .await
+            {
+                return ItemStack::EMPTY.clone();
             } else {
-                // If clicked slot is in the player inventory (3+) and NOT fuel (must be a smeltable item):
-                // Try to move to the Furnace's Input/Smelting slot (slot 0)
-                self.insert_item(&mut stack, 0, 3, false).await
+                false
             };
 
             if !success {
@@ -225,5 +285,32 @@ impl ScreenHandler for FurnaceLikeScreenHandler {
 
             stack_left
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pumpkin_data::item::Item;
+
+    /// `RecipePropertySet.FURNACE_INPUT`/`BLAST_FURNACE_INPUT`/`SMOKER_INPUT`
+    /// (`RecipeManager.java:48-53`): each station accepts exactly the ingredients of its
+    /// own cooking recipes - an ore is blastable but not smokeable, food is smokeable but
+    /// not blastable, and a non-cooking item is accepted by no furnace-like station.
+    #[test]
+    fn can_smelt_filters_per_station_cooking_type() {
+        assert!(can_smelt(&Item::IRON_ORE, Some(WindowType::Furnace)));
+        assert!(can_smelt(&Item::IRON_ORE, Some(WindowType::BlastFurnace)));
+        assert!(!can_smelt(&Item::IRON_ORE, Some(WindowType::Smoker)));
+
+        assert!(can_smelt(&Item::BEEF, Some(WindowType::Furnace)));
+        assert!(can_smelt(&Item::BEEF, Some(WindowType::Smoker)));
+        assert!(!can_smelt(&Item::BEEF, Some(WindowType::BlastFurnace)));
+
+        assert!(!can_smelt(&Item::DIAMOND_SWORD, Some(WindowType::Furnace)));
+        assert!(!can_smelt(
+            &Item::DIAMOND_SWORD,
+            Some(WindowType::BlastFurnace)
+        ));
     }
 }

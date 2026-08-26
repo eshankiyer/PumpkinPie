@@ -84,8 +84,32 @@ impl JavaClient {
                 )))
                 .await;
 
-            // The automatic flag means always active
-            if command.is_automatic() && block_type != Block::CHAIN_COMMAND_BLOCK {
+            // Vanilla `CommandBlockEntity.setAutomatic` (CommandBlockEntity.java:102-108):
+            // newly enabling "always active" schedules a tick unless this is a sequence
+            // (chain) block.
+            let previous_auto = old_command_block.auto.load(Ordering::SeqCst);
+            let auto = command.is_automatic();
+            if !previous_auto
+                && auto
+                && !old_command_block.powered.load(Ordering::SeqCst)
+                && block_type != Block::CHAIN_COMMAND_BLOCK
+            {
+                player.world().schedule_block_tick(
+                    &block_type,
+                    pos,
+                    1,
+                    pumpkin_world::tick::TickPriority::Normal,
+                );
+            }
+
+            // Vanilla `CommandBlockEntity.onModeSwitch` (CommandBlockEntity.java:110-115),
+            // invoked from `ServerGamePacketListenerImpl.handleSetCommandBlock`
+            // (ServerGamePacketListenerImpl.java:648-650): switching into repeating mode
+            // while powered or automatic starts the clock immediately.
+            if block.id != block_type.id
+                && block_type == Block::REPEATING_COMMAND_BLOCK
+                && (auto || old_command_block.powered.load(Ordering::SeqCst))
+            {
                 player.world().schedule_block_tick(
                     &block_type,
                     pos,
