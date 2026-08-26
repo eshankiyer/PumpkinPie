@@ -486,6 +486,9 @@ impl LootFunctionExt for LootFunction {
         }
 
         match &self.content {
+            // `DiscardItem.run` (`DiscardItem.java:23-25`) returns `ItemStack.EMPTY`; clearing
+            // the vector is the equivalent for this evaluator's multi-stack representation.
+            LootFunctionTypes::DiscardItem => stacks.clear(),
             LootFunctionTypes::SetCount { count, add } => {
                 for stack in stacks {
                     if *add {
@@ -1397,6 +1400,22 @@ mod tests {
         data_component_impl::StoredEnchantmentsImpl,
     };
     use pumpkin_util::loot_table::{LootFireworkExplosion, LootListOperation};
+
+    #[test]
+    fn discard_item_removes_all_selected_stacks() {
+        let mut stacks = vec![
+            ItemStack::new(3, &Item::MAP),
+            ItemStack::new(1, &Item::PAPER),
+        ];
+        let function = LootFunction {
+            content: LootFunctionTypes::DiscardItem,
+            conditions: None,
+        };
+
+        function.apply(&mut stacks, &LootContextParameters::default());
+
+        assert!(stacks.is_empty());
+    }
 
     #[test]
     fn set_name_custom_name_accepts_json_and_plain_strings() {
