@@ -1,6 +1,7 @@
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{Block, BlockStateId};
 use pumpkin_nbt::compound::NbtCompound;
@@ -973,6 +974,16 @@ impl Mob for EnderDragonEntity {
 
     fn is_pickable(&self) -> bool {
         false
+    }
+
+    /// Vanilla `EnderDragon.getAmbientSound` (`EnderDragon.java:768-771`).
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityEnderDragonAmbient)
+    }
+
+    /// Vanilla `EnderDragon.getSoundSource` (`EnderDragon.java:763-766`).
+    fn get_sound_source(&self) -> SoundCategory {
+        SoundCategory::Hostile
     }
 
     fn mob_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {

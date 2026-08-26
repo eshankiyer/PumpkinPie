@@ -1,6 +1,7 @@
 use std::{pin::Pin, sync::Arc};
 
 use crate::{
+    block::blocks::campfire::CampfireBlock,
     block::entities::sign::DyeColor,
     entity::EntityBase,
     entity::passive::tropical_fish::{Pattern, TropicalFishEntity},
@@ -483,6 +484,12 @@ pub(crate) async fn try_place_filled_bucket(
     if waterlogged_check(block, state.id).is_some() {
         if item.id == Item::LAVA_BUCKET.id {
             return None;
+        }
+        if item.id == Item::WATER_BUCKET.id
+            && (block == &Block::CAMPFIRE || block == &Block::SOUL_CAMPFIRE)
+            && CampfireBlock::place_liquid(world, &target_pos, block, state.id, &Fluid::WATER).await
+        {
+            return Some(target_pos);
         }
         let state_id = set_waterlogged(block, state.id, true);
         world

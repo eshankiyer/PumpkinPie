@@ -426,6 +426,12 @@ impl EntityBase for AreaEffectCloudEntity {
         None
     }
 
+    /// Vanilla `AreaEffectCloud.getPistonPushReaction` (`AreaEffectCloud.java:351-353`)
+    /// returns `IGNORE`; the piston entity path consults this hook before moving an entity.
+    fn can_be_pushed_by_piston(&self) -> bool {
+        false
+    }
+
     fn cast_any(&self) -> &dyn std::any::Any {
         self
     }

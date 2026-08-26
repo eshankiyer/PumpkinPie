@@ -2449,7 +2449,7 @@ impl LivingEntity {
             let check_damage = self.damage(caller, damage as f32, DamageType::FALL).await; // Fall
             if check_damage {
                 self.entity
-                    .play_sound(Self::get_fall_sound(fall_distance as i32));
+                    .play_sound(caller.get_fall_sound(fall_distance as i32));
             }
         }
     }
@@ -2495,14 +2495,6 @@ impl LivingEntity {
         #[allow(clippy::cast_possible_truncation)]
         {
             damage.floor() as i32
-        }
-    }
-
-    const fn get_fall_sound(distance: i32) -> Sound {
-        if distance > 4 {
-            Sound::EntityGenericBigFall
-        } else {
-            Sound::EntityGenericSmallFall
         }
     }
 

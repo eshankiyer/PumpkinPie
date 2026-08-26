@@ -20,6 +20,7 @@ use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
+use uuid::Uuid;
 
 use crate::block::entities::copper_golem_statue::CopperGolemStatueBlockEntity;
 use crate::entity::player::Player;
@@ -184,6 +185,7 @@ pub struct CopperGolemEntity {
     weather_state: AtomicCell<CopperWeatherState>,
     state: AtomicI32,
     next_weathering_tick: AtomicCell<i64>,
+    last_lightning_bolt_uuid: AtomicCell<Option<Uuid>>,
 }
 
 impl CopperGolemEntity {
@@ -194,6 +196,7 @@ impl CopperGolemEntity {
             weather_state: AtomicCell::new(CopperWeatherState::Unaffected),
             state: AtomicI32::new(CopperGolemState::Idle.id()),
             next_weathering_tick: AtomicCell::new(UNSET_WEATHERING_TICK),
+            last_lightning_bolt_uuid: AtomicCell::new(None),
         };
         let mob_arc = Arc::new(golem);
         let mob_weak: Weak<dyn Mob> = {
@@ -433,11 +436,35 @@ impl Mob for CopperGolemEntity {
         lightning: &'a crate::entity::lightning::LightningBoltEntity,
     ) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
-            self.set_weather_state(CopperWeatherState::Unaffected);
             self.mob_entity
                 .living_entity
                 .on_lightning_strike(caller, lightning)
                 .await;
+
+            // `CopperGolem.thunderHit` ignores repeated callbacks for the same bolt and
+            // advances one oxidation stage toward unaffected, rather than clearing all stages.
+            // The compare-exchange keeps that read/modify/write atomic if lightning dispatch
+            // ever reaches this entity concurrently.
+            let lightning_uuid = lightning.get_entity().entity_uuid;
+            loop {
+                let previous = self.last_lightning_bolt_uuid.load();
+                if previous == Some(lightning_uuid) {
+                    return;
+                }
+                if self
+                    .last_lightning_bolt_uuid
+                    .compare_exchange(previous, Some(lightning_uuid))
+                    .is_ok()
+                {
+                    break;
+                }
+            }
+
+            let state = self.weather_state();
+            if state != CopperWeatherState::Unaffected {
+                self.next_weathering_tick.store(UNSET_WEATHERING_TICK);
+                self.set_weather_state(state.previous());
+            }
         })
     }
 

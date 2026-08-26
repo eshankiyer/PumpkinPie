@@ -28,7 +28,7 @@ use pumpkin_data::entity::entity_from_egg;
 use pumpkin_data::entity::{EntityType, MobCategory};
 use pumpkin_data::item_stack::{DamageResult, ItemStack};
 use pumpkin_data::potion::Effect;
-use pumpkin_data::sound::Sound;
+use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
@@ -1229,6 +1229,11 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
+    /// Vanilla `Mob.getSoundSource`; neutral is the existing default for ordinary mobs.
+    fn get_sound_source(&self) -> SoundCategory {
+        SoundCategory::Neutral
+    }
+
     /// Sound emitted by the mob's `playStepSound` hook, or `None` when the mob uses the generic
     /// block step path. Concrete skeleton variants override this where vanilla overrides
     /// `getStepSound`.
@@ -1275,7 +1280,10 @@ pub trait Mob: EntityBase + Send + Sync {
                 .ambient_sound_time
                 .store(-self.get_ambient_sound_interval(), Relaxed);
             if let Some(sound) = self.get_ambient_sound() {
-                entity.play_sound(sound);
+                entity
+                    .world
+                    .load()
+                    .play_sound(sound, self.get_sound_source(), &entity.pos.load());
             }
         }
     }
@@ -2806,6 +2814,11 @@ impl<T: Mob + Send + 'static> EntityBase for T {
                 .damage_with_context(caller, amount, damage_type, position, source, cause)
                 .await;
             if damaged {
+                // `Animal.actuallyHurt` (`Animal.java:87-90`) clears love mode after damage is
+                // accepted. Only animals currently use `love_ticks`, so keeping this in the
+                // shared successful-mob-damage path applies the hook to every Animal implementor
+                // without duplicating damage overrides across the species.
+                self.get_mob_entity().reset_love_ticks();
                 self.on_damage(damage_type, source).await;
                 if rescue_lethal {
                     self.mob_on_lethal_rescue().await;

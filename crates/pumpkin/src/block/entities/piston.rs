@@ -91,6 +91,9 @@ impl PistonBlockEntity {
             if entity.get_player().is_some() {
                 continue;
             }
+            if !entity.can_be_pushed_by_piston() {
+                continue;
+            }
 
             let entity_aabb = e.bounding_box.load();
             let intersection = Self::intersection_size(swept, motion_dir, entity_aabb);

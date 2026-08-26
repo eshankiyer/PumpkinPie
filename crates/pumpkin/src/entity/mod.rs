@@ -341,6 +341,16 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         })
     }
 
+    /// Sound played after this entity takes fall damage. Entities with a custom fall sound
+    /// override this; the generic living-entity sound remains the default.
+    fn get_fall_sound(&self, fall_distance: i32) -> Sound {
+        if fall_distance > 4 {
+            Sound::EntityGenericBigFall
+        } else {
+            Sound::EntityGenericSmallFall
+        }
+    }
+
     /// Per-entity opt-out from explosions, independent of the vanilla
     /// `Entity.ignoreExplosion` rules below (kept because several entity types
     /// override only this one).
@@ -654,6 +664,12 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
 
     fn is_pushable(&self) -> bool {
         false
+    }
+
+    /// Whether a piston may move this entity. Marker armor stands override this to match
+    /// `ArmorStand.getPistonPushReaction() == IGNORE`.
+    fn can_be_pushed_by_piston(&self) -> bool {
+        true
     }
 
     fn push<'a>(&'a self, entity: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {

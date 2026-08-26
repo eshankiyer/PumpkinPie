@@ -16,7 +16,9 @@ use pumpkin_data::{
     sound::{Sound, SoundCategory},
 };
 use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
-use pumpkin_util::math::{euler_angle::EulerAngle, vector3::Vector3};
+use pumpkin_util::math::{
+    boundingbox::EntityDimensions, euler_angle::EulerAngle, vector3::Vector3,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct PackedRotation {
@@ -111,6 +113,7 @@ impl ArmorStandEntity {
 
     pub fn set_small(&self, small: bool) {
         self.set_bit_field(ArmorStandFlags::Small, small);
+        self.refresh_dimensions();
     }
 
     pub fn is_small(&self) -> bool {
@@ -135,6 +138,7 @@ impl ArmorStandEntity {
 
     pub fn set_marker(&self, marker: bool) {
         self.set_bit_field(ArmorStandFlags::Marker, marker);
+        self.refresh_dimensions();
     }
 
     pub fn is_marker(&self) -> bool {
@@ -142,13 +146,29 @@ impl ArmorStandEntity {
     }
 
     fn set_bit_field(&self, bit_field: ArmorStandFlags, set: bool) {
-        let current = self.armor_stand_flags.load(Ordering::Relaxed);
-        let new_value = if set {
-            current | bit_field as u8
+        if set {
+            self.armor_stand_flags
+                .fetch_or(bit_field as u8, Ordering::Relaxed);
         } else {
-            current & !(bit_field as u8)
+            self.armor_stand_flags
+                .fetch_and(!(bit_field as u8), Ordering::Relaxed);
+        }
+    }
+
+    fn refresh_dimensions(&self) {
+        let entity = self.get_entity();
+        let dimensions = if self.is_marker() {
+            EntityDimensions::fixed(0.0, 0.0)
+        } else if self.is_small() {
+            let base = entity.base_dimension.load();
+            EntityDimensions::new(base.width * 0.5, base.height * 0.5, 0.9875)
+        } else {
+            entity.base_dimension.load()
         };
-        self.armor_stand_flags.store(new_value, Ordering::Relaxed);
+        entity.entity_dimension.store(dimensions);
+        entity
+            .bounding_box
+            .store(dimensions.make_bounding_box(entity.pos.load()));
     }
 
     pub fn can_use_slot(&self, slot: &EquipmentSlot) -> bool {
@@ -313,6 +333,7 @@ impl NBTStorage for ArmorStandEntity {
             }
 
             self.armor_stand_flags.store(flags, Ordering::Relaxed);
+            self.refresh_dimensions();
 
             if let Some(pose_tag) = nbt.get("Pose") {
                 let packed: PackedRotation = pose_tag.clone().into();
@@ -333,6 +354,18 @@ impl EntityBase for ArmorStandEntity {
 
     fn is_pickable(&self) -> bool {
         self.get_entity().is_alive() && !self.is_marker()
+    }
+
+    /// Vanilla `ArmorStand.getPistonPushReaction` (`ArmorStand.java:472-475`). Marker stands are
+    /// not moved by pistons; ordinary stands use the default normal reaction.
+    fn can_be_pushed_by_piston(&self) -> bool {
+        !self.is_marker()
+    }
+
+    /// Vanilla `ArmorStand.getFallSounds` (`ArmorStand.java:587-590`). Both fall distances use
+    /// the armor-stand fall sound; the generic `LivingEntity` fallback is distance-dependent.
+    fn get_fall_sound(&self, _fall_distance: i32) -> Sound {
+        Sound::EntityArmorStandFall
     }
 
     fn as_nbt_storage(&self) -> &dyn NBTStorage {

@@ -17,7 +17,8 @@ use crate::block::entities::beehive::{
 };
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, GetComparatorOutputArgs, UseWithItemArgs,
+    BlockBehaviour, BlockFuture, BlockMetadata, GetComparatorOutputArgs, OnPlaceArgs,
+    UseWithItemArgs,
 };
 use crate::entity::mob::Mob;
 use crate::entity::passive::bee::as_bee;
@@ -51,6 +52,17 @@ impl BlockMetadata for BeehiveBlock {
 }
 
 impl BlockBehaviour for BeehiveBlock {
+    /// `BeehiveBlock.getStateForPlacement` (`BeehiveBlock.java:269-272`): hives face away
+    /// from the player that placed them. The facing is part of the block state consumed by
+    /// bee release and smoke checks, so it must be selected before the block is installed.
+    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
+        Box::pin(async move {
+            let mut props = BeeNestLikeProperties::default(args.block);
+            props.facing = args.player.get_entity().get_horizontal_facing().opposite();
+            props.to_state_id(args.block)
+        })
+    }
+
     fn get_comparator_output<'a>(
         &'a self,
         args: GetComparatorOutputArgs<'a>,
