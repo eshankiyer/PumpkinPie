@@ -388,6 +388,22 @@ impl BlockBehaviour for SculkSensorBlock {
         })
     }
 
+    /// Vanilla `SculkSensorBlock.getDirectSignal` (`SculkSensorBlock.java:183-185`): the
+    /// sensor only propagates strong power out of its top face
+    /// (`direction == UP ? state.getSignal(...) : 0`); inherited by the calibrated sensor.
+    fn get_strong_redstone_power<'a>(
+        &'a self,
+        args: GetRedstonePowerArgs<'a>,
+    ) -> BlockFuture<'a, u8> {
+        Box::pin(async move {
+            if args.direction == BlockDirection::Up {
+                self.get_weak_redstone_power(args).await
+            } else {
+                0
+            }
+        })
+    }
+
     fn get_comparator_output<'a>(
         &'a self,
         args: GetComparatorOutputArgs<'a>,

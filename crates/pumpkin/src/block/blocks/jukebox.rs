@@ -225,7 +225,34 @@ impl BlockBehaviour for JukeboxBlock {
     fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             // Drop the record if there is one
+            // Vanilla: `preRemoveSideEffects` -> `popOutTheItem`
+            // (JukeboxBlockEntity.java:153-155, 48-62).
             Self::drop_record(args.position, args.world).await;
+
+            // Vanilla `JukeboxBlockEntity#setRemoved` (JukeboxBlockEntity.java:126-130):
+            // removal unconditionally emits GAME_EVENT.JUKEBOX_STOP_PLAY (sculk-visible),
+            // regardless of whether a song was actually playing, in addition to the
+            // stop-song level event (1011).
+            if let Some(block_entity) = args.world.get_block_entity(args.position)
+                && let Some(jukebox_entity) =
+                    block_entity.as_any().downcast_ref::<JukeboxBlockEntity>()
+            {
+                if jukebox_entity.is_playing() {
+                    jukebox_entity.stop_playing();
+                }
+                emit_game_event(
+                    args.world,
+                    GameEvent::JukeboxStopPlay,
+                    Vector3::new(
+                        f64::from(args.position.0.x) + 0.5,
+                        f64::from(args.position.0.y) + 0.5,
+                        f64::from(args.position.0.z) + 0.5,
+                    ),
+                    GameEventContext::none(),
+                )
+                .await;
+            }
+
             // Stop the music
             args.world
                 .sync_world_event(WorldEvent::SoundStopJukeboxSong, *args.position, 0);
