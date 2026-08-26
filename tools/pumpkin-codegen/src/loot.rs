@@ -780,6 +780,15 @@ pub enum LootFunctionTypesStruct {
         #[serde(rename = "type")]
         container_type: String,
     },
+    /// Sets enchantment levels on the item, optionally adding to existing levels.
+    #[serde(rename = "minecraft:set_enchantments")]
+    SetEnchantments {
+        /// Enchantment ids mapped to number providers for their levels.
+        enchantments: BTreeMap<String, LootFunctionNumberProviderStruct>,
+        /// If `true`, adds the generated level to the existing level.
+        #[serde(default)]
+        add: bool,
+    },
     /// Increases count based on the level of a relevant enchantment.
     #[serde(rename = "minecraft:enchanted_count_increase")]
     EnchantedCountIncrease {
@@ -919,6 +928,18 @@ impl ToTokens for LootFunctionTypesStruct {
                 let name = LitStr::new(name, Span::call_site());
                 let seed = seed.unwrap_or(0);
                 quote! { LootFunctionTypes::SetContainerLootTable { name: #name, seed: #seed } }
+            }
+            Self::SetEnchantments { enchantments, add } => {
+                let enchantments = enchantments.iter().map(|(enchantment, level)| {
+                    let enchantment = LitStr::new(enchantment, Span::call_site());
+                    quote! { (#enchantment, #level) }
+                });
+                quote! {
+                    LootFunctionTypes::SetEnchantments {
+                        enchantments: &[#(#enchantments),*],
+                        add: #add,
+                    }
+                }
             }
             Self::SetOminousBottleAmplifier => {
                 quote! { LootFunctionTypes::SetOminousBottleAmplifier }
