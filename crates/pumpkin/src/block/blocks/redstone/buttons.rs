@@ -9,6 +9,7 @@ use pumpkin_data::block_properties::BlockProperties;
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_macros::pumpkin_block_from_tag;
+use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::tick::TickPriority;
@@ -65,6 +66,37 @@ fn button_click_sound(block: &Block, pressed: bool) -> Sound {
         ),
     };
     if pressed { on } else { off }
+}
+
+fn can_be_activated_by_arrows(block: &Block) -> bool {
+    // BlockSetType.STONE and BlockSetType.POLISHED_BLACKSTONE set this flag to false;
+    // every button block set used by the current registry has it enabled.
+    block != &Block::STONE_BUTTON && block != &Block::POLISHED_BLACKSTONE_BUTTON
+}
+
+/// `AbstractArrow.class` also covers `ThrownTrident` (`ThrownTrident.java` extends
+/// `AbstractArrow`), so vanilla's `getEntitiesOfClass(AbstractArrow.class, ...)`
+/// (`ButtonBlock.java:163-164`) matches a lodged trident too, not just arrows.
+fn is_abstract_arrow(entity_type: &'static pumpkin_data::entity::EntityType) -> bool {
+    entity_type == &pumpkin_data::entity::EntityType::ARROW
+        || entity_type == &pumpkin_data::entity::EntityType::SPECTRAL_ARROW
+        || entity_type == &pumpkin_data::entity::EntityType::TRIDENT
+}
+
+fn has_arrow_in_button(
+    world: &World,
+    position: &BlockPos,
+    state: &pumpkin_data::BlockState,
+) -> bool {
+    state
+        .get_block_collision_shapes_at(position)
+        .map(|shape| shape.at_pos(*position))
+        .any(|shape: BoundingBox| {
+            world
+                .get_entities_at_box(&shape)
+                .iter()
+                .any(|entity| is_abstract_arrow(entity.get_entity().entity_type))
+        })
 }
 
 async fn click_button(
@@ -153,7 +185,29 @@ impl BlockBehaviour for ButtonBlock {
     fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             let state = args.world.get_block_state(args.position);
-            let mut props = ButtonLikeProperties::from_state_id(state.id, args.block);
+            let props = ButtonLikeProperties::from_state_id(state.id, args.block);
+            if !props.powered {
+                return;
+            }
+
+            if can_be_activated_by_arrows(args.block)
+                && has_arrow_in_button(args.world, args.position, state)
+            {
+                let delay = if *args.block == Block::STONE_BUTTON {
+                    20
+                } else {
+                    30
+                };
+                args.world.schedule_block_tick(
+                    args.block,
+                    *args.position,
+                    delay,
+                    TickPriority::Normal,
+                );
+                return;
+            }
+
+            let mut props = props;
             props.powered = false;
             args.world
                 .set_block_state(
@@ -164,13 +218,9 @@ impl BlockBehaviour for ButtonBlock {
                 .await;
             Self::update_neighbors(args.world, args.position, &props).await;
 
-            // Vanilla `checkPressed` (ButtonBlock.java:170-175): releasing plays the
-            // click-off sound with no source and fires BLOCK_DEACTIVATE. Not ported:
-            // `checkPressed` re-checks for an arrow lodged in an arrow-activatable button
-            // (`type.canButtonBeActivatedByArrows()`) before unpressing, and arrows never
-            // press a button here at all (`entityInside`, ButtonBlock.java:156-160) - this
-            // always unpresses unconditionally, matching every button except one an arrow
-            // is still sitting in.
+            // Vanilla `checkPressed` (ButtonBlock.java:162-177): releasing plays the click-off
+            // sound with no source and fires BLOCK_DEACTIVATE. Arrow-activatable buttons remain
+            // powered while an arrow is still lodged in the button shape above.
             args.world.play_sound(
                 button_click_sound(args.block, false),
                 SoundCategory::Blocks,
@@ -191,6 +241,29 @@ impl BlockBehaviour for ButtonBlock {
                 GameEventContext::none(),
             )
             .await;
+        })
+    }
+
+    /// Vanilla `entityInside` (`ButtonBlock.java:153-160`) checks arrow-activatable button sets
+    /// on the server and delegates to `checkPressed`. `AbstractArrow` entities (arrow, spectral
+    /// arrow, thrown trident) are the only headless-server entities that can trigger this path.
+    fn on_entity_collision<'a>(
+        &'a self,
+        args: crate::block::OnEntityCollisionArgs<'a>,
+    ) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if !can_be_activated_by_arrows(args.block) {
+                return;
+            }
+
+            if !is_abstract_arrow(args.entity.get_entity().entity_type) {
+                return;
+            }
+
+            let props = ButtonLikeProperties::from_state_id(args.state.id, args.block);
+            if !props.powered {
+                click_button(args.world, args.position, args.block, None).await;
+            }
         })
     }
 

@@ -6631,6 +6631,9 @@ impl World {
 
     pub fn get_fluid(&self, position: &BlockPos) -> &'static pumpkin_data::fluid::Fluid {
         let id = self.get_block_state_id(position);
+        if Block::from_state_id(id) == &Block::BUBBLE_COLUMN {
+            return Fluid::FLOWING_WATER.to_flowing();
+        }
         let fluid = Fluid::from_state_id(id).ok_or(&Fluid::EMPTY);
         if let Ok(fluid) = fluid {
             return fluid.to_flowing();
@@ -6670,6 +6673,10 @@ impl World {
         let id = self.get_block_state_id(position);
         let block = Block::from_state_id(id);
 
+        if block == &Block::BUBBLE_COLUMN {
+            return (block, Fluid::FLOWING_WATER.to_flowing());
+        }
+
         let fluid = Fluid::from_state_id(id)
             .map(Fluid::to_flowing)
             .ok_or(&Fluid::EMPTY)
@@ -6702,6 +6709,9 @@ impl World {
 
         let Some(raw_fluid) = Fluid::from_state_id(id) else {
             let block = Block::from_state_id(id);
+            if block == &Block::BUBBLE_COLUMN {
+                return crate::block::blocks::bubble_column::BubbleColumnBlock::fluid_state();
+            }
             // `TallSeagrassBlock.getFluidState` (TallSeagrassBlock.java:78-80) always reports a
             // full water source; tall seagrass has no `waterlogged` property, so mirror the
             // waterlogged branch below by reporting the source WATER fluid state.
