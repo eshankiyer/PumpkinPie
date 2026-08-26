@@ -85,6 +85,11 @@ fn get_start_and_end_pos(player: &Player) -> (Vector3<f64>, Vector3<f64>) {
 }
 
 pub(crate) fn waterlogged_check(block: &Block, state: BlockStateId) -> Option<bool> {
+    if block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_SLABS)
+        && !crate::block::blocks::slabs::can_place_liquid(block, state)
+    {
+        return None;
+    }
     block.properties(state).and_then(|properties| {
         properties
             .to_props()

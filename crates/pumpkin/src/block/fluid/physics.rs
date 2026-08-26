@@ -7,6 +7,13 @@ use pumpkin_data::{Block, BlockStateId, fluid::Fluid, tag};
 /// Check if a specific block can be replaced by fluid (based on block properties)
 #[must_use]
 pub fn can_be_replaced(block_state: &BlockState, block: &Block, fluid: &Fluid) -> bool {
+    if fluid.matches_type(&Fluid::WATER)
+        && block.has_tag(&tag::Block::MINECRAFT_SLABS)
+        && !crate::block::blocks::slabs::can_place_liquid(block, block_state.id)
+    {
+        return false;
+    }
+
     // An already waterlogged block retains its host state and is not replaceable.
     if block.is_waterlogged(block_state.id) {
         return false;
@@ -73,6 +80,13 @@ pub fn waterlogged_replacement_state(
     block: &Block,
     fluid: &Fluid,
 ) -> Option<BlockStateId> {
+    if fluid.matches_type(&Fluid::WATER)
+        && block.has_tag(&tag::Block::MINECRAFT_SLABS)
+        && !crate::block::blocks::slabs::can_place_liquid(block, block_state.id)
+    {
+        return None;
+    }
+
     fluid
         .matches_type(&Fluid::WATER)
         .then(|| block.with_waterlogged(block_state.id))

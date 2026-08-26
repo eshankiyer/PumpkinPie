@@ -306,6 +306,14 @@ impl PortalProcessor {
         self.source_portal = Some(info);
     }
 
+    /// `PortalProcessor.isSamePortal` (`PortalProcessor.java:67-69`). Pumpkin represents the
+    /// vanilla portal instance with its supported portal kind, so a change between Nether and End
+    /// portals must replace the processor rather than reusing its old destination.
+    #[must_use]
+    pub fn is_same_portal(&self, portal_type: PortalType) -> bool {
+        self.portal_type == portal_type
+    }
+
     pub fn process_portal_teleportation(
         &mut self,
         current_world: &World,

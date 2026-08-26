@@ -7,10 +7,11 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::{BlockAccessor, BlockFlags};
 use rand::RngExt;
 
+use crate::block::blocks::plant::crop::ravager_destroy_crop;
 use crate::block::blocks::plant::crop::{get_available_moisture, has_sufficient_light};
 use crate::block::{
-    BlockBehaviour, BlockFuture, BrokenArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
-    OnPlaceArgs, RandomTickArgs,
+    BlockBehaviour, BlockFuture, BonemealArgs, BrokenArgs, CanPlaceAtArgs,
+    GetStateForNeighborUpdateArgs, OnEntityCollisionArgs, OnPlaceArgs, RandomTickArgs,
 };
 use crate::world::World;
 
@@ -19,9 +20,6 @@ type PitcherCropProperties = PitcherCropLikeProperties;
 /// `pitcher_crop`: a two-tall crop grown from a pitcher pod. Vanilla:
 /// `net.minecraft.world.level.block.PitcherCropBlock`.
 ///
-/// Bonemeal support (`BonemealableBlock`) is not ported: Pumpkin has no bonemeal-application
-/// hook on `BlockBehaviour` yet (checked `wheat.rs`/`beetroot.rs`, neither implements it either),
-/// so this only covers natural growth via `random_tick`.
 #[pumpkin_block("minecraft:pitcher_crop")]
 pub struct PitcherCropBlock;
 
@@ -86,6 +84,29 @@ fn can_grow(world: &World, lower_pos: &BlockPos, current_age: u8, new_age: u8) -
     !is_double(new_age) || can_grow_into(world, &above_pos)
 }
 
+/// `PitcherCropBlock.getLowerHalf` (`PitcherCropBlock.java:190-198`).
+fn lower_half(
+    world: &World,
+    pos: &BlockPos,
+    block: &Block,
+    state_id: BlockStateId,
+) -> Option<(BlockPos, BlockStateId)> {
+    let props = PitcherCropProperties::from_state_id(state_id, block);
+    if is_lower(block, props.half) {
+        return Some((*pos, state_id));
+    }
+
+    let lower_pos = pos.down();
+    let (lower_block, lower_state_id) = world.get_block_and_state_id(&lower_pos);
+    if lower_block == &Block::PITCHER_CROP {
+        let lower_props = PitcherCropProperties::from_state_id(lower_state_id, lower_block);
+        if is_lower(lower_block, lower_props.half) {
+            return Some((lower_pos, lower_state_id));
+        }
+    }
+    None
+}
+
 /// `PitcherCropBlock.grow`.
 async fn grow(
     world: &Arc<World>,
@@ -120,6 +141,30 @@ async fn grow(
 }
 
 impl BlockBehaviour for PitcherCropBlock {
+    fn on_entity_collision<'a>(&'a self, args: OnEntityCollisionArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move { ravager_destroy_crop(args.world, args.position, args.entity).await })
+    }
+
+    fn is_valid_bonemeal_target(&self, args: BonemealArgs<'_>) -> bool {
+        lower_half(args.world, args.position, args.block, args.state_id).is_some_and(
+            |(lower_pos, lower_state_id)| {
+                let lower_props =
+                    PitcherCropProperties::from_state_id(lower_state_id, &Block::PITCHER_CROP);
+                can_grow(args.world, &lower_pos, lower_props.age, lower_props.age + 1)
+            },
+        )
+    }
+
+    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if let Some((lower_pos, lower_state_id)) =
+                lower_half(args.world, args.position, args.block, args.state_id)
+            {
+                grow(args.world, &lower_pos, lower_state_id, 1).await;
+            }
+        })
+    }
+
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
         // A freshly placed pitcher pod is always the lower half, so the light gate applies.
         has_sufficient_light(args.block_accessor, args.position)

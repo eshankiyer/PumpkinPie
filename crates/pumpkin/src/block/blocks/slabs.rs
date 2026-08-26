@@ -3,6 +3,7 @@ use pumpkin_data::BlockDirection;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::BlockProperties;
 use pumpkin_data::block_properties::SlabType;
+use pumpkin_data::tag::Taggable;
 use pumpkin_macros::pumpkin_block_from_tag;
 
 use crate::block::BlockBehaviour;
@@ -17,6 +18,13 @@ type SlabProperties = pumpkin_data::block_properties::ResinBrickSlabLikeProperti
 
 #[pumpkin_block_from_tag("minecraft:slabs")]
 pub struct SlabBlock;
+
+/// Vanilla `SlabBlock.canPlaceLiquid` / `placeLiquid` (`SlabBlock.java:105-113`) reject a
+/// double slab while allowing water into the other slab states.
+pub(crate) fn can_place_liquid(block: &Block, state_id: BlockStateId) -> bool {
+    !block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_SLABS)
+        || SlabProperties::from_state_id(state_id, block).r#type != SlabType::Double
+}
 
 impl BlockBehaviour for SlabBlock {
     fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
