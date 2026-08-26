@@ -707,6 +707,13 @@ impl EntityBase for ItemEntity {
         None
     }
 
+    /// Vanilla `ItemEntity.isAttackable` (`ItemEntity.java:365-368`): dropped items do not
+    /// participate in player attack admission, even though they can still take environmental
+    /// damage through the entity damage path above.
+    fn is_attackable(&self) -> bool {
+        false
+    }
+
     fn get_item_entity(self: Arc<Self>) -> Option<Arc<ItemEntity>> {
         Some(self)
     }
