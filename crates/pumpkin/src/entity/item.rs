@@ -3,10 +3,11 @@ use crate::{entity::EntityBaseFuture, server::Server};
 use core::f32;
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::damage::DamageType;
+use pumpkin_data::data_component_impl::ContainerImpl;
 use pumpkin_data::data_component_impl::DamageResistantImpl;
 use pumpkin_data::data_component_impl::DamageResistantType;
-use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::packet::CURRENT_MC_VERSION;
+use pumpkin_data::{Block, item_stack::ItemStack};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::bedrock::client::CAddItemActor;
 use pumpkin_protocol::bedrock::network_item::ItemStackWrapper;
@@ -15,7 +16,7 @@ use pumpkin_protocol::codec::var_long::VarLong;
 use pumpkin_protocol::codec::var_ulong::VarULong;
 use pumpkin_protocol::java::client::play::{CSetEntityMetadata, Metadata};
 use pumpkin_util::math::atomic_f32::AtomicF32;
-use pumpkin_util::math::vector3::Vector3;
+use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
 use std::sync::atomic::Ordering::{AcqRel, Relaxed};
 
 use std::sync::{
@@ -324,6 +325,31 @@ impl ItemEntity {
         velo
     }
 
+    /// Vanilla `BlockItem.onDestroyed` (`BlockItem.java:198-204`) empties a block item's
+    /// container component and scatters its contents when the dropped item entity is destroyed.
+    async fn drop_container_contents_if_block_item(&self) {
+        let contents = {
+            let mut item_stack = self.item_stack.lock().await;
+            if Block::from_item_id(item_stack.item.id).is_none() {
+                return;
+            }
+            item_stack
+                .get_data_component_mut::<ContainerImpl>()
+                .map(|container| std::mem::take(&mut container.items))
+        };
+
+        let Some(contents) = contents else {
+            return;
+        };
+        let world = self.entity.world.load();
+        let position = BlockPos::floored_v(self.entity.pos.load());
+        for (_, stack) in contents {
+            if !stack.is_empty() {
+                world.drop_stack(&position, stack).await;
+            }
+        }
+    }
+
     fn update_no_clip_and_push_out(&self) {
         let entity = &self.entity;
         let pos = entity.pos.load();
@@ -623,6 +649,7 @@ impl EntityBase for ItemEntity {
                     .is_ok()
                 {
                     if new <= 0.0 {
+                        self.drop_container_contents_if_block_item().await;
                         self.entity.remove().await;
                     }
                     return true;
