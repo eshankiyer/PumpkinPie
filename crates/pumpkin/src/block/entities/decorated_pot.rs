@@ -1,10 +1,39 @@
 use super::BlockEntity;
+use crate::world::World;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
 use std::pin::Pin;
+use std::sync::Arc;
 use tokio::sync::Mutex;
+
+/// `DecoratedPotBlockEntity.WobbleStyle` (`DecoratedPotBlockEntity.java:177-186`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WobbleStyle {
+    Positive,
+    Negative,
+}
+
+impl WobbleStyle {
+    /// Animation length in ticks (`WobbleStyle.duration`, `DecoratedPotBlockEntity.java:178-179`).
+    #[must_use]
+    pub const fn duration(self) -> u8 {
+        match self {
+            Self::Positive => 7,
+            Self::Negative => 10,
+        }
+    }
+
+    /// Ordinal sent as the block-event data (`wobble`, `DecoratedPotBlockEntity.java:160-164`).
+    #[must_use]
+    pub const fn to_index(self) -> u8 {
+        match self {
+            Self::Positive => 0,
+            Self::Negative => 1,
+        }
+    }
+}
 
 pub struct DecoratedPotBlockEntity {
     pub position: BlockPos,
@@ -76,6 +105,8 @@ impl BlockEntity for DecoratedPotBlockEntity {
 
 impl DecoratedPotBlockEntity {
     pub const ID: &'static str = "minecraft:decorated_pot";
+    /// `EVENT_POT_WOBBLES` (`DecoratedPotBlockEntity.java:30`).
+    pub const EVENT_POT_WOBBLES: u8 = 1;
 
     #[must_use]
     pub const fn new(position: BlockPos) -> Self {
@@ -84,6 +115,15 @@ impl DecoratedPotBlockEntity {
             sherds: Mutex::const_new(None),
             item: Mutex::const_new(None),
         }
+    }
+
+    /// `DecoratedPotBlockEntity.wobble` (`DecoratedPotBlockEntity.java:160-164`): queues a
+    /// synced block event so clients play the wobble animation; the client-side
+    /// `triggerEvent` (`DecoratedPotBlockEntity.java:167-175`) consumes it.
+    pub async fn wobble(&self, world: &Arc<World>, style: WobbleStyle) {
+        world
+            .add_synced_block_event(self.position, Self::EVENT_POT_WOBBLES, style.to_index())
+            .await;
     }
 
     pub async fn get_item(&self) -> Option<ItemStack> {

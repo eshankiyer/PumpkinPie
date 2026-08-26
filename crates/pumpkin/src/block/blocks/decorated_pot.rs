@@ -7,11 +7,11 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_macros::pumpkin_block;
 
-use crate::block::entities::decorated_pot::DecoratedPotBlockEntity;
+use crate::block::entities::decorated_pot::{DecoratedPotBlockEntity, WobbleStyle};
 use crate::block::registry::BlockActionResult;
 use crate::block::{
     BlockBehaviour, BlockFuture, BrokenArgs, GetComparatorOutputArgs, NormalUseArgs, OnPlaceArgs,
-    PlacedArgs, UseWithItemArgs,
+    OnSyncedBlockEventArgs, PlacedArgs, UseWithItemArgs,
 };
 
 #[pumpkin_block("minecraft:decorated_pot")]
@@ -63,6 +63,9 @@ impl BlockBehaviour for DecoratedPotBlock {
                     .downcast_ref::<DecoratedPotBlockEntity>()
             {
                 if pot_entity.try_insert_item(args.item_stack, 1).await {
+                    // `DecoratedPotBlock.useItemOn` wobbles positively on a successful
+                    // insert (`DecoratedPotBlock.java:104`).
+                    pot_entity.wobble(args.world, WobbleStyle::Positive).await;
                     args.world.play_sound(
                         Sound::BlockDecoratedPotInsert,
                         SoundCategory::Blocks,
@@ -89,7 +92,28 @@ impl BlockBehaviour for DecoratedPotBlock {
                 SoundCategory::Blocks,
                 &args.position.to_f64(),
             );
+            // `DecoratedPotBlock.useWithoutItem` wobbles negatively on a failed
+            // interaction (`DecoratedPotBlock.java:140`).
+            if let Some(block_entity) = args.world.get_block_entity(args.position)
+                && let Some(pot_entity) = block_entity
+                    .as_any()
+                    .downcast_ref::<DecoratedPotBlockEntity>()
+            {
+                pot_entity.wobble(args.world, WobbleStyle::Negative).await;
+            }
             BlockActionResult::Success
+        })
+    }
+
+    /// `DecoratedPotBlockEntity.triggerEvent` (`DecoratedPotBlockEntity.java:167-175`):
+    /// accept only the pot-wobble event; the client plays the animation. Returning true
+    /// lets the world broadcast `ClientboundBlockEventPacket`.
+    fn on_synced_block_event<'a>(
+        &'a self,
+        args: OnSyncedBlockEventArgs<'a>,
+    ) -> BlockFuture<'a, bool> {
+        Box::pin(async move {
+            args.r#type == DecoratedPotBlockEntity::EVENT_POT_WOBBLES && args.data < 2
         })
     }
 

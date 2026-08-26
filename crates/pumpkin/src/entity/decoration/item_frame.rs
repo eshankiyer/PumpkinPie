@@ -9,6 +9,7 @@ use crate::server::Server;
 use crate::world::game_event::{GameEventContext, emit_game_event};
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::damage::DamageType;
+use pumpkin_data::data_component_impl::MapIdImpl;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item::Item;
@@ -57,7 +58,7 @@ impl ItemFrameEntity {
         // The spawn packet reads the direction from the entity data field, so
         // it has to agree with `facing` or the frame spawns facing elsewhere.
         entity.data.store(i32::from(facing), Ordering::Relaxed);
-        Self {
+        let frame = Self {
             entity,
             item_stack: Mutex::new(ItemStack::EMPTY.clone()),
             rotation: AtomicU8::new(0),
@@ -65,7 +66,9 @@ impl ItemFrameEntity {
             item_drop_chance: AtomicCell::new(1.0),
             fixed: AtomicBool::new(false),
             check_interval: AtomicU32::new(0),
-        }
+        };
+        frame.recalculate_bounding_box(false);
+        frame
     }
 
     pub fn get_facing(&self) -> BlockDirection {
@@ -73,12 +76,19 @@ impl ItemFrameEntity {
             .unwrap_or(Self::DEFAULT_FACING)
     }
 
-    /// `ItemFrame.createBoundingBox` with `hasFramedMap = false` (`ItemFrame.java`).
-    pub(crate) fn pop_box(position: Vector3<f64>, facing: BlockDirection) -> BoundingBox {
+    /// `ItemFrame.createBoundingBox` (`ItemFrame.java:114-123`). The displayed-map variant is
+    /// one block wide and tall; an ordinary frame is three quarters of a block in both axes.
+    fn frame_box(
+        position: Vector3<f64>,
+        facing: BlockDirection,
+        has_framed_map: bool,
+    ) -> BoundingBox {
+        let width = if has_framed_map { 1.0 } else { 0.75 };
+        let half_width = width / 2.0;
         let (half_x, half_y, half_z) = match facing {
-            BlockDirection::North | BlockDirection::South => (0.375, 0.375, 0.03125),
-            BlockDirection::West | BlockDirection::East => (0.03125, 0.375, 0.375),
-            BlockDirection::Down | BlockDirection::Up => (0.375, 0.03125, 0.375),
+            BlockDirection::North | BlockDirection::South => (half_width, half_width, 0.03125),
+            BlockDirection::West | BlockDirection::East => (0.03125, half_width, half_width),
+            BlockDirection::Down | BlockDirection::Up => (half_width, 0.03125, half_width),
         };
         BoundingBox::new(
             Vector3::new(
@@ -92,6 +102,19 @@ impl ItemFrameEntity {
                 position.z + half_z,
             ),
         )
+    }
+
+    /// Placement and support checks use the empty-frame box (`ItemFrame.java:110-112`).
+    pub(crate) fn pop_box(position: Vector3<f64>, facing: BlockDirection) -> BoundingBox {
+        Self::frame_box(position, facing, false)
+    }
+
+    fn recalculate_bounding_box(&self, has_framed_map: bool) {
+        self.entity.bounding_box.store(Self::frame_box(
+            self.entity.pos.load(),
+            self.get_facing(),
+            has_framed_map,
+        ));
     }
 
     /// `ItemFrame.setDirection` (`ItemFrame.java`), used when a frame is freshly placed.
@@ -111,6 +134,11 @@ impl ItemFrameEntity {
             BlockDirection::South => (0.0, 0.0),
         };
         self.entity.set_rotation(yaw, pitch);
+        let has_framed_map = self
+            .item_stack
+            .try_lock()
+            .is_ok_and(|stack| stack.get_data_component::<MapIdImpl>().is_some());
+        self.recalculate_bounding_box(has_framed_map);
     }
 
     /// `GlowItemFrame` overrides every sound and the dropped frame item.
@@ -165,6 +193,9 @@ impl ItemFrameEntity {
             stack.copy_with_count(1)
         };
         *self.item_stack.lock().await = stack.clone();
+        // `ItemFrame.onItemChanged` (`ItemFrame.java:307-309`) recalculates the hitbox because a
+        // map expands the frame from 0.75x0.75 to 1x1.
+        self.recalculate_bounding_box(stack.get_data_component::<MapIdImpl>().is_some());
         self.sync_item(&stack);
         if !stack.is_empty() {
             self.play_frame_sound(
@@ -318,6 +349,12 @@ impl NBTStorage for ItemFrameEntity {
             {
                 *self.item_stack.lock().await = stack;
             }
+            let has_framed_map = self
+                .item_stack
+                .lock()
+                .await
+                .get_data_component::<MapIdImpl>()
+                .is_some();
             self.rotation.store(
                 (nbt.get_byte("ItemRotation").unwrap_or(0) as u8) % 8,
                 Ordering::Relaxed,
@@ -326,6 +363,7 @@ impl NBTStorage for ItemFrameEntity {
             self.facing.store(facing, Ordering::Relaxed);
             // The spawn packet's data field carries the frame's direction.
             self.entity.data.store(i32::from(facing), Ordering::Relaxed);
+            self.recalculate_bounding_box(has_framed_map);
             self.item_drop_chance
                 .store(nbt.get_float("ItemDropChance").unwrap_or(1.0));
             // `setInvisible` is `Entity.setSharedFlag(FLAG_INVISIBLE)`, so this has

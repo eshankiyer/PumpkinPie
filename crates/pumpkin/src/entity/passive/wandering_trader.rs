@@ -291,6 +291,17 @@ impl ScreenHandlerFactory for WanderingTraderEntity {
                 })
             }));
 
+            let sound_weak = self.self_weak.lock().unwrap().clone().unwrap();
+            handler.on_quick_move_trade = Some(Box::new(move || {
+                if let Some(trader) = sound_weak.upgrade() {
+                    // `MerchantMenu.playTradeSound`/`WanderingTrader.getNotifyTradeSound`
+                    // (`MerchantMenu.java:142-147`, `WanderingTrader.java:191-193`).
+                    trader
+                        .get_entity()
+                        .play_sound(pumpkin_data::sound::Sound::EntityWanderingTraderYes);
+                }
+            }));
+
             Some(Arc::new(Mutex::new(handler)) as SharedScreenHandler)
         })
     }

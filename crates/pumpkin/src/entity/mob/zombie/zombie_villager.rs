@@ -8,6 +8,7 @@ use pumpkin_data::entity::{EntityStatus, EntityType};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::potion::Effect;
+use pumpkin_data::sound::Sound;
 use pumpkin_data::world::WorldEvent;
 use pumpkin_data::{Block, effect::StatusEffect, tag::Taggable};
 use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
@@ -320,6 +321,17 @@ impl NBTStorage for ZombieVillagerEntity {
 impl Mob for ZombieVillagerEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity.mob_entity
+    }
+
+    /// `ZombieVillager.getAmbientSound` (`ZombieVillager.java:311-314`). The shared mob tick
+    /// uses this hook to broadcast the idle sound on the vanilla cadence.
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityZombieVillagerAmbient)
+    }
+
+    /// `ZombieVillager.getStepSound` (`ZombieVillager.java:326-329`).
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityZombieVillagerStep)
     }
 
     /// Delegates to `ZombieEntityBase`, which carries `Zombie::finalizeSpawn`'s

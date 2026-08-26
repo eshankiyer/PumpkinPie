@@ -1,6 +1,6 @@
-use pumpkin_data::Block;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BlockProperties, NetherWartLikeProperties};
+use pumpkin_data::{Block, item::Item, item_stack::ItemStack};
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockAccessor;
@@ -10,8 +10,8 @@ use crate::block::blocks::plant::PlantBlockBase;
 use crate::block::blocks::plant::crop::CropBlockBase;
 use crate::block::blocks::plant::crop::ravager_destroy_crop;
 use crate::block::{
-    BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
-    OnEntityCollisionArgs, RandomTickArgs,
+    BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetCloneItemStackArgs,
+    GetStateForNeighborUpdateArgs, OnEntityCollisionArgs, RandomTickArgs,
 };
 
 type BeetrootProperties = NetherWartLikeProperties;
@@ -22,6 +22,14 @@ pub struct BeetrootBlock;
 impl BlockBehaviour for BeetrootBlock {
     fn on_entity_collision<'a>(&'a self, args: OnEntityCollisionArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move { ravager_destroy_crop(args.world, args.position, args.entity).await })
+    }
+
+    /// `BeetrootBlock.getBaseSeedId` (`BeetrootBlock.java:45-47`) supplies beetroot seeds to
+    /// the inherited `CropBlock.getCloneItemStack` (`CropBlock.java:169-170`).
+    fn get_clone_item_stack(&self, _args: GetCloneItemStackArgs<'_>) -> Option<ItemStack> {
+        Some(crate::block::blocks::plant::crop::clone_seed_stack(
+            &Item::BEETROOT_SEEDS,
+        ))
     }
 
     fn is_valid_bonemeal_target(&self, args: crate::block::BonemealArgs<'_>) -> bool {
