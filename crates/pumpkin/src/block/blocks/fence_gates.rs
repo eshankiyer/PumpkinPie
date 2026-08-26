@@ -142,6 +142,22 @@ impl BlockBehaviour for FenceGateBlock {
             fence_gate_props.powered = powered;
             fence_gate_props.open = powered;
 
+            // FenceGateBlock.java:133-134 (getStateForPlacement): check adjacent
+            // blocks on the perpendicular axis for walls to set in_wall.
+            let cw = args
+                .position
+                .offset(fence_gate_props.facing.rotate_clockwise().to_offset());
+            let ccw = args.position.offset(
+                fence_gate_props
+                    .facing
+                    .rotate_counter_clockwise()
+                    .to_offset(),
+            );
+            let cw_block = args.world.get_block(&cw);
+            let ccw_block = args.world.get_block(&ccw);
+            fence_gate_props.in_wall = cw_block.has_tag(&tag::Block::MINECRAFT_WALLS)
+                || ccw_block.has_tag(&tag::Block::MINECRAFT_WALLS);
+
             fence_gate_props.to_state_id(args.block)
         })
     }
