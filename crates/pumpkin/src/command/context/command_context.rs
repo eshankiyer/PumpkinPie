@@ -1,17 +1,42 @@
 use crate::command::context::command_source::{CommandSource, ReturnValue};
 use crate::command::context::string_range::StringRange;
 use crate::command::errors::command_syntax_error::CommandSyntaxError;
-use crate::command::errors::error_types::DISPATCHER_PARSE_EXCEPTION;
+use crate::command::errors::error_types::{CommandErrorType, DISPATCHER_PARSE_EXCEPTION};
 use crate::command::node::attached::NodeId;
 use crate::command::node::dispatcher::{CommandDispatcher, ResultConsumer};
 use crate::command::node::tree::Tree;
 use crate::command::node::{Command, RedirectModifier};
 use crate::server::Server;
 use crate::world::World;
+use pumpkin_data::game_rules::{GameRule, GameRuleRegistry, GameRuleValue};
+use pumpkin_data::translation;
 use pumpkin_util::text::TextComponent;
 use rustc_hash::FxHashMap;
 use std::any::Any;
 use std::sync::Arc;
+
+/// Port of vanilla's `BuildContexts.ERROR_FORK_LIMIT_REACHED`
+/// (`BuildContexts.java:29-31`).
+static ERROR_FORK_LIMIT_REACHED: CommandErrorType<1> = CommandErrorType::new(
+    translation::java::COMMAND_FORKLIMIT,
+    translation::java::COMMAND_FORKLIMIT,
+);
+
+/// Reads the `max_command_forks` gamerule of this source's world.
+///
+/// Vanilla reads it once when the outermost `ExecutionContext` is created
+/// (`Commands.java:399`); registered with a default of 65536 and a minimum of
+/// 0 (`GameRules.java:52`). Sources outside any world (console) use that
+/// default.
+fn command_fork_limit(source: &CommandSource) -> usize {
+    let default = GameRuleRegistry::default().max_command_forks;
+    source.world.as_ref().map_or(default as usize, |world| {
+        match world.get_game_rule(&GameRule::MaxCommandForks) {
+            GameRuleValue::Int(v) => v.max(0) as usize,
+            GameRuleValue::Bool(_) => default as usize,
+        }
+    })
+}
 
 /// Represents the current stage of the chain.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -307,6 +332,12 @@ impl<'a> ContextChain<'a> {
     }
 
     /// Executes all contexts in the chain, returning the ultimate result.
+    ///
+    /// This is the port of vanilla's `BuildContexts.execute`
+    /// (`BuildContexts.java:40-119`): each modifier stage fans the current
+    /// sources out through `run_modifier` (the `ContextChain.runModifier` call
+    /// at `BuildContexts.java:71`), tracking vanilla's forked flag as
+    /// `forked_mode` (set from the forked node at `:54-56`, read at `:66`).
     pub async fn execute_all(
         &self,
         source: &Arc<CommandSource>,
@@ -318,6 +349,7 @@ impl<'a> ContextChain<'a> {
 
         let mut forked_mode = false;
         let mut current_sources: Vec<Arc<CommandSource>> = vec![source.clone()];
+        let fork_limit = command_fork_limit(source);
 
         for modifier in &self.modifiers {
             forked_mode |= modifier.forks;
@@ -327,6 +359,19 @@ impl<'a> ContextChain<'a> {
                 let mut to_add =
                     Self::run_modifier(modifier, &source, result_consumer, forked_mode).await?;
                 next_sources.append(&mut to_add);
+                // Port of the fork-limit check (`BuildContexts.java:72-74`):
+                // once the accumulated context count reaches the limit, abort.
+                if next_sources.len() >= fork_limit {
+                    if forked_mode {
+                        // Vanilla reports through `handleError`, which is a
+                        // no-op beyond tracing when forked
+                        // (`CommandSourceStack.java:572-578`), so the chain
+                        // simply stops without surfacing an error.
+                        return Ok(0);
+                    }
+                    return Err(ERROR_FORK_LIMIT_REACHED
+                        .create_without_context(TextComponent::text(fork_limit.to_string())));
+                }
             }
             if next_sources.is_empty() {
                 return Ok(0);
@@ -565,7 +610,8 @@ mod test {
 
     use crate::command::argument_builder::{ArgumentBuilder, CommandArgumentBuilder};
     use crate::command::context::command_context::{
-        CommandContext, CommandContextBuilder, ContextChain, ParsedArgument, Stage,
+        CommandContext, CommandContextBuilder, ContextChain, ERROR_FORK_LIMIT_REACHED,
+        ParsedArgument, Stage,
     };
     use crate::command::context::command_source::{
         CommandSource, ResultValueTaker, ReturnValue, ReturnValueCallable,
@@ -808,5 +854,69 @@ mod test {
             .execute_all(&source, dispatcher.consumer.as_ref())
             .await;
         assert!(res.is_ok_and(|val| val == 1));
+    }
+
+    /// Yields more contexts than vanilla's default `max_command_forks`
+    /// (`GameRules.java:52`) through a custom modifier.
+    fn oversized_fork_modifier() -> RedirectModifier {
+        RedirectModifier::Custom(Arc::new(|context| {
+            Box::pin(async move {
+                let sources = std::iter::repeat_n(
+                    Arc::new(context.source.as_ref().clone()),
+                    // Above the 65536 default, so the fork limit must trip.
+                    70_000,
+                )
+                .collect::<Vec<_>>();
+                Ok(sources)
+            })
+        }))
+    }
+
+    #[tokio::test]
+    async fn fork_limit_stops_forked_chain_silently() {
+        let mut dispatcher = CommandDispatcher::new();
+        dispatcher
+            .register(CommandArgumentBuilder::new("foo", "A test command").executes(TenExecutor));
+        dispatcher.register(
+            CommandArgumentBuilder::new("fork", "A forking command")
+                .fork(Redirection::Root, oversized_fork_modifier()),
+        );
+
+        let source = Arc::new(CommandSource::dummy());
+        let result = dispatcher.parse_input("fork foo", &source).await;
+        let top_context = result.context.build("fork foo");
+        let chain = ContextChain::try_flatten(&top_context)
+            .expect("The context should have properly flattened, as it has a command to execute");
+
+        // Vanilla reports the fork limit through `handleError`, which is
+        // silent beyond tracing when forked (`CommandSourceStack.java:572-578`),
+        // so the chain ends without an error result.
+        assert_eq!(
+            chain.execute_all(&source, &EmptyResultConsumer).await,
+            Ok(0)
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_limit_errors_unforked_chain() {
+        let mut dispatcher = CommandDispatcher::new();
+        dispatcher
+            .register(CommandArgumentBuilder::new("foo", "A test command").executes(TenExecutor));
+        dispatcher.register(
+            CommandArgumentBuilder::new("fork", "A forking command")
+                .redirect_with_modifier(Redirection::Root, oversized_fork_modifier()),
+        );
+
+        let source = Arc::new(CommandSource::dummy());
+        let result = dispatcher.parse_input("fork foo", &source).await;
+        let top_context = result.context.build("fork foo");
+        let chain = ContextChain::try_flatten(&top_context)
+            .expect("The context should have properly flattened, as it has a command to execute");
+
+        let error = chain
+            .execute_all(&source, &EmptyResultConsumer)
+            .await
+            .expect_err("The fork limit should have aborted this unforked chain");
+        assert!(error.is(&ERROR_FORK_LIMIT_REACHED));
     }
 }
