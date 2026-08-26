@@ -4,6 +4,7 @@ use pumpkin_data::BlockState;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::world::WorldEvent;
@@ -226,10 +227,55 @@ impl FallingEntity {
         }
     }
 
-    /// `AnvilBlock.onBrokenAfterFall`: `level.levelEvent(1029, pos, 0)`.
-    fn play_broken_sound(world: &Arc<World>, pos: &BlockPos, block: &'static Block) {
+    /// `Fallable.onBrokenAfterFall` (`Fallable.java:14-15`) dispatches the block-specific
+    /// aftermath after a falling entity cannot place itself. The three server-visible block
+    /// implementations in this registry are covered here: anvil and speleothem landing
+    /// sounds, plus the brushable block-break event and particles.
+    async fn call_on_broken_after_fall(
+        &self,
+        world: &Arc<World>,
+        pos: &BlockPos,
+        block: &'static Block,
+    ) {
+        // `AnvilBlock.onBrokenAfterFall`/`SpeleothemBlock.onBrokenAfterFall`
+        // (`AnvilBlock.java:94-98`, `SpeleothemBlock.java:245-249`) both gate the landing
+        // sound behind `!entity.isSilent()`; `BrushableBlock.onBrokenAfterFall`
+        // (`BrushableBlock.java:95-99`) has no such guard.
         if block.has_tag(&tag::Block::MINECRAFT_ANVIL) {
-            world.sync_world_event(WorldEvent::SoundAnvilBroken, *pos, 0);
+            if !self.entity.is_silent() {
+                world.sync_world_event(WorldEvent::SoundAnvilBroken, *pos, 0);
+            }
+        } else if block == &Block::POINTED_DRIPSTONE {
+            if !self.entity.is_silent() {
+                world.sync_world_event(WorldEvent::SoundPointedDripstoneLand, *pos, 0);
+            }
+        } else if block == &Block::SULFUR_SPIKE {
+            if !self.entity.is_silent() {
+                world.sync_world_event(WorldEvent::SoundSulfurSpikeLand, *pos, 0);
+            }
+        } else if block == &Block::SUSPICIOUS_SAND || block == &Block::SUSPICIOUS_GRAVEL {
+            let bounding_box = self.entity.bounding_box.load();
+            let center = pumpkin_util::math::position::BlockPos::floored(
+                f64::midpoint(bounding_box.min.x, bounding_box.max.x),
+                f64::midpoint(bounding_box.min.y, bounding_box.max.y),
+                f64::midpoint(bounding_box.min.z, bounding_box.max.z),
+            );
+            world.sync_world_event(
+                WorldEvent::ParticlesDestroyBlock,
+                center,
+                i32::from(self.block_state_id.load().as_u16()),
+            );
+            crate::world::game_event::emit_game_event(
+                world,
+                GameEvent::BlockDestroy,
+                pumpkin_util::math::vector3::Vector3::new(
+                    f64::midpoint(bounding_box.min.x, bounding_box.max.x),
+                    f64::midpoint(bounding_box.min.y, bounding_box.max.y),
+                    f64::midpoint(bounding_box.min.z, bounding_box.max.z),
+                ),
+                crate::world::game_event::GameEventContext::none(),
+            )
+            .await;
         }
     }
 
@@ -249,7 +295,8 @@ impl FallingEntity {
     ) {
         let entity = &self.entity;
         if self.cancel_drop.load(Ordering::Relaxed) {
-            Self::play_broken_sound(world, pos, falling_block);
+            self.call_on_broken_after_fall(world, pos, falling_block)
+                .await;
             entity.remove().await;
             return;
         }
@@ -308,7 +355,8 @@ impl FallingEntity {
                 }
             }
         } else {
-            Self::play_broken_sound(world, pos, falling_block);
+            self.call_on_broken_after_fall(world, pos, falling_block)
+                .await;
             entity.remove().await;
             if self.drop_item.load(Ordering::Relaxed) && Self::entity_drops_enabled(world) {
                 self.drop_carried_item(world, pos).await;
@@ -408,6 +456,12 @@ impl NBTStorage for FallingEntity {
 impl EntityBase for FallingEntity {
     fn is_pickable(&self) -> bool {
         self.entity.is_alive()
+    }
+
+    /// Vanilla `FallingBlockEntity.isAttackable` (`FallingBlockEntity.java:105-107`).
+    /// Falling blocks can crush entities on landing, but cannot themselves be attacked.
+    fn is_attackable(&self) -> bool {
+        false
     }
 
     fn tick<'a>(

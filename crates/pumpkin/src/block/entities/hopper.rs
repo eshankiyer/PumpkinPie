@@ -511,7 +511,7 @@ impl HopperBlockEntity {
         let mut success = false;
         let to_empty = to.is_empty().await;
         for &j in to_slots {
-            if to.is_valid_slot_for(j, &item) {
+            if to.can_place_item(j, &item).await {
                 let mut dst = to.get_stack(j).await;
                 if dst.is_empty() {
                     dst = item.clone();

@@ -1,6 +1,10 @@
 use std::sync::{Arc, Weak};
 
-use pumpkin_data::{damage::DamageType, entity::EntityType, sound::Sound};
+use pumpkin_data::{
+    damage::DamageType,
+    entity::EntityType,
+    sound::{Sound, SoundCategory},
+};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::Difficulty;
@@ -113,6 +117,21 @@ impl Mob for PiglinBruteEntity {
         &self.mob_entity
     }
 
+    /// `PiglinBrute.getAmbientSound` (`PiglinBrute.java:117-120`).
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityPiglinBruteAmbient)
+    }
+
+    /// `PiglinBrute.getHurtSound` (`PiglinBrute.java:122-125`).
+    fn get_hurt_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityPiglinBruteHurt)
+    }
+
+    /// `PiglinBrute.playStepSound` (`PiglinBrute.java:132-135`).
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityPiglinBruteStep)
+    }
+
     /// `PiglinBruteAi.wasHurtBy`: unlike `Piglin`, brutes have no baby-flee or
     /// hoglin-outnumbered branch -- any non-piglin attacker is retaliated against
     /// directly via the same `maybeRetaliate`/`broadcastAngerTarget` piglins use.
@@ -138,6 +157,19 @@ impl Mob for PiglinBruteEntity {
     /// (`PiglinBrute.java:141-144`) for the conversion sound.
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
+            // `PiglinBruteAi.maybePlayActivitySound` (`PiglinBruteAi.java:150-161`) is
+            // reached from `PiglinBrute.customServerAiStep` (`PiglinBrute.java:92-100`).
+            if self.mob_entity.get_target().await.is_some() && rand::random::<f32>() < 0.0125 {
+                let entity = &self.mob_entity.living_entity.entity;
+                entity.world.load().play_sound_fine(
+                    Sound::EntityPiglinBruteAngry,
+                    SoundCategory::Hostile,
+                    &entity.pos.load(),
+                    1.0,
+                    1.0,
+                );
+            }
+
             if self.zombification.tick(&self.mob_entity) {
                 if self
                     .mob_entity

@@ -323,6 +323,44 @@ impl Inventory for CrafterBlockEntity {
     ) -> InventoryFuture<'a, bool> {
         Box::pin(async move { !self.is_slot_disabled(slot) })
     }
+
+    /// Vanilla `CrafterBlockEntity.canPlaceItem` (`CrafterBlockEntity.java:88-100`):
+    /// inputs are distributed across enabled slots by count, preserving the first later
+    /// empty or smaller matching stack as the insertion target.
+    fn can_place_item<'a>(
+        &'a self,
+        slot: usize,
+        _stack: &'a ItemStack,
+    ) -> InventoryFuture<'a, bool> {
+        Box::pin(async move {
+            if slot >= Self::INVENTORY_SIZE || self.is_slot_disabled(slot) {
+                return false;
+            }
+
+            let current = self.get_stack(slot).await;
+            if current.item_count >= current.get_max_stack_size() {
+                return false;
+            }
+            if current.is_empty() {
+                return true;
+            }
+
+            for later_slot in slot + 1..Self::INVENTORY_SIZE {
+                if self.is_slot_disabled(later_slot) {
+                    continue;
+                }
+                let later = self.get_stack(later_slot).await;
+                if later.is_empty()
+                    || (later.item_count < current.item_count
+                        && later.are_items_and_components_equal(&current))
+                {
+                    return false;
+                }
+            }
+
+            true
+        })
+    }
 }
 
 /// Vanilla `CrafterBlockEntity.getWidth`/`getHeight` (`CrafterBlockEntity.java:195-203`):
