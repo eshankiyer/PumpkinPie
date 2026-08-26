@@ -137,6 +137,17 @@ pub trait Inventory: Send + Sync + Clearable {
         true
     }
 
+    /// Vanilla `Container.canPlaceItem` admission check. Most inventories only need the
+    /// synchronous slot restriction above; inventories whose rule depends on their other
+    /// slots can override this asynchronous hook.
+    fn can_place_item<'a>(
+        &'a self,
+        slot: usize,
+        stack: &'a ItemStack,
+    ) -> InventoryFuture<'a, bool> {
+        Box::pin(async move { self.is_valid_slot_for(slot, stack) })
+    }
+
     fn can_transfer_to(
         &self,
         _hopper_inventory: &dyn Inventory,
