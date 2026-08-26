@@ -534,7 +534,7 @@ impl Server {
                 .await;
             let _ = server_for_load
                 .datapack_manager
-                .execute_function(&server_for_load, &source, "#minecraft:load")
+                .execute_function(&server_for_load, &source, "#minecraft:load", None)
                 .await;
         });
 
@@ -670,7 +670,7 @@ impl Server {
             .await;
         let _ = self
             .datapack_manager
-            .execute_function(server, &source, "#minecraft:load")
+            .execute_function(server, &source, "#minecraft:load", None)
             .await;
 
         let dynamic_recipes = self.recipe_manager.get_dynamic_recipes_internal().await;

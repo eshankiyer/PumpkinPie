@@ -2,10 +2,12 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+use super::macro_function::LoadedFunction;
+
 pub fn load_functions_from_dir<S: std::hash::BuildHasher>(
     namespace: &str,
     function_dir: &Path,
-    functions: &mut HashMap<String, Vec<String>, S>,
+    functions: &mut HashMap<String, LoadedFunction, S>,
 ) {
     if !function_dir.is_dir() {
         return;
@@ -17,7 +19,7 @@ fn load_functions_recursive<S: std::hash::BuildHasher>(
     namespace: &str,
     base_dir: &Path,
     current_dir: &Path,
-    functions: &mut HashMap<String, Vec<String>, S>,
+    functions: &mut HashMap<String, LoadedFunction, S>,
 ) {
     let Ok(entries) = fs::read_dir(current_dir) else {
         return;
@@ -39,13 +41,26 @@ fn load_functions_recursive<S: std::hash::BuildHasher>(
             let stem_path = stem_path.replace('\\', "/");
             let function_id = format!("{namespace}:{stem_path}");
             if let Ok(content) = fs::read_to_string(&path) {
-                let lines: Vec<String> = content
+                let raw_lines: Vec<String> = content
                     .lines()
                     .map(str::trim)
                     .filter(|line| !line.is_empty() && !line.starts_with('#'))
                     .map(|line| line.strip_prefix('/').unwrap_or(line).to_string())
                     .collect();
-                functions.insert(function_id, lines);
+                // Compile `$` macro lines into templates; a malformed macro
+                // line skips only this function with a warning. Vanilla instead
+                // aborts the whole reload with an
+                // IllegalArgumentException naming the line
+                // (`CommandFunction.fromLines`, `CommandFunction.java:74-83`,
+                // error wrapper `FunctionBuilder.java:50`).
+                match LoadedFunction::from_lines(&raw_lines) {
+                    Ok(function) => {
+                        functions.insert(function_id, function);
+                    }
+                    Err(error) => {
+                        tracing::warn!("Skipping function '{function_id}': {error}");
+                    }
+                }
             }
         }
     }
