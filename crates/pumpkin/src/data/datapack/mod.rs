@@ -1,4 +1,5 @@
 pub mod function_loader;
+pub mod macro_function;
 pub mod recipe_loader;
 
 use std::cell::Cell;
@@ -6,15 +7,21 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Mutex;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
 use pumpkin_data::game_rules::{GameRule, GameRuleRegistry, GameRuleValue};
+use pumpkin_data::translation;
+use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::recipe::DynamicRecipe;
+use pumpkin_util::text::TextComponent;
 
 use crate::command::context::command_source::CommandSource;
 use crate::server::Server;
 use crate::server::recipe::RecipeManager;
+
+use macro_function::{InstantiationCache, InstantiationError, LoadedFunction};
 
 tokio::task_local! {
     /// Remaining command quota of the currently running function chain.
@@ -43,10 +50,32 @@ pub struct LoadedDatapack {
     pub function_count: usize,
 }
 
+/// Why [`DatapackManager::execute_function`] failed.
+#[derive(Debug)]
+pub enum ExecuteFunctionError {
+    /// No function or function tag exists under this id (vanilla
+    /// `arguments.function.unknown`, raised by `FunctionArgument`).
+    Unknown(String),
+    /// Macro instantiation failed. Port of
+    /// `ERROR_FUNCTION_INSTANTATION_FAILURE`
+    /// (`FunctionCommand.java:49-51`, raised at `:139-141`) wrapping the
+    /// translated `MacroFunction.instantiate` failure
+    /// (`MacroFunction.java:52-82`).
+    InstantiationFailure {
+        function_id: String,
+        reason: TextComponent,
+    },
+}
+
 pub struct DatapackManager {
     loaded_packs: RwLock<Vec<LoadedDatapack>>,
-    functions: RwLock<HashMap<String, Vec<String>>>,
+    functions: RwLock<HashMap<String, LoadedFunction>>,
     function_tags: RwLock<HashMap<String, Vec<String>>>,
+    /// Per-function LRU caches of instantiated command lines, cleared whenever
+    /// datapacks reload — the analogue of the cache embedded in each vanilla
+    /// `MacroFunction` object (`MacroFunction.java:36`), whose lifetime also
+    /// ends on reload.
+    instantiation_caches: Mutex<HashMap<String, InstantiationCache>>,
 }
 
 impl Default for DatapackManager {
@@ -62,6 +91,7 @@ impl DatapackManager {
             loaded_packs: RwLock::new(Vec::new()),
             functions: RwLock::new(HashMap::new()),
             function_tags: RwLock::new(HashMap::new()),
+            instantiation_caches: Mutex::new(HashMap::new()),
         }
     }
 
@@ -74,7 +104,7 @@ impl DatapackManager {
         let datapacks_dir = world_path.join("datapacks");
         let mut loaded_packs_vec = Vec::new();
         let mut all_recipes: Vec<DynamicRecipe> = Vec::new();
-        let mut all_functions: HashMap<String, Vec<String>> = HashMap::new();
+        let mut all_functions: HashMap<String, LoadedFunction> = HashMap::new();
         let mut all_function_tags: HashMap<String, Vec<String>> = HashMap::new();
 
         if datapacks_dir.is_dir() {
@@ -177,13 +207,19 @@ impl DatapackManager {
         *self.loaded_packs.write().await = loaded_packs_vec;
         *self.functions.write().await = all_functions;
         *self.function_tags.write().await = all_function_tags;
+        // Instantiations of the old function set are invalid now; vanilla gets
+        // this for free because each reload builds fresh MacroFunction objects.
+        self.instantiation_caches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
     }
 
     pub async fn get_loaded_packs(&self) -> Vec<LoadedDatapack> {
         self.loaded_packs.read().await.clone()
     }
 
-    pub async fn get_functions(&self) -> HashMap<String, Vec<String>> {
+    pub async fn get_functions(&self) -> HashMap<String, LoadedFunction> {
         self.functions.read().await.clone()
     }
 
@@ -198,12 +234,15 @@ impl DatapackManager {
         names
     }
 
+    /// Executes a function or function tag, optionally supplying macro
+    /// arguments (vanilla `/function <name> <compound>`).
     pub async fn execute_function(
         &self,
         server: &Arc<Server>,
         source: &CommandSource,
         name: &str,
-    ) -> Result<usize, String> {
+        arguments: Option<&NbtCompound>,
+    ) -> Result<usize, ExecuteFunctionError> {
         // Vanilla clamps the chain limit to at least 1
         // (`Commands.java:400`).
         let fallback_registry = GameRuleRegistry::default();
@@ -220,14 +259,14 @@ impl DatapackManager {
         // ExecutionContext (`Commands.java:412-414`).
         if REMAINING_COMMAND_QUOTA.try_with(Cell::get).is_ok() {
             return self
-                .execute_function_in_context(server, source, name, limit)
+                .execute_function_in_context(server, source, name, arguments, limit)
                 .await;
         }
 
         REMAINING_COMMAND_QUOTA
             .scope(
                 Cell::new(limit),
-                self.execute_function_in_context(server, source, name, limit),
+                self.execute_function_in_context(server, source, name, arguments, limit),
             )
             .await
     }
@@ -239,18 +278,21 @@ impl DatapackManager {
     /// entries dispatched through `CommandQueueEntry.execute`,
     /// `CommandQueueEntry.java:4-6`): every executed line costs one unit of the
     /// chain quota, and an exhausted quota aborts the whole remaining chain with
-    /// vanilla's log message.
+    /// vanilla's log message. Functions containing `$` macro lines are
+    /// instantiated first (`MacroFunction.instantiate`,
+    /// `MacroFunction.java:52-82`).
     async fn execute_function_in_context(
         &self,
         server: &Arc<Server>,
         source: &CommandSource,
         name: &str,
+        arguments: Option<&NbtCompound>,
         limit: i64,
-    ) -> Result<usize, String> {
+    ) -> Result<usize, ExecuteFunctionError> {
         let (functions_to_run, is_tag) = if let Some(tag_name) = name.strip_prefix('#') {
             let tags = self.function_tags.read().await;
             let Some(fns) = tags.get(tag_name) else {
-                return Err(format!("Unknown function tag: #{tag_name}"));
+                return Err(ExecuteFunctionError::Unknown(format!("#{tag_name}")));
             };
             (fns.clone(), true)
         } else {
@@ -261,13 +303,14 @@ impl DatapackManager {
         let mut total_executed = 0;
 
         for fn_id in functions_to_run {
-            let Some(lines) = all_fns.get(&fn_id) else {
+            let Some(function) = all_fns.get(&fn_id) else {
                 if !is_tag {
-                    return Err(format!("Unknown function: {fn_id}"));
+                    return Err(ExecuteFunctionError::Unknown(fn_id));
                 }
                 continue;
             };
 
+            let lines = self.instantiate_lines(&fn_id, function, arguments)?;
             for line in lines {
                 // Vanilla checks the quota before polling each queued entry and
                 // breaks out of the entire queue once it is spent
@@ -284,13 +327,93 @@ impl DatapackManager {
                 server
                     .command_dispatcher
                     .load()
-                    .handle_command(source, line)
+                    .handle_command(source, &line)
                     .await;
                 total_executed += 1;
             }
         }
 
         Ok(total_executed)
+    }
+
+    /// Instantiates a function into the concrete command lines to dispatch.
+    ///
+    /// Plain functions pass their lines through unchanged (vanilla
+    /// `PlainTextFunction.instantiate`). Macro functions require an argument
+    /// compound and run through the LRU cache exactly like vanilla's
+    /// `MacroFunction.instantiate` (`MacroFunction.java:52-82`): missing
+    /// arguments raise an instantiation error which the caller surfaces as
+    /// `commands.function.instantiationFailure`
+    /// (`FunctionCommand.java:49-51`, `:139-141`), parameter values are pulled
+    /// and stringified in parameter order (`:57-68`, stringify at `:84-94`),
+    /// cached hits skip re-substitution (`:70-73`) and misses substitute all
+    /// entries before being inserted, evicting the least-recently-used entry
+    /// once 8 slots are occupied (`:75-81`).
+    fn instantiate_lines(
+        &self,
+        fn_id: &str,
+        function: &LoadedFunction,
+        arguments: Option<&NbtCompound>,
+    ) -> Result<Vec<String>, ExecuteFunctionError> {
+        if !function.is_macro() {
+            return Ok(function
+                .lines
+                .iter()
+                .filter_map(|line| match line {
+                    macro_function::FunctionLine::Plain(command) => Some(command.clone()),
+                    // A function without parameters cannot contain macro lines;
+                    // guaranteed by `LoadedFunction::from_lines`.
+                    macro_function::FunctionLine::Macro(_) => None,
+                })
+                .collect());
+        }
+
+        let instantiation_error = |error| instantiation_failure(fn_id, error);
+
+        let arguments =
+            arguments.ok_or_else(|| instantiation_error(InstantiationError::MissingArguments))?;
+        let values = function
+            .extract_parameter_values(arguments)
+            .map_err(instantiation_error)?;
+
+        let mut caches = self
+            .instantiation_caches
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let cache = caches.entry(fn_id.to_string()).or_default();
+        cache
+            .get_or_insert_with(&values, || function.substitute_all(&values))
+            .map_err(|e| ExecuteFunctionError::InstantiationFailure {
+                function_id: fn_id.to_string(),
+                reason: TextComponent::text(e),
+            })
+    }
+}
+
+/// Translates a macro instantiation failure into the user-facing component
+/// vanilla produces before wrapping it in `ERROR_FUNCTION_INSTANTATION_FAILURE`
+/// (`FunctionCommand.java:139-141`): "missing arguments to function %s"
+/// (`MacroFunction.java:53-55`) or "missing argument for function %s, %s"
+/// (`MacroFunction.java:61-65`).
+fn instantiation_failure(fn_id: &str, error: InstantiationError) -> ExecuteFunctionError {
+    let reason = match error {
+        InstantiationError::MissingArguments => TextComponent::translate_cross(
+            translation::java::COMMANDS_FUNCTION_ERROR_MISSING_ARGUMENTS,
+            translation::java::COMMANDS_FUNCTION_ERROR_MISSING_ARGUMENTS,
+            [TextComponent::text(fn_id.to_string())],
+        ),
+        InstantiationError::MissingArgument(parameter) => TextComponent::translate_cross(
+            translation::java::COMMANDS_FUNCTION_ERROR_MISSING_ARGUMENT,
+            translation::java::COMMANDS_FUNCTION_ERROR_MISSING_ARGUMENT,
+            [
+                TextComponent::text(fn_id.to_string()),
+                TextComponent::text(parameter),
+            ],
+        ),
+    };
+    ExecuteFunctionError::InstantiationFailure {
+        function_id: fn_id.to_string(),
+        reason,
     }
 }
 

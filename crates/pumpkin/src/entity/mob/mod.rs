@@ -1673,6 +1673,21 @@ pub trait Mob: EntityBase + Send + Sync {
 
     fn set_saddled(&self, _saddled: bool) {}
 
+    /// Vanilla `PathfinderMob.whenLeashedTo` (`PathfinderMob.java:100-104`): while leashed, the
+    /// home restriction is retargeted to the holder's block position with radius
+    /// `(int)leashElasticDistance() - 1` = 5 (`Leashable.java:191-193`). Vanilla re-runs this
+    /// every leashed tick from `Leashable.tickLeash` (`Leashable.java:155-160`); pumpkin does
+    /// the same from the Mob tick that consumes `tick_leash`. Plain-Mob leashees in vanilla
+    /// (ghast, phantom, ender dragon) override nothing here, and their goal selectors never
+    /// consult the restriction, so storing it unconditionally is observably equivalent.
+    fn when_leashed_to(&self, holder_block_pos: BlockPos) {
+        let mob_entity = self.get_mob_entity();
+        mob_entity.position_target.store(holder_block_pos);
+        mob_entity
+            .position_target_range
+            .store(Entity::LEASH_ELASTIC_DISTANCE as i32 - 1, Relaxed);
+    }
+
     /// Vanilla `PathfinderMob.closeRangeLeashBehaviour`: keep a non-panicking mob
     /// navigating toward its leash holder while preserving a two-block gap.
     fn close_range_leash_behavior(&self, holder_pos: Vector3<f64>, distance: f64) {
@@ -2672,6 +2687,10 @@ impl<T: Mob + Send + 'static> EntityBase for T {
             }
             let entity = &mob_entity.living_entity.entity;
             if let Some((holder_pos, distance)) = entity.tick_leash().await {
+                // `Leashable.tickLeash` (`Leashable.java:155-160`) re-runs
+                // `whenLeashedTo` on every leashed tick before the snap/elastic/close-range
+                // dispatch; `PathfinderMob.whenLeashedTo` retargets the home to the holder.
+                self.when_leashed_to(BlockPos::floored_v(holder_pos));
                 self.close_range_leash_behavior(holder_pos, distance);
             }
 

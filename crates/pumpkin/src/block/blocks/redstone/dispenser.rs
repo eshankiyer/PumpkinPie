@@ -26,7 +26,6 @@ use crate::entity::projectile::snowball::SnowballEntity;
 use crate::entity::projectile::splash_potion::SplashPotionEntity;
 use crate::entity::tnt::TNTEntity;
 use crate::entity::r#type::from_type;
-use crate::entity::vehicle::boat::BoatEntity;
 use crate::entity::{Entity, EntityBase};
 use crate::item::ItemMetadata;
 use crate::item::items::boat::BoatItem;
@@ -466,11 +465,10 @@ impl DispenserBlock {
 
         let _ = item.split(1);
         let facing = to_normal(ctx.facing);
-        let entity = Entity::new(ctx.world.clone(), spawn_pos, entity_type);
-        entity.set_rotation(facing.x.atan2(facing.z) as f32 * 57.295_776, 0.0);
-        ctx.world
-            .spawn_entity(Arc::new(BoatEntity::new(entity)))
-            .await;
+        let boat = from_type(entity_type, spawn_pos, ctx.world, Uuid::new_v4());
+        boat.get_entity()
+            .set_rotation(facing.x.atan2(facing.z) as f32 * 57.295_776, 0.0);
+        ctx.world.spawn_entity(boat).await;
 
         ctx.world
             .sync_world_event(WorldEvent::SoundDispenserDispense, *ctx.position, 0);

@@ -1,10 +1,8 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::entity::Entity;
 use crate::entity::EntityBase;
 use crate::entity::player::Player;
-use crate::entity::vehicle::boat::BoatEntity;
 use crate::item::{ItemBehaviour, ItemMetadata};
 use pumpkin_data::Block;
 use pumpkin_data::entity::EntityType;
@@ -171,14 +169,16 @@ impl ItemBehaviour for BoatItem {
                 return;
             }
 
-            // Create and spawn the boat
-            let entity = Entity::new(world.clone(), hit_vec, entity_type);
-
-            // Set yaw to player's yaw
+            // Route through the shared entity-type registry so chest boats get their
+            // container variant
+            let boat_entity = crate::entity::r#type::from_type(
+                entity_type,
+                hit_vec,
+                &world,
+                uuid::Uuid::new_v4(),
+            );
             let (player_yaw, _) = player.rotation();
-            entity.set_rotation(player_yaw, 0.0);
-
-            let boat_entity = Arc::new(BoatEntity::new(entity));
+            boat_entity.get_entity().set_rotation(player_yaw, 0.0);
             world.spawn_entity(boat_entity).await;
 
             if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {

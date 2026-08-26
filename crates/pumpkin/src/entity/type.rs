@@ -131,6 +131,7 @@ use crate::entity::projectile::wind_charge::{WIND_CHARGE_GRAVITY, WindChargeEnti
 use crate::entity::projectile::wither_skull::WitherSkullEntity;
 use crate::entity::tnt::TNTEntity;
 use crate::entity::vehicle::boat::BoatEntity;
+use crate::entity::vehicle::chest_boat::ChestBoatEntity;
 use crate::entity::vehicle::minecart::MinecartEntity;
 use crate::entity::{Entity, EntityBase, mob};
 use crate::world::World;
@@ -327,27 +328,30 @@ pub fn from_type(
         id if id == EntityType::LINGERING_POTION.id => Arc::new(LingeringPotionEntity::new(entity)),
         id if id == EntityType::EYE_OF_ENDER.id => Arc::new(EyeOfEnder::new(entity)),
         id if id == EntityType::ACACIA_BOAT.id
-            || id == EntityType::ACACIA_CHEST_BOAT.id
             || id == EntityType::BIRCH_BOAT.id
-            || id == EntityType::BIRCH_CHEST_BOAT.id
             || id == EntityType::DARK_OAK_BOAT.id
-            || id == EntityType::DARK_OAK_CHEST_BOAT.id
             || id == EntityType::JUNGLE_BOAT.id
-            || id == EntityType::JUNGLE_CHEST_BOAT.id
             || id == EntityType::MANGROVE_BOAT.id
-            || id == EntityType::MANGROVE_CHEST_BOAT.id
             || id == EntityType::OAK_BOAT.id
-            || id == EntityType::OAK_CHEST_BOAT.id
             || id == EntityType::PALE_OAK_BOAT.id
-            || id == EntityType::PALE_OAK_CHEST_BOAT.id
             || id == EntityType::SPRUCE_BOAT.id
-            || id == EntityType::SPRUCE_CHEST_BOAT.id
             || id == EntityType::BAMBOO_RAFT.id
-            || id == EntityType::BAMBOO_CHEST_RAFT.id
-            || id == EntityType::CHERRY_BOAT.id
-            || id == EntityType::CHERRY_CHEST_BOAT.id =>
+            || id == EntityType::CHERRY_BOAT.id =>
         {
             Arc::new(BoatEntity::new(entity))
+        }
+        id if id == EntityType::ACACIA_CHEST_BOAT.id
+            || id == EntityType::BAMBOO_CHEST_RAFT.id
+            || id == EntityType::BIRCH_CHEST_BOAT.id
+            || id == EntityType::CHERRY_CHEST_BOAT.id
+            || id == EntityType::DARK_OAK_CHEST_BOAT.id
+            || id == EntityType::JUNGLE_CHEST_BOAT.id
+            || id == EntityType::MANGROVE_CHEST_BOAT.id
+            || id == EntityType::OAK_CHEST_BOAT.id
+            || id == EntityType::PALE_OAK_CHEST_BOAT.id
+            || id == EntityType::SPRUCE_CHEST_BOAT.id =>
+        {
+            Arc::new(ChestBoatEntity::new(entity))
         }
         // Fallback Entity
         _ => {

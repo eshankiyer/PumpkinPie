@@ -33,6 +33,7 @@ const fn loot_item(name: &'static str, weight: i32) -> ChestLootEntry {
         weight,
         min_count: 1,
         max_count: 1,
+        enchant_randomly: None,
     }
 }
 

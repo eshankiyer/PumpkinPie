@@ -19,7 +19,7 @@ use crate::entity::{Entity, EntityBase, player::Player};
 use crate::world::loot::fill_chest_inventory;
 use pumpkin_data::chest_loot_table::get_chest_loot_table;
 
-pub(super) struct MinecartInventory {
+pub struct MinecartInventory {
     items: RwLock<Vec<ItemStack>>,
     size: usize,
     loot_table: Mutex<Option<(String, i64)>>,
@@ -27,7 +27,7 @@ pub(super) struct MinecartInventory {
 }
 
 impl MinecartInventory {
-    pub(super) fn new(size: usize) -> Self {
+    pub fn new(size: usize) -> Self {
         Self {
             items: RwLock::new(vec![ItemStack::EMPTY.clone(); size]),
             size,
@@ -36,11 +36,11 @@ impl MinecartInventory {
         }
     }
 
-    pub(super) fn claim_drops(&self) -> bool {
+    pub fn claim_drops(&self) -> bool {
         !self.drops_claimed.swap(true, Ordering::AcqRel)
     }
 
-    pub(super) async fn read_nbt(&self, nbt: &NbtCompound) {
+    pub async fn read_nbt(&self, nbt: &NbtCompound) {
         let loot_table = nbt.get_string("LootTable").map(|loot_table| {
             (
                 loot_table.to_owned(),
@@ -57,7 +57,7 @@ impl MinecartInventory {
         }
     }
 
-    pub(super) async fn write_nbt(&self, nbt: &mut NbtCompound) {
+    pub async fn write_nbt(&self, nbt: &mut NbtCompound) {
         let loot_table = self.loot_table.lock().await.clone();
         if let Some((loot_table, seed)) = loot_table {
             nbt.put_string("LootTable", loot_table);
@@ -69,11 +69,11 @@ impl MinecartInventory {
         }
     }
 
-    pub(super) async fn has_loot_table(&self) -> bool {
+    pub async fn has_loot_table(&self) -> bool {
         self.loot_table.lock().await.is_some()
     }
 
-    pub(super) async fn unpack_loot(self: &Arc<Self>) {
+    pub async fn unpack_loot(self: &Arc<Self>) {
         let loot_table = self.loot_table.lock().await.take();
         let Some((loot_table, seed)) = loot_table else {
             return;
@@ -173,7 +173,7 @@ impl ScreenHandlerFactory for MinecartScreenFactory {
     }
 }
 
-pub(super) async fn open(
+pub async fn open(
     entity: &Entity,
     player: &Arc<Player>,
     inventory: &Arc<MinecartInventory>,
@@ -200,7 +200,7 @@ pub(super) async fn open(
         .is_some()
 }
 
-pub(super) async fn velocity(
+pub async fn velocity(
     entity: &Entity,
     inventory: &MinecartInventory,
     velocity: Vector3<f64>,

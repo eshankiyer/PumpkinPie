@@ -26,3 +26,7 @@ attachs = "attachs"
 # `data/minecraft/tags/block/convertable_to_mud.json`). This is the generated constant's
 # real registry id, not a typo to fix.
 CONVERTABLE = "CONVERTABLE"
+# Mojang's own spelling: `FunctionCommand.ERROR_FUNCTION_INSTANTATION_FAILURE` (verified at
+# FunctionCommand.java:49). Correcting this to "INSTANTIATION" would falsify a citation of a
+# real vanilla constant name.
+INSTANTATION = "INSTANTATION"
