@@ -329,6 +329,15 @@ impl SulfurCubeEntity {
     const fn split_count_for_fuse(fuse: i32) -> i32 {
         if fuse >= 0 { 0 } else { 2 }
     }
+
+    /// Vanilla `SulfurCube.ageBoundaryReached` (`SulfurCube.java:706-710`) restores the
+    /// adult cube size when a baby reaches age zero. The shared ageable clock updates age,
+    /// but does not know this species-specific size rule.
+    fn age_boundary_reached(&self) {
+        if !self.is_baby() {
+            self.set_size(2, true);
+        }
+    }
 }
 
 fn is_swallowable_item(item_stack: &ItemStack) -> bool {
@@ -412,7 +421,11 @@ impl Mob for SulfurCubeEntity {
         _caller: &'a Arc<dyn EntityBase>,
     ) -> crate::entity::EntityBaseFuture<'a, ()> {
         Box::pin(async move {
+            let was_baby = self.is_baby();
             self.ageable_ai_step();
+            if was_baby && !self.is_baby() {
+                self.age_boundary_reached();
+            }
 
             self.o_squish.store(self.squish.load());
             self.squish
@@ -471,6 +484,7 @@ impl Mob for SulfurCubeEntity {
                     let age = self.get_age();
                     item_stack.decrement_unless_creative(player.gamemode.load(), 1);
                     self.age_up(Self::get_speed_up_seconds_when_feeding(-age), true);
+                    self.age_boundary_reached();
                     self.play_sound(Sound::EntitySmallSulfurCubeEat);
                     return true;
                 }

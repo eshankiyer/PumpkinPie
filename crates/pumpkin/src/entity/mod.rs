@@ -3942,6 +3942,26 @@ impl Entity {
     pub const LEASH_SNAP_DISTANCE: f64 = 12.0;
     pub const LEASH_ELASTIC_DISTANCE: f64 = 6.0;
 
+    /// Vanilla `HappyGhast.leashElasticDistance`/`leashSnapDistance`
+    /// (`HappyGhast.java:509-516`) override the shared leash thresholds.
+    #[must_use]
+    pub const fn leash_elastic_distance(&self) -> f64 {
+        if self.entity_type.id == EntityType::HAPPY_GHAST.id {
+            10.0
+        } else {
+            Self::LEASH_ELASTIC_DISTANCE
+        }
+    }
+
+    #[must_use]
+    pub const fn leash_snap_distance(&self) -> f64 {
+        if self.entity_type.id == EntityType::HAPPY_GHAST.id {
+            16.0
+        } else {
+            Self::LEASH_SNAP_DISTANCE
+        }
+    }
+
     pub async fn leash_to(&self, holder: Arc<dyn EntityBase>) {
         let holder_entity = holder.get_entity();
         *self.leashed_to.lock().await = Some(holder.clone());
@@ -4023,7 +4043,7 @@ impl Entity {
             let diff = self_pos - holder_pos;
             let distance = diff.length();
 
-            if distance > Self::LEASH_SNAP_DISTANCE {
+            if distance > self.leash_snap_distance() {
                 // Too far: snap/break leash and drop lead item
                 self.unleash().await;
                 let lead_item =
@@ -4034,7 +4054,7 @@ impl Entity {
                     .await;
                 None
             } else if distance
-                > Self::LEASH_ELASTIC_DISTANCE
+                > self.leash_elastic_distance()
                     - f64::from(holder_entity.width())
                     - f64::from(self.width())
                 && {
@@ -4050,11 +4070,11 @@ impl Entity {
                         + Vector3::new(0.0, f64::from(holder_entity.height()) * 0.5, 0.0);
                     let attachment_delta = holder_attachment - entity_attachment;
                     let attachment_distance = attachment_delta.length();
-                    if attachment_distance < Self::LEASH_ELASTIC_DISTANCE {
+                    if attachment_distance < self.leash_elastic_distance() {
                         false
                     } else {
                         let displacement = attachment_delta.normalize()
-                            * (attachment_distance - Self::LEASH_ELASTIC_DISTANCE);
+                            * (attachment_distance - self.leash_elastic_distance());
                         let holder_velocity = if holder
                             .get_mob()
                             .is_some_and(|mob| mob.get_mob_entity().is_no_ai())
