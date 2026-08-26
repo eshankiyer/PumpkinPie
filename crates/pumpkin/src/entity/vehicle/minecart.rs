@@ -1,6 +1,6 @@
 mod chest;
 mod command_block;
-mod container;
+pub(crate) mod container;
 mod furnace;
 mod hopper;
 mod rideable;
