@@ -3,6 +3,7 @@ use crate::{block::BlockFuture, world::World};
 use pumpkin_data::{
     Block, BlockDirection, BlockStateId,
     fluid::{EnumVariants, Falling, Fluid, FluidProperties, Level},
+    tag::Taggable,
 };
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::{tick::TickPriority, world::BlockFlags};
@@ -327,6 +328,7 @@ pub trait FlowingFluid: Send + Sync {
     /// - Fluid tick scheduling for non-source blocks
     ///
     /// Called by `spread_to` implementations after fluid-specific pre-checks.
+    #[allow(clippy::too_many_lines)]
     fn apply_spread<'a>(
         &'a self,
         world: &'a Arc<World>,
@@ -388,6 +390,15 @@ pub trait FlowingFluid: Send + Sync {
                         world, pos, block, state.id, fluid,
                     )
                     .await;
+                    return;
+                }
+                if fluid.matches_type(&Fluid::WATER)
+                    && block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_CANDLES)
+                    && crate::block::blocks::candles::CandleBlock::place_liquid(
+                        world, pos, block, state.id, fluid,
+                    )
+                    .await
+                {
                     return;
                 }
                 if let Some(waterlogged_state) =

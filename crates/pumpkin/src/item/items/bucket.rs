@@ -2,6 +2,7 @@ use std::{pin::Pin, sync::Arc};
 
 use crate::{
     block::blocks::campfire::CampfireBlock,
+    block::blocks::candles::CandleBlock,
     block::entities::sign::DyeColor,
     entity::EntityBase,
     entity::passive::tropical_fish::{Pattern, TropicalFishEntity},
@@ -22,6 +23,7 @@ use pumpkin_data::{
     item::Item,
     item_stack::ItemStack,
     sound::{Sound, SoundCategory},
+    tag::Taggable,
 };
 use pumpkin_util::{
     GameMode,
@@ -488,6 +490,12 @@ pub(crate) async fn try_place_filled_bucket(
         if item.id == Item::WATER_BUCKET.id
             && (block == &Block::CAMPFIRE || block == &Block::SOUL_CAMPFIRE)
             && CampfireBlock::place_liquid(world, &target_pos, block, state.id, &Fluid::WATER).await
+        {
+            return Some(target_pos);
+        }
+        if item.id == Item::WATER_BUCKET.id
+            && block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_CANDLES)
+            && CandleBlock::place_liquid(world, &target_pos, block, state.id, &Fluid::WATER).await
         {
             return Some(target_pos);
         }

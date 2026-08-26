@@ -307,6 +307,18 @@ impl pumpkin_world::inventory::Inventory for BrewingStandBlockEntity {
         self
     }
 
+    /// Port of `BrewingStandBlockEntity.canPlaceItem` (`BrewingStandBlockEntity.java:217-226`).
+    fn can_place_item<'a>(
+        &'a self,
+        slot: usize,
+        stack: &'a ItemStack,
+    ) -> pumpkin_world::inventory::InventoryFuture<'a, bool> {
+        Box::pin(async move {
+            self.is_valid_slot_for(slot, stack)
+                && (slot > 2 || self.items.read().await[slot].is_empty())
+        })
+    }
+
     fn slots_for_face(&self, direction: pumpkin_data::BlockDirection) -> Vec<usize> {
         match direction {
             pumpkin_data::BlockDirection::Up => vec![3],
