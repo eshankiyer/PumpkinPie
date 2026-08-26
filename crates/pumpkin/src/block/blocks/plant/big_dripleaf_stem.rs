@@ -1,16 +1,17 @@
 use std::sync::Arc;
 
 use crate::block::blocks::plant::PlantBlockBase;
-use crate::block::blocks::plant::big_dripleaf::can_plant_dripleaf_on_top;
+use crate::block::blocks::plant::big_dripleaf::{can_grow_into, can_plant_dripleaf_on_top};
 use crate::block::{
-    BlockBehaviour, BlockFuture, BrokenArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
+    BlockBehaviour, BlockFuture, BonemealArgs, BrokenArgs, CanPlaceAtArgs,
+    GetStateForNeighborUpdateArgs,
 };
 use crate::world::World;
-use pumpkin_data::Block;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{
     BigDripleafLikeProperties, BlockProperties, LadderLikeProperties,
 };
+use pumpkin_data::{Block, BlockDirection};
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::{BlockAccessor, BlockFlags};
@@ -21,6 +22,77 @@ pub struct BigDripleafStemBlock;
 pub type BigDripleafStemLikeProperties = LadderLikeProperties;
 
 impl BlockBehaviour for BigDripleafStemBlock {
+    /// Vanilla `GrowingPlantBodyBlock.isValidBonemealTarget`
+    /// (`BigDripleafStemBlock.java:104-108`): only the connected top leaf can
+    /// grow, and its block above must be replaceable.
+    fn is_valid_bonemeal_target(&self, args: BonemealArgs<'_>) -> bool {
+        let Some((head_pos, _)) = crate::block::blocks::plant::connected_plant_head(
+            args.world,
+            args.position,
+            &Block::BIG_DRIPLEAF,
+            &Block::BIG_DRIPLEAF_STEM,
+            BlockDirection::Up,
+        ) else {
+            return false;
+        };
+        can_grow_into(args.world, &head_pos.up())
+    }
+
+    /// Vanilla `BigDripleafStemBlock.isBonemealSuccess`
+    /// (`BigDripleafStemBlock.java:110-113`).
+    fn is_bonemeal_success(&self, _args: BonemealArgs<'_>) -> bool {
+        true
+    }
+
+    /// Vanilla `BigDripleafStemBlock.performBonemeal`
+    /// (`BigDripleafStemBlock.java:115-125`): convert the connected top leaf
+    /// to a stem and place a new leaf above it, preserving facing and
+    /// waterlogging.
+    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            let Some((head_pos, head_state_id)) = crate::block::blocks::plant::connected_plant_head(
+                args.world,
+                args.position,
+                &Block::BIG_DRIPLEAF,
+                &Block::BIG_DRIPLEAF_STEM,
+                BlockDirection::Up,
+            ) else {
+                return;
+            };
+
+            let stem_props = BigDripleafStemLikeProperties::from_state_id(
+                args.state_id,
+                &Block::BIG_DRIPLEAF_STEM,
+            );
+            let head_props =
+                BigDripleafLikeProperties::from_state_id(head_state_id, &Block::BIG_DRIPLEAF);
+            let mut new_stem_props =
+                BigDripleafStemLikeProperties::default(&Block::BIG_DRIPLEAF_STEM);
+            new_stem_props.facing = stem_props.facing;
+            new_stem_props.waterlogged = head_props.waterlogged;
+
+            args.world
+                .set_block_state(
+                    &head_pos,
+                    new_stem_props.to_state_id(&Block::BIG_DRIPLEAF_STEM),
+                    BlockFlags::NOTIFY_ALL,
+                )
+                .await;
+
+            let new_leaf_pos = head_pos.up();
+            let mut new_leaf_props = BigDripleafLikeProperties::default(&Block::BIG_DRIPLEAF);
+            new_leaf_props.facing = stem_props.facing;
+            new_leaf_props.waterlogged = args.world.get_block(&new_leaf_pos) == &Block::WATER;
+            args.world
+                .set_block_state(
+                    &new_leaf_pos,
+                    new_leaf_props.to_state_id(&Block::BIG_DRIPLEAF),
+                    BlockFlags::NOTIFY_ALL,
+                )
+                .await;
+        })
+    }
+
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
         <Self as PlantBlockBase>::can_place_at(self, args.block_accessor, args.position)
     }

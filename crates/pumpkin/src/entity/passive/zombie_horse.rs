@@ -198,6 +198,11 @@ impl Mob for ZombieHorseEntity {
         &self.mob_entity
     }
 
+    /// `ZombieHorse.getAmbientSound` (`ZombieHorse.java:90-93`).
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityZombieHorseAmbient)
+    }
+
     fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
         AbstractHorse::has_saddled_player_passenger(self)
     }
