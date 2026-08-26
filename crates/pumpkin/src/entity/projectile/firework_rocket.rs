@@ -178,7 +178,16 @@ impl FireworkRocketEntity {
             if let Some(owner_id) = attached_to_entity
                 && let Some(owner) = world.get_entity_by_id(owner_id)
             {
-                owner.damage(self, damage, DamageType::FIREWORKS).await;
+                owner
+                    .damage_with_context(
+                        owner.as_ref(),
+                        damage,
+                        DamageType::FIREWORKS,
+                        None,
+                        None,
+                        Some(self),
+                    )
+                    .await;
             }
             let targets = world.get_all_at_box(&entity.bounding_box.load().expand(5.0, 5.0, 5.0));
 
@@ -221,7 +230,16 @@ impl FireworkRocketEntity {
                 if !can_see {
                     continue;
                 }
-                target.damage(self, amount, DamageType::FIREWORKS).await;
+                target
+                    .damage_with_context(
+                        target.as_ref(),
+                        amount,
+                        DamageType::FIREWORKS,
+                        None,
+                        None,
+                        Some(self),
+                    )
+                    .await;
             }
         }
 
@@ -377,6 +395,23 @@ impl EntityBase for FireworkRocketEntity {
 
     fn get_living_entity(&self) -> Option<&crate::entity::living::LivingEntity> {
         None
+    }
+
+    /// Vanilla `FireworkRocketEntity.isAttackable` (`FireworkRocketEntity.java:305-308`).
+    fn is_attackable(&self) -> bool {
+        false
+    }
+
+    /// Vanilla `FireworkRocketEntity.calculateHorizontalHurtKnockbackDirection`
+    /// (`FireworkRocketEntity.java:314-319`) uses the vector from the rocket to the hurt entity,
+    /// rather than the generic projectile flight vector.
+    fn calculate_horizontal_hurt_knockback_direction(
+        &self,
+        hurt_entity: &crate::entity::living::LivingEntity,
+    ) -> (f64, f64) {
+        let hurt_pos = hurt_entity.entity.pos.load();
+        let rocket_pos = self.get_entity().pos.load();
+        (hurt_pos.x - rocket_pos.x, hurt_pos.z - rocket_pos.z)
     }
 
     fn on_hit(&self, hit: ProjectileHit) -> EntityBaseFuture<'_, ()> {

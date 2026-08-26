@@ -5142,8 +5142,8 @@ impl EntityBase for LivingEntity {
                         crate::entity::projectile::is_projectile(c.get_entity().entity_type)
                     })
                     .map(|projectile| {
-                        let v = projectile.get_entity().velocity.load();
-                        (-v.x, -v.z)
+                        let (x, z) = projectile.calculate_horizontal_hurt_knockback_direction(self);
+                        (-x, -z)
                     })
                     .or_else(|| {
                         source.map(|source| {
