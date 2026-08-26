@@ -1,7 +1,8 @@
 use crate::block::{
-    AttackArgs, BlockBehaviour, BlockFuture, BlockMetadata, NormalUseArgs, OnEntityStepArgs,
-    RandomTickArgs, registry::BlockActionResult,
+    AttackArgs, BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, NormalUseArgs,
+    OnEntityStepArgs, RandomTickArgs, UseWithItemArgs, registry::BlockActionResult,
 };
+use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::world::World;
 use pumpkin_data::block_properties::{BlockProperties, RedstoneOreLikeProperties};
 use pumpkin_data::particle::Particle;
@@ -111,6 +112,34 @@ impl BlockBehaviour for RedstoneOreBlock {
         })
     }
 
+    fn use_with_item<'a>(
+        &'a self,
+        args: UseWithItemArgs<'a>,
+    ) -> BlockFuture<'a, BlockActionResult> {
+        Box::pin(async move {
+            let state = args.world.get_block_state(args.position);
+            Self::interact(args.world, args.position, args.block, state).await;
+
+            // RedStoneOreBlock.useItemOn lights the ore before allowing a placeable block item
+            // to continue through BlockItem's placement path. `BlockPlaceContext.canPlace()` only
+            // checks whether the clicked block or the adjacent block can be replaced.
+            let can_place = state.replaceable()
+                || args
+                    .world
+                    .get_block_state(&BlockPos::new(
+                        args.position.0.x + args.hit.face.to_offset().x,
+                        args.position.0.y + args.hit.face.to_offset().y,
+                        args.position.0.z + args.hit.face.to_offset().z,
+                    ))
+                    .replaceable();
+            if Block::from_item_id(args.item_stack.item.id).is_some() && can_place {
+                BlockActionResult::Pass
+            } else {
+                BlockActionResult::Success
+            }
+        })
+    }
+
     fn on_entity_step<'a>(&'a self, args: OnEntityStepArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             if args.entity.get_entity().is_sneaking() {
@@ -136,6 +165,31 @@ impl BlockBehaviour for RedstoneOreBlock {
                     )
                     .await;
             }
+        })
+    }
+
+    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // RedStoneOreBlock.spawnAfterBreak awards 1..=5 XP when normal block drops are
+            // enabled and the break is eligible for drops. Silk Touch is handled by the vanilla
+            // block-experience enchantment effect and therefore suppresses this award.
+            if args.player.gamemode.load() == pumpkin_util::GameMode::Creative
+                || !args.world.level_info.load().game_rules.block_drops
+                || !args
+                    .player
+                    .can_harvest(args.state, Block::from_state_id(args.state.id))
+                    .await
+            {
+                return;
+            }
+
+            let tool = args.player.inventory().held_item().await;
+            if tool.get_enchantment_level(&pumpkin_data::Enchantment::SILK_TOUCH) > 0 {
+                return;
+            }
+
+            let amount = rand::rng().random_range(1..=5);
+            ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), amount).await;
         })
     }
 }

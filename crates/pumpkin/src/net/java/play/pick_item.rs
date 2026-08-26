@@ -24,6 +24,9 @@ impl JavaClient {
         else {
             return;
         };
+        if stack.is_empty() {
+            return;
+        }
 
         let slot_with_stack = player.inventory().get_slot_with_stack(&stack).await;
 

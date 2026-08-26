@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::block::{
-    BlockBehaviour, BlockFuture, GetStateForNeighborUpdateArgs, OnEntityCollisionArgs,
-    OnStateReplacedArgs,
+    BlockBehaviour, BlockFuture, GetCloneItemStackArgs, GetStateForNeighborUpdateArgs,
+    OnEntityCollisionArgs, OnStateReplacedArgs,
 };
 use crate::entity::EntityBase;
 use crate::world::World;
@@ -14,6 +14,7 @@ use pumpkin_data::block_properties::{
 };
 use pumpkin_data::dimension::Dimension;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::GameMode;
 
@@ -40,6 +41,12 @@ impl NetherPortalBlock {
 }
 
 impl BlockBehaviour for NetherPortalBlock {
+    fn get_clone_item_stack(&self, _args: GetCloneItemStackArgs<'_>) -> Option<ItemStack> {
+        // NetherPortalBlock.getCloneItemStack returns ItemStack.EMPTY, which must be explicit so
+        // the pick-block handler does not fall back to the registered portal item.
+        Some(ItemStack::EMPTY.clone())
+    }
+
     fn get_state_for_neighbor_update<'a>(
         &'a self,
         args: GetStateForNeighborUpdateArgs<'a>,
