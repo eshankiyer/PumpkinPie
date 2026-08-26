@@ -5791,6 +5791,11 @@ impl World {
         let block_moved = flags.contains(BlockFlags::MOVED);
 
         let is_new_block = old_block != new_block;
+        // CopperChestBlock::shouldChangedStateKeepBlockEntity retains the
+        // chest entity across copper oxidation and waxing transitions.
+        let keeps_copper_chest_entity = old_block
+            .has_tag(&pumpkin_data::tag::Block::MINECRAFT_COPPER_CHESTS)
+            && new_block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_COPPER_CHESTS);
 
         // PoiManager reacting to onBlockStateChange: keep the village POI
         // registry (village_poi.rs) in sync with bed/job-site/bell blocks.
@@ -5815,6 +5820,7 @@ impl World {
         // WorldChunk.java line 305-314
         if is_new_block
             && old_block.default_state.block_entity_type != u16::MAX
+            && !keeps_copper_chest_entity
             && let Some(entity) = self.get_block_entity(position)
         {
             if !is_current_mutation() {

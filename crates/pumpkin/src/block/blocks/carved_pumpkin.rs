@@ -180,10 +180,8 @@ impl CarvedPumpkinBlock {
 
         // Least-oxidized merge with the single partner when forming a double chest.
         // `getLeastOxidizedChestOfConnectedBlocks` (CopperChestBlock.java:78-95) only
-        // unwaxes either side when `isWaxed()` differs between them; this always compares
-        // (and, if the neighbor wins, always returns) the unwaxed block, so a merge where
-        // both sides are waxed incorrectly loses its wax. Not fixed here - narrow edge
-        // case (a golem-built waxed copper chest connecting to an existing waxed one).
+        // unwaxes either side when `isWaxed()` differs; when both sides have the same wax
+        // status, the selected block retains that status.
         let mut final_block = chest_block;
         let mut partner = None;
         if r#type != ChestType::Single
@@ -192,13 +190,28 @@ impl CarvedPumpkinBlock {
             let neighbor_pos = pos.offset(connected_dir(r#type).to_block_direction().to_offset());
             let neighbor_block = world.get_block(&neighbor_pos);
             partner = Some((neighbor_pos, props));
-            let own =
-                copper_weathering::oxidation_level_of(Self::unwax_chest(chest_block).to_block());
-            let other =
-                copper_weathering::oxidation_level_of(Self::unwax_chest(neighbor_block).to_block());
-            if other.is_some_and(|other| own.is_none_or(|own| other < own)) {
-                final_block = Self::unwax_chest(neighbor_block).to_block();
-            }
+            let own_unwaxed = Self::unwax_chest(chest_block).to_block();
+            let other_unwaxed = Self::unwax_chest(neighbor_block).to_block();
+            let own_is_waxed = own_unwaxed.id != chest_block.id;
+            let other_is_waxed = other_unwaxed.id != neighbor_block.id;
+            let wax_status_differs = own_is_waxed != other_is_waxed;
+            let updated_block = if wax_status_differs {
+                own_unwaxed
+            } else {
+                chest_block
+            };
+            let updated_neighbor = if wax_status_differs {
+                other_unwaxed
+            } else {
+                neighbor_block
+            };
+            let own = copper_weathering::oxidation_level_of(own_unwaxed).unwrap_or(0);
+            let other = copper_weathering::oxidation_level_of(other_unwaxed).unwrap_or(0);
+            final_block = if own <= other {
+                updated_block
+            } else {
+                updated_neighbor
+            };
         }
 
         let mut props = ChestLikeProperties::default(final_block);

@@ -250,8 +250,12 @@ macro_rules! impl_viewer_count_listener_for_chest {
                 _position: &'a pumpkin_util::math::position::BlockPos,
             ) -> $crate::block::viewer::ViewerFuture<'a, ()> {
                 Box::pin(async move {
-                    self.play_sound(world, pumpkin_data::sound::Sound::BlockChestOpen)
-                        .await;
+                    let block = world.get_block(_position);
+                    self.play_sound(
+                        world,
+                        $crate::block::blocks::chests::chest_sound_for_block(block, true),
+                    )
+                    .await;
                 })
             }
 
@@ -261,8 +265,12 @@ macro_rules! impl_viewer_count_listener_for_chest {
                 _position: &'a pumpkin_util::math::position::BlockPos,
             ) -> $crate::block::viewer::ViewerFuture<'a, ()> {
                 Box::pin(async move {
-                    self.play_sound(world, pumpkin_data::sound::Sound::BlockChestClose)
-                        .await;
+                    let block = world.get_block(_position);
+                    self.play_sound(
+                        world,
+                        $crate::block::blocks::chests::chest_sound_for_block(block, false),
+                    )
+                    .await;
                 })
             }
 
