@@ -96,6 +96,12 @@ impl Mob for GlowSquidEntity {
         &self.mob_entity
     }
 
+    /// `GlowSquid.getAmbientSound` (GlowSquid.java:55-58), reached through the shared
+    /// `Mob::tick_ambient_sound` cadence.
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityGlowSquidAmbient)
+    }
+
     fn set_movement_vector(&self, movement: Vector3<f64>) {
         self.movement_vector.store(movement);
     }
