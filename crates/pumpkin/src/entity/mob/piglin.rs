@@ -16,6 +16,7 @@ use crate::entity::{
         piglin_admire::{ADMIRE_DURATION_TICKS, PiglinAdmireGoal},
         piglin_avoid_repellent::PiglinAvoidRepellentGoal,
         ranged_crossbow_attack::RangedCrossbowAttackGoal,
+        spear_use::SpearUseGoal,
         swim::SwimGoal,
         wander_around::WanderAroundGoal,
     },
@@ -128,6 +129,8 @@ async fn player_not_wearing_gold(target: TargetData, world: Arc<World>) -> bool 
 /// `pickUpItem`), overworld zombification, the AVOID
 /// activity for zombified piglins and zoglins (`avoidZombified`), the baby-only nemesis retreat
 /// (`babyAvoidNemesis`), repellent avoidance (`avoidRepellent`), crossbow use (`CrossbowAttack`),
+/// the fight-activity spear trio (`SpearApproach`/`SpearAttack`/`SpearRetreat`,
+/// `PiglinAi.java:179-181`, flattened onto `SpearUseGoal`),
 /// hoglin hunting (`StartHuntingHoglin`) with its `HUNTED_RECENTLY` cooldown, and the adult-only
 /// gate on target acquisition (`StartAttacking`, `PiglinAi.java:160`).
 ///
@@ -279,6 +282,19 @@ impl PiglinEntity {
         // behavior. It must outrank the crossbow goal so a close visible target can interrupt
         // an already-running ranged attack.
         goal_selector.add_goal(3, Box::new(BackUpIfTooCloseGoal::new(5.0, 0.75)));
+        // `initFightActivity`'s spear trio (`PiglinAi.java:179-181`): `new
+        // SpearApproach(1.0, 10.0F)`, `new SpearAttack(1.0, 1.0, 2.0F)`, `new
+        // SpearRetreat(1.0)`. Vanilla runs these as three Brain behaviors that pass a
+        // `SPEAR_STATUS` memory between them (approach -> charging -> retreat); this
+        // codebase has no Brain memory plumbing, so the trio is flattened onto the
+        // existing goal port of the behaviourally identical approach -> windup -> stab ->
+        // reposition cycle (`SpearUseGoal`), exactly how the zombie registers the same
+        // behaviour (`Zombie.java:120`). The parameters map one-to-one: approach distance
+        // `10.0F` from `SpearApproach`, charge/reposition speeds `1.0`/`1.0` and stab range
+        // `2.0F` from `SpearAttack`. The goal self-gates on the held item carrying the
+        // `minecraft:kinetic_weapon` component, so it coexists with the crossbow/melee pair
+        // below; registering ahead of them reproduces `initFightActivity`'s behavior order.
+        goal_selector.add_goal(4, SpearUseGoal::new(1.0, 1.0, 10.0, 2.0));
         // `initFightActivity` runs `MeleeAttack.create(20)` and `new CrossbowAttack()` side by
         // side (`PiglinAi.java:182-183`); the crossbow goal gates itself on the piglin actually
         // holding one, which `mob/equipment.rs` already gives it a chance of.
