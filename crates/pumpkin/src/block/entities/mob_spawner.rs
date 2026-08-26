@@ -13,6 +13,19 @@ use pumpkin_util::math::{boundingbox::BoundingBox, position::BlockPos, vector3::
 
 use crate::{block::entities::BlockEntity, entity::EntityBase, world::World};
 
+/// The tunable fields of a `BaseSpawner` (BaseSpawner.java:53-59), split from
+/// the mutable delay so both the spawner block entity and the spawner minecart
+/// can share one `serverTick` implementation.
+#[derive(Clone, Copy)]
+pub(crate) struct BaseSpawnerConfig {
+    pub min_delay: i32,
+    pub max_delay: i32,
+    pub spawn_count: i32,
+    pub spawn_range: i32,
+    pub max_nearby_entities: i32,
+    pub required_player_range: i32,
+}
+
 pub struct MobSpawnerBlockEntity {
     pub position: BlockPos,
     pub delay: AtomicI32,
@@ -77,19 +90,15 @@ impl MobSpawnerBlockEntity {
 }
 
 impl MobSpawnerBlockEntity {
-    async fn update_spawns(&self, world: &Arc<World>) {
-        let min_delay = self.min_delay;
-        let max_delay = self.max_delay;
-
-        self.delay.store(
-            if max_delay <= min_delay {
-                min_delay
-            } else {
-                min_delay + rand::random_range(0..max_delay - min_delay)
-            },
-            Ordering::Relaxed,
-        );
-        world.add_synced_block_event(self.position, 1, 0).await;
+    pub(crate) const fn config(&self) -> BaseSpawnerConfig {
+        BaseSpawnerConfig {
+            min_delay: self.min_delay,
+            max_delay: self.max_delay,
+            spawn_count: self.spawn_count,
+            spawn_range: self.spawn_range,
+            max_nearby_entities: self.max_nearby_entities,
+            required_player_range: self.required_player_range,
+        }
     }
 
     pub fn set_entity_type(&self, entity_type: &'static EntityType) {
@@ -108,104 +117,19 @@ impl BlockEntity for MobSpawnerBlockEntity {
 
     fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
-            let Some(entity_type) = self.entity_type.load() else {
-                return;
-            };
-            // `BaseSpawner.serverTick` (BaseSpawner.java:89) gates the whole tick on
-            // `ServerLevel.isSpawnerBlockEnabled`, i.e. the `spawner_blocks_work` game rule
-            // (ServerLevel.java:1889-1891). Ordinary spawners ignored it entirely; only the
-            // trial spawner honoured it.
-            if !world.level_info.load().game_rules.spawner_blocks_work {
-                return;
-            }
-            if world
-                .get_closest_player_where(
-                    self.position.to_centered_f64(),
-                    self.required_player_range as f64,
-                    |player| !player.is_spectator() && player.living_entity.health.load() > 0.0,
-                )
-                .is_none()
+            // For the block form, vanilla's `broadcastEvent` override is
+            // `level.blockEvent(pos, this, 1, 0)`; the shared core returns whether
+            // vanilla reached a `delay()` call site so the notification stays here.
+            if base_spawner_server_tick(
+                world,
+                self.position,
+                &self.delay,
+                self.config(),
+                self.entity_type.load(),
+            )
+            .await
             {
-                return;
-            }
-            // `BaseSpawner.serverTick` (BaseSpawner.java:88-96): the -1 sentinel only seeds a
-            // fresh delay, and the countdown is a separate branch, so the tick the delay
-            // reaches 0 is the tick that spawns. Decrementing unconditionally instead made
-            // the delay go negative, skipped the 0 tick, and rolled a new delay twice.
-            if self.delay.load(Ordering::Relaxed) == -1 {
-                self.update_spawns(world).await;
-            }
-            if self.delay.load(Ordering::Relaxed) > 0 {
-                self.delay.fetch_sub(1, Ordering::Relaxed);
-                return;
-            }
-            let spawn_range = self.spawn_range;
-            let mut update_spawns = false;
-            for _ in 0..self.spawn_count {
-                let pos = self.position.0;
-
-                let spawn_pos = Vector3::new(
-                    pos.x as f64
-                        + spawn_offset(rand::random(), rand::random(), spawn_range as f64)
-                        + 0.5,
-                    (pos.y + rand::random_range(0..3) - 1) as f64,
-                    pos.z as f64
-                        + spawn_offset(rand::random(), rand::random(), spawn_range as f64)
-                        + 0.5,
-                );
-                // `BaseSpawner.serverTick` (BaseSpawner.java:118) tests `getSpawnAABB`, which
-                // applies the spawn dimension scale; the raw registry dimensions used before
-                // checked a quarter-size box for slimes and magma cubes.
-                if !world.is_space_empty(BoundingBox::new_from_pos(
-                    spawn_pos.x,
-                    spawn_pos.y,
-                    spawn_pos.z,
-                    &crate::world::natural_spawner::spawn_dimensions(entity_type),
-                )) {
-                    continue;
-                }
-                // `BaseSpawner.serverTick` (BaseSpawner.java:142-151): count the same entity
-                // type inside the spawner block inflated by `spawnRange`, ignoring spectators,
-                // and give up for this cycle once `maxNearbyEntities` is reached. Without this
-                // the spawner ignored its own cap and kept spawning forever.
-                let nearby_box = BoundingBox::new(
-                    Vector3::new(f64::from(pos.x), f64::from(pos.y), f64::from(pos.z)),
-                    Vector3::new(
-                        f64::from(pos.x) + 1.0,
-                        f64::from(pos.y) + 1.0,
-                        f64::from(pos.z) + 1.0,
-                    ),
-                )
-                .expand_all(f64::from(spawn_range));
-                let nearby = world
-                    .get_all_at_box(&nearby_box)
-                    .iter()
-                    .filter(|entity| {
-                        !entity.is_spectator()
-                            && entity.get_entity().entity_type.id == entity_type.id
-                    })
-                    .count();
-                if is_nearby_cap_reached(nearby, self.max_nearby_entities) {
-                    self.update_spawns(world).await;
-                    return;
-                }
-
-                let entity = crate::entity::r#type::from_type(
-                    entity_type,
-                    spawn_pos,
-                    world,
-                    uuid::Uuid::new_v4(),
-                );
-                // `BaseSpawner.serverTick` (BaseSpawner.java:153) randomises yaw on spawn.
-                entity
-                    .get_entity()
-                    .set_rotation(rand::random::<f32>() * 360.0, 0.0);
-                world.spawn_entity(entity).await;
-                world.sync_world_event(WorldEvent::ParticlesMobblockSpawn, self.position, 0);
-                update_spawns = true;
-            }
-            if update_spawns {
-                self.update_spawns(world).await;
+                world.add_synced_block_event(self.position, 1, 0).await;
             }
         })
     }
@@ -287,6 +211,140 @@ impl BlockEntity for MobSpawnerBlockEntity {
 
 fn spawn_offset(r1: f64, r2: f64, range: f64) -> f64 {
     (r1 - r2) * range
+}
+
+/// `BaseSpawner.delay` (BaseSpawner.java:194-200): roll a fresh spawn delay
+/// between `minSpawnDelay` and `maxSpawnDelay`.
+fn roll_delay(delay: &AtomicI32, config: BaseSpawnerConfig) {
+    let next_delay = if config.max_delay <= config.min_delay {
+        config.min_delay
+    } else {
+        config.min_delay + rand::random_range(0..config.max_delay - config.min_delay)
+    };
+    delay.store(next_delay, Ordering::Relaxed);
+}
+
+/// Core of `BaseSpawner.serverTick` (BaseSpawner.java:88-192), shared by the
+/// spawner block entity and the minecart spawner, whose only difference in
+/// vanilla is the `broadcastEvent` override (a block event for the block,
+/// MinecartSpawner.java:19-21 routes it to an entity event on the cart).
+///
+/// Returns `true` when vanilla reached one of the three `delay()` call sites
+/// (BaseSpawner.java:91, 149, 186); the caller emits the matching event-1
+/// notification. The delay reset itself happens here so both callers stay in
+/// lockstep with vanilla's ordering.
+pub(crate) async fn base_spawner_server_tick(
+    world: &Arc<World>,
+    position: BlockPos,
+    delay: &AtomicI32,
+    config: BaseSpawnerConfig,
+    entity_type: Option<&'static EntityType>,
+) -> bool {
+    let Some(entity_type) = entity_type else {
+        return false;
+    };
+    // `BaseSpawner.serverTick` (BaseSpawner.java:89) gates the whole tick on
+    // `ServerLevel.isSpawnerBlockEnabled`, i.e. the `spawner_blocks_work` game rule
+    // (ServerLevel.java:1889-1891). Ordinary spawners ignored it entirely; only the
+    // trial spawner honoured it.
+    if !world.level_info.load().game_rules.spawner_blocks_work {
+        return false;
+    }
+    if world
+        .get_closest_player_where(
+            position.to_centered_f64(),
+            f64::from(config.required_player_range),
+            |player| !player.is_spectator() && player.living_entity.health.load() > 0.0,
+        )
+        .is_none()
+    {
+        return false;
+    }
+    // `BaseSpawner.serverTick` (BaseSpawner.java:88-96): the -1 sentinel only seeds a
+    // fresh delay, and the countdown is a separate branch, so the tick the delay
+    // reaches 0 is the tick that spawns. Decrementing unconditionally instead made
+    // the delay go negative, skipped the 0 tick, and rolled a new delay twice.
+    let mut notify = if delay.load(Ordering::Relaxed) == -1 {
+        roll_delay(delay, config);
+        true
+    } else {
+        false
+    };
+    if delay.load(Ordering::Relaxed) > 0 {
+        delay.fetch_sub(1, Ordering::Relaxed);
+        return notify;
+    }
+    let mut update_spawns = false;
+    for _ in 0..config.spawn_count {
+        let pos = position.0;
+
+        let spawn_pos = Vector3::new(
+            pos.x as f64
+                + spawn_offset(
+                    rand::random(),
+                    rand::random(),
+                    f64::from(config.spawn_range),
+                )
+                + 0.5,
+            (pos.y + rand::random_range(0..3) - 1) as f64,
+            pos.z as f64
+                + spawn_offset(
+                    rand::random(),
+                    rand::random(),
+                    f64::from(config.spawn_range),
+                )
+                + 0.5,
+        );
+        // `BaseSpawner.serverTick` (BaseSpawner.java:118) tests `getSpawnAABB`, which
+        // applies the spawn dimension scale; the raw registry dimensions used before
+        // checked a quarter-size box for slimes and magma cubes.
+        if !world.is_space_empty(BoundingBox::new_from_pos(
+            spawn_pos.x,
+            spawn_pos.y,
+            spawn_pos.z,
+            &crate::world::natural_spawner::spawn_dimensions(entity_type),
+        )) {
+            continue;
+        }
+        // `BaseSpawner.serverTick` (BaseSpawner.java:142-151): count the same entity
+        // type inside the spawner block inflated by `spawnRange`, ignoring spectators,
+        // and give up for this cycle once `maxNearbyEntities` is reached. Without this
+        // the spawner ignored its own cap and kept spawning forever.
+        let nearby_box = BoundingBox::new(
+            Vector3::new(f64::from(pos.x), f64::from(pos.y), f64::from(pos.z)),
+            Vector3::new(
+                f64::from(pos.x) + 1.0,
+                f64::from(pos.y) + 1.0,
+                f64::from(pos.z) + 1.0,
+            ),
+        )
+        .expand_all(f64::from(config.spawn_range));
+        let nearby = world
+            .get_all_at_box(&nearby_box)
+            .iter()
+            .filter(|entity| {
+                !entity.is_spectator() && entity.get_entity().entity_type.id == entity_type.id
+            })
+            .count();
+        if is_nearby_cap_reached(nearby, config.max_nearby_entities) {
+            roll_delay(delay, config);
+            return true;
+        }
+
+        let entity =
+            crate::entity::r#type::from_type(entity_type, spawn_pos, world, uuid::Uuid::new_v4());
+        // `BaseSpawner.serverTick` (BaseSpawner.java:153) randomises yaw on spawn.
+        entity
+            .get_entity()
+            .set_rotation(rand::random::<f32>() * 360.0, 0.0);
+        world.spawn_entity(entity).await;
+        world.sync_world_event(WorldEvent::ParticlesMobblockSpawn, position, 0);
+        update_spawns = true;
+    }
+    if update_spawns {
+        notify = true;
+    }
+    notify
 }
 
 /// `BaseSpawner.serverTick` (BaseSpawner.java:148) aborts the whole spawn cycle once the

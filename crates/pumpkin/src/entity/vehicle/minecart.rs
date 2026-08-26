@@ -3,6 +3,7 @@ mod container;
 mod furnace;
 mod hopper;
 mod rideable;
+mod spawner;
 mod tnt;
 
 use std::sync::Arc;
@@ -37,6 +38,7 @@ use container::MinecartInventory;
 use furnace::FurnaceMinecart;
 use hopper::HopperMinecart;
 use rideable::RideableMinecart;
+use spawner::SpawnerMinecart;
 use tnt::TntMinecart;
 
 const fn get_exits(
@@ -71,6 +73,7 @@ enum MinecartKind {
     Furnace(FurnaceMinecart),
     Hopper(HopperMinecart),
     Tnt(TntMinecart),
+    Spawner(SpawnerMinecart),
     Other,
 }
 
@@ -86,6 +89,9 @@ impl MinecartEntity {
                 MinecartKind::Hopper(HopperMinecart::new())
             }
             id if id == EntityType::TNT_MINECART.id => MinecartKind::Tnt(TntMinecart::new()),
+            id if id == EntityType::SPAWNER_MINECART.id => {
+                MinecartKind::Spawner(SpawnerMinecart::new())
+            }
             _ => MinecartKind::Other,
         };
         Self {
@@ -108,6 +114,9 @@ impl MinecartEntity {
             MinecartKind::Furnace(_) => Some(&Item::FURNACE_MINECART),
             MinecartKind::Hopper(_) => Some(&Item::HOPPER_MINECART),
             MinecartKind::Tnt(_) => Some(&Item::TNT_MINECART),
+            // `MinecartSpawner.getDropItem` (MinecartSpawner.java:31-33): a broken
+            // spawner minecart drops a plain minecart, not a minecart-with-spawner item.
+            MinecartKind::Spawner(_) => Some(&Item::MINECART),
             _ => None,
         }
     }
@@ -122,6 +131,7 @@ impl NBTStorage for MinecartEntity {
                 MinecartKind::Furnace(minecart) => minecart.write_nbt(nbt),
                 MinecartKind::Hopper(minecart) => minecart.write_nbt(nbt).await,
                 MinecartKind::Tnt(minecart) => minecart.write_nbt(nbt),
+                MinecartKind::Spawner(minecart) => minecart.write_nbt(nbt),
                 MinecartKind::Rideable(_) | MinecartKind::Other => {}
             }
         })
@@ -135,6 +145,7 @@ impl NBTStorage for MinecartEntity {
                 MinecartKind::Furnace(minecart) => minecart.read_nbt(nbt),
                 MinecartKind::Hopper(minecart) => minecart.read_nbt(nbt).await,
                 MinecartKind::Tnt(minecart) => minecart.read_nbt(nbt),
+                MinecartKind::Spawner(minecart) => minecart.read_nbt(nbt),
                 MinecartKind::Rideable(_) | MinecartKind::Other => {}
             }
         })
@@ -170,6 +181,13 @@ impl EntityBase for MinecartEntity {
                 pos.y.floor() as i32,
                 pos.z.floor() as i32,
             ));
+
+            // `MinecartSpawner.tick` (MinecartSpawner.java:68-72) runs the carried
+            // spawner's ticker every entity tick (MinecartSpawner.java:40-44), from the
+            // cart's current position rather than a fixed one.
+            if let MinecartKind::Spawner(minecart) = &self.kind {
+                minecart.tick(&world, block_pos, &self.vehicle.entity).await;
+            }
 
             let mut block = world.get_block(&block_pos);
             let mut state_id = world.get_block_state_id(&block_pos);
@@ -796,7 +814,7 @@ impl EntityBase for MinecartEntity {
                 MinecartKind::Rideable(minecart) => {
                     minecart.interact(&self.vehicle.entity, player).await
                 }
-                MinecartKind::Tnt(_) | MinecartKind::Other => false,
+                MinecartKind::Tnt(_) | MinecartKind::Spawner(_) | MinecartKind::Other => false,
             }
         })
     }
