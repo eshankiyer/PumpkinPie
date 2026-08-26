@@ -277,7 +277,7 @@ fn can_replace(block: &Block) -> bool {
 
 /// Vanilla `BigDripleafBlock.canGrowInto` (`BigDripleafBlock.java:107-110`): inside build
 /// height and replaceable.
-fn can_grow_into(world: &Arc<World>, pos: &BlockPos) -> bool {
+pub(super) fn can_grow_into(world: &Arc<World>, pos: &BlockPos) -> bool {
     world.is_in_height_limit(pos.0.y) && can_replace(world.get_block(pos))
 }
 
