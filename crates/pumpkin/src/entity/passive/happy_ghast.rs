@@ -17,6 +17,7 @@ use pumpkin_util::math::boundingbox::EntityDimensions;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ageable::{AgeableData, AgeableMob},
+    ai::control::{flying_move_control::FlyingMoveControl, ghast_move_control::GhastMoveControl},
     ai::goal::{ghast_random_float::GhastRandomFloatAroundGoal, swim::SwimGoal, tempt::TemptGoal},
     mob::{Mob, MobEntity},
     passive::animal::Animal,
@@ -51,6 +52,7 @@ pub struct HappyGhastEntity {
     pub leash_holder_time: AtomicI32,
     pub is_leash_holder: AtomicBool,
     pub stays_still: AtomicBool,
+    baby_setup: AtomicBool,
 }
 
 impl HappyGhastEntity {
@@ -67,6 +69,7 @@ impl HappyGhastEntity {
             leash_holder_time: AtomicI32::new(0),
             is_leash_holder: AtomicBool::new(false),
             stays_still: AtomicBool::new(false),
+            baby_setup: AtomicBool::new(false),
         };
 
         let mob_arc = Arc::new(happy_ghast);
@@ -114,6 +117,16 @@ impl HappyGhastEntity {
             goal_selector.add_goal(5, Box::new(GhastRandomFloatAroundGoal::new()));
         };
 
+        // `HappyGhast` starts with the adult controller. A baby loaded or spawned after
+        // construction switches to `FlyingMoveControl` on its first server tick, matching
+        // `HappyGhast.babyGhastSetup` (`HappyGhast.java:132-138`).
+        *mob_arc
+            .mob_entity
+            .move_control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Box::new(GhastMoveControl::default());
+
         mob_arc
     }
 
@@ -136,6 +149,38 @@ impl HappyGhastEntity {
             && equippable.equip_on_interact
             && matches!(&equippable.allowed_entities, Some(IDSet::Tag(tag)) if tag.as_ref() == "can_equip_harness"))
         .then_some(equippable)
+    }
+
+    async fn setup_adult(&self) {
+        // `HappyGhast.adultGhastSetup` (`HappyGhast.java:120-129`) replaces the flying
+        // controller and clears/re-registers the server goals after the age boundary.
+        *self
+            .mob_entity
+            .move_control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Box::new(GhastMoveControl::default());
+        self.mob_entity.clear_ai_goals(self).await;
+        self.mob_entity.add_goal(3, SwimGoal::default());
+        self.mob_entity.add_goal(
+            4,
+            TemptGoal::with_stop_distance(1.0, HAPPY_GHAST_FOOD, false, 7.0),
+        );
+        self.mob_entity
+            .add_goal(5, GhastRandomFloatAroundGoal::new());
+    }
+
+    async fn setup_baby(&self) {
+        // `HappyGhast.babyGhastSetup` (`HappyGhast.java:132-138`) has no goals and uses
+        // `FlyingMoveControl(this, 180, true)`.
+        *self
+            .mob_entity
+            .move_control
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Box::new(FlyingMoveControl::new(180.0, true));
+        self.set_server_still_timeout(0);
+        self.mob_entity.clear_ai_goals(self).await;
     }
 
     async fn try_equip_harness(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
@@ -338,6 +383,22 @@ impl Mob for HappyGhastEntity {
         0.0
     }
 
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(if self.is_baby() {
+            Sound::EntityGhastlingAmbient
+        } else {
+            Sound::EntityHappyGhastAmbient
+        })
+    }
+
+    fn get_hurt_sound(&self) -> Option<Sound> {
+        Some(if self.is_baby() {
+            Sound::EntityGhastlingHurt
+        } else {
+            Sound::EntityHappyGhastHurt
+        })
+    }
+
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             let entity = self.get_entity();
@@ -402,6 +463,14 @@ impl Mob for HappyGhastEntity {
             }
 
             self.ageable_ai_step();
+
+            if self.is_baby() {
+                if !self.baby_setup.swap(true, Relaxed) {
+                    self.setup_baby().await;
+                }
+            } else if self.baby_setup.swap(false, Relaxed) {
+                self.setup_adult().await;
+            }
 
             let leash_time = self.leash_holder_time.load(Relaxed);
             if leash_time > 0 {

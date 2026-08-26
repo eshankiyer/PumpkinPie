@@ -1052,7 +1052,8 @@ impl MobEntity {
         {
             let diff = entity.pos.load() - player.get_entity().pos.load();
             let dist_sq = diff.length_squared();
-            if dist_sq <= Entity::LEASH_SNAP_DISTANCE * Entity::LEASH_SNAP_DISTANCE {
+            let leash_snap_distance = entity.leash_snap_distance();
+            if dist_sq <= leash_snap_distance * leash_snap_distance {
                 entity.leash_to(player.clone() as Arc<dyn EntityBase>).await;
                 if player.gamemode.load() != pumpkin_util::GameMode::Creative {
                     item_stack.decrement(1);
@@ -1683,9 +1684,10 @@ pub trait Mob: EntityBase + Send + Sync {
     fn when_leashed_to(&self, holder_block_pos: BlockPos) {
         let mob_entity = self.get_mob_entity();
         mob_entity.position_target.store(holder_block_pos);
-        mob_entity
-            .position_target_range
-            .store(Entity::LEASH_ELASTIC_DISTANCE as i32 - 1, Relaxed);
+        mob_entity.position_target_range.store(
+            self.get_entity().leash_elastic_distance() as i32 - 1,
+            Relaxed,
+        );
     }
 
     /// Vanilla `PathfinderMob.closeRangeLeashBehaviour`: keep a non-panicking mob
