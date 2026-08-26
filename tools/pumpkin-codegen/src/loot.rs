@@ -761,6 +761,9 @@ pub enum LootFunctionTypesStruct {
         /// If `true`, adds to the existing count instead of replacing it.
         add: Option<bool>,
     },
+    /// Discards the selected item stack.
+    #[serde(rename = "minecraft:discard")]
+    DiscardItem,
     /// Sets item durability from a number provider.
     #[serde(rename = "minecraft:set_damage")]
     SetItemDamage {
@@ -918,6 +921,9 @@ impl ToTokens for LootFunctionTypesStruct {
                 let count = count.to_token_stream();
                 let add = add.unwrap_or(false);
                 quote! { LootFunctionTypes::SetCount { count: #count, add: #add } }
+            }
+            Self::DiscardItem => {
+                quote! { LootFunctionTypes::DiscardItem }
             }
             Self::SetItemDamage { damage, add } => {
                 let damage = damage.to_token_stream();

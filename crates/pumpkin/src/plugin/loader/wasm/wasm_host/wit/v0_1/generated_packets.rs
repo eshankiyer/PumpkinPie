@@ -517,11 +517,13 @@ pub fn serialize_java_packet(
             Some(buf.into())
         }
         ClientboundPacket::CProjectilePower(data) => {
+            // The WIT interface still carries three per-axis power fields from
+            // before the native struct was corrected to vanilla's single
+            // `accelerationPower` scalar (ClientboundProjectilePowerPacket.java:9);
+            // y_power is used as the source until the .wit definition is updated.
             let p = pumpkin_protocol::java::client::play::CProjectilePower {
                 entity_id: VarInt(data.entity_id),
-                x_power: data.x_power.try_into().unwrap(),
-                y_power: data.y_power.try_into().unwrap(),
-                z_power: data.z_power.try_into().unwrap(),
+                acceleration_power: data.y_power,
             };
             let mut buf = Vec::new();
             crate::net::java::JavaClient::write_packet_for_version(&p, version, &mut buf).unwrap();
@@ -1867,11 +1869,16 @@ impl ToWitClientboundJava for pumpkin_protocol::java::client::play::CPlayerSpawn
 
 impl ToWitClientboundJava for pumpkin_protocol::java::client::play::CProjectilePower {
     fn to_wit(&self) -> ClientboundPacket {
+        // The WIT interface still carries three per-axis power fields from
+        // before the native struct was corrected to vanilla's single
+        // `accelerationPower` scalar (ClientboundProjectilePowerPacket.java:9);
+        // all three are filled with the same scalar until the .wit definition
+        // is updated.
         ClientboundPacket::CProjectilePower(crate::plugin::loader::wasm::wasm_host::wit::v0_1::pumpkin::plugin::java_packets::CProjectilePower {
                 entity_id: self.entity_id.0.try_into().unwrap(),
-                x_power: self.x_power.try_into().unwrap(),
-                y_power: self.y_power.try_into().unwrap(),
-                z_power: self.z_power.try_into().unwrap(),
+                x_power: self.acceleration_power,
+                y_power: self.acceleration_power,
+                z_power: self.acceleration_power,
         })
     }
 }

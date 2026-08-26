@@ -186,6 +186,10 @@ pub enum LootFunctionTypes {
         count: LootFunctionNumberProvider,
         add: bool,
     },
+    /// Discards the selected item stack.
+    ///
+    /// Mirrors `DiscardItem.run` (`DiscardItem.java:23-25`).
+    DiscardItem,
     /// Sets item durability from a number provider, optionally relative to current durability.
     /// Mirrors `SetItemDamageFunction.run` (`SetItemDamageFunction.java:46-56`).
     SetItemDamage {
