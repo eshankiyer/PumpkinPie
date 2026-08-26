@@ -1,5 +1,6 @@
 #[allow(clippy::wildcard_imports)]
 use super::*;
+use crossbeam::atomic::AtomicCell;
 
 impl JavaClient {
     pub async fn handle_set_command_block(
@@ -61,7 +62,7 @@ impl JavaClient {
             }
 
             let command_block = CommandBlockEntity {
-                position: pos,
+                position: AtomicCell::new(pos),
                 powered: old_command_block.powered.load(Ordering::SeqCst).into(),
                 condition_met: old_command_block
                     .condition_met

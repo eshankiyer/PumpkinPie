@@ -9,6 +9,16 @@ pub struct ChestLootEntry {
     pub min_count: i32,
     /// Maximum stack size (inclusive).
     pub max_count: i32,
+    /// Vanilla `EnchantRandomlyFunction`
+    /// (`net/minecraft/world/level/storage/loot/functions/EnchantRandomlyFunction.java:31-102`),
+    /// carried by a `minecraft:enchant_randomly` function on the entry.
+    ///
+    /// The slice holds the function's `options` candidates: a `#`-prefixed
+    /// enchantment-tag key expands to the tag's members, any other element is a
+    /// single enchantment id. An empty slice models vanilla's absent-`options`
+    /// default of every registered enchantment (`EnchantRandomlyFunction.java:75-77`).
+    /// `None` means the entry carries no such function at all.
+    pub enchant_randomly: Option<&'static [&'static str]>,
 }
 
 /// One roll pool inside a chest loot table.

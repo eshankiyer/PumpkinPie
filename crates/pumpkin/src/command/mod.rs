@@ -333,18 +333,28 @@ impl CommandSender {
                 server.clone(),
             ),
             Self::CommandBlock(command_entity, world) => {
-                let pos = command_entity.position;
+                let pos = command_entity.get_position();
 
-                let (block, state_id) = world.get_block_and_state_id(&pos);
-                let command_block_props =
-                    CommandBlockLikeProperties::from_state_id(state_id, block);
-                let facing = command_block_props.facing;
-
-                let horizontal_direction = match facing {
-                    Facing::South => 0.0,
-                    Facing::West => 90.0,
-                    Facing::North => 180.0,
-                    Facing::Up | Facing::Down | Facing::East => 270.0,
+                // A `CommandBlock` sender may also be a command block *minecart*
+                // (`MinecartCommandBase.createCommandSourceStack`,
+                // MinecartCommandBlock.java:122-134), whose tracked position holds
+                // whatever block the cart currently overlaps - not necessarily a
+                // command block. Only decode facing from real command blocks.
+                let horizontal_direction = if world.get_block(&pos).id == Block::COMMAND_BLOCK.id
+                    || world.get_block(&pos).id == Block::CHAIN_COMMAND_BLOCK.id
+                    || world.get_block(&pos).id == Block::REPEATING_COMMAND_BLOCK.id
+                {
+                    let (block, state_id) = world.get_block_and_state_id(&pos);
+                    let command_block_props =
+                        CommandBlockLikeProperties::from_state_id(state_id, block);
+                    match command_block_props.facing {
+                        Facing::South => 0.0,
+                        Facing::West => 90.0,
+                        Facing::North => 180.0,
+                        Facing::Up | Facing::Down | Facing::East => 270.0,
+                    }
+                } else {
+                    0.0
                 };
 
                 // TODO: when command blocks get custom names, add a check for it

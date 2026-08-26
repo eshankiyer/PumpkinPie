@@ -69,10 +69,20 @@ impl CountStruct {
     }
 }
 
+/// `options` of an `minecraft:enchant_randomly` function: either a single
+/// enchantment id, a `#`-prefixed enchantment tag key, or an explicit id list.
+#[derive(Deserialize, Clone, Debug)]
+#[serde(untagged)]
+enum EnchantRandomlyOptionsStruct {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
 #[derive(Deserialize, Clone, Debug)]
 struct EntryFunctionStruct {
     function: String,
     count: Option<CountStruct>,
+    options: Option<EnchantRandomlyOptionsStruct>,
 }
 
 /// A single entry inside a pool.
@@ -205,6 +215,31 @@ fn emit_table(
                         .map(|c| (c.min(), c.max()))
                         .unwrap_or((1, 1));
 
+                    // Capture the `options` of an `minecraft:enchant_randomly`
+                    // function, if any. Vanilla resolves an absent `options`
+                    // field to every registered enchantment
+                    // (`EnchantRandomlyFunction.java:75-77`), encoded here as an
+                    // empty candidate list.
+                    let enchant_randomly =
+                        entry
+                            .functions
+                            .iter()
+                            .find(|f| f.function == "minecraft:enchant_randomly")
+                            .map(|f| match &f.options {
+                                Some(EnchantRandomlyOptionsStruct::Single(value)) => {
+                                    vec![LitStr::new(value, Span::call_site())]
+                                }
+                                Some(EnchantRandomlyOptionsStruct::Multiple(values)) => values
+                                    .iter()
+                                    .map(|value| LitStr::new(value, Span::call_site()))
+                                    .collect(),
+                                None => Vec::new(),
+                            });
+                    let enchant_randomly_tokens = enchant_randomly.map_or_else(
+                        || quote! { None },
+                        |options| quote! { Some(&[#(#options),*]) },
+                    );
+
                     let name_lit = LitStr::new(&name, Span::call_site());
                     entry_literals.push(quote! {
                         ChestLootEntry {
@@ -212,6 +247,7 @@ fn emit_table(
                             weight: #weight,
                             min_count: #min_count,
                             max_count: #max_count,
+                            enchant_randomly: #enchant_randomly_tokens,
                         }
                     });
                 }

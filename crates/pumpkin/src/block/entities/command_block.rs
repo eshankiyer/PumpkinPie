@@ -3,6 +3,7 @@ use std::{
     sync::atomic::{AtomicBool, AtomicU32, Ordering},
 };
 
+use crossbeam::atomic::AtomicCell;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 
@@ -12,7 +13,7 @@ use super::BlockEntity;
 
 // todo: CustomName, LastExecution, UpdateLastExecution
 pub struct CommandBlockEntity {
-    pub position: BlockPos,
+    pub position: AtomicCell<BlockPos>,
     pub powered: AtomicBool,
     pub condition_met: AtomicBool,
     pub auto: AtomicBool,
@@ -28,7 +29,7 @@ impl CommandBlockEntity {
     #[must_use]
     pub fn new(position: BlockPos, track_output: bool, is_chain: bool) -> Self {
         Self {
-            position,
+            position: AtomicCell::new(position),
             powered: AtomicBool::new(false),
             condition_met: AtomicBool::new(false),
             auto: AtomicBool::new(is_chain),
@@ -46,7 +47,7 @@ impl BlockEntity for CommandBlockEntity {
         Self::ID
     }
     fn get_position(&self) -> BlockPos {
-        self.position
+        self.position.load()
     }
 
     fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound, position: BlockPos) -> Self
@@ -63,7 +64,7 @@ impl BlockEntity for CommandBlockEntity {
             AtomicU32::new(nbt.get_int("SuccessCount").unwrap_or(0).cast_unsigned());
 
         Self {
-            position,
+            position: AtomicCell::new(position),
             condition_met,
             auto,
             powered,

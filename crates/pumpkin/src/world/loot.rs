@@ -1154,6 +1154,79 @@ impl LootFunctionNumberProviderExt for LootFunctionNumberProvider {
     }
 }
 
+/// Vanilla `EnchantRandomlyFunction.run` + `enchantItem`
+/// (`net/minecraft/world/level/storage/loot/functions/EnchantRandomlyFunction.java:71-102`):
+/// resolves the function's candidate enchantments (a `#`-prefixed tag key expands
+/// to its members; an empty list is vanilla's absent-`options` default of every
+/// registered enchantment), drops candidates incompatible with the target item,
+/// picks one uniformly (`Util.getRandomSafe`, :80) and rolls a level with
+/// `Mth.nextInt(random, getMinLevel(), getMaxLevel())` (:91) - every enchantment's
+/// minimum level is 1.
+///
+/// Books bypass the compatibility filter and are transmuted to enchanted books
+/// carrying a stored-enchantments component (:73,92-94). The
+/// `include_additional_cost_component` half of `enchantItem` (:97-99) only fires
+/// for villager-trade loot contexts that allow the additional-cost parameter and
+/// has no chest-loot analogue here.
+fn apply_enchant_randomly(stack: &mut ItemStack, options: &[&'static str], rng: &mut Xoroshiro) {
+    let mut candidates: Vec<&'static pumpkin_data::Enchantment> = options
+        .iter()
+        .flat_map(|option| {
+            option.strip_prefix('#').map_or_else(
+                || {
+                    pumpkin_data::Enchantment::from_name(option)
+                        .into_iter()
+                        .collect::<Vec<_>>()
+                },
+                |tag_key| {
+                    pumpkin_data::tag::get_tag_ids(
+                        pumpkin_data::tag::RegistryKey::Enchantment,
+                        tag_key,
+                    )
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|id| pumpkin_data::Enchantment::from_id(u8::try_from(*id).ok()?))
+                    .collect::<Vec<_>>()
+                },
+            )
+        })
+        .collect();
+
+    // `shouldCheckCompatibility = !targetIsBook && this.onlyCompatible`
+    // (:73-74); no shipped chest table disables `only_compatible`.
+    if stack.item.id != Item::BOOK.id {
+        let item = stack.item;
+        candidates.retain(|enchantment| enchantment.can_enchant(item));
+    }
+
+    let Some(enchantment) = candidates.get(rng.next_bounded_i32(candidates.len() as i32) as usize)
+    else {
+        tracing::warn!(
+            "Couldn't find a compatible enchantment for {}",
+            stack.item.registry_key
+        );
+        return;
+    };
+    let level = rng.next_bounded_i32(enchantment.max_level) + 1;
+
+    if stack.item.id == Item::BOOK.id {
+        // Vanilla `itemStack.enchant` on a book writes the stored-enchantments
+        // component of an enchanted book (:92-96).
+        *stack = ItemStack::new_with_component(
+            stack.item_count,
+            &Item::ENCHANTED_BOOK,
+            vec![(
+                DataComponent::StoredEnchantments,
+                Some(Box::new(StoredEnchantmentsImpl {
+                    enchantment: std::borrow::Cow::Owned(vec![(*enchantment, level)]),
+                }) as Box<dyn DataComponentImpl>),
+            )],
+        );
+    } else {
+        stack.enchant(enchantment, level);
+    }
+}
+
 /// Generates a list of items from a `ChestLootTable` using a deterministic seed.
 #[must_use]
 pub fn generate_chest_loot(
@@ -1204,7 +1277,11 @@ pub fn generate_chest_loot(
                     let item_key = entry.item.strip_prefix("minecraft:").unwrap_or(entry.item);
 
                     if let Some(item) = Item::from_registry_key(item_key) {
-                        items_to_place.push(ItemStack::new(count as u8, item));
+                        let mut stack = ItemStack::new(count as u8, item);
+                        if let Some(options) = entry.enchant_randomly {
+                            apply_enchant_randomly(&mut stack, options, &mut rng);
+                        }
+                        items_to_place.push(stack);
                     }
                     break;
                 }
@@ -1992,5 +2069,99 @@ mod tests {
             },
         ]);
         assert!(!cond.is_fulfilled(&params));
+    }
+
+    fn single_entry_chest_table(
+        entry: pumpkin_util::chest_loot_table::ChestLootEntry,
+    ) -> pumpkin_util::chest_loot_table::ChestLootTable {
+        let entries: &'static [pumpkin_util::chest_loot_table::ChestLootEntry] =
+            Box::leak(vec![entry].into_boxed_slice());
+        let pools: &'static [pumpkin_util::chest_loot_table::ChestLootPool] = Box::leak(
+            vec![pumpkin_util::chest_loot_table::ChestLootPool {
+                entries,
+                min_rolls: 1,
+                max_rolls: 1,
+                empty_weight: 0,
+            }]
+            .into_boxed_slice(),
+        );
+        pumpkin_util::chest_loot_table::ChestLootTable { pools }
+    }
+
+    /// Vanilla `EnchantRandomlyFunction.enchantItem`
+    /// (`EnchantRandomlyFunction.java:89-102`): books are transmuted to enchanted
+    /// books whose stored-enchantments component carries the rolled enchantment
+    /// at a level within `[min_level, max_level]`.
+    #[test]
+    fn chest_enchant_randomly_transmutes_books_to_stored_enchantments() {
+        let table = single_entry_chest_table(pumpkin_util::chest_loot_table::ChestLootEntry {
+            item: "minecraft:book",
+            weight: 1,
+            min_count: 1,
+            max_count: 1,
+            enchant_randomly: Some(&["minecraft:sharpness"]),
+        });
+
+        let loot = generate_chest_loot(&table, 42);
+
+        assert_eq!(loot.len(), 1);
+        assert_eq!(loot[0].item.id, Item::ENCHANTED_BOOK.id);
+        let stored = loot[0]
+            .get_data_component::<StoredEnchantmentsImpl>()
+            .expect("enchanted book carries stored enchantments");
+        assert_eq!(stored.enchantment[0].0.id, Enchantment::SHARPNESS.id);
+        assert!(
+            (1..=Enchantment::SHARPNESS.max_level).contains(&stored.enchantment[0].1),
+            "level {} outside the enchantment's bounds",
+            stored.enchantment[0].1
+        );
+    }
+
+    /// Vanilla `EnchantRandomlyFunction.run` (:73-78): non-book targets keep the
+    /// default `only_compatible` filter, so an incompatible candidate is dropped;
+    /// the enchantment lands in the regular enchantments component (:96).
+    #[test]
+    fn chest_enchant_randomly_filters_incompatible_candidates_for_gear() {
+        let table = single_entry_chest_table(pumpkin_util::chest_loot_table::ChestLootEntry {
+            item: "minecraft:golden_axe",
+            weight: 1,
+            min_count: 1,
+            max_count: 1,
+            // Protection is armor-only and must be filtered out for an axe.
+            enchant_randomly: Some(&["minecraft:protection", "minecraft:efficiency"]),
+        });
+
+        let loot = generate_chest_loot(&table, 7);
+
+        assert_eq!(loot.len(), 1);
+        assert_eq!(loot[0].item.registry_key, "golden_axe");
+        let efficiency_level = loot[0].get_enchantment_level(&Enchantment::EFFICIENCY);
+        assert!(
+            (1..=Enchantment::EFFICIENCY.max_level).contains(&efficiency_level),
+            "efficiency level {efficiency_level} outside its bounds"
+        );
+        assert_eq!(loot[0].get_enchantment_level(&Enchantment::PROTECTION), 0);
+    }
+
+    /// A `#`-prefixed `options` value resolves through its enchantment tag's members.
+    #[test]
+    fn chest_enchant_randomly_expands_tag_options() {
+        let table = single_entry_chest_table(pumpkin_util::chest_loot_table::ChestLootEntry {
+            item: "minecraft:diamond_sword",
+            weight: 1,
+            min_count: 1,
+            max_count: 1,
+            // The smelts-loot tag holds exactly fire_aspect, which applies to swords.
+            enchant_randomly: Some(&["#minecraft:smelts_loot"]),
+        });
+
+        let loot = generate_chest_loot(&table, 3);
+
+        assert_eq!(loot.len(), 1);
+        let fire_aspect_level = loot[0].get_enchantment_level(&Enchantment::FIRE_ASPECT);
+        assert!(
+            (1..=Enchantment::FIRE_ASPECT.max_level).contains(&fire_aspect_level),
+            "fire_aspect level {fire_aspect_level} outside its bounds"
+        );
     }
 }
