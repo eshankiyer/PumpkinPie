@@ -3,6 +3,7 @@ use pumpkin_data::{
     BlockDirection, BlockStateId,
     block_properties::{BlockProperties, CandleLikeProperties},
     entity::EntityPose,
+    fluid::Fluid,
     game_event::GameEvent,
     sound::{Sound, SoundCategory},
 };
@@ -11,6 +12,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockAccessor;
 use pumpkin_world::world::BlockFlags;
+use std::sync::Arc;
 
 use crate::block::{BlockFuture, GetStateForNeighborUpdateArgs, OnScheduledTickArgs};
 use crate::{
@@ -28,6 +30,59 @@ use crate::{
 
 #[pumpkin_block_from_tag("minecraft:candles")]
 pub struct CandleBlock;
+
+impl CandleBlock {
+    /// Port of `CandleBlock.placeLiquid` (`CandleBlock.java:150-164`): waterlogs a dry
+    /// candle and extinguishes it before scheduling the water tick.
+    pub(crate) async fn place_liquid(
+        world: &Arc<crate::world::World>,
+        position: &BlockPos,
+        block: &pumpkin_data::Block,
+        state_id: BlockStateId,
+        fluid: &Fluid,
+    ) -> bool {
+        if !fluid.matches_type(&Fluid::WATER) {
+            return false;
+        }
+
+        let mut properties = CandleLikeProperties::from_state_id(state_id, block);
+        if properties.waterlogged {
+            return false;
+        }
+
+        if properties.lit {
+            world.play_block_sound(
+                Sound::BlockCandleExtinguish,
+                SoundCategory::Blocks,
+                *position,
+            );
+            emit_game_event(
+                world,
+                GameEvent::BlockChange,
+                position.to_centered_f64(),
+                GameEventContext::none(),
+            )
+            .await;
+        }
+
+        properties.waterlogged = true;
+        properties.lit = false;
+        world
+            .set_block_state(
+                position,
+                properties.to_state_id(block),
+                BlockFlags::NOTIFY_ALL,
+            )
+            .await;
+        world.schedule_fluid_tick(
+            &Fluid::WATER,
+            *position,
+            Fluid::WATER.flow_speed as u8,
+            TickPriority::Normal,
+        );
+        true
+    }
+}
 
 impl BlockBehaviour for CandleBlock {
     fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
@@ -81,21 +136,10 @@ impl BlockBehaviour for CandleBlock {
                     BlockActionResult::Consume
                 }
                 _ => {
-                    if properties.lit {
-                        properties.lit = false;
-                    } else {
-                        return BlockActionResult::Pass;
-                    }
-
-                    args.world
-                        .set_block_state(
-                            args.position,
-                            properties.to_state_id(args.block),
-                            BlockFlags::NOTIFY_ALL,
-                        )
-                        .await;
-
-                    BlockActionResult::Consume
+                    // Vanilla `CandleBlock.useItemOn` delegates non-empty-hand uses to
+                    // `BlockBehaviour.useItemOn`, which requests the empty-hand fallback.
+                    // The caller then invokes `normal_use` for the main hand.
+                    BlockActionResult::PassToDefaultBlockAction
                 }
             }
         })

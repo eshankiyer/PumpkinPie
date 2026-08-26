@@ -281,6 +281,32 @@ impl BlockEntity for BeaconBlockEntity {
         self.position
     }
 
+    fn on_block_replaced<'a>(
+        self: Arc<Self>,
+        world: Arc<World>,
+        position: BlockPos,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
+    where
+        Self: 'a,
+    {
+        Box::pin(async move {
+            let sound_position = Vector3::new(
+                position.0.x as f64 + 0.5,
+                position.0.y as f64 + 0.5,
+                position.0.z as f64 + 0.5,
+            );
+            world.play_sound(
+                Sound::BlockBeaconDeactivate,
+                SoundCategory::Blocks,
+                &sound_position,
+            );
+
+            if let Some(inventory) = self.clone().get_inventory() {
+                world.scatter_inventory(&position, &inventory).await;
+            }
+        })
+    }
+
     fn from_nbt(nbt: &NbtCompound, position: BlockPos) -> Self
     where
         Self: Sized,
