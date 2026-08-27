@@ -1268,6 +1268,16 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
+    /// Vanilla `NeutralMob.isPreventingPlayerRest`: a neutral mob may block sleep
+    /// based on the player-specific anger state rather than merely its entity type.
+    fn is_preventing_player_rest(
+        &self,
+        _player_uuid: Uuid,
+        _universal_anger: bool,
+    ) -> EntityBaseFuture<'_, bool> {
+        Box::pin(async { false })
+    }
+
     /// Vanilla `Mob.getSoundSource`; neutral is the existing default for ordinary mobs.
     fn get_sound_source(&self) -> SoundCategory {
         SoundCategory::Neutral

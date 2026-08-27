@@ -125,6 +125,16 @@ impl BlockBehaviour for CampfireBlock {
             };
             let item = &mut *args.item_stack;
             if campfire.add_item(item, args.player.is_creative()).await {
+                // Vanilla `CampfireBlockEntity.placeFood` (`CampfireBlockEntity.java:179-198`)
+                // emits BLOCK_CHANGE after accepting a recipe item; this is observable by
+                // game-event listeners (including sculk sensors), not just by the client.
+                emit_game_event(
+                    args.world,
+                    GameEvent::BlockChange,
+                    args.position.to_centered_f64(),
+                    GameEventContext::of_entity(args.player.clone()),
+                )
+                .await;
                 args.player
                     .increment_stat(
                         pumpkin_data::statistic::StatisticCategory::Custom,

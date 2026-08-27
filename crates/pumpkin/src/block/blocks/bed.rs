@@ -15,6 +15,7 @@ use pumpkin_util::GameMode;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::world::BlockFlags;
+use uuid::Uuid;
 
 use crate::block::BlockFuture;
 use crate::block::OnLandedUponArgs;
@@ -25,7 +26,7 @@ use crate::block::{
     BlockBehaviour, BrokenArgs, CanPlaceAtArgs, NormalUseArgs, OnPlaceArgs, OnStateReplacedArgs,
     PlacedArgs, PlayerPlacedArgs,
 };
-use crate::entity::{Entity, EntityBase};
+use crate::entity::EntityBase;
 use crate::world::World;
 
 type BedProperties = pumpkin_data::block_properties::WhiteBedLikeProperties;
@@ -376,8 +377,15 @@ impl BlockBehaviour for BedBlock {
             }
 
             // Make sure there are no monsters nearby
+            let universal_anger = args.world.level_info.load().game_rules.universal_anger;
             for entity in args.world.entities.load().iter() {
-                if !entity_prevents_sleep(entity.get_entity()) {
+                if !entity_prevents_sleep(
+                    entity.as_ref(),
+                    args.player.gameprofile.id,
+                    universal_anger,
+                )
+                .await
+                {
                     continue;
                 }
 
@@ -484,6 +492,19 @@ async fn can_sleep(world: &Arc<World>) -> bool {
     }
 }
 
-fn entity_prevents_sleep(entity: &Entity) -> bool {
-    NO_SLEEP_IDS.contains(&entity.entity_type.id)
+async fn entity_prevents_sleep(
+    entity: &dyn EntityBase,
+    player_uuid: Uuid,
+    universal_anger: bool,
+) -> bool {
+    if entity.get_entity().entity_type.id == EntityType::ZOMBIFIED_PIGLIN.id {
+        if let Some(mob) = entity.get_mob() {
+            return mob
+                .is_preventing_player_rest(player_uuid, universal_anger)
+                .await;
+        }
+        return false;
+    }
+
+    NO_SLEEP_IDS.contains(&entity.get_entity().entity_type.id)
 }

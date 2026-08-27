@@ -107,6 +107,47 @@ impl JukeboxBlock {
     fn start_playing(position: &BlockPos, world: &Arc<World>, song_id: u32) {
         world.sync_world_event(WorldEvent::SoundPlayJukeboxSong, *position, song_id as i32);
     }
+
+    /// Applies `JukeboxBlockEntity.setTheItem` side effects after a hopper changes the raw
+    /// inventory slot. Vanilla's hopper calls the container setter directly, so this path must
+    /// update the block state and playback just like a player insertion/removal does.
+    pub(crate) async fn refresh_after_inventory_transfer(world: &Arc<World>, position: &BlockPos) {
+        let Some(block_entity) = world.get_block_entity(position) else {
+            return;
+        };
+        let Some(jukebox) = block_entity.as_any().downcast_ref::<JukeboxBlockEntity>() else {
+            return;
+        };
+
+        let record = jukebox.get_record().await;
+        if record.is_empty() {
+            Self::stop_playing(&Block::JUKEBOX, position, world).await;
+            return;
+        }
+
+        let Some(playable) = record.get_data_component::<JukeboxPlayableImpl>() else {
+            return;
+        };
+        let Some(song_name) = playable.song.split(':').nth(1) else {
+            return;
+        };
+        let Some(song) = JukeboxSong::from_name(song_name) else {
+            return;
+        };
+
+        jukebox.start_playing(song.length_in_ticks());
+        Self::set_record_state(true, &Block::JUKEBOX, position, world).await;
+        world.update_neighbors(position, None).await;
+        world.update_comparators(position, &Block::JUKEBOX).await;
+        emit_game_event(
+            world,
+            GameEvent::BlockChange,
+            position.to_centered_f64(),
+            GameEventContext::none(),
+        )
+        .await;
+        Self::start_playing(position, world, song.get_id());
+    }
 }
 
 impl BlockBehaviour for JukeboxBlock {

@@ -168,6 +168,7 @@ impl Inventory for LecternBlockEntity {
             let mut removed = ItemStack::EMPTY.clone();
             let mut guard = self.book.lock().await;
             std::mem::swap(&mut removed, &mut *guard);
+            self.page.store(0, Ordering::Relaxed);
             self.mark_dirty();
             removed
         })
@@ -180,6 +181,13 @@ impl Inventory for LecternBlockEntity {
                 return ItemStack::EMPTY.clone();
             }
             let res = stack.split(amount);
+            if stack.is_empty() {
+                // Vanilla `bookAccess.removeItem` calls `onBookItemRemove` when the
+                // split empties the slot (`LecternBlockEntity.java:55-60`). The block
+                // callback is handled by the screen controller; keep the entity's
+                // page state in sync here as well.
+                self.page.store(0, Ordering::Relaxed);
+            }
             self.mark_dirty();
             res
         })
@@ -220,6 +228,10 @@ impl Clearable for LecternBlockEntity {
     fn clear(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         Box::pin(async move {
             *self.book.lock().await = ItemStack::EMPTY.clone();
+            // Vanilla `setBook(ItemStack.EMPTY)` resets both page and page count
+            // (`LecternBlockEntity.java:152-156`), which is the outer Clearable
+            // behavior behind `clearContent` (`:220-223`).
+            self.page.store(0, Ordering::Relaxed);
             self.mark_dirty();
         })
     }
