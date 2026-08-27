@@ -66,8 +66,7 @@ pub enum Activity {
 /// methods do.
 pub struct ActivityData {
     pub activity: Activity,
-    pub priority: u32,
-    pub behaviors: Vec<Box<dyn Behavior>>,
+    pub behavior_priority_pairs: Vec<(u32, Box<dyn Behavior>)>,
     /// `Brain.activityRequirements` entry, checked by `activityRequirementsAreMet`.
     pub conditions: Vec<(MemoryKeyId, MemoryStatus)>,
     /// `Brain.activityMemoriesToEraseWhenStopped` entry.
@@ -79,11 +78,23 @@ impl ActivityData {
     pub fn create(activity: Activity, priority: u32, behaviors: Vec<Box<dyn Behavior>>) -> Self {
         Self {
             activity,
-            priority,
-            behaviors,
+            behavior_priority_pairs: Self::create_priority_pairs(priority, behaviors),
             conditions: Vec::new(),
             memories_to_erase_when_stopped: Vec::new(),
         }
+    }
+
+    /// `ActivityData.createPriorityPairs` (`ActivityData.java:72-83`).
+    #[must_use]
+    pub fn create_priority_pairs(
+        priority: u32,
+        behaviors: Vec<Box<dyn Behavior>>,
+    ) -> Vec<(u32, Box<dyn Behavior>)> {
+        behaviors
+            .into_iter()
+            .enumerate()
+            .map(|(offset, behavior)| (priority + offset as u32, behavior))
+            .collect()
     }
 }
 
@@ -173,8 +184,7 @@ impl Brain {
         for activity_data in activities {
             let ActivityData {
                 activity,
-                priority,
-                behaviors,
+                behavior_priority_pairs,
                 conditions,
                 memories_to_erase_when_stopped,
             } = activity_data;
@@ -187,7 +197,7 @@ impl Brain {
                 activity_memories_to_erase.push((activity, memories_to_erase_when_stopped));
             }
 
-            for behavior in behaviors {
+            for (priority, behavior) in behavior_priority_pairs {
                 // Brain.addActivity registers every memory a behavior declares as required,
                 // which is what makes MemoryStatus::Registered meaningful (Brain.java:363-366).
                 for (id, _) in behavior.required_memories() {
