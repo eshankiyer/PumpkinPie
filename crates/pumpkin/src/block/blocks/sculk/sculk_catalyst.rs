@@ -6,8 +6,10 @@ use std::sync::Arc;
 
 use crate::block::entities::sculk_catalyst::SculkCatalystBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
+    BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, OnPlaceArgs, OnScheduledTickArgs,
+    PlacedArgs,
 };
+use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::world::World;
 use crate::world::game_event::{
     GameEventContext, GameEventFuture, GameEventListener, PositionSource,
@@ -74,6 +76,25 @@ impl BlockBehaviour for SculkCatalystBlock {
                     )
                     .await;
             }
+        })
+    }
+
+    /// `SculkCatalystBlock.spawnAfterBreak` (`SculkCatalystBlock.java:61-66`) awards 5
+    /// experience when the break is allowed to drop experience and the tool lacks Silk Touch.
+    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if args.player.gamemode.load() == pumpkin_util::GameMode::Creative
+                || !args.world.level_info.load().game_rules.block_drops
+            {
+                return;
+            }
+
+            let tool = args.player.inventory().held_item().await;
+            if tool.get_enchantment_level(&pumpkin_data::Enchantment::SILK_TOUCH) > 0 {
+                return;
+            }
+
+            ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), 5).await;
         })
     }
 }
