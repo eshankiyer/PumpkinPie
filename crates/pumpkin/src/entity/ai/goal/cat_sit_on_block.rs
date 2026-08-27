@@ -12,6 +12,7 @@ use pumpkin_util::math::position::BlockPos;
 
 use super::move_to_target_pos::{MoveToTargetPos, MoveToTargetPosGoal};
 use super::{Controls, Goal, GoalFuture, ParentHandle};
+use crate::block::entities::chest::ChestBlockEntity;
 use crate::entity::mob::Mob;
 use crate::entity::passive::cat::CatEntity;
 use crate::entity::passive::tamable::TamableAnimal;
@@ -22,12 +23,6 @@ const SEARCH_RANGE: i32 = 8;
 
 /// Vanilla `CatSitOnBlockGoal` (`CatSitOnBlockGoal.java:14-60`): a tamed cat that has not been
 /// ordered to sit walks to a nearby chest, lit furnace or bed foot and sits on top of it.
-///
-/// Divergence: vanilla's chest branch (`CatSitOnBlockGoal.java:51-52`) additionally requires
-/// `ChestBlockEntity.getOpenCount(level, pos) < 1`, so a cat will not claim a chest somebody is
-/// looking into. `ChestBlockEntity::viewers` is private to `block::entities::chest` here and no
-/// world-level accessor exposes it, so a chest is accepted regardless of its open count. The
-/// only observable difference is a cat sitting on an open chest.
 pub struct CatSitOnBlockGoal {
     cat: Weak<CatEntity>,
     move_to_target_pos_goal: MoveToTargetPosGoal<Self>,
@@ -65,8 +60,18 @@ impl CatSitOnBlockGoal {
         }
         let (block, state_id) = world.get_block_and_state_id(&block_pos);
         if block.id == Block::CHEST.id {
-            // See the type-level note: vanilla also checks the chest's open count.
-            return true;
+            // `CatSitOnBlockGoal.isValidTarget` (`CatSitOnBlockGoal.java:51-52`): a cat may
+            // claim a chest only when nobody is currently viewing it.
+            return world
+                .get_block_entity(&block_pos)
+                .and_then(|entity| {
+                    entity
+                        .as_any()
+                        .downcast_ref::<ChestBlockEntity>()
+                        .map(ChestBlockEntity::get_viewer_count)
+                })
+                .unwrap_or(0)
+                < 1;
         }
         if block.id == Block::FURNACE.id {
             return FurnaceLikeProperties::from_state_id(state_id, block).lit;
