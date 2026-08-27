@@ -7,15 +7,18 @@ use pumpkin_data::attributes::Attributes;
 use crate::entity::ai::goal::track_target::TrackTargetGoal;
 use crate::entity::ai::goal::{Controls, Goal, GoalFuture};
 use crate::entity::ai::target_predicate::TargetPredicate;
+use crate::entity::living::LivingEntity;
 use crate::entity::mob::Mob;
 use crate::entity::mob::vindicator::VindicatorEntity;
 use crate::entity::{EntityBase, mob::MobEntity};
 
-/// Vanilla: `Vindicator.VindicatorJohnnyAttackGoal extends NearestAttackableTargetGoal<LivingEntity>`.
+/// Vanilla: `Vindicator.VindicatorJohnnyAttackGoal extends NearestAttackableTargetGoal<LivingEntity>`,
+/// constructed with the `target.attackable()` selector (`Vindicator.java:209`).
 ///
 /// Unlike every other `NearestAttackableTargetGoal` in the codebase (which target one concrete
 /// `EntityType`), a "Johnny" vindicator targets *any* living entity -- gated on `is_johnny`, the
-/// one-way latch set when the vindicator is named "Johnny".
+/// one-way latch set when the vindicator is named "Johnny". `is_valid_ai_target` excludes armor
+/// stands the same way the vanilla selector does.
 pub struct JohnnyAttackGoal {
     track_target_goal: TrackTargetGoal,
     target: Option<Arc<dyn EntityBase>>,
@@ -56,7 +59,10 @@ impl JohnnyAttackGoal {
             .get_nearby_entities(search_pos, follow_range)
             .into_values()
             .filter(|entity| {
-                entity.get_entity().entity_id != self_id && entity.get_living_entity().is_some()
+                entity.get_entity().entity_id != self_id
+                    && entity
+                        .get_living_entity()
+                        .is_some_and(LivingEntity::is_valid_ai_target)
             })
             .collect();
         candidates.sort_by(|a, b| {
