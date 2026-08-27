@@ -7,8 +7,9 @@ use crate::block::blocks::plant::big_dripleaf_stem::{
 };
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BrokenArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
-    OnEntityStepArgs, OnNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
+    BlockBehaviour, BlockFuture, BonemealArgs, BrokenArgs, CanPlaceAtArgs,
+    GetStateForNeighborUpdateArgs, OnEntityStepArgs, OnNeighborUpdateArgs, OnPlaceArgs,
+    OnScheduledTickArgs, PlacedArgs,
 };
 use crate::entity::EntityBase;
 use crate::entity::ai::pathfinder::node::Coordinate;
@@ -30,6 +31,25 @@ use rand::RngExt;
 pub struct BigDripleafBlock;
 
 impl BlockBehaviour for BigDripleafBlock {
+    /// Vanilla `BigDripleafBlock.isValidBonemealTarget` (`BigDripleafBlock.java:169-172`)
+    /// checks whether the block above can be grown into.
+    fn is_valid_bonemeal_target(&self, args: BonemealArgs<'_>) -> bool {
+        can_grow_into(args.world, &args.position.up())
+    }
+
+    /// Vanilla `BigDripleafBlock.performBonemeal` (`BigDripleafBlock.java:179-187`):
+    /// convert the current leaf to a stem and place a new leaf above it.
+    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            let above = args.position.up();
+            if can_grow_into(args.world, &above) {
+                let props = BigDripleafLikeProperties::from_state_id(args.state_id, args.block);
+                place_stem(args.world, args.position, props.facing).await;
+                place_leaf(args.world, &above, props.facing).await;
+            }
+        })
+    }
+
     fn on_entity_step<'a>(&'a self, args: OnEntityStepArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             let props = BigDripleafLikeProperties::from_state_id(args.state.id, args.block);

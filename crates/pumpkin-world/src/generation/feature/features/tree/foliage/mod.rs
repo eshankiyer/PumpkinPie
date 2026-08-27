@@ -7,8 +7,10 @@ use fancy::LargeOakFoliagePlacer;
 use jungle::JungleFoliagePlacer;
 use mega_pine::MegaPineFoliagePlacer;
 use pine::PineFoliagePlacer;
+use pumpkin_data::Block;
 use pumpkin_data::BlockDirection;
 use pumpkin_data::BlockState;
+use pumpkin_data::fluid::Fluid;
 use pumpkin_util::{
     math::{int_provider::IntProvider, position::BlockPos, vector3::Vector3},
     random::{RandomGenerator, RandomImpl},
@@ -133,11 +135,45 @@ impl FoliagePlacer {
         pos: BlockPos,
         block_state: &BlockState,
     ) -> bool {
-        let block = GenerationCache::get_block_state(chunk, &pos.0);
-        if !TreeFeature::can_replace(block.to_state(), block.to_block_id()) {
+        let existing = GenerationCache::get_block_state(chunk, &pos.0);
+        if existing
+            .to_block()
+            .properties(existing)
+            .is_some_and(|props| {
+                props
+                    .to_props()
+                    .iter()
+                    .any(|(key, value)| *key == "persistent" && *value == "true")
+            })
+            || !TreeFeature::can_replace(existing.to_state(), existing.to_block_id())
+        {
             return false;
         }
-        chunk.set_block_state(&pos.0, block_state);
+
+        // Vanilla `FoliagePlacer.tryPlaceLeaf` (`FoliagePlacer.java:170-186`) preserves
+        // source-water occupancy when the foliage state supports `waterlogged`.
+        let (fluid, fluid_state) = GenerationCache::get_fluid_and_fluid_state(chunk, &pos.0);
+        let foliage_state = if fluid_state.is_source
+            && fluid.matches_type(&Fluid::WATER)
+            && let Some(properties) =
+                Block::from_state_id(block_state.id).properties(block_state.id)
+        {
+            let mut properties = properties.to_props();
+            properties
+                .iter()
+                .position(|(key, _)| *key == "waterlogged")
+                .map_or(block_state, |index| {
+                    properties[index] = ("waterlogged", "true");
+                    BlockState::from_id(
+                        Block::from_state_id(block_state.id)
+                            .from_properties(&properties)
+                            .to_state_id(Block::from_state_id(block_state.id)),
+                    )
+                })
+        } else {
+            block_state
+        };
+        chunk.set_block_state(&pos.0, foliage_state);
         true
     }
 
