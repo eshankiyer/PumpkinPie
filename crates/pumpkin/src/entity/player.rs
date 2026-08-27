@@ -5917,6 +5917,11 @@ impl Player {
             added_points = event.amount;
         }
 
+        // Vanilla `Player.giveExperiencePoints` increments the scoreboard score before
+        // applying the experience (`Player.java:1523-1525`). Keep this atomic: score is also
+        // persisted and exposed to concurrent scoreboard reads.
+        self.score.fetch_add(added_points, Ordering::Relaxed);
+
         let current_level = self.experience_level.load(Ordering::Relaxed);
         let current_points = self.experience_points.load(Ordering::Relaxed);
 
@@ -7439,6 +7444,15 @@ fn damage_dealt_stat_points(health_before: f32, health_after: f32) -> i32 {
 }
 
 impl EntityBase for Player {
+    /// Vanilla `Player.getFallSounds` (`Player.java:1504-1506`).
+    fn get_fall_sound(&self, fall_distance: i32) -> Sound {
+        if fall_distance > 4 {
+            Sound::EntityPlayerBigFall
+        } else {
+            Sound::EntityPlayerSmallFall
+        }
+    }
+
     fn damage_with_context<'a>(
         &'a self,
         caller: &'a dyn EntityBase,
