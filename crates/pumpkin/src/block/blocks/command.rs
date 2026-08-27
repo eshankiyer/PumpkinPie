@@ -47,28 +47,14 @@ impl CommandBlock {
         Some((target_pos, props))
     }
 
-    fn conditions_met(world: &Arc<World>, pos: &BlockPos, facing: Facing) -> bool {
-        let (block, state_id) = world.get_block_and_state_id(pos);
-        let props = CommandBlockLikeProperties::from_state_id(state_id, block);
-
-        if !props.conditional {
-            return true;
-        }
-
-        let Some(before) = Self::get_relative_facing(world, pos, facing.opposite()) else {
+    fn conditions_met(world: &Arc<World>, pos: &BlockPos, _facing: Facing) -> bool {
+        let Some(entity) = world.get_block_entity(pos) else {
             return false;
         };
-        let Some(before_entity) = world.get_block_entity(&before.0) else {
-            warn!("Command block has no matching entity");
+        let Some(command_entity) = entity.as_any().downcast_ref::<CommandBlockEntity>() else {
             return false;
         };
-        let Some(command_entity) = before_entity.as_any().downcast_ref::<CommandBlockEntity>()
-        else {
-            warn!("Block entity at {} is not a command block", before.0);
-            return false;
-        };
-
-        command_entity.success_count.load(Ordering::Relaxed) > 0
+        command_entity.mark_condition_met(world)
     }
 
     fn update(
@@ -92,6 +78,7 @@ impl CommandBlock {
         let props = CommandBlockLikeProperties::from_state_id(state_id, block);
 
         if !props.conditional {
+            command_block.mark_condition_met(world);
             world.schedule_block_tick(block, *pos, 1, TickPriority::Normal);
             return;
         }
@@ -106,12 +93,12 @@ impl CommandBlock {
             );
             return;
         };
-        let Some(behind_entity) = behind_entity.as_any().downcast_ref::<CommandBlockEntity>()
+        let Some(_behind_entity) = behind_entity.as_any().downcast_ref::<CommandBlockEntity>()
         else {
             return;
         };
 
-        if behind_entity.success_count.load(Ordering::Relaxed) > 0 {
+        if command_block.mark_condition_met(world) {
             world.schedule_block_tick(block, *pos, 1, TickPriority::Normal);
         }
     }
@@ -297,13 +284,23 @@ impl BlockBehaviour for CommandBlock {
                 args.block,
             );
 
-            Self::execute(
-                &server,
-                args.world.clone(),
-                block_entity.clone(),
-                &command_entity.command.lock().await,
-            )
-            .await;
+            let previous_condition_met = command_entity.condition_met.load(Ordering::Acquire);
+            let is_auto = args.block.id == Block::REPEATING_COMMAND_BLOCK.id;
+            if is_auto {
+                command_entity.mark_condition_met(args.world);
+            }
+            let should_execute = previous_condition_met;
+            if should_execute {
+                Self::execute(
+                    &server,
+                    args.world.clone(),
+                    block_entity.clone(),
+                    &command_entity.command.lock().await,
+                )
+                .await;
+            } else if props.conditional {
+                command_entity.success_count.store(0, Ordering::Release);
+            }
 
             Self::chain_execute(
                 &server,

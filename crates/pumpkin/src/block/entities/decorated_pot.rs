@@ -4,8 +4,8 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
-use std::pin::Pin;
 use std::sync::Arc;
+use std::{borrow::Cow, pin::Pin};
 use tokio::sync::Mutex;
 
 /// `DecoratedPotBlockEntity.WobbleStyle` (`DecoratedPotBlockEntity.java:177-186`).
@@ -128,6 +128,22 @@ impl DecoratedPotBlockEntity {
 
     pub async fn get_item(&self) -> Option<ItemStack> {
         self.item.lock().await.clone()
+    }
+
+    /// Returns the four serialized sherd identifiers used by
+    /// `DecoratedPotBlock.getDrops` and `getCloneItemStack`.
+    pub fn decorations(&self) -> Option<[Cow<'static, str>; 4]> {
+        let sherds = self.sherds.try_lock().ok()?;
+        sherds
+            .as_ref()?
+            .iter()
+            .map(|tag| {
+                tag.extract_string()
+                    .map(|value| Cow::Owned(value.to_string()))
+            })
+            .collect::<Option<Vec<_>>>()?
+            .try_into()
+            .ok()
     }
 
     pub async fn take_item(&self) -> Option<ItemStack> {

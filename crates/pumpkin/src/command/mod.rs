@@ -110,16 +110,19 @@ impl CommandSender {
             Self::Console => println!("{}", text.to_pretty_console()),
             Self::Player(c) => c.send_system_message(&text).await,
             Self::Rcon(s) => s.lock().await.push(text.to_pretty_console()),
-            Self::CommandBlock(block_entity, _) => {
-                let mut last_output = block_entity.last_output.lock().await;
+            Self::CommandBlock(block_entity, world) => {
+                {
+                    let mut last_output = block_entity.last_output.lock().await;
 
-                let now = time::OffsetDateTime::now_utc();
-                let format = time::macros::format_description!("[hour]:[minute]:[second]");
-                let timestamp = now
-                    .format(&format)
-                    .unwrap_or_else(|_| "00:00:00".to_string());
+                    let now = time::OffsetDateTime::now_utc();
+                    let format = time::macros::format_description!("[hour]:[minute]:[second]");
+                    let timestamp = now
+                        .format(&format)
+                        .unwrap_or_else(|_| "00:00:00".to_string());
 
-                *last_output = format!("[{}] {}", timestamp, text.get_text());
+                    *last_output = format!("[{}] {}", timestamp, text.get_text());
+                };
+                block_entity.on_updated(world);
             }
             Self::Dummy => {}
         }
