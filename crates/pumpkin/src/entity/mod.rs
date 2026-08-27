@@ -688,6 +688,22 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
             let self_entity = self.get_entity();
             let other_entity = entity.get_entity();
 
+            // Vanilla `IronGolem.doPush` (`IronGolem.java:103-110`) gives the golem a
+            // target with a 1/20 roll when it physically collides with an Enemy other
+            // than a creeper. `push_entities` reaches this shared collision method for
+            // every overlapping mob, so keep the species hook here rather than adding a
+            // second collision loop to IronGolemEntity.
+            if self_entity.entity_type == &EntityType::IRON_GOLEM
+                && other_entity.entity_type.category == &pumpkin_data::entity::MobCategory::MONSTER
+                && other_entity.entity_type != &EntityType::CREEPER
+                && rand::random_range(0..20) == 0
+                && let Some(iron_golem) =
+                    self.cast_any()
+                        .downcast_ref::<crate::entity::passive::iron_golem::IronGolemEntity>()
+            {
+                iron_golem.mob_entity.set_target(Some(entity.clone())).await;
+            }
+
             if self_entity.no_clip.load(Ordering::Relaxed)
                 || other_entity.no_clip.load(Ordering::Relaxed)
             {
