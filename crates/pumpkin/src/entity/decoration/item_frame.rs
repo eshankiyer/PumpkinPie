@@ -390,6 +390,20 @@ impl EntityBase for ItemFrameEntity {
         true
     }
 
+    /// `ItemFrame.move` (`ItemFrame.java:140-145`): fixed frames ignore entity
+    /// movement, including movement caused by a piston.
+    fn move_entity<'a>(
+        &'a self,
+        caller: &'a Arc<dyn EntityBase>,
+        motion: Vector3<f64>,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            if !self.fixed.load(Ordering::Relaxed) {
+                self.entity.move_entity(caller, motion).await;
+            }
+        })
+    }
+
     fn damage_with_context<'a>(
         &'a self,
         _caller: &'a dyn EntityBase,

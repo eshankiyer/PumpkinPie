@@ -139,6 +139,45 @@ pub const DEFAULT_AMBIENT_SOUND_INTERVAL: i32 = 80;
 /// Vanilla `AbstractGolem.getAmbientSoundInterval` (`AbstractGolem.java:29-31`).
 const GOLEM_AMBIENT_SOUND_INTERVAL: i32 = 120;
 
+/// Vanilla `Animal.getAmbientSoundInterval` (`Animal.java:121-124`). The Java method is
+/// inherited by every animal, while Pumpkin dispatches the sound cadence through `Mob`; keep
+/// the inherited 120-tick value here for the concrete types implementing `passive::animal::Animal`.
+const fn is_animal_entity(id: u16) -> bool {
+    id == EntityType::ARMADILLO.id
+        || id == EntityType::AXOLOTL.id
+        || id == EntityType::BEE.id
+        || id == EntityType::CAMEL.id
+        || id == EntityType::CAT.id
+        || id == EntityType::CHICKEN.id
+        || id == EntityType::COW.id
+        || id == EntityType::DONKEY.id
+        || id == EntityType::FOX.id
+        || id == EntityType::FROG.id
+        || id == EntityType::GOAT.id
+        || id == EntityType::HAPPY_GHAST.id
+        || id == EntityType::HOGLIN.id
+        || id == EntityType::HORSE.id
+        || id == EntityType::LLAMA.id
+        || id == EntityType::MOOSHROOM.id
+        || id == EntityType::MULE.id
+        || id == EntityType::NAUTILUS.id
+        || id == EntityType::OCELOT.id
+        || id == EntityType::PANDA.id
+        || id == EntityType::PARROT.id
+        || id == EntityType::PIG.id
+        || id == EntityType::POLAR_BEAR.id
+        || id == EntityType::RABBIT.id
+        || id == EntityType::SHEEP.id
+        || id == EntityType::SKELETON_HORSE.id
+        || id == EntityType::SNIFFER.id
+        || id == EntityType::STRIDER.id
+        || id == EntityType::TRADER_LLAMA.id
+        || id == EntityType::TURTLE.id
+        || id == EntityType::WOLF.id
+        || id == EntityType::ZOMBIE_HORSE.id
+        || id == EntityType::ZOMBIE_NAUTILUS.id
+}
+
 pub struct MobEntity {
     pub living_entity: LivingEntity,
     /// Vanilla `Mob.sensing`; the per-tick visibility caches are cleared at the start of
@@ -1259,6 +1298,7 @@ pub trait Mob: EntityBase + Send + Sync {
             {
                 GOLEM_AMBIENT_SOUND_INTERVAL
             }
+            id if is_animal_entity(id) => 120,
             _ => DEFAULT_AMBIENT_SOUND_INTERVAL,
         }
     }

@@ -2,11 +2,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 
 use crate::block::UseWithItemArgs;
+use crate::block::blocks::signs::SignTextAccess;
 use crate::block::entities::BlockEntity;
-use crate::block::entities::sign::SignBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::entity::player::Player;
 use crate::item::{ItemBehaviour, ItemMetadata};
@@ -92,15 +91,14 @@ pub(crate) async fn try_wax_block(world: &Arc<World>, location: BlockPos, block:
 }
 
 impl HoneyCombItem {
-    pub fn apply_to_sign(
-        &self,
+    pub(crate) fn apply_to_sign(
         args: &UseWithItemArgs<'_>,
         block_entity: &Arc<dyn BlockEntity>,
-        sign_entity: &SignBlockEntity,
+        sign_entity: &dyn SignTextAccess,
     ) -> BlockActionResult {
         // Vanilla `HoneycombItem#tryApplyToSign` returns the result of `SignBlockEntity#setWaxed`,
         // which is false when the sign is already waxed, so the honeycomb is not consumed.
-        if sign_entity.is_waxed.swap(true, Ordering::Relaxed) {
+        if !sign_entity.set_waxed() {
             return BlockActionResult::PassToDefaultBlockAction;
         }
 

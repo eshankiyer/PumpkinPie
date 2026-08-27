@@ -1,10 +1,12 @@
 use std::pin::Pin;
 
-use crate::entity::player::Player;
+use crate::entity::{EntityBase, player::Player};
 use crate::item::{ItemBehaviour, ItemMetadata};
 use crate::server::Server;
+use crate::world::game_event::{GameEventContext, emit_game_event};
 use pumpkin_data::BlockDirection;
 use pumpkin_data::block_properties::{BlockProperties, CampfireLikeProperties};
+use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::world::WorldEvent;
@@ -78,6 +80,19 @@ impl ItemBehaviour for ShovelItem {
                 if campfire_props.lit {
                     world.sync_world_event(WorldEvent::SoundExtinguishFire, location, 0);
 
+                    // CampfireBlock.dowse emits BLOCK_CHANGE before ShovelItem emits its
+                    // contextual block-change event (CampfireBlock.java:193-201).
+                    if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id)
+                    {
+                        emit_game_event(
+                            &world,
+                            GameEvent::BlockChange,
+                            location.to_centered_f64(),
+                            GameEventContext::of_entity(player_arc),
+                        )
+                        .await;
+                    }
+
                     campfire_props.lit = false;
                     world
                         .set_block_state(
@@ -90,8 +105,23 @@ impl ItemBehaviour for ShovelItem {
                 }
             }
 
-            if changed && player.gamemode.load() != GameMode::Creative {
-                player.damage_held_item(1).await;
+            if changed {
+                // ShovelItem.useOn: level.gameEvent(BLOCK_CHANGE, pos, Context.of(player,
+                // updatedState)) (ShovelItem.java:60-67).
+                if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
+                    let state_id = world.get_block_state_id(&location);
+                    emit_game_event(
+                        &world,
+                        GameEvent::BlockChange,
+                        location.to_centered_f64(),
+                        GameEventContext::of_entity_with_block_state(player_arc, state_id),
+                    )
+                    .await;
+                }
+
+                if player.gamemode.load() != GameMode::Creative {
+                    player.damage_held_item(1).await;
+                }
             }
         })
     }

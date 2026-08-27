@@ -53,6 +53,7 @@ pub struct SignBlock;
 /// (HangingSignBlockEntity.java:27-29).
 pub(crate) trait SignTextAccess: Send + Sync {
     fn sign_is_waxed(&self) -> bool;
+    fn set_waxed(&self) -> bool;
     fn front_text(&self) -> &crate::block::entities::sign::Text;
     fn back_text(&self) -> &crate::block::entities::sign::Text;
     fn editing_player(&self) -> &Arc<tokio::sync::Mutex<Option<Uuid>>>;
@@ -62,6 +63,10 @@ pub(crate) trait SignTextAccess: Send + Sync {
 impl SignTextAccess for SignBlockEntity {
     fn sign_is_waxed(&self) -> bool {
         self.is_waxed.load(Ordering::Relaxed)
+    }
+
+    fn set_waxed(&self) -> bool {
+        !self.is_waxed.swap(true, Ordering::Relaxed)
     }
 
     fn front_text(&self) -> &crate::block::entities::sign::Text {
@@ -84,6 +89,10 @@ impl SignTextAccess for SignBlockEntity {
 impl SignTextAccess for HangingSignBlockEntity {
     fn sign_is_waxed(&self) -> bool {
         self.is_waxed.load(Ordering::Relaxed)
+    }
+
+    fn set_waxed(&self) -> bool {
+        !self.is_waxed.swap(true, Ordering::Relaxed)
     }
 
     fn front_text(&self) -> &crate::block::entities::sign::Text {
@@ -623,11 +632,11 @@ impl BlockBehaviour for SignBlock {
             let Some(block_entity) = args.world.get_block_entity(args.position) else {
                 return BlockActionResult::Pass;
             };
-            let Some(sign_entity) = block_entity.as_any().downcast_ref::<SignBlockEntity>() else {
+            let Some(sign_entity) = as_sign_text_access(block_entity.as_any()) else {
                 return BlockActionResult::Pass;
             };
 
-            if sign_entity.is_waxed.load(Ordering::Relaxed) {
+            if sign_entity.sign_is_waxed() {
                 return BlockActionResult::PassToDefaultBlockAction;
             }
 
@@ -654,7 +663,7 @@ impl BlockBehaviour for SignBlock {
                 return BlockActionResult::PassToDefaultBlockAction;
             }
 
-            let currently_editing = sign_entity.currently_editing_player.lock().await;
+            let currently_editing = sign_entity.editing_player().lock().await;
             if other_player_is_editing_sign(
                 *currently_editing,
                 &args.player.gameprofile.id,
@@ -666,9 +675,9 @@ impl BlockBehaviour for SignBlock {
             drop(currently_editing);
 
             let text = if is_facing_front_text(args.world, args.position, args.block, args.player) {
-                &sign_entity.front_text
+                sign_entity.front_text()
             } else {
-                &sign_entity.back_text
+                sign_entity.back_text()
             };
 
             let result = pumpkin_item
@@ -704,8 +713,8 @@ impl BlockBehaviour for SignBlock {
                                 },
                             )
                     },
-                    |honeycomb_item| {
-                        honeycomb_item.apply_to_sign(&args, &block_entity, sign_entity)
+                    |_honeycomb_item| {
+                        HoneyCombItem::apply_to_sign(&args, &block_entity, sign_entity)
                     },
                 );
 
