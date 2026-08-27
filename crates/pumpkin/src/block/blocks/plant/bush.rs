@@ -1,4 +1,4 @@
-use pumpkin_data::{Block, BlockDirection, BlockId, BlockStateId};
+use pumpkin_data::{BlockDirection, BlockId, BlockStateId};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
@@ -19,18 +19,19 @@ impl BlockMetadata for BushBlock {
 impl BlockBehaviour for BushBlock {
     /// `FireflyBushBlock.isValidBonemealTarget` (`FireflyBushBlock.java:48-50`) delegates to
     /// `BonemealableBlock.hasSpreadableNeighbourPos` (`BonemealableBlock.java:13-15`): a
-    /// horizontal neighbour must be empty and able to support this bush.
+    /// horizontal neighbour must be empty and able to support this bush. The same behavior is
+    /// inherited by the ordinary `BushBlock` (`BushBlock.java:33-36`).
     fn is_valid_bonemeal_target(&self, args: BonemealArgs<'_>) -> bool {
-        args.block == &Block::FIREFLY_BUSH
-            && find_spreadable_neighbour(self, args.world, args.position, false).is_some()
+        find_spreadable_neighbour(self, args.world, args.position, false).is_some()
     }
 
-    /// `FireflyBushBlock.isBonemealSuccess` (`FireflyBushBlock.java:52-54`) always succeeds.
-    fn is_bonemeal_success(&self, args: BonemealArgs<'_>) -> bool {
-        args.block == &Block::FIREFLY_BUSH
+    /// `BushBlock.isBonemealSuccess` (`BushBlock.java:38-41`) always succeeds; the firefly
+    /// subclass has the same implementation (`FireflyBushBlock.java:55-58`).
+    fn is_bonemeal_success(&self, _args: BonemealArgs<'_>) -> bool {
+        true
     }
 
-    /// `FireflyBushBlock.performBonemeal` (`FireflyBushBlock.java:56-58`) places a fresh bush at
+    /// `BushBlock.performBonemeal` (`BushBlock.java:43-46`) places this block's default state at
     /// the shuffled horizontal spread position selected by
     /// `BonemealableBlock.findSpreadableNeighbourPos` (`BonemealableBlock.java:17-20`).
     fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
@@ -42,7 +43,7 @@ impl BlockBehaviour for BushBlock {
             args.world
                 .set_block_state(
                     &position,
-                    Block::FIREFLY_BUSH.default_state.id,
+                    args.block.default_state.id,
                     BlockFlags::NOTIFY_ALL,
                 )
                 .await;
@@ -71,7 +72,7 @@ impl BlockBehaviour for BushBlock {
 
 impl PlantBlockBase for BushBlock {}
 
-/// Finds an empty horizontal neighbour that can survive as a firefly bush. Vanilla uses a fixed
+/// Finds an empty horizontal neighbour that can survive as this bush. Vanilla uses a fixed
 /// direction order for the validity probe and a random permutation for the actual placement;
 /// `random_start` gives the latter a uniform choice without mutating a shared direction table
 /// (`BonemealableBlock.java:27-40`).
