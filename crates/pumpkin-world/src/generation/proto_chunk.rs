@@ -254,6 +254,7 @@ pub struct ProtoChunk {
     pub blending_data: Option<crate::generation::blender::blending_data::BlendingData>,
     pub pending_block_entities: Vec<NbtCompound>,
     pending_structure_entities: Vec<NbtCompound>,
+    pub block_ticks: Vec<ScheduledTick<&'static Block>>,
     pub fluid_ticks: Vec<ScheduledTick<&'static Fluid>>,
 }
 
@@ -606,6 +607,7 @@ impl ProtoChunk {
             blending_data: None,
             pending_block_entities: Vec::new(),
             pending_structure_entities: Vec::new(),
+            block_ticks: Vec::new(),
             fluid_ticks: Vec::new(),
         }
     }
@@ -625,6 +627,7 @@ impl ProtoChunk {
         proto_chunk
             .blending_data
             .clone_from(&chunk_data.blending_data);
+        proto_chunk.copy_runtime_state_from(chunk_data);
 
         let section_data = &chunk_data.section;
         let heightmap_data = chunk_data
@@ -732,6 +735,18 @@ impl ProtoChunk {
             proto_chunk.stage = resumed_stage;
         }
         proto_chunk
+    }
+
+    fn copy_runtime_state_from(&mut self, chunk_data: &ChunkData) {
+        self.block_ticks = chunk_data.block_ticks.to_vec();
+        self.fluid_ticks = chunk_data.fluid_ticks.to_vec();
+        self.pending_block_entities = chunk_data
+            .pending_block_entities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .cloned()
+            .collect();
     }
 
     #[inline]
@@ -2132,20 +2147,20 @@ impl GenerationCache for ProtoChunk {
     fn get_block_state(&self, pos: &Vector3<i32>) -> BlockStateId {
         Self::get_block_state(self, pos)
     }
-    fn get_fluid_and_fluid_state(&self, _pos: &Vector3<i32>) -> (Fluid, FluidState) {
-        (
-            Fluid::EMPTY,
-            FluidState {
-                height: 0.0,
-                level: 0,
-                is_empty: true,
-                blast_resistance: 0.0,
-                block_state_id: BlockStateId::AIR,
-                is_still: false,
-                is_source: false,
-                falling: false,
-            },
-        )
+    fn get_fluid_and_fluid_state(&self, pos: &Vector3<i32>) -> (Fluid, FluidState) {
+        let block_state_id = self.get_block_state(pos);
+        if let Some(fluid) = Fluid::from_state_id(block_state_id) {
+            return (fluid.clone(), fluid.states[0].clone());
+        }
+
+        let block_state = BlockState::from_id(block_state_id);
+        if block_state.is_waterlogged() {
+            let fluid = Fluid::FLOWING_WATER;
+            return (fluid.clone(), fluid.states[0].clone());
+        }
+
+        let fluid = Fluid::EMPTY;
+        (fluid.clone(), fluid.states[0].clone())
     }
     fn set_block_state(&mut self, pos: &Vector3<i32>, block_state: &BlockState) {
         Self::set_block_state(self, pos.x, pos.y, pos.z, block_state);

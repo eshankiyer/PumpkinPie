@@ -725,6 +725,11 @@ impl EntityBase for BlockDisplayEntity {
         false
     }
 
+    /// Vanilla `Display.getPistonPushReaction` (`Display.java:260-264`) is `IGNORE`.
+    fn can_be_pushed_by_piston(&self) -> bool {
+        false
+    }
+
     fn can_hit(&self) -> bool {
         false
     }
@@ -888,6 +893,11 @@ impl EntityBase for ItemDisplayEntity {
     }
 
     fn is_pushed_by_fluids(&self) -> bool {
+        false
+    }
+
+    /// Vanilla `Display.getPistonPushReaction` (`Display.java:260-264`) is `IGNORE`.
+    fn can_be_pushed_by_piston(&self) -> bool {
         false
     }
 
@@ -1230,6 +1240,11 @@ impl EntityBase for TextDisplayEntity {
     }
 
     fn is_pushed_by_fluids(&self) -> bool {
+        false
+    }
+
+    /// Vanilla `Display.getPistonPushReaction` (`Display.java:260-264`) is `IGNORE`.
+    fn can_be_pushed_by_piston(&self) -> bool {
         false
     }
 

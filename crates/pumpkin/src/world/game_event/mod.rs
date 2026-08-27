@@ -213,6 +213,16 @@ pub async fn emit_game_event(
     position: Vector3<f64>,
     context: GameEventContext,
 ) {
+    // `VibrationSystem.Listener.isValidVibration` rejects a source entity that
+    // dampens vibrations (ItemEntity.java:85-87 and VibrationSystem.java:424-426).
+    // Keep this source-side gate here so every listener observes the same rule.
+    if let Some(source) = context.source_entity.clone()
+        && let Some(item) = source.get_item_entity()
+        && item.dampens_vibrations().await
+    {
+        return;
+    }
+
     let radius = f64::from(notification_radius(&event));
     let radius_sq = radius * radius;
 

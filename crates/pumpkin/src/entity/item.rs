@@ -7,6 +7,7 @@ use pumpkin_data::data_component_impl::ContainerImpl;
 use pumpkin_data::data_component_impl::DamageResistantImpl;
 use pumpkin_data::data_component_impl::DamageResistantType;
 use pumpkin_data::packet::CURRENT_MC_VERSION;
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{Block, item_stack::ItemStack};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::bedrock::client::CAddItemActor;
@@ -22,7 +23,7 @@ use std::sync::atomic::Ordering::{AcqRel, Relaxed};
 use std::sync::{
     Arc,
     atomic::{
-        AtomicBool, AtomicI32, AtomicU8, AtomicU32,
+        AtomicBool, AtomicI32, AtomicU32,
         Ordering::{self},
     },
 };
@@ -46,15 +47,18 @@ pub struct ItemEntity {
     // These cannot be atomic values because we mutate their state based on what they are; we run
     // into the ABA problem
     item_stack: Mutex<ItemStack>,
-    pickup_delay: AtomicU8,
+    pickup_delay: AtomicI32,
     health: AtomicF32,
     never_pickup: AtomicBool,
     /// Vanilla `ItemEntity.target` (NBT `Owner`): when set, only that player may pick the stack
     /// up, and it only merges with another drop reserved for the same player.
     target: AtomicCell<Option<uuid::Uuid>>,
+    /// Vanilla `ItemEntity.thrower` (NBT `Thrower`).
+    thrower: AtomicCell<Option<uuid::Uuid>>,
 }
 
 const ITEM_UPDATE_INTERVAL: u32 = 20;
+const INFINITE_PICKUP_DELAY: i32 = 32_767;
 
 impl ItemEntity {
     pub fn new(entity: Entity, item_stack: ItemStack) -> Self {
@@ -73,7 +77,8 @@ impl ItemEntity {
             item_age: AtomicI32::new(0),
             merge_tick: AtomicU32::new(0),
             target: AtomicCell::new(None),
-            pickup_delay: AtomicU8::new(10), // Vanilla pickup delay is 10 ticks
+            thrower: AtomicCell::new(None),
+            pickup_delay: AtomicI32::new(10), // Vanilla pickup delay is 10 ticks
             health: AtomicF32::new(5.0),
             never_pickup: AtomicBool::new(false),
         }
@@ -96,7 +101,8 @@ impl ItemEntity {
             item_age: AtomicI32::new(0),
             merge_tick: AtomicU32::new(0),
             target: AtomicCell::new(None),
-            pickup_delay: AtomicU8::new(pickup_delay), // Vanilla pickup delay is 10 ticks
+            thrower: AtomicCell::new(None),
+            pickup_delay: AtomicI32::new(i32::from(pickup_delay)), // Vanilla pickup delay is 10 ticks
             health: AtomicF32::new(5.0),
             never_pickup: AtomicBool::new(false),
         }
@@ -111,7 +117,8 @@ impl ItemEntity {
             item_age: AtomicI32::new(0),
             merge_tick: AtomicU32::new(0),
             target: AtomicCell::new(None),
-            pickup_delay: AtomicU8::new(10),
+            thrower: AtomicCell::new(None),
+            pickup_delay: AtomicI32::new(10),
             health: AtomicF32::new(5.0),
             never_pickup: AtomicBool::new(false),
         }
@@ -120,6 +127,66 @@ impl ItemEntity {
     /// Vanilla `ItemEntity.setTarget`: reserve this drop for one player.
     pub fn set_target(&self, target: Option<uuid::Uuid>) {
         self.target.store(target);
+    }
+
+    /// Vanilla `ItemEntity.dampensVibrations` (`ItemEntity.java:85-87`).
+    pub async fn dampens_vibrations(&self) -> bool {
+        self.item_stack
+            .lock()
+            .await
+            .item
+            .has_tag(&tag::Item::MINECRAFT_DAMPENS_VIBRATIONS)
+    }
+
+    /// Vanilla `ItemEntity.setThrower` (`ItemEntity.java:392-394`).
+    pub fn set_thrower(&self, thrower: &dyn EntityBase) {
+        self.thrower.store(Some(thrower.get_entity().entity_uuid));
+    }
+
+    #[must_use]
+    pub fn get_thrower(&self) -> Option<uuid::Uuid> {
+        self.thrower.load()
+    }
+
+    /// Vanilla `ItemEntity.setDefaultPickUpDelay` (`ItemEntity.java:400-402`).
+    pub fn set_default_pickup_delay(&self) {
+        self.never_pickup.store(false, Ordering::Relaxed);
+        self.pickup_delay.store(10, Ordering::Relaxed);
+    }
+
+    /// Vanilla `ItemEntity.setNoPickUpDelay` (`ItemEntity.java:404-406`).
+    pub fn set_no_pickup_delay(&self) {
+        self.never_pickup.store(false, Ordering::Relaxed);
+        self.pickup_delay.store(0, Ordering::Relaxed);
+    }
+
+    /// Vanilla `ItemEntity.setNeverPickUp` (`ItemEntity.java:408-410`).
+    pub fn set_never_pickup(&self) {
+        self.never_pickup.store(true, Ordering::Relaxed);
+        self.pickup_delay
+            .store(INFINITE_PICKUP_DELAY, Ordering::Relaxed);
+    }
+
+    /// Vanilla `ItemEntity.setPickUpDelay` (`ItemEntity.java:412-414`).
+    pub fn set_pickup_delay(&self, ticks: i32) {
+        self.pickup_delay.store(ticks, Ordering::Relaxed);
+    }
+
+    /// Vanilla `ItemEntity.setUnlimitedLifetime` (`ItemEntity.java:420-422`).
+    pub fn set_unlimited_lifetime(&self) {
+        self.item_age
+            .store(INFINITE_LIFETIME_AGE, Ordering::Relaxed);
+    }
+
+    /// Vanilla `ItemEntity.setExtendedLifetime` (`ItemEntity.java:424-426`).
+    pub fn set_extended_lifetime(&self) {
+        self.item_age.store(-6_000, Ordering::Relaxed);
+    }
+
+    /// Vanilla `ItemEntity.makeFakeItem` (`ItemEntity.java:428-431`).
+    pub fn make_fake_item(&self) {
+        self.set_never_pickup();
+        self.item_age.store(5_999, Ordering::Relaxed);
     }
 
     /// Vanilla derives fire immunity from the held stack on every query
@@ -152,7 +219,7 @@ impl ItemEntity {
             || self.entity.removed.load(Ordering::Relaxed)
             || age == INFINITE_LIFETIME_AGE
             || age >= 6_000
-            || self.pickup_delay.load(Ordering::Relaxed) == u8::MAX
+            || self.pickup_delay.load(Ordering::Relaxed) == INFINITE_PICKUP_DELAY
         {
             return false;
         }
@@ -295,8 +362,8 @@ impl ItemEntity {
             .ok();
     }
 
-    const fn next_pickup_delay(value: u8) -> u8 {
-        if value == 0 || value == u8::MAX {
+    const fn next_pickup_delay(value: i32) -> i32 {
+        if value == 0 || value == INFINITE_PICKUP_DELAY {
             value
         } else {
             value - 1
@@ -511,16 +578,18 @@ impl NBTStorage for ItemEntity {
             // no special-casing for the sentinel.
             nbt.put_short("Age", self.item_age.load(Ordering::Relaxed) as i16);
 
-            // `u8::MAX` is this implementation's "never pick up" sentinel;
-            // vanilla spells the same thing as 32767.
+            // Vanilla spells the never-pick-up sentinel as 32767.
             let pickup_delay = match self.pickup_delay.load(Ordering::Relaxed) {
-                u8::MAX => i16::MAX,
-                delay => i16::from(delay),
+                INFINITE_PICKUP_DELAY => i16::MAX,
+                delay => delay as i16,
             };
             nbt.put_short("PickupDelay", pickup_delay);
             nbt.put_short("Health", self.health.load(Relaxed) as i16);
             if let Some(target) = self.target.load() {
                 nbt.put_uuid("Owner", target);
+            }
+            if let Some(thrower) = self.thrower.load() {
+                nbt.put_uuid("Thrower", thrower);
             }
         })
     }
@@ -538,6 +607,7 @@ impl NBTStorage for ItemEntity {
             }
 
             self.target.store(nbt.get_uuid("Owner"));
+            self.thrower.store(nbt.get_uuid("Thrower"));
 
             // Vanilla: `this.age = input.getShortOr("Age", (short)0)`. Negative
             // values are legitimate active states (-32768 never despawns, -6000
@@ -554,9 +624,9 @@ impl NBTStorage for ItemEntity {
                 // is kept deliberately rather than narrowed to an exact-match comparison.
                 #[allow(clippy::absurd_extreme_comparisons)]
                 let delay = if delay >= i16::MAX {
-                    u8::MAX
+                    INFINITE_PICKUP_DELAY
                 } else {
-                    delay.clamp(0, i16::from(u8::MAX - 1)) as u8
+                    i32::from(delay.clamp(0, i16::MAX - 1))
                 };
                 self.pickup_delay.store(delay, Ordering::Relaxed);
             }
@@ -811,7 +881,7 @@ impl EntityBase for ItemEntity {
 
 #[cfg(test)]
 mod tests {
-    use super::ItemEntity;
+    use super::{INFINITE_PICKUP_DELAY, ItemEntity};
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
 
@@ -833,7 +903,10 @@ mod tests {
 
     #[test]
     fn permanent_pickup_delay_is_not_decremented() {
-        assert_eq!(ItemEntity::next_pickup_delay(u8::MAX), u8::MAX);
+        assert_eq!(
+            ItemEntity::next_pickup_delay(INFINITE_PICKUP_DELAY),
+            INFINITE_PICKUP_DELAY
+        );
         assert_eq!(ItemEntity::next_pickup_delay(1), 0);
     }
 }
