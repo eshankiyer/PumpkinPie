@@ -8,6 +8,7 @@ use crate::command::errors::error_types::CommandErrorType;
 use crate::command::node::dispatcher::CommandDispatcher;
 use crate::command::node::{CommandExecutor, CommandExecutorResult};
 use crate::entity::EntityBase;
+use crate::entity::decoration::mannequin::MannequinEntity;
 use crate::net::authentication::{fetch_profile_by_uuid, lookup_profile_by_name};
 use crate::net::{GameProfile, offline_uuid};
 use crate::server::Server;
@@ -87,7 +88,15 @@ async fn report_resolved_profile(
     message_id: &'static str,
     argument: TextComponent,
 ) {
-    let encoded_profile_compound = game_profile_to_nbt(profile);
+    report_resolved_profile_nbt(source, game_profile_to_nbt(profile), message_id, argument).await;
+}
+
+async fn report_resolved_profile_nbt(
+    source: &CommandSource,
+    encoded_profile_compound: NbtCompound,
+    message_id: &'static str,
+    argument: TextComponent,
+) {
     let encoded_profile_as_string = encoded_profile_compound.to_string();
 
     let head_component = TextComponent::player_sprite(encoded_profile_compound, true);
@@ -354,6 +363,15 @@ impl CommandExecutor for PrintForEntityExecutor {
                     &player.gameprofile,
                     translation::java::COMMANDS_FETCHPROFILE_ENTITY_SUCCESS,
                     player.get_display_name().await,
+                )
+                .await;
+                Ok(1)
+            } else if let Some(mannequin) = entity.cast_any().downcast_ref::<MannequinEntity>() {
+                report_resolved_profile_nbt(
+                    &context.source,
+                    mannequin.get_profile().await.unwrap_or_default(),
+                    translation::java::COMMANDS_FETCHPROFILE_ENTITY_SUCCESS,
+                    entity.get_display_name().await,
                 )
                 .await;
                 Ok(1)
