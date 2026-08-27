@@ -13,6 +13,7 @@ use crate::entity::ai::control::look_control::LookControl;
 use crate::entity::ai::control::move_control::MoveControl;
 use crate::entity::ai::goal::Controls;
 use crate::entity::ai::goal::goal_selector::GoalSelector;
+use crate::entity::passive::wolf::WolfEntity;
 use crate::entity::player::Player;
 use crate::entity::r#type::from_type;
 use crate::item::items::spawn_egg::apply_entity_variant;
@@ -24,6 +25,7 @@ use pumpkin_data::attributes::Attributes;
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, IDSet, WeaponImpl};
 use pumpkin_data::effect::StatusEffect;
+use pumpkin_data::enchantment::Enchantment;
 use pumpkin_data::entity::entity_from_egg;
 use pumpkin_data::entity::{EntityType, MobCategory};
 use pumpkin_data::item_stack::{DamageResult, ItemStack};
@@ -398,6 +400,73 @@ impl MobEntity {
             let range_squared = position_target_range.wrapping_mul(position_target_range);
             dx.mul_add(dx, dy.mul_add(dy, dz * dz)) < f64::from(range_squared)
         }
+    }
+
+    /// Vanilla `Mob.canShearEquipment` and `Mob.attemptToShearEquipment`
+    /// (`Mob.java:568-585`): equipment shearing is available only when this mob is not a
+    /// vehicle, and the first equipped item with a shearing-enabled equippable component is
+    /// removed. The item component is the server-side source of both eligibility and sound.
+    pub async fn can_shear_equipment(&self, _player: &Player) -> bool {
+        !self.living_entity.entity.has_vehicle().await
+    }
+
+    pub async fn attempt_to_shear_equipment(&self, player: &Player) -> bool {
+        if !self.can_shear_equipment(player).await {
+            return false;
+        }
+
+        let slots = [
+            EquipmentSlot::MAIN_HAND,
+            EquipmentSlot::OFF_HAND,
+            EquipmentSlot::FEET,
+            EquipmentSlot::LEGS,
+            EquipmentSlot::CHEST,
+            EquipmentSlot::HEAD,
+            EquipmentSlot::BODY,
+            EquipmentSlot::SADDLE,
+        ];
+        let creative = player.gamemode.load() == pumpkin_util::GameMode::Creative;
+        let Some((slot, item, shearing_sound)) = ({
+            let equipment = self.living_entity.entity_equipment.lock().await;
+            slots.into_iter().find_map(|slot| {
+                let item = equipment.get(&slot);
+                let equippable = item.get_data_component::<EquippableImpl>()?;
+                if !equippable.can_be_sheared
+                    || (!creative && item.get_enchantment_level(&Enchantment::BINDING_CURSE) != 0)
+                {
+                    return None;
+                }
+                let shearing_sound = equippable.shearing_sound.clone();
+                Some((slot, item, shearing_sound))
+            })
+        }) else {
+            return false;
+        };
+
+        let mut equipment = self.living_entity.entity_equipment.lock().await;
+        equipment.put(&slot, ItemStack::EMPTY.clone());
+        drop(equipment);
+        self.living_entity
+            .send_equipment_changes(&[(slot, ItemStack::EMPTY.clone())]);
+
+        let entity = &self.living_entity.entity;
+        let world = entity.world.load();
+        player.damage_held_item(1).await;
+        let event_context = world
+            .get_player_by_id(player.entity_id())
+            .map_or_else(GameEventContext::none, |player| {
+                GameEventContext::of_entity(player as Arc<dyn EntityBase>)
+            });
+        emit_game_event(
+            &world,
+            pumpkin_data::game_event::GameEvent::Shear,
+            entity.pos.load(),
+            event_context,
+        )
+        .await;
+        world.drop_stack(&entity.block_pos.load(), item).await;
+        world.play_sound_event(&shearing_sound, SoundCategory::Neutral, &entity.pos.load());
+        true
     }
 
     pub fn set_attacking(&self, attacking: bool) {
@@ -2884,6 +2953,22 @@ impl<T: Mob + Send + 'static> EntityBase for T {
         item_stack: &'a mut ItemStack,
     ) -> EntityBaseFuture<'a, bool> {
         Box::pin(async move {
+            // `Wolf.canShearEquipment` (`Wolf.java:447-450`) overrides the base
+            // `!isVehicle()` check to also require ownership; this codebase has no
+            // per-species override point for the shared shear path, so check it here.
+            let wolf_shear_allowed = (self as &dyn std::any::Any)
+                .downcast_ref::<WolfEntity>()
+                .is_none_or(|wolf| wolf.mob_entity.owner.load() == Some(player.gameprofile.id));
+            if item_stack.is_shears()
+                && !player.get_entity().is_sneaking()
+                && wolf_shear_allowed
+                && self
+                    .get_mob_entity()
+                    .attempt_to_shear_equipment(player)
+                    .await
+            {
+                return true;
+            }
             if self.spawn_egg_interact(player, item_stack).await {
                 return true;
             }
