@@ -1873,6 +1873,16 @@ impl Entity {
         Vector3::new(sin_yaw * cos_pitch, -sin_pitch, cos_yaw * cos_pitch)
     }
 
+    /// Vanilla `Entity.getHandHoldingItemAngle` (`Entity.java:2575-2583`): the horizontal
+    /// direction from the selected arm, scaled to the hand attachment distance. The caller
+    /// resolves which arm holds the item because inventory state is player-specific.
+    #[must_use]
+    pub fn get_hand_holding_item_angle(&self, right_arm: bool) -> Vector3<f64> {
+        let hand_yaw = f64::from(self.yaw.load()) + if right_arm { 80.0 } else { -80.0 };
+        let yaw = -hand_yaw.to_radians();
+        Vector3::new(yaw.sin() * 0.5, 0.0, yaw.cos() * 0.5)
+    }
+
     /// Changes this entity's pitch and yaw to look at target
     pub fn look_at(&self, target: Vector3<f64>) {
         let position = self.pos.load();
