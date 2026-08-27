@@ -143,7 +143,30 @@ impl LoadedFunction {
             .iter()
             .map(|line| match line {
                 FunctionLine::Plain(command) => Ok(command.clone()),
-                FunctionLine::Macro(template) => template.substitute(values),
+                FunctionLine::Macro(template) => {
+                    // Vanilla's FunctionBuilder stores each macro entry's indexes into the
+                    // function-wide parameter list (`MacroFunction.java:96-107`). A template
+                    // may therefore mention parameters in an order different from their first
+                    // appearance in the function; translate that global value list into the
+                    // template's local order before substitution.
+                    let local_values: Result<Vec<String>, String> = template
+                        .variables
+                        .iter()
+                        .map(|variable| {
+                            let index = self
+                                .parameters
+                                .iter()
+                                .position(|parameter| parameter == variable)
+                                .ok_or_else(|| {
+                                    format!("Missing macro parameter '{variable}' in function")
+                                })?;
+                            values.get(index).cloned().ok_or_else(|| {
+                                format!("Missing macro argument '{variable}' for template")
+                            })
+                        })
+                        .collect();
+                    template.substitute(&local_values?)
+                }
             })
             .collect()
     }
@@ -499,6 +522,19 @@ mod tests {
         let function = LoadedFunction::from_lines(&lines).expect("parses");
         assert!(function.is_macro());
         assert_eq!(function.parameters, vec!["x".to_string(), "y".to_string()]);
+    }
+
+    #[test]
+    fn substitution_uses_function_parameter_order_for_each_template() {
+        let lines = vec!["$tp $(x) $(y)".to_string(), "$say $(y) $(x)".to_string()];
+        let function = LoadedFunction::from_lines(&lines).expect("parses");
+
+        assert_eq!(
+            function
+                .substitute_all(&["10".to_string(), "64".to_string()])
+                .expect("substitutes"),
+            vec!["tp 10 64".to_string(), "say 64 10".to_string()]
+        );
     }
 
     #[test]
