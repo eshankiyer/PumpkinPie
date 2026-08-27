@@ -281,6 +281,36 @@ impl Mob for ZombifiedPiglinEntity {
         Some(&self.persistent_anger)
     }
 
+    /// Vanilla `ZombifiedPiglin.isPreventingPlayerRest` (`ZombifiedPiglin.java:240-242`):
+    /// only an angry piglin targeting this player, or angry under universal anger, blocks sleep.
+    fn is_preventing_player_rest(
+        &self,
+        player_uuid: uuid::Uuid,
+        universal_anger: bool,
+    ) -> EntityBaseFuture<'_, bool> {
+        Box::pin(async move {
+            self.persistent_anger.is_angry_at(player_uuid).await
+                || self
+                    .persistent_anger
+                    .is_angry_at_all_players(universal_anger)
+                    .await
+        })
+    }
+
+    /// Vanilla `ZombifiedPiglin.getAmbientSound` (`ZombifiedPiglin.java:224-227`).
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(if self.persistent_anger.is_angry() {
+            Sound::EntityZombifiedPiglinAngry
+        } else {
+            Sound::EntityZombifiedPiglinAmbient
+        })
+    }
+
+    /// Vanilla `ZombifiedPiglin.getHurtSound` (`ZombifiedPiglin.java:229-232`).
+    fn get_hurt_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityZombifiedPiglinHurt)
+    }
+
     /// Vanilla `ZombifiedPiglin.java:156-163`: a `null -> non-null` target transition arms the
     /// one-shot anger sound and the first pack-alert interval.
     fn set_mob_target(&self, target: Option<Arc<dyn EntityBase>>) -> EntityBaseFuture<'_, ()> {

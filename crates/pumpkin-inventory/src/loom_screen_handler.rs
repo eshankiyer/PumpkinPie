@@ -19,6 +19,7 @@ use std::any::Any;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU8;
 
+use pumpkin_data::data_component_impl::{DyeImpl, ProvidesBannerPatternsImpl};
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::screen::WindowType;
 use pumpkin_data::tag::{Item as ItemTag, Taggable};
@@ -38,10 +39,14 @@ fn is_banner(stack: &ItemStack) -> bool {
 
 fn is_dye_item(stack: &ItemStack) -> bool {
     stack.item.has_tag(&ItemTag::MINECRAFT_LOOM_DYES)
+        && stack.get_data_component::<DyeImpl>().is_some()
 }
 
 fn is_pattern_item(stack: &ItemStack) -> bool {
     stack.item.has_tag(&ItemTag::MINECRAFT_LOOM_PATTERNS)
+        && stack
+            .get_data_component::<ProvidesBannerPatternsImpl>()
+            .is_some()
 }
 
 pub struct LoomScreenHandler {

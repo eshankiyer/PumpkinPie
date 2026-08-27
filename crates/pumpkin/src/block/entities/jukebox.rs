@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use pumpkin_data::Block;
+use pumpkin_data::data_component_impl::JukeboxPlayableImpl;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
@@ -257,6 +258,20 @@ impl Inventory for JukeboxBlockEntity {
         Box::pin(async move {
             *self.record_stack.lock().await = stack;
             self.mark_dirty();
+        })
+    }
+
+    /// Vanilla `JukeboxBlockEntity.canPlaceItem` (JukeboxBlockEntity.java:143-145):
+    /// hoppers may insert only a playable record, and only into the empty slot.
+    fn can_place_item<'a>(
+        &'a self,
+        slot: usize,
+        stack: &'a ItemStack,
+    ) -> InventoryFuture<'a, bool> {
+        Box::pin(async move {
+            slot == 0
+                && stack.get_data_component::<JukeboxPlayableImpl>().is_some()
+                && self.record_stack.lock().await.is_empty()
         })
     }
 
