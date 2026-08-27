@@ -3,6 +3,7 @@ use crate::{entity::EntityBaseFuture, server::Server};
 use core::f32;
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::damage::DamageType;
+use pumpkin_data::data_component_impl::BundleContentsImpl;
 use pumpkin_data::data_component_impl::ContainerImpl;
 use pumpkin_data::data_component_impl::DamageResistantImpl;
 use pumpkin_data::data_component_impl::DamageResistantType;
@@ -325,17 +326,26 @@ impl ItemEntity {
         velo
     }
 
-    /// Vanilla `BlockItem.onDestroyed` (`BlockItem.java:198-204`) empties a block item's
-    /// container component and scatters its contents when the dropped item entity is destroyed.
-    async fn drop_container_contents_if_block_item(&self) {
-        let contents = {
+    /// Vanilla `BundleItem.onDestroyed` (`BundleItem.java:248-255`) and
+    /// `BlockItem.onDestroyed` (`BlockItem.java:198-204`) empty container contents and scatter
+    /// them when the dropped item entity is destroyed.
+    async fn drop_container_contents_if_item(&self) {
+        let contents: Option<Vec<ItemStack>> = {
             let mut item_stack = self.item_stack.lock().await;
-            if Block::from_item_id(item_stack.item.id).is_none() {
-                return;
+            if Block::from_item_id(item_stack.item.id).is_some() {
+                item_stack
+                    .get_data_component_mut::<ContainerImpl>()
+                    .map(|container| {
+                        std::mem::take(&mut container.items)
+                            .into_iter()
+                            .map(|(_, stack)| stack)
+                            .collect()
+                    })
+            } else {
+                item_stack
+                    .get_data_component_mut::<BundleContentsImpl>()
+                    .map(|bundle| std::mem::take(&mut bundle.items))
             }
-            item_stack
-                .get_data_component_mut::<ContainerImpl>()
-                .map(|container| std::mem::take(&mut container.items))
         };
 
         let Some(contents) = contents else {
@@ -343,7 +353,7 @@ impl ItemEntity {
         };
         let world = self.entity.world.load();
         let position = BlockPos::floored_v(self.entity.pos.load());
-        for (_, stack) in contents {
+        for stack in contents {
             if !stack.is_empty() {
                 world.drop_stack(&position, stack).await;
             }
@@ -649,7 +659,7 @@ impl EntityBase for ItemEntity {
                     .is_ok()
                 {
                     if new <= 0.0 {
-                        self.drop_container_contents_if_block_item().await;
+                        self.drop_container_contents_if_item().await;
                         self.entity.remove().await;
                     }
                     return true;

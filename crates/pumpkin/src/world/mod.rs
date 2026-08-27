@@ -7313,6 +7313,19 @@ impl World {
 
             let direction = Self::intersects_aabb_with_direction(from, to, world_min, world_max);
             if direction.is_some() {
+                // `ComposterBlock.getInteractionShape` (`ComposterBlock.java:230-233`)
+                // overrides the outline hit direction with a full-cube hit when that
+                // interaction shape is closer. The outline is still required to select the
+                // block, so preserve the loop's collision test and only replace its direction.
+                if Block::from_state_id(state.id) == &Block::COMPOSTER {
+                    let block_min = block_pos.0.to_f64();
+                    let block_max = block_min.add(&Vector3::new(1.0, 1.0, 1.0));
+                    if let Some(interaction_direction) =
+                        Self::intersects_aabb_with_direction(from, to, block_min, block_max)
+                    {
+                        return (true, Some(interaction_direction));
+                    }
+                }
                 return (true, direction);
             }
         }

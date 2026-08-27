@@ -98,6 +98,8 @@ impl DataComponentImpl for ChargedProjectilesImpl {
 #[derive(Clone)]
 pub struct BundleContentsImpl {
     pub items: Vec<crate::item_stack::ItemStack>,
+    /// Vanilla `BundleContents.selectedItem`; -1 means no selected item.
+    pub selected_item: i32,
 }
 impl PartialEq for BundleContentsImpl {
     fn eq(&self, _other: &Self) -> bool {
@@ -122,7 +124,10 @@ impl BundleContentsImpl {
                 }
             }
         }
-        Some(Self { items })
+        Some(Self {
+            items,
+            selected_item: -1,
+        })
     }
     pub fn get_weight(&self) -> u32 {
         self.items
@@ -156,8 +161,31 @@ impl BundleContentsImpl {
         if self.items.is_empty() {
             None
         } else {
-            Some(self.items.remove(0))
+            let index = usize::try_from(self.selected_item)
+                .ok()
+                .filter(|&index| index < self.items.len())
+                .unwrap_or(0);
+            self.selected_item = -1;
+            Some(self.items.remove(index))
         }
+    }
+
+    /// `BundleContents.Mutable.toggleSelectedItem` (`BundleContents.java:228-234`).
+    pub fn toggle_selected_item(&mut self, selected_item: i32) {
+        let valid = usize::try_from(selected_item)
+            .ok()
+            .is_some_and(|index| index < self.items.len());
+        self.selected_item = if self.selected_item != selected_item && valid {
+            selected_item
+        } else {
+            -1
+        };
+    }
+
+    /// `BundleContents.getSelectedItemIndex` (`BundleContents.java:111-113`).
+    #[must_use]
+    pub const fn selected_item_index(&self) -> i32 {
+        self.selected_item
     }
 }
 impl DataComponentImpl for BundleContentsImpl {
