@@ -470,6 +470,11 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         false
     }
 
+    /// Vanilla `Entity.canBeHitByProjectile` (`Entity.java:2005-2007`).
+    fn can_be_hit_by_projectile(&self) -> bool {
+        self.get_entity().is_alive() && self.is_pickable()
+    }
+
     /// Vanilla `Entity.isAttackable` (`Entity.java:2970-2972`), default `true`. Gates the whole
     /// of `Player.attack`/`Player.cannotAttack` (`Player.java:1017-1018`): when an entity
     /// returns `false` here, attacking it has no effect at all -- no cooldown reset, no sound,

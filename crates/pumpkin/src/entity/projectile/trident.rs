@@ -173,6 +173,10 @@ impl TridentEntity {
             return true;
         }
 
+        if !other.can_be_hit_by_projectile() {
+            return true;
+        }
+
         // Skip owner for initial frames (5 ticks)
         if Some(other_ent.entity_id) == self.owner_id && self_ent.age.load(Ordering::Relaxed) < 5 {
             return true;
