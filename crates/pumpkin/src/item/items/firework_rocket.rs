@@ -11,6 +11,7 @@ use pumpkin_data::BlockDirection;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 
@@ -72,6 +73,15 @@ impl ItemBehaviour for FireworkRocketItem {
         Box::pin(async {
             if player.get_entity().is_fall_flying() {
                 let world = player.world();
+                // Vanilla `FireworkRocketItem::use` breaks the player's leash connections
+                // before launching an attached rocket (`FireworkRocketItem.java:58-70`).
+                if player.get_entity().drop_all_leash_connections().await {
+                    world.play_sound(
+                        Sound::ItemLeadBreak,
+                        SoundCategory::Neutral,
+                        &player.get_entity().pos.load(),
+                    );
+                }
                 let entity = Entity::new(
                     world.clone(),
                     player.get_entity().pos.load(),

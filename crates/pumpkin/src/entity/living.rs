@@ -610,15 +610,14 @@ impl LivingEntity {
     /// `MOVEMENT_SPEED` modifier, removed as soon as `frozen_ticks` returns to 0.
     /// `Entity::tick_frozen` (called just before this from `Entity`, which owns
     /// `frozen_ticks`/`is_in_powder_snow`) already ports the tick-counter and freeze-damage
-    /// half; this ports the remaining speed-modifier half. Vanilla additionally gates
-    /// `tryAddFrost` on `!getBlockStateOnLegacy().isAir()` (a legacy block-state lookup at the
-    /// entity's position); that guard is not ported here, so the modifier is applied purely
-    /// from `frozen_ticks > 0` -- a documented, narrow simplification.
+    /// half; this ports the remaining speed-modifier half. Vanilla removes the modifier before
+    /// `tryAddFrost`, which only adds it when `getBlockStateOnLegacy()` is non-air
+    /// (`LivingEntity.java:523-545`).
     const POWDER_SNOW_SPEED_MODIFIER_ID: &'static str = "minecraft:powder_snow";
 
     async fn tick_frost(&self) {
         let frozen_ticks = self.entity.frozen_ticks.load(Relaxed);
-        if frozen_ticks <= 0 {
+        if frozen_ticks <= 0 || self.entity.get_block_state_on_legacy().is_air() {
             let had_modifier = {
                 let map = self
                     .attributes
