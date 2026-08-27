@@ -11,6 +11,7 @@ use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    ageable::{AgeableData, AgeableMob},
     ai::goal::{
         active_target::ActiveTargetGoal, escape_danger::EscapeDangerGoal,
         follow_parent::FollowParentGoal, look_around::RandomLookAroundGoal,
@@ -24,6 +25,7 @@ use crate::entity::{
     persistent_anger::PersistentAnger,
 };
 use crate::world::World;
+use pumpkin_util::math::boundingbox::EntityDimensions;
 
 /// Represents a Polar Bear, a neutral mob found in cold biomes.
 ///
@@ -31,6 +33,8 @@ use crate::world::World;
 pub struct PolarBearEntity {
     pub mob_entity: MobEntity,
     pub persistent_anger: PersistentAnger,
+    /// Vanilla `AgeableMob` state inherited by `PolarBear`.
+    pub ageable_data: AgeableData,
     /// Vanilla `PolarBear.DATA_STANDING_ID`: server-driven rearing-up state that the client
     /// plays the stand animation off of.
     is_standing: AtomicBool,
@@ -44,6 +48,7 @@ impl PolarBearEntity {
         let polar_bear = Self {
             mob_entity,
             persistent_anger: PersistentAnger::default(),
+            ageable_data: AgeableData::default(),
             is_standing: AtomicBool::new(false),
             warning_sound_ticks: AtomicI32::new(0),
         };
@@ -177,10 +182,22 @@ impl PolarBearEntity {
     }
 }
 
+impl AgeableMob for PolarBearEntity {
+    fn get_ageable_data(&self) -> &AgeableData {
+        &self.ageable_data
+    }
+
+    /// `PolarBear.BABY_DIMENSIONS` (`PolarBear.java:67-69`).
+    fn baby_dimensions(&self) -> Option<EntityDimensions> {
+        Some(EntityDimensions::new(0.7, 0.7, 0.34375))
+    }
+}
+
 impl NBTStorage for PolarBearEntity {
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async {
             self.mob_entity.living_entity.write_nbt(nbt).await;
+            self.write_ageable_nbt(nbt);
             self.persistent_anger.write_nbt(nbt).await;
         })
     }
@@ -188,6 +205,7 @@ impl NBTStorage for PolarBearEntity {
     fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
+            self.read_ageable_nbt(nbt);
             self.persistent_anger.read_nbt(nbt).await;
         })
     }
@@ -222,6 +240,7 @@ impl Mob for PolarBearEntity {
 
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
+            self.ageable_ai_step();
             self.persistent_anger.tick().await;
 
             // Vanilla `PolarBear::tick`: `if (warningSoundTicks > 0) warningSoundTicks--;`.
