@@ -178,6 +178,7 @@ async fn give_player_bucket_item(
 pub(crate) async fn try_pickup_fluid_at(
     world: &Arc<World>,
     block_pos: BlockPos,
+    user_is_creative: bool,
 ) -> Option<&'static Item> {
     let (block, state) = world.get_block_and_state_id(&block_pos);
 
@@ -206,7 +207,10 @@ pub(crate) async fn try_pickup_fluid_at(
         return Some(&Item::WATER_BUCKET);
     }
 
-    if is_waterlogged(block, state) {
+    if is_waterlogged(block, state)
+        && (block != &Block::BARRIER
+            || crate::block::blocks::barrier::can_pickup_liquid(user_is_creative))
+    {
         let state_id = set_waterlogged(block, state, false);
         world
             .set_block_state(&block_pos, state_id, BlockFlags::NOTIFY_NEIGHBORS)
@@ -244,14 +248,18 @@ async fn try_pickup_bucket_item(
     world: &Arc<World>,
     block_pos: BlockPos,
     direction: BlockDirection,
+    user_is_creative: bool,
 ) -> Option<(&'static Item, BlockPos)> {
-    if let Some(item) = try_pickup_fluid_at(world, block_pos).await {
+    if let Some(item) = try_pickup_fluid_at(world, block_pos, user_is_creative).await {
         return Some((item, block_pos));
     }
 
     let target_pos = block_pos.offset(direction.to_offset());
     let (block, state) = world.get_block_and_state_id(&target_pos);
-    if waterlogged_check(block, state).is_some() {
+    if waterlogged_check(block, state).is_some()
+        && (block != &Block::BARRIER
+            || crate::block::blocks::barrier::can_pickup_liquid(user_is_creative))
+    {
         let state_id = set_waterlogged(block, state, false);
         world
             .set_block_state(&target_pos, state_id, BlockFlags::NOTIFY_NEIGHBORS)
@@ -468,6 +476,7 @@ pub(crate) async fn try_place_filled_bucket(
     item: &Item,
     pos: BlockPos,
     direction: BlockDirection,
+    user_is_creative: bool,
 ) -> Option<BlockPos> {
     let (block, state) = world.get_block_and_state(&pos);
     if item.id == Item::POWDER_SNOW_BUCKET.id {
@@ -476,7 +485,23 @@ pub(crate) async fn try_place_filled_bucket(
             .then_some(pos.offset(direction.to_offset()));
     }
 
-    if is_waterlogged(block, state.id) && item.id == Item::WATER_BUCKET.id {
+    if block == &Block::BARRIER
+        && item.id == Item::WATER_BUCKET.id
+        && crate::block::blocks::barrier::can_place_liquid(state.id, user_is_creative)
+    {
+        let state_id = set_waterlogged(block, state.id, true);
+        world
+            .set_block_state(&pos, state_id, BlockFlags::NOTIFY_NEIGHBORS)
+            .await;
+        world.schedule_fluid_tick(&Fluid::WATER, pos, 5, TickPriority::Normal);
+        return Some(pos);
+    }
+
+    if is_waterlogged(block, state.id)
+        && item.id == Item::WATER_BUCKET.id
+        && (block != &Block::BARRIER
+            || crate::block::blocks::barrier::can_place_liquid(state.id, user_is_creative))
+    {
         let state_id = set_waterlogged(block, state.id, true);
         world
             .set_block_state(&pos, state_id, BlockFlags::NOTIFY_NEIGHBORS)
@@ -488,7 +513,10 @@ pub(crate) async fn try_place_filled_bucket(
     let target_pos = pos.offset(direction.to_offset());
     let (block, state) = world.get_block_and_state(&target_pos);
 
-    if waterlogged_check(block, state.id).is_some() {
+    if waterlogged_check(block, state.id).is_some()
+        && (block != &Block::BARRIER
+            || crate::block::blocks::barrier::can_place_liquid(state.id, user_is_creative))
+    {
         if item.id == Item::LAVA_BUCKET.id {
             return None;
         }
@@ -624,8 +652,13 @@ impl ItemBehaviour for EmptyBucketItem {
                 return;
             };
 
-            let Some((item, acted_pos)) =
-                try_pickup_bucket_item(&world, block_pos, direction).await
+            let Some((item, acted_pos)) = try_pickup_bucket_item(
+                &world,
+                block_pos,
+                direction,
+                player.gamemode.load() == GameMode::Creative,
+            )
+            .await
             else {
                 return;
             };
@@ -798,7 +831,14 @@ impl ItemBehaviour for FilledBucketItem {
                 play_bucket_evaporation_by_player(&world, player, pos);
                 pos
             } else {
-                let Some(placed_pos) = try_place_filled_bucket(&world, item, pos, direction).await
+                let Some(placed_pos) = try_place_filled_bucket(
+                    &world,
+                    item,
+                    pos,
+                    direction,
+                    player.gamemode.load() == GameMode::Creative,
+                )
+                .await
                 else {
                     return;
                 };

@@ -3533,6 +3533,15 @@ impl LivingEntity {
         !self.is_spectator() && self.entity.is_alive()
     }
 
+    /// Vanilla `LivingEntity.attackable` (`LivingEntity.java:3715-3717`), overridden `false`
+    /// only by `ArmorStand.attackable` (`ArmorStand.java:621-624`). Distinct from
+    /// `Entity.isAttackable`/`is_attackable` (whether the entity can be hit at all) -- this
+    /// gates whether AI target-selection predicates such as `WitherBoss`'s and the Johnny
+    /// Vindicator's may ever pick this entity as a target.
+    pub fn is_valid_ai_target(&self) -> bool {
+        self.entity.entity_type != &EntityType::ARMOR_STAND
+    }
+
     pub async fn reset_state(&self) {
         self.entity.reset_state().await;
 

@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use crate::{
     block::{
-        BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, NormalUseArgs,
-        OnEntityCollisionArgs, RandomTickArgs, UseWithItemArgs,
+        BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetCloneItemStackArgs,
+        GetStateForNeighborUpdateArgs, NormalUseArgs, OnEntityCollisionArgs, RandomTickArgs,
+        UseWithItemArgs,
         blocks::plant::{
             PlantBlockBase,
             crop::{CropBlockBase, MIN_GROWTH_LIGHT},
@@ -30,6 +31,14 @@ use rand::RngExt;
 pub struct SweetBerryBushBlock;
 
 impl BlockBehaviour for SweetBerryBushBlock {
+    /// `SweetBerryBushBlock.getCloneItemStack` (`SweetBerryBushBlock.java:52-55`) returns the
+    /// planting item because the bush itself has no placeable block item.
+    fn get_clone_item_stack(&self, _args: GetCloneItemStackArgs<'_>) -> Option<ItemStack> {
+        Some(crate::block::blocks::plant::crop::clone_seed_stack(
+            &Item::SWEET_BERRIES,
+        ))
+    }
+
     fn is_valid_bonemeal_target(&self, args: crate::block::BonemealArgs<'_>) -> bool {
         <Self as CropBlockBase>::is_valid_bonemeal_target(self, args.world, args.position)
     }

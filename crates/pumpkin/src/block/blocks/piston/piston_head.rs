@@ -6,8 +6,8 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockFlags;
 
 use crate::block::{
-    BlockBehaviour, BlockFuture, BrokenArgs, OnNeighborUpdateArgs, OnStateReplacedArgs,
-    PlayerWillDestroyArgs,
+    BlockBehaviour, BlockFuture, BrokenArgs, GetCloneItemStackArgs, OnNeighborUpdateArgs,
+    OnStateReplacedArgs, PlayerWillDestroyArgs,
 };
 use crate::world::World;
 
@@ -40,6 +40,22 @@ impl PistonHeadBlock {
 }
 
 impl BlockBehaviour for PistonHeadBlock {
+    /// `PistonHeadBlock.getCloneItemStack` (`PistonHeadBlock.java:121-124`): pick-block returns
+    /// the piston variant matching the head's own `type` property.
+    fn get_clone_item_stack(
+        &self,
+        args: GetCloneItemStackArgs<'_>,
+    ) -> Option<pumpkin_data::item_stack::ItemStack> {
+        let state_id = args.world.get_block_state_id(args.position);
+        let props = PistonHeadProperties::from_state_id(state_id, args.block);
+        let item = if props.r#type == pumpkin_data::block_properties::PistonType::Sticky {
+            &pumpkin_data::item::Item::STICKY_PISTON
+        } else {
+            &pumpkin_data::item::Item::PISTON
+        };
+        Some(pumpkin_data::item_stack::ItemStack::new(1, item))
+    }
+
     /// `PistonHeadBlock.playerWillDestroy` (`PistonHeadBlock.java:70-78`): creative removal
     /// destroys a fitting base without drops before the head itself is destroyed.
     fn player_will_destroy<'a>(&'a self, args: PlayerWillDestroyArgs<'a>) -> BlockFuture<'a, ()> {

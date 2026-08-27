@@ -20,6 +20,7 @@ use crate::entity::{
     },
     ai::pathfinder::NavigatorGoal,
     ai::target_predicate::TargetPredicate,
+    living::LivingEntity,
     mob::{Mob, MobEntity},
     projectile::wither_skull::WitherSkullEntity,
 };
@@ -502,7 +503,9 @@ impl WitherNearestTargetGoal {
                         .get_entity()
                         .entity_type
                         .has_tag(&tag::EntityType::MINECRAFT_WITHER_FRIENDS)
-                    && candidate.get_living_entity().is_some()
+                    && candidate
+                        .get_living_entity()
+                        .is_some_and(LivingEntity::is_valid_ai_target)
             })
             .collect();
         candidates.sort_by(|a, b| {
