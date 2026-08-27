@@ -17,6 +17,7 @@ use pumpkin_protocol::{
     java::client::play::Metadata,
 };
 use pumpkin_util::{
+    Hand,
     math::vector3::Vector3,
     random::{RandomGenerator, RandomImpl, get_seed, xoroshiro128::Xoroshiro},
 };
@@ -337,16 +338,34 @@ impl EntityBase for FireworkRocketEntity {
 
             if let Some(shooter) = boosting_elytra_owner {
                 // Logic for boosting Elytra flight
-                let shooter = shooter.get_entity();
-                let rotation = shooter.rotation().to_f64();
-                let shooter_vel = shooter.velocity.load();
+                let shooter_entity = shooter.get_entity();
+                let rotation = shooter_entity.rotation().to_f64();
+                let shooter_vel = shooter_entity.velocity.load();
 
                 let new_shooter_vel =
                     shooter_vel + (rotation * 0.1 + (rotation * 1.5 - shooter_vel) * 0.5);
 
-                shooter.set_velocity(new_shooter_vel);
+                shooter_entity.set_velocity(new_shooter_vel);
 
-                entity.set_pos(shooter.pos.load());
+                // Vanilla `FireworkRocketEntity.tick` (`FireworkRocketEntity.java:125-144`)
+                // places an attached rocket at `getHandHoldingItemAngle`, selecting the
+                // off-hand only when it alone holds a matching rocket.
+                let hand_angle = if let Some(player) = shooter.get_player() {
+                    let main_hand = player.inventory().held_item().await;
+                    let off_hand = player.inventory().off_hand_item().await;
+                    let item_only_in_offhand = off_hand.item.id == Item::FIREWORK_ROCKET.id
+                        && main_hand.item.id != Item::FIREWORK_ROCKET.id;
+                    let main_arm_right = matches!(player.config.load().main_hand, Hand::Right);
+                    shooter_entity.get_hand_holding_item_angle(if item_only_in_offhand {
+                        !main_arm_right
+                    } else {
+                        main_arm_right
+                    })
+                } else {
+                    Vector3::default()
+                };
+
+                entity.set_pos(shooter_entity.pos.load() + hand_angle);
                 entity.set_velocity(new_shooter_vel);
             } else if !self.shot_at_angle.load(Ordering::Relaxed) {
                 // Standard firework rocket flight logic: not applied to a crossbow- or
