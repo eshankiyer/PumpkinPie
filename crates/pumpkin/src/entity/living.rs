@@ -605,7 +605,61 @@ impl LivingEntity {
     }
 
     /// Soul Speed's `minecraft:location_changed` effects (`soul_speed.json`).
-    ///
+    /// `LivingEntity.removeFrost`/`tryAddFrost` (`LivingEntity.java:523-545`): while freezing
+    /// in powder snow, movement speed is slowed by `-0.05 * percentFrozen` via a transient
+    /// `MOVEMENT_SPEED` modifier, removed as soon as `frozen_ticks` returns to 0.
+    /// `Entity::tick_frozen` (called just before this from `Entity`, which owns
+    /// `frozen_ticks`/`is_in_powder_snow`) already ports the tick-counter and freeze-damage
+    /// half; this ports the remaining speed-modifier half. Vanilla additionally gates
+    /// `tryAddFrost` on `!getBlockStateOnLegacy().isAir()` (a legacy block-state lookup at the
+    /// entity's position); that guard is not ported here, so the modifier is applied purely
+    /// from `frozen_ticks > 0` -- a documented, narrow simplification.
+    const POWDER_SNOW_SPEED_MODIFIER_ID: &'static str = "minecraft:powder_snow";
+
+    async fn tick_frost(&self) {
+        let frozen_ticks = self.entity.frozen_ticks.load(Relaxed);
+        if frozen_ticks <= 0 {
+            let had_modifier = {
+                let map = self
+                    .attributes
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                map.get(&Attributes::MOVEMENT_SPEED.id)
+                    .is_some_and(|instance| {
+                        instance
+                            .modifiers
+                            .iter()
+                            .any(|m| m.id == Self::POWDER_SNOW_SPEED_MODIFIER_ID)
+                    })
+            };
+            if had_modifier {
+                self.update_attribute(&Attributes::MOVEMENT_SPEED, |instance| {
+                    instance.remove_modifier(Self::POWDER_SNOW_SPEED_MODIFIER_ID);
+                });
+                crate::entity::attributes::send_attribute_updates_for_living(
+                    self,
+                    vec![Attributes::MOVEMENT_SPEED],
+                )
+                .await;
+            }
+            return;
+        }
+
+        let percent_frozen = f64::from(frozen_ticks) / f64::from(Entity::MAX_FROZEN_TICKS);
+        self.update_attribute(&Attributes::MOVEMENT_SPEED, |instance| {
+            instance.add_or_replace_modifier(Modifier {
+                id: Self::POWDER_SNOW_SPEED_MODIFIER_ID.to_string(),
+                amount: -0.05 * percent_frozen,
+                operation: ModifierOperation::Add,
+            });
+        });
+        crate::entity::attributes::send_attribute_updates_for_living(
+            self,
+            vec![Attributes::MOVEMENT_SPEED],
+        )
+        .await;
+    }
+
     /// Unlike every other enchantment attribute this one is *not* equip-time: vanilla only
     /// holds the `movement_speed`/`movement_efficiency` modifiers while the entity is walking
     /// on `#minecraft:soul_speed_blocks`, and keeps them for the airborne part of a stride
@@ -5463,6 +5517,7 @@ impl EntityBase for LivingEntity {
                 self.tick_movement(server, caller).await;
                 // Vanilla-like order: freeze logic runs after movement/collisions.
                 self.entity.tick_frozen(caller.as_ref()).await;
+                self.tick_frost().await;
                 self.tick_auto_spin_attack(caller, previous_bounding_box)
                     .await;
                 self.push_entities(caller).await;
