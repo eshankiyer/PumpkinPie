@@ -19,9 +19,23 @@ impl JavaClient {
             return;
         }
 
-        debug!(
-            "Bundle item selected: Slot ID {}, Selected Item Index {}",
-            packet.slot_id.0, selected_item_index
-        );
+        let current_handler = player.current_screen_handler.lock().await.clone();
+        let handler = current_handler.lock().await;
+        let Some(slot) = handler
+            .get_behaviour()
+            .slots
+            .get(usize::try_from(packet.slot_id.0).unwrap_or(usize::MAX))
+            .cloned()
+        else {
+            return;
+        };
+        let mut stack = slot.get_stack().await;
+        if let Some(contents) =
+            stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
+        {
+            contents.toggle_selected_item(selected_item_index);
+            slot.set_stack(stack).await;
+            slot.mark_dirty().await;
+        }
     }
 }

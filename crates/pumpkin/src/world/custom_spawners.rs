@@ -15,6 +15,7 @@ use crate::entity::EntityBase;
 use crate::entity::mob::MobEntity;
 use crate::entity::mob::equipment::RegionalDifficulty;
 use crate::entity::passive::cat::select_natural_cat_variant;
+use crate::entity::passive::wandering_trader::WanderingTraderEntity;
 use crate::entity::player::statistics::{CustomStatistic, StatisticCategory};
 use crate::entity::r#type::from_type;
 use crate::world::World;
@@ -292,6 +293,14 @@ async fn try_spawn_wandering_trader(world: &Arc<World>) -> bool {
         }
     }
 
+    // `WanderingTraderSpawner.spawn` (`WanderingTraderSpawner.java:102-104`) applies these
+    // values after the trader and its llamas are created.
+    if let Some(trader_entity) = trader.cast_any().downcast_ref::<WanderingTraderEntity>() {
+        trader_entity.set_despawn_delay(48000);
+        trader_entity.set_wander_target(Some(reference_pos));
+        trader_entity.set_home_to(reference_pos, 16);
+    }
+
     true
 }
 
@@ -301,12 +310,10 @@ async fn try_spawn_wandering_trader(world: &Arc<World>) -> bool {
 /// counter, and a spawn-chance that ramps `25 -> 50 -> 75` (capped) each day
 /// until a trader actually spawns, then resets to 25.
 ///
-/// Scope reductions: the `spawn_delay`/`spawn_chance` counters live only in
-/// memory (`World::trader_spawn_delay` / `trader_spawn_chance`), not in a
-/// persisted `WanderingTraderData` saved-data file, so they reset to vanilla
-/// defaults (24000 / 25) on server restart. The trader also isn't given a
-/// wander/home restriction or scripted despawn timer: Pumpkin's mob
-/// restriction system (`Mob::get_home_pos`) has no setter yet.
+/// Scope reduction: the `spawn_delay`/`spawn_chance` counters live only in memory
+/// (`World::trader_spawn_delay` / `trader_spawn_chance`), not in a persisted
+/// `WanderingTraderData` saved-data file, so they reset to vanilla defaults (24000 / 25) on
+/// server restart.
 pub async fn tick_wandering_trader_spawner(world: &Arc<World>) {
     if !world.level_info.load().game_rules.spawn_wandering_traders {
         return;
