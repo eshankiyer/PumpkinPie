@@ -12,8 +12,8 @@ use pumpkin_world::world::{BlockAccessor, BlockFlags};
 
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockFuture, BrokenArgs, CanPlaceAtArgs, GetRedstonePowerArgs, GetStateForNeighborUpdateArgs,
-    OnNeighborUpdateArgs, OnPlaceArgs, PlacedArgs, PrepareArgs,
+    BlockFuture, CanPlaceAtArgs, GetRedstonePowerArgs, GetStateForNeighborUpdateArgs,
+    OnNeighborUpdateArgs, OnPlaceArgs, OnStateReplacedArgs, PlacedArgs, PrepareArgs,
 };
 use crate::{
     block::{BlockBehaviour, NormalUseArgs},
@@ -157,6 +157,12 @@ impl BlockBehaviour for RedstoneWireBlock {
 
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
+            // RedStoneWireBlock.useWithoutItem (vanilla: RedStoneWireBlock.java:490-506)
+            // does not toggle the shape when the player may not build.
+            if !args.player.abilities.lock().await.allow_modify_world {
+                return BlockActionResult::Pass;
+            }
+
             let state = args.world.get_block_state(args.position);
             let wire = RedstoneWireProperties::from_state_id(state.id, args.block);
             if on_use(wire, args.world, args.position).await {
@@ -237,9 +243,15 @@ impl BlockBehaviour for RedstoneWireBlock {
         })
     }
 
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            update_wire_neighbors(args.world, args.position).await;
+            // RedStoneWireBlock.affectNeighborsAfterRemoval (vanilla:
+            // RedStoneWireBlock.java:315-325) skips piston moves and updates the
+            // surrounding wire network after any ordinary replacement. The generic
+            // World::set_block_state path reaches this hook for non-player removals too.
+            if !args.moved {
+                update_wire_neighbors(args.world, args.position).await;
+            }
         })
     }
 
