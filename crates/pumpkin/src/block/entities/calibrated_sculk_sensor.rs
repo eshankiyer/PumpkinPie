@@ -57,6 +57,10 @@ impl BlockEntity for CalibratedSculkSensorBlockEntity {
 
 impl CalibratedSculkSensorBlockEntity {
     pub const ID: &'static str = "minecraft:calibrated_sculk_sensor";
+    // Vanilla `CalibratedSculkSensorBlockEntity.VibrationUser.getListenerRadius`
+    // (`CalibratedSculkSensorBlockEntity.java:29-32`).
+    pub const LISTENER_RADIUS: i32 = 16;
+
     #[must_use]
     pub fn new(position: BlockPos) -> Self {
         Self {
