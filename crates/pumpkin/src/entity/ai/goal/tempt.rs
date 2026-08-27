@@ -24,6 +24,10 @@ pub struct TemptGoal {
     prev_yaw: f32,
     prev_pitch: f32,
     stop_distance: f64,
+    /// Vanilla `TemptGoal#isRunning`: tracks whether the goal is actively chasing
+    /// a tempting player. Used externally by Ocelot, Cat, and Strider to gate
+    /// interaction/animation logic.
+    is_running: bool,
 }
 
 /// Vanilla `TemptGoal#canContinueToUse`'s scare check, factored out as a pure
@@ -80,11 +84,19 @@ impl TemptGoal {
             prev_yaw: 0.0,
             prev_pitch: 0.0,
             stop_distance,
+            is_running: false,
         }
     }
 
     fn is_tempt_item(&self, stack: &pumpkin_data::item_stack::ItemStack) -> bool {
         stack.item_count > 0 && self.tempt_items.iter().any(|i| i.id == stack.item.id)
+    }
+
+    /// Vanilla `TemptGoal#isRunning`: whether the goal is actively chasing a
+    /// tempting player. Called externally by Ocelot, Cat, and Strider.
+    #[must_use]
+    pub const fn is_running(&self) -> bool {
+        self.is_running
     }
 
     async fn is_holding_tempt_item(&self, player: &Player) -> bool {
@@ -134,6 +146,7 @@ impl Goal for TemptGoal {
             self.target_player = self.find_tempting_player(mob).await;
             if let Some(player) = &self.target_player {
                 self.prev_pos = player.get_entity().pos.load();
+                self.is_running = true;
                 true
             } else {
                 false
@@ -208,15 +221,27 @@ impl Goal for TemptGoal {
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     navigator.set_progress(NavigatorGoal::new(mob_pos, player_pos, self.speed));
+                } else {
+                    mob_entity
+                        .navigator
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .stop();
                 }
             }
         })
     }
 
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
         Box::pin(async move {
             self.target_player = None;
+            self.is_running = false;
             self.cooldown = 100;
+            mob.get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .stop();
         })
     }
 

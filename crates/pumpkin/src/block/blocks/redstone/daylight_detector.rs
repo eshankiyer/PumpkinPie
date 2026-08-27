@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::block::entities::daylight_detector::DaylightDetectorBlockEntity;
-use pumpkin_data::{Block, block_properties::BlockProperties};
+use pumpkin_data::{Block, BlockStateId, block_properties::BlockProperties, game_event::GameEvent};
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockFlags;
@@ -11,6 +11,7 @@ use crate::block::{
     GetRedstonePowerArgs, NormalUseArgs, PlacedArgs,
 };
 use crate::world::World;
+use crate::world::game_event::{GameEventContext, emit_game_event};
 
 type DaylightDetectorProperties = pumpkin_data::block_properties::DaylightDetectorLikeProperties;
 
@@ -41,8 +42,26 @@ impl BlockBehaviour for DaylightDetectorBlock {
             let state = args.world.get_block_state(args.position);
             let props = DaylightDetectorProperties::from_state_id(state.id, args.block);
 
-            self.update_inverted(props, args.world, args.position, args.block)
+            let new_state = self
+                .update_inverted(props, args.world, args.position, args.block)
                 .await;
+
+            // DaylightDetectorBlock.useWithoutItem, lines 80-84: notify vibration/game-event
+            // listeners about the inverted state before recalculating its power.
+            emit_game_event(
+                args.world,
+                GameEvent::BlockChange,
+                pumpkin_util::math::vector3::Vector3::new(
+                    f64::from(args.position.0.x) + 0.5,
+                    f64::from(args.position.0.y) + 0.5,
+                    f64::from(args.position.0.z) + 0.5,
+                ),
+                GameEventContext::of_entity_with_block_state(
+                    args.player.clone() as Arc<dyn crate::entity::EntityBase>,
+                    new_state,
+                ),
+            )
+            .await;
 
             DaylightDetectorBlockEntity::update_power(args.world, args.position).await;
 
@@ -76,7 +95,7 @@ impl DaylightDetectorBlock {
         world: &Arc<World>,
         block_pos: &BlockPos,
         block: &Block,
-    ) {
+    ) -> BlockStateId {
         let mut props = props;
         props.inverted = !props.inverted;
 
@@ -85,5 +104,7 @@ impl DaylightDetectorBlock {
         world
             .set_block_state(block_pos, state, BlockFlags::NOTIFY_LISTENERS)
             .await;
+
+        state
     }
 }
