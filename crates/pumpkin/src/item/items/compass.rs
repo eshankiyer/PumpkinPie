@@ -2,7 +2,7 @@ use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::entity::player::Player;
+use crate::entity::{EntityBase, player::Player};
 use crate::item::{ItemBehaviour, ItemMetadata};
 use crate::server::Server;
 use pumpkin_data::data_component::DataComponent;
@@ -22,7 +22,72 @@ impl ItemMetadata for CompassItem {
     }
 }
 
+/// `new LodestoneTracker(Optional.empty(), true)`: clears the target while keeping the compass
+/// in tracking mode (still shows the lodestone-compass appearance/name, just spins).
+fn clear_lodestone_tracker(item: &mut ItemStack) {
+    item.patch
+        .retain(|(id, _)| *id != DataComponent::LodestoneTracker);
+    item.patch.push((
+        DataComponent::LodestoneTracker,
+        Some(
+            LodestoneTrackerImpl {
+                target: None,
+                tracked: true,
+            }
+            .to_dyn(),
+        ),
+    ));
+}
+
 impl ItemBehaviour for CompassItem {
+    fn inventory_tick<'a>(
+        &'a self,
+        item: &'a mut ItemStack,
+        owner: &'a dyn EntityBase,
+        _server: &'a Server,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            let Some(tracker) = item.get_data_component::<LodestoneTrackerImpl>() else {
+                return;
+            };
+            if !tracker.tracked {
+                return;
+            }
+            let Some(target) = &tracker.target else {
+                return;
+            };
+
+            let world = owner.get_entity().world.load();
+            // Vanilla `LodestoneTracker.tick`: a tracker whose target is in a different
+            // dimension from this one is left untouched (it isn't checked until the item is
+            // back in that dimension).
+            if target.dimension != world.dimension.minecraft_name {
+                return;
+            }
+
+            // Vanilla `isInWorldBounds` failing short-circuits straight to invalidating the
+            // tracker, unlike the different-dimension case above.
+            if target.y < world.min_y || target.y >= world.min_y + world.dimension.height {
+                clear_lodestone_tracker(item);
+                return;
+            }
+
+            let target_pos = BlockPos(Vector3::new(target.x, target.y, target.z));
+            // Vanilla queries the POI manager without forcing an unloaded target chunk to load.
+            // Preserve the component until that location is available to inspect.
+            if !world.is_loaded(&target_pos) {
+                return;
+            }
+            if pumpkin_data::Block::from_state_id(world.get_block_state_id(&target_pos))
+                == &Block::LODESTONE
+            {
+                return;
+            }
+
+            clear_lodestone_tracker(item);
+        })
+    }
+
     fn use_on_block<'a>(
         &'a self,
         item: &'a mut ItemStack,

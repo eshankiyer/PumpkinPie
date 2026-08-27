@@ -21,6 +21,16 @@ pub trait ItemMetadata {
 }
 
 pub trait ItemBehaviour: Send + Sync {
+    /// Called once per server tick for an item held in an inventory.
+    fn inventory_tick<'a>(
+        &'a self,
+        _item: &'a mut ItemStack,
+        _owner: &'a dyn EntityBase,
+        _server: &'a Server,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async {})
+    }
+
     fn normal_use<'a>(
         &'a self,
         _item: &'a Item,
