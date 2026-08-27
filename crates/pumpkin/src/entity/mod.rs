@@ -4495,6 +4495,12 @@ impl Entity {
 
             // Vanilla: ridingCooldown = 60 (prevents immediate re-mount)
             passenger_entity.riding_cooldown.store(60, Relaxed);
+            // `Player.removeVehicle` (`Player.java:864-867`) clears the player's boarding
+            // cooldown after the superclass removes the passenger. The generic dismount path
+            // above serves every passenger type, so restore that player-specific result here.
+            if passenger.get_player().is_some() {
+                passenger_entity.riding_cooldown.store(0, Relaxed);
+            }
 
             // Entity.java:2490 -- `this.level().gameEvent(this, GameEvent.ENTITY_DISMOUNT,
             // oldVehicle.position)`, fired on the passenger with the vehicle's own position.

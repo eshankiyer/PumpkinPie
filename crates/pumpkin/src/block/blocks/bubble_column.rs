@@ -178,6 +178,16 @@ impl BlockBehaviour for BubbleColumnBlock {
                 return;
             }
 
+            // `Player.onAboveBubbleColumn` and `Player.onInsideBubbleColumn`
+            // (`Player.java:310-321`) delegate to the superclass only while the player is not
+            // flying. The collision callback is the shared server-side implementation of both
+            // bubble-column hooks, so flying players must not receive the column impulse.
+            if let Some(player) = args.entity.get_player()
+                && player.is_flying().await
+            {
+                return;
+            }
+
             let kind = kind_from_state(args.state.id);
             let above = args.world.get_block_state_id(&args.position.up());
             let above_state = pumpkin_data::BlockState::from_id(above);

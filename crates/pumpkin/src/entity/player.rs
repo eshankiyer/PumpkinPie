@@ -4578,6 +4578,18 @@ impl Player {
             .get_attribute_value(&Attributes::ENTITY_INTERACTION_RANGE)
     }
 
+    /// `Player.isWithinEntityInteractionRange` (`Player.java:2000-2012`): an entity
+    /// interaction is valid when the nearest point of its bounding box is within the player's
+    /// entity-interaction attribute plus the protocol-side buffer.
+    pub fn is_within_entity_interaction_range(
+        &self,
+        target_bounds: BoundingBox,
+        additional_range: f64,
+    ) -> bool {
+        let max_range = self.entity_interaction_range() + additional_range;
+        target_bounds.squared_magnitude(self.eye_position()) < max_range * max_range
+    }
+
     pub fn can_interact_with_block_at(&self, position: &BlockPos, additional_range: f64) -> bool {
         let d = self.block_interaction_range() + additional_range;
         let box_pos = BoundingBox::from_block(position);

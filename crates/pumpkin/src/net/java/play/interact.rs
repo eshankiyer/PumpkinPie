@@ -34,6 +34,18 @@ impl JavaClient {
             .or_else(|| world.get_entity_by_id(entity_id.0));
 
         if let Some(target) = target {
+            // `ServerGamePacketListenerImpl.handleInteract` (`ServerGamePacketListenerImpl.java:
+            // 1837-1840`) rejects an entity interaction outside the player's interaction range
+            // before dispatching either spectator camera selection or the interaction event.
+            if target.get_entity().is_removed()
+                || !player.is_within_entity_interaction_range(
+                    target.get_entity().bounding_box.load(),
+                    3.0,
+                )
+            {
+                return;
+            }
+
             if player.gamemode.load() == GameMode::Spectator {
                 player.camera_target_id.store(Some(entity_id.0));
                 player.send_client_packet(&CSetCamera::new(entity_id)).await;
