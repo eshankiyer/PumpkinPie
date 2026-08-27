@@ -2983,6 +2983,7 @@ impl Player {
             .entity
             .age
             .fetch_add(1, Ordering::Relaxed);
+        self.tick_inventory(server).await;
         if let Some(sleeping_since) = self.sleeping_since.load()
             && sleeping_since < 101
         {
@@ -3087,6 +3088,26 @@ impl Player {
                     ),
                 )
                 .await;
+            }
+        }
+    }
+
+    /// Ticks the player's main inventory items, matching `Inventory.tick` and its
+    /// `ItemStack.inventoryTick` dispatch (`Inventory.java:241-247`, `ItemStack.java:712-720`).
+    async fn tick_inventory(&self, server: &Server) {
+        for slot in 0..PlayerInventory::MAIN_SIZE {
+            let mut stack = self.inventory().get_stack(slot).await;
+            if stack.is_empty() {
+                continue;
+            }
+            let before = stack.clone();
+            server
+                .item_registry
+                .inventory_tick(&mut stack, self, server)
+                .await;
+            if !stack.are_equal(&before) {
+                self.inventory().set_stack(slot, stack.clone()).await;
+                self.sync_hand_slot(slot, stack).await;
             }
         }
     }

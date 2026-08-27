@@ -49,6 +49,17 @@ impl ItemRegistry {
         }
     }
 
+    pub async fn inventory_tick(
+        &self,
+        stack: &mut ItemStack,
+        owner: &dyn EntityBase,
+        server: &Server,
+    ) {
+        if let Some(behaviour) = self.get_pumpkin_item(stack.item.id) {
+            behaviour.inventory_tick(stack, owner, server).await;
+        }
+    }
+
     pub async fn on_stopped_using(&self, stack: &ItemStack, player: &Player) {
         if let Some(behaviour) = self.get_pumpkin_item(stack.item.id) {
             behaviour.on_stopped_using(stack, player).await;

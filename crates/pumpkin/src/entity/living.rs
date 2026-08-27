@@ -4042,6 +4042,49 @@ impl LivingEntity {
     }
 }
 
+/// Ticks equipment stacks, matching `EntityEquipment.tick` (`EntityEquipment.java:48-55`).
+/// Player main-hand stacks are handled by `Inventory.tick`; the other equipment slots remain
+/// owned by this entity's equipment store.
+async fn tick_equipment_items(living: &LivingEntity, owner: &dyn EntityBase, server: &Server) {
+    let player = owner.get_player();
+    for (slot, mut stack) in living.items_by_equipment_slot(owner).await {
+        if stack.is_empty() || (player.is_some() && slot == EquipmentSlot::MAIN_HAND) {
+            continue;
+        }
+
+        let before = stack.clone();
+        server
+            .item_registry
+            .inventory_tick(&mut stack, owner, server)
+            .await;
+        if stack.are_equal(&before) {
+            continue;
+        }
+
+        living
+            .entity_equipment
+            .lock()
+            .await
+            .put(&slot, stack.clone());
+        living.send_equipment_changes(&[(slot.clone(), stack.clone())]);
+        if let Some(player) = player {
+            let slot_index = player
+                .inventory()
+                .equipment_slots
+                .iter()
+                .find_map(|(index, mapped)| (mapped == &slot).then_some(*index));
+            if let Some(slot_index) = slot_index {
+                player
+                    .enqueue_slot_set_packet(&CSetPlayerInventory::new(
+                        (slot_index as i32).into(),
+                        &ItemStackSerializer::from(stack),
+                    ))
+                    .await;
+            }
+        }
+    }
+}
+
 /// Vanilla persists only an attribute instance's *permanent* modifiers
 /// (`AttributeInstance.java:186-188`, which packs `permanentModifiers`). Everything applied
 /// through `addTransientModifier` is rebuilt from its source after load instead: equipment and
@@ -5383,6 +5426,7 @@ impl EntityBase for LivingEntity {
             {
                 mob.update_swimming().await;
             }
+            tick_equipment_items(self, caller.as_ref(), server).await;
             self.tick_equipment_attributes(caller.as_ref()).await;
             self.tick_soul_speed(caller.as_ref()).await;
             self.tick_location_changed_effects(caller.as_ref()).await;
