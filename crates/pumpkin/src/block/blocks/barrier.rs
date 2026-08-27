@@ -1,14 +1,26 @@
 use crate::block::{BlockBehaviour, BlockFuture, GetStateForNeighborUpdateArgs, OnPlaceArgs};
-use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{
     BlockProperties, MangroveRootsLikeProperties as BarrierLikeProperties,
 };
 use pumpkin_data::fluid::Fluid;
+use pumpkin_data::{Block, BlockStateId};
 use pumpkin_macros::pumpkin_block;
 use pumpkin_world::tick::TickPriority;
 
 #[pumpkin_block("minecraft:barrier")]
 pub struct BarrierBlock;
+
+/// `BarrierBlock.canPlaceLiquid` (`BarrierBlock.java:92-95`) allows water only when the user is a
+/// creative player and the barrier is currently dry. Dispenser placement passes `false` here.
+pub(crate) fn can_place_liquid(state_id: BlockStateId, user_is_creative: bool) -> bool {
+    user_is_creative && !BarrierLikeProperties::from_state_id(state_id, &Block::BARRIER).waterlogged
+}
+
+/// `BarrierBlock.pickupBlock` (`BarrierBlock.java:87-90`) exposes its water only to creative
+/// players. The caller reaches this helper only after confirming the state is waterlogged.
+pub(crate) const fn can_pickup_liquid(user_is_creative: bool) -> bool {
+    user_is_creative
+}
 
 impl BlockBehaviour for BarrierBlock {
     fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
