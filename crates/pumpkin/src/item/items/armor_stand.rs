@@ -1,12 +1,14 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::entity::Entity;
 use crate::entity::decoration::armor_stand::ArmorStandEntity;
 use crate::entity::player::Player;
+use crate::entity::{Entity, EntityBase};
 use crate::item::{ItemBehaviour, ItemMetadata};
 use crate::server::Server;
+use crate::world::game_event::{GameEventContext, emit_game_event};
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
@@ -96,6 +98,17 @@ impl ItemBehaviour for ArmorStandItem {
                 let armor_stand = ArmorStandEntity::new(entity);
 
                 world.spawn_entity(Arc::new(armor_stand)).await;
+                // `ArmorStandItem.useOn` (`ArmorStandItem.java:51-52`): placing the stand
+                // emits ENTITY_PLACE with the player as the source for vibration listeners.
+                if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
+                    emit_game_event(
+                        &world,
+                        GameEvent::EntityPlace,
+                        position,
+                        GameEventContext::of_entity(player_arc),
+                    )
+                    .await;
+                }
                 item.decrement_unless_creative(player.gamemode.load(), 1);
             }
         })

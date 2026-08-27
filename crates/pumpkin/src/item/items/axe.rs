@@ -2,13 +2,16 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use std::pin::Pin;
 
-use crate::entity::player::Player;
+use crate::entity::{EntityBase, player::Player};
 use crate::item::{ItemBehaviour, ItemMetadata};
 use crate::server::Server;
+use crate::world::game_event::{GameEventContext, emit_game_event};
 use pumpkin_data::block_properties::BlockProperties;
 use pumpkin_data::block_properties::{
-    OakDoorLikeProperties, OakTrapdoorLikeProperties, PaleOakWoodLikeProperties,
+    ChestLikeProperties, ChestType, OakDoorLikeProperties, OakTrapdoorLikeProperties,
+    PaleOakWoodLikeProperties,
 };
+use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::Taggable;
@@ -87,6 +90,7 @@ impl ItemBehaviour for AxeItem {
                     let old_state_id = world.get_block_state_id(&location);
                     crate::item::items::state_with_properties_of(block, old_state_id, new_block)
                 };
+                let old_state_id = world.get_block_state_id(&location);
                 world
                     .set_block_state(&location, new_state_id, BlockFlags::NOTIFY_ALL)
                     .await;
@@ -105,6 +109,48 @@ impl ItemBehaviour for AxeItem {
                 world.play_block_sound_expect(player, sound, SoundCategory::Blocks, location);
                 if let Some(event) = level_event {
                     world.sync_world_event(event, location, 0);
+                }
+
+                // `AxeItem.useOn` (`AxeItem.java:78-79,117-126`): changing a block notifies
+                // vibration listeners. Scraping or waxing-off a double chest also notifies its
+                // connected half.
+                if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
+                    emit_game_event(
+                        &world,
+                        GameEvent::BlockChange,
+                        location.to_centered_f64(),
+                        GameEventContext::of_entity_with_block_state(player_arc, new_state_id),
+                    )
+                    .await;
+                }
+                if !matches!(action, AxeAction::Strip)
+                    && (block.has_tag(&tag::Block::C_CHESTS_WOODEN)
+                        || block.has_tag(&tag::Block::MINECRAFT_COPPER_CHESTS))
+                {
+                    let chest = ChestLikeProperties::from_state_id(old_state_id, block);
+                    let connected_direction = match chest.r#type {
+                        ChestType::Single => None,
+                        ChestType::Left => Some(chest.facing.rotate_clockwise()),
+                        ChestType::Right => Some(chest.facing.rotate_counter_clockwise()),
+                    };
+                    if let Some(direction) = connected_direction {
+                        let neighbor = location.offset(direction.to_offset());
+                        let neighbor_state_id = world.get_block_state_id(&neighbor);
+                        if let Some(player_arc) =
+                            world.get_player_by_id(player.get_entity().entity_id)
+                        {
+                            emit_game_event(
+                                &world,
+                                GameEvent::BlockChange,
+                                neighbor.to_centered_f64(),
+                                GameEventContext::of_entity_with_block_state(
+                                    player_arc,
+                                    neighbor_state_id,
+                                ),
+                            )
+                            .await;
+                        }
+                    }
                 }
 
                 true
