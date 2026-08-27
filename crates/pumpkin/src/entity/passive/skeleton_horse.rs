@@ -7,6 +7,7 @@ use std::sync::{
 
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 use rand::RngExt;
@@ -167,6 +168,24 @@ impl AbstractHorse for SkeletonHorseEntity {
 impl Mob for SkeletonHorseEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `SkeletonHorse.getAmbientSound` (`SkeletonHorse.java:68-71`). `eye_in_water` is updated
+    /// during the entity base tick before the shared mob ambient-sound cadence runs.
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(
+            if self
+                .mob_entity
+                .living_entity
+                .entity
+                .eye_in_water
+                .load(Ordering::Relaxed)
+            {
+                Sound::EntitySkeletonHorseAmbientWater
+            } else {
+                Sound::EntitySkeletonHorseAmbient
+            },
+        )
     }
 
     fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
