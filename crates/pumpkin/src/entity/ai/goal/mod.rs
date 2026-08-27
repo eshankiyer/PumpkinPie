@@ -73,6 +73,7 @@ pub mod illusioner_spell;
 pub mod interact;
 pub mod interact_with_door;
 pub mod johnny_attack;
+pub mod land_on_owners_shoulder;
 pub mod leap_at_target;
 pub mod llama_follow_caravan;
 pub mod llama_hurt_by_target;

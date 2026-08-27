@@ -7,7 +7,7 @@ use std::f64::consts::TAU;
 use std::num::NonZero;
 use std::str::FromStr;
 use std::sync::atomic::{
-    AtomicBool, AtomicI8, AtomicI32, AtomicU8, AtomicU16, AtomicU32, Ordering,
+    AtomicBool, AtomicI8, AtomicI32, AtomicI64, AtomicU8, AtomicU16, AtomicU32, Ordering,
 };
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
@@ -978,6 +978,15 @@ pub struct Player {
     pub bedrock_skin: arc_swap::ArcSwap<pumpkin_protocol::bedrock::client::Skin>,
     pub score: AtomicI32,
     pub spawn_extra_particles_on_fall: AtomicBool,
+    /// `ServerPlayer.shoulderEntityLeft`/`shoulderEntityRight`: a tamed entity perched on a
+    /// shoulder, stored as its own serialized NBT rather than a live entity
+    /// (`ServerPlayer.java:408-409,427-429`).
+    pub shoulder_entity_left: Mutex<Option<NbtCompound>>,
+    pub shoulder_entity_right: Mutex<Option<NbtCompound>>,
+    /// `ServerPlayer.timeEntitySatOnShoulder`: the game tick a shoulder slot was last filled,
+    /// used by `removeEntitiesOnShoulder` to enforce a minimum ride duration before a
+    /// shoulder entity can respawn (`ServerPlayer.java:800,804,813`).
+    pub time_entity_sat_on_shoulder: AtomicI64,
 }
 
 use base64::prelude::*;
@@ -1262,7 +1271,128 @@ impl Player {
             bedrock_skin: ArcSwap::new(Arc::new(bedrock_skin)),
             score: AtomicI32::new(0),
             spawn_extra_particles_on_fall: AtomicBool::new(false),
+            shoulder_entity_left: Mutex::new(None),
+            shoulder_entity_right: Mutex::new(None),
+            time_entity_sat_on_shoulder: AtomicI64::new(0),
         }
+    }
+
+    /// `ServerPlayer.setEntityOnShoulder` (`ServerPlayer.java:795-809`): mounts a tamed
+    /// entity's serialized NBT onto an empty shoulder slot (left first, then right).
+    pub async fn set_entity_on_shoulder(&self, entity_tag: NbtCompound) -> bool {
+        if self.living_entity.entity.has_vehicle().await
+            || !self.living_entity.entity.on_ground.load(Ordering::Relaxed)
+            || self
+                .living_entity
+                .entity
+                .touching_water
+                .load(Ordering::Relaxed)
+            || self.living_entity.entity.is_in_powder_snow()
+        {
+            return false;
+        }
+
+        let mut left = self.shoulder_entity_left.lock().await;
+        if left.is_none() {
+            *left = Some(entity_tag);
+            drop(left);
+            let now = self.world().get_world_age().await;
+            self.time_entity_sat_on_shoulder
+                .store(now, Ordering::Relaxed);
+            return true;
+        }
+        drop(left);
+
+        let mut right = self.shoulder_entity_right.lock().await;
+        if right.is_none() {
+            *right = Some(entity_tag);
+            drop(right);
+            let now = self.world().get_world_age().await;
+            self.time_entity_sat_on_shoulder
+                .store(now, Ordering::Relaxed);
+            return true;
+        }
+        false
+    }
+
+    /// `ServerPlayer.handleShoulderEntities` (`ServerPlayer.java:766-772`), called every tick
+    /// from `LivingEntity::tick`. Vanilla also plays each shoulder entity's ambient sound at a
+    /// 1/200 chance per tick (`playShoulderEntityAmbientSound`, `ServerPlayer.java:774-790`,
+    /// including `Parrot.imitateNearbyMobs`'s broader mimicry check); that half is not ported
+    /// here, only the dismount-condition half below.
+    pub async fn handle_shoulder_entities(&self) {
+        if self.shoulder_entity_left.lock().await.is_none()
+            && self.shoulder_entity_right.lock().await.is_none()
+        {
+            return;
+        }
+        let fall_distance = self.living_entity.fall_distance.load();
+        let flying = self.abilities.lock().await.flying;
+        if fall_distance > 0.5
+            || self
+                .living_entity
+                .entity
+                .touching_water
+                .load(Ordering::Relaxed)
+            || flying
+            || self.sleeping_since.load().is_some()
+            || self.living_entity.entity.is_in_powder_snow()
+        {
+            self.remove_entities_on_shoulder().await;
+        }
+    }
+
+    /// `ServerPlayer.removeEntitiesOnShoulder` (`ServerPlayer.java:811-819`): once at least 20
+    /// ticks have passed since a shoulder slot was filled, both slots respawn as real entities.
+    pub async fn remove_entities_on_shoulder(&self) {
+        let now = self.world().get_world_age().await;
+        if self.time_entity_sat_on_shoulder.load(Ordering::Relaxed) + 20 >= now {
+            return;
+        }
+
+        let left = self.shoulder_entity_left.lock().await.take();
+        if let Some(tag) = left {
+            self.respawn_entity_on_shoulder(tag).await;
+        }
+        let right = self.shoulder_entity_right.lock().await.take();
+        if let Some(tag) = right {
+            self.respawn_entity_on_shoulder(tag).await;
+        }
+    }
+
+    /// `ServerPlayer.respawnEntityOnShoulder` (`ServerPlayer.java:821-839`): deserializes the
+    /// shoulder NBT into a fresh live entity next to the player, restoring `TamableAnimal`
+    /// ownership.
+    async fn respawn_entity_on_shoulder(&self, tag: NbtCompound) {
+        let Some(id) = tag.get_string("id") else {
+            return;
+        };
+        let Some(entity_type) = pumpkin_data::entity::EntityType::from_name(
+            id.strip_prefix("minecraft:").unwrap_or(id),
+        ) else {
+            return;
+        };
+        let uuid = tag.get_uuid("UUID").unwrap_or_else(Uuid::new_v4);
+        let world = self.world();
+        let spawn_pos = self.position() + Vector3::new(0.0, 0.7, 0.0);
+        let entity = crate::entity::r#type::from_type(entity_type, spawn_pos, &world, uuid);
+
+        if let Some(living) = entity.get_living_entity() {
+            living.read_nbt_non_mut(&tag).await;
+        } else {
+            entity.get_entity().read_nbt_non_mut(&tag).await;
+        }
+        entity.read_nbt_non_mut(&tag).await;
+        entity.init_data_tracker().await;
+
+        if let Some(parrot) = entity
+            .cast_any()
+            .downcast_ref::<crate::entity::passive::parrot::ParrotEntity>()
+        {
+            parrot.mob_entity.set_owner(self.gameprofile.id);
+        }
+
+        world.spawn_entity(entity).await;
     }
 
     /// Sets the tab list header and footer for Java Edition clients.
@@ -6990,6 +7120,16 @@ impl NBTStorage for Player {
             }
             self.stats.lock().await.write_nbt(nbt);
             self.recipe_book.lock().await.write_nbt(nbt);
+
+            // `ServerPlayer.java:427-429`: only stored when non-empty.
+            let shoulder_left = self.shoulder_entity_left.lock().await.clone();
+            if let Some(tag) = shoulder_left {
+                nbt.put_compound("ShoulderEntityLeft", tag);
+            }
+            let shoulder_right = self.shoulder_entity_right.lock().await.clone();
+            if let Some(tag) = shoulder_right {
+                nbt.put_compound("ShoulderEntityRight", tag);
+            }
         })
     }
 
@@ -7089,6 +7229,11 @@ impl NBTStorage for Player {
             self.root_vehicle_uuid.store(read_root_vehicle(nbt));
             self.stats.lock().await.read_nbt(nbt);
             self.recipe_book.lock().await.read_nbt(nbt);
+
+            *self.shoulder_entity_left.lock().await =
+                nbt.get_compound("ShoulderEntityLeft").cloned();
+            *self.shoulder_entity_right.lock().await =
+                nbt.get_compound("ShoulderEntityRight").cloned();
         })
     }
 }

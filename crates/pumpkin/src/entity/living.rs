@@ -5500,6 +5500,9 @@ impl EntityBase for LivingEntity {
                 && let Some(player) = caller.cast_any().downcast_ref::<Player>()
             {
                 player.breath_manager.tick(player).await;
+                // `Player.tick` (`Player.java:479-482`): shoulder-entity dismount checks run
+                // every tick regardless of alive/air state.
+                player.handle_shoulder_entities().await;
             }
             self.tick_air_supply(caller, was_alive_before_air).await;
 

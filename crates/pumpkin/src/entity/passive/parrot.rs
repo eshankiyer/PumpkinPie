@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use std::sync::Weak;
+use std::sync::atomic::{AtomicI32, Ordering};
 
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
@@ -18,8 +19,8 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
         escape_danger::EscapeDangerGoal, follow_mob::FollowMobGoal, follow_owner::FollowOwnerGoal,
-        look_at_entity::LookAtEntityGoal, sit::SitGoal, swim::SwimGoal,
-        wander_around::WanderAroundGoal,
+        land_on_owners_shoulder::LandOnOwnersShoulderGoal, look_at_entity::LookAtEntityGoal,
+        sit::SitGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
     player::Player,
@@ -29,17 +30,31 @@ use crate::entity::{
 /// vanilla `Parrot.mobInteract`.
 const COOKIE_POISON_DURATION: i32 = 900;
 
+/// `ShoulderRidingEntity.RIDE_COOLDOWN` (`ShoulderRidingEntity.java:14`).
+const RIDE_COOLDOWN: i32 = 100;
+
 /// Represents a Parrot, a passive flying mob that can mimic nearby mob sounds.
 ///
 /// Wiki: <https://minecraft.wiki/w/Parrot>
 pub struct ParrotEntity {
     pub mob_entity: MobEntity,
+    /// `ShoulderRidingEntity.rideCooldownCounter` (`ShoulderRidingEntity.java:15,35-38`):
+    /// vanilla increments this every tick from `ShoulderRidingEntity.tick()`; this codebase
+    /// has no per-tick hook on `ParrotEntity` to mirror that exactly, so it is incremented
+    /// once per `can_sit_on_shoulder` check instead (called from
+    /// `LandOnOwnersShoulderGoal::can_start`, which the goal selector re-evaluates near every
+    /// tick while the goal is inactive) -- a freshly spawned or respawned-from-shoulder parrot
+    /// still starts at 0, giving the same net ~100-tick post-spawn cooldown.
+    ride_cooldown_counter: AtomicI32,
 }
 
 impl ParrotEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
-        let parrot = Self { mob_entity };
+        let parrot = Self {
+            mob_entity,
+            ride_cooldown_counter: AtomicI32::new(0),
+        };
         let mob_arc = Arc::new(parrot);
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
@@ -65,15 +80,43 @@ impl ParrotEntity {
             // `Parrot.ParrotWanderGoal` only overrides the flying-navigation position search;
             // this codebase has no flying-stroll variant, so the water-avoiding stroll stands in.
             goal_selector.add_goal(2, Box::new(WanderAroundGoal::new_water_avoiding(1.0)));
-            // `Parrot.java:168` -- priority 3 `LandOnOwnersShoulderGoal` is still NOT registered:
-            // it needs `Player.setEntityOnShoulder` / shoulder-passenger support, and grepping
-            // `crates/pumpkin/src` for "shoulder" finds nothing but this comment. A goal that can
-            // never fire is worse than an absent one.
+            // `Parrot.java:168`.
+            goal_selector.add_goal(3, LandOnOwnersShoulderGoal::new());
             // `Parrot.java:169` -- priority 3 `FollowMobGoal(this, 1.0, 3.0F, 7.0F)`.
             goal_selector.add_goal(3, FollowMobGoal::new(1.0, 3.0, 7.0));
         };
 
         mob_arc
+    }
+
+    /// `ShoulderRidingEntity.canSitOnShoulder` (`ShoulderRidingEntity.java:41-43`).
+    pub fn can_sit_on_shoulder(&self) -> bool {
+        self.ride_cooldown_counter.fetch_add(1, Ordering::Relaxed) > RIDE_COOLDOWN
+    }
+
+    /// `ShoulderRidingEntity.setEntityOnShoulder` (`ShoulderRidingEntity.java:45-56`): saves
+    /// this parrot into the given player's shoulder slot and discards the live entity.
+    pub async fn set_entity_on_shoulder(&self, player: &Player) -> bool {
+        let mut nbt = pumpkin_nbt::compound::NbtCompound::new();
+        self.write_nbt(&mut nbt).await;
+        nbt.put_string(
+            "id",
+            format!(
+                "minecraft:{}",
+                self.mob_entity
+                    .living_entity
+                    .entity
+                    .entity_type
+                    .resource_name
+            ),
+        );
+
+        if player.set_entity_on_shoulder(nbt).await {
+            self.mob_entity.living_entity.entity.remove().await;
+            true
+        } else {
+            false
+        }
     }
 
     /// Feeds the parrot a cookie: it is poisoned and then killed, as in vanilla
