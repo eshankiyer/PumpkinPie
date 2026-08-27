@@ -38,6 +38,7 @@ const LISTENER_RANGE: i32 = 8;
 
 struct SculkSensorListener {
     pos: BlockPos,
+    radius: i32,
 }
 
 impl GameEventListener for SculkSensorListener {
@@ -46,7 +47,7 @@ impl GameEventListener for SculkSensorListener {
     }
 
     fn listener_radius(&self) -> i32 {
-        LISTENER_RANGE
+        self.radius
     }
 
     fn handle_game_event<'a>(
@@ -80,8 +81,14 @@ impl GameEventListener for SculkSensorListener {
                 .get_position(world)
                 .expect("block position source always resolves");
             let distance = (listener_pos - source_position).length() as f32;
-            let power = redstone_strength_for_distance(distance, LISTENER_RANGE);
+            let power = redstone_strength_for_distance(distance, self.radius);
             let frequency = crate::world::game_event::vibration_frequency(event);
+            // Vanilla `SculkSensorBlockEntity.VibrationUser.canReceiveVibration`
+            // (`SculkSensorBlockEntity.java:102-107`) rejects events with no vibration
+            // frequency before delegating to the sensor activation check.
+            if frequency == 0 {
+                return false;
+            }
 
             let _ = context;
             SculkSensorBlock::trigger(world, &self.pos, block, power, frequency).await;
@@ -216,7 +223,10 @@ impl SculkSensorBlock {
                     .get_weak_redstone_power(back_block, world, &back_pos, back_state, back_dir)
                     .await;
 
-                if calibrated_freq > 0 && calibrated_freq != power {
+                // Vanilla `CalibratedSculkSensorBlockEntity.VibrationUser.canReceiveVibration`
+                // (`CalibratedSculkSensorBlockEntity.java:35-40`) compares the back signal to
+                // the event frequency, not to the distance-derived redstone power.
+                if calibrated_freq > 0 && i32::from(calibrated_freq) != frequency {
                     return;
                 }
 
@@ -225,7 +235,7 @@ impl SculkSensorBlock {
                         .as_any()
                         .downcast_ref::<CalibratedSculkSensorBlockEntity>()
                 {
-                    *cal_be.last_vibration_frequency.lock().await = power as i32;
+                    *cal_be.last_vibration_frequency.lock().await = frequency;
                 }
 
                 props.sculk_sensor_phase = SculkSensorPhase::Active;
@@ -277,6 +287,11 @@ impl BlockBehaviour for SculkSensorBlock {
             args.world
                 .register_game_event_listener(Arc::new(SculkSensorListener {
                     pos: *args.position,
+                    radius: if args.block.id == BlockId::CALIBRATED_SCULK_SENSOR {
+                        CalibratedSculkSensorBlockEntity::LISTENER_RADIUS
+                    } else {
+                        LISTENER_RANGE
+                    },
                 }))
                 .await;
         })
@@ -341,7 +356,12 @@ impl BlockBehaviour for SculkSensorBlock {
             let distance = listener_pos
                 .distance_squared(args.entity.get_entity().pos.load())
                 .sqrt();
-            let power = redstone_strength_for_distance(distance as f32, LISTENER_RANGE);
+            let listener_radius = if args.block.id == BlockId::CALIBRATED_SCULK_SENSOR {
+                CalibratedSculkSensorBlockEntity::LISTENER_RADIUS
+            } else {
+                LISTENER_RANGE
+            };
+            let power = redstone_strength_for_distance(distance as f32, listener_radius);
             Self::trigger(
                 args.world,
                 args.position,
