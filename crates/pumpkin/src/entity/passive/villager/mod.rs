@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::block::blocks::{bed::BedBlock, composter::ComposterBlock};
 use pumpkin_data::Block;
 use pumpkin_data::Enchantment;
+use pumpkin_data::HorizontalFacingExt;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::block_properties::{
     BedPart, BlockProperties, ComposterLikeProperties, WhiteBedLikeProperties as BedProperties,
@@ -1427,16 +1428,27 @@ impl VillagerEntity {
     /// when a player uses an occupied bed: un-occupies the bed and stands the villager up.
     pub async fn stop_sleeping(&self, world: &Arc<World>) {
         let home_pos = *self.home_pos.lock().unwrap();
+        let mut stand_up_position = None;
         if let Some(home_pos) = home_pos {
             let (block, state) = world.get_block_and_state(&home_pos);
             if block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_BEDS) {
                 let bed_props = BedProperties::from_state_id(state.id, block);
                 if bed_props.occupied {
+                    stand_up_position = BedBlock::find_stand_up_position(
+                        world,
+                        &home_pos,
+                        bed_props.facing.to_block_direction(),
+                        self.get_entity().yaw.load(),
+                        &EntityType::VILLAGER,
+                    );
                     BedBlock::set_occupied(false, world, block, &home_pos, state.id).await;
                 }
             }
         }
 
+        if let Some(position) = stand_up_position {
+            self.get_entity().set_pos(position);
+        }
         self.get_entity().set_pose(EntityPose::Standing);
         self.get_entity().send_meta_data(
             &[Metadata::new(

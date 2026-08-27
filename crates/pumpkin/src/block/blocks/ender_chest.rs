@@ -5,6 +5,7 @@ use crate::block::{
     BlockBehaviour, BlockFuture, NormalUseArgs, OnPlaceArgs, OnSyncedBlockEventArgs, PlacedArgs,
     registry::BlockActionResult,
 };
+use crate::entity::mob::piglin_shared;
 use crate::world::World;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BlockProperties, LadderLikeProperties};
@@ -116,7 +117,7 @@ impl BlockBehaviour for EnderChestBlock {
                         Some(*args.position),
                     )
                     .await;
-                // TODO: PiglinBrain.onGuardedBlockInteracted(serverWorld, player, true);
+                piglin_shared::anger_nearby_piglins(args.world, args.player).await;
             }
 
             BlockActionResult::Success
