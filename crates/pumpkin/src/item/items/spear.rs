@@ -469,11 +469,21 @@ impl ItemBehaviour for SpearItem {
                 let damage_dealt =
                     base_damage + (relative_speed * params.damage_multiplier).floor();
 
-                // `LivingEntity.stabAttack` (`LivingEntity.java:2889-2930`), reduced to the
-                // damage and knockback halves. The dismount half
-                // (`LivingEntity.java:2912-2915`) is not portable: Pumpkin has no
-                // `stopRiding` equivalent, so `deals_dismount` alone cannot yet produce an
-                // effect and only serves to let a stab through to the knockback branch.
+                // `LivingEntity.stabAttack` (`LivingEntity.java:2889-2930`). A dismount is a
+                // server-side state change, so route it through the vehicle's existing
+                // passenger-removal path just as `target.stopRiding()` does in vanilla
+                // (`LivingEntity.java:2912-2915`).
+                if deals_dismount {
+                    let vehicle = target_entity.vehicle.lock().await.clone();
+                    if let Some(vehicle) = vehicle {
+                        vehicle
+                            .get_entity()
+                            .remove_passenger(target_entity.entity_id)
+                            .await;
+                        affected = true;
+                    }
+                }
+
                 if deals_damage {
                     let attacker = world.get_entity_by_id(attacker_id);
                     let dealt = target
