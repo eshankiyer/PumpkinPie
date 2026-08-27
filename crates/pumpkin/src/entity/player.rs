@@ -204,6 +204,7 @@ impl BedrockPlayer<'_> {
         self.client_data().map(|d| d.graphics_mode)
     }
 }
+use pumpkin_data::HorizontalFacingExt;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::block_properties::{BlockProperties, HorizontalFacing};
 use pumpkin_data::damage::DamageType;
@@ -2672,10 +2673,20 @@ impl Player {
         }
 
         let (bed, bed_state) = world.get_block_and_state_id(&respawn_point.position);
+        let bed_properties =
+            pumpkin_data::block_properties::WhiteBedLikeProperties::from_state_id(bed_state, bed);
+        let stand_up_position = BedBlock::find_stand_up_position(
+            &world,
+            &respawn_point.position,
+            bed_properties.facing.to_block_direction(),
+            self.get_entity().yaw.load(),
+            &EntityType::PLAYER,
+        )
+        .unwrap_or_else(|| respawn_point.position.to_f64().add_raw(0.5, 1.1, 0.5));
         BedBlock::set_occupied(false, &world, bed, &respawn_point.position, bed_state).await;
 
         self.living_entity.entity.set_pose(EntityPose::Standing);
-        self.living_entity.entity.set_pos(self.position());
+        self.living_entity.entity.set_pos(stand_up_position);
         self.living_entity.entity.send_meta_data(
             &[Metadata::new(
                 pumpkin_data::tracked_data::player::SLEEPING_POS_ID,

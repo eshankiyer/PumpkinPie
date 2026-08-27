@@ -7,8 +7,10 @@ use pumpkin_data::Block;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::BedPart;
 use pumpkin_data::block_properties::BlockProperties;
+use pumpkin_data::block_properties::CampfireLikeProperties;
 use pumpkin_data::dimension::Dimension;
 use pumpkin_data::entity::{EntityPose, EntityType};
+use pumpkin_data::tag::Taggable;
 use pumpkin_data::translation;
 use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_util::GameMode;
@@ -441,6 +443,181 @@ impl BlockBehaviour for BedBlock {
 }
 
 impl BedBlock {
+    /// `BedBlock.findStandUpPosition`'s danger predicate
+    /// (`net/minecraft/world/level/block/BedBlock.java:206-264`, via `DismountHelper`).
+    fn is_dangerous_stand_position(
+        world: &World,
+        position: &BlockPos,
+        entity_type: &EntityType,
+    ) -> bool {
+        let state = world.get_block_state(position);
+        let block = Block::from_state_id(state.id);
+        let burning = block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_FIRE)
+            || block == &Block::LAVA
+            || block == &Block::MAGMA_BLOCK
+            || block == &Block::LAVA_CAULDRON
+            || ((block == &Block::CAMPFIRE || block == &Block::SOUL_CAMPFIRE)
+                && CampfireLikeProperties::from_state_id(state.id, block).lit);
+        (!entity_type.fire_immune && burning)
+            || block == &Block::WITHER_ROSE
+            || block == &Block::SWEET_BERRY_BUSH
+            || block == &Block::CACTUS
+            || block == &Block::POWDER_SNOW
+    }
+
+    /// Checks a single candidate offset from `base` for a safe, collision-free stand-up spot.
+    fn find_stand_up_candidate(
+        world: &World,
+        base: &BlockPos,
+        offsets: &[(i32, i32)],
+        check_dangerous: bool,
+        entity_type: &EntityType,
+    ) -> Option<Vector3<f64>> {
+        offsets.iter().find_map(|(dx, dz)| {
+            let candidate = BlockPos(Vector3::new(base.0.x + dx, base.0.y, base.0.z + dz));
+            if check_dangerous && Self::is_dangerous_stand_position(world, &candidate, entity_type)
+            {
+                return None;
+            }
+
+            let floor_height = world.get_dismount_height(&candidate);
+            if !floor_height.is_finite() || floor_height >= 1.0 {
+                return None;
+            }
+            if check_dangerous
+                && floor_height <= 0.0
+                && Self::is_dangerous_stand_position(world, &candidate.down(), entity_type)
+            {
+                return None;
+            }
+
+            let position = Vector3::new(
+                f64::from(candidate.0.x) + 0.5,
+                f64::from(candidate.0.y) + floor_height,
+                f64::from(candidate.0.z) + 0.5,
+            );
+            let half_width = f64::from(entity_type.dimension[0]) / 2.0;
+            let bounding_box = pumpkin_util::math::boundingbox::BoundingBox::new(
+                Vector3::new(position.x - half_width, position.y, position.z - half_width),
+                Vector3::new(
+                    position.x + half_width,
+                    position.y + f64::from(entity_type.dimension[1]),
+                    position.z + half_width,
+                ),
+            );
+            let invalid_player_spawn = entity_type == &EntityType::PLAYER
+                && (world
+                    .get_block(&candidate)
+                    .has_tag(&pumpkin_data::tag::Block::MINECRAFT_INVALID_SPAWN_INSIDE)
+                    || world
+                        .get_block(&candidate.up())
+                        .has_tag(&pumpkin_data::tag::Block::MINECRAFT_INVALID_SPAWN_INSIDE));
+            (!invalid_player_spawn && world.is_space_empty(bounding_box)).then_some(position)
+        })
+    }
+
+    /// Finds the first collision-free position around a bed where a sleeping entity can stand.
+    ///
+    /// This follows `BedBlock.findStandUpPosition` and its offset ordering from
+    /// `net/minecraft/world/level/block/BedBlock.java:206-264`.  Pumpkin's world exposes the
+    /// equivalent floor-height and block-collision queries directly, so the helper is shared by
+    /// players and villagers when they leave a bed.
+    pub fn find_stand_up_position(
+        world: &World,
+        bed_pos: &BlockPos,
+        forward: pumpkin_data::BlockDirection,
+        yaw: f32,
+        entity_type: &EntityType,
+    ) -> Option<Vector3<f64>> {
+        let right = forward.rotate_clockwise();
+        let look_radians = yaw.to_radians();
+        let facing_right = match right {
+            pumpkin_data::BlockDirection::North => look_radians.cos() < 0.0,
+            pumpkin_data::BlockDirection::South => look_radians.cos() > 0.0,
+            pumpkin_data::BlockDirection::West => look_radians.sin() > 0.0,
+            pumpkin_data::BlockDirection::East => look_radians.sin() < 0.0,
+            _ => false,
+        };
+        let side = if facing_right {
+            right.opposite()
+        } else {
+            right
+        };
+
+        let step = |direction: pumpkin_data::BlockDirection| {
+            let offset = direction.to_offset();
+            (offset.x, offset.z)
+        };
+        let (forward_x, forward_z) = step(forward);
+        let (side_x, side_z) = step(side);
+        let surround_offsets = [
+            (side_x, side_z),
+            (side_x - forward_x, side_z - forward_z),
+            (side_x - forward_x * 2, side_z - forward_z * 2),
+            (-forward_x * 2, -forward_z * 2),
+            (-side_x - forward_x * 2, -side_z - forward_z * 2),
+            (-side_x - forward_x, -side_z - forward_z),
+            (-side_x, -side_z),
+            (-side_x + forward_x, -side_z + forward_z),
+            (forward_x, forward_z),
+            (side_x + forward_x, side_z + forward_z),
+        ];
+        let above_offsets = [(0, 0), (-forward_x, -forward_z)];
+        let is_bunk = world
+            .get_block(&bed_pos.down())
+            .has_tag(&pumpkin_data::tag::Block::MINECRAFT_BEDS);
+
+        let mut offsets = surround_offsets.to_vec();
+        if !is_bunk {
+            offsets.extend(above_offsets);
+        }
+
+        if is_bunk {
+            for check_dangerous in [true, false] {
+                if let Some(position) = Self::find_stand_up_candidate(
+                    world,
+                    bed_pos,
+                    &surround_offsets,
+                    check_dangerous,
+                    entity_type,
+                ) {
+                    return Some(position);
+                }
+                if let Some(position) = Self::find_stand_up_candidate(
+                    world,
+                    &bed_pos.down(),
+                    &surround_offsets,
+                    check_dangerous,
+                    entity_type,
+                ) {
+                    return Some(position);
+                }
+                if let Some(position) = Self::find_stand_up_candidate(
+                    world,
+                    bed_pos,
+                    &above_offsets,
+                    check_dangerous,
+                    entity_type,
+                ) {
+                    return Some(position);
+                }
+            }
+        } else {
+            for check_dangerous in [true, false] {
+                if let Some(position) = Self::find_stand_up_candidate(
+                    world,
+                    bed_pos,
+                    &offsets,
+                    check_dangerous,
+                    entity_type,
+                ) {
+                    return Some(position);
+                }
+            }
+        }
+        None
+    }
+
     pub async fn set_occupied(
         occupied: bool,
         world: &Arc<World>,

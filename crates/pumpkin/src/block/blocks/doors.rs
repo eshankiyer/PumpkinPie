@@ -309,11 +309,12 @@ impl BlockBehaviour for DoorBlock {
             // when the player broke the UPPER half, and only suppresses that lower half's
             // drop when `player.preventsBlockDrops() || !player.hasCorrectToolForDrops(state)`
             // - breaking the LOWER half, or breaking the UPPER half in survival with the right
-            // tool, always lets the other half's loot drop normally. The wrong-tool check isn't
-            // ported (no tool-correctness helper exists here yet), so this only covers the
-            // creative-mode half of the condition.
+            // tool, always lets the other half's loot drop normally.
             let is_creative = args.player.gamemode.load() == pumpkin_util::GameMode::Creative;
-            let flags = if door_props.half == DoubleBlockHalf::Upper && is_creative {
+            let actual_block = Block::from_state_id(args.state.id);
+            let suppress_other_half_drop = door_props.half == DoubleBlockHalf::Upper
+                && (is_creative || !args.player.can_harvest(args.state, actual_block).await);
+            let flags = if suppress_other_half_drop {
                 BlockFlags::SKIP_DROPS | BlockFlags::NOTIFY_ALL
             } else {
                 BlockFlags::NOTIFY_ALL
