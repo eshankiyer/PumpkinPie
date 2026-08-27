@@ -1,13 +1,16 @@
 use pumpkin_data::item::Item;
 use pumpkin_data::translation;
 use pumpkin_data::{
+    Block, BlockDirection,
     block_properties::{BlockProperties, RespawnAnchorLikeProperties},
     dimension::Dimension,
+    fluid::Fluid,
     game_event::GameEvent,
     sound::{Sound, SoundCategory},
 };
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::GameMode;
+use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockFlags;
 use std::sync::Arc;
 
@@ -16,7 +19,57 @@ use crate::block::{
     registry::BlockActionResult,
 };
 use crate::entity::EntityBase;
+use crate::world::World;
+use crate::world::explosion::{
+    DefaultExplosionDamageCalculator, Explosion, ExplosionDamageCalculator,
+};
 use crate::world::game_event::{GameEventContext, emit_game_event};
+
+/// `RespawnAnchorBlock.isWaterThatWouldFlow` (`RespawnAnchorBlock.java:140-156`): a water
+/// source, or flowing water with enough amount left (`getAmount() == FluidState.level`,
+/// 8 = a full/source column - see `grass_block.rs`'s `FULL_FLUID_AMOUNT`) whose column
+/// isn't just draining into empty space below.
+fn is_water_that_would_flow(world: &World, pos: BlockPos) -> bool {
+    let (fluid, state) = world.get_fluid_and_fluid_state(&pos);
+    if !fluid.matches_type(&Fluid::WATER) {
+        return false;
+    }
+    if state.is_source {
+        return true;
+    }
+    if state.level < 2 {
+        return false;
+    }
+    let (below_fluid, _) = world.get_fluid_and_fluid_state(&pos.down());
+    below_fluid.matches_type(&Fluid::WATER)
+}
+
+/// `RespawnAnchorBlock.explode`'s custom `ExplosionDamageCalculator`
+/// (`RespawnAnchorBlock.java:163-172`): the anchor's own former position reports water's
+/// explosion resistance instead of the surrounding terrain's, when water would flow in.
+struct RespawnAnchorExplosionCalculator {
+    anchor_pos: BlockPos,
+    in_water: bool,
+}
+
+impl ExplosionDamageCalculator for RespawnAnchorExplosionCalculator {
+    fn get_block_explosion_resistance(
+        &self,
+        explosion: &Explosion,
+        world: &World,
+        pos: &BlockPos,
+        block: &Block,
+        fluid: &pumpkin_data::fluid::FluidState,
+    ) -> Option<f32> {
+        if *pos == self.anchor_pos && self.in_water {
+            // `Blocks.WATER.getExplosionResistance()`.
+            Some(Block::WATER.blast_resistance)
+        } else {
+            DefaultExplosionDamageCalculator
+                .get_block_explosion_resistance(explosion, world, pos, block, fluid)
+        }
+    }
+}
 
 /// `net.minecraft.world.level.block.RespawnAnchorBlock`: charges with glowstone, sets the
 /// player's respawn point on an empty-hand use, and explodes instead outside the Nether.
@@ -99,20 +152,44 @@ impl BlockBehaviour for RespawnAnchorBlock {
                 args.world
                     .break_block(args.position, None, BlockFlags::SKIP_DROPS)
                     .await;
-                // Vanilla `RespawnAnchorBlock.explode` (lines 160-176) uses a custom
-                // `ExplosionDamageCalculator` (softens resistance for a water-neighbor block)
-                // and `damageSources().badRespawnPointExplosion(pos)` as the explosion's damage
-                // source; neither a per-position resistance override nor a pluggable damage
-                // source exists on `World::explode`/`Explosion` in this codebase (checked:
-                // `explode_with_fire` in `pumpkin/src/world/mod.rs` takes only
-                // `position`/`power`/`interaction`). Left as a known
-                // divergence pending an `Explosion` API extension. The `creates_fire = true`
-                // half (`explode_with_fire`) is not a gap and is applied below.
+                // Vanilla `RespawnAnchorBlock.explode` (`RespawnAnchorBlock.java:159-176`):
+                // the anchor's own former position reports water's explosion resistance
+                // when the anchor block was in/adjacent to flowing water, softening the
+                // blast there. The damage-source attribution
+                // (`damageSources().badRespawnPointExplosion`) has no equivalent yet --
+                // entities hurt by this blast are attributed the generic explosion damage
+                // type instead of a respawn-anchor-specific one; narrow, admin/edge-case
+                // divergence, left as-is.
+                let mut in_water = false;
+                for direction in [
+                    BlockDirection::North,
+                    BlockDirection::South,
+                    BlockDirection::East,
+                    BlockDirection::West,
+                ] {
+                    if is_water_that_would_flow(
+                        args.world,
+                        args.position.offset(direction.to_offset()),
+                    ) {
+                        in_water = true;
+                        break;
+                    }
+                }
+                if !in_water {
+                    let (above_fluid, _) =
+                        args.world.get_fluid_and_fluid_state(&args.position.up());
+                    in_water = above_fluid.matches_type(&Fluid::WATER);
+                }
+
                 args.world
-                    .explode_with_fire(
+                    .explode_with_fire_and_calculator(
                         args.position.to_centered_f64(),
                         5.0,
                         crate::world::ExplosionInteraction::Block,
+                        Arc::new(RespawnAnchorExplosionCalculator {
+                            anchor_pos: *args.position,
+                            in_water,
+                        }),
                     )
                     .await;
                 return BlockActionResult::SuccessServer;

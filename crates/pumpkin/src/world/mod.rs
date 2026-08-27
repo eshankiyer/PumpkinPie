@@ -4422,6 +4422,25 @@ impl World {
         self.run_explosion(explosion, position, power).await;
     }
 
+    /// Like [`Self::explode_with_fire`], but with a custom [`ExplosionDamageCalculator`]
+    /// (e.g. `RespawnAnchorBlock.explode`'s water-softened resistance at its own position,
+    /// `RespawnAnchorBlock.java:159-176`).
+    pub async fn explode_with_fire_and_calculator(
+        self: &Arc<Self>,
+        position: Vector3<f64>,
+        power: f32,
+        interaction: ExplosionInteraction,
+        damage_calculator: Arc<dyn ExplosionDamageCalculator>,
+    ) {
+        let block_interaction = self.get_block_interaction(interaction);
+        let mut explosion = Explosion::new(power, position, block_interaction)
+            .with_damage_calculator(damage_calculator);
+        if block_interaction != BlockInteraction::Keep {
+            explosion = explosion.creating_fire();
+        }
+        self.run_explosion(explosion, position, power).await;
+    }
+
     /// Damage-less, block-preserving knockback used by enchantment effect components
     /// such as Wind Burst (`minecraft:explode` with no `damage_type`).
     pub async fn explode_knockback_only(

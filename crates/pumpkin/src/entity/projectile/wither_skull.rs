@@ -7,12 +7,46 @@ use crate::{
         projectile::{ProjectileHit, ThrownItemEntity},
     },
     server::Server,
+    world::{
+        World,
+        explosion::{DefaultExplosionDamageCalculator, Explosion, ExplosionDamageCalculator},
+    },
 };
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::potion::Effect;
+use pumpkin_data::{Block, tag::Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::Difficulty;
+
+/// `WitherSkull.getBlockExplosionResistance` (`WitherSkull.java:50-55`): a "dangerous"
+/// (charged-boss) skull caps a destructible block's resistance at 0.8, matching
+/// `WitherBoss.canDestroy` (`WitherBoss.java:355-357`: not air, not wither-immune).
+struct WitherSkullExplosionCalculator {
+    dangerous: bool,
+}
+
+impl ExplosionDamageCalculator for WitherSkullExplosionCalculator {
+    fn get_block_explosion_resistance(
+        &self,
+        explosion: &Explosion,
+        world: &World,
+        pos: &pumpkin_util::math::position::BlockPos,
+        block: &Block,
+        fluid: &pumpkin_data::fluid::FluidState,
+    ) -> Option<f32> {
+        let resistance = DefaultExplosionDamageCalculator
+            .get_block_explosion_resistance(explosion, world, pos, block, fluid)?;
+        if self.dangerous
+            && !block.default_state.is_air()
+            && !block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_WITHER_IMMUNE)
+        {
+            Some(resistance.min(0.8))
+        } else {
+            Some(resistance)
+        }
+    }
+}
 
 /// `AbstractHurtingProjectile.getInertia` (`AbstractHurtingProjectile.java:155-157`).
 pub const AIR_INERTIA: f64 = 0.95;
@@ -203,12 +237,17 @@ impl EntityBase for WitherSkullEntity {
             let hit_pos = hit.hit_pos();
             // Vanilla `WitherSkull.onHit` (WitherSkull.java:97) always explodes with
             // `ExplosionInteraction.MOB`; the `mobGriefing` game rule is applied inside
-            // `World::get_block_interaction`, which demotes a MOB blast to `Keep`.
+            // `World::get_block_interaction`, which demotes a MOB blast to `Keep`. A
+            // dangerous skull additionally caps destructible-block resistance at 0.8
+            // (`WitherSkull.getBlockExplosionResistance`, WitherSkull.java:50-55).
             world
-                .explode(
+                .explode_with_calculator(
                     hit_pos,
                     EXPLOSION_POWER,
                     crate::world::ExplosionInteraction::Mob,
+                    Some(Arc::new(WitherSkullExplosionCalculator {
+                        dangerous: self.is_dangerous(),
+                    })),
                 )
                 .await;
         })
