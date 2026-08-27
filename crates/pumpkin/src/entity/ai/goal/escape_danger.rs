@@ -5,11 +5,11 @@ use crate::entity::{ai::pathfinder::NavigatorGoal, mob::Mob};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
-use rand::RngExt;
+
+use super::random_pos::default_get_pos;
 
 const RANGE: i32 = 5;
 const RECENT_DAMAGE_TICKS: i64 = 40;
-const TARGET_ATTEMPTS: usize = 10;
 
 const fn panic_damage_is_recent(last_damage: i64, game_time: i64) -> bool {
     last_damage >= 0 && game_time - last_damage <= RECENT_DAMAGE_TICKS
@@ -106,19 +106,7 @@ impl EscapeDangerGoal {
             return Some(water.to_f64());
         }
 
-        let pos = mob.get_mob_entity().living_entity.entity.pos.load();
-        let mut rng = mob.get_random();
-
-        for _ in 0..TARGET_ATTEMPTS {
-            let dx = rng.random_range(-RANGE..=RANGE);
-            let dz = rng.random_range(-RANGE..=RANGE);
-            if dx == 0 && dz == 0 {
-                continue;
-            }
-            return Some(Vector3::new(pos.x + dx as f64, pos.y, pos.z + dz as f64));
-        }
-
-        None
+        default_get_pos(mob, RANGE, 4)
     }
 }
 

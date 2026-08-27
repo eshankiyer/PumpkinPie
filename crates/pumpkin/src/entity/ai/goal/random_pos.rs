@@ -170,6 +170,57 @@ fn move_pos_up_out_of_solid(mob: &dyn Mob, pos: BlockPos) -> Option<BlockPos> {
     Some(landing)
 }
 
+/// `AirAndWaterRandomPos.getPos` (`AirAndWaterRandomPos.java:8-13`).
+pub fn air_and_water_get_pos(
+    mob: &dyn Mob,
+    horizontal: i32,
+    vertical: i32,
+    flying_height: i32,
+    x_dir: f64,
+    z_dir: f64,
+    max_xz_radians_from_dir: f64,
+) -> Option<Vector3<f64>> {
+    let restrict = mob_restricted(mob, f64::from(horizontal));
+    generate_random_pos(mob, |rng| {
+        let direction = generate_random_direction_within_radians(
+            rng,
+            0.0,
+            f64::from(horizontal),
+            vertical,
+            x_dir,
+            z_dir,
+            max_xz_radians_from_dir,
+        )?;
+        let candidate = generate_random_pos_toward_direction(
+            mob,
+            f64::from(horizontal),
+            rng,
+            Vector3::new(direction.x, direction.y + flying_height, direction.z),
+        );
+        let mob_entity = mob.get_mob_entity();
+        let world = mob_entity.living_entity.entity.world.load();
+        if !(world.get_bottom_y()..=world.get_top_y()).contains(&candidate.0.y)
+            || (restrict && !mob_entity.is_in_position_target_range_pos(&candidate))
+        {
+            return None;
+        }
+        let landing = move_up_out_of_solid(mob, candidate);
+        (!has_malus(mob, landing)).then_some(landing)
+    })
+}
+
+fn move_up_out_of_solid(mob: &dyn Mob, pos: BlockPos) -> BlockPos {
+    let world = mob.get_mob_entity().living_entity.entity.world.load();
+    let mut landing = pos;
+    if world.get_block_state(&landing).is_solid() {
+        landing = landing.up();
+        while landing.0.y <= world.get_top_y() && world.get_block_state(&landing).is_solid() {
+            landing = landing.up();
+        }
+    }
+    landing
+}
+
 /// `RandomPos.generateRandomPos` (`RandomPos.java:96-112`): ten independent draws, keeping the
 /// one with the highest `getWalkTargetValue`, then `Vec3.atBottomCenterOf` on the winner.
 fn generate_random_pos(
@@ -226,6 +277,18 @@ pub fn default_get_pos_towards(
             generate_random_pos_toward_direction(mob, f64::from(horizontal), rng, direction);
         // `DefaultRandomPos` also rejects on malus, which `LandRandomPos` defers to
         // `movePosUpOutOfSolid` instead (`DefaultRandomPos.java:54`).
+        (passes_common_checks(mob, restrict, candidate) && !has_malus(mob, candidate))
+            .then_some(candidate)
+    })
+}
+
+/// `DefaultRandomPos.getPos` (`DefaultRandomPos.java:10-15`).
+pub fn default_get_pos(mob: &dyn Mob, horizontal: i32, vertical: i32) -> Option<Vector3<f64>> {
+    let restrict = mob_restricted(mob, f64::from(horizontal));
+    generate_random_pos(mob, |rng| {
+        let direction = generate_random_direction(rng, horizontal, vertical);
+        let candidate =
+            generate_random_pos_toward_direction(mob, f64::from(horizontal), rng, direction);
         (passes_common_checks(mob, restrict, candidate) && !has_malus(mob, candidate))
             .then_some(candidate)
     })
