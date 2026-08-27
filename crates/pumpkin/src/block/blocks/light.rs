@@ -1,10 +1,14 @@
 use pumpkin_data::block_properties::{BlockProperties, LightLikeProperties};
+use pumpkin_data::data_component::DataComponent;
+use pumpkin_data::data_component_impl::BlockStateImpl;
+use pumpkin_data::item::Item;
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::{GameMode, PermissionLvl};
 use pumpkin_world::world::BlockFlags;
 
 use crate::block::registry::BlockActionResult;
-use crate::block::{BlockBehaviour, BlockFuture, NormalUseArgs};
+use crate::block::{BlockBehaviour, BlockFuture, GetCloneItemStackArgs, NormalUseArgs};
 
 /// `LightBlock.MAX_LEVEL` (`net/minecraft/world/level/block/LightBlock.java:33`).
 const MAX_LEVEL: u8 = 15;
@@ -15,8 +19,7 @@ const MAX_LEVEL: u8 = 15;
 /// (LightBlock.java:53-63). Everything else on the class is client-side or data-driven here:
 /// `getShape`/`getRenderShape`/`getShadeBrightness` are rendering, `LIGHT_EMISSION` is the
 /// generated per-state luminance, and `propagatesSkylightDown`/`getFluidState` follow from the
-/// `WATERLOGGED` property. `getCloneItemStack` (LightBlock.java:108-111) is pick-block and lives
-/// on the item side, so it is not covered here.
+/// `WATERLOGGED` property.
 #[pumpkin_block("minecraft:light")]
 pub struct LightBlock;
 
@@ -56,6 +59,24 @@ impl BlockBehaviour for LightBlock {
                 .await;
             BlockActionResult::SuccessServer
         })
+    }
+
+    /// `LightBlock.getCloneItemStack`/`setLightOnStack` (LightBlock.java:108-115): creative
+    /// pick-block preserves the block's current light level on the returned item.
+    fn get_clone_item_stack(&self, args: GetCloneItemStackArgs<'_>) -> Option<ItemStack> {
+        let state = args.world.get_block_state(args.position);
+        let props = LightLikeProperties::from_state_id(state.id, args.block);
+        let mut stack = ItemStack::new(1, Item::from_id(args.block.item_id)?);
+        stack.patch.push((
+            DataComponent::BlockState,
+            Some(Box::new(BlockStateImpl {
+                properties: std::borrow::Cow::Owned(vec![(
+                    std::borrow::Cow::Borrowed("level"),
+                    std::borrow::Cow::Owned(props.level.to_string()),
+                )]),
+            })),
+        ));
+        Some(stack)
     }
 }
 

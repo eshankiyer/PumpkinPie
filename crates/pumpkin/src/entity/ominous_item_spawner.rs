@@ -284,6 +284,18 @@ impl EntityBase for OminousItemSpawnerEntity {
         None
     }
 
+    /// `OminousItemSpawner.canAddPassenger` and `couldAcceptPassenger` both
+    /// reject mounting (`OminousItemSpawner.java:129-142`). The shared
+    /// `Entity::add_passenger` guard makes this effective for `/ride` and other
+    /// server-side mount paths.
+    fn can_add_passenger(&self, _passenger: &dyn EntityBase) -> bool {
+        false
+    }
+
+    fn could_accept_passenger(&self) -> bool {
+        false
+    }
+
     fn as_nbt_storage(&self) -> &dyn NBTStorage {
         self
     }
