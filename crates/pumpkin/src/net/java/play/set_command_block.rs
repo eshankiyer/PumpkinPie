@@ -61,7 +61,7 @@ impl JavaClient {
                 cmd = &cmd[1..];
             }
 
-            let command_block = CommandBlockEntity {
+            let command_block = Arc::new(CommandBlockEntity {
                 position: AtomicCell::new(pos),
                 powered: old_command_block.powered.load(Ordering::SeqCst).into(),
                 condition_met: old_command_block
@@ -74,8 +74,10 @@ impl JavaClient {
                 last_output: old_command_block.last_output.lock().await.clone().into(),
                 track_output: command.track_output().into(),
                 success_count: AtomicU32::new(0),
-            };
-            player.world().add_block_entity(Arc::new(command_block));
+            });
+            player.world().add_block_entity(command_block.clone());
+            command_block.mark_condition_met(&player.world());
+            command_block.on_updated(&player.world());
 
             player
                 .send_system_message(&TextComponent::text(format!(

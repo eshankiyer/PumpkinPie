@@ -2,17 +2,23 @@ use std::sync::Arc;
 
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BlockProperties, DecoratedPotLikeProperties};
+use pumpkin_data::data_component::DataComponent;
+use pumpkin_data::data_component_impl::{DataComponentImpl, PotDecorationsImpl};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::tag::Taggable;
+use pumpkin_data::{Enchantment, tag};
 use pumpkin_macros::pumpkin_block;
 
 use crate::block::entities::decorated_pot::{DecoratedPotBlockEntity, WobbleStyle};
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BrokenArgs, GetComparatorOutputArgs, NormalUseArgs, OnPlaceArgs,
-    OnSyncedBlockEventArgs, PlacedArgs, UseWithItemArgs,
+    BlockBehaviour, BlockFuture, BrokenArgs, GetCloneItemStackArgs, GetComparatorOutputArgs,
+    NormalUseArgs, OnPlaceArgs, OnSyncedBlockEventArgs, PlacedArgs, PlayerWillDestroyArgs,
+    UseWithItemArgs,
 };
+use pumpkin_world::world::BlockFlags;
 
 #[pumpkin_block("minecraft:decorated_pot")]
 pub struct DecoratedPotBlock;
@@ -28,6 +34,7 @@ impl BlockBehaviour for DecoratedPotBlock {
                 .entity
                 .get_horizontal_facing()
                 .opposite();
+            props.waterlogged = args.replacing.water_source();
             props.to_state_id(args.block)
         })
     }
@@ -123,9 +130,21 @@ impl BlockBehaviour for DecoratedPotBlock {
                 && let Some(pot_entity) = block_entity
                     .as_any()
                     .downcast_ref::<DecoratedPotBlockEntity>()
-                && let Some(contained) = pot_entity.take_item().await
             {
-                args.world.drop_stack(args.position, contained).await;
+                if let Some(contained) = pot_entity.take_item().await {
+                    args.world.drop_stack(args.position, contained).await;
+                }
+                if let Some(decorations) = pot_entity.decorations() {
+                    for decoration in decorations {
+                        if let Some(item) = Item::from_registry_key(
+                            decoration.strip_prefix("minecraft:").unwrap_or(&decoration),
+                        ) {
+                            args.world
+                                .drop_stack(args.position, ItemStack::new(1, item))
+                                .await;
+                        }
+                    }
+                }
             }
 
             args.world.play_sound(
@@ -154,5 +173,46 @@ impl BlockBehaviour for DecoratedPotBlock {
                 Some(0)
             }
         })
+    }
+
+    /// `DecoratedPotBlock.playerWillDestroy` (`DecoratedPotBlock.java:195-203`): tools in
+    /// `#minecraft:breaks_decorated_pots` crack the state unless they have an enchantment in
+    /// `#minecraft:prevents_decorated_pot_shattering` (currently Silk Touch).
+    fn player_will_destroy<'a>(&'a self, args: PlayerWillDestroyArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            let tool = args.player.inventory().held_item().await;
+            if tool
+                .item
+                .has_tag(&tag::Item::MINECRAFT_BREAKS_DECORATED_POTS)
+                && tool.get_enchantment_level(&Enchantment::SILK_TOUCH) == 0
+            {
+                let mut props =
+                    DecoratedPotLikeProperties::from_state_id(args.state.id, args.block);
+                props.cracked = true;
+                args.world
+                    .set_block_state(
+                        args.position,
+                        props.to_state_id(args.block),
+                        BlockFlags::empty(),
+                    )
+                    .await;
+            }
+        })
+    }
+
+    /// `DecoratedPotBlock.getCloneItemStack` (`DecoratedPotBlock.java:226-233`): creative
+    /// pick-block preserves the pot-decoration component from the block entity.
+    fn get_clone_item_stack(&self, args: GetCloneItemStackArgs<'_>) -> Option<ItemStack> {
+        let entity = args.world.get_block_entity(args.position)?;
+        let pot = entity.as_any().downcast_ref::<DecoratedPotBlockEntity>()?;
+        let decorations = pot.decorations()?;
+        Some(ItemStack::new_with_component(
+            1,
+            &Item::DECORATED_POT,
+            vec![(
+                DataComponent::PotDecorations,
+                Some(Box::new(PotDecorationsImpl { decorations }).to_dyn()),
+            )],
+        ))
     }
 }

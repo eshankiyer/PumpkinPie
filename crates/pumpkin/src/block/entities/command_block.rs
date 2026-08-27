@@ -4,12 +4,17 @@ use std::{
 };
 
 use crossbeam::atomic::AtomicCell;
+use pumpkin_data::{
+    Block, FacingExt,
+    block_properties::{BlockProperties, CommandBlockLikeProperties},
+};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 
 use tokio::sync::Mutex;
 
 use super::BlockEntity;
+use crate::world::World;
 
 // todo: CustomName, LastExecution, UpdateLastExecution
 pub struct CommandBlockEntity {
@@ -39,6 +44,46 @@ impl CommandBlockEntity {
             track_output: AtomicBool::new(track_output),
             success_count: AtomicU32::new(0),
         }
+    }
+
+    /// Port of `CommandBlockEntity.markConditionMet` (`CommandBlockEntity.java:129-141`).
+    /// The command-block tick uses the value from the previous scheduling decision, then
+    /// refreshes it for the next tick just as vanilla's `CommandBlock.tick` does.
+    pub fn mark_condition_met(&self, world: &World) -> bool {
+        let position = self.position.load();
+        let (block, state_id) = world.get_block_and_state_id(&position);
+        let properties = CommandBlockLikeProperties::from_state_id(state_id, block);
+        let condition_met = !properties.conditional || {
+            let relative = position.offset(
+                properties
+                    .facing
+                    .opposite()
+                    .to_block_direction()
+                    .to_offset(),
+            );
+            matches!(
+                world.get_block(&relative).id,
+                id if id == Block::COMMAND_BLOCK.id
+                    || id == Block::CHAIN_COMMAND_BLOCK.id
+                    || id == Block::REPEATING_COMMAND_BLOCK.id
+            ) && world
+                .get_block_entity(&relative)
+                .and_then(|entity| {
+                    entity
+                        .as_any()
+                        .downcast_ref::<Self>()
+                        .map(|command| command.success_count.load(Ordering::Acquire) > 0)
+                })
+                .unwrap_or(false)
+        };
+        self.condition_met.store(condition_met, Ordering::Release);
+        condition_met
+    }
+
+    /// Port of `CommandBlockEntity.onUpdated` (`CommandBlockEntity.java:37-40`).
+    pub fn on_updated(self: &std::sync::Arc<Self>, world: &World) {
+        let block_entity: std::sync::Arc<dyn BlockEntity> = self.clone();
+        world.update_block_entity(&block_entity);
     }
 }
 

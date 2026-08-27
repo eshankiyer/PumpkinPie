@@ -1,6 +1,6 @@
 use std::any::Any;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU16, Ordering};
 
 use crate::player::player_inventory::PlayerInventory;
 use crate::screen_handler::{
@@ -23,6 +23,7 @@ pub struct StonecutterScreenHandler {
     pub input_inventory: Arc<SimpleInventory>,
     pub output_inventory: Arc<SimpleInventory>,
     pub selected_recipe: AtomicU8,
+    last_input_item: AtomicU16,
 }
 
 impl StonecutterScreenHandler {
@@ -36,6 +37,7 @@ impl StonecutterScreenHandler {
             input_inventory: input_inventory.clone(),
             output_inventory: output_inventory.clone(),
             selected_recipe: AtomicU8::new(u8::MAX),
+            last_input_item: AtomicU16::new(Item::AIR.id),
         };
 
         handler.add_slot(Arc::new(NormalSlot::new(
@@ -57,6 +59,21 @@ impl StonecutterScreenHandler {
 
     async fn update_output(&self) {
         let input_lock = self.input_inventory.get_stack(0).await;
+
+        // `StonecutterMenu.slotsChanged` resets the selected recipe when the input
+        // item changes (StonecutterMenu.java:127-134), but retains it when only the
+        // count changes. Track the item id so every input mutation path, including
+        // quick-move from the player inventory, gets the same reset.
+        let input_item = if input_lock.is_empty() {
+            Item::AIR.id
+        } else {
+            input_lock.item.id
+        };
+        if self.last_input_item.swap(input_item, Ordering::Relaxed) != input_item
+            && self.selected_recipe.load(Ordering::Relaxed) != u8::MAX
+        {
+            self.selected_recipe.store(u8::MAX, Ordering::Relaxed);
+        }
 
         if input_lock.is_empty() {
             self.output_inventory
@@ -93,6 +110,8 @@ impl StonecutterScreenHandler {
             return false;
         }
 
+        self.last_input_item
+            .store(input_stack.item.id, Ordering::Relaxed);
         self.selected_recipe.store(id as u8, Ordering::Relaxed);
         self.update_output().await;
         true
@@ -201,7 +220,12 @@ impl ScreenHandler for StonecutterScreenHandler {
                             .await;
                     } else {
                         // From Player to Stonecutter
-                        // Try input slot (0)
+                        // `StonecutterMenu.quickMoveStack` only routes items accepted
+                        // by the stonecutter recipe manager to the input slot
+                        // (StonecutterMenu.java:198-201).
+                        if Self::get_available_recipes(&slot_stack).is_empty() {
+                            return ItemStack::EMPTY.clone();
+                        }
                         if !self.insert_item(&mut slot_stack, 0, 1, false).await {
                             return ItemStack::EMPTY.clone();
                         }
@@ -218,6 +242,8 @@ impl ScreenHandler for StonecutterScreenHandler {
                         let mut taken_stack = stack.clone();
                         taken_stack.set_count(moved_count);
                         slot.on_take_item(player, &taken_stack).await;
+                        self.update_output().await;
+                    } else if slot_index >= 2 {
                         self.update_output().await;
                     }
                 }
@@ -388,5 +414,24 @@ mod tests {
         assert_eq!(handler.selected_recipe.load(Ordering::Relaxed), u8::MAX);
         let output = handler.output_inventory.get_stack(0).await;
         assert!(output.is_empty());
+    }
+
+    #[tokio::test]
+    async fn changing_input_item_clears_the_selected_recipe() {
+        let handler = handler();
+        handler
+            .input_inventory
+            .set_stack(0, ItemStack::new(1, &Item::STONE))
+            .await;
+        assert!(handler.select_recipe(0).await);
+
+        handler
+            .input_inventory
+            .set_stack(0, ItemStack::new(1, &Item::COBBLESTONE))
+            .await;
+        handler.update_output().await;
+
+        assert_eq!(handler.selected_recipe.load(Ordering::Relaxed), u8::MAX);
+        assert!(handler.output_inventory.get_stack(0).await.is_empty());
     }
 }
