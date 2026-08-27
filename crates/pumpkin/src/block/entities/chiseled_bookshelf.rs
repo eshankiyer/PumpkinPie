@@ -1,6 +1,7 @@
 use pumpkin_data::Block;
 use pumpkin_data::block_properties::{BlockProperties, ChiseledBookshelfLikeProperties};
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 use std::any::Any;
@@ -190,6 +191,21 @@ impl Inventory for ChiseledBookshelfBlockEntity {
             items[slot] = stack;
             self.mark_dirty();
         })
+    }
+
+    /// Vanilla `ChiseledBookShelfBlockEntity.acceptsItemType`
+    /// (`ChiseledBookShelfBlockEntity.java:73-76`): hoppers may insert only bookshelf books.
+    fn is_valid_slot_for(&self, slot: usize, stack: &ItemStack) -> bool {
+        slot < Self::INVENTORY_SIZE
+            && (stack.is_empty()
+                || stack
+                    .get_item()
+                    .has_tag(&tag::Item::MINECRAFT_BOOKSHELF_BOOKS))
+    }
+
+    fn get_max_count_per_stack(&self) -> u8 {
+        // Vanilla `getMaxStackSize` (`ChiseledBookShelfBlockEntity.java:68-71`).
+        1
     }
 
     fn mark_dirty(&self) {

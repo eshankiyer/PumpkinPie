@@ -10,8 +10,9 @@ use pumpkin_world::{
 
 use crate::{
     block::{
-        BlockBehaviour, BlockFuture, GetStateForNeighborUpdateArgs, NormalUseArgs,
-        OnScheduledTickArgs, UseWithItemArgs, blocks::cake::CakeBlock, registry::BlockActionResult,
+        BlockBehaviour, BlockFuture, GetCloneItemStackArgs, GetStateForNeighborUpdateArgs,
+        NormalUseArgs, OnScheduledTickArgs, UseWithItemArgs, blocks::cake::CakeBlock,
+        registry::BlockActionResult,
     },
     entity::player::Player,
     world::World,
@@ -92,6 +93,12 @@ impl CandleCakeBlock {
 }
 
 impl BlockBehaviour for CandleCakeBlock {
+    /// Vanilla `CandleCakeBlock.getCloneItemStack` (`CandleCakeBlock.java:110-113`):
+    /// creative pick-block returns a plain cake rather than the candle-cake block item.
+    fn get_clone_item_stack(&self, _args: GetCloneItemStackArgs<'_>) -> Option<ItemStack> {
+        Some(ItemStack::new(1, &Item::CAKE))
+    }
+
     fn use_with_item<'a>(
         &'a self,
         args: UseWithItemArgs<'a>,
