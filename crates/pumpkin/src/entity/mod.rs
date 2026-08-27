@@ -2827,6 +2827,12 @@ impl Entity {
         }
     }
 
+    /// Vanilla `Entity.getBlockStateOnLegacy` (`Entity.java:1697-1700`).
+    pub(crate) fn get_block_state_on_legacy(&self) -> &'static BlockState {
+        let (pos, _, state) = self.get_pos_with_y_offset(0.2);
+        state.unwrap_or_else(|| self.world.load().get_block_state(&pos))
+    }
+
     // Entity.updateVelocity in yarn
 
     pub(crate) fn update_velocity_from_input(&self, movement_input: Vector3<f64>, speed: f64) {
@@ -4027,6 +4033,59 @@ impl Entity {
         } else {
             Self::LEASH_SNAP_DISTANCE
         }
+    }
+
+    /// `Entity.dropAllLeashConnections` (`Entity.java:2343-2361`): break every leash
+    /// held by this entity in the vanilla 32-block search volume and drop one lead per
+    /// released target. The firework launch path is the current server caller.
+    ///
+    /// Vanilla's `Leashable.leashableInArea` (`Leashable.java:356-358`) centers a 32x32x32
+    /// cube on the entity's bounding-box center, i.e. +-16 on every axis; `pos` here is the
+    /// entity's base position rather than its box center, so this is off by roughly half the
+    /// entity's height on the vertical axis -- a documented, narrow simplification, still far
+    /// closer to vanilla than an asymmetric box that only searches upward.
+    pub async fn drop_all_leash_connections(&self) -> bool {
+        let world = self.world.load();
+        let pos = self.pos.load();
+        let search_box = BoundingBox {
+            min: Vector3::new(pos.x - 16.0, pos.y - 16.0, pos.z - 16.0),
+            max: Vector3::new(pos.x + 16.0, pos.y + 16.0, pos.z + 16.0),
+        };
+        let mut attached = Vec::new();
+
+        for entity_base in world.get_entities_at_box(&search_box) {
+            let entity = entity_base.get_entity();
+            let is_attached = entity
+                .leashed_to
+                .lock()
+                .await
+                .as_ref()
+                .is_some_and(|holder| holder.get_entity().entity_id == self.entity_id);
+            if is_attached {
+                attached.push(entity_base);
+            }
+        }
+
+        if attached.is_empty() {
+            return false;
+        }
+
+        for entity_base in attached {
+            let entity = entity_base.get_entity();
+            entity.unleash().await;
+            let lead_item = ItemStack::new(1, &pumpkin_data::item::Item::LEAD);
+            world.drop_stack(&entity.block_pos.load(), lead_item).await;
+        }
+
+        crate::world::game_event::emit_game_event(
+            &world,
+            pumpkin_data::game_event::GameEvent::Shear,
+            pos,
+            crate::world::game_event::GameEventContext::none(),
+        )
+        .await;
+
+        true
     }
 
     pub async fn leash_to(&self, holder: Arc<dyn EntityBase>) {
