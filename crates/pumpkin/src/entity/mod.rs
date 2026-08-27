@@ -2720,6 +2720,17 @@ impl Entity {
         self.touching_lava.store(in_lava, Ordering::SeqCst);
     }
 
+    /// `Entity.isEyeInFluid` (`Entity.java:1730-1731`).
+    pub fn is_eye_in_fluid(&self, world: &World, fluid_tag: &'static tag::Tag) -> bool {
+        let pos = self.pos.load();
+        let eye_y = self.get_eye_y();
+        let eye_block = BlockPos::floored(pos.x, eye_y, pos.z);
+        let (fluid, state) = world.get_fluid_and_fluid_state(&eye_block);
+
+        fluid.has_tag(fluid_tag)
+            && f64::from(eye_block.0.y) + world.get_fluid_height(&eye_block, fluid, state) >= eye_y
+    }
+
     /// Port of vanilla's `Entity::doWaterSplashEffect`. Simplified: no controlling-passenger
     /// volume modifier, no firstTick guard, and `play_sound` has no volume/pitch parameters.
     async fn do_water_splash_effect(&self) {
@@ -5045,13 +5056,7 @@ impl EntityBase for Entity {
                 .store(self.eye_in_water.load(Relaxed), Relaxed);
             self.update_fluid_state(caller).await;
             let world = self.world.load();
-            let eye_y = self.get_eye_y();
-            let eye_pos = self.pos.load();
-            let eye_block = BlockPos::floored(eye_pos.x, eye_y, eye_pos.z);
-            let (fluid, state) = world.get_fluid_and_fluid_state(&eye_block);
-            let eye_in_water = fluid.has_tag(&tag::Fluid::MINECRAFT_WATER)
-                && f64::from(eye_block.0.y) + world.get_fluid_height(&eye_block, fluid, state)
-                    >= eye_y;
+            let eye_in_water = self.is_eye_in_fluid(&world, &tag::Fluid::MINECRAFT_WATER);
             self.eye_in_water.store(eye_in_water, Relaxed);
             self.check_out_of_world(&**caller).await;
 
@@ -5059,8 +5064,8 @@ impl EntityBase for Entity {
             // entity stands in and the one at the top of its bounding box.
             if self.fire_ticks.load(Ordering::Relaxed) > 0 {
                 let block_pos = self.block_pos.load();
-                let head_pos =
-                    BlockPos::floored(eye_pos.x, self.bounding_box.load().max.y, eye_pos.z);
+                let pos = self.pos.load();
+                let head_pos = BlockPos::floored(pos.x, self.bounding_box.load().max.y, pos.z);
                 if world.is_raining_at(&block_pos).await || world.is_raining_at(&head_pos).await {
                     self.extinguish();
                 }
