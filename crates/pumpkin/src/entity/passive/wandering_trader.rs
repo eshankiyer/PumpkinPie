@@ -3,6 +3,7 @@
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
 
+use crossbeam::atomic::AtomicCell;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::sound::Sound;
 use pumpkin_inventory::merchant::merchant_screen_handler::MerchantScreenHandler;
@@ -10,8 +11,11 @@ use pumpkin_inventory::screen_handler::{
     BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
 };
 use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_nbt::tag::NbtTag;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::CMerchantOffers;
+use pumpkin_util::math::position::BlockPos;
+use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::SimpleInventory;
 use tokio::sync::Mutex;
@@ -20,20 +24,19 @@ use crate::entity::player::Player;
 use crate::entity::{
     Entity, EntityBase, NBTStorage,
     ai::goal::{
-        avoid_entity::AvoidEntityGoal, escape_danger::EscapeDangerGoal, interact::InteractGoal,
-        look_at_entity::LookAtEntityGoal, look_at_trading_player,
+        Controls, Goal, GoalFuture, avoid_entity::AvoidEntityGoal, escape_danger::EscapeDangerGoal,
+        interact::InteractGoal, look_at_entity::LookAtEntityGoal, look_at_trading_player,
         move_towards_restriction::MoveTowardsRestrictionGoal, swim::SwimGoal,
         trade_with_player::TradeWithPlayerGoal, wander_around::WanderAroundGoal,
     },
+    ai::pathfinder::NavigatorGoal,
     mob::{Mob, MobEntity},
 };
 
 /// Vanilla `WanderingTrader::despawnDelay` default (`WanderingTrader.java:52-53`): `0`,
 /// meaning "never auto-despawns" until something sets it positive (`maybeDespawn` only acts
-/// when `despawnDelay > 0`). Only `WanderingTraderSpawner.spawn` sets it to 48000 on a
-/// natural spawn; since that spawner is deferred (see module doc), every trader created here
-/// via spawn egg/command correctly never despawns on its own, matching vanilla for a
-/// non-naturally-spawned trader.
+/// when `despawnDelay > 0`). `WanderingTraderSpawner.spawn` sets it to 48000 for natural
+/// spawns; traders created via spawn egg/command retain the zero default.
 const DEFAULT_DESPAWN_DELAY: i32 = 0;
 
 /// The seven `AvoidEntityGoal`s of `WanderingTrader.registerGoals`
@@ -65,16 +68,9 @@ const AVOIDED: &[(&EntityType, f64)] = &[
 /// design doc's cross-cutting note; this duplicates the small amount of trading glue
 /// `VillagerEntity` already has rather than introducing a shared base for a two-user case.
 ///
-/// **Not implemented, deferred with reasons:**
-/// - `WanderingTraderSpawner`/`WanderingTraderData` (per-world periodic natural spawner) --
-///   a separate, larger piece of world-tick + saved-data infrastructure, out of scope here.
-///   Without it, a trader can currently only appear via spawn egg/command.
-/// - `WanderToPositionGoal` (`WanderingTrader.java:89`) -- steers back to the `wanderTarget`
-///   that only `WanderingTraderSpawner` ever sets. With that spawner unimplemented the target
-///   is always absent, so the goal could never fire; left out rather than registered dead.
-/// - The two `UseItemGoal`s (`WanderingTrader.java:62-78`, drink invisibility after dark and
-///   milk at dawn) -- vanilla's generic `UseItemGoal` has no Rust counterpart yet.
-/// - `LookAtTradingPlayerGoal` (`WanderingTrader.java:88`) is ported as
+/// The two `UseItemGoal`s (`WanderingTrader.java:62-78`, drink invisibility after dark and milk
+/// at dawn) remain deferred because vanilla's generic `UseItemGoal` has no Rust counterpart yet.
+/// `LookAtTradingPlayerGoal` (`WanderingTrader.java:88`) is ported as
 ///   [`crate::entity::ai::goal::look_at_trading_player::LookAtTradingPlayerGoal`].
 pub struct WanderingTraderEntity {
     pub mob_entity: MobEntity,
@@ -83,6 +79,8 @@ pub struct WanderingTraderEntity {
     /// Vanilla `despawnDelay` (`WanderingTrader.java:52-53, 195-201`). Ticks remaining before
     /// natural despawn; decremented in `mob_tick` while not trading.
     pub despawn_delay: AtomicI32,
+    /// Vanilla `wanderTarget` (`WanderingTrader.java:52,217-223`).
+    wander_target: AtomicCell<Option<BlockPos>>,
     /// Vanilla `AbstractVillager.tradingPlayer`. Set while the merchant screen is open, which
     /// is what makes `isTrading()` (`WanderingTrader.java:212`) and `TradeWithPlayerGoal`
     /// meaningful here. Mirrors `VillagerEntity::trading_player`.
@@ -98,6 +96,7 @@ impl WanderingTraderEntity {
             offers: Mutex::new(Vec::new()),
             merchant_inventory: Arc::new(SimpleInventory::new(3)),
             despawn_delay: AtomicI32::new(DEFAULT_DESPAWN_DELAY),
+            wander_target: AtomicCell::new(None),
             trading_player: std::sync::Mutex::new(None),
             self_weak: std::sync::Mutex::new(None),
         };
@@ -132,6 +131,7 @@ impl WanderingTraderEntity {
                 );
             }
             goal_selector.add_goal(1, EscapeDangerGoal::new(0.5));
+            goal_selector.add_goal(2, Box::new(WanderToPositionGoal::new(2.0, 0.35)));
             goal_selector.add_goal(4, MoveTowardsRestrictionGoal::new(0.35));
             goal_selector.add_goal(8, Box::new(WanderAroundGoal::new_water_avoiding(0.35)));
             // `new InteractGoal(this, Player.class, 3.0F, 1.0F)`
@@ -145,6 +145,30 @@ impl WanderingTraderEntity {
         };
 
         mob_arc
+    }
+
+    /// Vanilla `WanderingTrader.setDespawnDelay` (`WanderingTrader.java:195-197`).
+    pub fn set_despawn_delay(&self, delay: i32) {
+        self.despawn_delay.store(delay, Ordering::Relaxed);
+    }
+
+    /// Vanilla `WanderingTrader.getDespawnDelay` (`WanderingTrader.java:199-201`).
+    #[must_use]
+    pub fn get_despawn_delay(&self) -> i32 {
+        self.despawn_delay.load(Ordering::Relaxed)
+    }
+
+    /// Vanilla `WanderingTrader.setWanderTarget` (`WanderingTrader.java:217-219`).
+    pub fn set_wander_target(&self, target: Option<BlockPos>) {
+        self.wander_target.store(target);
+    }
+
+    /// The spawner's `setHomeTo(referencePos, 16)` (`WanderingTraderSpawner.java:102-104`).
+    pub fn set_home_to(&self, position: BlockPos, radius: i32) {
+        self.mob_entity.position_target.store(position);
+        self.mob_entity
+            .position_target_range
+            .store(radius, Ordering::Relaxed);
     }
 
     /// Vanilla `WanderingTrader::updateTrades` (`WanderingTrader.java:129-135`), via the
@@ -346,6 +370,12 @@ impl NBTStorage for WanderingTraderEntity {
         Box::pin(async move {
             self.mob_entity.living_entity.write_nbt(nbt).await;
             nbt.put_int("DespawnDelay", self.despawn_delay.load(Ordering::Relaxed));
+            if let Some(target) = self.wander_target.load() {
+                nbt.put(
+                    "wander_target",
+                    NbtTag::IntArray(vec![target.0.x, target.0.y, target.0.z]),
+                );
+            }
 
             let offers = self.offers.lock().await;
             let mut recipes = Vec::new();
@@ -390,6 +420,13 @@ impl NBTStorage for WanderingTraderEntity {
             if let Some(delay) = nbt.get_int("DespawnDelay") {
                 self.despawn_delay.store(delay, Ordering::Relaxed);
             }
+            self.wander_target
+                .store(nbt.get_int_array("wander_target").and_then(|values| {
+                    let &[x, y, z] = values else {
+                        return None;
+                    };
+                    Some(BlockPos::new(x, y, z))
+                }));
 
             if let Some(offers_compound) = nbt.get_compound("Offers")
                 && let Some(recipes) = offers_compound.get_list("Recipes")
@@ -435,6 +472,103 @@ impl NBTStorage for WanderingTraderEntity {
                 }
             }
         })
+    }
+}
+
+/// Vanilla `WanderingTrader.WanderToPositionGoal` (`WanderingTrader.java:225-268`).
+struct WanderToPositionGoal {
+    goal_control: Controls,
+    stop_distance: f64,
+    speed: f64,
+    target: Option<BlockPos>,
+}
+
+impl WanderToPositionGoal {
+    const fn new(stop_distance: f64, speed: f64) -> Self {
+        Self {
+            goal_control: Controls::MOVE,
+            stop_distance,
+            speed,
+            target: None,
+        }
+    }
+
+    fn is_too_far(mob: &dyn Mob, target: BlockPos, distance: f64) -> bool {
+        let target = target.to_f64() + Vector3::new(0.5, 0.5, 0.5);
+        let delta = target - mob.get_entity().pos.load();
+        delta.length_squared() > distance * distance
+    }
+}
+
+impl Goal for WanderToPositionGoal {
+    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        Box::pin(async move {
+            let Some(trader) = mob.cast_any().downcast_ref::<WanderingTraderEntity>() else {
+                return false;
+            };
+            let Some(target) = trader.wander_target.load() else {
+                return false;
+            };
+            if !Self::is_too_far(mob, target, self.stop_distance) {
+                return false;
+            }
+            self.target = Some(target);
+            true
+        })
+    }
+
+    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        Box::pin(async move {
+            self.target
+                .is_some_and(|target| Self::is_too_far(mob, target, self.stop_distance))
+        })
+    }
+
+    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async {})
+    }
+
+    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            if let Some(trader) = mob.cast_any().downcast_ref::<WanderingTraderEntity>() {
+                trader.set_wander_target(None);
+            }
+            mob.get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .stop();
+            self.target = None;
+        })
+    }
+
+    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            let Some(target) = self.target else {
+                return;
+            };
+            let mut navigator = mob
+                .get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if !navigator.is_idle() {
+                return;
+            }
+
+            let current = mob.get_entity().pos.load();
+            let target_center = target.to_f64() + Vector3::new(0.5, 0.5, 0.5);
+            let destination = if Self::is_too_far(mob, target, 10.0) {
+                current + (target_center - current).normalize() * 10.0
+            } else {
+                target_center
+            };
+            navigator.set_progress(NavigatorGoal::new(current, destination, self.speed));
+        })
+    }
+
+    fn controls(&self) -> Controls {
+        self.goal_control
     }
 }
 

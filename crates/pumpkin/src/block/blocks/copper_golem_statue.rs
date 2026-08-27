@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
 use pumpkin_data::block_properties::{
-    BlockProperties, CopperGolemPose, CopperGolemStatueLikeProperties,
+    BlockProperties, CopperGolemPose, CopperGolemStatueLikeProperties, EnumVariants,
 };
+use pumpkin_data::data_component::DataComponent;
+use pumpkin_data::data_component_impl::BlockStateImpl;
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item::Item;
 use pumpkin_data::sound::{Sound, SoundCategory};
@@ -208,6 +210,34 @@ impl BlockBehaviour for CopperGolemStatueBlock {
             };
             Some(ordinal + 1)
         })
+    }
+
+    /// Vanilla `CopperGolemStatueBlock.getCloneItemStack` and
+    /// `CopperGolemStatueBlockEntity.getItem` (`CopperGolemStatueBlock.java:151-155`,
+    /// `CopperGolemStatueBlockEntity.java:43-47`): pick-block preserves the statue pose on
+    /// the returned item through its `block_state` component.
+    fn get_clone_item_stack(
+        &self,
+        args: crate::block::GetCloneItemStackArgs<'_>,
+    ) -> Option<pumpkin_data::item_stack::ItemStack> {
+        let block_entity = args.world.get_block_entity(args.position)?;
+        block_entity
+            .as_any()
+            .downcast_ref::<CopperGolemStatueBlockEntity>()?;
+        let state = args.world.get_block_state(args.position);
+        let props = CopperGolemStatueLikeProperties::from_state_id(state.id, args.block);
+        let mut stack =
+            pumpkin_data::item_stack::ItemStack::new(1, Item::from_id(args.block.item_id)?);
+        stack.patch.push((
+            DataComponent::BlockState,
+            Some(Box::new(BlockStateImpl {
+                properties: std::borrow::Cow::Owned(vec![(
+                    std::borrow::Cow::Borrowed("copper_golem_pose"),
+                    std::borrow::Cow::Borrowed(props.copper_golem_pose.to_value()),
+                )]),
+            })),
+        ));
+        Some(stack)
     }
 
     /// `WeatheringCopperGolemStatueBlock.randomTick`: only the unwaxed variants weather,
