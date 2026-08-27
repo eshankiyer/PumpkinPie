@@ -663,6 +663,18 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         })
     }
 
+    /// Whether this entity accepts the passenger (`Entity.canAddPassenger`).
+    /// Entity types with no passenger support override this synchronously because
+    /// vanilla performs the check before mutating either passenger list.
+    fn can_add_passenger(&self, _passenger: &dyn EntityBase) -> bool {
+        true
+    }
+
+    /// Whether this entity can accept any passenger (`Entity.couldAcceptPassenger`).
+    fn could_accept_passenger(&self) -> bool {
+        true
+    }
+
     fn move_entity<'a>(
         &'a self,
         caller: &'a Arc<dyn EntityBase>,
@@ -4242,6 +4254,10 @@ impl Entity {
         vehicle: Arc<dyn EntityBase>,
         passenger: Arc<dyn EntityBase>,
     ) {
+        if !vehicle.could_accept_passenger() || !vehicle.can_add_passenger(passenger.as_ref()) {
+            return;
+        }
+
         let mut mount_event =
             crate::plugin::api::events::entity::entity_mount::EntityMountEvent::new(
                 passenger.get_entity().entity_id,
