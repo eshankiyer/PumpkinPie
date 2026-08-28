@@ -122,6 +122,13 @@ pub trait BlockEntity: Any + Send + Sync {
             .unwrap_or(0) as u32
     }
 
+    /// Mirrors `BlockEntity.isValidBlockState`: the NBT type must belong to the
+    /// block state currently occupying the position.
+    fn is_valid_block_state(&self, block_state: BlockStateId) -> bool {
+        let block_entity_type = pumpkin_data::BlockState::from_id(block_state).block_entity_type;
+        block_entity_type != u16::MAX && block_entity_type == self.get_id() as u16
+    }
+
     /// Obtain NBT data for sending to the client in `ChunkData`
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
         None
@@ -184,13 +191,21 @@ pub fn block_entity_from_generic<T: BlockEntity>(nbt: &NbtCompound) -> T {
 }
 
 #[must_use]
-#[allow(clippy::too_many_lines)]
 pub fn block_entity_from_nbt(nbt: &NbtCompound) -> Option<Arc<dyn BlockEntity>> {
-    let id = nbt.get_string("id")?;
     let x = nbt.get_int("x")?;
     let y = nbt.get_int("y")?;
     let z = nbt.get_int("z")?;
-    let pos = BlockPos::new(x, y, z);
+    block_entity_from_nbt_at(nbt, BlockPos::new(x, y, z))
+}
+
+#[must_use]
+#[allow(clippy::too_many_lines)]
+pub fn block_entity_from_nbt_at(
+    nbt: &NbtCompound,
+    position: BlockPos,
+) -> Option<Arc<dyn BlockEntity>> {
+    let id = nbt.get_string("id")?;
+    let pos = position;
     match id {
         barrel::BarrelBlockEntity::ID => {
             Some(Arc::new(barrel::BarrelBlockEntity::from_nbt(nbt, pos)))

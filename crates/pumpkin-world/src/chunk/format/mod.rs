@@ -469,12 +469,9 @@ impl ChunkData {
         let mut block_entities = FxHashMap::default();
         if let Some(list) = root_tag.get_list("block_entities") {
             for tag in list {
-                if let pumpkin_nbt::tag::NbtTag::Compound(nbt) = tag
-                    && let Some(x) = nbt.get_int("x")
-                    && let Some(y) = nbt.get_int("y")
-                    && let Some(z) = nbt.get_int("z")
-                {
-                    block_entities.insert(BlockPos::new(x, y, z), nbt.clone());
+                if let pumpkin_nbt::tag::NbtTag::Compound(nbt) = tag {
+                    let block_pos = block_entity_position_from_tag(position, nbt);
+                    block_entities.insert(block_pos, nbt.clone());
                 }
             }
         }
@@ -814,6 +811,29 @@ impl ChunkData {
     pub fn has_custom_data(&self, namespace: &str, key: &str) -> bool {
         self.get_custom_data(namespace, key).is_some()
     }
+}
+
+/// Resolves a block entity's position like `BlockEntity.getPosFromTag`.
+///
+/// x/z are corrected into the chunk being read when malformed or migrated data
+/// points at another chunk, while y is retained unchanged.
+#[must_use]
+pub fn block_entity_position_from_tag(base: Vector2<i32>, entity_tag: &NbtCompound) -> BlockPos {
+    let x = entity_tag.get_int("x").unwrap_or(0);
+    let y = entity_tag.get_int("y").unwrap_or(0);
+    let z = entity_tag.get_int("z").unwrap_or(0);
+
+    let resolved_x = if x.div_euclid(16) == base.x {
+        x
+    } else {
+        base.x * 16 + x.rem_euclid(16)
+    };
+    let resolved_z = if z.div_euclid(16) == base.y {
+        z
+    } else {
+        base.y * 16 + z.rem_euclid(16)
+    };
+    BlockPos::new(resolved_x, y, resolved_z)
 }
 
 impl PathFromLevelFolder for ChunkEntityData {
@@ -1391,6 +1411,29 @@ mod tests {
             pumpkin_data::biome::Biome::from_name("the_void")
                 .unwrap()
                 .id
+        );
+    }
+
+    #[test]
+    fn block_entity_position_is_corrected_into_chunk() {
+        let mut tag = NbtCompound::new();
+        tag.put_int("x", 33);
+        tag.put_int("y", 70);
+        tag.put_int("z", -17);
+
+        assert_eq!(
+            block_entity_position_from_tag(Vector2::new(-2, 3), &tag),
+            BlockPos::new(-31, 70, 63)
+        );
+    }
+
+    #[test]
+    fn block_entity_position_defaults_missing_coordinates() {
+        let tag = NbtCompound::new();
+
+        assert_eq!(
+            block_entity_position_from_tag(Vector2::new(4, -3), &tag),
+            BlockPos::new(64, 0, -48)
         );
     }
 }

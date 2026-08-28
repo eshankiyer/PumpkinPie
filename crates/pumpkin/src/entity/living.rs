@@ -1523,7 +1523,9 @@ impl LivingEntity {
             .lock()
             .await
             .contains_key(&&StatusEffect::INVISIBILITY);
-        self.entity.set_invisible(has_invisibility).await;
+        self.entity
+            .set_invisible(has_invisibility || self.entity.persistent_invisible.load(Relaxed))
+            .await;
         self.sync_effect_particles().await;
     }
 
@@ -1800,6 +1802,7 @@ impl LivingEntity {
         world.broadcast_editioned(&je_packet, &be_packet).await;
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn tick_movement<'a>(&'a self, server: &'a Server, caller: &'a Arc<dyn EntityBase>) {
         // `LivingEntity.aiStep` does not call travel when `Mob.isEffectiveAi()` is false.
         // Keep the rest of this method running so block collisions and frozen-state updates
@@ -1911,7 +1914,9 @@ impl LivingEntity {
         // normal air/fluid travel exactly like vanilla's `travel` re-check.
         self.tick_glide_state(caller).await;
 
-        let custom_travel = if no_ai {
+        let effective_ai = caller.is_effective_ai();
+
+        let custom_travel = if no_ai || !effective_ai {
             false
         } else if let Some(mob) = caller.get_mob()
             && mob.get_entity().entity_id == self.entity.entity_id
@@ -1921,7 +1926,7 @@ impl LivingEntity {
             false
         };
 
-        if !no_ai && !custom_travel {
+        if !no_ai && effective_ai && !custom_travel {
             let touching_water = self.entity.touching_water.load(SeqCst);
 
             // Strider is the only entity that has canWalkOnFluid = false
@@ -2444,6 +2449,14 @@ impl LivingEntity {
     }
 
     pub fn get_swim_height(&self) -> f64 {
+        // `SulfurCube.getFluidJumpThreshold` (`SulfurCube.java:196-198`) uses 20% of
+        // the current bounding-box height. `LivingEntity.tickMovement` consumes this
+        // value when deciding between a ground jump and `jumpInLiquid`; keeping the
+        // species-specific value here makes that existing movement path reachable.
+        if self.entity.entity_type == &EntityType::SULFUR_CUBE {
+            return f64::from(self.entity.entity_dimension.load().height) * 0.2;
+        }
+
         let eye_height = self.entity.get_eye_height();
 
         if self.entity.entity_type == &EntityType::BREEZE {
