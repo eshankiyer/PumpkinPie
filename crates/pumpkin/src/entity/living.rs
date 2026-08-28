@@ -1894,6 +1894,11 @@ impl LivingEntity {
         // LivingEntity.getFrictionInfluencedSpeed uses `getSpeed()`, not the raw attribute.
         let effective_speed = self.speed.load();
 
+        let air_drag = modified_friction(
+            0.91,
+            self.get_attribute_value(&Attributes::AIR_DRAG_MODIFIER),
+        );
+
         let (speed, friction) = if self.entity.on_ground.load(SeqCst) {
             // getVelocityAffectingPos
 
@@ -1906,7 +1911,7 @@ impl LivingEntity {
 
             (
                 friction_influenced_speed(effective_speed, slipperiness),
-                slipperiness * 0.91,
+                slipperiness * air_drag,
             )
         } else {
             let speed = if let Some(player) = caller.get_player() {
@@ -1917,7 +1922,7 @@ impl LivingEntity {
                 0.02
             };
 
-            (speed, 0.91)
+            (speed, air_drag)
         };
 
         self.entity
@@ -1963,7 +1968,10 @@ impl LivingEntity {
             if caller.is_flutterer() {
                 friction
             } else {
-                0.98
+                modified_friction(
+                    0.98,
+                    self.get_attribute_value(&Attributes::AIR_DRAG_MODIFIER),
+                )
             }
         });
 
@@ -6678,6 +6686,11 @@ pub(crate) const fn bypasses_shield(damage_type: &DamageType) -> bool {
 /// `moveRelative` is called with.
 fn friction_influenced_speed(speed: f64, slipperiness: f64) -> f64 {
     speed * 0.216_000_02 / (slipperiness * slipperiness * slipperiness)
+}
+
+/// Vanilla `LivingEntity.computeModifiedFriction` (`LivingEntity.java:515-517`).
+fn modified_friction(friction: f64, modifier: f64) -> f64 {
+    (1.0 - (1.0 - friction) * modifier).clamp(0.0, 1.0)
 }
 
 /// Vanilla `LivingEntity.updateFallFlyingMovement`, kept pure so its pitch and velocity
