@@ -3720,20 +3720,8 @@ impl LivingEntity {
     }
 
     pub(crate) fn is_eye_in_water(&self, world: &World) -> bool {
-        let pos = self.entity.pos.load();
-        let eye_y = self.entity.get_eye_y();
-        let block_pos = BlockPos::floored(pos.x, eye_y, pos.z);
-        let (fluid, state) = world.get_fluid_and_fluid_state(&block_pos);
-
-        if !fluid.has_tag(&tag::Fluid::MINECRAFT_WATER) {
-            return false;
-        }
-
-        let surface_y = f64::from(block_pos.0.y) + world.get_fluid_height(&block_pos, fluid, state);
-
-        // EntityFluidInteraction.isEyeInFluid uses an inclusive top boundary:
-        // eyeY <= blockY + fluidState.getHeight(...).
-        surface_y >= eye_y
+        self.entity
+            .is_eye_in_fluid(world, &tag::Fluid::MINECRAFT_WATER)
     }
 
     pub(crate) fn max_air_supply(&self) -> i32 {

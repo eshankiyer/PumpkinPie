@@ -199,6 +199,30 @@ impl BlockBehaviour for BubbleColumnBlock {
                 kind,
                 at_surface,
             ));
+            if at_surface {
+                // Vanilla `Entity.handleOnAboveBubbleColumn` sends two splash and two bubble
+                // particles at the column top (`Entity.java:2841-2867`). The movement itself is
+                // handled by this block callback; keep the server-side client effect here too.
+                let particle_pos = Vector3::new(
+                    f64::from(args.position.0.x),
+                    f64::from(args.position.0.y) + 1.0,
+                    f64::from(args.position.0.z),
+                );
+                args.world.spawn_particle(
+                    particle_pos,
+                    Vector3::new(1.0, 0.0, 1.0),
+                    1.0,
+                    2,
+                    pumpkin_data::particle::Particle::Splash,
+                );
+                args.world.spawn_particle(
+                    particle_pos,
+                    Vector3::new(1.0, 0.0, 1.0),
+                    0.2,
+                    2,
+                    pumpkin_data::particle::Particle::Bubble,
+                );
+            }
             if !at_surface && let Some(living) = args.entity.get_living_entity() {
                 living.fall_distance.store(0.0);
             }
