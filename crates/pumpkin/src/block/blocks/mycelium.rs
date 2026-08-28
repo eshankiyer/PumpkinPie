@@ -1,12 +1,13 @@
 use pumpkin_data::BlockStateId;
 use pumpkin_data::fluid::Fluid;
 use pumpkin_data::{
-    Block, BlockState,
+    Block, BlockDirection, BlockState,
     block_properties::{BlockProperties, GrassBlockLikeProperties, SnowLikeProperties},
     tag::{self, Taggable},
 };
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
+use pumpkin_world::lighting::light_dampening_into;
 use pumpkin_world::world::BlockFlags;
 
 use crate::block::{BlockBehaviour, BlockFuture, GetStateForNeighborUpdateArgs, RandomTickArgs};
@@ -129,18 +130,17 @@ fn can_stay_alive(world: &World, position: &BlockPos) -> bool {
     !ceiling_kills_mycelium(above_block, above_state)
 }
 
-/// `LightEngine#getLightDampeningInto` applied to the block covering the mycelium.
-///
-/// Pumpkin has no face-occlusion lookup, so the raw opacity of the covering block stands in
-/// for the dampened-light calculation, same as `grass_block.rs::can_be_grass`. Known divergence
-/// for low-opacity downward-occluding blocks (carpets, bottom slabs, thin snow); the common
-/// fully-opaque-ceiling case still kills the mycelium correctly.
-fn ceiling_kills_mycelium(above_block: &Block, above_state: &BlockState) -> bool {
+fn ceiling_kills_mycelium(above_block: &Block, above_state: &'static BlockState) -> bool {
     if above_block == &Block::SNOW {
         return SnowLikeProperties::from_state_id(above_state.id, above_block).layers > 1;
     }
 
-    above_state.opacity >= MAX_LIGHT_LEVEL
+    light_dampening_into(
+        Block::MYCELIUM.default_state,
+        above_state,
+        BlockDirection::Up,
+        above_state.opacity,
+    ) >= MAX_LIGHT_LEVEL
 }
 
 /// `SpreadingSnowyBlock#canPropagate`: mycelium cannot spread into a spot that has water on top.

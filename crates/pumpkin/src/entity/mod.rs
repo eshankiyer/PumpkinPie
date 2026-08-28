@@ -4704,7 +4704,9 @@ impl Entity {
             let fallback_pos =
                 Vector3::new(self.pos.load().x, vehicle_box.max.y, self.pos.load().z);
 
-            let dismount_pos = if is_water {
+            // HappyGhast.getDismountLocationForPassenger (`HappyGhast.java:593-596`) always
+            // returns the vehicle's top center, rather than searching for a side exit.
+            let dismount_pos = if self.entity_type == &EntityType::HAPPY_GHAST || is_water {
                 fallback_pos
             } else {
                 // Vanilla checks Standing, Crouching, Swimming poses and their respective height checks

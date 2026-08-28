@@ -88,9 +88,9 @@ impl BlockBehaviour for StructureBlock {
     /// `StructureBlock.neighborChanged` (`StructureBlock.java:67-97`): on a redstone signal,
     /// LOAD mode always places the named template (no size-match gating - that's
     /// `placeStructureIfSameSize`, only reachable from the GUI's load button, which requires the
-    /// C2S structure-block packet this codebase doesn't have yet). SAVE/CORNER/DATA modes are
-    /// no-ops here: SAVE has no filesystem-backed template writer to save to, and CORNER/DATA
-    /// don't affect world state.
+    /// C2S structure-block packet this codebase doesn't have yet). SAVE captures the selected area
+    /// in memory, CORNER evicts the named template, and DATA is a no-op here. SAVE has no
+    /// filesystem-backed template writer to save to on this redstone path.
     ///
     /// Like `TNTBlock::on_neighbor_update` in this codebase, this checks the current redstone
     /// state rather than tracking a false-to-true edge, so a template can be re-placed on any
@@ -115,6 +115,9 @@ impl BlockBehaviour for StructureBlock {
                 }
                 "SAVE" => {
                     structure_block.save_structure(args.world, false).await;
+                }
+                "CORNER" => {
+                    structure_block.unload_structure().await;
                 }
                 _ => {}
             }

@@ -16,6 +16,25 @@ use std::collections::VecDeque;
 type FastHashSet<K> = rustc_hash::FxHashSet<K>;
 type FastHashMap<K, V> = rustc_hash::FxHashMap<K, V>;
 
+/// Returns the light dampening between two adjacent block states.
+///
+/// Vanilla's `LightEngine.getLightDampeningInto` returns the supplied opacity
+/// unless the two touching occlusion faces close the shared face, in which case
+/// it returns 16 (`LightEngine.java:50-60`).
+#[must_use]
+pub fn light_dampening_into(
+    from_state: &'static pumpkin_data::BlockState,
+    to_state: &'static pumpkin_data::BlockState,
+    direction: BlockDirection,
+    simple_opacity: u8,
+) -> u8 {
+    if pumpkin_data::light_shape_occludes(from_state, to_state, direction) {
+        16
+    } else {
+        simple_opacity
+    }
+}
+
 /// Trait to unify Block and Sky light logic
 pub trait LightProvider {
     fn get_light(cache: &Cache, pos: BlockPos) -> u8;
@@ -718,6 +737,28 @@ mod sky_light_heightmap_tests {
         assert_eq!(get_sky_light(&cache, BlockPos(Vector3::new(8, 100, 8))), 0);
         assert_eq!(
             get_block_light(&cache, BlockPos(Vector3::new(8, 100, 8))),
+            0
+        );
+    }
+
+    #[test]
+    fn light_dampening_uses_closed_adjacent_faces() {
+        assert_eq!(
+            light_dampening_into(
+                Block::GRASS_BLOCK.default_state,
+                Block::PISTON.default_state,
+                BlockDirection::Up,
+                0,
+            ),
+            16
+        );
+        assert_eq!(
+            light_dampening_into(
+                Block::GRASS_BLOCK.default_state,
+                Block::AIR.default_state,
+                BlockDirection::Up,
+                0,
+            ),
             0
         );
     }

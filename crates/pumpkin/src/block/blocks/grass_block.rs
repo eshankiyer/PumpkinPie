@@ -1,7 +1,7 @@
 use pumpkin_data::BlockStateId;
 use pumpkin_data::fluid::Fluid;
 use pumpkin_data::{
-    Block, BlockState,
+    Block, BlockDirection, BlockState,
     block_properties::{
         BlockProperties, DoubleBlockHalf, GrassBlockLikeProperties, SnowLikeProperties,
         TallSeagrassLikeProperties,
@@ -15,6 +15,7 @@ use pumpkin_world::generation::feature::{
     configured_features::{BONE_MEAL_FEATURES, CONFIGURED_FEATURES, ConfiguredFeature},
     placed_features::{Feature, PLACED_FEATURES},
 };
+use pumpkin_world::lighting::light_dampening_into;
 use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
@@ -220,17 +221,6 @@ fn can_be_grass(world: &World, position: &BlockPos) -> bool {
         return false;
     }
 
-    // Vanilla short-circuits on a single snow layer, then runs the opacity
-    // through `LightEngine#getLightBlockInto`, which reports 16 when the two
-    // touching faces fully occlude each other.
-    //
-    // Pumpkin has no face-occlusion lookup, so only the raw opacity is
-    // available here. That is a known divergence rather than an equivalence:
-    // blocks that occlude downwards but carry a low opacity, such as carpets,
-    // bottom slabs and snow layers of two or more, let the grass survive where
-    // vanilla would kill it. Grass under a full opaque block still dies, which
-    // is the common case. Closing the gap needs a face-occlusion flag from the
-    // data generator.
     let (above_block, above_state) = world.get_block_and_state(&above);
 
     // Handle the snow layers explicitly, since that is the one case the raw
@@ -239,7 +229,12 @@ fn can_be_grass(world: &World, position: &BlockPos) -> bool {
         return SnowLikeProperties::from_state_id(above_state.id, above_block).layers <= 1;
     }
 
-    above_state.opacity < MAX_LIGHT_LEVEL
+    light_dampening_into(
+        Block::GRASS_BLOCK.default_state,
+        above_state,
+        BlockDirection::Up,
+        above_state.opacity,
+    ) < MAX_LIGHT_LEVEL
 }
 
 /// `SpreadingSnowyDirtBlock#canPropagate`: grass cannot spread into a spot that has water on top.
