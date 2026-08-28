@@ -82,6 +82,8 @@ bitflags! {
         const SCORES_SET = 1 << 10;
         /// Whether the `advancements` option has been set.
         const ADVANCEMENTS_SET = 1 << 11;
+        /// Whether the `type` option has set an entity-type tag.
+        const ENTITY_TYPE_TAG_SET = 1 << 12;
     }
 }
 
@@ -655,6 +657,8 @@ mod tests {
         assert!(parse("@e[type=iron_golem]"));
         assert!(parse("@e[type=minecraft:iron_golem]"));
         assert!(parse("@e[type=!minecraft:iron_golem]"));
+        assert!(parse("@e[type=#undead]"));
+        assert!(parse("@e[type=!#undead]"));
         assert!(!parse("@e[type=pumpkin:iron_golem]"));
         assert!(!parse("@e[type=minecraft:not_an_entity]"));
     }

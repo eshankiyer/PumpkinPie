@@ -250,12 +250,19 @@ impl BlockBehaviour for CampfireBlock {
     fn on_projectile_hit<'a>(&'a self, args: OnProjectileHitArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             let props = CampfireLikeProperties::from_state_id(args.state.id, args.block);
-            if args
-                .projectile
-                .get_entity()
-                .fire_ticks
-                .load(Ordering::Relaxed)
-                > 0
+            if crate::entity::projectile::projectile_may_interact(
+                args.projectile,
+                args.server,
+                args.world,
+                args.position,
+            )
+            .await
+                && args
+                    .projectile
+                    .get_entity()
+                    .fire_ticks
+                    .load(Ordering::Relaxed)
+                    > 0
                 && !props.lit
                 && !props.waterlogged
             {

@@ -12,6 +12,7 @@ use crate::entity::player::advancement::AdvancementProgress;
 use crate::world::World;
 use pumpkin_data::Advancement;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::tag::Taggable;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::GameMode;
@@ -412,6 +413,8 @@ pub enum EntitySelectorPredicate {
     Distance(DoubleBounds, Vector3<f64>),
     /// A predicate to check the entity type. This check can also be inverted.
     EntityType(&'static EntityType, bool),
+    /// A predicate to check whether the entity type belongs to a tag. This check can also be inverted.
+    EntityTypeTag(String, bool),
     /// A predicate to check the entity's name (custom or profile name).
     Name(String, bool),
     /// A predicate to check the entity's scoreboard tags.
@@ -538,6 +541,14 @@ impl EntitySelectorPredicate {
             Self::EntityType(expected_type, invert) => {
                 let actual_type = entity.get_entity().entity_type;
                 (actual_type.id == expected_type.id) ^ invert
+            }
+            Self::EntityTypeTag(expected_tag, invert) => {
+                entity
+                    .get_entity()
+                    .entity_type
+                    .is_tagged_with(expected_tag)
+                    .unwrap_or(false)
+                    ^ invert
             }
             Self::Name(expected_name, invert) => {
                 let actual_name = entity_actual_name(entity);

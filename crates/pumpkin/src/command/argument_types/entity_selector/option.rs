@@ -288,12 +288,29 @@ impl EntitySelectorOption {
             Self::Type => {
                 let start = parser.reader.cursor();
                 let invert = parser.consume_inverted_start();
-                if parser.has_flag(Flags::ENTITY_TYPE_INVERTED) && !invert {
+                let is_tag = parser.consume_tag_start();
+                if is_tag {
+                    if parser.entity_type.is_some() || parser.has_flag(Flags::ENTITY_TYPE_INVERTED)
+                    {
+                        parser.reader.set_cursor(start);
+                        return Err(self.inapplicable_error(parser.reader));
+                    }
+                } else if parser.entity_type.is_some()
+                    || parser.has_flag(Flags::ENTITY_TYPE_TAG_SET)
+                    || parser.has_flag(Flags::ENTITY_TYPE_INVERTED)
+                {
                     parser.reader.set_cursor(start);
                     return Err(self.inapplicable_error(parser.reader));
                 }
                 let identifier = Identifier::from_reader(parser.reader)?;
-                if let Some(entity_type) =
+                if is_tag {
+                    parser.add_predicate(EntitySelectorPredicate::EntityTypeTag(
+                        identifier.to_string(),
+                        invert,
+                    ));
+                    parser.set_flag(Flags::ENTITY_TYPE_TAG_SET, true);
+                    Ok(())
+                } else if let Some(entity_type) =
                     identifier.is_vanilla_then().and_then(EntityType::from_name)
                 {
                     if entity_type.id == EntityType::PLAYER.id && !invert {

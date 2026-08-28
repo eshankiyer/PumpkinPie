@@ -1,10 +1,12 @@
 use super::{Entity, EntityBase, NBTStorage, living::LivingEntity};
+use crate::block::BlockHitResult;
 use crate::block::blocks::redstone::target_block::TargetBlock;
 use crate::entity::player::advancement::trigger::AdvancementTrigger;
 use crate::server::Server;
 use crate::world::World;
 use pumpkin_data::BlockDirection;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_protocol::java::client::play::CEntityVelocity;
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
@@ -167,6 +169,83 @@ pub fn projectile_owner_id(source: &dyn EntityBase) -> Option<i32> {
     None
 }
 
+/// `Projectile.mayInteract` (`Projectile.java:360-364`) as used by block projectile-hit callbacks.
+///
+/// Player-owned projectiles obey spawn protection and the world border; other owners are governed
+/// by `mobGriefing`, while an unresolved owner has no restriction.
+pub async fn projectile_may_interact(
+    projectile: &dyn EntityBase,
+    server: &Server,
+    world: &Arc<World>,
+    position: &BlockPos,
+) -> bool {
+    let Some(owner_id) = projectile_owner_id(projectile) else {
+        return true;
+    };
+    let Some(owner) = world.get_entity_by_id(owner_id) else {
+        return true;
+    };
+    if let Some(player) = owner.get_player() {
+        return !player
+            .is_under_spawn_protection(server, world, position)
+            .await
+            && world
+                .worldborder
+                .lock()
+                .await
+                .contains_block(position.0.x, position.0.z);
+    }
+    world.level_info.load().game_rules.mob_griefing
+}
+
+/// `Projectile.mayBreak` (`Projectile.java:366-368`).
+#[must_use]
+pub fn projectile_may_break(projectile: &dyn EntityBase, world: &World) -> bool {
+    projectile
+        .get_entity()
+        .entity_type
+        .has_tag(&tag::EntityType::MINECRAFT_IMPACT_PROJECTILES)
+        && world
+            .level_info
+            .load()
+            .game_rules
+            .projectiles_can_break_blocks
+}
+
+/// Calls the block hook from `Projectile.onHitBlock` (`Projectile.java:312-315`).
+pub async fn on_projectile_block_hit(
+    world: &Arc<World>,
+    server: &Server,
+    projectile: &Arc<dyn EntityBase>,
+    position: BlockPos,
+    face: BlockDirection,
+    hit_pos: Vector3<f64>,
+) {
+    let cursor_pos = Vector3::new(
+        (hit_pos.x - f64::from(position.0.x)) as f32,
+        (hit_pos.y - f64::from(position.0.y)) as f32,
+        (hit_pos.z - f64::from(position.0.z)) as f32,
+    );
+    let hit = BlockHitResult {
+        face: &face,
+        cursor_pos: &cursor_pos,
+    };
+    let block = world.get_block(&position);
+    let state = world.get_block_state(&position);
+    world
+        .block_registry
+        .on_projectile_hit(
+            block,
+            server,
+            world,
+            projectile.as_ref(),
+            &position,
+            state,
+            &hit,
+        )
+        .await;
+}
+
 /// The impact location vanilla passes to `GameEvent.PROJECTILE_LAND`.
 ///
 /// `Projectile.java:300` uses the exact hit location for entity hits, `:305` uses the
@@ -319,7 +398,7 @@ impl ThrownItemEntity {
 
 impl ThrownItemEntity {
     /// Process a tick for projectile movement and collisions
-    pub async fn process_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>, _server: &'a Server) {
+    pub async fn process_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>, server: &'a Server) {
         let entity = self.get_entity();
         let world = entity.world.load();
 
@@ -436,6 +515,12 @@ impl ThrownItemEntity {
 
             // Just trigger hit effects and remove
             let land_pos = projectile_land_pos(&h);
+            if let ProjectileHit::Block {
+                pos, face, hit_pos, ..
+            } = &h
+            {
+                on_projectile_block_hit(&world, server, caller, *pos, *face, *hit_pos).await;
+            }
             caller.on_hit(h).await;
             emit_projectile_land(&world, caller, land_pos).await;
 

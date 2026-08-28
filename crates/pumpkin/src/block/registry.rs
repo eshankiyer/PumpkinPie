@@ -180,7 +180,7 @@ use crate::block::fluid::water::FlowingWater;
 use crate::block::{
     AttackArgs, BlockBehaviour, BlockHitResult, BlockMetadata, BonemealArgs, FluidMetadata,
     GetCloneItemStackArgs, GetInsideCollisionShapeArgs, OnEntityCollisionArgs, OnLandedUponArgs,
-    UpdateEntityMovementAfterFallOnArgs, stop_vertical_movement_after_fall,
+    OnProjectileHitArgs, UpdateEntityMovementAfterFallOnArgs, stop_vertical_movement_after_fall,
 };
 use crate::entity::EntityBase;
 use crate::entity::player::Player;
@@ -899,6 +899,37 @@ impl BlockRegistry {
                 })
                 .await;
         }
+    }
+
+    /// Dispatches `BlockBehaviour.onProjectileHit` (`Projectile.java:312-315`).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors the block callback context"
+    )]
+    pub async fn on_projectile_hit(
+        &self,
+        block: &Block,
+        server: &Server,
+        world: &Arc<World>,
+        projectile: &dyn EntityBase,
+        position: &BlockPos,
+        state: &BlockState,
+        hit: &BlockHitResult<'_>,
+    ) {
+        let Some(pumpkin_block) = self.get_pumpkin_block(block.id) else {
+            return;
+        };
+        pumpkin_block
+            .on_projectile_hit(OnProjectileHitArgs {
+                server,
+                world,
+                block,
+                state,
+                position,
+                projectile,
+                hit,
+            })
+            .await;
     }
 
     pub async fn on_entity_step(
