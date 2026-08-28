@@ -6,11 +6,12 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::generation::structure::template::{
-    CapturedBlock, PaletteEntry, StructureTemplate, TemplateEntity, get_template, global_cache,
-    place_template,
+    CapturedBlock, PaletteEntry, StructureProcessor, StructureTemplate, TemplateEntity,
+    get_template, global_cache, place_template_with_seed,
 };
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 
 use crate::entity::NBTStorage;
@@ -190,7 +191,6 @@ impl StructureBlockBlockEntity {
     /// - `mirror` is read from NBT but not applied: `place_template`'s signature has no mirror
     ///   parameter (it hardcodes `Mirror::default()` internally), and threading mirror support
     ///   through it touches shared worldgen infrastructure used by `/place` and jigsaw pieces.
-    /// - `integrity < 1.0` block-dropout (`BlockRotProcessor`) is not applied.
     /// - Entities embedded in the template are not placed (`place_template` does not place
     ///   entities at all currently).
     /// - This only covers the `TemplateCache`'s embedded/worldgen template set, since there is
@@ -204,6 +204,20 @@ impl StructureBlockBlockEntity {
         let lookup_name = name.strip_prefix("minecraft:").unwrap_or(&name);
         let Some(template) = get_template(lookup_name) else {
             return false;
+        };
+
+        self.load_structure_info(&template).await;
+        let integrity = *self.integrity.lock().await;
+        let seed = *self.seed.lock().await;
+        // Vanilla adds BlockRotProcessor when integrity is below 1.0
+        // (`StructureBlockEntity.java:420-422`; `BlockRotProcessor.java:40-53`).
+        let processors = if integrity < 1.0 {
+            vec![StructureProcessor::BlockRot {
+                integrity: integrity.clamp(0.0, 1.0),
+                rottable_blocks: None,
+            }]
+        } else {
+            Vec::new()
         };
 
         let rotation = match self.rotation.lock().await.as_str() {
@@ -220,7 +234,7 @@ impl StructureBlockBlockEntity {
         );
 
         let mut placer = WorldBlockPlacer::new(world);
-        place_template(
+        place_template_with_seed(
             &mut placer,
             &template,
             origin,
@@ -228,8 +242,9 @@ impl StructureBlockBlockEntity {
             rotation,
             false,
             false,
-            &[],
+            &processors,
             None,
+            Self::create_random(seed),
         );
         placer.finalize();
         world.queue_block_updates(&placer.changed_positions).await;
@@ -329,9 +344,10 @@ impl StructureBlockBlockEntity {
             return false;
         };
 
-        let Some(template) = self.capture_structure(world).await else {
+        let Some(mut template) = self.capture_structure(world).await else {
             return false;
         };
+        template.author.clone_from(&*self.author.lock().await);
         let template = Arc::new(template);
 
         global_cache().insert(&format!("{namespace}:{path}"), Arc::clone(&template));
@@ -347,6 +363,35 @@ impl StructureBlockBlockEntity {
             .join("structure")
             .join(format!("{path}.nbt"));
         template.save_to_path(&file_path).is_ok()
+    }
+
+    /// Mirrors `StructureBlockEntity.createRandom` (`StructureBlockEntity.java:365-367`): a zero
+    /// seed gets fresh time-based randomness, while a nonzero seed remains deterministic.
+    fn create_random(seed: i64) -> u64 {
+        if seed == 0 {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_millis() as u64)
+        } else {
+            seed as u64
+        }
+    }
+
+    /// Mirrors `StructureBlockEntity.loadStructureInfo` (`StructureBlockEntity.java:396-400`)
+    /// for the template already resolved by `place_structure`.
+    async fn load_structure_info(&self, template: &StructureTemplate) {
+        *self.author.lock().await = template.author.clone();
+        *self.size_x.lock().await = template.size.x;
+        *self.size_y.lock().await = template.size.y;
+        *self.size_z.lock().await = template.size.z;
+    }
+
+    /// Mirrors `StructureBlockEntity.unloadStructure` (`StructureBlockEntity.java:432-437`).
+    pub async fn unload_structure(&self) {
+        let name = self.name.lock().await.clone();
+        if !name.is_empty() {
+            global_cache().remove(&name);
+        }
     }
 }
 

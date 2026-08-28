@@ -5,6 +5,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicI32, Ordering, Ordering::Relaxed},
 };
 
+use pumpkin_data::attributes::Attributes;
 use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, IDSet, IdOr};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
@@ -12,7 +13,9 @@ use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_protocol::java::server::play::SPlayerInput;
 use pumpkin_util::math::boundingbox::EntityDimensions;
+use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -381,6 +384,89 @@ impl Mob for HappyGhastEntity {
 
     fn get_mob_gravity(&self) -> f64 {
         0.0
+    }
+
+    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async move {
+            let living = &self.mob_entity.living_entity;
+            let entity = &living.entity;
+            let flying_speed = living.get_attribute_value(&Attributes::FLYING_SPEED);
+
+            // HappyGhast.getRiddenInput/getRiddenRotation/tickRidden
+            // (`HappyGhast.java:350-387`) are folded into this reachable travel hook. The
+            // packet's input flags are the server representation of the rider's xxa/zza/jumping.
+            let rider_input = {
+                let passengers = entity.passengers.lock().await;
+                passengers.first().and_then(|passenger| {
+                    passenger.get_player().map(|rider| {
+                        (
+                            rider.last_input.load(Relaxed),
+                            rider.get_entity().pitch.load(),
+                            rider.get_entity().yaw.load(),
+                        )
+                    })
+                })
+            };
+            let movement_input = if !self.is_on_still_timeout()
+                && self.is_wearing_body_armor().await
+                && let Some((input, pitch, yaw)) = rider_input
+            {
+                // `ServerPlayer.getLastClientMoveIntent` (`ServerPlayer.java:2231`): left is
+                // positive strafe, right is negative.
+                let mut strafe = 0.0;
+                if input & SPlayerInput::LEFT != 0 {
+                    strafe += 1.0;
+                }
+                if input & SPlayerInput::RIGHT != 0 {
+                    strafe -= 1.0;
+                }
+
+                let mut up = 0.0;
+                let mut forward = 0.0;
+                if input & (SPlayerInput::FORWARD | SPlayerInput::BACKWARD) != 0 {
+                    let pitch_radians = f64::from(pitch).to_radians();
+                    forward = pitch_radians.cos();
+                    up = -pitch_radians.sin();
+                    if input & SPlayerInput::BACKWARD != 0 {
+                        forward *= -0.5;
+                        up *= -0.5;
+                    }
+                }
+                if input & SPlayerInput::JUMP != 0 {
+                    up += 0.5;
+                }
+
+                let diff = pumpkin_util::math::wrap_degrees(yaw - entity.yaw.load());
+                let new_yaw = entity.yaw.load() + diff * 0.08;
+                entity.yaw.store(new_yaw);
+                entity.pitch.store(pitch * 0.5);
+                entity.head_yaw.store(new_yaw);
+                entity.body_yaw.store(new_yaw);
+
+                Vector3::new(strafe, up, forward) * (3.9 * flying_speed)
+            } else {
+                living.movement_input.load()
+            };
+
+            // `HappyGhast.travel` (`HappyGhast.java:176-179`) always uses travelFlying with
+            // FLYING_SPEED * 5/3, including in water and lava. `travelFlying` applies the
+            // corresponding 0.8/0.5/0.91 velocity drag (`LivingEntity.java:2439-2457`).
+            living
+                .entity
+                .update_velocity_from_input(movement_input, flying_speed * (5.0 / 3.0));
+            let velocity = entity.velocity.load();
+            entity.move_entity(caller, velocity).await;
+
+            let drag = if entity.touching_water.load(Relaxed) {
+                0.8
+            } else if entity.touching_lava.load(Relaxed) {
+                0.5
+            } else {
+                0.91
+            };
+            entity.velocity.store(entity.velocity.load() * drag);
+            true
+        })
     }
 
     fn get_ambient_sound(&self) -> Option<Sound> {

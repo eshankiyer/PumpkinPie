@@ -69,6 +69,12 @@ impl TemplateCache {
         self.cache.insert(name.to_owned(), template);
     }
 
+    /// Removes a cached template by name.
+    pub fn remove(&self, name: &str) {
+        let name = name.strip_prefix("minecraft:").unwrap_or(name);
+        self.cache.remove(name);
+    }
+
     /// Gets a template by name, returning an error if loading fails.
     ///
     /// # Errors

@@ -2351,6 +2351,14 @@ impl LivingEntity {
     }
 
     fn check_climbing(&self) {
+        // HappyGhast.onClimbable (`HappyGhast.java:171-173`) is always false. Do not let the
+        // generic climbable-block check turn a happy ghast into a ladder-climbing mob.
+        if self.entity.entity_type == &EntityType::HAPPY_GHAST {
+            self.climbing.store(false, Relaxed);
+            self.climbing_pos.store(None);
+            return;
+        }
+
         if let Some(climbing) = spider_climbing_state(
             self.entity.entity_type,
             self.entity.horizontal_collision.load(SeqCst),
@@ -2498,6 +2506,13 @@ impl LivingEntity {
         ground: bool,
         dont_damage: bool,
     ) {
+        // HappyGhast.checkFallDamage (`HappyGhast.java:167-168`) is an empty override: neither
+        // fall distance nor landing damage is accumulated for this flying mob.
+        if caller.get_entity().entity_type == &EntityType::HAPPY_GHAST {
+            self.fall_distance.store(0.0);
+            return;
+        }
+
         // A passenger is snapped back onto its vehicle every tick by `Entity.positionRider`, so
         // it never builds up a fall of its own; the vehicle hands it the fall through
         // `Entity.propagateFallToPassengers` (`Entity.java:1583-1589`) instead. Without this

@@ -105,6 +105,39 @@ pub fn place_template(
     );
 }
 
+/// Places a template using a caller-provided seed for processor randomness.
+///
+/// This is used by structure blocks for the vanilla `StructurePlaceSettings` random source
+/// (`StructurePlaceSettings.java:68-70, 110-115`). Existing callers retain the historical
+/// position-derived randomness through [`place_template`].
+#[allow(clippy::too_many_arguments)]
+pub fn place_template_with_seed(
+    placer: &mut impl BlockPlacer,
+    template: &StructureTemplate,
+    origin: Vector3<i32>,
+    offset: (i32, i32),
+    rotation: Rotation,
+    skip_air: bool,
+    apply_waterlogging: bool,
+    processors: &[StructureProcessor],
+    chunk_box: Option<&pumpkin_util::math::block_box::BlockBox>,
+    seed: u64,
+) {
+    place_template_with_options_seed(
+        placer,
+        template,
+        origin,
+        offset,
+        rotation,
+        skip_air,
+        apply_waterlogging,
+        processors,
+        chunk_box,
+        false,
+        Some(seed),
+    );
+}
+
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub fn place_template_with_options(
     placer: &mut impl BlockPlacer,
@@ -118,12 +151,43 @@ pub fn place_template_with_options(
     chunk_box: Option<&pumpkin_util::math::block_box::BlockBox>,
     keep_jigsaws: bool,
 ) {
+    place_template_with_options_seed(
+        placer,
+        template,
+        origin,
+        offset,
+        rotation,
+        skip_air,
+        apply_waterlogging,
+        processors,
+        chunk_box,
+        keep_jigsaws,
+        None,
+    );
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn place_template_with_options_seed(
+    placer: &mut impl BlockPlacer,
+    template: &StructureTemplate,
+    origin: Vector3<i32>,
+    offset: (i32, i32),
+    rotation: Rotation,
+    skip_air: bool,
+    apply_waterlogging: bool,
+    processors: &[StructureProcessor],
+    chunk_box: Option<&pumpkin_util::math::block_box::BlockBox>,
+    keep_jigsaws: bool,
+    placement_seed: Option<u64>,
+) {
     let (rotated_ox, rotated_oz) = rotation.rotate_offset(offset.0, offset.1);
     let world_x = origin.x + rotated_ox;
     let world_z = origin.z + rotated_oz;
 
     let mut context_rng = LegacyRand::from_seed(hash_block_pos(world_x, origin.y, world_z) as u64);
     let mut context = processor::ProcessorContext::new(origin, processors, &mut context_rng);
+
+    let mut placement_rng = placement_seed.map(LegacyRand::from_seed);
 
     for block in &template.blocks {
         let palette_entry = &template.palette[block.state as usize];
@@ -199,8 +263,11 @@ pub fn place_template_with_options(
         let mut should_place = true;
         let mut wy = wy;
         let mut capped_idx = 0;
-        let mut rng =
+        let mut local_rng =
             LegacyRand::from_seed(hash_block_pos(world_pos.x, world_pos.y, world_pos.z) as u64);
+        let rng: &mut LegacyRand = placement_rng
+            .as_mut()
+            .map_or_else(|| &mut local_rng, |rng| rng);
         for processor in processors {
             if let StructureProcessor::Gravity { heightmap, offset } = processor {
                 // Vanilla `GravityProcessor.processBlock` (`GravityProcessor.java:29-56`):
@@ -241,7 +308,7 @@ pub fn place_template_with_options(
                 &mut block_entity_nbt,
                 &mut context,
                 &mut capped_idx,
-                &mut rng,
+                rng,
             ) else {
                 should_place = false;
                 break;
