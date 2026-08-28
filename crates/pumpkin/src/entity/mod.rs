@@ -4417,13 +4417,13 @@ impl Entity {
             return;
         }
 
-        let passenger_entity = passenger.get_entity();
+        let mounted_passenger = passenger.clone();
+        let passenger_entity = mounted_passenger.get_entity();
         passenger_entity
             .vehicle_persistence_required
             .store(true, Relaxed);
         *passenger_entity.vehicle.lock().await = Some(vehicle);
 
-        let mounted_passenger = passenger.clone();
         let mut passengers = self.passengers.lock().await;
         // Vanilla keeps a server-side player ahead of non-player passengers. The first
         // passenger controls rideable entities, so preserving this ordering is observable in
@@ -4457,6 +4457,19 @@ impl Entity {
         drop(passengers);
         self.position_rider(&mounted_passenger, mounted_index, passenger_ids.len())
             .await;
+
+        // Vanilla `Mob.startRiding` (`Mob.java:1298-1305`) drops a mob's leash after a
+        // successful mount. The shared passenger path is Pumpkin's equivalent of that
+        // operation, so perform the same cleanup for mob passengers here.
+        if passenger_entity.leashed_to.lock().await.as_ref().is_some()
+            && mounted_passenger.get_mob().is_some()
+        {
+            passenger_entity.unleash().await;
+            let lead_item = ItemStack::new(1, &pumpkin_data::item::Item::LEAD);
+            world
+                .drop_stack(&passenger_entity.block_pos.load(), lead_item)
+                .await;
+        }
     }
 
     pub(crate) async fn remove_passenger_on_disconnect(&self, passenger_id: i32) {
