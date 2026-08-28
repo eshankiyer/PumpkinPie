@@ -1077,8 +1077,10 @@ impl LivingEntity {
 
     /// Sets the current absorption amount for this entity (yellow hearts)
     pub async fn set_absorption(&self, new_abs: f32) {
-        // Must be at least 0
-        let new_abs = new_abs.max(0.0);
+        // `LivingEntity.setAbsorptionAmount` (`LivingEntity.java:3397-3400`) clamps both
+        // sides, including writes above the current max-absorption attribute.
+        let max_absorption = self.get_attribute_value(&Attributes::MAX_ABSORPTION) as f32;
+        let new_abs = new_abs.clamp(0.0, max_absorption);
 
         // Set local state
         self.absorption.store(new_abs);
@@ -1101,6 +1103,70 @@ impl LivingEntity {
                 None,
             );
         }
+    }
+
+    /// Applies the `post_piercing_attack` enchantment effects after a melee attack.
+    ///
+    /// Vanilla `LivingEntity.postPiercingAttack` (`LivingEntity.java:1707-1711`) delegates
+    /// this to `EnchantmentHelper`; `Player.attack` and `Mob.doHurtTarget` invoke it after the
+    /// attack attempt (`Player.java:1004`, `Mob.java:1404`).
+    pub async fn post_piercing_attack(&self, caller: &dyn EntityBase) {
+        if self.entity.vehicle.lock().await.is_some()
+            || self.entity.is_fall_flying()
+            || self.entity.touching_water.load(Relaxed)
+        {
+            return;
+        }
+
+        if let Some(player) = caller.get_player()
+            && player.gamemode.load() != GameMode::Creative
+            && player.get_food_level() < 7
+        {
+            return;
+        }
+
+        let item = self.held_item(caller).await;
+        let Some(enchantments) = item.get_data_component::<EnchantmentsImpl>() else {
+            return;
+        };
+        let Some((magnitude, exhaustion, item_damage)) =
+            enchantments
+                .enchantment
+                .iter()
+                .find_map(|(enchantment, level)| {
+                    crate::enchantment::post_piercing_lunge(enchantment, *level)
+                })
+        else {
+            return;
+        };
+
+        let look = Vector3::from_yaw_pitch(self.entity.yaw.load(), self.entity.pitch.load());
+        self.entity
+            .add_velocity(look.multiply(f64::from(magnitude), 0.0, f64::from(magnitude)));
+
+        if let Some(player) = caller.get_player() {
+            player.add_exhaustion(exhaustion).await;
+            player.damage_held_item(item_damage).await;
+        } else if let Some(mob) = caller.get_mob() {
+            mob.get_mob_entity()
+                .damage_main_hand_weapon_after_hit()
+                .await;
+        }
+
+        let sound = match rand::random_range(0..3) {
+            0 => Sound::ItemSpearLunge1,
+            1 => Sound::ItemSpearLunge2,
+            _ => Sound::ItemSpearLunge3,
+        };
+        let category = if caller.get_player().is_some() {
+            SoundCategory::Players
+        } else {
+            SoundCategory::Neutral
+        };
+        self.entity
+            .world
+            .load()
+            .play_sound(sound, category, &self.entity.pos.load());
     }
 
     /// Convenience helper to mutate an attribute instance. Automatically inserts

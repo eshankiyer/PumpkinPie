@@ -1803,6 +1803,7 @@ impl Player {
                 SoundCategory::Players,
                 &self.living_entity.entity.pos.load(),
             );
+            self.living_entity.post_piercing_attack(self).await;
             return;
         }
 
@@ -2022,6 +2023,8 @@ impl Player {
         //    as a known limitation if refactoring is deemed too invasive.
         self.damage_held_item(Self::combat_weapon_durability_cost(&item_stack))
             .await;
+
+        self.living_entity.post_piercing_attack(self).await;
 
         // Vanilla `Player#attack` ends the successful-hit branch with
         // `causeFoodExhaustion(0.1F)`. Only landed hits exhaust; the miss/no-damage

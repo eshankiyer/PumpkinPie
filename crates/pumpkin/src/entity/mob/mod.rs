@@ -914,6 +914,7 @@ impl MobEntity {
         true
     }
 
+    #[expect(clippy::too_many_lines)]
     pub async fn try_attack(&self, target: &dyn EntityBase) -> bool {
         if self.living_entity.dead.load(Relaxed) {
             return false;
@@ -1022,13 +1023,17 @@ impl MobEntity {
             self.damage_main_hand_weapon_after_hit().await;
         }
 
+        if let Some(caller) = caller.as_deref() {
+            self.living_entity.post_piercing_attack(caller).await;
+        }
+
         damaged
     }
 
     /// `Mob.doHurtTarget` delegates successful weapon strikes to `ItemStack.hurtEnemy`.
     /// Pumpkin's weapon component carries the equivalent durability cost, so mutate and publish
     /// the equipped main-hand stack only after the target actually accepted the hit.
-    async fn damage_main_hand_weapon_after_hit(&self) {
+    pub(crate) async fn damage_main_hand_weapon_after_hit(&self) {
         let living = &self.living_entity;
         let slot = EquipmentSlot::MAIN_HAND;
         let mut equipment = living.entity_equipment.lock().await;
