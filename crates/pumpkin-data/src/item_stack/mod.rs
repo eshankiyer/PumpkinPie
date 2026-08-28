@@ -280,6 +280,7 @@ impl ItemStack {
     pub fn get_damage(&self) -> i32 {
         self.get_data_component::<DamageImpl>()
             .map_or(0, |value| value.damage)
+            .clamp(0, self.get_max_damage().unwrap_or(0))
     }
 
     #[must_use]
@@ -301,7 +302,7 @@ impl ItemStack {
     }
 
     pub fn set_damage(&mut self, damage: i32) {
-        let damage = damage.max(0);
+        let damage = damage.clamp(0, self.get_max_damage().unwrap_or(0));
         if damage == 0 {
             self.patch.retain(|(id, _)| *id != DataComponent::Damage);
             return;
@@ -320,7 +321,23 @@ impl ItemStack {
 
     #[must_use]
     pub fn is_damageable(&self) -> bool {
-        self.get_max_damage().unwrap_or(0) > 0
+        self.get_max_damage()
+            .is_some_and(|max_damage| max_damage > 0)
+            && !self.is_unbreakable()
+            && self.get_data_component::<DamageImpl>().is_some()
+    }
+
+    #[must_use]
+    pub fn is_damaged(&self) -> bool {
+        self.is_damageable() && self.get_damage() > 0
+    }
+
+    #[must_use]
+    pub fn is_broken(&self) -> bool {
+        self.is_damageable()
+            && self
+                .get_max_damage()
+                .is_some_and(|max_damage| self.get_damage() >= max_damage)
     }
 
     /// Vanilla `ItemStack.isValidRepairItem` (`ItemStack.java:1117-1120`) delegates to the
@@ -433,8 +450,7 @@ impl ItemStack {
 
     #[must_use]
     pub fn is_stackable(&self) -> bool {
-        self.get_max_stack_size() > 1
-            && self.get_max_damage().is_none_or(|_| self.get_damage() == 0)
+        self.get_max_stack_size() > 1 && (!self.is_damageable() || !self.is_damaged())
     }
 
     #[must_use]
@@ -1030,6 +1046,32 @@ mod tests {
             );
             assert_eq!(stack.get_damage(), 0, "damage mismatch for amount={amount}");
         }
+    }
+
+    #[test]
+    fn damage_accessors_match_vanilla_bounds_and_flags() {
+        let mut stack = iron_sword();
+
+        assert!(stack.is_damageable());
+        assert!(!stack.is_damaged());
+        assert!(!stack.is_broken());
+
+        stack.set_damage(300);
+        assert_eq!(stack.get_damage(), 250);
+        assert!(stack.is_damaged());
+        assert!(stack.is_broken());
+
+        stack.set_damage(-1);
+        assert_eq!(stack.get_damage(), 0);
+        assert!(!stack.is_damaged());
+        assert!(!stack.is_broken());
+
+        stack
+            .patch
+            .push((DataComponent::Unbreakable, Some(UnbreakableImpl.to_dyn())));
+        assert!(!stack.is_damageable());
+        assert!(!stack.is_damaged());
+        assert!(!stack.is_broken());
     }
 
     #[test]
