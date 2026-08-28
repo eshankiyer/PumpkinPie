@@ -1,6 +1,6 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-use crate::block::entities::{BlockEntity, block_entity_from_nbt};
+use crate::block::entities::BlockEntity;
 use dashmap::DashMap;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::chunk::Biome;
@@ -7058,6 +7058,10 @@ impl World {
                     .cloned()
             })
             .flatten()?;
+        let entity = crate::block::entities::block_entity_from_nbt_at(&nbt, *block_pos)?;
+        if !entity.is_valid_block_state(self.get_block_state_id(block_pos)) {
+            return None;
+        }
         if let Some(custom_data) = nbt
             .get_compound("PumpkinCustomData")
             .or_else(|| nbt.get_compound("BukkitValues"))
@@ -7065,7 +7069,6 @@ impl World {
             self.custom_block_entity_data
                 .insert(*block_pos, custom_data.clone());
         }
-        let entity = block_entity_from_nbt(&nbt)?;
         self.block_entities
             .entry(chunk_pos)
             .or_default()
@@ -7124,7 +7127,12 @@ impl World {
                             relative.z as usize,
                         )?;
                         bedrock_chest_block_actor(state_id, *position).or_else(|| {
-                            block_entity_from_nbt(nbt)?.bedrock_block_actor_data(state_id)
+                            let entity =
+                                crate::block::entities::block_entity_from_nbt_at(nbt, *position)?;
+                            entity
+                                .is_valid_block_state(state_id)
+                                .then(|| entity.bedrock_block_actor_data(state_id))
+                                .flatten()
                         })
                     }),
             )

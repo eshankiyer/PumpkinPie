@@ -470,6 +470,13 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         false
     }
 
+    /// Vanilla `LivingEntity.canBeSeenByAnyone` (`LivingEntity.java:956-958`). Entity
+    /// implementations with additional visibility rules override this; armor stands hide
+    /// themselves when invisible or marker-configured.
+    fn can_be_seen_by_anyone(&self) -> bool {
+        !self.get_entity().is_spectator() && self.get_entity().is_alive()
+    }
+
     /// Vanilla `Entity.canBeHitByProjectile` (`Entity.java:2005-2007`).
     fn can_be_hit_by_projectile(&self) -> bool {
         self.get_entity().is_alive() && self.is_pickable()
@@ -481,6 +488,18 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
     /// no swing -- not merely no damage. Override to `false` where vanilla does.
     fn is_attackable(&self) -> bool {
         true
+    }
+
+    /// Vanilla `Entity.isEffectiveAi` (`Entity.java:3592-3594`). The server-side default is
+    /// effective; special entities can suppress their living movement path.
+    fn is_effective_ai(&self) -> bool {
+        true
+    }
+
+    /// Vanilla `Entity.skipAttackInteraction` (`Entity.java:2974-2976`). This is async because
+    /// the server's spawn-protection and world-border state are asynchronous in Pumpkin.
+    fn skip_attack_interaction<'a>(&'a self, _source: &'a Player) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async { false })
     }
 
     /// Vanilla `Projectile.calculateHorizontalHurtKnockbackDirection` defaults to the
@@ -1180,6 +1199,9 @@ pub struct Entity {
     pub swimming: AtomicBool,
     /// Indicates whether the entity is invisible
     pub invisible: AtomicBool,
+    /// Entity-specific invisibility that must survive potion visibility updates. Armor stands
+    /// use this for their saved `Invisible` flag; other entities leave it false.
+    pub persistent_invisible: AtomicBool,
     /// Indicates whether the entity is glowing
     pub glowing: AtomicBool,
     /// Indicates whether the entity is flying due to a fall
@@ -1485,6 +1507,7 @@ impl Entity {
             sneaking: AtomicBool::new(false),
             swimming: AtomicBool::new(false),
             invisible: AtomicBool::new(false),
+            persistent_invisible: AtomicBool::new(false),
             glowing: AtomicBool::new(false),
             world: ArcSwap::new(world),
             sprinting: AtomicBool::new(false),

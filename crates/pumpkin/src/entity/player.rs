@@ -1649,6 +1649,9 @@ impl Player {
         if !victim.is_attackable() {
             return;
         }
+        if victim.skip_attack_interaction(self).await {
+            return;
+        }
         let world = self.world();
         let Some(server) = world.server.upgrade() else {
             return;

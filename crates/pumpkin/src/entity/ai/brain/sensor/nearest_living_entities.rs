@@ -49,10 +49,9 @@ impl NearestLivingEntitySensor {
         distance_sq: f64,
         candidate: &Arc<dyn EntityBase>,
     ) -> bool {
-        // `!target.canBeSeenByAnyone()` -> false
-        // (LivingEntity.java:956-958: !isSpectator() && isAlive()).
-        let target = candidate.get_entity();
-        if target.is_spectator() || !target.is_alive() {
+        // `!target.canBeSeenByAnyone()` -> false (LivingEntity.java:956-958), including the
+        // ArmorStand override (ArmorStand.java:670-672).
+        if !candidate.can_be_seen_by_anyone() {
             return false;
         }
 

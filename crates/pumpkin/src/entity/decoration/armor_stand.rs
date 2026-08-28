@@ -201,6 +201,15 @@ impl ArmorStandEntity {
         self.get_entity().invisible.load(Ordering::Relaxed)
     }
 
+    /// Vanilla `ArmorStand.setInvisible` (`ArmorStand.java:450-454`) stores a stand-specific
+    /// invisibility flag and reapplies it after potion visibility recalculation.
+    pub async fn set_invisible(&self, invisible: bool) {
+        self.get_entity()
+            .persistent_invisible
+            .store(invisible, Ordering::Relaxed);
+        self.living_entity.update_effect_visibility().await;
+    }
+
     pub fn pack_rotation(&self) -> PackedRotation {
         self.rotation.load()
     }
@@ -277,7 +286,12 @@ impl NBTStorage for ArmorStandEntity {
             let disabled_slots = self.disabled_slots.load(Ordering::Relaxed);
             // ...
 
-            nbt.put_bool("Invisible", self.is_invisible());
+            nbt.put_bool(
+                "Invisible",
+                self.get_entity()
+                    .persistent_invisible
+                    .load(Ordering::Relaxed),
+            );
             nbt.put_bool("Small", self.is_small());
             nbt.put_bool("ShowArms", self.should_show_arms());
             nbt.put_int("DisabledSlots", disabled_slots);
@@ -296,11 +310,8 @@ impl NBTStorage for ArmorStandEntity {
             let mut flags = 0u8;
             // ...
 
-            if let Some(invisible) = nbt.get_bool("Invisible")
-                && invisible
-            {
-                self.get_entity().set_invisible(invisible).await;
-            }
+            self.set_invisible(nbt.get_bool("Invisible").unwrap_or(false))
+                .await;
 
             if let Some(small) = nbt.get_bool("Small")
                 && small
@@ -354,6 +365,52 @@ impl EntityBase for ArmorStandEntity {
 
     fn is_pickable(&self) -> bool {
         self.get_entity().is_alive() && !self.is_marker()
+    }
+
+    /// Vanilla `ArmorStand.isEffectiveAi` (`ArmorStand.java:118-121`) gates the inherited
+    /// living movement path on the stand having physics.
+    fn is_effective_ai(&self) -> bool {
+        !self.is_marker() && !self.get_entity().has_no_gravity()
+    }
+
+    /// Vanilla `ArmorStand.canBeSeenByAnyone` (`ArmorStand.java:670-672`). Marker stands and
+    /// explicitly invisible stands must not enter living-entity visibility memories.
+    fn can_be_seen_by_anyone(&self) -> bool {
+        !self.is_invisible() && !self.is_marker()
+    }
+
+    /// Vanilla `ArmorStand.skipAttackInteraction` (`ArmorStand.java:577-580`) delegates to
+    /// `ServerLevel.mayInteract` (`ServerLevel.java:868-871`).
+    fn skip_attack_interaction<'a>(
+        &'a self,
+        source: &'a crate::entity::player::Player,
+    ) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async move {
+            let entity = self.get_entity();
+            let world = entity.world.load();
+            let Some(server) = world.server.upgrade() else {
+                return false;
+            };
+            let block_pos = entity.block_pos.load();
+            source
+                .is_under_spawn_protection(&server, &world, &block_pos)
+                .await
+                || !world
+                    .worldborder
+                    .lock()
+                    .await
+                    .contains_block(block_pos.0.x, block_pos.0.z)
+        })
+    }
+
+    /// Vanilla `ArmorStand.thunderHit` (`ArmorStand.java:602-604`) is intentionally empty, so
+    /// lightning must not apply the generic living-entity fire and damage callback.
+    fn on_lightning_strike<'a>(
+        &'a self,
+        _caller: &'a dyn EntityBase,
+        _lightning: &'a crate::entity::lightning::LightningBoltEntity,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async {})
     }
 
     /// Vanilla `ArmorStand.getPistonPushReaction` (`ArmorStand.java:472-475`). Marker stands are

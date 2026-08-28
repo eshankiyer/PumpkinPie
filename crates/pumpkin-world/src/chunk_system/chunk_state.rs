@@ -1,6 +1,6 @@
 use crate::chunk::{
     ChunkData, ChunkHeightmapType, ChunkHeightmaps, ChunkLight, ChunkSections,
-    format::LightContainer,
+    format::{LightContainer, block_entity_position_from_tag},
     palette::{BiomePalette, BlockPalette},
 };
 use crate::generation::biome_coords;
@@ -360,13 +360,11 @@ impl Chunk {
         // Convert pending block entities from structure generation to actual block entities
         let mut pending_block_entities = FxHashMap::default();
         for nbt in proto_chunk.pending_block_entities {
-            if let Some(x) = nbt.get_int("x")
-                && let Some(y) = nbt.get_int("y")
-                && let Some(z) = nbt.get_int("z")
-            {
-                pending_block_entities
-                    .insert(pumpkin_util::math::position::BlockPos::new(x, y, z), nbt);
-            }
+            let block_pos = block_entity_position_from_tag(
+                pumpkin_util::math::vector2::Vector2::new(proto_chunk.x, proto_chunk.z),
+                &nbt,
+            );
+            pending_block_entities.insert(block_pos, nbt);
         }
 
         let chunk = ChunkData {
