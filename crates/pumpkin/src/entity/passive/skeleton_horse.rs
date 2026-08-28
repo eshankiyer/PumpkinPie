@@ -215,6 +215,7 @@ impl Mob for SkeletonHorseEntity {
         _caller: &'a Arc<dyn EntityBase>,
     ) -> crate::entity::EntityBaseFuture<'a, ()> {
         Box::pin(async move {
+            self.tick_horse_ai().await;
             // Vanilla: `SkeletonHorse.aiStep` -- an untriggered trap horse despawns after
             // `TRAP_MAX_LIFE` ticks. `isPersistenceRequired` gating is skipped (Pumpkin doesn't
             // expose that flag to entities generically here); this only matters once something

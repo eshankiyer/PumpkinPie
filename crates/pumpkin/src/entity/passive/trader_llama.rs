@@ -233,6 +233,7 @@ impl Mob for TraderLlamaEntity {
     /// the trader's timer; otherwise it decrements independently.
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
+            self.tick_horse_ai().await;
             let entity = &self.mob_entity.living_entity.entity;
             let holder = entity.leashed_to.lock().await.clone();
 

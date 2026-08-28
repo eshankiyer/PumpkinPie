@@ -463,6 +463,11 @@ impl AbstractHorse for LlamaEntity {
         &self.horse_data
     }
 
+    /// `Llama.canEatGrass` (`Llama.java:429-432`).
+    fn can_eat_grass(&self) -> bool {
+        false
+    }
+
     /// `AbstractChestedHorse.randomizeAttributes`: only max-health is rolled.
     fn randomize_attributes(&self, random: &mut impl RngExt)
     where
@@ -530,6 +535,10 @@ impl LlamaMob for LlamaEntity {
 impl Mob for LlamaEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+        AbstractHorse::tick_horse_ai(self)
     }
 
     fn get_follow_leash_speed(&self) -> f32 {

@@ -168,6 +168,10 @@ impl Mob for DonkeyEntity {
         &self.mob_entity
     }
 
+    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+        AbstractHorse::tick_horse_ai(self)
+    }
+
     fn has_controlling_passenger(&self) -> EntityBaseFuture<'_, bool> {
         AbstractHorse::has_saddled_player_passenger(self)
     }

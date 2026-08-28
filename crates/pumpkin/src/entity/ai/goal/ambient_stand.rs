@@ -5,10 +5,9 @@ use rand::RngExt;
 use super::{Controls, Goal};
 use crate::entity::{ai::goal::GoalFuture, mob::Mob, passive::equine::AbstractHorse};
 
-/// `Mob.java:274` (`getAmbientSoundInterval`, default 80), used by
-/// `AbstractHorse.java:1036`'s `getAmbientStandInterval` -- no horse-family species
-/// overrides it.
-const AMBIENT_STAND_INTERVAL_TICKS: i32 = 80;
+/// `AbstractHorse.getAmbientStandInterval` delegates to `getAmbientSoundInterval`,
+/// which `AbstractHorse` overrides to 400 ticks (`AbstractHorse.java:401-405`).
+const AMBIENT_STAND_INTERVAL_TICKS: i32 = 400;
 
 /// Vanilla `RandomStandGoal.canUse` (`RandomStandGoal.java:30-40`), factored out as a pure
 /// function of the post-increment counter and the two random rolls it consumes.

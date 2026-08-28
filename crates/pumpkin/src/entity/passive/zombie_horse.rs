@@ -198,6 +198,10 @@ impl Mob for ZombieHorseEntity {
         &self.mob_entity
     }
 
+    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+        AbstractHorse::tick_horse_ai(self)
+    }
+
     /// `ZombieHorse.getAmbientSound` (`ZombieHorse.java:90-93`).
     fn get_ambient_sound(&self) -> Option<Sound> {
         Some(Sound::EntityZombieHorseAmbient)

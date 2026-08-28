@@ -19,9 +19,8 @@
 //!   chest storage is shown. This is a real, working inventory (right-click+sneak on a tamed
 //!   chested horse opens and persists chest contents) but is not pixel-identical to vanilla's
 //!   menu layout -- flagged as a follow-up if the exact vanilla GUI is required.
-//! - `standIfPossible`'s standing pose is set but never automatically cleared (vanilla ticks
-//!   `standCounter` down in `aiStep`); cosmetic-only gap, out of scope without a per-species
-//!   `mob_tick` port.
+//! - The shared `mob_tick` hook now handles the server-side grazing trigger and standing timer;
+//!   species-specific hooks call it before their own extra per-tick behavior.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, AtomicU8, Ordering::Relaxed};
@@ -31,7 +30,7 @@ use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::particle::Particle;
 use pumpkin_data::sound::{Sound, SoundCategory};
-use pumpkin_data::{entity::EntityType, tag::Taggable};
+use pumpkin_data::{Block, entity::EntityType, tag::Taggable};
 use pumpkin_inventory::generic_container_screen_handler::create_generic_9x3;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
@@ -50,6 +49,24 @@ pub(crate) fn is_valid_saddle_item(stack: &ItemStack, entity_type: &EntityType) 
         .get_data_component::<EquippableImpl>()
         .is_some_and(|equippable| {
             *equippable.slot == EquipmentSlot::SADDLE
+                && equippable
+                    .allowed_entities
+                    .as_ref()
+                    .is_none_or(|allowed| match allowed {
+                        IDSet::Tag(tag) => entity_type.is_tagged_with(tag).unwrap_or(false),
+                        IDSet::IDs(ids) => ids.iter().any(|allowed| allowed.id == entity_type.id),
+                    })
+        })
+}
+
+/// `AbstractHorse.equipBodyArmor` uses the animal-body equipment component and
+/// its allowed-entity predicate. Keep this separate from the generic mob helper,
+/// whose tag handling is intentionally more limited.
+pub(crate) fn is_valid_body_armor_item(stack: &ItemStack, entity_type: &EntityType) -> bool {
+    stack
+        .get_data_component::<EquippableImpl>()
+        .is_some_and(|equippable| {
+            *equippable.slot == EquipmentSlot::BODY
                 && equippable
                     .allowed_entities
                     .as_ref()
@@ -92,6 +109,35 @@ pub(crate) async fn equip_saddle_item(
     mob_entity
         .living_entity
         .send_equipment_changes(&[(EquipmentSlot::SADDLE, new_stack)]);
+
+    let entity = &mob_entity.living_entity.entity;
+    let world = entity.world.load();
+    world.play_sound_event(&equip_sound, SoundCategory::Neutral, &entity.pos.load());
+}
+
+pub(crate) async fn equip_body_armor_item(
+    mob_entity: &MobEntity,
+    player: &Arc<Player>,
+    item_stack: &mut ItemStack,
+) {
+    let equip_sound = item_stack
+        .get_data_component::<EquippableImpl>()
+        .map_or(IdOr::Id(Sound::ItemArmorEquipGeneric), |equippable| {
+            equippable.equip_sound.clone()
+        });
+    let new_stack = item_stack.split_unless_creative(player.gamemode.load(), 1);
+    let mut equipment = mob_entity.living_entity.entity_equipment.lock().await;
+    equipment.put(&EquipmentSlot::BODY, new_stack.clone());
+    drop(equipment);
+    mob_entity
+        .living_entity
+        .equipment_drop_chances
+        .lock()
+        .await
+        .insert(EquipmentSlot::BODY, 1.0);
+    mob_entity
+        .living_entity
+        .send_equipment_changes(&[(EquipmentSlot::BODY, new_stack)]);
 
     let entity = &mob_entity.living_entity.entity;
     let world = entity.world.load();
@@ -158,6 +204,8 @@ pub const FLAG_OPEN_MOUTH: u8 = 64;
 pub struct AbstractHorseData {
     pub flags: AtomicU8,
     pub temper: AtomicI32,
+    pub eating_counter: AtomicI32,
+    pub stand_counter: AtomicI32,
 }
 
 impl Default for AbstractHorseData {
@@ -165,6 +213,8 @@ impl Default for AbstractHorseData {
         Self {
             flags: AtomicU8::new(0),
             temper: AtomicI32::new(0),
+            eating_counter: AtomicI32::new(0),
+            stand_counter: AtomicI32::new(0),
         }
     }
 }
@@ -329,6 +379,44 @@ pub trait AbstractHorse: Animal {
         true
     }
 
+    /// `AbstractHorse.canEatGrass`; llamas override this to `false`.
+    fn can_eat_grass(&self) -> bool {
+        true
+    }
+
+    /// Server-side portion of `AbstractHorse.aiStep` and `tick`: start haystack
+    /// eating beneath the horse and expire the 20-tick standing pose.
+    fn tick_horse_ai(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let data = self.horse_data();
+            if data.stand_counter.load(Relaxed) > 0 && data.stand_counter.fetch_sub(1, Relaxed) <= 1
+            {
+                self.clear_standing();
+            }
+
+            let entity = self.get_entity();
+            let is_vehicle = !entity.passengers.lock().await.is_empty();
+            if self.can_eat_grass()
+                && !data.get_flag(FLAG_EATING)
+                && !is_vehicle
+                && self.get_random().random_range(0..300) == 0
+                && entity
+                    .world
+                    .load()
+                    .get_block(&entity.block_pos.load().down())
+                    .id
+                    == Block::GRASS_BLOCK.id
+            {
+                data.set_flag(FLAG_EATING, true);
+            }
+
+            if data.get_flag(FLAG_EATING) && data.eating_counter.fetch_add(1, Relaxed) + 1 > 50 {
+                data.eating_counter.store(0, Relaxed);
+                data.set_flag(FLAG_EATING, false);
+            }
+        })
+    }
+
     /// `AbstractHorse.isImmobile`: `super.isImmobile() && isVehicle() && isSaddled() ||
     /// isEating() || isStanding()`. The `super.isImmobile()` (dead-or-dying) clause combined
     /// with the ridden-and-saddled check is omitted here as a rare edge case; eating/standing
@@ -459,13 +547,19 @@ pub trait AbstractHorse: Animal {
         }
     }
 
-    /// `AbstractHorse.standIfPossible`. See the module doc comment: the standing flag is set
-    /// here but not auto-cleared (no `aiStep`-driven `standCounter` tick-down ported).
+    /// `AbstractHorse.setStanding`/`standIfPossible`.
     fn stand_if_possible(&self) {
         if self.can_perform_rearing() {
             self.horse_data().set_flag(FLAG_EATING, false);
             self.horse_data().set_flag(FLAG_STANDING, true);
+            self.horse_data().stand_counter.store(20, Relaxed);
         }
+    }
+
+    /// `AbstractHorse.clearStanding`.
+    fn clear_standing(&self) {
+        self.horse_data().set_flag(FLAG_STANDING, false);
+        self.horse_data().stand_counter.store(0, Relaxed);
     }
 
     /// `AbstractHorse.doPlayerRide`, using `Entity::add_passenger` the same way
@@ -473,7 +567,7 @@ pub trait AbstractHorse: Animal {
     fn do_player_ride<'a>(&'a self, player: &'a Arc<Player>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             self.horse_data().set_flag(FLAG_EATING, false);
-            self.horse_data().set_flag(FLAG_STANDING, false);
+            self.clear_standing();
 
             if !player.get_entity().can_start_riding().await {
                 return;
@@ -646,6 +740,16 @@ pub trait AbstractHorse: Animal {
 
                 if !self.is_tamed() {
                     self.make_mad();
+                    return true;
+                }
+
+                let body_armor = {
+                    let equipment = mob_entity.living_entity.entity_equipment.lock().await;
+                    equipment.get(&EquipmentSlot::BODY)
+                };
+                if is_valid_body_armor_item(item_stack, entity.entity_type) && body_armor.is_empty()
+                {
+                    equip_body_armor_item(mob_entity, player, item_stack).await;
                     return true;
                 }
 
