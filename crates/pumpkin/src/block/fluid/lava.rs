@@ -11,6 +11,7 @@ use pumpkin_data::{
     damage::DamageType,
     dimension::Dimension,
     fluid::{Falling, Fluid, FluidProperties, Level},
+    sound::{Sound, SoundCategory},
     world::WorldEvent,
 };
 use pumpkin_util::math::position::BlockPos;
@@ -214,8 +215,19 @@ impl FluidBehaviour for FlowingLava {
             {
                 entity.set_on_fire_for(15.0);
 
-                // Also apply lava damage
-                base_entity.damage(entity, 4.0, DamageType::LAVA).await;
+                // Also apply lava damage and the vanilla burn sound.
+                let damaged = base_entity.damage(entity, 4.0, DamageType::LAVA).await;
+                if damaged && base_entity.should_play_lava_hurt_sound() && !base_entity.is_silent()
+                {
+                    let world = base_entity.world.load();
+                    world.play_sound_fine(
+                        Sound::EntityGenericBurn,
+                        SoundCategory::Neutral,
+                        &base_entity.pos.load(),
+                        0.4,
+                        2.0 + rand::random::<f32>() * 0.4,
+                    );
+                }
             }
         })
     }

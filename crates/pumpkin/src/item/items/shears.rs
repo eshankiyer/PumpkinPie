@@ -86,6 +86,17 @@ impl ItemBehaviour for ShearsItem {
         entity: Arc<dyn EntityBase>,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
+            // Vanilla `Entity.interact` calls `shearOffAllLeashConnections` before
+            // entity-specific shearing (`Entity.java:2284-2287`, `2334-2341`).
+            if entity
+                .get_entity()
+                .shear_off_all_leash_connections(SoundCategory::Players)
+                .await
+            {
+                player.damage_held_item(1).await;
+                return;
+            }
+
             if let Some(sheep) = entity.get_mob().and_then(|m| m.get_sheep())
                 && !sheep.is_sheared()
             {

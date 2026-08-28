@@ -1700,6 +1700,12 @@ impl Entity {
         self.silent.load(Ordering::Relaxed)
     }
 
+    /// Vanilla `Entity.shouldPlayLavaHurtSound` (`Entity.java:614-628`) has no
+    /// overrides and permits the lava damage path to play its burn sound.
+    pub const fn should_play_lava_hurt_sound(&self) -> bool {
+        true
+    }
+
     pub fn set_silent(&self, silent: bool) {
         self.silent.store(silent, Ordering::Relaxed);
         self.send_meta_data(
@@ -4107,6 +4113,26 @@ impl Entity {
         .await;
 
         true
+    }
+
+    /// `Entity.shearOffAllLeashConnections` (`Entity.java:2334-2341`): break the
+    /// leashes held by this entity, then play the shears sound.
+    pub async fn shear_off_all_leash_connections(
+        &self,
+        sound_category: pumpkin_data::sound::SoundCategory,
+    ) -> bool {
+        let dropped = self.drop_all_leash_connections().await;
+
+        if dropped {
+            let world = self.world.load();
+            world.play_sound(
+                pumpkin_data::sound::Sound::ItemShearsSnip,
+                sound_category,
+                &self.pos.load(),
+            );
+        }
+
+        dropped
     }
 
     pub async fn leash_to(&self, holder: Arc<dyn EntityBase>) {
