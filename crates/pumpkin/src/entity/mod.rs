@@ -1966,7 +1966,11 @@ impl Entity {
     }
 
     fn default_portal_cooldown(&self) -> u32 {
-        if self.entity_type == &EntityType::PLAYER {
+        // `Projectile.getDimensionChangingDelay` (`Projectile.java:386-389`) overrides
+        // `Entity.getDimensionChangingDelay` with two ticks.
+        if crate::entity::projectile::is_projectile(self.entity_type) {
+            2
+        } else if self.entity_type == &EntityType::PLAYER {
             10
         } else {
             300

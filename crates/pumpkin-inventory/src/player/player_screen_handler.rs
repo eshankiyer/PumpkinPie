@@ -71,6 +71,11 @@ impl PlayerScreenHandler {
         self.behaviour.slots[slot].clone()
     }
 
+    /// Gets the player's 2x2 crafting inventory.
+    pub fn get_crafting_inventory(&self) -> Arc<dyn Inventory> {
+        self.crafting_inventory.clone()
+    }
+
     /// Creates a new player screen handler.
     ///
     /// # Arguments

@@ -450,7 +450,7 @@ impl EntityBase for ArrowEntity {
     fn tick<'a>(
         &'a self,
         caller: &'a Arc<dyn EntityBase>,
-        _server: &'a Server,
+        server: &'a Server,
     ) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             let entity = self.get_entity();
@@ -638,6 +638,15 @@ impl EntityBase for ArrowEntity {
                 // ThrownItemEntity::process_tick), so PROJECTILE_LAND needs its own
                 // emission mirroring the one in projectile::mod.
                 let land_pos = crate::entity::projectile::projectile_land_pos(&h);
+                if let ProjectileHit::Block {
+                    pos, face, hit_pos, ..
+                } = &h
+                {
+                    crate::entity::projectile::on_projectile_block_hit(
+                        &world, server, caller, *pos, *face, *hit_pos,
+                    )
+                    .await;
+                }
                 caller.on_hit(h).await;
                 crate::entity::projectile::emit_projectile_land(&world, caller, land_pos).await;
             }

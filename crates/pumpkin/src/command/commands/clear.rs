@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::translation;
+use pumpkin_inventory::screen_handler::ScreenHandler;
 use pumpkin_util::text::TextComponent;
+use pumpkin_world::inventory::Inventory;
 
 use crate::command::args::bounded_num::BoundedNumArgumentConsumer;
 use crate::command::args::players::PlayersArgumentConsumer;
@@ -54,6 +56,92 @@ async fn clear_player(target: &Player, item: &ItemPredicate, max: i32) -> i32 {
         for slot in entity_equipment_lock.equipment.values_mut() {
             test_and_clear(&mut count, &mut max, item, slot, &mut is_done);
             if is_done {
+                break;
+            }
+        }
+    }
+
+    // Vanilla `Inventory.clearOrCountMatchingItems` also visits the 2x2 crafting
+    // container passed by `ClearInventoryCommands` (Inventory.java:180-191).
+    if !is_done {
+        let crafting_inventory = target
+            .player_screen_handler
+            .lock()
+            .await
+            .get_crafting_inventory();
+        let crafting_count = clear_inventory(crafting_inventory.as_ref(), item, max).await;
+        count += crafting_count;
+        if max > 0 {
+            max -= crafting_count;
+            is_done = max == 0;
+        }
+    }
+
+    // Vanilla then processes the current menu's carried stack and normalizes an
+    // empty result back to ItemStack.EMPTY (Inventory.java:185-189).
+    if !is_done {
+        let current_screen_handler = target.current_screen_handler.lock().await.clone();
+        let screen_handler = current_screen_handler.lock().await;
+        let mut carried = screen_handler.get_behaviour().cursor_stack.lock().await;
+        test_and_clear(&mut count, &mut max, item, &mut carried, &mut is_done);
+        if carried.is_empty() {
+            *carried = ItemStack::EMPTY.clone();
+        }
+    }
+
+    // Vanilla broadcasts both the current menu and the player's inventory menu
+    // after the operation (ClearInventoryCommands.java:65-68).
+    target
+        .current_screen_handler
+        .lock()
+        .await
+        .lock()
+        .await
+        .send_content_updates()
+        .await;
+    target
+        .player_screen_handler
+        .lock()
+        .await
+        .send_content_updates()
+        .await;
+
+    count
+}
+
+/// Clears or counts matching stacks in an async inventory, preserving the
+/// `ContainerHelper.clearOrCountMatchingItems` ordering and amount semantics
+/// (ContainerHelper.java:48-80).
+async fn clear_inventory(
+    inventory: &dyn Inventory,
+    item: &ItemPredicate,
+    amount_to_remove: i32,
+) -> i32 {
+    let counting_only = amount_to_remove == 0;
+    let mut remaining = amount_to_remove;
+    let mut count = 0;
+
+    for slot in 0..inventory.size() {
+        let stack = inventory.get_stack(slot).await;
+        if stack.is_empty() || !item.test_item_stack(&stack) {
+            continue;
+        }
+
+        if counting_only {
+            count += i32::from(stack.item_count);
+            continue;
+        }
+
+        let amount = if remaining < 0 {
+            stack.item_count
+        } else {
+            remaining.min(i32::from(stack.item_count)) as u8
+        };
+        let removed = inventory.remove_stack_specific(slot, amount).await;
+        count += i32::from(removed.item_count);
+        if remaining > 0 {
+            remaining -= i32::from(removed.item_count);
+            if remaining == 0 {
                 break;
             }
         }
