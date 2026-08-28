@@ -1526,7 +1526,10 @@ mod tests {
     async fn transmute_preserves_the_input_component_patch() {
         let inventory = CraftingInventory::new(3, 3);
         let mut input = ItemStack::new(1, &Item::SHULKER_BOX);
-        input.set_damage(26);
+        input.patch.push((
+            DataComponent::Damage,
+            Some(DamageImpl { damage: 26 }.to_dyn()),
+        ));
         inventory.set_stack(0, input).await;
         inventory
             .set_stack(1, ItemStack::new(1, &Item::BLACK_DYE))
@@ -1542,7 +1545,13 @@ mod tests {
             result.component_patch,
         );
 
-        assert_eq!(output.get_damage(), 26);
+        assert_eq!(
+            output
+                .get_data_component::<pumpkin_data::data_component_impl::DamageImpl>()
+                .map(|damage| damage.damage),
+            Some(26)
+        );
+        assert_eq!(output.get_damage(), 0);
     }
 
     #[tokio::test]
