@@ -3,6 +3,7 @@ use pumpkin_protocol::java::client::play::{
     CSetBorderWarningDelay, CSetBorderWarningDistance,
 };
 
+use pumpkin_util::math::{boundingbox::BoundingBox, vector3::Vector3};
 use pumpkin_world::world_info::data_files::WorldBorderData;
 
 use crate::net::java::JavaClient;
@@ -334,6 +335,45 @@ impl Worldborder {
         distance < bb_max * 2.0 && self.contains_with_margin(x, z, bb_max)
     }
 
+    /// Returns finite bounding-box pieces for the outside-of-border collision shape.
+    ///
+    /// Vanilla `WorldBorder.getCollisionShape` (`WorldBorder.java:100-101`) delegates
+    /// to the extent's shape. Both extents construct it as `INFINITY` minus the box
+    /// from `floor(min)` to `ceil(max)` (`WorldBorder.java:440-452` and
+    /// `WorldBorder.java:553-564`), which is the four outside walls returned here.
+    /// The query bounds keep those infinite walls finite for Pumpkin's AABB
+    /// collision solver without changing their relevant collision planes.
+    #[must_use]
+    pub fn collision_boxes(&self, query: BoundingBox) -> Vec<BoundingBox> {
+        let (min_x, max_x, min_z, max_z) = self.bounds();
+        let min_x = min_x.floor();
+        let max_x = max_x.ceil();
+        let min_z = min_z.floor();
+        let max_z = max_z.ceil();
+
+        [
+            BoundingBox::new(
+                Vector3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY),
+                Vector3::new(min_x, f64::INFINITY, f64::INFINITY),
+            ),
+            BoundingBox::new(
+                Vector3::new(max_x, f64::NEG_INFINITY, f64::NEG_INFINITY),
+                Vector3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY),
+            ),
+            BoundingBox::new(
+                Vector3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY),
+                Vector3::new(f64::INFINITY, f64::INFINITY, min_z),
+            ),
+            BoundingBox::new(
+                Vector3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, max_z),
+                Vector3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY),
+            ),
+        ]
+        .into_iter()
+        .filter(|wall| wall.intersects(&query))
+        .collect()
+    }
+
     /// Vanilla `WorldBorder.setAbsoluteMaxSize` (`WorldBorder.java:216-219`).
     ///
     /// Sets the absolute maximum size (clamping boundary) for the border.
@@ -366,6 +406,7 @@ fn clamp(value: f64, min: f64, max: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::Worldborder;
+    use pumpkin_util::math::{boundingbox::BoundingBox, vector3::Vector3};
 
     fn border(center: f64, diameter: f64) -> Worldborder {
         Worldborder::new(center, center, diameter, 0, 5, 300)
@@ -395,6 +436,34 @@ mod tests {
         // max = 2e7 + 1.5e7 = 3.5e7, clamped down to 29_999_984.
         assert!(!border.contains(3.0e7, 2.0e7));
         assert!(border.contains(2.999_998_3E7, 2.0e7));
+    }
+
+    #[test]
+    fn collision_boxes_are_the_outside_border_walls() {
+        let border = border(0.0, 16.0);
+        let query = BoundingBox::new(Vector3::new(7.0, 64.0, -1.0), Vector3::new(9.0, 66.0, 1.0));
+        let walls = border.collision_boxes(query);
+
+        assert_eq!(walls.len(), 1);
+        assert_eq!(walls[0].min.x, 8.0);
+        assert_eq!(walls[0].max.x, f64::INFINITY);
+    }
+
+    #[test]
+    fn collision_wall_stops_outward_movement_at_the_vanilla_ceil_boundary() {
+        let border = border(0.0, 16.0);
+        let entity_box =
+            BoundingBox::new(Vector3::new(7.0, 64.0, -1.0), Vector3::new(7.6, 66.0, 1.0));
+        let query = entity_box.stretch(Vector3::new(2.0, 0.0, 0.0));
+        let wall = border.collision_boxes(query)[0];
+
+        let collision_time = entity_box.calculate_collision_time(
+            &wall,
+            Vector3::new(2.0, 0.0, 0.0),
+            pumpkin_util::math::vector3::Axis::X,
+            1.0,
+        );
+        assert!(collision_time.is_some_and(|time| (time - 0.2).abs() < 1.0e-12));
     }
 
     /// `WorldBorder.applyInitialSettings` (`WorldBorder.java:285-299`) resumes an

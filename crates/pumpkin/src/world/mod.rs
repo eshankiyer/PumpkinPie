@@ -2531,6 +2531,22 @@ impl World {
             }
         }
 
+        // Vanilla `CollisionGetter.getBlockCollisionsFromContext` adds the
+        // world-border collision shape when the source is close to the border
+        // (`CollisionGetter.java:104-110`). Keep these after block positions so
+        // the movement solver can use them for horizontal collision without
+        // treating an infinite border wall as a supporting block.
+        let entity_position = entity.get_entity().pos.load();
+        let worldborder = self.worldborder.lock().await;
+        if worldborder.is_inside_close_to_border(
+            entity_position.x,
+            entity_position.z,
+            bounding_box.max.x - bounding_box.min.x,
+            bounding_box.max.z - bounding_box.min.z,
+        ) {
+            collisions.extend(worldborder.collision_boxes(bounding_box));
+        }
+
         (collisions, positions)
     }
 

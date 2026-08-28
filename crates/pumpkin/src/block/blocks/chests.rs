@@ -36,6 +36,7 @@ use crate::block::{
     PlayerPlacedArgs, RandomTickArgs,
 };
 use crate::entity::EntityBase;
+use crate::entity::mob::piglin_shared;
 use crate::world::World;
 use crate::world::loot::fill_chest_inventory;
 use crate::{
@@ -297,6 +298,16 @@ async fn get_chest_comparator_output(args: GetComparatorOutputArgs<'_>) -> Optio
     }
 }
 
+async fn unpack_chest_loot(entity: &Arc<dyn BlockEntity>) {
+    if let Some((loot_key, seed)) = entity.take_loot_table()
+        && let Some(table) = get_chest_loot_table(&loot_key)
+        && let Some(inventory) = entity.clone().get_inventory()
+    {
+        fill_chest_inventory(&inventory, table, seed).await;
+        inventory.mark_dirty();
+    }
+}
+
 async fn normal_use_chest_impl(
     args: NormalUseArgs<'_>,
     open_stat: pumpkin_data::statistic::CustomStatistic,
@@ -313,21 +324,6 @@ async fn normal_use_chest_impl(
     {
         return BlockActionResult::Success;
     }
-
-    // Unpack deferred loot table on first open (non-spectator only).
-    if let Some(ref entity) = first_chest
-        && let Some((loot_key, seed)) = entity.take_loot_table()
-        && let Some(table) = get_chest_loot_table(&loot_key)
-        && let Some(inv) = entity.clone().get_inventory()
-    {
-        fill_chest_inventory(&inv, table, seed).await;
-        // Mark the block entity dirty so the generated items persist.
-        inv.mark_dirty();
-    }
-
-    let Some(first_inventory) = first_chest.and_then(BlockEntity::get_inventory) else {
-        return BlockActionResult::Fail;
-    };
 
     let chest_props = ChestLikeProperties::from_state_id(state, args.block);
     let connected_towards = match chest_props.r#type {
@@ -349,16 +345,6 @@ async fn normal_use_chest_impl(
         return BlockActionResult::Success;
     }
 
-    if !player_is_spectator {
-        args.player
-            .increment_stat(
-                pumpkin_data::statistic::StatisticCategory::Custom,
-                open_stat as i32,
-                1,
-            )
-            .await;
-    }
-
     if is_chest_blocked(args.world, args.position) {
         return BlockActionResult::Success;
     }
@@ -370,11 +356,27 @@ async fn normal_use_chest_impl(
         }
     }
 
-    let inventory = if let Some(direction) = connected_towards
-        && let Some(second_inventory) = args
-            .world
+    let Some(first_chest) = first_chest else {
+        return BlockActionResult::Fail;
+    };
+
+    // Vanilla's double-chest menu provider unpacks both halves only after both
+    // halves are allowed to open (ChestBlock.java:98-102).
+    unpack_chest_loot(&first_chest).await;
+    let Some(first_inventory) = first_chest.clone().get_inventory() else {
+        return BlockActionResult::Fail;
+    };
+
+    let second_entity = connected_towards.and_then(|direction| {
+        args.world
             .get_block_entity(&args.position.offset(direction.to_offset()))
-            .and_then(BlockEntity::get_inventory)
+    });
+    if let Some(entity) = &second_entity {
+        unpack_chest_loot(entity).await;
+    }
+
+    let inventory = if let Some(_direction) = connected_towards
+        && let Some(second_inventory) = second_entity.and_then(BlockEntity::get_inventory)
     {
         // Vanilla: chestType == ChestType.RIGHT ? DoubleBlockProperties.Type.FIRST : DoubleBlockProperties.Type.SECOND;
         if matches!(chest_props.r#type, ChestType::Right) {
@@ -389,6 +391,19 @@ async fn normal_use_chest_impl(
     args.player
         .open_handled_screen(&ChestScreenFactory(inventory), Some(*args.position))
         .await;
+
+    // Vanilla ChestBlock.useWithoutItem (ChestBlock.java:255-268) awards the
+    // open statistic and angers nearby piglins after a menu is opened.
+    if !player_is_spectator {
+        args.player
+            .increment_stat(
+                pumpkin_data::statistic::StatisticCategory::Custom,
+                open_stat as i32,
+                1,
+            )
+            .await;
+    }
+    piglin_shared::anger_nearby_piglins(args.world, args.player).await;
 
     BlockActionResult::Success
 }
