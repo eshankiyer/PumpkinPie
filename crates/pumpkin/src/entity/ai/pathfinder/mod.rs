@@ -164,6 +164,12 @@ impl Navigator {
         self.navigation_kind
     }
 
+    /// Vanilla `PathNavigation.canFloat` (`PathNavigation.java:401-403`).
+    #[must_use]
+    pub fn can_float(&self) -> bool {
+        self.evaluator.can_float()
+    }
+
     pub fn set_progress(&mut self, goal: NavigatorGoal) {
         self.is_idle.store(false, Ordering::Relaxed);
         if self.wall_climber {

@@ -1810,12 +1810,15 @@ impl LivingEntity {
 
                 let mut velo = self.entity.velocity.load();
 
-                // `MagmaCube.jumpInLiquid` (`net/minecraft/world/entity/monster/cubemob/MagmaCube.java:102-109`)
-                // replaces the ordinary liquid jump impulse in lava with a size-scaled value.
+                // `Mob.jumpInLiquid` (`Mob.java:1409-1414`) uses LivingEntity's ordinary
+                // 0.04 impulse only when the mob's navigation can float; otherwise it uses
+                // 0.3. `MagmaCube.jumpInLiquid` (`MagmaCube.java:102-109`) then replaces the
+                // lava value with its size-scaled impulse.
+                let can_float = Self::mob_can_float(caller.as_ref());
                 if in_lava && self.entity.entity_type == &EntityType::MAGMA_CUBE {
                     velo.y = 0.22 + f64::from(self.entity.data.load(Relaxed)) * 0.05;
                 } else {
-                    velo.y += 0.04;
+                    velo.y += if can_float { 0.04 } else { 0.3 };
                 }
 
                 self.entity.velocity.store(velo);
@@ -1965,6 +1968,14 @@ impl LivingEntity {
         });
 
         self.entity.velocity.store(velo);
+    }
+
+    /// Reads the active mob navigator for `Mob.jumpInLiquid`; players use the ordinary
+    /// `LivingEntity` impulse because they have no mob navigation.
+    fn mob_can_float(caller: &dyn EntityBase) -> bool {
+        caller
+            .get_mob()
+            .is_none_or(|mob| mob.get_mob_entity().navigator.lock().unwrap().can_float())
     }
 
     /// Vanilla `LivingEntity.travelFallFlying`: update velocity from the look vector before
