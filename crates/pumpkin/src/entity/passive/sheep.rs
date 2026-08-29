@@ -14,7 +14,7 @@ use pumpkin_util::math::vector3::Vector3;
 use rand::{RngExt, rng};
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture,
     ageable::{AgeableData, AgeableMob},
     ai::goal::{
         breed::BreedGoal, eat_grass::EatGrassGoal, escape_danger::EscapeDangerGoal,
@@ -242,7 +242,7 @@ impl SheepEntity {
     /// marks the sheep sheared. No `shear_sheep`-equivalent loot table exists in `pumpkin-data`
     /// today, so the 1-3 count and color->wool mapping are hardcoded here rather than rolled
     /// from a data-driven table.
-    pub async fn shear(&self, world: &Arc<World>) {
+    pub fn shear(&self, world: &Arc<World>) {
         let entity = &self.mob_entity.living_entity.entity;
         let pos = entity.pos.load();
         let drop_pos = drop_spawn_pos(pos);
@@ -267,7 +267,7 @@ impl SheepEntity {
                 velocity,
                 10,
             ));
-            world.spawn_entity(item_entity).await;
+            world.spawn_entity(item_entity);
         }
 
         self.set_sheared(true);
@@ -322,33 +322,6 @@ impl crate::entity::ageable::AgeableMob for SheepEntity {
     }
 }
 
-impl NBTStorage for SheepEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_ageable_nbt(nbt);
-            self.write_animal_nbt(nbt);
-            nbt.put_bool("Sheared", self.is_sheared());
-            nbt.put_byte("Color", self.get_color() as i8);
-        })
-    }
-
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_ageable_nbt(nbt);
-            self.read_animal_nbt(nbt);
-            let sheared = nbt
-                .get_bool("Sheared")
-                .or_else(|| nbt.get_byte("Sheared").map(|b| b == 1))
-                .unwrap_or(false);
-            let color = nbt.get_byte("Color").unwrap_or(0) as u8;
-            let byte = (color & 0x0F) | if sheared { 0x10 } else { 0 };
-            self.color_and_sheared.store(byte, Ordering::Relaxed);
-        })
-    }
-}
-
 impl super::animal::Animal for SheepEntity {
     fn is_food(&self, item_stack: &ItemStack) -> bool {
         use pumpkin_data::tag::Taggable;
@@ -360,23 +333,43 @@ impl super::animal::Animal for SheepEntity {
 }
 
 impl Mob for SheepEntity {
+    fn as_ageable(&self) -> Option<&dyn AgeableMob> {
+        Some(self)
+    }
+
+    fn as_animal(&self) -> Option<&dyn Animal> {
+        Some(self)
+    }
+
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_bool("Sheared", self.is_sheared());
+        nbt.put_byte("Color", self.get_color() as i8);
+    }
+
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        let sheared = nbt
+            .get_bool("Sheared")
+            .or_else(|| nbt.get_byte("Sheared").map(|b| b == 1))
+            .unwrap_or(false);
+        let color = nbt.get_byte("Color").unwrap_or(0) as u8;
+        let byte = (color & 0x0F) | if sheared { 0x10 } else { 0 };
+        self.color_and_sheared.store(byte, Ordering::Relaxed);
+    }
+
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
     }
 
     /// Vanilla `Sheep.ate`: un-shears the sheep and, if it's a baby, ages it up by 60 seconds
     /// (60 * 20 ticks), same as `Animal.ate` -> `AgeableMob.ageUp(int)`.
-    fn on_eating_grass(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async {
-            self.set_sheared(false);
-            if AgeableMob::can_age_up(self) {
-                self.age_up(60, false);
-            }
-        })
+    fn on_eating_grass(&self) {
+        self.set_sheared(false);
+        if AgeableMob::can_age_up(self) {
+            self.age_up(60, false);
+        }
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
+    fn mob_init_data_tracker(&self) {
             let entity = &self.mob_entity.living_entity.entity;
 
             if self.color_and_sheared.load(Ordering::Relaxed) == COLOR_UNSET {
@@ -402,31 +395,20 @@ impl Mob for SheepEntity {
                     None,
                 );
             }
-        })
+        
     }
 
     fn get_sheep(&self) -> Option<&SheepEntity> {
         Some(self)
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
             if item_stack.is_shears() {
                 if self.ready_for_shearing() {
                     let world = self.mob_entity.living_entity.entity.world.load();
                     let pos = self.mob_entity.living_entity.entity.pos.load();
-                    self.shear(&world).await;
-                    emit_game_event(
-                        &world,
-                        GameEvent::Shear,
-                        pos,
-                        GameEventContext::of_entity(player.clone()),
-                    )
-                    .await;
+                    self.shear(&world);
+                    world.emit_game_event("shear", pos);
                     let _ = item_stack.damage_item(1);
                 }
                 // Vanilla returns `InteractionResult.CONSUME` either way (sheared/baby just
@@ -435,8 +417,6 @@ impl Mob for SheepEntity {
             }
 
             self.animal_interact(player, item_stack, Sound::EntitySheepAmbient)
-                .await
-        })
     }
 
     /// Vanilla `Sheep.getBreedOffspring`: colors the lamb via `DyeColor.getMixedColor` of the

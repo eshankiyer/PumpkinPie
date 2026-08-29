@@ -5,16 +5,14 @@ use crate::command::context::command_context::CommandContext;
 use crate::command::errors::error_types::CommandErrorType;
 use crate::command::node::dispatcher::CommandDispatcher;
 use crate::command::node::{CommandExecutor, CommandExecutorResult};
-use crate::command::suggestion::provider::SuggestionProvider;
-use crate::command::suggestion::suggestions::{Suggestions, SuggestionsBuilder};
+use crate::command::suggestion::provider::{SuggestionProvider, SuggestionProviderResult};
+use crate::command::suggestion::suggestions::SuggestionsBuilder;
 use crate::entity::EntityBase;
 use pumpkin_data::translation;
 use pumpkin_protocol::codec::recipe::DynamicRecipe;
 use pumpkin_util::PermissionLvl;
 use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
 use pumpkin_util::text::TextComponent;
-use std::future::Future;
-use std::pin::Pin;
 
 const DESCRIPTION: &str = "Gives or takes player recipes.";
 const PERMISSION: &str = "minecraft:command.recipe";
@@ -62,178 +60,187 @@ impl SuggestionProvider for RecipeSuggestionProvider {
         &self,
         context: &CommandContext,
         mut builder: SuggestionsBuilder,
-    ) -> Pin<Box<dyn Future<Output = Suggestions> + Send>> {
-        let server = context.source.server.clone();
-
-        Box::pin(async move {
-            builder = builder.suggest("*");
-            if let Some(server) = server {
-                let recipes = server.recipe_manager.get_dynamic_recipes_internal().await;
-                for recipe in recipes {
-                    let id = get_recipe_id(&recipe);
-                    builder = builder.suggest(id);
-                }
+    ) -> SuggestionProviderResult {
+        builder = builder.suggest("*");
+        if let Some(server) = &context.source.server {
+            let recipes = server.recipe_manager.get_dynamic_recipes_internal();
+            for recipe in recipes {
+                let id = get_recipe_id(&recipe);
+                builder = builder.suggest(id);
             }
-            builder.build()
-        })
+        }
+        builder.build()
     }
 }
 
 struct RecipeGiveExecutor;
 
 impl CommandExecutor for RecipeGiveExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let targets = EntityArgumentType::get_players(context, "targets").await?;
-            let recipe_str = StringArgumentType::get(context, "recipe")?;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let targets = EntityArgumentType::get_players(context, "targets")?;
+        let recipe_str = StringArgumentType::get(context, "recipe")?;
 
-            let server = context.source.server.as_ref().ok_or_else(|| {
-                ERROR_RECIPE_NOT_FOUND
-                    .create_without_context(TextComponent::text(recipe_str.to_string()))
-            })?;
+        let server = context.source.server.as_ref().ok_or_else(|| {
+            ERROR_RECIPE_NOT_FOUND
+                .create_without_context(TextComponent::text(recipe_str.to_string()))
+        })?;
 
-            let all_recipes = server.recipe_manager.get_dynamic_recipes_internal().await;
+        let all_recipes = server.recipe_manager.get_dynamic_recipes_internal();
 
-            let is_all = recipe_str == "*";
-            let matching_recipes = if is_all {
-                all_recipes.clone()
-            } else {
-                all_recipes
-                    .iter()
-                    .filter(|r| {
-                        let id = get_recipe_id(r);
-                        id == recipe_str
-                            || id.strip_prefix("minecraft:").unwrap_or(&id) == recipe_str
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>()
-            };
+        let is_all = recipe_str == "*";
+        let matching_recipes = if is_all {
+            all_recipes
+        } else {
+            all_recipes
+                .iter()
+                .filter(|r| {
+                    let id = get_recipe_id(r);
+                    id == recipe_str || id.strip_prefix("minecraft:").unwrap_or(&id) == recipe_str
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        };
 
-            if !is_all && matching_recipes.is_empty() {
-                return Err(ERROR_RECIPE_NOT_FOUND
-                    .create_without_context(TextComponent::text(recipe_str.to_string())));
-            }
+        if !is_all && matching_recipes.is_empty() {
+            return Err(ERROR_RECIPE_NOT_FOUND
+                .create_without_context(TextComponent::text(recipe_str.to_string())));
+        }
 
-            let recipe_count = matching_recipes.len();
-
-            for player in &targets {
-                // `/recipe give` is `ServerPlayer.awardRecipes`: the unlock has to enter the
-                // player's book, or it is forgotten on reconnect. `award_recipes` also sends
-                // the subset add packet, so sending a full-table add here as well would
-                // overwrite the per-player set that was just established.
-                let ids: Vec<String> = matching_recipes.iter().map(get_recipe_id).collect();
+        let recipe_count = matching_recipes.len();
+        for player in &targets {
+            // `/recipe give` is `ServerPlayer.awardRecipes`: persist the unlock in the
+            // player's recipe book, then let that method send the subset packet. The command
+            // executor is synchronous after the upstream refactor, so associate the async
+            // operation with each target's client task.
+            let player = player.clone();
+            let ids: Vec<String> = matching_recipes.iter().map(get_recipe_id).collect();
+            player.spawn_task(async move {
                 player.award_recipes(ids.iter().map(String::as_str)).await;
-            }
+            });
+        }
 
-            let recipe_count_str = recipe_count.to_string();
-            if targets.len() == 1 {
-                let msg = TextComponent::translate_cross(
-                    translation::java::COMMANDS_RECIPE_GIVE_SUCCESS_SINGLE,
-                    translation::java::COMMANDS_RECIPE_GIVE_SUCCESS_SINGLE,
-                    [
-                        TextComponent::text(recipe_count_str),
-                        targets[0].get_display_name().await,
-                    ],
-                );
-                context.source.send_feedback(msg, true).await;
-            } else {
-                let msg = TextComponent::translate_cross(
-                    translation::java::COMMANDS_RECIPE_GIVE_SUCCESS_MULTIPLE,
-                    translation::java::COMMANDS_RECIPE_GIVE_SUCCESS_MULTIPLE,
-                    [
-                        TextComponent::text(recipe_count_str),
-                        TextComponent::text(targets.len().to_string()),
-                    ],
-                );
-                context.source.send_feedback(msg, true).await;
-            }
+        let recipe_count_str = recipe_count.to_string();
+        if targets.len() == 1 {
+            let msg = TextComponent::translate_cross(
+                translation::java::COMMANDS_RECIPE_GIVE_SUCCESS_SINGLE,
+                translation::java::COMMANDS_RECIPE_GIVE_SUCCESS_SINGLE,
+                [
+                    TextComponent::text(recipe_count_str),
+                    targets[0].get_display_name(),
+                ],
+            );
+            context.source.send_feedback(msg, true);
+        } else {
+            let msg = TextComponent::translate_cross(
+                translation::java::COMMANDS_RECIPE_GIVE_SUCCESS_MULTIPLE,
+                translation::java::COMMANDS_RECIPE_GIVE_SUCCESS_MULTIPLE,
+                [
+                    TextComponent::text(recipe_count_str),
+                    TextComponent::text(targets.len().to_string()),
+                ],
+            );
+            context.source.send_feedback(msg, true);
+        }
 
-            Ok((targets.len() * recipe_count) as i32)
-        })
+        Ok((targets.len() * recipe_count) as i32)
     }
 }
 
 struct RecipeTakeExecutor;
 
 impl CommandExecutor for RecipeTakeExecutor {
-    fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-        Box::pin(async move {
-            let targets = EntityArgumentType::get_players(context, "targets").await?;
-            let recipe_str = StringArgumentType::get(context, "recipe")?;
+    fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+        let targets = EntityArgumentType::get_players(context, "targets")?;
+        let recipe_str = StringArgumentType::get(context, "recipe")?;
 
-            let server = context.source.server.as_ref().ok_or_else(|| {
-                ERROR_RECIPE_NOT_FOUND
-                    .create_without_context(TextComponent::text(recipe_str.to_string()))
-            })?;
+        let server = context.source.server.as_ref().ok_or_else(|| {
+            ERROR_RECIPE_NOT_FOUND
+                .create_without_context(TextComponent::text(recipe_str.to_string()))
+        })?;
 
-            let all_recipes = server.recipe_manager.get_dynamic_recipes_internal().await;
+        let all_recipes = server.recipe_manager.get_dynamic_recipes_internal();
 
-            let is_all = recipe_str == "*";
+        let is_all = recipe_str == "*";
 
-            let mut matched = false;
-            let remaining_recipes = if is_all {
-                matched = true;
-                Vec::new()
-            } else {
-                all_recipes
-                    .iter()
-                    .filter(|r| {
-                        let id = get_recipe_id(r);
-                        let is_match = id == recipe_str
-                            || id.strip_prefix("minecraft:").unwrap_or(&id) == recipe_str;
-                        if is_match {
-                            matched = true;
-                        }
-                        !is_match
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>()
-            };
+        let mut matched = false;
+        let remaining_recipes = if is_all {
+            matched = true;
+            Vec::new()
+        } else {
+            all_recipes
+                .iter()
+                .filter(|r| {
+                    let id = get_recipe_id(r);
+                    let is_match = id == recipe_str
+                        || id.strip_prefix("minecraft:").unwrap_or(&id) == recipe_str;
+                    if is_match {
+                        matched = true;
+                    }
+                    !is_match
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        };
 
-            if !matched {
-                return Err(ERROR_RECIPE_NOT_FOUND
-                    .create_without_context(TextComponent::text(recipe_str.to_string())));
-            }
+        if !matched {
+            return Err(ERROR_RECIPE_NOT_FOUND
+                .create_without_context(TextComponent::text(recipe_str.to_string())));
+        }
 
-            let taken_count = if is_all {
-                all_recipes.len()
-            } else {
-                all_recipes.len() - remaining_recipes.len()
-            };
+        let taken_count = if is_all {
+            all_recipes.len()
+        } else {
+            all_recipes.len() - remaining_recipes.len()
+        };
 
-            for player in &targets {
-                // `reset_recipes` sends the remove packet naming exactly the display ids it
-                // dropped, which is what `ServerRecipeBook.removeRecipes` does. A full-table
-                // add here would re-add everything it had just removed.
-                let ids: Vec<String> = all_recipes.iter().map(get_recipe_id).collect();
+        let ids: Vec<String> = if is_all {
+            all_recipes.iter().map(get_recipe_id).collect()
+        } else {
+            all_recipes
+                .iter()
+                .filter(|recipe| {
+                    let id = get_recipe_id(recipe);
+                    id == recipe_str
+                        || id.strip_prefix("minecraft:").unwrap_or(&id) == recipe_str
+                })
+                .map(get_recipe_id)
+                .collect()
+        };
+        for player in &targets {
+            // `resetRecipes` removes exactly the requested ids and sends the remove packet.
+            // Keep this asynchronous work on the target's client task while the executor stays
+            // synchronous in upstream's command API.
+            let player = player.clone();
+            let ids = ids.clone();
+            player.spawn_task(async move {
                 player.reset_recipes(ids.iter().map(String::as_str)).await;
-            }
+            });
+        }
 
-            let taken_count_str = taken_count.to_string();
-            if targets.len() == 1 {
-                let msg = TextComponent::translate_cross(
-                    translation::java::COMMANDS_RECIPE_TAKE_SUCCESS_SINGLE,
-                    translation::java::COMMANDS_RECIPE_TAKE_SUCCESS_SINGLE,
-                    [
-                        TextComponent::text(taken_count_str),
-                        targets[0].get_display_name().await,
-                    ],
-                );
-                context.source.send_feedback(msg, true).await;
-            } else {
-                let msg = TextComponent::translate_cross(
-                    translation::java::COMMANDS_RECIPE_TAKE_SUCCESS_MULTIPLE,
-                    translation::java::COMMANDS_RECIPE_TAKE_SUCCESS_MULTIPLE,
-                    [
-                        TextComponent::text(taken_count_str),
-                        TextComponent::text(targets.len().to_string()),
-                    ],
-                );
-                context.source.send_feedback(msg, true).await;
-            }
+        let taken_count_str = taken_count.to_string();
+        if targets.len() == 1 {
+            let msg = TextComponent::translate_cross(
+                translation::java::COMMANDS_RECIPE_TAKE_SUCCESS_SINGLE,
+                translation::java::COMMANDS_RECIPE_TAKE_SUCCESS_SINGLE,
+                [
+                    TextComponent::text(taken_count_str),
+                    targets[0].get_display_name(),
+                ],
+            );
+            context.source.send_feedback(msg, true);
+        } else {
+            let msg = TextComponent::translate_cross(
+                translation::java::COMMANDS_RECIPE_TAKE_SUCCESS_MULTIPLE,
+                translation::java::COMMANDS_RECIPE_TAKE_SUCCESS_MULTIPLE,
+                [
+                    TextComponent::text(taken_count_str),
+                    TextComponent::text(targets.len().to_string()),
+                ],
+            );
+            context.source.send_feedback(msg, true);
+        }
 
-            Ok((targets.len() * taken_count) as i32)
-        })
+        Ok((targets.len() * taken_count) as i32)
     }
 }
 

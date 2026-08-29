@@ -18,7 +18,7 @@ use pumpkin_util::math::boundingbox::EntityDimensions;
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture,
     ageable::{AgeableData, AgeableMob},
     ai::control::{flying_move_control::FlyingMoveControl, ghast_move_control::GhastMoveControl},
     ai::goal::{ghast_random_float::GhastRandomFloatAroundGoal, swim::SwimGoal, tempt::TemptGoal},
@@ -133,17 +133,17 @@ impl HappyGhastEntity {
         mob_arc
     }
 
-    async fn body_armor_stack(&self) -> ItemStack {
+    fn body_armor_stack(&self) -> ItemStack {
         self.mob_entity
             .living_entity
             .entity_equipment
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(&EquipmentSlot::BODY)
     }
 
-    async fn is_wearing_body_armor(&self) -> bool {
-        !self.body_armor_stack().await.is_empty()
+    fn is_wearing_body_armor(&self) -> bool {
+        !self.body_armor_stack().is_empty()
     }
 
     fn is_harness(item_stack: &ItemStack) -> Option<&EquippableImpl> {
@@ -154,7 +154,7 @@ impl HappyGhastEntity {
         .then_some(equippable)
     }
 
-    async fn setup_adult(&self) {
+    fn setup_adult(&self) {
         // `HappyGhast.adultGhastSetup` (`HappyGhast.java:120-129`) replaces the flying
         // controller and clears/re-registers the server goals after the age boundary.
         *self
@@ -163,7 +163,7 @@ impl HappyGhastEntity {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) =
             Box::new(GhastMoveControl::default());
-        self.mob_entity.clear_ai_goals(self).await;
+        self.mob_entity.clear_ai_goals(self);
         self.mob_entity.add_goal(3, SwimGoal::default());
         self.mob_entity.add_goal(
             4,
@@ -173,7 +173,7 @@ impl HappyGhastEntity {
             .add_goal(5, GhastRandomFloatAroundGoal::new());
     }
 
-    async fn setup_baby(&self) {
+    fn setup_baby(&self) {
         // `HappyGhast.babyGhastSetup` (`HappyGhast.java:132-138`) has no goals and uses
         // `FlyingMoveControl(this, 180, true)`.
         *self
@@ -183,15 +183,15 @@ impl HappyGhastEntity {
             .unwrap_or_else(std::sync::PoisonError::into_inner) =
             Box::new(FlyingMoveControl::new(180.0, true));
         self.set_server_still_timeout(0);
-        self.mob_entity.clear_ai_goals(self).await;
+        self.mob_entity.clear_ai_goals(self);
     }
 
-    async fn try_equip_harness(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+    fn try_equip_harness(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
         let Some(equippable) = Self::is_harness(item_stack) else {
             return false;
         };
 
-        if self.is_wearing_body_armor().await {
+        if self.is_wearing_body_armor() {
             return false;
         }
 
@@ -202,7 +202,12 @@ impl HappyGhastEntity {
 
         let new_stack = item_stack.split_unless_creative(player.gamemode.load(), 1);
         {
-            let mut equipment = self.mob_entity.living_entity.entity_equipment.lock().await;
+            let mut equipment = self
+                .mob_entity
+                .living_entity
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             equipment.put(&EquipmentSlot::BODY, new_stack.clone())
         };
         self.mob_entity
@@ -215,13 +220,17 @@ impl HappyGhastEntity {
         true
     }
 
-    async fn try_mount(&self, player: &Arc<Player>) -> bool {
-        if !self.is_wearing_body_armor().await || !player.get_entity().can_start_riding().await {
+    fn try_mount(&self, player: &Arc<Player>) -> bool {
+        if !self.is_wearing_body_armor() || !player.get_entity().can_start_riding() {
             return false;
         }
 
         let entity = &self.mob_entity.living_entity.entity;
-        let passengers_len = entity.passengers.lock().await.len();
+        let passengers_len = entity
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .len();
         // HappyGhast.java:339, MAX_PASSENGERS (vanilla misspells the constant name).
         if passengers_len >= 4 {
             return false;
@@ -243,9 +252,7 @@ impl HappyGhastEntity {
             );
         }
 
-        entity
-            .add_passenger(vehicle, passenger as Arc<dyn EntityBase>)
-            .await;
+        entity.add_passenger(vehicle, passenger as Arc<dyn EntityBase>);
         true
     }
 
@@ -269,14 +276,19 @@ impl HappyGhastEntity {
 
     // HappyGhast.java:452-459. Only called from `mob_tick` while not a vehicle
     // (`this.isVehicle()` there).
-    async fn check_restriction(&self) {
+    fn check_restriction(&self) {
         let entity = &self.mob_entity.living_entity.entity;
-        if entity.leashed_to.lock().await.is_some() {
+        if entity
+            .leashed_to
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+        {
             return;
         }
 
         let is_baby = self.is_baby();
-        let has_body_armor = self.is_wearing_body_armor().await;
+        let has_body_armor = self.is_wearing_body_armor();
 
         let radius = restriction_radius(is_baby, has_body_armor);
         self.mob_entity
@@ -333,31 +345,6 @@ impl AgeableMob for HappyGhastEntity {
     }
 }
 
-impl NBTStorage for HappyGhastEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_ageable_nbt(nbt);
-            self.write_animal_nbt(nbt);
-            nbt.put_int(
-                "still_timeout",
-                self.server_still_timeout.load(Ordering::Relaxed),
-            );
-        })
-    }
-
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_ageable_nbt(nbt);
-            self.read_animal_nbt(nbt);
-            if let Some(timeout) = nbt.get_int("still_timeout") {
-                self.set_server_still_timeout(timeout);
-            }
-        })
-    }
-}
-
 impl Animal for HappyGhastEntity {
     fn is_food(&self, item_stack: &ItemStack) -> bool {
         item_stack
@@ -368,6 +355,27 @@ impl Animal for HappyGhastEntity {
 }
 
 impl Mob for HappyGhastEntity {
+    fn as_ageable(&self) -> Option<&dyn AgeableMob> {
+        Some(self)
+    }
+
+    fn as_animal(&self) -> Option<&dyn Animal> {
+        Some(self)
+    }
+
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_int(
+            "still_timeout",
+            self.server_still_timeout.load(Ordering::Relaxed),
+        );
+    }
+
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        if let Some(timeout) = nbt.get_int("still_timeout") {
+            self.set_server_still_timeout(timeout);
+        }
+    }
+
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
     }
@@ -396,7 +404,10 @@ impl Mob for HappyGhastEntity {
             // (`HappyGhast.java:350-387`) are folded into this reachable travel hook. The
             // packet's input flags are the server representation of the rider's xxa/zza/jumping.
             let rider_input = {
-                let passengers = entity.passengers.lock().await;
+                let passengers = entity
+                    .passengers
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 passengers.first().and_then(|passenger| {
                     passenger.get_player().map(|rider| {
                         (
@@ -408,7 +419,7 @@ impl Mob for HappyGhastEntity {
                 })
             };
             let movement_input = if !self.is_on_still_timeout()
-                && self.is_wearing_body_armor().await
+                && self.is_wearing_body_armor()
                 && let Some((input, pitch, yaw)) = rider_input
             {
                 // `ServerPlayer.getLastClientMoveIntent` (`ServerPlayer.java:2231`): left is
@@ -485,106 +496,75 @@ impl Mob for HappyGhastEntity {
         })
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let is_baby = entity.age.load(Ordering::Relaxed) < 0;
-            if is_baby {
-                entity.send_meta_data(
-                    &[Metadata::new(
-                        pumpkin_data::tracked_data::happy_ghast::BABY_ID,
-                        true,
-                    )],
-                    None,
-                );
-            }
+    fn mob_init_data_tracker(&self) {
+        let entity = self.get_entity();
+        let is_baby = entity.age.load(Ordering::Relaxed) < 0;
+        if is_baby {
             entity.send_meta_data(
-                &[
-                    Metadata::new(
-                        pumpkin_data::tracked_data::happy_ghast::IS_LEASH_HOLDER,
-                        self.is_leash_holder.load(Ordering::Relaxed),
-                    ),
-                    Metadata::new(
-                        pumpkin_data::tracked_data::happy_ghast::STAYS_STILL,
-                        self.stays_still.load(Ordering::Relaxed),
-                    ),
-                ],
+                &[Metadata::new(
+                    pumpkin_data::tracked_data::happy_ghast::BABY_ID,
+                    true,
+                )],
                 None,
             );
-        })
+        }
+        entity.send_meta_data(
+            &[
+                Metadata::new(
+                    pumpkin_data::tracked_data::happy_ghast::IS_LEASH_HOLDER,
+                    self.is_leash_holder.load(Ordering::Relaxed),
+                ),
+                Metadata::new(
+                    pumpkin_data::tracked_data::happy_ghast::STAYS_STILL,
+                    self.stays_still.load(Ordering::Relaxed),
+                ),
+            ],
+            None,
+        );
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            // HappyGhast.java:281-283: babies never equip/ride, only eat to grow up.
-            if self.is_baby() {
-                use crate::entity::passive::animal::Animal as _;
-                return self
-                    .animal_interact(player, item_stack, Sound::EntityGhastlingAmbient)
-                    .await;
-            }
-
-            if !item_stack.is_empty() && self.try_equip_harness(player, item_stack).await {
-                return true;
-            }
-
-            if self.try_mount(player).await {
-                return true;
-            }
-
-            self.mob_entity
-                .mob_interact(player, item_stack, self.can_be_leashed())
-                .await
-        })
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        // HappyGhast.java:281-283: babies never equip/ride, only eat to grow up.
+        if self.is_baby() {
+            return self.animal_interact(player, item_stack, Sound::EntityGhastlingAmbient);
+        }
+        if !item_stack.is_empty() && self.try_equip_harness(player, item_stack) {
+            return true;
+        }
+        if self.try_mount(player) {
+            return true;
+        }
+        self.mob_entity.mob_interact(player, item_stack)
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if !self.mob_entity.living_entity.entity.is_alive() {
-                return;
+    fn mob_tick(&self, _caller: &dyn EntityBase) {
+        if !self.mob_entity.living_entity.entity.is_alive() {
+            return;
+        }
+        self.ageable_ai_step();
+        if self.is_baby() {
+            if !self.baby_setup.swap(true, Relaxed) {
+                self.setup_baby();
             }
-
-            self.ageable_ai_step();
-
-            if self.is_baby() {
-                if !self.baby_setup.swap(true, Relaxed) {
-                    self.setup_baby().await;
-                }
-            } else if self.baby_setup.swap(false, Relaxed) {
-                self.setup_adult().await;
+        } else if self.baby_setup.swap(false, Relaxed) {
+            self.setup_adult();
+        }
+        let leash_time = self.leash_holder_time.load(Relaxed);
+        if leash_time > 0 {
+            self.leash_holder_time.fetch_sub(1, Relaxed);
+        }
+        self.set_leash_holder(leash_time > 0);
+        if self.server_still_timeout.load(Relaxed) > 0 {
+            if self.get_entity().age.load(Relaxed) > 60 {
+                self.server_still_timeout.fetch_sub(1, Relaxed);
             }
-
-            let leash_time = self.leash_holder_time.load(Relaxed);
-            if leash_time > 0 {
-                self.leash_holder_time.fetch_sub(1, Relaxed);
-            }
-            self.set_leash_holder(leash_time > 0);
-
-            if self.server_still_timeout.load(Relaxed) > 0 {
-                if self.get_entity().age.load(Relaxed) > 60 {
-                    self.server_still_timeout.fetch_sub(1, Relaxed);
-                }
-                self.sync_stay_still_flag();
-            }
-
-            self.continuous_heal();
-
-            let is_vehicle = !self
-                .mob_entity
-                .living_entity
-                .entity
-                .passengers
-                .lock()
-                .await
-                .is_empty();
-            if !is_vehicle {
-                self.check_restriction().await;
-            }
-        })
+            self.sync_stay_still_flag();
+        }
+        self.continuous_heal();
+        let is_vehicle = self.mob_entity.living_entity.entity.has_passengers();
+        if !is_vehicle {
+            self.check_restriction();
+        }
     }
 }
 

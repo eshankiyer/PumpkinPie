@@ -46,33 +46,18 @@ impl SpyglassItem {
 }
 
 impl ItemBehaviour for SpyglassItem {
-    fn normal_use<'a>(
-        &'a self,
-        _item: &'a Item,
-        player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            Self::play_use_sound(player);
-            player
-                .increment_stat(StatisticCategory::Used, Item::SPYGLASS.id as i32, 1)
-                .await;
+    fn normal_use(&self, _item: &Item, player: &Player) {
+        Self::play_use_sound(player);
+        player.increment_stat(StatisticCategory::Used, Item::SPYGLASS.id as i32, 1);
 
-            let stack = player.inventory().held_item().await;
-            player
-                .living_entity
-                .set_active_hand(Hand::Right, stack, Self::USE_DURATION)
-                .await;
-        })
+        let stack = player.inventory().held_item();
+        player
+            .living_entity
+            .set_active_hand(Hand::Right, stack, Self::USE_DURATION);
     }
 
-    fn on_stopped_using<'a>(
-        &'a self,
-        _stack: &'a ItemStack,
-        player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            Self::play_stop_using_sound(player);
-        })
+    fn on_stopped_using(&self, _stack: &ItemStack, player: &Player) {
+        Self::play_stop_using_sound(player);
     }
 
     /// Vanilla `SpyglassItem#finishUsingItem`: same `stopUsing` call as

@@ -1,4 +1,7 @@
-use std::sync::{Arc, Weak};
+use std::sync::{
+    Arc, Weak,
+    atomic::{AtomicBool, AtomicI32, Ordering},
+};
 
 use pumpkin_data::{
     damage::DamageType,
@@ -9,34 +12,40 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::Difficulty;
 
+use pumpkin_data::{Block, dimension::Dimension, tracked_data};
+use pumpkin_util::math::position::BlockPos;
+
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase,
     ai::goal::{
         active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, swim::SwimGoal,
-        wander_around::WanderAroundGoal,
+        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, open_door::OpenDoorGoal,
+        revenge::RevengeGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
     },
     mob::{
-        Mob, MobEntity, piglin_shared,
-        zombification::{self, ZombificationTimer},
-        zombified_piglin::ZombifiedPiglinEntity,
+        Mob, MobEntity,
     },
 };
+use crate::world::World;
 
 pub struct PiglinBruteEntity {
     pub mob_entity: MobEntity,
     /// `AbstractPiglin.timeInOverworld`/`IsImmuneToZombification`
-    /// (`AbstractPiglin.java:26-33`); brutes inherit the whole conversion path unchanged
-    /// apart from the sound (`PiglinBrute.java:141-144`).
-    zombification: ZombificationTimer,
+    /// (`AbstractPiglin.java:26-33`).
+    pub immune_to_zombification: AtomicBool,
+    pub time_in_overworld: AtomicI32,
 }
 
 impl PiglinBruteEntity {
+    pub const CONVERSION_TIME: i32 = 300;
+    pub const XP_REWARD: u32 = 20;
+
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
         let piglin = Self {
             mob_entity,
-            zombification: ZombificationTimer::new(),
+            immune_to_zombification: AtomicBool::new(false),
+            time_in_overworld: AtomicI32::new(0),
         };
         let mob_arc = Arc::new(piglin);
         let mob_weak: Weak<dyn Mob> = {
@@ -52,6 +61,7 @@ impl PiglinBruteEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
+            goal_selector.add_goal(1, Box::new(OpenDoorGoal::new(true)));
             goal_selector.add_goal(2, Box::new(MeleeAttackGoal::new(1.0, true)));
             goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
             goal_selector.add_goal(
@@ -65,12 +75,14 @@ impl PiglinBruteEntity {
                 .target_selector
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
+            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            // Piglin brutes are always hostile to players (even with gold armor)
             target_selector.add_goal(
-                1,
+                2,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),
             );
             target_selector.add_goal(
-                2,
+                3,
                 ActiveTargetGoal::with_default(
                     &mob_arc.mob_entity,
                     &EntityType::WITHER_SKELETON,
@@ -78,37 +90,99 @@ impl PiglinBruteEntity {
                 ),
             );
             target_selector.add_goal(
-                2,
+                3,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::WITHER, true),
             );
         };
 
         mob_arc
     }
-}
 
-impl NBTStorage for PiglinBruteEntity {
-    /// `AbstractPiglin.addAdditionalSaveData` (`AbstractPiglin.java:65-70`).
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.zombification.write_nbt(nbt);
-        })
+    #[must_use]
+    pub fn is_immune_to_zombification(&self) -> bool {
+        self.immune_to_zombification.load(Ordering::Relaxed)
     }
 
-    /// `AbstractPiglin.readAdditionalSaveData` (`AbstractPiglin.java:72-78`).
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.zombification.read_nbt(nbt);
-            self.mob_entity.living_entity.entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::piglin_brute::DATA_IMMUNE_TO_ZOMBIFICATION,
-                    self.zombification.is_immune(),
-                )],
-                None,
+    pub fn set_immune_to_zombification(&self, immune: bool) {
+        self.immune_to_zombification
+            .store(immune, Ordering::Relaxed);
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                tracked_data::piglin_brute::DATA_IMMUNE_TO_ZOMBIFICATION,
+                immune,
+            )],
+            None,
+        );
+    }
+
+    #[must_use]
+    pub fn is_converting(&self, world: &World) -> bool {
+        !self.is_immune_to_zombification()
+            && !self.mob_entity.is_no_ai()
+            && world.dimension.minecraft_name != Dimension::THE_NETHER.minecraft_name
+    }
+
+    #[must_use]
+    pub fn check_piglin_brute_spawn_rules(world: &World, pos: &BlockPos) -> bool {
+        let below = BlockPos::new(pos.0.x, pos.0.y - 1, pos.0.z);
+        let state = world.get_block_state(&below);
+        state.id != Block::NETHER_WART_BLOCK.default_state.id
+    }
+
+    fn convert_to_zombified(&self) {
+        let entity = &self.mob_entity.living_entity.entity;
+        let world = entity.world.load();
+        let pos = entity.pos.load();
+
+        // `PiglinBrute.playConvertedSound` (`PiglinBrute.java:141-144`).
+        if world.level_info.load().difficulty != pumpkin_util::Difficulty::Peaceful {
+            world.play_sound(
+                Sound::EntityPiglinBruteConvertedToZombified,
+                SoundCategory::Hostile,
+                &pos,
             );
-        })
+        }
+
+        let zombified = crate::entity::r#type::from_type(
+            &EntityType::ZOMBIFIED_PIGLIN,
+            pos,
+            &world,
+            uuid::Uuid::new_v4(),
+        );
+
+        let zombified_base = zombified.get_entity();
+        zombified_base.set_rotation(entity.yaw.load(), entity.pitch.load());
+        zombified_base.head_yaw.store(entity.head_yaw.load());
+        zombified_base.velocity.store(entity.velocity.load());
+
+        if let Some(living) = zombified.get_living_entity() {
+            living.set_health(self.mob_entity.living_entity.health.load());
+        }
+
+        if let Some(custom_name) = &**entity.custom_name.load() {
+            zombified_base.set_custom_name(custom_name.clone());
+        }
+
+        {
+            let src_equip = self
+                .mob_entity
+                .living_entity
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(living) = zombified.get_living_entity() {
+                let mut dst_equip = living
+                    .entity_equipment
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                for (slot, item) in &src_equip.equipment {
+                    dst_equip.put(slot, item.clone());
+                }
+            }
+        }
+
+        world.spawn_entity(zombified);
+        entity.remove();
     }
 }
 
@@ -132,69 +206,106 @@ impl Mob for PiglinBruteEntity {
         Some(Sound::EntityPiglinBruteStep)
     }
 
-    /// `PiglinBruteAi.wasHurtBy`: unlike `Piglin`, brutes have no baby-flee or
-    /// hoglin-outnumbered branch -- any non-piglin attacker is retaliated against
-    /// directly via the same `maybeRetaliate`/`broadcastAngerTarget` piglins use.
-    fn on_damage<'a>(
-        &'a self,
-        _damage_type: DamageType,
-        source: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(source) = source {
-                if source.get_entity().entity_type.id == EntityType::PIGLIN.id
-                    || source.get_entity().entity_type.id == EntityType::PIGLIN_BRUTE.id
-                {
-                    return;
-                }
-                piglin_shared::retaliate_and_alert_piglins(self, source).await;
+    /// `PiglinBruteAi.wasHurtBy` retaliates against non-piglin attackers and alerts nearby
+    /// adult piglins, the synchronous equivalent of the fork's shared piglin helper.
+    fn on_damage(&self, _damage_type: DamageType, source: Option<&dyn EntityBase>) {
+        let Some(source) = source else {
+            return;
+        };
+        if source.get_entity().entity_type.id == EntityType::PIGLIN.id
+            || source.get_entity().entity_type.id == EntityType::PIGLIN_BRUTE.id
+        {
+            return;
+        }
+        let entity = &self.mob_entity.living_entity.entity;
+        let world = entity.world.load();
+        let Some(source) = world.get_entity_by_id(source.get_entity().entity_id) else {
+            return;
+        };
+        self.set_mob_target(Some(source.clone()));
+        for nearby in world.get_nearby_entities(entity.pos.load(), 16.0).into_values() {
+            if nearby.get_entity().entity_type.id != EntityType::PIGLIN.id {
+                continue;
             }
-        })
+            if let Some(nearby_mob) = nearby.get_mob()
+                && nearby_mob
+                    .get_mob_entity()
+                    .target
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .is_none()
+            {
+                nearby_mob.set_mob_target(Some(source.clone()));
+            }
+        }
     }
 
-    /// `AbstractPiglin.customServerAiStep` (`AbstractPiglin.java:80-96`): the overworld
-    /// zombification timer, with `PiglinBrute.playConvertedSound`
-    /// (`PiglinBrute.java:141-144`) for the conversion sound.
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            // `PiglinBruteAi.maybePlayActivitySound` (`PiglinBruteAi.java:150-161`) is
-            // reached from `PiglinBrute.customServerAiStep` (`PiglinBrute.java:92-100`).
-            if self.mob_entity.get_target().await.is_some() && rand::random::<f32>() < 0.0125 {
-                let entity = &self.mob_entity.living_entity.entity;
-                entity.world.load().play_sound_fine(
-                    Sound::EntityPiglinBruteAngry,
-                    SoundCategory::Hostile,
-                    &entity.pos.load(),
-                    1.0,
-                    1.0,
-                );
-            }
-
-            if self.zombification.tick(&self.mob_entity) {
-                if self
-                    .mob_entity
-                    .living_entity
-                    .entity
-                    .world
-                    .load()
-                    .level_info
-                    .load()
-                    .difficulty
-                    != Difficulty::Peaceful
-                {
-                    zombification::play_converted_sound(
-                        &self.mob_entity,
-                        Sound::EntityPiglinBruteConvertedToZombified,
-                    );
-                }
-                zombification::convert_to(
-                    &self.mob_entity,
-                    &EntityType::ZOMBIFIED_PIGLIN,
+    fn mob_init_data_tracker(&self) {
+        let entity = self.get_entity();
+        if self.is_immune_to_zombification() {
+            entity.send_meta_data(
+                &[Metadata::new(
+                    tracked_data::piglin_brute::DATA_IMMUNE_TO_ZOMBIFICATION,
                     true,
-                    ZombifiedPiglinEntity::new,
-                )
-                .await;
+                )],
+                None,
+            );
+        }
+    }
+
+    /// `AbstractPiglin.addAdditionalSaveData` (`AbstractPiglin.java:65-70`).
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        if self.is_immune_to_zombification() {
+            nbt.put_bool("IsImmuneToZombification", true);
+        }
+        let time_in_overworld = self.time_in_overworld.load(Ordering::Relaxed);
+        if time_in_overworld > 0 {
+            nbt.put_int("TimeInOverworld", time_in_overworld);
+        }
+        nbt.put_bool("CanPickUpLoot", true);
+    }
+
+    /// `AbstractPiglin.readAdditionalSaveData` (`AbstractPiglin.java:72-78`).
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        if let Some(immune) = nbt.get_bool("IsImmuneToZombification") {
+            self.set_immune_to_zombification(immune);
+        }
+        if let Some(time) = nbt.get_int("TimeInOverworld") {
+            self.time_in_overworld.store(time, Ordering::Relaxed);
+        }
+    }
+
+    fn mob_tick(&self, _caller: &dyn EntityBase) {
+        let entity = &self.mob_entity.living_entity.entity;
+        if !entity.is_alive() {
+            return;
+        }
+
+        let world = entity.world.load();
+        // `PiglinBruteAi.maybePlayActivitySound` (`PiglinBruteAi.java:150-161`) is reached
+        // from `PiglinBrute.customServerAiStep` (`PiglinBrute.java:92-100`).
+        if self.mob_entity.get_target().is_some() && rand::random::<f32>() < 0.0125 {
+            world.play_sound_fine(
+                Sound::EntityPiglinBruteAngry,
+                SoundCategory::Hostile,
+                &entity.pos.load(),
+                1.0,
+                1.0,
+            );
+        }
+
+        // `AbstractPiglin.customServerAiStep` (`AbstractPiglin.java:80-96`).
+        if self.is_converting(&world) {
+            let time = self.time_in_overworld.fetch_add(1, Ordering::Relaxed) + 1;
+            if time > Self::CONVERSION_TIME {
+                self.convert_to_zombified();
             }
-        })
+        } else {
+            self.time_in_overworld.store(0, Ordering::Relaxed);
+        }
+    }
+
+    fn get_base_experience_reward(&self) -> u32 {
+        Self::XP_REWARD
     }
 }

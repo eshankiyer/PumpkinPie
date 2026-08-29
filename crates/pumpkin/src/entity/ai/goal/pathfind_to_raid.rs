@@ -15,13 +15,13 @@
 //! (`isActive`/`isOver`/`getCenter`) is re-read from `World::raids` on every use, matching
 //! vanilla's repeated `getCurrentRaid()` calls.
 
-use std::sync::atomic::Ordering::Relaxed;
+use std::sync::atomic::{AtomicI32, Ordering::Relaxed};
 
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_util::math::vector3::Vector3;
 
 use super::random_pos::default_get_pos_towards;
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::living::LivingEntity;
 use crate::entity::mob::Mob;
@@ -41,144 +41,162 @@ const MAX_NO_ACTION_TIME: i32 = 2400;
 /// `Math.PI / 2` cone passed to `getPosTowards` (`PathfindToRaidGoal.java:49`).
 const MAX_ANGLE_RADIANS: f64 = std::f64::consts::FRAC_PI_2;
 
-#[derive(Default)]
 pub struct PathfindToRaidGoal {
     /// `PathfindToRaidGoal.recruitmentTick` (`PathfindToRaidGoal.java:18`).
-    recruitment_tick: i32,
+    recruitment_tick: AtomicI32,
+    speed_modifier: f64,
+}
+
+impl Default for PathfindToRaidGoal {
+    fn default() -> Self {
+        Self::new(SPEED_MODIFIER)
+    }
 }
 
 impl PathfindToRaidGoal {
     #[must_use]
-    pub fn new() -> Box<Self> {
-        Box::new(Self::default())
+    pub const fn new(speed_modifier: f64) -> Self {
+        Self {
+            recruitment_tick: AtomicI32::new(0),
+            speed_modifier,
+        }
     }
-}
 
-/// The mob's cached membership plus its world, or `None` when the mob has no cached raid.
-///
-/// Vanilla's `Raider.hasActiveRaid()` is `getCurrentRaid() != null && raid.isActive()`
-/// (`Raider.java`); pumpkin approximates liveness with the membership captured at `join_raid`
-/// time (see `LivingEntity::has_active_raid`), so this reports whatever that proxy reports.
-async fn raid_membership(mob: &dyn Mob) -> Option<i32> {
-    let living = &mob.get_mob_entity().living_entity;
-    let membership = living.raid_membership.load()?;
-    let raid_exists = living
-        .entity
-        .world
-        .load()
-        .raids
-        .lock()
-        .await
-        .raid(membership.raid_id)
-        .is_some();
-    raid_exists.then_some(membership.raid_id)
+    /// Returns the mob's cached raid membership only while its live raid is active.
+    fn active_raid_id(mob: &dyn Mob) -> Option<i32> {
+        let raider = mob.as_raider()?;
+        let raid_id = raider.get_raider_data().raid_id.load()?;
+        let world = mob.get_entity().world.load();
+        let raids = world
+            .raids
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let raid = raids.get(raid_id)?;
+        (raid.is_active() && !raid.is_over()).then_some(raid_id)
+    }
+
+    /// The base `hasControllingPassenger` check is asynchronous in the older entity hierarchy.
+    /// The synchronous goal scheduler uses the current passenger snapshot at this decision point.
+    fn has_controlling_passenger(mob: &dyn Mob) -> bool {
+        mob.get_entity()
+            .passengers
+            .try_lock()
+            .ok()
+            .and_then(|passengers| passengers.first().cloned())
+            .is_some_and(|passenger| passenger.get_player().is_some())
+    }
+
+    fn is_outside_village(mob: &dyn Mob, raid_id: i32) -> bool {
+        let pos = mob.get_entity().block_pos.load();
+        let world = mob.get_entity().world.load();
+        let raids = world
+            .raids
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(raid) = raids.get(raid_id) else {
+            return false;
+        };
+        if !raid.is_active() || raid.is_over() {
+            return false;
+        }
+        let is_village = world
+            .villager_poi
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_nearest_job_site(pos, 32)
+            .is_some();
+        !is_village
+    }
 }
 
 impl Goal for PathfindToRaidGoal {
     /// Vanilla `canUse` (`PathfindToRaidGoal.java:26-32`): no target, no controlling passenger,
     /// active raid, and the mob outside the village.
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let mob_entity = mob.get_mob_entity();
-            if mob_entity.target.lock().await.is_some() {
-                return false;
-            }
-            if mob.has_controlling_passenger().await {
-                return false;
-            }
-            if raid_membership(mob).await.is_none() {
-                return false;
-            }
-            // `!getServerLevel(this.mob.level()).isVillage(this.mob.blockPosition())`;
-            // `ServerLevel.isVillage` is `isCloseToVillage(pos, 1)` (see
-            // `world/custom_spawners.rs` for the established reading).
-            let block_pos = mob_entity.living_entity.entity.block_pos.load();
-            !mob_entity
-                .living_entity
-                .entity
-                .world
-                .load()
-                .is_close_to_village(block_pos, 1)
-                .await
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let Some(raider) = mob.as_raider() else {
+            return false;
+        };
+        if mob.get_mob_entity().get_target().is_some()
+            || Self::has_controlling_passenger(mob)
+            || !raider.has_active_raid()
+        {
+            return false;
+        }
+        let Some(raid_id) = Self::active_raid_id(mob) else {
+            return false;
+        };
+        Self::is_outside_village(mob, raid_id)
     }
 
     /// Vanilla `canContinueToUse` (`PathfindToRaidGoal.java:35-37`): same raid-liveness and
     /// village gates without the target/passenger checks.
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if raid_membership(mob).await.is_none() {
-                return false;
-            }
-            let entity = &mob.get_mob_entity().living_entity.entity;
-            let block_pos = entity.block_pos.load();
-            !entity.world.load().is_close_to_village(block_pos, 1).await
-        })
+    fn should_continue(&self, mob: &dyn Mob) -> bool {
+        let Some(raid_id) = Self::active_raid_id(mob) else {
+            return false;
+        };
+        Self::is_outside_village(mob, raid_id)
     }
 
     /// Vanilla `tick` (`PathfindToRaidGoal.java:40-55`): while the raid runs, recruit nearby
     /// idle raiders every 20 ticks and keep pathing toward the raid center whenever the mob is
     /// not currently pathfinding.
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(raid_id) = raid_membership(mob).await else {
-                return;
-            };
-            let mob_entity = mob.get_mob_entity();
-            let world = mob_entity.living_entity.entity.world.load();
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(raid_id) = Self::active_raid_id(mob) else {
+            return;
+        };
+        let mob_entity = mob.get_mob_entity();
+        let world = mob_entity.living_entity.entity.world.load();
 
-            let (should_recruit, raid_center) = {
-                let raids = world.raids.lock().await;
-                let Some(raid) = raids.raid(raid_id) else {
-                    return;
-                };
-                if !raid.is_active() || raid.is_over() {
-                    return;
-                }
-                let tick_count = mob_entity.tick_count.load(Relaxed);
-                let should_recruit = tick_count > self.recruitment_tick;
-                if should_recruit {
-                    self.recruitment_tick = tick_count + RECRUITMENT_SEARCH_TICK_DELAY;
-                }
-                let center = raid.center();
-                // `Vec3.atBottomCenterOf(raid.getCenter())` (`PathfindToRaidGoal.java:49`).
-                let raid_center = Vector3::new(
-                    f64::from(center.0.x) + 0.5,
-                    f64::from(center.0.y),
-                    f64::from(center.0.z) + 0.5,
-                );
-                (should_recruit, raid_center)
-            };
-
-            if should_recruit {
-                Self::recruit_nearby(&mob_entity.living_entity, &world, raid_id).await;
-            }
-
-            // `if (!this.mob.isPathFinding())` (`PathfindToRaidGoal.java:48`): pumpkin's
-            // navigator reports idle exactly when there is no live path being followed.
-            let navigator_idle = mob_entity
-                .navigator
+        let raid_center = {
+            let raids = world
+                .raids
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .is_idle();
-            if !navigator_idle {
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Some(raid) = raids.get(raid_id) else {
+                return;
+            };
+            if !raid.is_active() || raid.is_over() {
                 return;
             }
-            if let Some(pos_towards) = default_get_pos_towards(
-                mob,
-                HORIZONTAL_RANGE,
-                VERTICAL_RANGE,
-                raid_center,
-                MAX_ANGLE_RADIANS,
-            ) {
-                let pos = mob_entity.living_entity.entity.pos.load();
-                mob_entity
-                    .navigator
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .set_progress(NavigatorGoal::new(pos, pos_towards, SPEED_MODIFIER));
-            }
-        })
+            Vector3::new(
+                f64::from(raid.center.0.x) + 0.5,
+                f64::from(raid.center.0.y),
+                f64::from(raid.center.0.z) + 0.5,
+            )
+        };
+
+        let current_age = mob_entity.living_entity.entity.age.load(Relaxed);
+        let next_recruit = self.recruitment_tick.load(Relaxed);
+        if current_age >= next_recruit {
+            self.recruitment_tick
+                .store(current_age + RECRUITMENT_SEARCH_TICK_DELAY, Relaxed);
+            Self::recruit_nearby(&mob_entity.living_entity, &world, raid_id);
+        }
+
+        // `if (!this.mob.isPathFinding())` (`PathfindToRaidGoal.java:48`): pumpkin's
+        // navigator reports idle exactly when there is no live path being followed.
+        let mut navigator = mob_entity
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !navigator.is_idle() {
+            return;
+        }
+        let Some(pos_towards) = default_get_pos_towards(
+            mob,
+            HORIZONTAL_RANGE,
+            VERTICAL_RANGE,
+            raid_center,
+            MAX_ANGLE_RADIANS,
+        ) else {
+            return;
+        };
+        let pos = mob_entity.living_entity.entity.pos.load();
+        navigator.set_progress(NavigatorGoal {
+            current_progress: pos,
+            destination: pos_towards,
+            speed: self.speed_modifier,
+        });
     }
 
     /// Vanilla registers `EnumSet.of(Goal.Flag.MOVE)` (`PathfindToRaidGoal.java:22`).
@@ -192,7 +210,7 @@ impl PathfindToRaidGoal {
     /// 16 blocks of the recruiter that has no raid yet and passes `Raids.canJoinRaid`
     /// (`Raids.java:98-100`: alive, `canJoinRaid`, `noActionTime <= 2400`) joins this raid's
     /// current wave.
-    async fn recruit_nearby(recruiter: &LivingEntity, world: &std::sync::Arc<World>, raid_id: i32) {
+    fn recruit_nearby(recruiter: &LivingEntity, world: &std::sync::Arc<World>, raid_id: i32) {
         let search_pos = recruiter.entity.pos.load();
         let self_id = recruiter.entity.entity_id;
         let candidates: Vec<_> = world
@@ -200,8 +218,7 @@ impl PathfindToRaidGoal {
             .into_values()
             .filter(|entity| entity.get_entity().entity_id != self_id)
             // `getEntitiesOfClass(Raider.class, ...)`: pumpkin marks raider types with the
-            // `minecraft:raiders` entity tag (same test as
-            // `nearest_healable_raider_target.rs`).
+            // `minecraft:raiders` entity tag (same test as `nearest_healable_raider_target.rs`).
             .filter(|entity| {
                 entity
                     .get_entity()
@@ -211,33 +228,39 @@ impl PathfindToRaidGoal {
             .collect();
 
         for entity in candidates {
-            let Some(recruit_mob) = entity.get_mob() else {
+            let Some(candidate_mob) = entity.get_mob() else {
                 continue;
             };
-            let recruit = &recruit_mob.get_mob_entity().living_entity;
-            if recruit.has_active_raid()
-                || !recruit.entity.is_alive()
-                || !recruit.can_join_raid.load(Relaxed)
-                || recruit_mob.get_mob_entity().no_action_time.load(Relaxed) > MAX_NO_ACTION_TIME
+            let Some(candidate_raider) = candidate_mob.as_raider() else {
+                continue;
+            };
+            let candidate = &candidate_mob.get_mob_entity().living_entity;
+            if candidate_raider.has_active_raid()
+                || !candidate.entity.is_alive()
+                || !candidate_raider.can_join_raid()
+                || candidate_mob.get_mob_entity().no_action_time.load(Relaxed)
+                    > MAX_NO_ACTION_TIME
             {
                 continue;
             }
-            // `raid.joinRaid(level, raid.getGroupsSpawned(), raider, null, true)`
-            // (`PathfindToRaidGoal.java:67`). The lock must be released between recruits to
-            // stay await-safe, hence the per-candidate scope.
-            let mut raids = world.raids.lock().await;
-            let Some(raid) = raids.raid_mut(raid_id) else {
+
+            let mut raids = world
+                .raids
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Some(raid) = raids.get_mut(raid_id) else {
                 continue;
             };
-            if !raid.is_active() {
+            if !raid.is_active() || raid.is_over() {
                 continue;
             }
-            raid.join_raid(
-                raid.groups_spawned(),
-                recruit.entity.entity_uuid,
-                recruit_mob.get_mob_entity(),
-                false,
-            );
+            let wave = raid.get_groups_spawned();
+            // `raid.joinRaid(level, raid.getGroupsSpawned(), raider, null, true)`
+            // (`PathfindToRaidGoal.java:67`). The membership is stored alongside the upstream
+            // raid map enrollment so later active-raid checks see the new recruit.
+            raid.join_raid(wave, candidate.entity.entity_uuid, &entity);
+            candidate_raider.set_wave(wave);
+            candidate_raider.get_raider_data().raid_id.store(Some(raid_id));
         }
     }
 }

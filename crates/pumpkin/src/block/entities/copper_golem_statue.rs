@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::Arc;
 
 use pumpkin_data::Block;
@@ -36,12 +35,7 @@ impl BlockEntity for CopperGolemStatueBlockEntity {
         Self { position }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        _nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async {})
-    }
+    fn write_nbt(&self, _nbt: &mut NbtCompound) {}
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
@@ -96,7 +90,7 @@ impl CopperGolemStatueBlockEntity {
         entity.head_yaw.store(yaw);
 
         let golem = CopperGolemEntity::new(entity);
-        world.spawn_entity(golem).await;
+        world.spawn_entity(golem);
 
         // `CopperGolemStatueBlockEntity.initCopperGolem` finishes with `playSpawnSound()`
         // (`CopperGolem.playSpawnSound`, CopperGolem.java:378-380).
@@ -111,9 +105,7 @@ impl CopperGolemStatueBlockEntity {
         } else {
             Block::AIR.default_state.id
         };
-        world
-            .set_block_state(&pos, remaining, BlockFlags::NOTIFY_ALL)
-            .await;
+        world.set_block_state(&pos, remaining, BlockFlags::NOTIFY_ALL);
     }
 }
 

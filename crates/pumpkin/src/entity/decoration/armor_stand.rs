@@ -1,9 +1,6 @@
 use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU8, Ordering};
 
-use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture, living::LivingEntity,
-};
-use crate::world::game_event::{GameEventContext, emit_game_event};
+use crate::entity::{Entity, EntityBase, living::LivingEntity};
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::tag::{self, Taggable};
@@ -203,11 +200,11 @@ impl ArmorStandEntity {
 
     /// Vanilla `ArmorStand.setInvisible` (`ArmorStand.java:450-454`) stores a stand-specific
     /// invisibility flag and reapplies it after potion visibility recalculation.
-    pub async fn set_invisible(&self, invisible: bool) {
+    pub fn set_invisible(&self, invisible: bool) {
         self.get_entity()
             .persistent_invisible
             .store(invisible, Ordering::Relaxed);
-        self.living_entity.update_effect_visibility().await;
+        self.get_entity().set_invisible(invisible);
     }
 
     pub fn pack_rotation(&self) -> PackedRotation {
@@ -218,9 +215,13 @@ impl ArmorStandEntity {
         self.rotation.store(packed.to_owned());
     }
 
-    async fn break_and_drop_items(&self) {
+    fn break_and_drop_items(&self) {
         let entity = self.get_entity();
-        let equipment = self.living_entity.entity_equipment.lock().await;
+        let equipment = self
+            .living_entity
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let equipped_items: Vec<_> = equipment.equipment.values().cloned().collect();
         drop(equipment);
 
@@ -234,8 +235,7 @@ impl ArmorStandEntity {
             entity
                 .world
                 .load()
-                .drop_stack(&entity.block_pos.load(), dropped)
-                .await;
+                .drop_stack(&entity.block_pos.load(), dropped);
         }
 
         //let name = entity.custom_name.unwrap_or(entity.get_name());
@@ -245,8 +245,7 @@ impl ArmorStandEntity {
         entity
             .world
             .load()
-            .drop_stack(&entity.block_pos.load(), armor_stand_item)
-            .await;
+            .drop_stack(&entity.block_pos.load(), armor_stand_item);
 
         Self::on_break(entity);
     }
@@ -279,82 +278,72 @@ impl ArmorStandEntity {
     }
 }
 
-impl NBTStorage for ArmorStandEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.living_entity.write_nbt(nbt).await;
-            let disabled_slots = self.disabled_slots.load(Ordering::Relaxed);
-            // ...
+impl EntityBase for ArmorStandEntity {
+    fn write_custom_nbt(&self, nbt: &mut NbtCompound) {
+        let disabled_slots = self.disabled_slots.load(Ordering::Relaxed);
+        // ...
 
-            nbt.put_bool(
-                "Invisible",
-                self.get_entity()
-                    .persistent_invisible
-                    .load(Ordering::Relaxed),
-            );
-            nbt.put_bool("Small", self.is_small());
-            nbt.put_bool("ShowArms", self.should_show_arms());
-            nbt.put_int("DisabledSlots", disabled_slots);
-            nbt.put_bool("NoBasePlate", !self.should_show_base_plate());
-            if self.is_marker() {
-                nbt.put_bool("Marker", true);
-            }
+        nbt.put_bool(
+            "Invisible",
+            self.get_entity()
+                .persistent_invisible
+                .load(Ordering::Relaxed),
+        );
+        nbt.put_bool("Small", self.is_small());
+        nbt.put_bool("ShowArms", self.should_show_arms());
+        nbt.put_int("DisabledSlots", disabled_slots);
+        nbt.put_bool("NoBasePlate", !self.should_show_base_plate());
+        if self.is_marker() {
+            nbt.put_bool("Marker", true);
+        }
 
-            nbt.put("Pose", self.pack_rotation());
-        })
+        nbt.put("Pose", self.pack_rotation());
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.living_entity.read_nbt_non_mut(nbt).await;
-            let mut flags = 0u8;
-            // ...
+    fn read_custom_nbt(&self, nbt: &NbtCompound) {
+        let mut flags = 0u8;
+        // ...
 
-            self.set_invisible(nbt.get_bool("Invisible").unwrap_or(false))
-                .await;
+        self.set_invisible(nbt.get_bool("Invisible").unwrap_or(false));
 
-            if let Some(small) = nbt.get_bool("Small")
-                && small
-            {
-                flags |= ArmorStandFlags::Small as u8;
-            }
+        if let Some(small) = nbt.get_bool("Small")
+            && small
+        {
+            flags |= ArmorStandFlags::Small as u8;
+        }
 
-            if let Some(show_arms) = nbt.get_bool("ShowArms")
-                && show_arms
-            {
-                flags |= ArmorStandFlags::ShowArms as u8;
-            }
+        if let Some(show_arms) = nbt.get_bool("ShowArms")
+            && show_arms
+        {
+            flags |= ArmorStandFlags::ShowArms as u8;
+        }
 
-            if let Some(disabled_slots) = nbt.get_int("DisabledSlots") {
-                self.disabled_slots.store(disabled_slots, Ordering::Relaxed);
-            }
+        if let Some(disabled_slots) = nbt.get_int("DisabledSlots") {
+            self.disabled_slots.store(disabled_slots, Ordering::Relaxed);
+        }
 
-            if let Some(no_base_plate) = nbt.get_bool("NoBasePlate") {
-                if !no_base_plate {
-                    flags |= ArmorStandFlags::HideBasePlate as u8;
-                }
-            } else {
+        if let Some(no_base_plate) = nbt.get_bool("NoBasePlate") {
+            if !no_base_plate {
                 flags |= ArmorStandFlags::HideBasePlate as u8;
             }
+        } else {
+            flags |= ArmorStandFlags::HideBasePlate as u8;
+        }
 
-            if let Some(marker) = nbt.get_bool("Marker")
-                && marker
-            {
-                flags |= ArmorStandFlags::Marker as u8;
-            }
+        if let Some(marker) = nbt.get_bool("Marker")
+            && marker
+        {
+            flags |= ArmorStandFlags::Marker as u8;
+        }
 
-            self.armor_stand_flags.store(flags, Ordering::Relaxed);
-            self.refresh_dimensions();
+        self.armor_stand_flags.store(flags, Ordering::Relaxed);
+        self.refresh_dimensions();
 
-            if let Some(pose_tag) = nbt.get("Pose") {
-                let packed: PackedRotation = pose_tag.clone().into();
-                self.unpack_rotation(&packed);
-            }
-        })
+        if let Some(pose_tag) = nbt.get("Pose") {
+            let packed: PackedRotation = pose_tag.clone().into();
+            self.unpack_rotation(&packed);
+        }
     }
-}
-
-impl EntityBase for ArmorStandEntity {
     fn get_entity(&self) -> &Entity {
         &self.living_entity.entity
     }
@@ -381,36 +370,36 @@ impl EntityBase for ArmorStandEntity {
 
     /// Vanilla `ArmorStand.skipAttackInteraction` (`ArmorStand.java:577-580`) delegates to
     /// `ServerLevel.mayInteract` (`ServerLevel.java:868-871`).
-    fn skip_attack_interaction<'a>(
-        &'a self,
-        source: &'a crate::entity::player::Player,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let world = entity.world.load();
-            let Some(server) = world.server.upgrade() else {
-                return false;
-            };
-            let block_pos = entity.block_pos.load();
-            source
-                .is_under_spawn_protection(&server, &world, &block_pos)
-                .await
-                || !world
-                    .worldborder
-                    .lock()
-                    .await
-                    .contains_block(block_pos.0.x, block_pos.0.z)
-        })
+    fn skip_attack_interaction(
+        &self,
+        source: &crate::entity::player::Player,
+    ) -> bool {
+        let entity = self.get_entity();
+        let world = entity.world.load();
+        let Some(server) = world.server.upgrade() else {
+            return false;
+        };
+        let block_pos = entity.block_pos.load();
+        let spawn_protected = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(
+                source.is_under_spawn_protection(&server, &world, &block_pos),
+            )
+        });
+        spawn_protected
+            || !world
+                .worldborder
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .contains_block(block_pos.0.x, block_pos.0.z)
     }
 
     /// Vanilla `ArmorStand.thunderHit` (`ArmorStand.java:602-604`) is intentionally empty, so
     /// lightning must not apply the generic living-entity fire and damage callback.
-    fn on_lightning_strike<'a>(
-        &'a self,
-        _caller: &'a dyn EntityBase,
-        _lightning: &'a crate::entity::lightning::LightningBoltEntity,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async {})
+    fn on_lightning_strike(
+        &self,
+        _caller: &dyn EntityBase,
+        _lightning: &crate::entity::lightning::LightningBoltEntity,
+    ) {
     }
 
     /// Vanilla `ArmorStand.getPistonPushReaction` (`ArmorStand.java:472-475`). Marker stands are
@@ -425,140 +414,139 @@ impl EntityBase for ArmorStandEntity {
         Sound::EntityArmorStandFall
     }
 
-    fn as_nbt_storage(&self) -> &dyn NBTStorage {
-        self
+    fn kill(&self, _caller: &dyn EntityBase) {
+        self.get_entity().remove();
+        let entity = self.get_entity();
+        let world = entity.world.load();
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(
+                crate::world::game_event::emit_game_event(
+                    &world,
+                    pumpkin_data::game_event::GameEvent::EntityDie,
+                    entity.pos.load(),
+                    crate::world::game_event::GameEventContext::none(),
+                ),
+            );
+        });
     }
 
-    fn kill<'a>(&'a self, _caller: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.get_entity().remove().await;
-
-            // No Arc<dyn EntityBase> available here, so GameEventContext::none().
-            emit_game_event(
-                &self.get_entity().world.load(),
-                pumpkin_data::game_event::GameEvent::EntityDie,
-                self.get_entity().pos.load(),
-                GameEventContext::none(),
-            )
-            .await;
-        })
-    }
-
-    fn damage_with_context<'a>(
-        &'a self,
-        caller: &'a dyn EntityBase,
+    fn damage_with_context(
+        &self,
+        _caller: &dyn EntityBase,
         _amount: f32,
         damage_type: DamageType,
         _position: Option<Vector3<f64>>,
-        source: Option<&'a dyn EntityBase>,
-        cause: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            if entity.is_removed() {
-                return false;
-            }
+        source: Option<&dyn EntityBase>,
+        cause: Option<&dyn EntityBase>,
+    ) -> bool {
+        let entity = self.get_entity();
+        if entity.is_removed() {
+            return false;
+        }
 
-            let world = entity.world.load();
+        let world = entity.world.load();
 
-            let mob_griefing_gamerule = {
-                let game_rules = &world.level_info.load().game_rules;
-                game_rules.mob_griefing
-            };
+        let mob_griefing_gamerule = {
+            let game_rules = &world.level_info.load().game_rules;
+            game_rules.mob_griefing
+        };
 
-            if !mob_griefing_gamerule && source.is_some_and(|source| source.get_player().is_none())
+        if !mob_griefing_gamerule && source.is_some_and(|source| source.get_player().is_none()) {
+            return false;
+        }
+
+        let bypasses_invulnerability =
+            damage_type == DamageType::OUT_OF_WORLD || damage_type == DamageType::GENERIC_KILL;
+
+        if bypasses_invulnerability {
+            entity.remove();
+            return false;
+        }
+
+        if entity.is_invulnerable_to(&damage_type) || self.is_invisible() || self.is_marker() {
+            return false;
+        }
+
+        let is_explosion = damage_type == DamageType::FIREWORKS
+            || damage_type == DamageType::EXPLOSION
+            || damage_type == DamageType::PLAYER_EXPLOSION
+            || damage_type == DamageType::BAD_RESPAWN_POINT;
+
+        if is_explosion {
+            self.break_and_drop_items();
+            entity.remove();
+            return false;
+        }
+
+        // Vanilla ignites instead of damaging; an armor stand has no health field to chip
+        // for the already-on-fire case.
+        if damage_type.has_tag(&tag::DamageType::MINECRAFT_IGNITES_ARMOR_STANDS) {
+            entity.set_on_fire_for(5.0);
+            return false;
+        }
+
+        if damage_type.has_tag(&tag::DamageType::MINECRAFT_BURNS_ARMOR_STANDS) {
+            return false;
+        }
+
+        let can_break = damage_type == DamageType::PLAYER_EXPLOSION
+            || damage_type == DamageType::PLAYER_ATTACK
+            || damage_type == DamageType::SPEAR
+            || damage_type == DamageType::MACE_SMASH;
+
+        let always_kills = damage_type == DamageType::ARROW
+            || damage_type == DamageType::TRIDENT
+            || damage_type == DamageType::FIREBALL
+            || damage_type == DamageType::WITHER_SKULL
+            || damage_type == DamageType::WIND_CHARGE;
+
+        if !can_break && !always_kills {
+            return false;
+        }
+
+        let attacker = cause.or(source);
+        if let Some(attacker) = attacker
+            && let Some(player) = attacker.get_player()
+        {
+            if !player
+                .abilities
+                .try_lock()
+                .is_ok_and(|a| a.allow_modify_world)
             {
                 return false;
-            }
-
-            let bypasses_invulnerability =
-                damage_type == DamageType::OUT_OF_WORLD || damage_type == DamageType::GENERIC_KILL;
-
-            if bypasses_invulnerability {
-                entity.kill(caller).await;
-                return false;
-            }
-
-            if entity.is_invulnerable_to(&damage_type).await
-                || self.is_invisible()
-                || self.is_marker()
-            {
-                return false;
-            }
-
-            let is_explosion = damage_type == DamageType::FIREWORKS
-                || damage_type == DamageType::EXPLOSION
-                || damage_type == DamageType::PLAYER_EXPLOSION
-                || damage_type == DamageType::BAD_RESPAWN_POINT;
-
-            if is_explosion {
-                self.break_and_drop_items().await;
-                entity.kill(caller).await;
-                return false;
-            }
-
-            // Vanilla ignites instead of damaging; no health field exists here to chip
-            // for the already-on-fire case, so that sub-case is a no-op.
-            if damage_type.has_tag(&tag::DamageType::MINECRAFT_IGNITES_ARMOR_STANDS) {
-                entity.set_on_fire_for(5.0);
-                return false;
-            }
-
-            if damage_type.has_tag(&tag::DamageType::MINECRAFT_BURNS_ARMOR_STANDS) {
-                return false;
-            }
-
-            let can_break = damage_type == DamageType::PLAYER_EXPLOSION
-                || damage_type == DamageType::PLAYER_ATTACK
-                || damage_type == DamageType::SPEAR
-                || damage_type == DamageType::MACE_SMASH;
-
-            let always_kills = damage_type == DamageType::ARROW
-                || damage_type == DamageType::TRIDENT
-                || damage_type == DamageType::FIREBALL
-                || damage_type == DamageType::WITHER_SKULL
-                || damage_type == DamageType::WIND_CHARGE;
-
-            if !can_break && !always_kills {
-                return false;
-            }
-
-            let attacker = cause.or(source);
-            if let Some(attacker) = attacker
-                && let Some(player) = attacker.get_player()
-            {
-                if !player.abilities.lock().await.allow_modify_world {
-                    return false;
-                } else if player.is_creative() {
-                    Self::spawn_break_particles(entity);
-                    entity.kill(caller).await;
-                    return true;
-                }
-            }
-
-            let time = world.level_time.lock().await.query_gametime();
-
-            if time - self.last_hit_time.load(Ordering::Relaxed) > 5 && !always_kills {
-                world.send_entity_status(entity, EntityStatus::ArmorstandWobble, None);
-                world.play_sound(
-                    Sound::EntityArmorStandHit,
-                    SoundCategory::Neutral,
-                    &entity.block_pos.load().to_f64(),
-                );
-                self.last_hit_time.store(time, Ordering::Relaxed);
-            } else {
+            } else if player.is_creative() {
                 Self::spawn_break_particles(entity);
-                world.play_sound(
-                    Sound::EntityArmorStandBreak,
-                    SoundCategory::Neutral,
-                    &entity.block_pos.load().to_f64(),
-                );
-                self.break_and_drop_items().await;
-                entity.kill(caller).await;
+                entity.remove();
+                return true;
             }
+        }
 
-            true
-        })
+        let time = world
+            .level_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .query_gametime();
+
+        if time - self.last_hit_time.load(Ordering::Relaxed) > 5 && !always_kills {
+            world.send_entity_status(entity, EntityStatus::ArmorstandWobble, None);
+            world.play_sound(
+                Sound::EntityArmorStandHit,
+                SoundCategory::Neutral,
+                &entity.block_pos.load().to_f64(),
+            );
+            self.last_hit_time.store(time, Ordering::Relaxed);
+        } else {
+            Self::spawn_break_particles(entity);
+            world.play_sound(
+                Sound::EntityArmorStandBreak,
+                SoundCategory::Neutral,
+                &entity.block_pos.load().to_f64(),
+            );
+            self.break_and_drop_items();
+            entity.remove();
+        }
+
+        true
     }
 
     fn get_gravity(&self) -> f64 {

@@ -1,12 +1,8 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 use crate::entity::projectile::{ProjectileHit, is_projectile};
 use crate::{
-    entity::{
-        Entity, EntityBase, EntityBaseFuture, NBTStorage, item::ItemEntity, living::LivingEntity,
-        player::Player,
-    },
+    entity::{Entity, EntityBase, item::ItemEntity, living::LivingEntity, player::Player},
     server::Server,
 };
 use pumpkin_data::Block;
@@ -164,7 +160,7 @@ impl FishingBobberEntity {
         true
     }
 
-    pub async fn reel_in(&self, player: &Player) -> i32 {
+    pub fn reel_in(&self, player: &Player) -> i32 {
         let world = self.entity.world.load();
         let hooked_id = self.hooked_entity_id.load(Ordering::Relaxed);
 
@@ -186,9 +182,8 @@ impl FishingBobberEntity {
         if self.bite_countdown.load(Ordering::Relaxed) > 0 {
             // Caught something!
             let luck_of_the_sea = player
-                .inventory
+                .inventory()
                 .held_item()
-                .await
                 .get_enchantment_level(&pumpkin_data::Enchantment::LUCK_OF_THE_SEA);
             let item = if Self::calculate_open_water(&world, &self.entity.block_pos.load()) {
                 fishing_loot_item(rand::random(), rand::random(), luck_of_the_sea)
@@ -203,7 +198,7 @@ impl FishingBobberEntity {
                         pumpkin_data::statistic::CustomStatistic::FishCaught as i32,
                         1,
                     )
-                    .await;
+                    ;
             }
 
             // Vanilla FishingHook#retrieve always spawns a physical ItemEntity thrown
@@ -221,14 +216,12 @@ impl FishingBobberEntity {
                 hook_pos,
                 &pumpkin_data::entity::EntityType::ITEM,
             );
-            world
-                .spawn_entity(Arc::new(ItemEntity::new_with_velocity(
-                    item_entity,
-                    ItemStack::new(1, item),
-                    velocity,
-                    0,
-                )))
-                .await;
+            world.spawn_entity(Arc::new(ItemEntity::new_with_velocity(
+                item_entity,
+                ItemStack::new(1, item),
+                velocity,
+                0,
+            )));
 
             // `FishingHook.retrieve` (`FishingHook.java:456`) fires FISHING_ROD_HOOKED with
             // the rolled loot; Pumpkin models that as the `FishedItem` trigger.
@@ -237,8 +230,7 @@ impl FishingBobberEntity {
                     crate::entity::player::advancement::trigger::AdvancementTrigger::FishedItem {
                         item_id: format!("minecraft:{}", item.registry_key),
                     },
-                )
-                .await;
+                );
 
             // Vanilla constructs a single `ExperienceOrb` directly here (FishingHook.java:465),
             // unlike XP-drop sources that go through `ExperienceOrb.award` and split into
@@ -249,14 +241,12 @@ impl FishingBobberEntity {
                 player_pos.add_raw(0.0, 0.5, 0.5),
                 &pumpkin_data::entity::EntityType::EXPERIENCE_ORB,
             );
-            world
-                .spawn_entity(Arc::new(
-                    crate::entity::experience_orb::ExperienceOrbEntity::new(
-                        orb_entity,
-                        fishing_experience_reward(rand::random()) as u32,
-                    ),
-                ))
-                .await;
+            world.spawn_entity(Arc::new(
+                crate::entity::experience_orb::ExperienceOrbEntity::new(
+                    orb_entity,
+                    fishing_experience_reward(rand::random()) as u32,
+                ),
+            ));
 
             return self.ground_retrieve_override(1);
         }
@@ -276,28 +266,28 @@ impl FishingBobberEntity {
     }
 
     #[expect(clippy::too_many_lines)]
-    pub async fn process_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>, _server: &'a Server) {
+    pub fn process_tick(&self, caller: &dyn EntityBase) {
         let entity = self.get_entity();
         let world = entity.world.load();
 
         let Some(owner) = world.get_player_by_id(self.owner_id) else {
-            entity.remove().await;
+            entity.remove();
             return;
         };
         let owner_position = owner.get_entity().pos.load();
         let hook_position = entity.pos.load();
         if (owner_position - hook_position).length_squared() > 1024.0 {
             owner.fishing_bobber.store(-1, Ordering::Relaxed);
-            entity.remove().await;
+            entity.remove();
             return;
         }
         let main_hand_is_rod =
-            owner.inventory.held_item().await.item.id == pumpkin_data::item::Item::FISHING_ROD.id;
-        let off_hand_is_rod = owner.inventory.off_hand_item().await.item.id
+            owner.inventory().held_item().item.id == pumpkin_data::item::Item::FISHING_ROD.id;
+        let off_hand_is_rod = owner.inventory().off_hand_item().item.id
             == pumpkin_data::item::Item::FISHING_ROD.id;
         if !main_hand_is_rod && !off_hand_is_rod {
             owner.fishing_bobber.store(-1, Ordering::Relaxed);
-            entity.remove().await;
+            entity.remove();
             return;
         }
 
@@ -330,9 +320,8 @@ impl FishingBobberEntity {
             if !self.wait_adjusted.swap(true, Ordering::Relaxed) {
                 let mut reduction = 0;
                 if let Some(owner) = world.get_player_by_id(self.owner_id) {
-                    let held = owner.inventory.held_item();
+                    let held = owner.inventory().held_item();
                     reduction += held
-                        .await
                         .get_enchantment_level(&pumpkin_data::Enchantment::LURE)
                         .max(0)
                         * 20;
@@ -359,7 +348,7 @@ impl FishingBobberEntity {
                 if wait > 0 {
                     let above = entity.block_pos.load().up();
                     let mut fishing_speed = 1;
-                    if rand::random::<f32>() < 0.25 && world.is_raining_at(&above).await {
+                    if rand::random::<f32>() < 0.25 && world.is_raining_at(&above) {
                         fishing_speed += 1;
                     }
                     if rand::random::<f32>() < 0.5 && !world.can_see_sky(&above) {
@@ -409,9 +398,7 @@ impl FishingBobberEntity {
         .expand(0.3, 0.3, 0.3);
 
         // Basic block collision to stop bobber
-        let (block_cols, _) = world
-            .get_block_collisions(search_box, caller.as_ref())
-            .await;
+        let (block_cols, _) = world.get_block_collisions(search_box, caller);
         if !block_cols.is_empty() {
             self.in_ground.store(true, Ordering::Relaxed);
             entity.velocity.store(Vector3::new(0.0, 0.0, 0.0));
@@ -449,8 +436,6 @@ impl FishingBobberEntity {
     }
 }
 
-impl NBTStorage for FishingBobberEntity {}
-
 impl EntityBase for FishingBobberEntity {
     fn get_entity(&self) -> &Entity {
         &self.entity
@@ -463,25 +448,12 @@ impl EntityBase for FishingBobberEntity {
     fn cast_any(&self) -> &dyn std::any::Any {
         self
     }
-
-    fn as_nbt_storage(&self) -> &dyn NBTStorage {
-        self
+    fn on_hit(&self, _hit: ProjectileHit) {
+        self.has_hit.store(true, Ordering::Relaxed);
     }
 
-    fn on_hit(&self, _hit: ProjectileHit) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.has_hit.store(true, Ordering::Relaxed);
-        })
-    }
-
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.process_tick(caller, server).await;
-        })
+    fn tick(&self, caller: &dyn EntityBase, _server: &Server) {
+        self.process_tick(caller);
     }
 }
 

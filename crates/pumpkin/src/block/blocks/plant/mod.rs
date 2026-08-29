@@ -12,8 +12,10 @@ pub mod cactus_flower;
 pub mod cave_vines;
 pub mod chorus_flower;
 pub mod chorus_plant;
+pub mod cocoa;
 pub mod crop;
 pub mod dry_vegetation;
+pub mod eyeblossom;
 pub mod flower;
 pub mod flowerbed;
 pub mod fungus;
@@ -44,7 +46,7 @@ trait PlantBlockBase {
         block.has_tag(&tag::Block::MINECRAFT_SUPPORTS_VEGETATION)
     }
 
-    async fn get_state_for_neighbor_update(
+    fn get_state_for_neighbor_update(
         &self,
         block_accessor: &dyn BlockAccessor,
         block_pos: &BlockPos,

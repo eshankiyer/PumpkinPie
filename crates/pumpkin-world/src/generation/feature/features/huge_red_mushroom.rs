@@ -1,7 +1,9 @@
-use pumpkin_data::Block;
-use pumpkin_data::block_properties::{BlockProperties, BrownMushroomBlockLikeProperties, is_air};
+use pumpkin_data::{
+    Block, BlockState,
+    block_properties::{BlockProperties, BrownMushroomBlockLikeProperties, is_air},
+};
 use pumpkin_data::tag;
-use pumpkin_util::{math::position::BlockPos, random::RandomGenerator, random::RandomImpl};
+use pumpkin_util::{math::position::BlockPos, random::{RandomGenerator, RandomImpl}};
 
 use crate::generation::proto_chunk::GenerationCache;
 
@@ -85,24 +87,24 @@ impl HugeRedMushroomFeature {
     ) -> bool {
         // Vanilla AbstractHugeMushroomFeature.getTreeHeight
         // (AbstractHugeMushroomFeature.java:41-47).
-        let mut height = random.next_bounded_i32(3) + 4;
-        if random.next_bounded_i32(12) == 0 {
-            height *= 2;
-        }
+        let height = super::huge_brown_mushroom::mushroom_tree_height(random);
 
         if !self.is_valid_position(chunk, pos, height) {
             return false;
         }
 
+        let stem_props = BrownMushroomBlockLikeProperties {
+            up: false,
+            down: false,
+            north: true,
+            east: true,
+            south: true,
+            west: true,
+        };
+        let stem_state = BlockState::from_id(stem_props.to_state_id(&Block::MUSHROOM_STEM));
         for i in 0..height {
             let stem_pos = BlockPos::new(pos.0.x, pos.0.y + i, pos.0.z);
-            let mut stem_state = BrownMushroomBlockLikeProperties::default(&Block::MUSHROOM_STEM);
-            stem_state.up = false;
-            stem_state.down = false;
-            chunk.set_block_state(
-                &stem_pos.0,
-                pumpkin_data::BlockState::from_id(stem_state.to_state_id(&Block::MUSHROOM_STEM)),
-            );
+            chunk.set_block_state(&stem_pos.0, stem_state);
         }
 
         // Vanilla HugeRedMushroomFeature.makeCap uses dy = treeHeight - 3 ..= treeHeight.
@@ -127,6 +129,7 @@ impl HugeRedMushroomFeature {
                 }
             }
         }
+
         true
     }
 }

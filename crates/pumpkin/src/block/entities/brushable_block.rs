@@ -16,7 +16,7 @@ use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockFlags;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 /// `BrushableBlockEntity.java:44-46`.
 const BRUSH_COOLDOWN_TICKS: i64 = 10;
@@ -288,14 +288,12 @@ impl BlockEntity for BrushableBlockBlockEntity {
 
     /// `BrushableBlockEntity.saveAdditional` (`BrushableBlockEntity.java:217-223`): the
     /// rolled item is written only when no deferred loot table remains.
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let state = self.state.lock().await;
-            write_state(&state, nbt);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        write_state(&state, nbt);
     }
 
     /// `BrushableBlockEntity.getUpdateTag` (`BrushableBlockEntity.java:189-199`): the
@@ -367,7 +365,7 @@ impl BrushableBlockBlockEntity {
 
     /// `BrushableBlockEntity.setLootTable` (`BrushableBlockEntity.java:225-228`).
     pub async fn set_loot_table(&self, key: String, seed: i64) {
-        let mut state = self.state.lock().await;
+        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         state.loot_table = Some(key);
         state.loot_table_seed = seed;
         state.item = None;
@@ -376,7 +374,7 @@ impl BrushableBlockBlockEntity {
     /// Unpacks any pending loot table and takes the contained item, for the drop that
     /// happens when the block is mined rather than brushed away.
     pub async fn take_item(&self) -> Option<ItemStack> {
-        let mut state = self.state.lock().await;
+        let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         state.unpack_loot_table();
         state.item.take()
     }
@@ -393,7 +391,7 @@ impl BrushableBlockBlockEntity {
         let block = world.get_block(&self.position);
 
         let outcome = {
-            let mut state = self.state.lock().await;
+            let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if state.hit_direction.is_none() {
                 state.hit_direction = Some(direction);
             }
@@ -487,7 +485,7 @@ impl BrushableBlockBlockEntity {
         let block = world.get_block(&self.position);
 
         let (new_stage, reschedule) = {
-            let mut state = self.state.lock().await;
+            let mut state = self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut new_stage = None;
             if state.brush_count != 0 && game_time >= state.brush_count_resets_at_tick {
                 let previous = completion_state(state.brush_count);

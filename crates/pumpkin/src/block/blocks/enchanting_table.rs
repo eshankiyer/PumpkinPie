@@ -1,34 +1,31 @@
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use crate::block::entities::enchanting_table::EnchantingTableBlockEntity;
 use crate::block::registry::BlockActionResult;
-use crate::block::{BlockBehaviour, BlockFuture, NormalUseArgs, PlacedArgs};
+use crate::block::{BlockBehaviour, NormalUseArgs, PlacedArgs};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{Block, translation};
 use pumpkin_inventory::enchanting::enchanting_screen_handler::EnchantingTableScreenHandler;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
-    BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
+    InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
 };
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::{Inventory, SimpleInventory};
-use tokio::sync::Mutex;
 
 #[pumpkin_block("minecraft:enchanting_table")]
 pub struct EnchantingTableBlock;
 
 impl BlockBehaviour for EnchantingTableBlock {
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = EnchantingTableBlockEntity::new(*args.position);
-            args.world.add_block_entity(Arc::new(entity));
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        let entity = EnchantingTableBlockEntity::new(*args.position);
+        args.world.add_block_entity(Arc::new(entity));
     }
 
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
             // EnchantingTableBlock.BOOKSHELF_OFFSETS / isValidBookShelf (26.2 decompile): every
             // (x,y,z) with x,z in -2..=2, y in 0..=1 and (|x| == 2 or |z| == 2) is a candidate
             // shelf position, gated by the gap at (x/2, y, z/2) — integer division truncating
@@ -60,17 +57,15 @@ impl BlockBehaviour for EnchantingTableBlock {
             // re-clamp its own `bookshelf_count` field.
             let bookshelf_count = bookshelf_count.min(15);
 
-            args.player
-                .open_handled_screen(
-                    &EnchantingTableScreenFactory {
-                        bookshelf_count,
-                        seed: args.player.enchantment_seed(),
-                    },
-                    Some(*args.position),
-                )
-                .await;
-            BlockActionResult::Success
-        })
+        let seed = args.player.enchantment_seed();
+        args.player.open_handled_screen(
+            &EnchantingTableScreenFactory {
+                bookshelf_count,
+                seed,
+            },
+            Some(*args.position),
+        );
+        BlockActionResult::Success
     }
 }
 
@@ -88,24 +83,22 @@ struct EnchantingTableScreenFactory {
 }
 
 impl ScreenHandlerFactory for EnchantingTableScreenFactory {
-    fn create_screen_handler<'a>(
-        &'a self,
+    fn create_screen_handler(
+        &self,
         sync_id: u8,
-        player_inventory: &'a Arc<PlayerInventory>,
-        _player: &'a dyn InventoryPlayer,
-    ) -> BoxFuture<'a, Option<SharedScreenHandler>> {
-        Box::pin(async move {
-            let inventory: Arc<dyn Inventory> = Arc::new(SimpleInventory::new(2));
-            let handler = EnchantingTableScreenHandler::new(
-                sync_id,
-                player_inventory,
-                &inventory,
-                self.seed,
-                self.bookshelf_count,
-            );
-            let screen_handler_arc = Arc::new(Mutex::new(handler));
-            Some(screen_handler_arc as SharedScreenHandler)
-        })
+        player_inventory: &Arc<PlayerInventory>,
+        _player: &dyn InventoryPlayer,
+    ) -> Option<SharedScreenHandler> {
+        let inventory: Arc<dyn Inventory> = Arc::new(SimpleInventory::new(2));
+        let handler = EnchantingTableScreenHandler::new(
+            sync_id,
+            player_inventory,
+            &inventory,
+            self.seed,
+            self.bookshelf_count,
+        );
+        let screen_handler_arc = Arc::new(Mutex::new(handler));
+        Some(screen_handler_arc as SharedScreenHandler)
     }
 
     fn get_display_name(&self) -> TextComponent {

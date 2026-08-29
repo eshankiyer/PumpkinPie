@@ -1,60 +1,63 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
-use std::sync::{Arc, Weak};
+use std::sync::{
+    Arc, Mutex, Weak,
+    atomic::{AtomicBool, Ordering},
+};
 
 use pumpkin_data::Enchantment;
 use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::sound::Sound;
 use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::difficulty::Difficulty;
 use rand::RngExt;
-use tokio::sync::Mutex;
 
 use crate::entity::{
-    Entity, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase,
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal,
-        look_at_entity::LookAtEntityGoal, pathfind_to_raid::PathfindToRaidGoal,
-        ranged_crossbow_attack::RangedCrossbowAttackGoal, revenge::RevengeGoal, swim::SwimGoal,
-        wander_around::WanderAroundGoal,
+        look_around::RandomLookAroundGoal,
+        look_at_entity::LookAtEntityGoal, ranged_crossbow_attack::RangedCrossbowAttackGoal,
+        revenge::RevengeGoal,
+        swim::SwimGoal, wander_around::WanderAroundGoal,
     },
-    mob::{Mob, MobEntity, equipment::enchant_item_from_single_enchantment},
+    mob::{
+        Mob, MobEntity,
+        equipment::enchant_item_from_single_enchantment,
+        crossbow_attack_mob::CrossbowAttackMob,
+        patrol::{LongDistancePatrolGoal, PatrolData, PatrollingMonster},
+        raider::{
+            HoldGroundAttackGoal, ObtainRaidLeaderBannerGoal, PathfindToRaidGoal, Raider,
+            RaiderCelebrationGoal, RaiderData, RaiderMoveThroughVillageGoal,
+        },
+    },
 };
 use crate::world::raid::num_groups_for_difficulty;
 
-const BANNER_INVENTORY_SIZE: usize = 5;
-
 pub struct PillagerEntity {
     pub mob_entity: MobEntity,
-    /// Vanilla: `Pillager.IS_CHARGING_CROSSBOW` synced data.
-    is_charging_crossbow: AtomicBool,
-    /// Vanilla: `Pillager.inventory` (a private 5-slot `SimpleContainer` that only ever holds
-    /// plain white banners picked up during an active raid, for the "ominous banner leader"
-    /// hand-off mechanic).
-    ///
-    /// Scope reduction: `Pillager.pickUpItem`'s "else" branch (the actual banner-pickup logic
-    /// this inventory exists for) is not wired up -- Pumpkin has no generic mob item-pickup
-    /// pipeline anywhere yet (confirmed by a repo-wide search finding no `pick_up_item`/
-    /// `on_item_pickup` hook on `Mob`/`MobEntity`), so nothing currently populates this. The
-    /// field and its NBT round-trip exist so a future item-pickup pass has a slot to fill.
-    banner_inventory: Mutex<[Option<ItemStack>; BANNER_INVENTORY_SIZE]>,
+    pub raider_data: RaiderData,
+    pub is_charging_crossbow: AtomicBool,
+    pub inventory: Mutex<Vec<ItemStack>>,
 }
 
 impl PillagerEntity {
+    pub const INVENTORY_SIZE: usize = 5;
+
+    #[must_use]
     pub fn new(entity: Entity) -> Arc<Self> {
-        let mob_entity = MobEntity::new(entity);
-        let pillager = Self {
-            mob_entity,
+        let mob_arc = Arc::new(Self {
+            mob_entity: MobEntity::new(entity),
+            raider_data: RaiderData::default(),
             is_charging_crossbow: AtomicBool::new(false),
-            banner_inventory: Mutex::new(std::array::from_fn(|_| None)),
-        };
-        let mob_arc = Arc::new(pillager);
+            inventory: Mutex::new(Vec::new()),
+        });
         mob_arc
             .mob_entity
             .living_entity
@@ -81,10 +84,7 @@ impl PillagerEntity {
                 1,
                 Box::new(AvoidEntityGoal::new(&EntityType::CREAKING, 8.0, 1.0, 1.2)),
             );
-            // Raider.java:65, via `super.registerGoals()`: `PathfindToRaidGoal<>(this)`.
-            goal_selector.add_goal(3, PathfindToRaidGoal::new());
             // Pillager.java:74: `RangedCrossbowAttackGoal<>(this, 1.0, 8.0F)`.
-            goal_selector.add_goal(3, Box::new(RangedCrossbowAttackGoal::new(8.0)));
             // Pillager.java:75-77: `RandomStrollGoal(this, 0.6)` at 8,
             // `LookAtPlayerGoal(this, Player.class, 15.0F, 1.0F)` at 9 and
             // `LookAtPlayerGoal(this, Mob.class, 15.0F)` at 10. Vanilla registers no
@@ -100,10 +100,26 @@ impl PillagerEntity {
                     false,
                 )),
             );
+            goal_selector.add_goal(1, Box::new(ObtainRaidLeaderBannerGoal));
+            goal_selector.add_goal(2, Box::new(HoldGroundAttackGoal::new(10.0)));
+            goal_selector.add_goal(3, Box::new(RangedCrossbowAttackGoal::new(1.0, 8.0)));
+            goal_selector.add_goal(4, Box::new(LongDistancePatrolGoal::new(0.7, 0.595)));
+            goal_selector.add_goal(4, Box::new(RaiderMoveThroughVillageGoal::new(1.05)));
+            goal_selector.add_goal(4, Box::new(PathfindToRaidGoal::default()));
+            goal_selector.add_goal(5, Box::new(RaiderCelebrationGoal));
+            goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
             goal_selector.add_goal(
-                10,
-                LookAtEntityGoal::with_default_any_mob(mob_weak.clone(), 15.0),
+                6,
+                LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 8.0),
             );
+            goal_selector.add_goal(7, Box::new(RandomLookAroundGoal::default()));
+            goal_selector.add_goal(10, LookAtEntityGoal::with_default_any_mob(
+                {
+                    let mob_arc: Arc<dyn Mob> = mob_arc.clone();
+                    Arc::downgrade(&mob_arc)
+                },
+                15.0,
+            ));
 
             let mut target_selector = mob_arc
                 .mob_entity
@@ -132,40 +148,54 @@ impl PillagerEntity {
 
         mob_arc
     }
-}
 
-impl NBTStorage for PillagerEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-
-            let inventory = self.banner_inventory.lock().await;
-            let mut items = Vec::with_capacity(BANNER_INVENTORY_SIZE);
-            for slot in inventory.iter() {
-                let mut item_nbt = NbtCompound::new();
-                if let Some(stack) = slot {
-                    stack.write_item_stack(&mut item_nbt);
-                }
-                items.push(NbtTag::Compound(item_nbt));
-            }
-            nbt.put("Inventory", NbtTag::List(items));
-        })
+    #[must_use]
+    pub fn is_charging_crossbow(&self) -> bool {
+        self.is_charging_crossbow.load(Ordering::Relaxed)
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
+    pub fn set_charging_crossbow(&self, is_charging: bool) {
+        self.is_charging_crossbow
+            .store(is_charging, Ordering::Relaxed);
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                tracked_data::pillager::IS_CHARGING_CROSSBOW,
+                is_charging,
+            )],
+            None,
+        );
+    }
 
-            if let Some(NbtTag::List(items)) = nbt.get("Inventory") {
-                let mut inventory = self.banner_inventory.lock().await;
-                for (slot, tag) in inventory.iter_mut().zip(items.iter()) {
-                    *slot = tag
-                        .extract_compound()
-                        .and_then(ItemStack::read_item_stack)
-                        .filter(|stack| !stack.is_empty());
-                }
+    pub fn add_to_inventory(&self, item: ItemStack) -> Option<ItemStack> {
+        let mut inv = self
+            .inventory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if inv.len() < Self::INVENTORY_SIZE {
+            inv.push(item);
+            None
+        } else {
+            Some(item)
+        }
+    }
+
+    pub fn drop_inventory(&self) {
+        let items = self
+            .inventory
+            .try_lock()
+            .map_or_else(|_| Vec::new(), |mut inv| std::mem::take(&mut *inv));
+        let entity = &self.mob_entity.living_entity.entity;
+        let world = entity.world.load();
+        let pos = entity.pos.load();
+        for item in items {
+            if !item.is_empty() {
+                let item_entity = crate::entity::item::ItemEntity::new(
+                    Entity::new(world.clone(), pos, &EntityType::ITEM),
+                    item,
+                );
+                world.spawn_entity(Arc::new(item_entity));
             }
-        })
+        }
     }
 }
 
@@ -254,5 +284,98 @@ impl Mob for PillagerEntity {
                 None,
             );
         }
+    }
+    fn as_patrolling_monster(&self) -> Option<&dyn PatrollingMonster> {
+        Some(self)
+    }
+
+    fn as_raider(&self) -> Option<&dyn Raider> {
+        Some(self)
+    }
+
+    fn as_crossbow_attack_mob(&self) -> Option<&dyn CrossbowAttackMob> {
+        Some(self)
+    }
+
+    fn mob_init_data_tracker(&self) {
+        self.set_charging_crossbow(self.is_charging_crossbow.load(Ordering::Relaxed));
+    }
+
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        self.write_raider_nbt(nbt);
+        nbt.put_bool("CanPickUpLoot", true);
+
+        let inv = self
+            .inventory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !inv.is_empty() {
+            let mut items_tag = Vec::new();
+            for item in inv.iter() {
+                if !item.is_empty() {
+                    let mut item_nbt = NbtCompound::new();
+                    item.write_item_stack(&mut item_nbt);
+                    items_tag.push(NbtTag::Compound(item_nbt));
+                }
+            }
+            if !items_tag.is_empty() {
+                nbt.put_list("Inventory", items_tag);
+            }
+        }
+    }
+
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        self.read_raider_nbt(nbt);
+
+        if let Some(inv_list) = nbt.get_list("Inventory") {
+            let mut inv = self
+                .inventory
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            inv.clear();
+            for tag in inv_list {
+                if let Some(compound) = tag.extract_compound()
+                    && let Some(stack) = ItemStack::read_item_stack(compound)
+                {
+                    inv.push(stack);
+                }
+            }
+        }
+    }
+
+    fn on_damage(
+        &self,
+        _damage_type: pumpkin_data::damage::DamageType,
+        _source: Option<&dyn EntityBase>,
+    ) {
+        if self.mob_entity.living_entity.dead.load(Ordering::Relaxed) {
+            self.drop_inventory();
+        }
+    }
+}
+
+impl PatrollingMonster for PillagerEntity {
+    fn get_patrol_data(&self) -> &PatrolData {
+        &self.raider_data.patrol_data
+    }
+}
+
+impl Raider for PillagerEntity {
+    fn get_raider_data(&self) -> &RaiderData {
+        &self.raider_data
+    }
+
+    fn get_celebrate_sound(&self) -> Sound {
+        Sound::EntityPillagerCelebrate
+    }
+}
+
+impl CrossbowAttackMob for PillagerEntity {
+    fn set_charging_crossbow(&self, is_charging: bool) {
+        self.set_charging_crossbow(is_charging);
+    }
+
+    fn is_charging_crossbow(&self) -> bool {
+        self.is_charging_crossbow()
     }
 }

@@ -3,7 +3,6 @@ use std::sync::atomic::Ordering;
 
 use super::{Controls, Goal};
 use crate::entity::EntityBase;
-use crate::entity::ai::goal::GoalFuture;
 use crate::entity::mob::Mob;
 use crate::entity::mob::creeper::CreeperEntity;
 
@@ -43,11 +42,11 @@ impl CreeperIgniteGoal {
             if !target.get_entity().is_alive() {
                 return false;
             }
-            let dist_sq = mob
-                .get_entity()
-                .pos
-                .load()
-                .squared_distance_to_vec(&target.get_entity().pos.load());
+        let dist_sq = mob
+            .get_entity()
+            .pos
+            .load()
+            .squared_distance_to_vec(&target.get_entity().pos.load());
             return dist_sq < 9.0;
         }
 
@@ -56,59 +55,54 @@ impl CreeperIgniteGoal {
 }
 
 impl Goal for CreeperIgniteGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.can_swell(mob).await })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        futures::executor::block_on(self.can_swell(mob))
     }
 
     /// Vanilla `SwellGoal` inherits `canContinueToUse` from `Goal`, which returns `canUse()`.
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move { self.can_swell(mob).await })
+    fn should_continue(&self, mob: &dyn Mob) -> bool {
+        futures::executor::block_on(self.can_swell(mob))
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .stop();
-            let target = mob.get_mob_entity().target.lock().await.clone();
-            self.target.clone_from(&target);
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stop();
+        self.target = mob.get_mob_entity().get_target();
     }
 
     // Vanilla `SwellGoal.stop` only clears the cached target, it never resets the fuse.
-    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.target = None;
-        })
+    fn stop(&mut self, _mob: &dyn Mob) {
+        self.target = None;
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(target) = self.target.as_ref() else {
-                self.creeper.set_fuse_speed(-1);
-                return;
-            };
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(target) = self.target.as_ref() else {
+            self.creeper.set_fuse_speed(-1);
+            return;
+        };
 
-            if !target.get_entity().is_alive() {
-                self.creeper.set_fuse_speed(-1);
-                return;
-            }
+        if !target.get_entity().is_alive() {
+            self.creeper.set_fuse_speed(-1);
+            return;
+        }
 
             let dist_sq = mob
                 .get_entity()
                 .pos
                 .load()
                 .squared_distance_to_vec(&target.get_entity().pos.load());
-
-            let has_line_of_sight = Self::has_line_of_sight(mob, target.as_ref()).await;
-            if Self::should_swell(dist_sq, has_line_of_sight) {
-                self.creeper.set_fuse_speed(1);
-            } else {
-                self.creeper.set_fuse_speed(-1);
-            }
-        })
+        let has_line_of_sight = futures::executor::block_on(Self::has_line_of_sight(
+            mob,
+            target.as_ref(),
+        ));
+        if Self::should_swell(dist_sq, has_line_of_sight) {
+            self.creeper.set_fuse_speed(1);
+        } else {
+            self.creeper.set_fuse_speed(-1);
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

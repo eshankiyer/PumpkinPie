@@ -16,7 +16,7 @@ use rand::RngExt;
 use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase,
     ai::goal::{
         escape_danger::EscapeDangerGoal, follow_mob::FollowMobGoal, follow_owner::FollowOwnerGoal,
         land_on_owners_shoulder::LandOnOwnersShoulderGoal, look_at_entity::LookAtEntityGoal,
@@ -98,7 +98,7 @@ impl ParrotEntity {
     /// this parrot into the given player's shoulder slot and discards the live entity.
     pub async fn set_entity_on_shoulder(&self, player: &Player) -> bool {
         let mut nbt = pumpkin_nbt::compound::NbtCompound::new();
-        self.write_nbt(&mut nbt).await;
+        self.write_nbt(&mut nbt);
         nbt.put_string(
             "id",
             format!(
@@ -112,7 +112,7 @@ impl ParrotEntity {
         );
 
         if player.set_entity_on_shoulder(nbt).await {
-            self.mob_entity.living_entity.entity.remove().await;
+            self.mob_entity.living_entity.entity.remove();
             true
         } else {
             false
@@ -121,7 +121,7 @@ impl ParrotEntity {
 
     /// Feeds the parrot a cookie: it is poisoned and then killed, as in vanilla
     /// `Parrot.mobInteract`.
-    async fn eat_cookie(&self, player: &Arc<Player>, item_stack: &mut ItemStack) {
+    fn eat_cookie(&self, player: &Arc<Player>, item_stack: &mut ItemStack) {
         item_stack.decrement_unless_creative(player.gamemode.load(), 1);
 
         self.mob_entity
@@ -134,8 +134,7 @@ impl ParrotEntity {
                 show_particles: true,
                 show_icon: true,
                 blend: true,
-            })
-            .await;
+            });
 
         // Vanilla guards this call with `player.isCreative() || !this.isInvulnerable()`,
         // but `hurt` re-checks invulnerability itself and `player_attack` doesn't bypass
@@ -147,40 +146,7 @@ impl ParrotEntity {
             None,
             Some(player.as_ref()),
             Some(player.as_ref()),
-        )
-        .await;
-    }
-}
-
-impl NBTStorage for ParrotEntity {
-    /// `TamableAnimal.addAdditionalSaveData`: owner UUID plus the ordered-to-sit flag.
-    /// Without these a tamed parrot reverted to wild on reload.
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut pumpkin_nbt::compound::NbtCompound,
-    ) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            if let Some(owner) = self.mob_entity.owner.load() {
-                nbt.put_uuid("Owner", owner);
-            }
-            nbt.put_bool("Sitting", self.mob_entity.is_ordered_to_sit());
-        })
-    }
-
-    fn read_nbt_non_mut<'a>(
-        &'a self,
-        nbt: &'a pumpkin_nbt::compound::NbtCompound,
-    ) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            if let Some(owner) = nbt.get_uuid("Owner") {
-                self.mob_entity.set_owner(owner);
-            }
-            if let Some(sitting) = nbt.get_bool("Sitting") {
-                self.mob_entity.set_ordered_to_sit(sitting);
-            }
-        })
+        );
     }
 }
 
@@ -220,30 +186,40 @@ impl Mob for ParrotEntity {
         &self.mob_entity
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.sync_tame_flags();
-            self.mob_entity.living_entity.entity.send_meta_data(
+    fn mob_write_nbt(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        /// `TamableAnimal.addAdditionalSaveData`: owner UUID plus ordered-to-sit flag.
+        if let Some(owner) = self.mob_entity.owner.load() {
+            nbt.put_uuid("Owner", owner);
+        }
+        nbt.put_bool("Sitting", self.mob_entity.is_ordered_to_sit());
+    }
+
+    fn mob_read_nbt(&self, nbt: &pumpkin_nbt::compound::NbtCompound) {
+        if let Some(owner) = nbt.get_uuid("Owner") {
+            self.mob_entity.set_owner(owner);
+        }
+        if let Some(sitting) = nbt.get_bool("Sitting") {
+            self.mob_entity.set_ordered_to_sit(sitting);
+        }
+    }
+
+    fn mob_init_data_tracker(&self) {
+        self.sync_tame_flags();
+        self.mob_entity.living_entity.entity.send_meta_data(
                 &[Metadata::new(
                     pumpkin_data::tracked_data::parrot::OWNER_UUID,
                     self.mob_entity.owner.load(),
                 )],
                 None,
-            );
-        })
+        );
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
             if item_stack
                 .item
                 .has_tag(&tag::Item::MINECRAFT_PARROT_POISONOUS_FOOD)
             {
-                self.eat_cookie(player, item_stack).await;
+                self.eat_cookie(player, item_stack);
                 return true;
             }
 
@@ -280,10 +256,7 @@ impl Mob for ParrotEntity {
                 return true;
             }
 
-            self.mob_entity
-                .mob_interact(player, item_stack, self.can_be_leashed())
-                .await
-        })
+            self.mob_entity.mob_interact(player, item_stack)
     }
 }
 

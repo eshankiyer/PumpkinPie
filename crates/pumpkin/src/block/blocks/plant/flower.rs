@@ -10,7 +10,7 @@ use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
 
 use crate::block::blocks::plant::PlantBlockBase;
-use crate::block::{BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetStateForNeighborUpdateArgs};
+use crate::block::{BlockBehaviour, CanPlaceAtArgs, GetStateForNeighborUpdateArgs};
 
 use crate::block::RandomTickArgs;
 
@@ -64,27 +64,23 @@ impl BlockBehaviour for FlowerBlock {
         <Self as PlantBlockBase>::can_place_at(self, args.block_accessor, args.position)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            <Self as PlantBlockBase>::get_state_for_neighbor_update(
-                self,
-                args.world,
-                args.position,
-                args.state_id,
-            )
-            .await
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        <Self as PlantBlockBase>::get_state_for_neighbor_update(
+            self,
+            args.world,
+            args.position,
+            args.state_id,
+        )
     }
 
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
             if (args.world.dimension.eq(&Dimension::OVERWORLD)
                 || args.world.dimension.eq(&Dimension::OVERWORLD_CAVES))
                 && args.block.eq(&Block::CLOSED_EYEBLOSSOM)
-                && args.world.level_time.lock().await.time_of_day % 24000 > 14500
+                && args.world.level_time.lock().unwrap().time_of_day % 24000 > 14500
             {
                 args.world
                     .set_block_state(
@@ -92,11 +88,11 @@ impl BlockBehaviour for FlowerBlock {
                         Block::OPEN_EYEBLOSSOM.default_state.id,
                         BlockFlags::NOTIFY_ALL,
                     )
-                    .await;
+                    ;
                 spawn_transform_particle(args.world, args.position, EYEBLOSSOM_OPEN_COLOR);
             }
             if args.block.eq(&Block::OPEN_EYEBLOSSOM)
-                && args.world.level_time.lock().await.time_of_day % 24000 <= 14500
+                && args.world.level_time.lock().unwrap().time_of_day % 24000 <= 14500
             {
                 args.world
                     .set_block_state(
@@ -104,10 +100,9 @@ impl BlockBehaviour for FlowerBlock {
                         Block::CLOSED_EYEBLOSSOM.default_state.id,
                         BlockFlags::NOTIFY_ALL,
                     )
-                    .await;
+                    ;
                 spawn_transform_particle(args.world, args.position, EYEBLOSSOM_CLOSED_COLOR);
             }
-        })
     }
 }
 

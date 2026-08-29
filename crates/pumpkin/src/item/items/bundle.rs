@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::pin::Pin;
 
 use crate::entity::player::Player;
@@ -17,30 +18,23 @@ impl ItemMetadata for BundleItem {
 }
 
 impl ItemBehaviour for BundleItem {
-    fn normal_use<'a>(
-        &'a self,
-        _item: &'a Item,
-        player: &'a Player,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let held_item = player.inventory.held_item().await;
-            let hand = if !held_item.is_empty() && Self::ids().contains(&held_item.item.id) {
-                Hand::Right
-            } else {
-                let off_hand_item = player.inventory.off_hand_item().await;
-                if off_hand_item.is_empty() || !Self::ids().contains(&off_hand_item.item.id) {
-                    return;
-                }
-                Hand::Left
-            };
-            let stack = player.inventory.get_stack_in_hand(hand).await;
-            // Vanilla `BundleItem.use` starts the 200-tick active-use cycle
-            // (`BundleItem.java:140-143,230-233`).
-            player
-                .living_entity
-                .set_active_hand(hand, stack, Self::USE_DURATION)
-                .await;
-        })
+    fn normal_use(&self, _item: &Item, player: &Player) {
+        let held_item = player.inventory.held_item();
+        let hand = if !held_item.is_empty() && Self::ids().contains(&held_item.item.id) {
+            Hand::Right
+        } else {
+            let off_hand_item = player.inventory.off_hand_item();
+            if off_hand_item.is_empty() || !Self::ids().contains(&off_hand_item.item.id) {
+                return;
+            }
+            Hand::Left
+        };
+        let stack = player.inventory.get_stack_in_hand(hand);
+        // Vanilla `BundleItem.use` starts the 200-tick active-use cycle
+        // (`BundleItem.java:140-143,230-233`).
+        player
+            .living_entity
+            .set_active_hand(hand, stack, Self::USE_DURATION);
     }
 
     fn on_use_tick<'a>(
@@ -57,10 +51,15 @@ impl ItemBehaviour for BundleItem {
                 return;
             }
 
-            let Some(hand) = *player.living_entity.active_hand.lock().await else {
+            let Some(hand) = *player
+                .living_entity
+                .active_hand
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+            else {
                 return;
             };
-            let mut bundle = player.inventory.get_stack_in_hand(hand).await;
+            let mut bundle = player.inventory.get_stack_in_hand(hand);
             let Some(contents) = bundle.get_data_component_mut::<BundleContentsImpl>() else {
                 return;
             };
@@ -77,8 +76,8 @@ impl ItemBehaviour for BundleItem {
                 pumpkin_data::sound::SoundCategory::Players,
                 &position,
             );
-            player.drop_item(extracted_stack).await;
-            player.sync_hand_slot(slot, bundle).await;
+            player.drop_item(extracted_stack);
+            player.sync_hand_slot(slot, bundle);
         })
     }
 

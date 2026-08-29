@@ -49,6 +49,7 @@ pub mod pillar;
 pub mod slabs;
 pub mod stairs;
 pub mod walls;
+pub mod weathering_copper;
 
 // Decorative & furnishings
 pub mod banners;
@@ -82,6 +83,7 @@ pub mod dripstone;
 pub mod farmland;
 pub mod hanging_roots;
 pub mod hay;
+pub mod leaves;
 pub mod logs;
 pub mod mangrove_roots;
 pub mod pale_hanging_moss;

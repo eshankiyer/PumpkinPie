@@ -21,7 +21,6 @@ use pumpkin_util::text::{TextComponent, TextContent};
 use uuid::Uuid;
 
 use crate::block::BlockBehaviour;
-use crate::block::BlockFuture;
 use crate::block::CanPlaceAtArgs;
 use crate::block::GetStateForNeighborUpdateArgs;
 use crate::block::NormalUseArgs;
@@ -37,8 +36,8 @@ use crate::item::items::dye::DyeItem;
 use crate::item::items::glowing_ink_sac::GlowingInkSacItem;
 use crate::item::items::honeycomb::HoneyCombItem;
 use crate::item::items::ink_sac::InkSacItem;
-use crate::net::ClientPlatform;
 use crate::world::World;
+use pumpkin_protocol::java::client::play::COpenSignEditor;
 
 #[pumpkin_block_from_tag("minecraft:all_signs")]
 pub struct SignBlock;
@@ -379,40 +378,30 @@ impl SignBlock {
 }
 
 impl BlockBehaviour for SignBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let support = Self::detect_support(args.world, args.position);
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let support = Self::detect_support(args.world, args.position);
 
-            let Some(placement) = Self::determine_placement(&args, &support) else {
-                return BlockStateId::AIR; // Invalid placement
-            };
+        let Some(placement) = Self::determine_placement(&args, &support) else {
+            return BlockStateId::AIR; // Invalid placement
+        };
 
-            let actual_block = Block::from_id(placement.block_id);
-            Self::apply_placement_properties(actual_block, &placement)
-        })
+        let actual_block = Block::from_id(placement.block_id);
+        Self::apply_placement_properties(actual_block, &placement)
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if args.block.name.contains("hanging") {
-                args.world
-                    .add_block_entity(Arc::new(HangingSignBlockEntity::empty(*args.position)));
-            } else {
-                args.world
-                    .add_block_entity(Arc::new(SignBlockEntity::empty(*args.position)));
-            }
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        if args.block.name.contains("hanging") {
+            args.world
+                .add_block_entity(Arc::new(HangingSignBlockEntity::empty(*args.position)));
+        } else {
+            args.world
+                .add_block_entity(Arc::new(SignBlockEntity::empty(*args.position)));
+        }
     }
 
-    fn player_placed<'a>(&'a self, args: PlayerPlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            match args.player.client.as_ref() {
-                crate::net::ClientPlatform::Java(java) => {
-                    java.send_sign_packet(*args.position, true).await;
-                }
-                crate::net::ClientPlatform::Bedrock(_bedrock) => {}
-            }
-        })
+    fn player_placed(&self, args: PlayerPlacedArgs<'_>) {
+        args.player
+            .try_send_client_packet(&COpenSignEditor::new(*args.position, true));
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
@@ -458,16 +447,14 @@ impl BlockBehaviour for SignBlock {
         }
     }
 
-    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            args.world.remove_block_entity(args.position);
-        })
+    fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
+        args.world.remove_block_entity(args.position);
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
         let is_hanging = args.block.name.contains("hanging");
         let is_wall_sign = args.block.name.contains("wall");
 
@@ -483,44 +470,42 @@ impl BlockBehaviour for SignBlock {
             Some(BlockDirection::Down)
         };
 
-        Box::pin(async move {
-            if let Some(dir) = support_dir {
-                // Only check if the neighbor that changed is our support neighbor
-                if args.direction == dir {
-                    let support_pos = args.position.offset(dir.to_offset());
-                    let (support_block, support_state) =
-                        args.world.get_block_and_state(&support_pos);
+        if let Some(dir) = support_dir {
+            let support_pos = args.position.offset(dir.to_offset());
+            let support_state = args.world.get_block_state(&support_pos);
 
-                    // Permissive support check
-                    let is_leaf =
-                        support_block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_LEAVES);
-                    let is_sign = support_block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_SIGNS);
+            let is_leaf = args
+                .world
+                .get_block(&support_pos)
+                .has_tag(&pumpkin_data::tag::Block::MINECRAFT_LEAVES);
 
-                    let is_valid = match dir {
-                        BlockDirection::Up => {
-                            support_state.is_side_solid(BlockDirection::Down) || is_leaf || is_sign
-                        }
-                        BlockDirection::Down => {
-                            support_state.is_center_solid(BlockDirection::Up) || is_leaf || is_sign
-                        }
-                        _ => support_state.is_side_solid(dir.opposite()) || is_leaf || is_sign,
-                    };
+            let is_sign = args
+                .world
+                .get_block(&support_pos)
+                .has_tag(&pumpkin_data::tag::Block::MINECRAFT_ALL_SIGNS);
 
-                    if !is_valid {
-                        return BlockStateId::AIR; // Return AIR to break the block
-                    }
+            let is_valid = match dir {
+                BlockDirection::Up => {
+                    support_state.is_center_solid(BlockDirection::Down) || is_leaf || is_sign
                 }
+                BlockDirection::Down => {
+                    support_state.is_center_solid(BlockDirection::Up) || is_leaf || is_sign
+                }
+                _ => support_state.is_side_solid(dir.opposite()) || is_leaf || is_sign,
+            };
+
+            if !is_valid {
+                return BlockStateId::AIR;
             }
-            args.state_id
-        })
+        }
+        args.state_id
     }
 
     /// Mirrors `SignBlock.useWithoutItem` and `hasEditableText` from
     /// `net/minecraft/world/level/block/SignBlock.java:128-159`: execute the sign's click
     /// commands first, refuse waxed signs, and only claim the editor for a player who may build
     /// when every line has plain-text contents.
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
             let Some(block_entity) = args.world.get_block_entity(args.position) else {
                 return BlockActionResult::Pass;
             };
@@ -560,12 +545,11 @@ impl BlockBehaviour for SignBlock {
                     else {
                         continue;
                     };
-                    let source = CommandSender::Dummy.into_source(&server).await;
+                    let source = CommandSender::Dummy.into_source(&server);
                     server
                         .command_dispatcher
                         .load()
-                        .handle_command(&source, command)
-                        .await;
+                        .handle_command(&source, &server, command);
                     executed_command = true;
                 }
             }
@@ -585,7 +569,9 @@ impl BlockBehaviour for SignBlock {
                 return BlockActionResult::SuccessServer;
             }
 
-            let mut currently_editing = sign_entity.editing_player().lock().await;
+            let Ok(mut currently_editing) = sign_entity.editing_player().try_lock() else {
+                return BlockActionResult::Pass;
+            };
             if other_player_is_editing_sign(
                 *currently_editing,
                 &args.player.gameprofile.id,
@@ -602,33 +588,29 @@ impl BlockBehaviour for SignBlock {
             } else {
                 sign_entity.back_text()
             };
-            let may_build = args.player.abilities.lock().await.allow_modify_world;
+            let may_build = args
+                .player
+                .abilities
+                .try_lock()
+                .is_ok_and(|abilities| abilities.allow_modify_world);
             if !has_editable_text(text) || !may_build {
                 return BlockActionResult::Pass;
             }
 
             *currently_editing = Some(args.player.gameprofile.id);
             drop(currently_editing);
-            match args.player.client.as_ref() {
-                ClientPlatform::Java(java) => {
-                    java.send_sign_packet(*args.position, is_facing_front_text)
-                        .await;
-                }
-                ClientPlatform::Bedrock(_bedrock) => {}
-            }
+            args.player.try_send_client_packet(&COpenSignEditor::new(
+                *args.position,
+                is_facing_front_text,
+            ));
 
-            BlockActionResult::SuccessServer
-        })
+        BlockActionResult::SuccessServer
     }
 
     /// Mirrors `SignBlock.useItemOn` from
     /// `net/minecraft/world/level/block/SignBlock.java:91-125`: only a build-capable sign
     /// applicator may mutate the text, and an item attempt must not claim the text editor.
-    fn use_with_item<'a>(
-        &'a self,
-        args: UseWithItemArgs<'a>,
-    ) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
+    fn use_with_item(&self, args: UseWithItemArgs<'_>) -> BlockActionResult {
             let Some(block_entity) = args.world.get_block_entity(args.position) else {
                 return BlockActionResult::Pass;
             };
@@ -658,12 +640,18 @@ impl BlockBehaviour for SignBlock {
                     .is_some()
                 || pumpkin_item.as_any().downcast_ref::<InkSacItem>().is_some()
                 || pumpkin_item.as_any().downcast_ref::<DyeItem>().is_some();
-            let may_build = args.player.abilities.lock().await.allow_modify_world;
+            let may_build = args
+                .player
+                .abilities
+                .try_lock()
+                .is_ok_and(|abilities| abilities.allow_modify_world);
             if !is_sign_applicator || !may_build {
                 return BlockActionResult::PassToDefaultBlockAction;
             }
 
-            let currently_editing = sign_entity.editing_player().lock().await;
+            let Ok(currently_editing) = sign_entity.editing_player().try_lock() else {
+                return BlockActionResult::PassToDefaultBlockAction;
+            };
             if other_player_is_editing_sign(
                 *currently_editing,
                 &args.player.gameprofile.id,
@@ -724,15 +712,14 @@ impl BlockBehaviour for SignBlock {
                     .downcast_ref::<crate::item::items::glowing_ink_sac::GlowingInkSacItem>()
                     .is_some()
                 {
-                    args.player.trigger_advancement(crate::entity::player::advancement::trigger::AdvancementTrigger::GlowedSign).await;
+                    args.player.trigger_advancement(crate::entity::player::advancement::trigger::AdvancementTrigger::GlowedSign);
                 }
                 if !args.player.has_infinite_materials() {
                     args.item_stack.decrement(1);
                 }
             }
-
             result
-        })
+        }
     }
 }
 

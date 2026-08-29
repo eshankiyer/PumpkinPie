@@ -30,23 +30,20 @@ impl ItemBehaviour for BrushItem {
     /// `BrushItem.useOn` (`BrushItem.java:37-45`) only starts the use animation; all of
     /// the work happens in `onUseTick`. Vanilla's `Item.use` is not overridden, so
     /// right-clicking air does nothing.
-    fn use_on_block<'a>(
-        &'a self,
-        _item: &'a mut ItemStack,
-        player: &'a Player,
+    fn use_on_block(
+        &self,
+        _item: &mut ItemStack,
+        player: &Player,
         _location: BlockPos,
         _face: BlockDirection,
         _cursor_pos: Vector3<f32>,
-        _block: &'a Block,
-        _server: &'a Server,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let stack = player.inventory().held_item().await;
-            player
-                .living_entity
-                .set_active_hand(pumpkin_util::Hand::Right, stack, Self::USE_DURATION)
-                .await;
-        })
+        _block: &Block,
+        _server: &Server,
+    ) {
+        let stack = player.inventory().held_item();
+        player
+            .living_entity
+            .set_active_hand(pumpkin_util::Hand::Right, stack, Self::USE_DURATION);
     }
 
     /// `BrushItem.onUseTick` (`BrushItem.java:57-96`): one brush stroke lands on every
@@ -60,18 +57,17 @@ impl ItemBehaviour for BrushItem {
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
             if remaining_use_ticks < 0 {
-                player.living_entity.clear_active_hand().await;
+                player.living_entity.clear_active_hand();
                 return;
             }
 
             let world = player.world();
             let (start, end) = self.get_start_and_end_pos(player);
-            let Some((position, face)) = world
-                .raycast(start, end, async |pos, w| !w.get_block_state(pos).is_air())
-                .await
+            let Some((position, face)) =
+                world.raycast(start, end, |pos, w| !w.get_block_state(pos).is_air())
             else {
                 // `BrushItem.java:90-92`: losing the target stops the use.
-                player.living_entity.clear_active_hand().await;
+                player.living_entity.clear_active_hand();
                 return;
             };
 
@@ -94,51 +90,43 @@ impl ItemBehaviour for BrushItem {
                 return;
             };
 
-            let game_time = world.get_world_age().await;
+            let game_time = world.get_world_age();
             if brush_be.brush(&world, game_time, face).await {
-                player.damage_held_item(1).await;
+                player.damage_held_item(1);
             }
         })
     }
 
-    fn use_on_entity<'a>(
-        &'a self,
-        _item: &'a mut ItemStack,
-        player: &'a Player,
-        entity: Arc<dyn EntityBase>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let ent = entity.get_entity();
-            if ent.entity_type == &EntityType::ARMADILLO {
-                let world = player.world();
-                world.play_sound(
-                    Sound::EntityArmadilloBrush,
-                    SoundCategory::Neutral,
-                    &ent.pos.load(),
-                );
+    fn use_on_entity(&self, _item: &mut ItemStack, player: &Player, entity: Arc<dyn EntityBase>) {
+        let ent = entity.get_entity();
+        if ent.entity_type == &EntityType::ARMADILLO {
+            let world = player.world();
+            world.play_sound(
+                Sound::EntityArmadilloBrush,
+                SoundCategory::Neutral,
+                &ent.pos.load(),
+            );
 
-                let item_entity = Arc::new(ItemEntity::new(
-                    Entity::new(world.clone(), ent.pos.load(), &EntityType::ITEM),
-                    ItemStack::new(1, &Item::ARMADILLO_SCUTE),
-                ));
-                world.spawn_entity(item_entity).await;
+            let item_entity = Arc::new(ItemEntity::new(
+                Entity::new(world.clone(), ent.pos.load(), &EntityType::ITEM),
+                ItemStack::new(1, &Item::ARMADILLO_SCUTE),
+            ));
+            world.spawn_entity(item_entity);
 
-                player.damage_held_item(16).await;
-            } else {
-                let world = player.world();
-                world.play_sound(
-                    Sound::ItemBrushBrushingGeneric,
-                    SoundCategory::Neutral,
-                    &ent.pos.load(),
-                );
-            }
+            player.damage_held_item(16);
+        } else {
+            let world = player.world();
+            world.play_sound(
+                Sound::ItemBrushBrushingGeneric,
+                SoundCategory::Neutral,
+                &ent.pos.load(),
+            );
+        }
 
-            let stack = player.inventory().held_item().await;
-            player
-                .living_entity
-                .set_active_hand(pumpkin_util::Hand::Right, stack, Self::USE_DURATION)
-                .await;
-        })
+        let stack = player.inventory().held_item();
+        player
+            .living_entity
+            .set_active_hand(pumpkin_util::Hand::Right, stack, Self::USE_DURATION);
     }
 
     fn get_use_duration(&self) -> i32 {

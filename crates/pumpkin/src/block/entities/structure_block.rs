@@ -9,7 +9,6 @@ use pumpkin_world::generation::structure::template::{
     CapturedBlock, PaletteEntry, StructureProcessor, StructureTemplate, TemplateEntity,
     get_template, global_cache, place_template_with_seed,
 };
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
@@ -97,31 +96,64 @@ impl BlockEntity for StructureBlockBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            nbt.put_string("name", self.name.lock().await.clone());
-            nbt.put_string("author", self.author.lock().await.clone());
-            nbt.put_string("metadata", self.metadata.lock().await.clone());
-            nbt.put_int("posX", *self.pos_x.lock().await);
-            nbt.put_int("posY", *self.pos_y.lock().await);
-            nbt.put_int("posZ", *self.pos_z.lock().await);
-            nbt.put_int("sizeX", *self.size_x.lock().await);
-            nbt.put_int("sizeY", *self.size_y.lock().await);
-            nbt.put_int("sizeZ", *self.size_z.lock().await);
-            nbt.put_string("rotation", self.rotation.lock().await.clone());
-            nbt.put_string("mirror", self.mirror.lock().await.clone());
-            nbt.put_string("mode", self.mode.lock().await.clone());
-            nbt.put_bool("ignoreEntities", *self.ignore_entities.lock().await);
-            nbt.put_bool("strict", *self.strict.lock().await);
-            nbt.put_bool("powered", *self.powered.lock().await);
-            nbt.put_bool("showair", *self.show_air.lock().await);
-            nbt.put_bool("showboundingbox", *self.show_bounding_box.lock().await);
-            nbt.put_float("integrity", *self.integrity.lock().await);
-            nbt.put_long("seed", *self.seed.lock().await);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        if let Ok(name) = self.name.try_lock() {
+            nbt.put_string("name", name.clone());
+        }
+        if let Ok(author) = self.author.try_lock() {
+            nbt.put_string("author", author.clone());
+        }
+        if let Ok(metadata) = self.metadata.try_lock() {
+            nbt.put_string("metadata", metadata.clone());
+        }
+        if let Ok(pos_x) = self.pos_x.try_lock() {
+            nbt.put_int("posX", *pos_x);
+        }
+        if let Ok(pos_y) = self.pos_y.try_lock() {
+            nbt.put_int("posY", *pos_y);
+        }
+        if let Ok(pos_z) = self.pos_z.try_lock() {
+            nbt.put_int("posZ", *pos_z);
+        }
+        if let Ok(size_x) = self.size_x.try_lock() {
+            nbt.put_int("sizeX", *size_x);
+        }
+        if let Ok(size_y) = self.size_y.try_lock() {
+            nbt.put_int("sizeY", *size_y);
+        }
+        if let Ok(size_z) = self.size_z.try_lock() {
+            nbt.put_int("sizeZ", *size_z);
+        }
+        if let Ok(rotation) = self.rotation.try_lock() {
+            nbt.put_string("rotation", rotation.clone());
+        }
+        if let Ok(mirror) = self.mirror.try_lock() {
+            nbt.put_string("mirror", mirror.clone());
+        }
+        if let Ok(mode) = self.mode.try_lock() {
+            nbt.put_string("mode", mode.clone());
+        }
+        if let Ok(ignore_entities) = self.ignore_entities.try_lock() {
+            nbt.put_bool("ignoreEntities", *ignore_entities);
+        }
+        if let Ok(strict) = self.strict.try_lock() {
+            nbt.put_bool("strict", *strict);
+        }
+        if let Ok(powered) = self.powered.try_lock() {
+            nbt.put_bool("powered", *powered);
+        }
+        if let Ok(show_air) = self.show_air.try_lock() {
+            nbt.put_bool("showair", *show_air);
+        }
+        if let Ok(show_bounding_box) = self.show_bounding_box.try_lock() {
+            nbt.put_bool("showboundingbox", *show_bounding_box);
+        }
+        if let Ok(integrity) = self.integrity.try_lock() {
+            nbt.put_float("integrity", *integrity);
+        }
+        if let Ok(seed) = self.seed.try_lock() {
+            nbt.put_long("seed", *seed);
+        }
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -247,8 +279,8 @@ impl StructureBlockBlockEntity {
             Self::create_random(seed),
         );
         placer.finalize();
-        world.queue_block_updates(&placer.changed_positions).await;
-        world.flush_block_updates().await;
+        world.queue_block_updates(&placer.changed_positions);
+        world.flush_block_updates();
         true
     }
 
@@ -415,7 +447,7 @@ fn palette_entry_from_state_id(state_id: BlockStateId) -> PaletteEntry {
 async fn block_entity_nbt(world: &Arc<World>, pos: &BlockPos) -> Option<NbtCompound> {
     let block_entity = world.get_block_entity(pos)?;
     let mut nbt = NbtCompound::new();
-    block_entity.write_nbt(&mut nbt).await;
+    block_entity.write_nbt(&mut nbt);
     nbt.put_string("id", block_entity.resource_location().to_string());
     Some(nbt)
 }
@@ -447,11 +479,11 @@ async fn capture_entities(
 
         let mut nbt = NbtCompound::new();
         if let Some(living) = entity.get_living_entity() {
-            living.write_nbt(&mut nbt).await;
+            living.write_nbt(&mut nbt);
         } else {
-            entity.get_entity().write_nbt(&mut nbt).await;
+            entity.get_entity().write_nbt(&mut nbt);
         }
-        entity.write_nbt(&mut nbt).await;
+        entity.write_nbt(&mut nbt);
 
         let rel_pos = Vector3::new(
             pos.x - f64::from(min.x),
@@ -518,7 +550,7 @@ mod tests {
         *futures::executor::block_on(entity.strict.lock()) = true;
 
         let mut nbt = NbtCompound::new();
-        futures::executor::block_on(entity.write_nbt(&mut nbt));
+        entity.write_nbt(&mut nbt);
 
         assert_eq!(nbt.get_bool("showair"), Some(true));
         assert_eq!(nbt.get_bool("showboundingbox"), Some(false));

@@ -1,11 +1,7 @@
 use crate::block::registry::BlockActionResult;
-use crate::block::{
-    BlockBehaviour, BlockFuture, GetCloneItemStackArgs, RandomTickArgs, UseWithItemArgs,
-};
-use crate::world::game_event::{GameEventContext, emit_game_event};
+use crate::block::{BlockBehaviour, RandomTickArgs, UseWithItemArgs};
 use pumpkin_data::dimension::Dimension;
 use pumpkin_data::flower_pot_transformations::get_potted_item;
-use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::{Block, BlockId};
@@ -33,11 +29,8 @@ fn get_potted(block: &Block) -> Option<&'static Block> {
 }
 
 impl BlockBehaviour for FlowerPotBlock {
-    fn use_with_item<'a>(
-        &'a self,
-        args: UseWithItemArgs<'a>,
-    ) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
+    fn use_with_item(&self, args: UseWithItemArgs<'_>) -> BlockActionResult {
+        {
             let item = args.item_stack.item;
             //Place the flower inside the pot
             let potted_block_id = get_potted_item(item.id);
@@ -49,31 +42,22 @@ impl BlockBehaviour for FlowerPotBlock {
                     // (FlowerPotBlock.java:70-71,89-91).
                     return BlockActionResult::Consume;
                 }
-                args.world
-                    .set_block_state(
-                        args.position,
-                        Block::from_id(potted_block_id).default_state.id,
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
+                args.world.set_block_state(
+                    args.position,
+                    Block::from_id(potted_block_id).default_state.id,
+                    BlockFlags::NOTIFY_ALL,
+                );
                 // Vanilla `level.gameEvent(player, GameEvent.BLOCK_CHANGE, pos)`
                 // (FlowerPotBlock.java:78).
-                emit_game_event(
-                    args.world,
-                    GameEvent::BlockChange,
-                    args.position.to_centered_f64(),
-                    GameEventContext::of_entity(args.player.clone()),
-                )
-                .await;
+                args.world
+                    .emit_game_event("block_change", args.position.to_centered_f64());
                 // Vanilla `player.awardStat(Stats.POT_FLOWER)` (FlowerPotBlock.java:80,
                 // Stats.java:73 registers `pot_flower` as a custom stat).
-                args.player
-                    .increment_stat(
-                        pumpkin_data::statistic::StatisticCategory::Custom,
-                        pumpkin_data::statistic::CustomStatistic::PotFlower as i32,
-                        1,
-                    )
-                    .await;
+                args.player.increment_stat(
+                    pumpkin_data::statistic::StatisticCategory::Custom,
+                    pumpkin_data::statistic::CustomStatistic::PotFlower as i32,
+                    1,
+                );
                 // Vanilla `itemStack.consume(1, player)` (FlowerPotBlock.java:81).
                 if args.player.gamemode.load() != GameMode::Creative {
                     args.item_stack.decrement(1);
@@ -94,68 +78,43 @@ impl BlockBehaviour for FlowerPotBlock {
                 return BlockActionResult::Consume;
             };
             let mut plant = ItemStack::new(1, potted_item);
-            if !args
-                .player
-                .inventory
-                .insert_stack_anywhere(&mut plant)
-                .await
-            {
-                args.player.drop_item(plant).await;
+            if !args.player.inventory.insert_stack_anywhere(&mut plant) {
+                args.player.drop_item(plant);
             }
 
-            args.world
-                .set_block_state(
-                    args.position,
-                    Block::FLOWER_POT.default_state.id,
-                    BlockFlags::NOTIFY_ALL,
-                )
-                .await;
+            args.world.set_block_state(
+                args.position,
+                Block::FLOWER_POT.default_state.id,
+                BlockFlags::NOTIFY_ALL,
+            );
             // Vanilla `level.gameEvent(player, GameEvent.BLOCK_CHANGE, pos)`
             // (FlowerPotBlock.java:99).
-            emit_game_event(
-                args.world,
-                GameEvent::BlockChange,
-                args.position.to_centered_f64(),
-                GameEventContext::of_entity(args.player.clone()),
-            )
-            .await;
+            args.world
+                .emit_game_event("block_change", args.position.to_centered_f64());
             BlockActionResult::Success
-        })
+        }
     }
 
-    /// Vanilla `FlowerPotBlock#getCloneItemStack` (FlowerPotBlock.java:104-106):
-    /// middle-clicking a filled pot yields its contents instead of the pot itself.
-    fn get_clone_item_stack(&self, args: GetCloneItemStackArgs<'_>) -> Option<ItemStack> {
-        let potted = get_potted(args.block)?;
-        Some(ItemStack::new(1, Item::from_id(potted.item_id)?))
-    }
-
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if (args.world.dimension.eq(&Dimension::OVERWORLD)
-                || args.world.dimension.eq(&Dimension::OVERWORLD_CAVES))
-                && args.block.eq(&Block::POTTED_CLOSED_EYEBLOSSOM)
-                && args.world.level_time.lock().await.time_of_day % 24000 > 14500
-            {
-                args.world
-                    .set_block_state(
-                        args.position,
-                        Block::POTTED_OPEN_EYEBLOSSOM.default_state.id,
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-            }
-            if args.block.eq(&Block::POTTED_OPEN_EYEBLOSSOM)
-                && args.world.level_time.lock().await.time_of_day % 24000 <= 14500
-            {
-                args.world
-                    .set_block_state(
-                        args.position,
-                        Block::POTTED_CLOSED_EYEBLOSSOM.default_state.id,
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-            }
-        })
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        if (args.world.dimension.eq(&Dimension::OVERWORLD)
+            || args.world.dimension.eq(&Dimension::OVERWORLD_CAVES))
+            && args.block.eq(&Block::POTTED_CLOSED_EYEBLOSSOM)
+            && args.world.get_time_of_day() % 24000 > 14500
+        {
+            args.world.set_block_state(
+                args.position,
+                Block::POTTED_OPEN_EYEBLOSSOM.default_state.id,
+                BlockFlags::NOTIFY_ALL,
+            );
+        }
+        if args.block.eq(&Block::POTTED_OPEN_EYEBLOSSOM)
+            && args.world.get_time_of_day() % 24000 <= 14500
+        {
+            args.world.set_block_state(
+                args.position,
+                Block::POTTED_CLOSED_EYEBLOSSOM.default_state.id,
+                BlockFlags::NOTIFY_ALL,
+            );
+        }
     }
 }

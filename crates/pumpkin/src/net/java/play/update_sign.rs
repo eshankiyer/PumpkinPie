@@ -4,7 +4,7 @@ use super::*;
 use crate::block::blocks::signs::as_sign_text_access;
 
 impl JavaClient {
-    pub async fn handle_sign_update(&self, player: &Player, sign_data: SUpdateSign<'_>) {
+    pub fn handle_sign_update(&self, player: &Player, sign_data: &SUpdateSign<'_>) {
         let world = player.get_entity().world.load_full();
         let Some(block_entity) = world.get_block_entity(&sign_data.location) else {
             return;
@@ -22,7 +22,10 @@ impl JavaClient {
         // Vanilla `SignBlockEntity.updateSignText` only accepts the edit from the player
         // holding the edit lock (`playerWhoMayEdit`); anyone else's packet is dropped with a
         // warning. Without this check any player could rewrite any unwaxed sign's text.
-        let mut currently_editing = sign_entity.editing_player().lock().await;
+        let mut currently_editing = sign_entity
+            .editing_player()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if *currently_editing != Some(player.gameprofile.id) {
             tracing::warn!(
                 "Player {} just tried to change non-editable sign",
@@ -42,10 +45,10 @@ impl JavaClient {
             let mut event = crate::plugin::api::events::block::sign_change::SignChangeEvent::new(
                 player_arc,
                 sign_data.location,
-                lines.clone(),
+                lines,
             );
             if let Some(server) = world.server.upgrade() {
-                server.plugin_manager.fire(&server, &mut event).await;
+                server.plugin_manager.fire_blocking(&server, &mut event);
             }
             if event.cancelled {
                 return;

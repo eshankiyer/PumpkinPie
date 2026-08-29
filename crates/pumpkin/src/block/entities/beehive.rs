@@ -39,10 +39,9 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 /// `BeehiveBlockEntity.MAX_OCCUPANTS`.
 pub const MAX_OCCUPANTS: usize = 3;
@@ -152,7 +151,7 @@ impl Occupant {
 /// `EnvironmentAttributes.BEES_STAY_IN_HIVE`: raised by `WeatherAttributes` while it is raining
 /// and by the `Timelines` keyframes at day-time 12542 (on) and 23460 (off).
 pub async fn bees_stay_in_hive(world: &World) -> bool {
-    if world.weather.lock().await.raining {
+    if world.weather.lock().unwrap_or_else(std::sync::PoisonError::into_inner).raining {
         return true;
     }
     let time_of_day = world.get_time_of_day().await.rem_euclid(24_000);
@@ -195,10 +194,10 @@ pub fn is_beehive(block: &Block) -> bool {
 pub struct BeehiveBlockEntity {
     pub position: BlockPos,
     /// `BeehiveBlockEntity.stored`.
-    pub bees: Mutex<Vec<Occupant>>,
+    pub bees: Arc<Mutex<Vec<Occupant>>>,
     /// `BeehiveBlockEntity.savedFlowerPos`.
-    pub flower_pos: Mutex<Option<BlockPos>>,
-    dirty: AtomicBool,
+    pub flower_pos: Arc<Mutex<Option<BlockPos>>>,
+    dirty: Arc<AtomicBool>,
 }
 
 impl BlockEntity for BeehiveBlockEntity {
@@ -226,34 +225,32 @@ impl BlockEntity for BeehiveBlockEntity {
             });
         Self {
             position,
-            bees: Mutex::new(bees),
-            flower_pos: Mutex::new(flower_pos),
-            dirty: AtomicBool::new(false),
+            bees: Arc::new(Mutex::new(bees)),
+            flower_pos: Arc::new(Mutex::new(flower_pos)),
+            dirty: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            nbt.put_list(
-                "bees",
-                self.bees
-                    .lock()
-                    .await
-                    .iter()
-                    .map(Occupant::to_nbt)
-                    .collect(),
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_list(
+            "bees",
+            self.bees
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .map(Occupant::to_nbt)
+                .collect(),
+        );
+        let flower_pos = *self
+            .flower_pos
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(pos) = flower_pos {
+            nbt.put(
+                "flower_pos",
+                NbtTag::IntArray(vec![pos.0.x, pos.0.y, pos.0.z]),
             );
-            let flower_pos = *self.flower_pos.lock().await;
-            if let Some(pos) = flower_pos {
-                nbt.put(
-                    "flower_pos",
-                    NbtTag::IntArray(vec![pos.0.x, pos.0.y, pos.0.z]),
-                );
-            }
-        })
+        }
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -273,28 +270,17 @@ impl BlockEntity for BeehiveBlockEntity {
 
     /// `BeehiveBlockEntity.serverTick`, plus the fire check `setChanged` runs before every
     /// other mutation.
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            if self.bees.lock().await.is_empty() {
-                return;
-            }
-
-            if self.is_fire_nearby(world) {
-                self.empty_all_living_from_hive(world, None, BeeReleaseStatus::Emergency)
-                    .await;
-                return;
-            }
-
-            self.tick_occupants(world).await;
-
-            if !self.bees.lock().await.is_empty() && rand::rng().random::<f64>() < 0.005 {
-                world.play_sound(
-                    Sound::BlockBeehiveWork,
-                    SoundCategory::Blocks,
-                    &self.position.to_f64(),
-                );
-            }
-        })
+    fn tick(&self, world: &Arc<World>) {
+        let beehive = Arc::new(Self {
+            position: self.position,
+            bees: self.bees.clone(),
+            flower_pos: self.flower_pos.clone(),
+            dirty: self.dirty.clone(),
+        });
+        let world = world.clone();
+        tokio::spawn(async move {
+            beehive.tick_server(&world).await;
+        });
     }
 
     fn is_dirty(&self) -> bool {
@@ -314,12 +300,45 @@ impl BeehiveBlockEntity {
     pub const ID: &'static str = "minecraft:beehive";
 
     #[must_use]
-    pub const fn new(position: BlockPos) -> Self {
+    pub fn new(position: BlockPos) -> Self {
         Self {
             position,
-            bees: Mutex::const_new(Vec::new()),
-            flower_pos: Mutex::const_new(None),
-            dirty: AtomicBool::new(false),
+            bees: Arc::new(Mutex::new(Vec::new())),
+            flower_pos: Arc::new(Mutex::new(None)),
+            dirty: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    async fn tick_server(&self, world: &Arc<World>) {
+        if self
+            .bees
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+        {
+            return;
+        }
+
+        if self.is_fire_nearby(world) {
+            self.empty_all_living_from_hive(world, None, BeeReleaseStatus::Emergency)
+                .await;
+            return;
+        }
+
+        self.tick_occupants(world).await;
+
+        if !self
+            .bees
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+            && rand::rng().random::<f64>() < 0.005
+        {
+            world.play_sound(
+                Sound::BlockBeehiveWork,
+                SoundCategory::Blocks,
+                &self.position.to_f64(),
+            );
         }
     }
 
@@ -329,17 +348,17 @@ impl BeehiveBlockEntity {
 
     /// `BeehiveBlockEntity.isEmpty`.
     pub async fn is_empty(&self) -> bool {
-        self.bees.lock().await.is_empty()
+        self.bees.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_empty()
     }
 
     /// `BeehiveBlockEntity.isFull`.
     pub async fn is_full(&self) -> bool {
-        self.bees.lock().await.len() >= MAX_OCCUPANTS
+        self.bees.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len() >= MAX_OCCUPANTS
     }
 
     /// `BeehiveBlockEntity.getOccupantCount`.
     pub async fn occupant_count(&self) -> usize {
-        self.bees.lock().await.len()
+        self.bees.lock().unwrap_or_else(std::sync::PoisonError::into_inner).len()
     }
 
     /// `BeehiveBlockEntity.isSedated`.
@@ -371,7 +390,7 @@ impl BeehiveBlockEntity {
 
     /// `BeehiveBlockEntity.storeBee`.
     pub async fn store_bee(&self, occupant: Occupant) {
-        self.bees.lock().await.push(occupant);
+        self.bees.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(occupant);
         self.mark_dirty();
     }
 
@@ -397,7 +416,7 @@ impl BeehiveBlockEntity {
             .await;
 
         if let Some(flower_pos) = bee_flower_pos {
-            let mut saved = self.flower_pos.lock().await;
+            let mut saved = self.flower_pos.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             if saved.is_none() || rand::rng().random::<bool>() {
                 *saved = Some(flower_pos);
             }
@@ -464,7 +483,7 @@ impl BeehiveBlockEntity {
         if indices.is_empty() {
             return;
         }
-        let mut bees = self.bees.lock().await;
+        let mut bees = self.bees.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         for &index in indices.iter().rev() {
             if index < bees.len() {
                 bees.remove(index);
@@ -480,8 +499,8 @@ impl BeehiveBlockEntity {
         world: &Arc<World>,
         release_status: BeeReleaseStatus,
     ) -> Vec<Arc<dyn EntityBase>> {
-        let saved_flower_pos = *self.flower_pos.lock().await;
-        let occupants: Vec<Occupant> = self.bees.lock().await.clone();
+        let saved_flower_pos = *self.flower_pos.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let occupants: Vec<Occupant> = self.bees.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
 
         let mut spawned = Vec::new();
         let mut released = Vec::new();
@@ -501,12 +520,12 @@ impl BeehiveBlockEntity {
 
     /// `BeehiveBlockEntity.tickOccupants`.
     async fn tick_occupants(&self, world: &Arc<World>) {
-        let saved_flower_pos = *self.flower_pos.lock().await;
+        let saved_flower_pos = *self.flower_pos.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // The counters are advanced under the lock so a concurrent `add_occupant` cannot lose
         // a tick; the releases themselves happen after it is dropped.
         let ready: Vec<(usize, Occupant)> = {
-            let mut bees = self.bees.lock().await;
+            let mut bees = self.bees.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let mut ready = Vec::new();
             for (index, occupant) in bees.iter_mut().enumerate() {
                 if occupant.tick() {

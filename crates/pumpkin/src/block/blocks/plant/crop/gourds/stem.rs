@@ -1,5 +1,5 @@
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, CanPlaceAtArgs, GetCloneItemStackArgs,
+    BlockBehaviour, BlockMetadata, CanPlaceAtArgs, GetCloneItemStackArgs,
     GetStateForNeighborUpdateArgs, RandomTickArgs,
     blocks::plant::{
         PlantBlockBase,
@@ -76,97 +76,83 @@ impl BlockBehaviour for StemBlock {
         Some(ItemStack::new(1, seed))
     }
 
-    fn perform_bonemeal<'a>(&'a self, args: crate::block::BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            <Self as CropBlockBase>::perform_bonemeal(self, args.world, args.position).await;
-            let (_, state) = args.world.get_block_and_state_id(args.position);
-            if StemProperties::from_state_id(state, args.block).age == 7 {
-                BlockBehaviour::random_tick(
-                    self,
-                    RandomTickArgs {
-                        world: args.world,
-                        block: args.block,
-                        position: args.position,
-                    },
-                )
-                .await;
-            }
-        })
+    fn perform_bonemeal(&self, args: crate::block::BonemealArgs<'_>) {
+        <Self as CropBlockBase>::perform_bonemeal(self, args.world, args.position);
+        let (_, state) = args.world.get_block_and_state_id(args.position);
+        if StemProperties::from_state_id(state, args.block).age == 7 {
+            BlockBehaviour::random_tick(
+                self,
+                RandomTickArgs {
+                    world: args.world,
+                    block: args.block,
+                    position: args.position,
+                },
+            );
+        }
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
         <Self as PlantBlockBase>::can_place_at(self, args.block_accessor, args.position)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            <Self as PlantBlockBase>::get_state_for_neighbor_update(
-                self,
-                args.world,
-                args.position,
-                args.state_id,
-            )
-            .await
-        })
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        <Self as PlantBlockBase>::get_state_for_neighbor_update(
+            self,
+            args.world,
+            args.position,
+            args.state_id,
+        )
     }
 
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if args.world.get_raw_brightness(args.position, 0) < MIN_GROWTH_LIGHT {
-                return;
-            }
-            let f: f32 = get_available_moisture(args.world, args.position, args.block).await;
-            if rand::rng().random_range(0..=(25.0 / f).floor() as i32) == 0 {
-                let (block, state) = args.world.get_block_and_state_id(args.position);
-                let props = StemProperties::from_state_id(state, block);
-                let age = i32::from(props.age);
-                if age < 7 {
-                    args.world
-                        .set_block_state(
-                            args.position,
-                            Self::state_with_age(block, state, age + 1),
-                            BlockFlags::NOTIFY_NEIGHBORS,
-                        )
-                        .await;
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        if args.world.get_raw_brightness(args.position, 0) < MIN_GROWTH_LIGHT {
+            return;
+        }
+        let f: f32 = get_available_moisture(args.world, args.position, args.block);
+        if rand::rng().random_range(0..=(25.0 / f).floor() as i32) == 0 {
+            let (block, state) = args.world.get_block_and_state_id(args.position);
+            let props = StemProperties::from_state_id(state, block);
+            let age = i32::from(props.age);
+            if age < 7 {
+                args.world.set_block_state(
+                    args.position,
+                    Self::state_with_age(block, state, age + 1),
+                    BlockFlags::NOTIFY_NEIGHBORS,
+                );
+            } else {
+                let dir = BlockDirection::random_horizontal(&mut RandomGenerator::Xoroshiro(
+                    Xoroshiro::from_seed(rand::rng().random()),
+                ));
+                let plant_block_pos = args.position.offset(dir.to_offset());
+                let plant_block_state = args.world.get_block_state(&plant_block_pos);
+                let under_block: &Block = args.world.get_block(&plant_block_pos.down());
+                // `StemBlock.randomTick`: the fruit needs a block from the stem's own
+                // `supports_*_stem_fruit` tag beneath it, which covers grass, podzol,
+                // mycelium, mud and moss as well as dirt and farmland.
+                let fruit_support = if block == &Block::PUMPKIN_STEM {
+                    &tag::Block::MINECRAFT_SUPPORTS_PUMPKIN_STEM_FRUIT
                 } else {
-                    let dir = BlockDirection::random_horizontal(&mut RandomGenerator::Xoroshiro(
-                        Xoroshiro::from_seed(rand::rng().random()),
-                    ));
-                    let plant_block_pos = args.position.offset(dir.to_offset());
-                    let plant_block_state = args.world.get_block_state(&plant_block_pos);
-                    let under_block: &Block = args.world.get_block(&plant_block_pos.down());
-                    // `StemBlock.randomTick`: the fruit needs a block from the stem's own
-                    // `supports_*_stem_fruit` tag beneath it, which covers grass, podzol,
-                    // mycelium, mud and moss as well as dirt and farmland.
-                    let fruit_support = if block == &Block::PUMPKIN_STEM {
-                        &tag::Block::MINECRAFT_SUPPORTS_PUMPKIN_STEM_FRUIT
-                    } else {
-                        &tag::Block::MINECRAFT_SUPPORTS_MELON_STEM_FRUIT
-                    };
-                    if plant_block_state.is_air() && under_block.has_tag(fruit_support) {
-                        let attached_stem = Self::get_attached_stem(dir, block);
-                        let gourd = Self::get_gourd(block);
-                        args.world
-                            .set_block_state(
-                                &plant_block_pos,
-                                gourd.default_state.id,
-                                BlockFlags::NOTIFY_NEIGHBORS,
-                            )
-                            .await;
-                        args.world
-                            .set_block_state(
-                                args.position,
-                                attached_stem,
-                                BlockFlags::NOTIFY_NEIGHBORS,
-                            )
-                            .await;
-                    }
+                    &tag::Block::MINECRAFT_SUPPORTS_MELON_STEM_FRUIT
+                };
+                if plant_block_state.is_air() && under_block.has_tag(fruit_support) {
+                    let attached_stem = Self::get_attached_stem(dir, block);
+                    let gourd = Self::get_gourd(block);
+                    args.world.set_block_state(
+                        &plant_block_pos,
+                        gourd.default_state.id,
+                        BlockFlags::NOTIFY_NEIGHBORS,
+                    );
+                    args.world.set_block_state(
+                        args.position,
+                        attached_stem,
+                        BlockFlags::NOTIFY_NEIGHBORS,
+                    );
                 }
             }
-        })
+        }
     }
 }
 

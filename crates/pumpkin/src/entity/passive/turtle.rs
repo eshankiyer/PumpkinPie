@@ -21,6 +21,7 @@ use crate::entity::{
         tempt::TemptGoal, turtle_go_home::TurtleGoHomeGoal,
         turtle_go_to_water::TurtleGoToWaterGoal, turtle_lay_egg::TurtleLayEggGoal,
         turtle_random_stroll::TurtleRandomStrollGoal, turtle_travel::TurtleTravelGoal,
+        try_find_water::TryFindWaterGoal,
     },
     ai::pathfinder::node::PathType,
     mob::{Mob, MobEntity},
@@ -91,6 +92,7 @@ impl TurtleEntity {
 
             // Priorities follow `Turtle.registerGoals` (`Turtle.java:151-160`). No float/swim
             // goal: vanilla doesn't register one for Turtle either.
+            goal_selector.add_goal(0, Box::new(TryFindWaterGoal));
             goal_selector.add_goal(0, EscapeDangerGoal::new(1.2));
             goal_selector.add_goal(1, BreedGoal::new(1.0));
             goal_selector.add_goal(1, TurtleLayEggGoal::new(turtle_weak.clone(), 1.0));

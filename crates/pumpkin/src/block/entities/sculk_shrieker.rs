@@ -21,7 +21,6 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockFlags;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
@@ -61,7 +60,7 @@ pub struct SculkShriekerBlockEntity {
     /// Guards the lazy `GameEventListener` registration performed on the first tick, exactly
     /// as `SculkCatalystBlockEntity` does (this codebase's listener registry is flat and
     /// per-world, so a block entity loaded from disk never runs the block's `placed` hook).
-    listener_registered: AtomicBool,
+    listener_registered: Arc<AtomicBool>,
     /// Mirrors the block state's `shrieking` and `can_summon` while a shriek is in flight.
     ///
     /// `preRemoveSideEffects` (lines 133-138) reads the state being removed, but this
@@ -90,20 +89,17 @@ impl BlockEntity for SculkShriekerBlockEntity {
         Self {
             position,
             warning_level: Mutex::new(warning_level),
-            listener_registered: AtomicBool::new(false),
+            listener_registered: Arc::new(AtomicBool::new(false)),
             shrieking_flag: AtomicBool::new(false),
             can_summon_flag: AtomicBool::new(false),
         }
     }
 
     /// `saveAdditional` (lines 81-86).
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            nbt.put_int("warning_level", *self.warning_level.lock().await);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        if let Ok(warning_level) = self.warning_level.try_lock() {
+            nbt.put_int("warning_level", *warning_level);
+        }
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -112,27 +108,25 @@ impl BlockEntity for SculkShriekerBlockEntity {
         Some(nbt)
     }
 
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            self.ensure_listener_registered(world).await;
-        })
+    fn tick(&self, world: &Arc<World>) {
+        let world = world.clone();
+        let position = self.position;
+        let listener_registered = self.listener_registered.clone();
+        tokio::spawn(async move {
+            Self::ensure_listener_registered(&world, position, &listener_registered).await;
+        });
     }
 
     /// `preRemoveSideEffects` (lines 133-138): a shrieker broken mid-shriek still responds.
-    fn on_block_replaced<'a>(
-        self: Arc<Self>,
-        world: Arc<World>,
-        position: BlockPos,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
-    where
-        Self: 'a,
-    {
-        Box::pin(async move {
+    fn on_block_replaced(self: Arc<Self>, world: &Arc<World>, position: &BlockPos) {
+        let world = world.clone();
+        let position = *position;
+        tokio::spawn(async move {
             if self.shrieking_flag.load(Ordering::Acquire) {
                 self.try_respond(&world).await;
             }
             world.unregister_game_event_listener_at(&position).await;
-        })
+        });
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -144,18 +138,22 @@ impl SculkShriekerBlockEntity {
     pub const ID: &'static str = "minecraft:sculk_shrieker";
 
     #[must_use]
-    pub fn new(position: BlockPos) -> Self {
+    pub const fn new(position: BlockPos) -> Self {
         Self {
             position,
             warning_level: Mutex::new(0),
-            listener_registered: AtomicBool::new(false),
+            listener_registered: Arc::new(AtomicBool::new(false)),
             shrieking_flag: AtomicBool::new(false),
             can_summon_flag: AtomicBool::new(false),
         }
     }
 
-    async fn ensure_listener_registered(&self, world: &Arc<World>) {
-        if self.listener_registered.swap(true, Ordering::AcqRel) {
+    async fn ensure_listener_registered(
+        world: &Arc<World>,
+        position: BlockPos,
+        listener_registered: &AtomicBool,
+    ) {
+        if listener_registered.swap(true, Ordering::AcqRel) {
             return;
         }
         let already_present = world
@@ -166,12 +164,12 @@ impl SculkShriekerBlockEntity {
             .any(|listener| {
                 matches!(
                     listener.listener_source(),
-                    crate::world::game_event::PositionSource::Block(pos) if pos == self.position
+                    crate::world::game_event::PositionSource::Block(pos) if pos == position
                 )
             });
         if !already_present {
             world
-                .register_game_event_listener(Arc::new(ShriekerListener { pos: self.position }))
+                .register_game_event_listener(Arc::new(ShriekerListener { pos: position }))
                 .await;
         }
     }

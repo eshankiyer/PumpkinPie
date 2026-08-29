@@ -120,9 +120,8 @@ impl Worldborder {
         self.lerp_ticks_remaining
     }
 
-    pub async fn init_client(&self, client: &JavaClient) {
-        client
-            .enqueue_client_packet(&CInitializeWorldBorder::new(
+    pub fn init_client(&self, client: &JavaClient) {
+        if let Ok(data) = client.serialize_packet(&CInitializeWorldBorder::new(
                 self.center_x,
                 self.center_z,
                 self.current_diameter,
@@ -131,8 +130,9 @@ impl Worldborder {
                 self.portal_teleport_boundary.into(),
                 self.warning_blocks.into(),
                 self.warning_time.into(),
-            ))
-            .await;
+        )) {
+            client.try_enqueue_packet(data);
+        }
     }
 
     pub fn set_center(&mut self, world: &World, x: f64, z: f64) {
@@ -205,6 +205,41 @@ impl Worldborder {
         self.warning_blocks = distance;
 
         world.broadcast_packet_all(&CSetBorderWarningDistance::new(self.warning_blocks.into()));
+    }
+
+    pub const fn set_damage_buffer(&mut self, buffer: f32) {
+        self.buffer = buffer;
+    }
+
+    pub const fn set_damage_per_block(&mut self, damage: f32) {
+        self.damage_per_block = damage;
+    }
+
+    pub fn reset(&mut self, world: &World) {
+        self.center_x = 0.0;
+        self.center_z = 0.0;
+        self.old_diameter = 29_999_984.0;
+        self.new_diameter = 29_999_984.0;
+        self.current_diameter = 29_999_984.0;
+        self.lerp_ticks_total = 0;
+        self.lerp_ticks_remaining = 0;
+        self.speed = 0;
+        self.portal_teleport_boundary = 29_999_984;
+        self.warning_blocks = 5;
+        self.warning_time = 15;
+        self.damage_per_block = 0.2;
+        self.buffer = 5.0;
+
+        world.broadcast_packet_all(&CInitializeWorldBorder::new(
+            self.center_x,
+            self.center_z,
+            self.current_diameter,
+            self.new_diameter,
+            self.lerp_ticks_remaining.into(),
+            self.portal_teleport_boundary.into(),
+            self.warning_blocks.into(),
+            self.warning_time.into(),
+        ));
     }
 
     /// `(min_x, max_x, min_z, max_z)`, matching vanilla's `BorderExtent` getters:

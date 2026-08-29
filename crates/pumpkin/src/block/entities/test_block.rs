@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -73,15 +72,14 @@ impl BlockEntity for TestBlockBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            nbt.put_string("mode", mode_to_value(*self.mode.lock().await).to_string());
-            nbt.put_string("message", self.message.lock().await.clone());
-            nbt.put_bool("powered", self.powered.load(Ordering::Relaxed));
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        if let Ok(mode) = self.mode.try_lock() {
+            nbt.put_string("mode", mode_to_value(*mode).to_string());
+        }
+        if let Ok(message) = self.message.try_lock() {
+            nbt.put_string("message", message.clone());
+        }
+        nbt.put_bool("powered", self.powered.load(Ordering::Relaxed));
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -95,7 +93,6 @@ impl BlockEntity for TestBlockBlockEntity {
         nbt.put_bool("powered", self.powered.load(Ordering::Relaxed));
         Some(nbt)
     }
-
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }

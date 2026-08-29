@@ -1,5 +1,3 @@
-use pumpkin_data::dimension::Dimension;
-
 use crate::ProtoChunk;
 use crate::generation::generator::WorldGenerator;
 use crate::world::WorldPortalExt;
@@ -21,8 +19,6 @@ const GENERATION_STAGES: [StagedChunkEnum; 10] = [
 ];
 
 pub fn generate_single_chunk(
-    dimension: &Dimension,
-    biome_mixer_seed: i64,
     generator: &WorldGenerator,
     block_registry: &dyn WorldPortalExt,
     chunk_x: i32,
@@ -41,8 +37,6 @@ pub fn generate_single_chunk(
     }
 
     generate_single_chunk_with_radius(
-        dimension,
-        biome_mixer_seed,
         generator,
         block_registry,
         chunk_x,
@@ -52,10 +46,7 @@ pub fn generate_single_chunk(
     )
 }
 
-#[expect(clippy::too_many_arguments)]
 pub fn generate_single_chunk_with_radius(
-    _dimension: &Dimension,
-    _biome_mixer_seed: i64,
     generator: &WorldGenerator,
     block_registry: &dyn WorldPortalExt,
     chunk_x: i32,
@@ -109,7 +100,6 @@ pub fn generate_single_chunk_with_radius(
 
 #[cfg(test)]
 mod tests {
-    use crate::biome::hash_seed;
     use crate::chunk::ChunkHeightmapType;
     use crate::chunk_system::Chunk;
     use crate::chunk_system::{
@@ -178,11 +168,8 @@ mod tests {
             let block_registry = Arc::new(BlockRegistry);
             let world_gen =
                 get_world_gen(seed, dimension.clone(), false, Vec::new(), String::new());
-            let biome_mixer_seed = hash_seed(world_gen.seed());
 
             let chunk = generate_single_chunk(
-                &dimension,
-                biome_mixer_seed,
                 &world_gen,
                 block_registry.as_ref(),
                 0,
@@ -215,12 +202,9 @@ mod tests {
         let dimension = Dimension::OVERWORLD;
         let seed = Seed(42);
         let block_registry = Arc::new(BlockRegistry);
-        let world_gen = get_world_gen(seed, dimension.clone(), false, Vec::new(), String::new());
-        let biome_mixer_seed = hash_seed(world_gen.seed());
+        let world_gen = get_world_gen(seed, dimension, false, Vec::new(), String::new());
 
         let chunk = generate_single_chunk(
-            &dimension,
-            biome_mixer_seed,
             &world_gen,
             block_registry.as_ref(),
             0,
@@ -249,12 +233,9 @@ mod tests {
         let dimension = Dimension::OVERWORLD;
         let seed = Seed(1_782_124_772_053_846_960);
         let block_registry = Arc::new(BlockRegistry);
-        let world_gen = get_world_gen(seed, dimension.clone(), false, Vec::new(), String::new());
-        let biome_mixer_seed = hash_seed(world_gen.seed());
+        let world_gen = get_world_gen(seed, dimension, false, Vec::new(), String::new());
 
         let chunk = generate_single_chunk(
-            &dimension,
-            biome_mixer_seed,
             &world_gen,
             block_registry.as_ref(),
             31,
@@ -302,12 +283,9 @@ mod tests {
         let dimension = Dimension::OVERWORLD;
         let seed = Seed(1_782_124_772_053_846_960);
         let block_registry = Arc::new(BlockRegistry);
-        let world_gen = get_world_gen(seed, dimension.clone(), false, Vec::new(), String::new());
-        let biome_mixer_seed = hash_seed(world_gen.seed());
+        let world_gen = get_world_gen(seed, dimension, false, Vec::new(), String::new());
 
         let chunk = generate_single_chunk_with_radius(
-            &dimension,
-            biome_mixer_seed,
             &world_gen,
             block_registry.as_ref(),
             73,
@@ -355,11 +333,8 @@ mod tests {
         let dimension = Dimension::THE_END;
         let seed = Seed(12_345);
         let block_registry = Arc::new(BlockRegistry);
-        let world_gen = get_world_gen(seed, dimension.clone(), false, Vec::new(), String::new());
-        let biome_mixer_seed = hash_seed(world_gen.seed());
+        let world_gen = get_world_gen(seed, dimension, false, Vec::new(), String::new());
         let chunk = generate_single_chunk_with_radius(
-            &dimension,
-            biome_mixer_seed,
             &world_gen,
             block_registry.as_ref(),
             -306,
@@ -408,12 +383,9 @@ mod tests {
         let dimension = Dimension::OVERWORLD;
         let seed = Seed(1_782_124_772_053_846_960);
         let block_registry = Arc::new(BlockRegistry);
-        let world_gen = get_world_gen(seed, dimension.clone(), false, Vec::new(), String::new());
-        let biome_mixer_seed = hash_seed(world_gen.seed());
+        let world_gen = get_world_gen(seed, dimension, false, Vec::new(), String::new());
 
         let chunk = generate_single_chunk(
-            &dimension,
-            biome_mixer_seed,
             &world_gen,
             block_registry.as_ref(),
             73,
@@ -430,8 +402,6 @@ mod tests {
         }
 
         let cage_chunk = generate_single_chunk(
-            &dimension,
-            biome_mixer_seed,
             &world_gen,
             block_registry.as_ref(),
             73,

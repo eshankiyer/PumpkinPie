@@ -1,8 +1,6 @@
 use std::any::Any;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use pumpkin_data::Block;
 use pumpkin_data::data_component_impl::JukeboxPlayableImpl;
@@ -10,7 +8,6 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
-use tokio::sync::Mutex;
 
 use crate::block::entities::BlockEntity;
 use crate::world::World;
@@ -67,52 +64,51 @@ impl BlockEntity for JukeboxBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let record = self.record_stack.lock().await;
-            if !record.is_empty() {
-                let mut record_nbt = NbtCompound::new();
-                record.write_item_stack(&mut record_nbt);
-                nbt.put(RECORD_ITEM_NBT_KEY, record_nbt);
-            }
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        let record = self
+            .record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !record.is_empty() {
+            let mut record_nbt = NbtCompound::new();
+            record.write_item_stack(&mut record_nbt);
+            nbt.put(RECORD_ITEM_NBT_KEY, record_nbt);
+        }
 
-            let ticks = self.ticks_since_song_started.load(Ordering::Relaxed);
-            if ticks > 0 {
-                nbt.put_long(TICKS_SINCE_SONG_STARTED_NBT_KEY, ticks as i64);
-            }
-        })
+        let ticks = self.ticks_since_song_started.load(Ordering::Relaxed);
+        if ticks > 0 {
+            nbt.put_long(TICKS_SINCE_SONG_STARTED_NBT_KEY, ticks as i64);
+        }
     }
 
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            // Increment ticks if we're playing
-            let song_length = self.song_length_ticks.load(Ordering::Relaxed);
-            if song_length > 0 {
-                let ticks = self
-                    .ticks_since_song_started
-                    .fetch_add(1, Ordering::Relaxed);
-                // Check if song has finished (with vanilla's end-padding grace period)
-                if ticks >= song_length + SONG_END_PADDING_TICKS {
-                    self.stop_playing();
-                    world.update_neighbors(&self.position, None).await;
-                    world
-                        .update_comparators(&self.position, &Block::JUKEBOX)
+    fn tick(&self, world: &Arc<World>) {
+        // Increment ticks if we're playing
+        let song_length = self.song_length_ticks.load(Ordering::Relaxed);
+        if song_length > 0 {
+            let ticks = self
+                .ticks_since_song_started
+                .fetch_add(1, Ordering::Relaxed);
+            // Check if song has finished (with vanilla's end-padding grace period)
+            if ticks >= song_length + SONG_END_PADDING_TICKS {
+                self.stop_playing();
+                world.update_neighbors(&self.position, None);
+                let world_for_events = world.clone();
+                let position = self.position;
+                tokio::spawn(async move {
+                    world_for_events
+                        .update_comparators(&position, &Block::JUKEBOX)
                         .await;
-                    self.emit_jukebox_event(world, GameEvent::JukeboxStopPlay)
-                        .await;
-                } else if ticks.is_multiple_of(20) {
-                    // JukeboxSongPlayer.PLAY_EVENT_INTERVAL_TICKS = 20 /
-                    // shouldEmitJukeboxPlayingEvent: ticksSinceSongStarted % 20 == 0,
-                    // checked against the pre-increment tick count (matches `ticks` here).
-                    // This is what keeps a dancing Allay in range considering the jukebox
-                    // "still playing" (Allay.java shouldStopDancing / setJukeboxPlaying).
-                    self.emit_jukebox_event(world, GameEvent::JukeboxPlay).await;
-                }
+                    Self::emit_jukebox_event(
+                        world_for_events,
+                        position,
+                        GameEvent::JukeboxStopPlay,
+                    );
+                });
+            } else if ticks.is_multiple_of(20) {
+                // JukeboxSongPlayer.PLAY_EVENT_INTERVAL_TICKS = 20.
+                Self::emit_jukebox_event(world.clone(), self.position, GameEvent::JukeboxPlay);
             }
-        })
+        }
     }
 
     fn is_dirty(&self) -> bool {
@@ -159,21 +155,30 @@ impl JukeboxBlockEntity {
     }
 
     /// Get the current record stack
-    pub async fn get_record(&self) -> ItemStack {
-        self.record_stack.lock().await.clone()
+    pub fn get_record(&self) -> ItemStack {
+        self.record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     /// Set the record stack - matches vanilla's `setStack()`
     /// Note: The caller is responsible for updating block state and playing music
-    pub async fn set_record(&self, stack: ItemStack) {
-        *self.record_stack.lock().await = stack;
+    pub fn set_record(&self, stack: ItemStack) {
+        *self
+            .record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = stack;
         self.mark_dirty();
     }
 
     /// Clear the stack and return what was there - used for dropping
-    pub async fn clear_record(&self) -> ItemStack {
+    pub fn clear_record(&self) -> ItemStack {
         self.stop_playing();
-        let mut record = self.record_stack.lock().await;
+        let mut record = self
+            .record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let taken = record.clone();
         *record = ItemStack::EMPTY.clone();
         self.mark_dirty();
@@ -209,18 +214,20 @@ impl JukeboxBlockEntity {
         self.dirty.store(true, Ordering::Relaxed);
     }
 
-    async fn emit_jukebox_event(&self, world: &Arc<World>, event: GameEvent) {
-        emit_game_event(
-            world,
+    fn emit_jukebox_event(world: Arc<World>, position: BlockPos, event: GameEvent) {
+        tokio::spawn(async move {
+            emit_game_event(
+            &world,
             event,
             Vector3::new(
-                f64::from(self.position.0.x) + 0.5,
-                f64::from(self.position.0.y) + 0.5,
-                f64::from(self.position.0.z) + 0.5,
+                f64::from(position.0.x) + 0.5,
+                f64::from(position.0.y) + 0.5,
+                f64::from(position.0.z) + 0.5,
             ),
             GameEventContext::none(),
         )
         .await;
+        });
     }
 }
 
@@ -230,35 +237,43 @@ impl Inventory for JukeboxBlockEntity {
         1
     }
 
-    fn is_empty(&self) -> InventoryFuture<'_, bool> {
-        Box::pin(async move { self.record_stack.lock().await.is_empty() })
+    fn is_empty(&self) -> bool {
+        self.record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
     }
 
-    fn get_stack(&self, _slot: usize) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move { self.record_stack.lock().await.clone() })
+    fn get_stack(&self, _slot: usize) -> ItemStack {
+        self.record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
-    fn remove_stack(&self, _slot: usize) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            self.stop_playing();
-            let mut record = self.record_stack.lock().await;
-            let taken = record.clone();
-            *record = ItemStack::EMPTY.clone();
-            self.mark_dirty();
-            taken
-        })
+    fn remove_stack(&self, _slot: usize) -> ItemStack {
+        self.stop_playing();
+        let mut record = self
+            .record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let taken = record.clone();
+        *record = ItemStack::EMPTY.clone();
+        self.mark_dirty();
+        taken
     }
 
-    fn remove_stack_specific(&self, _slot: usize, _amount: u8) -> InventoryFuture<'_, ItemStack> {
+    fn remove_stack_specific(&self, _slot: usize, _amount: u8) -> ItemStack {
         // Jukebox only holds one item, so remove the whole stack
         self.remove_stack(0)
     }
 
-    fn set_stack(&self, _slot: usize, stack: ItemStack) -> InventoryFuture<'_, ()> {
-        Box::pin(async move {
-            *self.record_stack.lock().await = stack;
-            self.mark_dirty();
-        })
+    fn set_stack(&self, _slot: usize, stack: ItemStack) {
+        *self
+            .record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = stack;
+        self.mark_dirty();
     }
 
     /// Vanilla `JukeboxBlockEntity.canPlaceItem` (JukeboxBlockEntity.java:143-145):
@@ -271,7 +286,11 @@ impl Inventory for JukeboxBlockEntity {
         Box::pin(async move {
             slot == 0
                 && stack.get_data_component::<JukeboxPlayableImpl>().is_some()
-                && self.record_stack.lock().await.is_empty()
+                && self
+                    .record_stack
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .is_empty()
         })
     }
 
@@ -285,12 +304,13 @@ impl Inventory for JukeboxBlockEntity {
 }
 
 impl Clearable for JukeboxBlockEntity {
-    fn clear(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        Box::pin(async move {
-            self.stop_playing();
-            *self.record_stack.lock().await = ItemStack::EMPTY.clone();
-            self.mark_dirty();
-        })
+    fn clear(&self) {
+        self.stop_playing();
+        *self
+            .record_stack
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = ItemStack::EMPTY.clone();
+        self.mark_dirty();
     }
 }
 

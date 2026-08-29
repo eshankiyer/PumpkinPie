@@ -10,13 +10,20 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::{lerp, position::BlockPos, vector3::Vector3};
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase,
     ai::goal::{
         active_target::ActiveTargetGoal, look_at_entity::LookAtEntityGoal,
-        melee_attack::MeleeAttackGoal, pathfind_to_raid::PathfindToRaidGoal, revenge::RevengeGoal,
-        swim::SwimGoal, wander_around::WanderAroundGoal,
+        melee_attack::MeleeAttackGoal, revenge::RevengeGoal, swim::SwimGoal,
+        wander_around::WanderAroundGoal,
     },
-    mob::{Mob, MobEntity},
+    mob::{
+        Mob, MobEntity,
+        patrol::{LongDistancePatrolGoal, PatrolData, PatrollingMonster},
+        raider::{
+            HoldGroundAttackGoal, PathfindToRaidGoal, Raider, RaiderCelebrationGoal, RaiderData,
+            RaiderMoveThroughVillageGoal,
+        },
+    },
 };
 
 /// Vanilla: the four `AbstractIllager`-family raiders that a roaring Ravager never damages
@@ -31,6 +38,7 @@ fn is_illager(entity_type: &'static EntityType) -> bool {
 
 pub struct RavagerEntity {
     pub mob_entity: MobEntity,
+    pub raider_data: RaiderData,
     /// Vanilla: `Ravager.attackTick`.
     attack_tick: AtomicI32,
     /// Vanilla: `Ravager.stunnedTick`.
@@ -40,10 +48,12 @@ pub struct RavagerEntity {
 }
 
 impl RavagerEntity {
+    #[must_use]
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
         let ravager = Self {
             mob_entity,
+            raider_data: RaiderData::default(),
             attack_tick: AtomicI32::new(0),
             stunned_tick: AtomicI32::new(0),
             roar_tick: AtomicI32::new(0),
@@ -63,8 +73,12 @@ impl RavagerEntity {
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             // Raider.java:65, via `super.registerGoals()`: `PathfindToRaidGoal<>(this)`.
-            goal_selector.add_goal(3, PathfindToRaidGoal::new());
+            goal_selector.add_goal(3, Box::new(PathfindToRaidGoal::default()));
+            goal_selector.add_goal(2, Box::new(HoldGroundAttackGoal::new(10.0)));
             goal_selector.add_goal(4, Box::new(MeleeAttackGoal::new(1.0, true)));
+            goal_selector.add_goal(4, Box::new(LongDistancePatrolGoal::new(0.7, 0.595)));
+            goal_selector.add_goal(4, Box::new(RaiderMoveThroughVillageGoal::new(1.05)));
+            goal_selector.add_goal(5, Box::new(RaiderCelebrationGoal));
             goal_selector.add_goal(5, Box::new(WanderAroundGoal::new_water_avoiding(0.4)));
             goal_selector.add_goal(
                 6,
@@ -127,12 +141,17 @@ impl RavagerEntity {
     /// Vanilla: `Ravager.aiStep` step 1 -- lerps `MOVEMENT_SPEED`'s base value toward `0.35`
     /// (has target) or `0.3` (idle) at rate `Mth.lerp(0.1, current, max)`, or forces it to `0.0`
     /// while immobile.
-    async fn tick_movement_speed(&self) {
+    fn tick_movement_speed(&self) {
         let living = &self.mob_entity.living_entity;
         if self.is_immobile() {
             living.set_attribute_base(&Attributes::MOVEMENT_SPEED, 0.0);
         } else {
-            let has_target = self.mob_entity.target.lock().await.is_some();
+            let has_target = self
+                .mob_entity
+                .target
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_some();
             let max_speed = if has_target { 0.35 } else { 0.3 };
             let base = living.get_attribute_base(&Attributes::MOVEMENT_SPEED);
             living.set_attribute_base(&Attributes::MOVEMENT_SPEED, lerp(0.1, base, max_speed));
@@ -141,7 +160,7 @@ impl RavagerEntity {
 
     /// Vanilla: `Ravager.aiStep` step 2 -- destroys leaves in an inflated bounding box while
     /// colliding horizontally, if `MOB_GRIEFING` is on.
-    async fn tick_leaf_destroy(&self) {
+    fn tick_leaf_destroy(&self) {
         let entity = &self.mob_entity.living_entity.entity;
         if !entity.horizontal_collision.load(Relaxed) {
             return;
@@ -168,9 +187,7 @@ impl RavagerEntity {
                 for z in min_z..=max_z {
                     let pos = BlockPos::new(x, y, z);
                     if world.get_block(&pos).has_tag(&tag::Block::MINECRAFT_LEAVES) {
-                        world
-                            .break_block(&pos, None, pumpkin_world::world::BlockFlags::empty())
-                            .await;
+                        world.break_block(&pos, None, pumpkin_world::world::BlockFlags::empty());
                     }
                 }
             }
@@ -182,7 +199,7 @@ impl RavagerEntity {
 
     /// Vanilla: `Ravager.roar`. Area-of-effect 6-damage hit + strong knockback (except players
     /// and other ravagers; illagers are never damaged) in a 4-block-inflated box.
-    async fn roar(&self, caller: &Arc<dyn EntityBase>) {
+    fn roar(&self, caller: &dyn EntityBase) {
         if !caller.get_entity().is_alive() {
             return;
         }
@@ -202,16 +219,14 @@ impl RavagerEntity {
             }
 
             if !is_illager(candidate_entity.entity_type) {
-                candidate
-                    .damage_with_context(
-                        candidate.as_ref(),
-                        6.0,
-                        DamageType::MOB_ATTACK,
-                        Some(entity.pos.load()),
-                        Some(caller.as_ref()),
-                        Some(caller.as_ref()),
-                    )
-                    .await;
+                candidate.damage_with_context(
+                    candidate,
+                    6.0,
+                    DamageType::MOB_ATTACK,
+                    Some(entity.pos.load()),
+                    Some(caller),
+                    Some(caller),
+                );
             }
 
             if candidate.get_player().is_none() {
@@ -234,135 +249,151 @@ fn strong_knockback(source: &Entity, target: &Entity) {
     target.add_velocity(Vector3::new(xd / dd * 4.0, 0.2, zd / dd * 4.0));
 }
 
-impl NBTStorage for RavagerEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            nbt.put_int("AttackTick", self.attack_tick.load(Relaxed));
-            nbt.put_int("StunTick", self.stunned_tick.load(Relaxed));
-            nbt.put_int("RoarTick", self.roar_tick.load(Relaxed));
-        })
-    }
-
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            if let Some(v) = nbt.get_int("AttackTick") {
-                self.attack_tick.store(v, Relaxed);
-            }
-            if let Some(v) = nbt.get_int("StunTick") {
-                self.stunned_tick.store(v, Relaxed);
-            }
-            if let Some(v) = nbt.get_int("RoarTick") {
-                self.roar_tick.store(v, Relaxed);
-            }
-        })
-    }
-}
-
 impl Mob for RavagerEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
     }
 
-    fn can_be_raid_leader(&self) -> bool {
-        false
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        self.write_raider_nbt(nbt);
+        nbt.put_int("AttackTick", self.attack_tick.load(Relaxed));
+        nbt.put_int("StunTick", self.stunned_tick.load(Relaxed));
+        nbt.put_int("RoarTick", self.roar_tick.load(Relaxed));
+    }
+
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        self.read_raider_nbt(nbt);
+        if let Some(v) = nbt.get_int("AttackTick") {
+            self.attack_tick.store(v, Relaxed);
+        }
+        if let Some(v) = nbt.get_int("StunTick") {
+            self.stunned_tick.store(v, Relaxed);
+        }
+        if let Some(v) = nbt.get_int("RoarTick") {
+            self.roar_tick.store(v, Relaxed);
+        }
     }
 
     /// Vanilla: `Ravager.aiStep` (the counter-driven parts of it; movement is handled above via
     /// `MOVEMENT_SPEED` base-value mutation, which `LivingEntity::set_attribute_base` supports).
-    fn mob_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if !caller.get_entity().is_alive() {
-                return;
-            }
+    fn mob_tick(&self, caller: &dyn EntityBase) {
+        if !caller.get_entity().is_alive() {
+            return;
+        }
 
-            self.tick_movement_speed().await;
-            self.tick_leaf_destroy().await;
+        self.tick_movement_speed();
+        self.tick_leaf_destroy();
 
-            let roar_tick = self.roar_tick.load(Relaxed);
-            if roar_tick > 0 {
-                let new_roar_tick = roar_tick - 1;
-                self.roar_tick.store(new_roar_tick, Relaxed);
-                if new_roar_tick == 10 {
-                    self.roar(caller).await;
-                }
+        let roar_tick = self.roar_tick.load(Relaxed);
+        if roar_tick > 0 {
+            let new_roar_tick = roar_tick - 1;
+            self.roar_tick.store(new_roar_tick, Relaxed);
+            if new_roar_tick == 10 {
+                self.roar(caller);
             }
+        }
 
-            let attack_tick = self.attack_tick.load(Relaxed);
-            if attack_tick > 0 {
-                self.attack_tick.store(attack_tick - 1, Relaxed);
-            }
+        let attack_tick = self.attack_tick.load(Relaxed);
+        if attack_tick > 0 {
+            self.attack_tick.store(attack_tick - 1, Relaxed);
+        }
 
-            let stunned_tick = self.stunned_tick.load(Relaxed);
-            if stunned_tick > 0 {
-                let new_stunned_tick = stunned_tick - 1;
-                self.stunned_tick.store(new_stunned_tick, Relaxed);
-                // Scope reduction: `stunEffect()`'s tinted particle spawn is a pure client
-                // rendering effect and is not ported.
-                if new_stunned_tick == 0 {
-                    self.mob_entity
-                        .living_entity
-                        .entity
-                        .world
-                        .load()
-                        .play_sound(
-                            Sound::EntityRavagerRoar,
-                            SoundCategory::Hostile,
-                            &self.mob_entity.living_entity.entity.pos.load(),
-                        );
-                    self.roar_tick.store(20, Relaxed);
-                }
+        let stunned_tick = self.stunned_tick.load(Relaxed);
+        if stunned_tick > 0 {
+            let new_stunned_tick = stunned_tick - 1;
+            self.stunned_tick.store(new_stunned_tick, Relaxed);
+            // Scope reduction: `stunEffect()`'s tinted particle spawn is a pure client
+            // rendering effect and is not ported.
+            if new_stunned_tick == 0 {
+                self.mob_entity
+                    .living_entity
+                    .entity
+                    .world
+                    .load()
+                    .play_sound(
+                        Sound::EntityRavagerRoar,
+                        SoundCategory::Hostile,
+                        &self.mob_entity.living_entity.entity.pos.load(),
+                    );
+                self.roar_tick.store(20, Relaxed);
             }
-        })
+        }
+    }
+
+    fn as_patrolling_monster(&self) -> Option<&dyn PatrollingMonster> {
+        Some(self)
+    }
+
+    fn as_raider(&self) -> Option<&dyn Raider> {
+        Some(self)
+    }
+}
+
+impl RavagerEntity {
+    /// Fork extension retained for callers that query raid-leader eligibility directly.
+    #[must_use]
+    pub const fn can_be_raid_leader(&self) -> bool {
+        false
     }
 
     /// Vanilla: `Ravager.doHurtTarget` (`attackTick = 10`, broadcasts entity event `4`, plays the
     /// attack sound) -- runs after `MobEntity::try_attack` lands a successful hit.
-    fn on_successful_attack<'a>(&'a self, _target: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.attack_tick.store(10, Relaxed);
-            let entity = &self.mob_entity.living_entity.entity;
-            let world = entity.world.load();
-            world.send_entity_status(entity, EntityStatus::StartAttacking, None);
-            world.play_sound(
-                Sound::EntityRavagerAttack,
-                SoundCategory::Hostile,
-                &entity.pos.load(),
-            );
-        })
+    pub fn on_successful_attack(&self, _target: &dyn EntityBase) {
+        self.attack_tick.store(10, Relaxed);
+        let entity = &self.mob_entity.living_entity.entity;
+        let world = entity.world.load();
+        world.send_entity_status(entity, EntityStatus::StartAttacking, None);
+        world.play_sound(
+            Sound::EntityRavagerAttack,
+            SoundCategory::Hostile,
+            &entity.pos.load(),
+        );
     }
 
     /// Vanilla: `Ravager.blockedByItem` -- while not roaring, a 50/50 roll either stuns self for
     /// 40 ticks (chaining into a roar once the stun ends, per `aiStep`) or knocks the shield
     /// blocker back.
-    fn blocked_by_item<'a>(
-        &'a self,
-        defender: &'a dyn EntityBase,
-        _damage: f32,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if self.roar_tick.load(Relaxed) != 0 {
-                return;
-            }
-            let entity = &self.mob_entity.living_entity.entity;
-            if rand::random::<f64>() < 0.5 {
-                self.stunned_tick.store(40, Relaxed);
-                entity.world.load().play_sound(
-                    Sound::EntityRavagerStunned,
-                    SoundCategory::Hostile,
-                    &entity.pos.load(),
-                );
-                entity
-                    .world
-                    .load()
-                    .send_entity_status(entity, EntityStatus::RavagerStunned, None);
-                // Scope reduction: vanilla's `defender.push(this)` is a generic physics
-                // separation push (not a knockback formula); not replicated here.
-            } else {
-                strong_knockback(entity, defender.get_entity());
-            }
-        })
+    pub fn blocked_by_item(&self, defender: &dyn EntityBase, _damage: f32) {
+        if self.roar_tick.load(Relaxed) != 0 {
+            return;
+        }
+        let entity = &self.mob_entity.living_entity.entity;
+        if rand::random::<f64>() < 0.5 {
+            self.stunned_tick.store(40, Relaxed);
+            entity.world.load().play_sound(
+                Sound::EntityRavagerStunned,
+                SoundCategory::Hostile,
+                &entity.pos.load(),
+            );
+            entity
+                .world
+                .load()
+                .send_entity_status(entity, EntityStatus::RavagerStunned, None);
+            // Scope reduction: vanilla's `defender.push(this)` is a generic physics
+            // separation push (not a knockback formula); not replicated here.
+        } else {
+            strong_knockback(entity, defender.get_entity());
+        }
+    }
+}
+
+impl PatrollingMonster for RavagerEntity {
+    fn get_patrol_data(&self) -> &PatrolData {
+        &self.raider_data.patrol_data
+    }
+
+    fn can_be_leader(&self) -> bool {
+        false
+    }
+}
+
+impl Raider for RavagerEntity {
+    fn get_raider_data(&self) -> &RaiderData {
+        &self.raider_data
+    }
+
+    fn get_celebrate_sound(&self) -> Sound {
+        Sound::EntityRavagerCelebrate
     }
 }
 

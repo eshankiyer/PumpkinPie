@@ -3,12 +3,11 @@ use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
-use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture, sync_write_items_to_nbt};
+use pumpkin_world::inventory::{Clearable, Inventory, sync_write_items_to_nbt};
 use pumpkin_world::world::BlockFlags;
 use std::any::Any;
 use std::array::from_fn;
-use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::world::World;
@@ -16,7 +15,7 @@ use crate::world::game_event::{GameEventContext, emit_game_event};
 
 pub struct ShelfBlockEntity {
     pub position: BlockPos,
-    pub items: tokio::sync::RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
+    pub items: RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
     /// `ShelfBlockEntity.alignItemsToBottom` (`ShelfBlockEntity.java:36`), saved and loaded
     /// under `align_items_to_bottom` (`ShelfBlockEntity.java:47,54`) and repeated in the
     /// update tag (`:66`) because the renderer reads it.
@@ -25,17 +24,12 @@ pub struct ShelfBlockEntity {
 }
 
 impl BlockEntity for ShelfBlockEntity {
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            self.write_inventory_nbt(nbt, true).await;
-            nbt.put_bool(
-                "align_items_to_bottom",
-                self.align_items_to_bottom.load(Ordering::Relaxed),
-            );
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.write_inventory_nbt(nbt, true);
+        nbt.put_bool(
+            "align_items_to_bottom",
+            self.align_items_to_bottom.load(Ordering::Relaxed),
+        );
     }
 
     fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound, position: BlockPos) -> Self
@@ -44,14 +38,20 @@ impl BlockEntity for ShelfBlockEntity {
     {
         let mut shelf = Self {
             position,
-            items: tokio::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+            items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             align_items_to_bottom: AtomicBool::new(
                 nbt.get_bool("align_items_to_bottom").unwrap_or(false),
             ),
             dirty: AtomicBool::new(false),
         };
 
-        pumpkin_world::inventory::sync_read_items_from_nbt(nbt, shelf.items.get_mut());
+        pumpkin_world::inventory::sync_read_items_from_nbt(
+            nbt,
+            shelf
+                .items
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
 
         shelf
     }
@@ -78,8 +78,9 @@ impl BlockEntity for ShelfBlockEntity {
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
         let mut nbt = NbtCompound::new();
-        let items = futures::executor::block_on(self.items.read());
-        sync_write_items_to_nbt(items.as_slice(), &mut nbt);
+        if let Ok(items) = self.items.try_read() {
+            sync_write_items_to_nbt(items.as_slice(), &mut nbt);
+        }
         nbt.put_bool(
             "align_items_to_bottom",
             self.align_items_to_bottom.load(Ordering::Relaxed),
@@ -100,7 +101,7 @@ impl ShelfBlockEntity {
     pub fn new(position: BlockPos) -> Self {
         Self {
             position,
-            items: tokio::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+            items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             align_items_to_bottom: AtomicBool::new(false),
             dirty: AtomicBool::new(false),
         }
@@ -113,9 +114,9 @@ impl ShelfBlockEntity {
 
     /// `ShelfBlockEntity.swapItemNoUpdate` (`ShelfBlockEntity.java:81-85`): returns the stack
     /// currently in `slot` and puts `held_item_stack` in its place.
-    pub async fn swap_item_no_update(&self, slot: usize, held_item_stack: ItemStack) -> ItemStack {
-        let retrieved_item = self.remove_stack(slot).await;
-        self.set_stack(slot, held_item_stack).await;
+    pub fn swap_item_no_update(&self, slot: usize, held_item_stack: ItemStack) -> ItemStack {
+        let retrieved_item = self.remove_stack(slot);
+        self.set_stack(slot, held_item_stack);
         retrieved_item
     }
 
@@ -144,9 +145,7 @@ impl ShelfBlockEntity {
             )
             .await;
         }
-        world
-            .set_block_state(&self.position, state_id, BlockFlags::NOTIFY_ALL)
-            .await;
+        world.set_block_state(&self.position, state_id, BlockFlags::NOTIFY_ALL);
     }
 }
 
@@ -155,48 +154,53 @@ impl Inventory for ShelfBlockEntity {
         Self::INVENTORY_SIZE
     }
 
-    fn is_empty(&self) -> InventoryFuture<'_, bool> {
-        Box::pin(async move {
-            let items = self.items.read().await;
-            items.iter().all(ItemStack::is_empty)
-        })
+    fn is_empty(&self) -> bool {
+        let items = self
+            .items
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        items.iter().all(ItemStack::is_empty)
     }
 
-    fn get_stack(&self, slot: usize) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            let items = self.items.read().await;
-            items[slot].clone()
-        })
+    fn get_stack(&self, slot: usize) -> ItemStack {
+        let items = self
+            .items
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        items[slot].clone()
     }
 
-    fn remove_stack(&self, slot: usize) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            let mut items = self.items.write().await;
-            let removed = std::mem::replace(&mut items[slot], ItemStack::EMPTY.clone());
-            self.mark_dirty();
-            removed
-        })
+    fn remove_stack(&self, slot: usize) -> ItemStack {
+        let mut items = self
+            .items
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let removed = std::mem::replace(&mut items[slot], ItemStack::EMPTY.clone());
+        self.mark_dirty();
+        removed
     }
 
-    fn remove_stack_specific(&self, slot: usize, amount: u8) -> InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            let mut items = self.items.write().await;
-            let res = if !items[slot].is_empty() && amount > 0 {
-                items[slot].split(amount)
-            } else {
-                ItemStack::EMPTY.clone()
-            };
-            self.mark_dirty();
-            res
-        })
+    fn remove_stack_specific(&self, slot: usize, amount: u8) -> ItemStack {
+        let mut items = self
+            .items
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let res = if !items[slot].is_empty() && amount > 0 {
+            items[slot].split(amount)
+        } else {
+            ItemStack::EMPTY.clone()
+        };
+        self.mark_dirty();
+        res
     }
 
-    fn set_stack(&self, slot: usize, stack: ItemStack) -> InventoryFuture<'_, ()> {
-        Box::pin(async move {
-            let mut items = self.items.write().await;
-            items[slot] = stack;
-            self.mark_dirty();
-        })
+    fn set_stack(&self, slot: usize, stack: ItemStack) {
+        let mut items = self
+            .items
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        items[slot] = stack;
+        self.mark_dirty();
     }
 
     fn mark_dirty(&self) {
@@ -209,12 +213,13 @@ impl Inventory for ShelfBlockEntity {
 }
 
 impl Clearable for ShelfBlockEntity {
-    fn clear(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        Box::pin(async move {
-            let mut items = self.items.write().await;
-            items.fill_with(|| ItemStack::EMPTY.clone());
-            self.mark_dirty();
-        })
+    fn clear(&self) {
+        let mut items = self
+            .items
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        items.fill_with(|| ItemStack::EMPTY.clone());
+        self.mark_dirty();
     }
 }
 
@@ -233,7 +238,7 @@ mod tests {
         entity.align_items_to_bottom.store(true, Ordering::Relaxed);
 
         let mut nbt = NbtCompound::new();
-        futures::executor::block_on(entity.write_nbt(&mut nbt));
+        entity.write_nbt(&mut nbt);
         assert_eq!(nbt.get_bool("align_items_to_bottom"), Some(true));
 
         let loaded = ShelfBlockEntity::from_nbt(&nbt, pos);

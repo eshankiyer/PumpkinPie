@@ -1,37 +1,42 @@
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crossbeam::atomic::AtomicCell;
-
-use crate::entity::{Entity, EntityBase, EntityBaseFuture, NBTStorage, living::LivingEntity};
-use pumpkin_data::damage::DamageType;
-use pumpkin_data::item_stack::ItemStack;
+use crate::entity::{Entity, EntityBase, living::LivingEntity};
+use pumpkin_data::{
+    damage::DamageType,
+    item_stack::ItemStack,
+    tag::{self, Taggable},
+};
 use pumpkin_protocol::java::client::play::Metadata;
-use pumpkin_util::math::position::BlockPos;
-use pumpkin_util::math::vector3::Vector3;
+use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
 
 pub struct EndCrystalEntity {
     entity: Entity,
-    beam_target: AtomicCell<Option<BlockPos>>,
+    beam_target: Mutex<Option<BlockPos>>,
     show_bottom: AtomicBool,
+    invulnerable: AtomicBool,
 }
 
 impl EndCrystalEntity {
+    #[must_use]
     pub const fn new(entity: Entity) -> Self {
         Self {
             entity,
-            beam_target: AtomicCell::new(None),
+            beam_target: Mutex::new(None),
             show_bottom: AtomicBool::new(true),
+            invulnerable: AtomicBool::new(false),
         }
     }
-}
 
-impl EndCrystalEntity {
     /// Vanilla `EndCrystal.setBeamTarget` (`EndCrystal.java:124-126`).
     pub fn set_beam_target(&self, target: Option<BlockPos>) {
-        self.beam_target.store(target);
+        *self
+            .beam_target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = target;
         self.entity.send_meta_data(
             &[Metadata::new(
-                pumpkin_data::tracked_data::end_crystal::DATA_BEAM_TARGET,
+                pumpkin_data::tracked_data::end_crystal::BEAM_TARGET,
                 target,
             )],
             None,
@@ -41,7 +46,16 @@ impl EndCrystalEntity {
     /// Vanilla `EndCrystal.getBeamTarget` (`EndCrystal.java:128-130`).
     #[must_use]
     pub fn get_beam_target(&self) -> Option<BlockPos> {
-        self.beam_target.load()
+        *self
+            .beam_target
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Compatibility alias for callers using the upstream accessor name.
+    #[must_use]
+    pub fn beam_target(&self) -> Option<BlockPos> {
+        self.get_beam_target()
     }
 
     /// Vanilla `EndCrystal.setShowBottom` (`EndCrystal.java:132-134`).
@@ -62,14 +76,26 @@ impl EndCrystalEntity {
         self.show_bottom.load(Ordering::Relaxed)
     }
 
+    /// Compatibility alias for callers using the upstream accessor name.
+    #[must_use]
+    pub fn show_bottom(&self) -> bool {
+        self.shows_bottom()
+    }
+
     /// Vanilla `EndCrystal.getPickResult` (`EndCrystal.java:145-148`).
     #[must_use]
     pub const fn get_pick_result() -> ItemStack {
         ItemStack::static_new_java(1, &pumpkin_data::item::Item::END_CRYSTAL)
     }
-}
 
-impl NBTStorage for EndCrystalEntity {}
+    pub fn set_invulnerable(&self, invulnerable: bool) {
+        self.invulnerable.store(invulnerable, Ordering::Relaxed);
+    }
+
+    pub fn is_invulnerable(&self) -> bool {
+        self.invulnerable.load(Ordering::Relaxed)
+    }
+}
 
 impl EntityBase for EndCrystalEntity {
     fn get_entity(&self) -> &Entity {
@@ -84,42 +110,41 @@ impl EntityBase for EndCrystalEntity {
         true
     }
 
-    fn damage_with_context<'a>(
-        &'a self,
-        _caller: &'a dyn EntityBase,
+    fn damage_with_context(
+        &self,
+        _caller: &dyn EntityBase,
         _amount: f32,
         damage_type: DamageType,
         _position: Option<Vector3<f64>>,
-        source: Option<&'a dyn EntityBase>,
-        _cause: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            if source.is_some_and(|source| {
-                source.get_entity().entity_type == &pumpkin_data::entity::EntityType::ENDER_DRAGON
-            }) {
-                return false;
-            }
+        source: Option<&dyn EntityBase>,
+        _cause: Option<&dyn EntityBase>,
+    ) -> bool {
+        if self.is_invulnerable() {
+            return false;
+        }
 
-            self.entity.remove().await;
-            if !is_explosion_damage(&damage_type) {
-                self.entity
-                    .world
-                    .load()
-                    .explode(
-                        self.entity.pos.load(),
-                        6.0,
-                        crate::world::ExplosionInteraction::Block,
-                    )
-                    .await;
-            }
+        if source.is_some_and(|source| {
+            source.get_entity().entity_type == &pumpkin_data::entity::EntityType::ENDER_DRAGON
+        }) {
+            return false;
+        }
 
-            // TODO
-            true
-        })
-    }
+        self.entity.remove();
+        let world = self.entity.world.load();
+        if !is_explosion_damage(&damage_type)
+            && !damage_type.has_tag(&tag::DamageType::MINECRAFT_IS_EXPLOSION)
+        {
+            let pos = self.entity.pos.load();
+            world.explode(pos, 6.0, crate::world::ExplosionInteraction::Block);
+        }
 
-    fn as_nbt_storage(&self) -> &dyn NBTStorage {
-        self
+        if let Some(ref fight_mutex) = world.dragon_fight
+            && let Ok(mut fight) = fight_mutex.lock()
+        {
+            fight.on_crystal_destroyed(&world, self.entity.entity_uuid);
+        }
+
+        true
     }
 
     fn cast_any(&self) -> &dyn std::any::Any {

@@ -30,10 +30,9 @@ use pumpkin_world::inventory::Inventory;
 use crate::{
     player::player_inventory::PlayerInventory,
     screen_handler::{
-        InventoryPlayer, ItemStackFuture, ScreenHandler, ScreenHandlerBehaviour,
-        ScreenHandlerFuture, offer_or_drop_stack,
+        InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, offer_or_drop_stack,
     },
-    slot::{BoxFuture, NormalSlot, Slot},
+    slot::{NormalSlot, Slot},
     window_property::{Anvil, WindowProperty},
 };
 
@@ -223,15 +222,9 @@ impl Slot for AnvilResultSlot {
             .store(id as u8, std::sync::atomic::Ordering::Relaxed);
     }
 
-    fn can_insert(&self, _stack: &ItemStack) -> BoxFuture<'_, bool> {
-        Box::pin(async move { false })
-    }
+    fn can_insert(&self, _stack: &ItemStack) -> bool { false }
 
-    fn mark_dirty(&self) -> BoxFuture<'_, ()> {
-        Box::pin(async move {
-            self.inventory.mark_dirty();
-        })
-    }
+    fn mark_dirty(&self) { self.inventory.mark_dirty(); }
 }
 
 pub struct AnvilScreenHandler {
@@ -276,7 +269,7 @@ impl AnvilScreenHandler {
     /// `AnvilMenu.setItemName` (AnvilMenu.java:280-298); `validateName` (AnvilMenu.java:300-303)
     /// only implements the length cap, not the full `StringUtil.filterText` control-character
     /// strip.
-    pub async fn update_item_name(&mut self, name: String, player: &dyn InventoryPlayer) {
+    pub fn update_item_name(&mut self, name: String, player: &dyn InventoryPlayer) {
         if name.chars().count() > MAX_NAME_LENGTH {
             return;
         }
@@ -284,25 +277,25 @@ impl AnvilScreenHandler {
             return;
         }
         self.rename_text = name;
-        self.create_result(player).await;
-        self.send_content_updates().await;
+        self.create_result(player);
+        self.send_content_updates();
     }
 
     /// `AnvilMenu.createResult` (AnvilMenu.java:117-274).
-    pub async fn create_result(&mut self, player: &dyn InventoryPlayer) {
-        let input = self.inventory.get_stack(0).await;
+    pub fn create_result(&mut self, player: &dyn InventoryPlayer) {
+        let input = self.inventory.get_stack(0);
 
         self.only_renaming = false;
-        self.set_repair_cost(1).await;
+        self.set_repair_cost(1);
 
         if input.is_empty() || !can_store_enchantments(&input) {
-            self.inventory.set_stack(2, ItemStack::EMPTY.clone()).await;
-            self.set_repair_cost(0).await;
+            self.inventory.set_stack(2, ItemStack::EMPTY.clone());
+            self.set_repair_cost(0);
             return;
         }
 
         let mut result = input.clone();
-        let addition = self.inventory.get_stack(1).await;
+        let addition = self.inventory.get_stack(1);
         let mut enchantments = enchantments_for_crafting(&result);
         // Prior-work-penalty tax: see module docs, always 0 given the RepairCostImpl gap.
         let tax: i64 = 0;
@@ -319,8 +312,8 @@ impl AnvilScreenHandler {
                 player,
             )
         {
-            self.inventory.set_stack(2, ItemStack::EMPTY.clone()).await;
-            self.set_repair_cost(0).await;
+            self.inventory.set_stack(2, ItemStack::EMPTY.clone());
+            self.set_repair_cost(0);
             return;
         }
 
@@ -335,14 +328,14 @@ impl AnvilScreenHandler {
         self.set_repair_cost(
             i16::try_from(final_price.min(i64::from(i16::MAX))).unwrap_or(i16::MAX),
         )
-        .await;
+        ;
         if price <= 0 {
             result = ItemStack::EMPTY.clone();
         }
 
         if naming_cost == price && naming_cost > 0 {
             if self.repair_cost >= 40 {
-                self.set_repair_cost(39).await;
+                self.set_repair_cost(39);
             }
             self.only_renaming = true;
         }
@@ -355,7 +348,7 @@ impl AnvilScreenHandler {
             set_enchantments_for_crafting(&mut result, enchantments);
         }
 
-        self.inventory.set_stack(2, result).await;
+        self.inventory.set_stack(2, result);
     }
 
     /// Applies the second-slot item to `result`: either material repair or enchantment merge,
@@ -426,14 +419,14 @@ impl AnvilScreenHandler {
         false
     }
 
-    pub async fn set_repair_cost(&mut self, cost: i16) {
+    pub fn set_repair_cost(&mut self, cost: i16) {
         self.repair_cost = cost;
         if let Some(sync_handler) = self.behaviour.sync_handler.as_ref() {
             let (property_id, property_value) =
                 WindowProperty::new(Anvil::RepairCost, cost).into_tuple();
             sync_handler
                 .update_property(&self.behaviour, property_id as i32, property_value as i32)
-                .await;
+                ;
         }
     }
 
@@ -446,29 +439,29 @@ impl AnvilScreenHandler {
 
     /// `AnvilMenu.onTake` (AnvilMenu.java:74-115), minus the block-damage effect (see module
     /// docs).
-    async fn on_take(&mut self, player: &dyn InventoryPlayer) {
+    fn on_take(&mut self, player: &dyn InventoryPlayer) {
         if !player.has_infinite_materials() {
             player
                 .add_experience_levels(-i32::from(self.repair_cost))
-                .await;
+                ;
         }
 
         if self.repair_item_count_cost > 0 {
-            let addition = self.inventory.get_stack(1).await;
+            let addition = self.inventory.get_stack(1);
             if !addition.is_empty() && i32::from(addition.item_count) > self.repair_item_count_cost
             {
                 let mut shrunk = addition;
                 shrunk.decrement(u8::try_from(self.repair_item_count_cost).unwrap_or(u8::MAX));
-                self.inventory.set_stack(1, shrunk).await;
+                self.inventory.set_stack(1, shrunk);
             } else {
-                self.inventory.set_stack(1, ItemStack::EMPTY.clone()).await;
+                self.inventory.set_stack(1, ItemStack::EMPTY.clone());
             }
         } else if !self.only_renaming {
-            self.inventory.set_stack(1, ItemStack::EMPTY.clone()).await;
+            self.inventory.set_stack(1, ItemStack::EMPTY.clone());
         }
 
-        self.set_repair_cost(0).await;
-        self.inventory.set_stack(0, ItemStack::EMPTY.clone()).await;
+        self.set_repair_cost(0);
+        self.inventory.set_stack(0, ItemStack::EMPTY.clone());
     }
 }
 
@@ -498,121 +491,62 @@ impl ScreenHandler for AnvilScreenHandler {
         &mut self.behaviour
     }
 
-    fn on_closed<'a>(&'a mut self, player: &'a dyn InventoryPlayer) -> ScreenHandlerFuture<'a, ()> {
-        Box::pin(async move {
-            self.default_on_closed(player).await;
-            self.inventory.on_close().await;
-            // Drop inputs from anvil
-            for i in 0..2 {
-                let stack = self.inventory.remove_stack(i).await;
-                if !stack.is_empty() {
-                    offer_or_drop_stack(player, stack).await;
-                }
-            }
-            self.inventory.set_stack(2, ItemStack::EMPTY.clone()).await;
-        })
+    fn on_closed(&mut self, player: &dyn InventoryPlayer) {
+        self.default_on_closed(player);
+        self.inventory.on_close();
+        for i in 0..2 {
+            let stack = self.inventory.remove_stack(i);
+            if !stack.is_empty() { offer_or_drop_stack(player, stack); }
+        }
+        self.inventory.set_stack(2, ItemStack::EMPTY.clone());
     }
 
-    fn quick_move<'a>(
-        &'a mut self,
-        player: &'a dyn InventoryPlayer,
-        slot_index: i32,
-    ) -> ItemStackFuture<'a> {
-        Box::pin(async move {
-            let mut stack_left = ItemStack::EMPTY.clone();
-            let slot = self.get_behaviour().slots[slot_index as usize].clone();
-
-            if slot.has_stack().await {
-                let mut slot_stack = slot.get_stack().await;
-                stack_left = slot_stack.clone();
-
-                if slot_index < 3 {
-                    // From anvil to player
-                    if !self.insert_item(&mut slot_stack, 3, 39, true).await {
-                        return ItemStack::EMPTY.clone();
-                    }
-                    slot.on_quick_move_crafted(slot_stack.clone(), stack_left.clone())
-                        .await;
-                } else {
-                    // From player to anvil
-                    if !self.insert_item(&mut slot_stack, 0, 2, false).await {
-                        return ItemStack::EMPTY.clone();
-                    }
-                }
-
-                if slot_stack.item_count == stack_left.item_count {
-                    return ItemStack::EMPTY.clone();
-                }
-
-                slot.set_stack_prev(slot_stack.clone(), stack_left.clone())
-                    .await;
-                slot.on_take_item(player, &slot_stack).await;
-                slot.mark_dirty().await;
-
-                // `ItemCombinerMenu.quickMoveStack` calls `slot.onTake` once the result
-                // count changes. Preserve the anvil's XP/input consumption and recompute
-                // its output after that callback.
-                if slot_index == 2 {
-                    self.on_take(player).await;
-                    self.create_result(player).await;
-                    self.send_content_updates().await;
-                }
+    fn quick_move(&mut self, player: &dyn InventoryPlayer, slot_index: i32) -> ItemStack {
+        let mut stack_left = ItemStack::EMPTY.clone();
+        let slot = self.get_behaviour().slots[slot_index as usize].clone();
+        if slot.has_stack() {
+            let mut slot_stack = slot.get_stack();
+            stack_left = slot_stack.clone();
+            if slot_index < 3 {
+                if !self.insert_item(&mut slot_stack, 3, 39, true) { return ItemStack::EMPTY.clone(); }
+                slot.on_quick_move_crafted(slot_stack.clone(), stack_left.clone());
+            } else if !self.insert_item(&mut slot_stack, 0, 2, false) {
+                return ItemStack::EMPTY.clone();
             }
-
-            stack_left
-        })
+            if slot_stack.item_count == stack_left.item_count { return ItemStack::EMPTY.clone(); }
+            slot.set_stack_prev(slot_stack.clone(), stack_left.clone());
+            slot.on_take_item(player, &slot_stack);
+            slot.mark_dirty();
+            if slot_index == 2 { self.on_take(player); self.create_result(player); self.send_content_updates(); }
+        }
+        stack_left
     }
 
-    fn on_slot_click<'a>(
-        &'a mut self,
-        slot_index: i32,
-        button: i32,
+    fn on_slot_click(
+        &mut self, slot_index: i32, button: i32,
         action_type: pumpkin_protocol::java::server::play::SlotActionType,
-        player: &'a dyn InventoryPlayer,
-    ) -> ScreenHandlerFuture<'a, ()> {
-        Box::pin(async move {
-            // `AbstractContainerMenu.doClick` only calls `slot.onTake` after `slot.tryRemove`
-            // actually removed the stack (AbstractContainerMenu.java:420-464), reached only via
-            // the `slot.mayPickup(player)` branch. `may_pickup` mirrors that gate; the actual
-            // removal is left to `internal_on_slot_click` (now that `AnvilResultSlot::can_insert`
-            // matches `mayPlace == false`, that call only removes the slot's stack, never a
-            // mismatched-item swap), and `on_take` fires afterward only if the count dropped.
-            let mut prev_result_count = 0;
-            if slot_index == 2 {
-                let result_slot = self.get_behaviour().slots[2].clone();
-                if result_slot.has_stack().await {
-                    if !self.may_pickup(player) {
-                        self.send_content_updates().await;
-                        return;
-                    }
-                    prev_result_count = result_slot.get_cloned_stack().await.item_count;
-                }
+        player: &dyn InventoryPlayer,
+    ) {
+        let mut prev_result_count = 0;
+        if slot_index == 2 {
+            let result_slot = self.get_behaviour().slots[2].clone();
+            if result_slot.has_stack() {
+                if !self.may_pickup(player) { self.send_content_updates(); return; }
+                prev_result_count = result_slot.get_cloned_stack().item_count;
             }
-
-            let was_quick_move =
-                action_type == pumpkin_protocol::java::server::play::SlotActionType::QuickMove;
-            self.internal_on_slot_click(slot_index, button, action_type, player)
-                .await;
-
-            // `QuickMove` is excluded: `internal_on_slot_click` routes it into our own
-            // `quick_move` override, which already calls `on_take` itself on a successful
-            // take. Calling it again here would charge XP and wipe the inputs a second time.
-            if slot_index == 2 && prev_result_count > 0 && !was_quick_move {
-                let new_count = self.get_behaviour().slots[2]
-                    .get_cloned_stack()
-                    .await
-                    .item_count;
-                if new_count < prev_result_count {
-                    self.on_take(player).await;
-                }
-            }
-
-            if slot_index == 0 || slot_index == 1 || slot_index == 2 {
-                self.create_result(player).await;
-                self.send_content_updates().await;
-            }
-        })
+        }
+        let was_quick_move = action_type == pumpkin_protocol::java::server::play::SlotActionType::QuickMove;
+        self.internal_on_slot_click(slot_index, button, action_type, player);
+        if slot_index == 2 && prev_result_count > 0 && !was_quick_move {
+            let new_count = self.get_behaviour().slots[2].get_cloned_stack().item_count;
+            if new_count < prev_result_count { self.on_take(player); }
+        }
+        if slot_index == 0 || slot_index == 1 || slot_index == 2 {
+            self.create_result(player);
+            self.send_content_updates();
+        }
     }
+
 }
 
 #[cfg(test)]
@@ -632,8 +566,8 @@ mod tests {
         AnvilScreenHandler::new(0, &player_inventory, inventory)
     }
 
-    #[tokio::test]
-    async fn result_slot_never_accepts_items() {
+    #[test]
+    fn result_slot_never_accepts_items() {
         // `AnvilMenu.java:66-68` (`ItemCombinerMenu`'s result slot): `mayPlace` is always
         // `false`, matched by `AnvilResultSlot::can_insert`.
         let handler = handler();
@@ -641,7 +575,7 @@ mod tests {
         assert!(
             !result_slot
                 .can_insert(&ItemStack::new(1, &Item::DIRT))
-                .await
+                
         );
     }
 

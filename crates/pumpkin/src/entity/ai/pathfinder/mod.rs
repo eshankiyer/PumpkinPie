@@ -461,7 +461,7 @@ impl Navigator {
         }
     }
 
-    pub(crate) async fn can_reach_entity(
+    pub(crate) fn can_reach_entity(
         &mut self,
         mob: &LivingEntity,
         target: &LivingEntity,
@@ -472,7 +472,7 @@ impl Navigator {
             f64::from(target_pos.0.y),
             f64::from(target_pos.0.z),
         );
-        let Some(path) = self.compute_path(mob, destination).await else {
+        let Some(path) = self.compute_path(mob, destination) else {
             return false;
         };
         let Some(last) = path.get_end_node() else {
@@ -484,30 +484,29 @@ impl Navigator {
         dx * dx + dz * dz <= 2
     }
 
-    pub async fn can_reach_within(
+    pub fn can_reach_within(
         &mut self,
         entity: &LivingEntity,
         destination: Vector3<f64>,
         distance: f32,
     ) -> bool {
         self.compute_path(entity, destination)
-            .await
             .is_some_and(|path| path.can_reach() || path.get_dist_to_target() <= distance)
     }
 
     #[allow(clippy::too_many_lines)]
-    pub(crate) async fn compute_path(
+    pub(crate) fn compute_path(
         &mut self,
         entity: &LivingEntity,
         destination: Vector3<f64>,
     ) -> Option<Path> {
-        self.compute_path_with_reach(entity, destination, 0).await
+        self.compute_path_with_reach(entity, destination, 0)
     }
 
     /// Finds a path using the same target reach allowance as vanilla's
     /// `PathNavigation.createPath(target, reachRange)`.
     #[allow(clippy::too_many_lines)]
-    pub(crate) async fn compute_path_with_reach(
+    pub(crate) fn compute_path_with_reach(
         &mut self,
         entity: &LivingEntity,
         destination: Vector3<f64>,
@@ -525,7 +524,7 @@ impl Navigator {
             && !entity.entity.on_ground.load(Ordering::Relaxed)
             && !entity.entity.touching_water.load(Ordering::Relaxed)
             && !entity.entity.touching_lava.load(Ordering::Relaxed)
-            && !entity.entity.has_vehicle().await
+            && !entity.entity.has_vehicle()
         {
             return None;
         }
@@ -548,7 +547,7 @@ impl Navigator {
             (entity.get_attribute_value(&Attributes::FOLLOW_RANGE) as f32).max(16.0);
         let max_iterations = (max_path_length * 16.0).floor() as usize;
 
-        let root_vehicle_id = entity.entity.root_vehicle_id().await;
+        let root_vehicle_id = entity.entity.root_vehicle_id();
         let context = PathfindingContext::for_entity(
             mob_position,
             world.clone(),
@@ -566,7 +565,6 @@ impl Navigator {
             || entity
                 .entity_equipment
                 .lock()
-                .await
                 .equipment
                 .get(&EquipmentSlot::FEET)
                 .is_some_and(|boots| boots.item == &Item::LEATHER_BOOTS);
@@ -598,7 +596,7 @@ impl Navigator {
 
         self.evaluator.prepare(context, mob_data);
 
-        let mut start_node = self.evaluator.get_start().await?;
+        let mut start_node = self.evaluator.get_start()?;
 
         // Vanilla NodeEvaluator floors navigation coordinates before resolving the target node.
         let mut target_pos = if self.evaluator.is_amphibious() {
@@ -665,8 +663,7 @@ impl Navigator {
 
             self.neighbors_buf.clear();
             self.evaluator
-                .get_neighbors(&current, &mut self.neighbors_buf)
-                .await;
+                .get_neighbors(&current, &mut self.neighbors_buf);
 
             for mut neighbor in self.neighbors_buf.drain(..) {
                 let step_cost = current.distance(&neighbor);
@@ -756,7 +753,7 @@ impl Navigator {
     }
 
     #[allow(clippy::too_many_lines)]
-    pub async fn tick(&mut self, entity: &LivingEntity) {
+    pub fn tick(&mut self, entity: &LivingEntity) {
         let Some(goal) = self.current_goal.take() else {
             // Idle: stop the mob
             self.is_idle.store(true, Ordering::Relaxed);
@@ -798,7 +795,7 @@ impl Navigator {
         }
 
         if !self.wall_climber_direct && self.needs_new_path(&goal) {
-            self.current_path = self.compute_path(entity, goal.destination).await;
+            self.current_path = self.compute_path(entity, goal.destination);
             self.ticks_on_current_node = 0;
             self.last_node_index = 0;
             self.path_start_pos = Some(entity.entity.pos.load());
@@ -928,7 +925,6 @@ impl Navigator {
                             f64::from(next.2),
                         ),
                     )
-                    .await
                 } else {
                     false
                 };
@@ -1070,14 +1066,13 @@ impl Navigator {
             || (position.y > f64::from(target.0.y) && center_distance(position.y.floor() as i32))
     }
 
-    async fn can_move_directly(
+    fn can_move_directly(
         world: &std::sync::Arc<crate::world::World>,
         start: Vector3<f64>,
         stop: Vector3<f64>,
     ) -> bool {
         world
-            .raycast_collision(start, stop, async |_, _| true)
-            .await
+            .raycast_collision(start, stop, |_, _| true)
             .is_none()
     }
 
@@ -1110,7 +1105,7 @@ impl Navigator {
     /// Returns the next path waypoint in the form consumed by vanilla's
     /// `PathNavigation.tick`: navigation computes the path, then hands this point to the
     /// mob's `MoveControl`. Keeping this handoff separate lets flying controls receive the
-    /// waypoint without making the async navigator hold a controller lock.
+    /// waypoint without making the navigator hold a controller lock.
     #[must_use]
     pub fn next_movement_target(&self) -> Option<(Vector3<f64>, f64)> {
         let goal = self.current_goal.as_ref()?;
@@ -1131,5 +1126,13 @@ impl Navigator {
             Vector3::new(f64::from(x), f64::from(y), f64::from(z)),
             goal.speed,
         ))
+    #[must_use]
+    pub const fn get_path(&self) -> Option<&Path> {
+        self.current_path.as_ref()
+    }
+
+    #[must_use]
+    pub const fn get_path_mut(&mut self) -> Option<&mut Path> {
+        self.current_path.as_mut()
     }
 }

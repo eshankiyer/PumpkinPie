@@ -1,9 +1,10 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use super::{Controls, Goal, to_goal_ticks};
-use crate::entity::ai::goal::GoalFuture;
+
 use crate::entity::ai::goal::track_target::TrackTargetGoal;
-use crate::entity::ai::target_predicate::{TargetData, TargetPredicate};
+use crate::entity::ai::target_predicate::TargetPredicate;
+use crate::entity::living::LivingEntity;
 use crate::entity::mob::Mob;
 use crate::entity::{EntityBase, mob::MobEntity};
 use crate::world::World;
@@ -11,7 +12,6 @@ use pumpkin_data::attributes::Attributes;
 use pumpkin_data::entity::EntityType;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
-use std::future::Future;
 use std::sync::Arc;
 
 const DEFAULT_RECIPROCAL_CHANCE: i32 = 10;
@@ -27,7 +27,7 @@ pub struct ActiveTargetGoal {
 }
 
 impl ActiveTargetGoal {
-    pub fn new<F, Fut>(
+    pub fn new<F>(
         mob: &MobEntity,
         target_type: &'static EntityType,
         reciprocal_chance: i32,
@@ -36,8 +36,7 @@ impl ActiveTargetGoal {
         predicate: Option<F>,
     ) -> Self
     where
-        F: Fn(TargetData, Arc<World>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = bool> + Send + 'static,
+        F: Fn(&LivingEntity, &World) -> bool + Send + Sync + 'static,
     {
         let track_target_goal = TrackTargetGoal::new(check_visibility, check_can_navigate);
         let mut target_predicate = TargetPredicate::create_attackable();
@@ -60,7 +59,7 @@ impl ActiveTargetGoal {
         }
     }
 
-    pub fn new_types<F, Fut>(
+    pub fn new_types<F>(
         mob: &MobEntity,
         target_types: &'static [&'static EntityType],
         reciprocal_chance: i32,
@@ -69,8 +68,7 @@ impl ActiveTargetGoal {
         predicate: Option<F>,
     ) -> Self
     where
-        F: Fn(TargetData, Arc<World>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = bool> + Send + 'static,
+        F: Fn(&LivingEntity, &World) -> bool + Send + Sync + 'static,
     {
         let track_target_goal = TrackTargetGoal::new(check_visibility, check_can_navigate);
         let mut target_predicate = TargetPredicate::create_attackable();
@@ -176,9 +174,8 @@ impl ActiveTargetGoal {
         self.target = target;
     }
 
-    async fn find_closest_target(&mut self, mob: &dyn Mob) {
-        let mob_entity = mob.get_mob_entity();
-        let follow_range = mob_entity
+    fn find_closest_target(&mut self, mob: &MobEntity) {
+        let follow_range = mob
             .living_entity
             .get_attribute_value(&Attributes::FOLLOW_RANGE)
             * self.follow_distance_multiplier;
@@ -186,11 +183,11 @@ impl ActiveTargetGoal {
         // Vanilla updates the target conditions with the current follow distance on every search
         self.target_predicate.base_max_distance = follow_range;
 
-        let world = mob_entity.living_entity.entity.world.load();
+        let world = mob.living_entity.entity.world.load();
 
         // Vanilla searches using getEyeY(), so we offset the position by the eye height
-        let mut search_pos = mob_entity.living_entity.entity.pos.load();
-        search_pos.y += mob_entity
+        let mut search_pos = mob.living_entity.entity.pos.load();
+        search_pos.y += mob
             .living_entity
             .entity
             .entity_dimension
@@ -200,7 +197,8 @@ impl ActiveTargetGoal {
         // Vanilla evaluates the target conditions per candidate inside the search, so the result is
         // the nearest *valid* target. Testing only the nearest candidate would make a single
         // invalid entity (for example an invulnerable creative player) hide every target behind it.
-        // The predicate is async, so candidates are gathered first and tested in order.
+        // Candidates are gathered and tested in distance order so an invalid nearest entity
+        // cannot hide a valid target behind it.
         let sort_by_distance = |a: &Vector3<f64>, b: &Vector3<f64>| {
             a.squared_distance_to_vec(&search_pos)
                 .partial_cmp(&b.squared_distance_to_vec(&search_pos))
@@ -217,16 +215,15 @@ impl ActiveTargetGoal {
                 for player in candidates {
                     // Vanilla `TargetingConditions.test` (combat branch, `TargetingConditions.java:78`)
                     // consults `targeter.canAttack(target)` before the rest of the predicate.
-                    if !TrackTargetGoal::is_allied(mob, player.as_ref()).await
+                    if !TrackTargetGoal::is_allied(mob, player.as_ref())
                         && mob.can_attack(player.get_entity())
                         && self
                             .target_predicate
                             .test(
                                 &world,
-                                Some(&mob_entity.living_entity),
+                                Some(&mob.living_entity),
                                 &player.living_entity,
                             )
-                            .await
                     {
                         result = Some(player as Arc<dyn EntityBase>);
                         break;
@@ -251,12 +248,11 @@ impl ActiveTargetGoal {
                 let mut result = None;
                 for entity in candidates {
                     if let Some(living) = entity.get_living_entity()
-                        && !TrackTargetGoal::is_allied(mob, entity.as_ref()).await
+                        && !TrackTargetGoal::is_allied(mob, entity.as_ref())
                         && mob.can_attack(entity.get_entity())
                         && self
                             .target_predicate
-                            .test(&world, Some(&mob_entity.living_entity), living)
-                            .await
+                            .test(&world, Some(&mob.living_entity), living)
                     {
                         result = Some(entity);
                         break;
@@ -268,33 +264,27 @@ impl ActiveTargetGoal {
 }
 
 impl Goal for ActiveTargetGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            if self.reciprocal_chance > 0
-                && mob.get_random().random_range(0..self.reciprocal_chance) != 0
-            {
-                return false;
-            }
-            self.find_closest_target(mob).await;
-            self.target.is_some()
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if self.reciprocal_chance > 0
+            && mob.get_random().random_range(0..self.reciprocal_chance) != 0
+        {
+            return false;
+        }
+        self.find_closest_target(mob.get_mob_entity());
+        self.target.is_some()
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { self.track_target_goal.should_continue(mob).await })
+    fn should_continue(&self, mob: &dyn Mob) -> bool {
+        self.track_target_goal.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            mob.set_mob_target(self.target.clone()).await;
-            self.track_target_goal.start(mob).await;
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        mob.set_mob_target(self.target.clone());
+        self.track_target_goal.start(mob);
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.track_target_goal.stop(mob).await;
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.track_target_goal.stop(mob);
     }
 
     fn controls(&self) -> Controls {

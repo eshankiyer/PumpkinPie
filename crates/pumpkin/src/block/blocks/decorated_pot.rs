@@ -24,155 +24,130 @@ use pumpkin_world::world::BlockFlags;
 pub struct DecoratedPotBlock;
 
 impl BlockBehaviour for DecoratedPotBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props =
-                DecoratedPotLikeProperties::from_state_id(args.block.default_state.id, args.block);
-            props.facing = args
-                .player
-                .living_entity
-                .entity
-                .get_horizontal_facing()
-                .opposite();
-            props.waterlogged = args.replacing.water_source();
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props =
+            DecoratedPotLikeProperties::from_state_id(args.block.default_state.id, args.block);
+        props.facing = args
+            .player
+            .living_entity
+            .entity
+            .get_horizontal_facing()
+            .opposite();
+        props.waterlogged = args.replacing.water_source();
+        props.to_state_id(args.block)
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = DecoratedPotBlockEntity::new(*args.position);
-            args.world.add_block_entity(Arc::new(entity));
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        let entity = DecoratedPotBlockEntity::new(*args.position);
+        args.world.add_block_entity(Arc::new(entity));
     }
 
-    fn use_with_item<'a>(
-        &'a self,
-        args: UseWithItemArgs<'a>,
-    ) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            if args.item_stack.item_count == 0 {
-                return self
-                    .normal_use(NormalUseArgs {
-                        server: args.server,
-                        world: args.world,
-                        block: args.block,
-                        position: args.position,
-                        player: args.player,
-                        hit: args.hit,
-                    })
-                    .await;
+    fn use_with_item(&self, args: UseWithItemArgs<'_>) -> BlockActionResult {
+        if args.item_stack.item_count == 0 {
+            return self.normal_use(NormalUseArgs {
+                server: args.server,
+                world: args.world,
+                block: args.block,
+                position: args.position,
+                player: args.player,
+                hit: args.hit,
+            });
+        }
+
+        if let Some(block_entity) = args.world.get_block_entity(args.position)
+            && let Some(pot_entity) = block_entity
+                .as_any()
+                .downcast_ref::<DecoratedPotBlockEntity>()
+        {
+            if pot_entity.try_insert_item(args.item_stack, 1) {
+                // `DecoratedPotBlock.useItemOn` wobbles positively on a successful insert
+                // (`DecoratedPotBlock.java:104`).
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(pot_entity.wobble(args.world, WobbleStyle::Positive));
+                });
+                args.world.play_sound(
+                    Sound::BlockDecoratedPotInsert,
+                    SoundCategory::Blocks,
+                    &args.position.to_f64(),
+                );
+            } else {
+                args.world.play_sound(
+                    Sound::BlockDecoratedPotInsertFail,
+                    SoundCategory::Blocks,
+                    &args.position.to_f64(),
+                );
             }
+            return BlockActionResult::Success;
+        }
 
-            if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(pot_entity) = block_entity
-                    .as_any()
-                    .downcast_ref::<DecoratedPotBlockEntity>()
-            {
-                if pot_entity.try_insert_item(args.item_stack, 1).await {
-                    // `DecoratedPotBlock.useItemOn` wobbles positively on a successful
-                    // insert (`DecoratedPotBlock.java:104`).
-                    pot_entity.wobble(args.world, WobbleStyle::Positive).await;
-                    args.world.play_sound(
-                        Sound::BlockDecoratedPotInsert,
-                        SoundCategory::Blocks,
-                        &args.position.to_f64(),
-                    );
-                } else {
-                    args.world.play_sound(
-                        Sound::BlockDecoratedPotInsertFail,
-                        SoundCategory::Blocks,
-                        &args.position.to_f64(),
-                    );
-                }
-                return BlockActionResult::Success;
+        BlockActionResult::Pass
+    }
+
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
+        args.world.play_sound(
+            Sound::BlockDecoratedPotInsertFail,
+            SoundCategory::Blocks,
+            &args.position.to_f64(),
+        );
+        // `DecoratedPotBlock.useWithoutItem` wobbles negatively on a failed interaction
+        // (`DecoratedPotBlock.java:140`).
+        if let Some(block_entity) = args.world.get_block_entity(args.position)
+            && let Some(pot_entity) = block_entity.as_any().downcast_ref::<DecoratedPotBlockEntity>()
+        {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(pot_entity.wobble(args.world, WobbleStyle::Negative));
+            });
+        }
+        BlockActionResult::Success
+    }
+
+    /// `DecoratedPotBlockEntity.triggerEvent` (`DecoratedPotBlockEntity.java:167-175`): accept
+    /// only the pot-wobble event so the world broadcasts it to clients.
+    fn on_synced_block_event(&self, args: OnSyncedBlockEventArgs<'_>) -> bool {
+        args.r#type == DecoratedPotBlockEntity::EVENT_POT_WOBBLES && args.data < 2
+    }
+
+    fn broken(&self, args: BrokenArgs<'_>) {
+        if let Some(block_entity) = args.world.get_block_entity(args.position)
+            && let Some(pot_entity) = block_entity
+                .as_any()
+                .downcast_ref::<DecoratedPotBlockEntity>()
+        {
+            if let Some(contained) = pot_entity.take_item() {
+                args.world.drop_stack(args.position, contained);
             }
-
-            BlockActionResult::Pass
-        })
-    }
-
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            args.world.play_sound(
-                Sound::BlockDecoratedPotInsertFail,
-                SoundCategory::Blocks,
-                &args.position.to_f64(),
-            );
-            // `DecoratedPotBlock.useWithoutItem` wobbles negatively on a failed
-            // interaction (`DecoratedPotBlock.java:140`).
-            if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(pot_entity) = block_entity
-                    .as_any()
-                    .downcast_ref::<DecoratedPotBlockEntity>()
-            {
-                pot_entity.wobble(args.world, WobbleStyle::Negative).await;
-            }
-            BlockActionResult::Success
-        })
-    }
-
-    /// `DecoratedPotBlockEntity.triggerEvent` (`DecoratedPotBlockEntity.java:167-175`):
-    /// accept only the pot-wobble event; the client plays the animation. Returning true
-    /// lets the world broadcast `ClientboundBlockEventPacket`.
-    fn on_synced_block_event<'a>(
-        &'a self,
-        args: OnSyncedBlockEventArgs<'a>,
-    ) -> BlockFuture<'a, bool> {
-        Box::pin(async move {
-            args.r#type == DecoratedPotBlockEntity::EVENT_POT_WOBBLES && args.data < 2
-        })
-    }
-
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(pot_entity) = block_entity
-                    .as_any()
-                    .downcast_ref::<DecoratedPotBlockEntity>()
-            {
-                if let Some(contained) = pot_entity.take_item().await {
-                    args.world.drop_stack(args.position, contained).await;
-                }
-                if let Some(decorations) = pot_entity.decorations() {
-                    for decoration in decorations {
-                        if let Some(item) = Item::from_registry_key(
-                            decoration.strip_prefix("minecraft:").unwrap_or(&decoration),
-                        ) {
-                            args.world
-                                .drop_stack(args.position, ItemStack::new(1, item))
-                                .await;
-                        }
+            if let Some(decorations) = pot_entity.decorations() {
+                for decoration in decorations {
+                    if let Some(item) = Item::from_registry_key(
+                        decoration.strip_prefix("minecraft:").unwrap_or(&decoration),
+                    ) {
+                        args.world.drop_stack(args.position, ItemStack::new(1, item));
                     }
                 }
             }
+        }
 
-            args.world.play_sound(
-                Sound::BlockDecoratedPotShatter,
-                SoundCategory::Blocks,
-                &args.position.to_f64(),
-            );
-            args.world
-                .drop_stack(args.position, ItemStack::new(4, &Item::BRICK))
-                .await;
-        })
+        args.world.play_sound(
+            Sound::BlockDecoratedPotShatter,
+            SoundCategory::Blocks,
+            &args.position.to_f64(),
+        );
+        args.world
+            .drop_stack(args.position, ItemStack::new(4, &Item::BRICK));
     }
 
-    fn get_comparator_output<'a>(
-        &'a self,
-        args: GetComparatorOutputArgs<'a>,
-    ) -> BlockFuture<'a, Option<u8>> {
-        Box::pin(async move {
-            if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(pot_entity) = block_entity
-                    .as_any()
-                    .downcast_ref::<DecoratedPotBlockEntity>()
-            {
-                Some(pot_entity.get_comparator_output().await)
-            } else {
-                Some(0)
-            }
-        })
+    fn get_comparator_output(&self, args: GetComparatorOutputArgs<'_>) -> Option<u8> {
+        if let Some(block_entity) = args.world.get_block_entity(args.position)
+            && let Some(pot_entity) = block_entity
+                .as_any()
+                .downcast_ref::<DecoratedPotBlockEntity>()
+        {
+            Some(pot_entity.get_comparator_output())
+        } else {
+            Some(0)
+        }
     }
 
     /// `DecoratedPotBlock.playerWillDestroy` (`DecoratedPotBlock.java:195-203`): tools in

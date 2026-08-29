@@ -11,9 +11,10 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::difficulty::Difficulty;
 use rand::RngExt;
+use pumpkin_data::sound::Sound;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase,
     ai::goal::{
         active_target::ActiveTargetGoal,
         avoid_entity::AvoidEntityGoal,
@@ -27,7 +28,14 @@ use crate::entity::{
         swim::SwimGoal,
         wander_around::WanderAroundGoal,
     },
-    mob::{Mob, MobEntity, equipment::enchant_item_from_single_enchantment},
+    mob::{
+        Mob, MobEntity, equipment::enchant_item_from_single_enchantment,
+        patrol::{LongDistancePatrolGoal, PatrolData, PatrollingMonster},
+        raider::{
+            HoldGroundAttackGoal, ObtainRaidLeaderBannerGoal, Raider, RaiderCelebrationGoal,
+            RaiderData, RaiderMoveThroughVillageGoal,
+        },
+    },
 };
 use crate::world::raid::num_groups_for_difficulty;
 
@@ -36,14 +44,17 @@ pub struct VindicatorEntity {
     /// Vanilla: `Vindicator.isJohnny`. One-way latch set (via `mob_tick`) once the vindicator is
     /// custom-named "Johnny".
     is_johnny: AtomicBool,
+    pub raider_data: RaiderData,
 }
 
 impl VindicatorEntity {
+    #[must_use]
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
         let vindicator = Self {
             mob_entity,
             is_johnny: AtomicBool::new(false),
+            raider_data: RaiderData::default(),
         };
         let mob_arc = Arc::new(vindicator);
         // Vanilla `populateDefaultEquipmentSlots`: only gives the axe `if getCurrentRaid() ==
@@ -106,6 +117,19 @@ impl VindicatorEntity {
                 10,
                 LookAtEntityGoal::with_default_any_mob(mob_weak.clone(), 8.0),
             );
+            goal_selector.add_goal(1, Box::new(OpenDoorGoal::new(true)));
+            goal_selector.add_goal(1, Box::new(ObtainRaidLeaderBannerGoal));
+            goal_selector.add_goal(2, Box::new(HoldGroundAttackGoal::new(10.0)));
+            goal_selector.add_goal(3, Box::new(MeleeAttackGoal::new(1.0, true)));
+            goal_selector.add_goal(4, Box::new(LongDistancePatrolGoal::new(0.7, 0.595)));
+            goal_selector.add_goal(4, Box::new(RaiderMoveThroughVillageGoal::new(1.05)));
+            goal_selector.add_goal(5, Box::new(RaiderCelebrationGoal));
+            goal_selector.add_goal(6, LookAtEntityGoal::with_default(
+                mob_weak.clone(),
+                &EntityType::PLAYER,
+                8.0,
+            ));
+            goal_selector.add_goal(7, Box::new(RandomLookAroundGoal::default()));
 
             let mut target_selector = mob_arc
                 .mob_entity
@@ -142,26 +166,6 @@ impl VindicatorEntity {
     }
 }
 
-impl NBTStorage for VindicatorEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            if self.is_johnny() {
-                nbt.put_bool("Johnny", true);
-            }
-        })
-    }
-
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            if nbt.get_bool("Johnny") == Some(true) {
-                self.is_johnny.store(true, Relaxed);
-            }
-        })
-    }
-}
-
 impl Mob for VindicatorEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
@@ -174,69 +178,88 @@ impl Mob for VindicatorEntity {
     /// approximated with `has_active_raid()` (this mob's own raid membership) rather than
     /// re-querying the level for any raid covering this position -- same approximation
     /// `InteractWithDoorGoal::raid_gated`/`BreakDoorGoal` already use.
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if !self.is_johnny.load(Relaxed)
-                && let Some(name) = &**self.mob_entity.living_entity.entity.custom_name.load()
-                && name.clone().get_text() == "Johnny"
-            {
-                self.is_johnny.store(true, Relaxed);
-            }
+    fn mob_tick(&self, _caller: &dyn EntityBase) {
+        if !self.is_johnny.load(Relaxed)
+            && let Some(name) = &**self.mob_entity.living_entity.entity.custom_name.load()
+            && name.clone().get_text() == "Johnny"
+        {
+            self.is_johnny.store(true, Relaxed);
+        }
 
-            let can_open_doors = self.mob_entity.living_entity.has_active_raid();
-            self.mob_entity
-                .navigator
-                .lock()
-                .unwrap()
-                .set_can_open_doors(can_open_doors);
-        })
+        let can_open_doors = self.mob_entity.living_entity.has_active_raid();
+        self.mob_entity
+            .navigator
+            .lock()
+            .unwrap()
+            .set_can_open_doors(can_open_doors);
     }
 
-    /// Vanilla: `Vindicator.applyRaidBuffs` (`Vindicator.java:168-180`). Builds a fresh
-    /// iron axe, rolls `random.nextFloat() <= raid.getEnchantOdds()` on the raider's own
-    /// raid, and on success enchants the axe through the exact `SingleEnchantment`
-    /// provider for the wave: `raid/vindicator` (Sharpness I) at waves
-    /// `<= getNumGroups(Normal)` and `raid/vindicator_post_wave_5` (Sharpness II) after.
-    /// The `DifficultyInstance` argument is threaded through by vanilla but unused by
-    /// `SingleEnchantment`, so no regional difficulty is consulted here.
-    fn apply_raid_buffs(&self, wave: i32, _is_captain: bool) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let living = &self.mob_entity.living_entity;
-            let mut axe = ItemStack::new(1, &Item::IRON_AXE);
+    fn as_patrolling_monster(&self) -> Option<&dyn PatrollingMonster> {
+        Some(self)
+    }
 
-            // Vindicator.java:170-171: `shouldEnchant =
-            // this.random.nextFloat() <= raid.getEnchantOdds()` against
-            // `getCurrentRaid()`. Pumpkin keeps only the raid membership cached on the
-            // entity, so a missing membership/raid skips the roll entirely (vanilla can
-            // never reach this method without an active raid).
-            let should_enchant = {
-                let world = living.entity.world.load();
-                let raids = world.raids.lock().await;
-                living
-                    .raid_membership
-                    .load()
-                    .and_then(|membership| raids.raid(membership.raid_id))
-                    .is_some_and(|raid| self.get_random().random::<f32>() <= raid.enchant_odds())
-            };
+    fn as_raider(&self) -> Option<&dyn Raider> {
+        Some(self)
+    }
 
-            // Vindicator.java:173-176: provider selection is
-            // `wave > raid.getNumGroups(Difficulty.NORMAL)`.
-            if should_enchant {
-                enchant_item_from_single_enchantment(
-                    &mut axe,
-                    &Enchantment::SHARPNESS,
-                    raid_vindicator_sharpness_level(wave),
-                );
-            }
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        self.write_raider_nbt(nbt);
+        if self.is_johnny() {
+            nbt.put_bool("Johnny", true);
+        }
+    }
 
-            // Vindicator.java:179: `setItemSlot(EquipmentSlot.MAINHAND, axe)` --
-            // unconditional, enchanted or not.
-            living
-                .entity_equipment
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        self.read_raider_nbt(nbt);
+        if nbt.get_bool("Johnny") == Some(true) {
+            self.is_johnny.store(true, Relaxed);
+        }
+    }
+}
+
+impl PatrollingMonster for VindicatorEntity {
+    fn get_patrol_data(&self) -> &PatrolData {
+        &self.raider_data.patrol_data
+    }
+}
+
+impl Raider for VindicatorEntity {
+    fn get_raider_data(&self) -> &RaiderData {
+        &self.raider_data
+    }
+
+    fn get_celebrate_sound(&self) -> Sound {
+        Sound::EntityVindicatorCelebrate
+    }
+
+    /// Vanilla `Vindicator.applyRaidBuffs` (`Vindicator.java:168-180`).
+    fn apply_raid_buffs(&self, wave: i32, _is_captain: bool) {
+        let living = &self.mob_entity.living_entity;
+        let mut axe = ItemStack::new(1, &Item::IRON_AXE);
+        let should_enchant = {
+            let world = living.entity.world.load();
+            let raids = world
+                .raids
                 .lock()
-                .await
-                .put(&EquipmentSlot::MAIN_HAND, axe);
-        })
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            living
+                .raid_membership
+                .load()
+                .and_then(|membership| raids.raid(membership.raid_id))
+                .is_some_and(|raid| self.get_random().random::<f32>() <= raid.enchant_odds())
+        };
+        if should_enchant {
+            enchant_item_from_single_enchantment(
+                &mut axe,
+                &Enchantment::SHARPNESS,
+                raid_vindicator_sharpness_level(wave),
+            );
+        }
+        living
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .put(&EquipmentSlot::MAIN_HAND, axe);
     }
 }
 
@@ -302,5 +325,3 @@ mod tests {
                 .unwrap_or_default();
             assert_eq!(applied, vec![(sharpness_id, expected)]);
         }
-    }
-}

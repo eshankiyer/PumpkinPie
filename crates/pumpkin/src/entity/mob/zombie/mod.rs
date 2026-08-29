@@ -1,5 +1,5 @@
 use super::{Mob, MobEntity};
-use crate::entity::EntityBaseFuture;
+use crate::entity::ai::goal::break_door::BreakDoorGoal;
 use crate::entity::ai::goal::destroy_egg::DestroyEggGoal;
 use crate::entity::ai::goal::look_around::RandomLookAroundGoal;
 use crate::entity::ai::goal::non_tame_random_target::baby_turtle_on_land;
@@ -13,12 +13,16 @@ use crate::entity::living::LivingEntity;
 use crate::entity::mob::equipment::RegionalDifficulty;
 use crate::entity::r#type::{SpawnRuleContext, check_spawn_rules, from_type};
 use crate::entity::{
-    Entity, EntityBase, NBTStorage, NbtFuture,
+    Entity, EntityBase,
     ai::goal::{active_target::ActiveTargetGoal, look_at_entity::LookAtEntityGoal},
 };
 use crate::world::natural_spawner::is_spawn_position_ok;
+use crate::world::World;
 use pumpkin_data::attributes::Attributes;
+use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::item::Item;
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
@@ -47,15 +51,21 @@ pub struct ZombieEntityBase {
     /// (`Zombie.java:543`). Read by `ZombieEntity` to force door breaking
     /// (`Zombie.java:556`).
     pub is_leader: AtomicBool,
+    pub can_break_doors: AtomicBool,
 }
 
 impl ZombieEntityBase {
     pub fn new(entity: Entity) -> Arc<Self> {
+        Self::with_can_break_doors(entity, false)
+    }
+
+    pub fn with_can_break_doors(entity: Entity, can_break_doors: bool) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
         let zombie = Self {
             mob_entity,
             restored_from_nbt: AtomicBool::new(false),
             is_leader: AtomicBool::new(false),
+            can_break_doors: AtomicBool::new(can_break_doors),
         };
         let mob_arc = Arc::new(zombie);
         let mob_weak: Weak<dyn Mob> = {
@@ -78,6 +88,9 @@ impl ZombieEntityBase {
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(2, SpearUseGoal::new(1.0, 1.0, 10.0, 2.0));
             goal_selector.add_goal(3, ZombieAttackGoal::new(1.0, false));
+            if can_break_doors {
+                goal_selector.add_goal(1, Box::new(BreakDoorGoal::default()));
+            }
             goal_selector.add_goal(4, DestroyEggGoal::new(1.0, 3));
             goal_selector.add_goal(7, Box::new(WanderAroundGoal::new_water_avoiding(1.0)));
             goal_selector.add_goal(
@@ -121,6 +134,36 @@ impl ZombieEntityBase {
 
         mob_arc
     }
+
+    #[must_use]
+    pub fn can_break_doors(&self) -> bool {
+        self.can_break_doors.load(Ordering::Relaxed)
+    }
+
+    pub fn set_can_break_doors(&self, can_break_doors: bool, mob: &dyn Mob) {
+        if self
+            .can_break_doors
+            .swap(can_break_doors, Ordering::Relaxed)
+            != can_break_doors
+        {
+            let mut stopped = {
+                let mut goal_selector = self
+                    .mob_entity
+                    .goals_selector
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if can_break_doors {
+                    goal_selector.add_goal(1, Box::new(BreakDoorGoal::default()));
+                    Vec::new()
+                } else {
+                    goal_selector.remove_goals::<BreakDoorGoal>()
+                }
+            };
+            for goal in &mut stopped {
+                goal.stop(mob);
+            }
+        }
+    }
 }
 
 impl ZombieEntityBase {
@@ -131,6 +174,7 @@ impl ZombieEntityBase {
             mob_entity,
             restored_from_nbt: AtomicBool::new(false),
             is_leader: AtomicBool::new(false),
+            can_break_doors: AtomicBool::new(false),
         }
     }
 
@@ -141,30 +185,15 @@ impl ZombieEntityBase {
 
     /// Runs `Zombie::handleAttributes` (`Zombie.java:531-558`) once, and only for a genuine
     /// fresh spawn, recording the leader outcome in `is_leader`.
-    pub async fn roll_spawn_attributes(&self) {
+    pub fn roll_spawn_attributes(&self) {
         if self.restored_from_nbt.load(Ordering::Relaxed) {
             return;
         }
         let entity = &self.mob_entity.living_entity.entity;
         let world = entity.world.load_full();
         let difficulty = RegionalDifficulty::at(&world, entity.pos.load());
-        let is_leader = handle_attributes(
-            &self.mob_entity.living_entity,
-            difficulty.special_multiplier,
-        )
-        .await;
+        let is_leader = handle_attributes(&self.mob_entity.living_entity, difficulty.special_multiplier);
         self.is_leader.store(is_leader, Ordering::Relaxed);
-    }
-}
-
-impl NBTStorage for ZombieEntityBase {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        self.mob_entity.living_entity.write_nbt(nbt)
-    }
-
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        self.mark_restored_from_nbt();
-        self.mob_entity.living_entity.read_nbt_non_mut(nbt)
     }
 }
 
@@ -173,21 +202,90 @@ impl Mob for ZombieEntityBase {
         &self.mob_entity
     }
 
+    fn populate_default_equipment_slots(
+        &self,
+        _world: &Arc<World>,
+        difficulty: &RegionalDifficulty,
+    ) {
+        if rand::random::<f32>()
+            < MobEntity::MAX_WEARING_ARMOR_CHANCE * difficulty.special_multiplier
+        {
+            let mut armor_type = rand::random_range(0..3);
+            for _ in 1..=3 {
+                if rand::random::<f32>() < MobEntity::WEARING_ARMOR_UPGRADE_MATERIAL_CHANCE {
+                    armor_type += 1;
+                }
+            }
+            let partial_chance = if difficulty.base_difficulty == Difficulty::Hard {
+                0.1
+            } else {
+                0.25
+            };
+            let mut equipment = self
+                .mob_entity
+                .living_entity
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut first = true;
+            for slot in &MobEntity::EQUIPMENT_POPULATION_ORDER {
+                if !first && rand::random::<f32>() < partial_chance {
+                    break;
+                }
+                first = false;
+                if equipment.get(slot).is_empty()
+                    && let Some(item) = MobEntity::get_equipment_for_slot(slot, armor_type)
+                {
+                    equipment.put(slot, ItemStack::new(1, item));
+                }
+            }
+        }
+        let weapon_chance = if difficulty.base_difficulty == Difficulty::Hard {
+            0.05
+        } else {
+            0.01
+        };
+        if rand::random::<f32>() < weapon_chance {
+            let weapon_item = match rand::random_range(0..6) {
+                0 => &Item::IRON_SWORD,
+                1 => &Item::IRON_SPEAR,
+                _ => &Item::IRON_SHOVEL,
+            };
+            self.mob_entity
+                .living_entity
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .put(&EquipmentSlot::MAIN_HAND, ItemStack::new(1, weapon_item));
+        }
+    }
+
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        if self.can_break_doors() {
+            nbt.put_bool("CanBreakDoors", true);
+        }
+    }
+
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        self.mark_restored_from_nbt();
+        if let Some(can_break_doors) = nbt.get_bool("CanBreakDoors") {
+            self.set_can_break_doors(can_break_doors, self);
+        }
+    }
+
     /// Adds `Zombie::finalizeSpawn`'s `handleAttributes` call (`Zombie.java:505`) on top of the
     /// `Mob` default's baby-metadata send. That default is inlined rather than reached through
     /// `Mob::mob_init_data_tracker(self)`, which would resolve straight back into this override
     /// and recurse.
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            if entity.age.load(Ordering::Relaxed) < 0 {
-                entity.send_meta_data(
-                    &[Metadata::new(tracked_data::ageable_mob::DATA_BABY_ID, true)],
-                    None,
-                );
-            }
-            self.roll_spawn_attributes().await;
-        })
+    fn mob_init_data_tracker(&self) {
+        let entity = self.get_entity();
+        if entity.age.load(Ordering::Relaxed) < 0 {
+            entity.send_meta_data(
+                &[Metadata::new(tracked_data::ageable_mob::DATA_BABY_ID, true)],
+                None,
+            );
+        }
+        self.roll_spawn_attributes();
     }
 }
 
@@ -250,7 +348,7 @@ fn randomize_reinforcements_chance(living: &LivingEntity) {
 /// Divergence: vanilla skips the heal for `CONVERSION`/`LOAD`/`DIMENSION_TRAVEL` spawn
 /// reasons; Pumpkin has no spawn-reason plumbing, so callers only invoke this on a genuine
 /// fresh spawn, which covers the same intent.
-pub async fn handle_attributes(living: &LivingEntity, difficulty_modifier: f32) -> bool {
+pub fn handle_attributes(living: &LivingEntity, difficulty_modifier: f32) -> bool {
     randomize_reinforcements_chance(living);
 
     // `Zombie.java:533-535`: KNOCKBACK_RESISTANCE += random.nextDouble() * 0.05F.
@@ -302,7 +400,7 @@ pub async fn handle_attributes(living: &LivingEntity, difficulty_modifier: f32) 
         living.set_health(living.get_max_health());
     }
 
-    crate::entity::attributes::send_attribute_updates_for_living(living, touched).await;
+    crate::entity::attributes::send_attribute_updates_for_living(living, touched);
     is_leader
 }
 
@@ -318,13 +416,13 @@ pub async fn handle_attributes(living: &LivingEntity, difficulty_modifier: f32) 
 /// * `EntitySpawnReason.REINFORCEMENT` is passed as `SpawnRuleContext::Natural`, the only
 ///   non-worldgen context this codebase models.
 /// * positions in unloaded chunks are skipped instead of forcing a chunk load.
-pub async fn try_spawn_reinforcements(mob: &MobEntity, source: Option<&dyn EntityBase>) {
+pub fn try_spawn_reinforcements(mob: &MobEntity, source: Option<&dyn EntityBase>) {
     let living = &mob.living_entity;
     let entity = &living.entity;
     let world = entity.world.load_full();
 
     // `Zombie.java:289-292`: the current target, falling back to the attacker.
-    let target = if let Some(target) = mob.get_target().await {
+    let target = if let Some(target) = mob.get_target() {
         target
     } else {
         let Some(source) = source else {
@@ -362,7 +460,11 @@ pub async fn try_spawn_reinforcements(mob: &MobEntity, source: Option<&dyn Entit
     let base_y = pos.y.floor() as i32;
     let base_z = pos.z.floor() as i32;
     let entity_type = entity.entity_type;
-    let is_thundering = world.weather.lock().await.thundering;
+    let is_thundering = world
+        .weather
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .thundering;
 
     for _ in 0..REINFORCEMENT_ATTEMPTS {
         // `Zombie.java:304-306`: `Mth.nextInt` is inclusive on both bounds.
@@ -407,8 +509,7 @@ pub async fn try_spawn_reinforcements(mob: &MobEntity, source: Option<&dyn Entit
             // `Zombie.java:317`.
             reinforcement_mob
                 .get_mob_entity()
-                .set_target(Some(target.clone()))
-                .await;
+                .set_target(Some(target.clone()));
         }
         if let Some(reinforcement_living) = reinforcement.get_living_entity() {
             // `Zombie.java:327`.
@@ -440,7 +541,7 @@ pub async fn try_spawn_reinforcements(mob: &MobEntity, source: Option<&dyn Entit
         // `Zombie.java:318-319`: `finalizeSpawn` then `addFreshEntityWithPassengers`.
         // `World::spawn_entity` runs `init_data_tracker`, which is where this codebase's
         // `finalizeSpawn` equivalent (`Mob::mob_init_data_tracker`) lives.
-        world.spawn_entity(reinforcement).await;
+        world.spawn_entity(reinforcement);
         break;
     }
 }

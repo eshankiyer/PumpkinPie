@@ -8,11 +8,12 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase,
     ai::goal::{
         avoid_entity::AvoidEntityGoal, escape_danger::EscapeDangerGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
-        wander_around::WanderAroundGoal,
+        wander_around::WanderAroundGoal, swim::SwimGoal,
+        try_find_water::TryFindWaterGoal,
     },
     mob::{Mob, MobEntity, zombification},
     passive::frog::FrogEntity,
@@ -79,6 +80,10 @@ impl TadpoleEntity {
                 Box::new(AvoidEntityGoal::new(&EntityType::PLAYER, 8.0, 1.6, 1.4)),
             );
             goal_selector.add_goal(4, Box::new(WanderAroundGoal::new_with_interval(1.0, 40)));
+            // Upstream keeps the water-finding/swimming goals at priority 0. The fork's
+            // AbstractFish flee and interval-wander goals remain below them.
+            goal_selector.add_goal(0, Box::new(TryFindWaterGoal));
+            goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(
                 2,
                 LookAtEntityGoal::with_default(mob_weak, &EntityType::PLAYER, 6.0),
@@ -107,56 +112,46 @@ impl TadpoleEntity {
     }
 }
 
-impl NBTStorage for TadpoleEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            // `Tadpole.addAdditionalSaveData` (`Tadpole.java:113-117`).
-            nbt.put_int("Age", self.age.load(Relaxed));
-            nbt.put_bool("AgeLocked", self.is_age_locked());
-        })
-    }
-
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            // `Tadpole.readAdditionalSaveData` (`Tadpole.java:119-123`).
-            self.age.store(nbt.get_int("Age").unwrap_or(0), Relaxed);
-            self.age_locked
-                .store(nbt.get_bool("AgeLocked").unwrap_or(false), Relaxed);
-        })
-    }
-}
-
 impl Mob for TadpoleEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.get_entity().send_meta_data(
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        // `Tadpole.addAdditionalSaveData` (`Tadpole.java:113-117`).
+        nbt.put_int("Age", self.age.load(Relaxed));
+        nbt.put_bool("AgeLocked", self.is_age_locked());
+    }
+
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        // `Tadpole.readAdditionalSaveData` (`Tadpole.java:119-123`).
+        self.age.store(nbt.get_int("Age").unwrap_or(0), Relaxed);
+        self.age_locked
+            .store(nbt.get_bool("AgeLocked").unwrap_or(false), Relaxed);
+    }
+
+    fn mob_init_data_tracker(&self) {
+        self.get_entity().send_meta_data(
                 &[Metadata::new(
                     tracked_data::tadpole::AGE_LOCKED,
                     self.is_age_locked(),
                 )],
                 None,
-            );
-        })
+        );
     }
 
     /// `Tadpole.aiStep` (`Tadpole.java:103-106`) plus the growth check `setAge` performs
     /// (`Tadpole.java:231-236`).
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if !self.get_entity().is_alive() || self.is_age_locked() {
-                return;
-            }
+    fn mob_tick(&self, _caller: &dyn EntityBase) {
+        if !self.get_entity().is_alive() || self.is_age_locked() {
+            return;
+        }
 
-            let age = self.age.fetch_add(1, Relaxed) + 1;
-            if age >= TICKS_TO_BE_FROG {
-                self.grow_into_frog().await;
-            }
-        })
+        let age = self.age.fetch_add(1, Relaxed) + 1;
+        if age >= TICKS_TO_BE_FROG {
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(self.grow_into_frog());
+            });
+        }
     }
 }

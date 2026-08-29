@@ -29,6 +29,67 @@ real client attached, rather than by reading code alone.
 
 Two instruments, deliberately separate, because they answer different questions. Both are in-repo
 and reproducible.
+- [x] Configuration (toml)
+- [Tracking: Protocol](https://github.com/Pumpkin-MC/Pumpkin/issues/1401)
+  - [x] Server Status/Ping
+  - [x] Encryption
+  - [x] Packet Compression
+  - [x] Java Edition
+  - [x] Bedrock Edition (W.I.P)
+  - ...
+- [Tracking: World](https://github.com/Pumpkin-MC/Pumpkin/issues/1403)
+  - [x] Player Tab-list
+  - [x] Scoreboard
+  - [x] World Loading
+  - [x] World Time
+  - [x] World Borders
+  - [x] World Saving
+  - [x] Lighting
+  - [x] Entity Spawning
+  - [x] Bossbar
+  - [x] Chunk Loading (Vanilla, Linear, Pump)
+  - [Chunk Generation](https://github.com/Pumpkin-MC/Pumpkin/issues/36)
+  - [x] Chunk Saving (Vanilla, Linear, Pump)
+  - [Redstone](https://github.com/Pumpkin-MC/Pumpkin/issues/1402)
+  - [x] Liquid Physics
+  - ...
+- [Tracking: Player](https://github.com/Pumpkin-MC/Pumpkin/issues/1405)
+  - [x] Skins
+  - [x] Teleport
+  - [x] Movement
+  - [x] Animation
+  - [x] Inventory
+  - [Combat](https://github.com/Pumpkin-MC/Pumpkin/issues/1404)
+  - [x] Experience
+  - [x] Hunger
+  - [X] Off Hand
+  - [X] Advancements (W.I.P)
+  - [x] Eating
+  - ...
+- Entities
+  - [x] Non-Living (Minecart, Eggs...) (W.I.P)
+  - [x] Entity Effects
+  - [x] Players
+  - [x] Mobs (W.I.P)
+  - [x] Animals (W.I.P)
+  - [Entity AI](https://github.com/Pumpkin-MC/Pumpkin/issues/1406)
+  - [x] Boss (W.I.P)
+  - [x] Villagers (W.I.P)
+  - [X] Entity Saving
+- Server
+  - [Plugins](https://github.com/Pumpkin-MC/Pumpkin/issues/1407)
+  - [x] Query
+  - [x] RCON
+  - [x] Inventories
+  - [x] Particles
+  - [x] Chat
+  - [Commands](https://github.com/Pumpkin-MC/Pumpkin/issues/15)
+  - [x] Permissions
+  - [x] Translations
+- Proxy
+  - [x] [BungeeCord](https://github.com/SpigotMC/BungeeCord)
+  - [x] [BungeeGuard](https://github.com/lucko/BungeeGuard)
+  - [x] [Velocity](https://github.com/PaperMC/Velocity)
 
 ### Registry coverage: does an implementation exist at all?
 

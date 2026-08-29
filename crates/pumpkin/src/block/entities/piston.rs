@@ -1,7 +1,7 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::{pin::Pin, sync::Arc};
 
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::{Block, BlockDirection, BlockState};
@@ -83,7 +83,7 @@ impl PistonBlockEntity {
 
         for entity in world.get_entities_at_box(&swept) {
             let e = entity.get_entity();
-            if e.no_clip.load(Ordering::Relaxed) {
+            if e.no_physics.load(Ordering::Relaxed) {
                 continue;
             }
             // Player movement is client-authoritative; vanilla still nudges them
@@ -196,7 +196,7 @@ impl PistonBlockEntity {
         )
     }
 
-    pub async fn finish(&self, world: Arc<World>) {
+    pub fn finish(&self, world: &Arc<World>) {
         if self.last_progress.load() < 1.0 {
             let pos = self.position;
             world.remove_block_entity(&pos);
@@ -204,16 +204,10 @@ impl PistonBlockEntity {
                 let state = if self.source {
                     Block::AIR.default_state.id
                 } else {
-                    world
-                        .clone()
-                        .update_from_neighbor_shapes(self.pushed_block_state.id, &pos)
-                        .await
+                    world.update_from_neighbor_shapes(self.pushed_block_state.id, &pos)
                 };
-                world
-                    .clone()
-                    .set_block_state(&pos, state, BlockFlags::NOTIFY_ALL)
-                    .await;
-                world.update_neighbors(&pos, None).await;
+                world.set_block_state(&pos, state, BlockFlags::NOTIFY_ALL);
+                world.update_neighbors(&pos, None);
             }
         }
     }
@@ -233,79 +227,63 @@ impl BlockEntity for PistonBlockEntity {
         self.position
     }
 
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let current_progress = self.current_progress.load();
-            self.last_progress.store(current_progress);
-            if current_progress >= 1.0 {
-                let pos = self.position;
-                world.remove_block_entity(&pos);
-                if world.get_block(&pos) == &Block::MOVING_PISTON {
-                    if self.pushed_block_state.is_air() {
-                        world
-                            .clone()
-                            .set_block_state(
-                                &pos,
-                                self.pushed_block_state.id,
-                                BlockFlags::FORCE_STATE | BlockFlags::MOVED,
-                            )
-                            .await;
+    fn tick(&self, world: &Arc<World>) {
+        let current_progress = self.current_progress.load();
+        self.last_progress.store(current_progress);
+        if current_progress >= 1.0 {
+            let pos = self.position;
+            world.remove_block_entity(&pos);
+            if world.get_block(&pos) == &Block::MOVING_PISTON {
+                if self.pushed_block_state.is_air() {
+                    world.set_block_state(
+                        &pos,
+                        self.pushed_block_state.id,
+                        BlockFlags::FORCE_STATE | BlockFlags::MOVED,
+                    );
+                } else {
+                    let updated_state =
+                        world.update_from_neighbor_shapes(self.pushed_block_state.id, &pos);
+                    if BlockState::from_id(updated_state).is_air() {
+                        // PistonMovingBlockEntity.tick: the moved block can no longer
+                        // exist at its destination (e.g. an attached block lost its
+                        // support). Vanilla places it, then destroys it properly
+                        // (drops, block-break side effects) instead of it vanishing.
+                        world.set_block_state(
+                            &pos,
+                            self.pushed_block_state.id,
+                            BlockFlags::FORCE_STATE | BlockFlags::MOVED,
+                        );
+                        world.break_block(&pos, None, BlockFlags::MOVED);
                     } else {
-                        let updated_state = world
-                            .clone()
-                            .update_from_neighbor_shapes(self.pushed_block_state.id, &pos)
-                            .await;
-                        if BlockState::from_id(updated_state).is_air() {
-                            // PistonMovingBlockEntity.tick: the moved block can no longer
-                            // exist at its destination (e.g. an attached block lost its
-                            // support). Vanilla places it, then destroys it properly
-                            // (drops, block-break side effects) instead of it vanishing.
-                            world
-                                .clone()
-                                .set_block_state(
-                                    &pos,
-                                    self.pushed_block_state.id,
-                                    BlockFlags::FORCE_STATE | BlockFlags::MOVED,
-                                )
-                                .await;
-                            world
-                                .clone()
-                                .break_block(&pos, None, BlockFlags::MOVED)
-                                .await;
+                        // PistonMovingBlockEntity.tick: a piston-moved block never
+                        // arrives waterlogged, even if update_from_neighbor_shapes
+                        // recomputed it that way.
+                        let block = Block::from_state_id(updated_state);
+                        let final_state = if block.is_waterlogged(updated_state) {
+                            let mut props = block.properties(updated_state).unwrap().to_props();
+                            if let Some(entry) =
+                                props.iter_mut().find(|(k, _)| *k == "waterlogged")
+                            {
+                                entry.1 = "false";
+                            }
+                            block.from_properties(&props).to_state_id(block)
                         } else {
-                            // PistonMovingBlockEntity.tick: a piston-moved block never
-                            // arrives waterlogged, even if update_from_neighbor_shapes
-                            // recomputed it that way.
-                            let block = Block::from_state_id(updated_state);
-                            let final_state = if block.is_waterlogged(updated_state) {
-                                let mut props = block.properties(updated_state).unwrap().to_props();
-                                if let Some(entry) =
-                                    props.iter_mut().find(|(k, _)| *k == "waterlogged")
-                                {
-                                    entry.1 = "false";
-                                }
-                                block.from_properties(&props).to_state_id(block)
-                            } else {
-                                updated_state
-                            };
-                            world
-                                .clone()
-                                .set_block_state(
-                                    &pos,
-                                    final_state,
-                                    BlockFlags::NOTIFY_ALL | BlockFlags::MOVED,
-                                )
-                                .await;
-                            world.clone().update_neighbors(&pos, None).await;
-                        }
+                            updated_state
+                        };
+                        world.set_block_state(
+                            &pos,
+                            final_state,
+                            BlockFlags::NOTIFY_ALL | BlockFlags::MOVED,
+                        );
+                        world.update_neighbors(&pos, None);
                     }
                 }
-                return;
             }
-            let new_progress = (current_progress + 0.5).min(1.0);
-            self.push_entities(world, new_progress);
-            self.current_progress.store(new_progress);
-        })
+            return;
+        }
+        let new_progress = (current_progress + 0.5).min(1.0);
+        self.push_entities(world, new_progress);
+        self.current_progress.store(new_progress);
     }
 
     fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound, position: BlockPos) -> Self
@@ -329,17 +307,12 @@ impl BlockEntity for PistonBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            // TODO: pushed_block_state
-            nbt.put_byte(FACING, self.facing.to_index() as i8);
-            nbt.put_float(LAST_PROGRESS, self.last_progress.load());
-            nbt.put_bool(EXTENDING, self.extending);
-            nbt.put_bool(SOURCE, self.source);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        // TODO: pushed_block_state
+        nbt.put_byte(FACING, self.facing.to_index() as i8);
+        nbt.put_float(LAST_PROGRESS, self.last_progress.load());
+        nbt.put_bool(EXTENDING, self.extending);
+        nbt.put_bool(SOURCE, self.source);
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {

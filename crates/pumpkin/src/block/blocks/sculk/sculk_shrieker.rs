@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::block::entities::sculk_shrieker::SculkShriekerBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, OnEntityStepArgs, OnPlaceArgs,
+    BlockBehaviour, BlockMetadata, BrokenArgs, OnEntityStepArgs, OnPlaceArgs,
     OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs,
 };
 use crate::entity::experience_orb::ExperienceOrbEntity;
@@ -18,16 +18,23 @@ use crate::world::game_event::{
     GameEventContext, GameEventFuture, GameEventListener, PositionSource,
 };
 use pumpkin_data::game_event::GameEvent;
+use pumpkin_data::potion::Effect;
 use pumpkin_data::{
     BlockId, BlockStateId,
     block_properties::{BlockProperties, SculkShriekerLikeProperties},
+    effect::StatusEffect,
+    sound::{Sound, SoundCategory},
 };
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
+use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockFlags;
 
 /// `SculkShriekerBlockEntity.VibrationUser.LISTENER_RADIUS` (line 176).
 const LISTENER_RADIUS: i32 = 8;
+const SHRIEK_TICKS: u8 = 90;
+const DARKNESS_RADIUS: f64 = 40.0;
+const DARKNESS_DURATION: i32 = 260;
 
 pub struct SculkShriekerBlock;
 
@@ -43,6 +50,52 @@ impl BlockMetadata for SculkShriekerBlock {
 /// `WARDEN_CAN_LISTEN` directly - `GameEvent` carries no `Taggable` impl.
 const fn shrieker_can_listen(event: &GameEvent) -> bool {
     matches!(event, GameEvent::SculkSensorTendrilsClicking)
+}
+
+impl SculkShriekerBlock {
+    pub fn try_activate(world: &Arc<World>, pos: &BlockPos) -> bool {
+        let block = world.get_block(pos);
+        if block.id != BlockId::SCULK_SHRIEKER {
+            return false;
+        }
+        let state = world.get_block_state(pos);
+        let mut props = SculkShriekerLikeProperties::from_state_id(state.id, block);
+        if props.shrieking {
+            return false;
+        }
+        props.shrieking = true;
+        world.set_block_state(pos, props.to_state_id(block), BlockFlags::NOTIFY_ALL);
+        world.play_sound(
+            Sound::BlockSculkShriekerShriek,
+            SoundCategory::Blocks,
+            &pos.to_f64(),
+        );
+        world.schedule_block_tick(block, *pos, SHRIEK_TICKS, TickPriority::Normal);
+        let center = pos.to_centered_f64();
+        for player in world.get_nearby_players(center, DARKNESS_RADIUS) {
+            let darkness = Effect {
+                effect_type: &StatusEffect::DARKNESS,
+                duration: DARKNESS_DURATION,
+                amplifier: 0,
+                ambient: false,
+                show_particles: false,
+                show_icon: true,
+                blend: true,
+            };
+            player.send_effect(&darkness);
+            player.living_entity.add_effect(darkness);
+        }
+        if let Some(entity) = world.get_block_entity(pos)
+            && let Some(shrieker) = entity.as_any().downcast_ref::<SculkShriekerBlockEntity>()
+        {
+            let mut level = shrieker
+                .warning_level
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            *level = (*level + 1).min(4);
+        }
+        true
+    }
 }
 
 /// `SculkShriekerBlockEntity.VibrationUser` (lines 175-224).
@@ -70,7 +123,10 @@ impl GameEventListener for ShriekerListener {
             if !shrieker_can_listen(event) {
                 return false;
             }
-            let (block, state) = world.get_block_and_state(&self.pos);
+
+
+
+        let (block, state) = world.get_block_and_state(&self.pos);
             if block.id != BlockId::SCULK_SHRIEKER {
                 return false;
             }
@@ -121,52 +177,54 @@ async fn try_get_player(
 impl BlockBehaviour for SculkShriekerBlock {
     /// `SculkShriekerBlock.spawnAfterBreak` (`SculkShriekerBlock.java:128-133`): after the
     /// normal player-break path, a break eligible for experience emits five XP.
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if args.player.gamemode.load() != pumpkin_util::GameMode::Creative
+    fn broken(&self, args: BrokenArgs<'_>) {
+        if args.player.gamemode.load() != pumpkin_util::GameMode::Creative
                 && args.player.gamemode.load() != pumpkin_util::GameMode::Spectator
                 && args.world.level_info.load().game_rules.block_drops
-            {
-                ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), 5).await;
-            }
-        })
+        {
+            let world = args.world.clone();
+            let position = args.position.to_centered_f64();
+            tokio::spawn(async move { ExperienceOrbEntity::spawn(&world, position, 5).await });
+        }
     }
 
     /// `getStateForPlacement` (lines 117-120).
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = SculkShriekerLikeProperties::default(args.block);
-            props.shrieking = false;
-            props.waterlogged = args.replacing.water_source();
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = SculkShriekerLikeProperties::default(args.block);
+        props.shrieking = false;
+        props.waterlogged = args.replacing.water_source();
+        props.to_state_id(args.block)
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            args.world
-                .register_game_event_listener(Arc::new(ShriekerListener {
-                    pos: *args.position,
-                }))
+    fn placed(&self, args: PlacedArgs<'_>) {
+        let world = args.world.clone();
+        let pos = *args.position;
+        tokio::spawn(async move {
+            world
+                .register_game_event_listener(Arc::new(ShriekerListener { pos }))
                 .await;
-        })
+        });
     }
 
-    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            args.world
-                .unregister_game_event_listener_at(args.position)
-                .await;
-        })
+    fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
+        let world = args.world.clone();
+        let pos = *args.position;
+        tokio::spawn(async move { world.unregister_game_event_listener_at(&pos).await });
     }
 
     /// `stepOn` (lines 59-69).
-    fn on_entity_step<'a>(&'a self, args: OnEntityStepArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(player) = try_get_player(args.world, args.entity).await else {
+    fn on_entity_step(&self, args: OnEntityStepArgs<'_>) {
+        let world = args.world.clone();
+        let pos = *args.position;
+        let entity_uuid = args.entity.get_entity().entity_uuid;
+        tokio::spawn(async move {
+            let Some(entity) = world.get_entity_by_uuid(entity_uuid) else {
                 return;
             };
-            let Some(block_entity) = args.world.get_block_entity(args.position) else {
+            let Some(player) = try_get_player(&world, entity.as_ref()).await else {
+                return;
+            };
+            let Some(block_entity) = world.get_block_entity(&pos) else {
                 return;
             };
             let Some(shrieker) = block_entity
@@ -175,37 +233,34 @@ impl BlockBehaviour for SculkShriekerBlock {
             else {
                 return;
             };
-            shrieker.try_shriek(args.world, &player).await;
-        })
+            shrieker.try_shriek(&world, &player).await;
+        });
     }
 
     /// `tick` (lines 71-77): the shriek ends and the shrieker responds.
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
             let state = args.world.get_block_state(args.position);
             let mut props = SculkShriekerLikeProperties::from_state_id(state.id, args.block);
             if !props.shrieking {
                 return;
             }
             props.shrieking = false;
-            args.world
-                .set_block_state(
-                    args.position,
-                    props.to_state_id(args.block),
-                    BlockFlags::NOTIFY_ALL,
-                )
-                .await;
+            args.world.set_block_state(
+                args.position,
+                props.to_state_id(args.block),
+                BlockFlags::NOTIFY_ALL,
+            );
 
-            let Some(block_entity) = args.world.get_block_entity(args.position) else {
-                return;
-            };
-            let Some(shrieker) = block_entity
-                .as_any()
-                .downcast_ref::<SculkShriekerBlockEntity>()
-            else {
-                return;
-            };
-            shrieker.try_respond(args.world).await;
-        })
+            let world = args.world.clone();
+            let pos = *args.position;
+            tokio::spawn(async move {
+                if let Some(block_entity) = world.get_block_entity(&pos)
+                    && let Some(shrieker) = block_entity
+                        .as_any()
+                        .downcast_ref::<SculkShriekerBlockEntity>()
+                {
+                    shrieker.try_respond(&world).await;
+                }
+            });
     }
 }

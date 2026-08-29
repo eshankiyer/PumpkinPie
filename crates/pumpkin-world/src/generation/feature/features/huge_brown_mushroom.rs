@@ -1,9 +1,22 @@
-use pumpkin_data::Block;
-use pumpkin_data::block_properties::{BlockProperties, BrownMushroomBlockLikeProperties, is_air};
+use pumpkin_data::{
+    Block, BlockState,
+    block_properties::{BlockProperties, BrownMushroomBlockLikeProperties, is_air},
+};
+use pumpkin_util::{
+    math::position::BlockPos,
+    random::{RandomGenerator, RandomImpl},
+};
 use pumpkin_data::tag;
-use pumpkin_util::{math::position::BlockPos, random::RandomGenerator, random::RandomImpl};
 
 use crate::generation::proto_chunk::GenerationCache;
+
+pub fn mushroom_tree_height(random: &mut RandomGenerator) -> i32 {
+    let mut height = random.next_bounded_i32(3) + 4;
+    if random.next_bounded_i32(12) == 0 {
+        height *= 2;
+    }
+    height
+}
 
 pub struct HugeBrownMushroomFeature;
 
@@ -97,18 +110,27 @@ impl HugeBrownMushroomFeature {
         random: &mut RandomGenerator,
         pos: BlockPos,
     ) -> bool {
-        let height = random.next_bounded_i32(3) + 4;
+        let tree_height = mushroom_tree_height(random);
 
-        if !self.is_valid_position(chunk, pos, height) {
+        if !self.is_valid_position(chunk, pos, tree_height) {
             return false;
         }
 
-        for i in 0..height {
+        let stem_props = BrownMushroomBlockLikeProperties {
+            up: false,
+            down: false,
+            north: true,
+            east: true,
+            south: true,
+            west: true,
+        };
+        let stem_state = BlockState::from_id(stem_props.to_state_id(&Block::MUSHROOM_STEM));
+        for i in 0..tree_height {
             let stem_pos = BlockPos::new(pos.0.x, pos.0.y + i, pos.0.z);
-            chunk.set_block_state(&stem_pos.0, Block::MUSHROOM_STEM.default_state);
+            chunk.set_block_state(&stem_pos.0, stem_state);
         }
 
-        Self::make_cap(chunk, pos, height);
+        Self::make_cap(chunk, pos, tree_height);
         true
     }
 }

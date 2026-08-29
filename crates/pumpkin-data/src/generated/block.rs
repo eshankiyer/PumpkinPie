@@ -635830,6105 +635830,1856 @@ impl Block {
     #[track_caller]
     #[doc = r" Get the properties of the block."]
     pub fn properties(&self, state_id: BlockStateId) -> Option<Box<dyn BlockProperties>> {
-        Some(match self.id.as_u16() {
-            844 => Box::new(GrindstoneLikeProperties::from_state_id(
-                state_id,
-                &Block::GRINDSTONE,
-            )),
-            258 => Box::new(LeverLikeProperties::from_state_id(state_id, &Block::LEVER)),
-            275 => Box::new(LeverLikeProperties::from_state_id(
-                state_id,
-                &Block::STONE_BUTTON,
-            )),
-            443 => Box::new(LeverLikeProperties::from_state_id(
-                state_id,
-                &Block::OAK_BUTTON,
-            )),
-            444 => Box::new(LeverLikeProperties::from_state_id(
-                state_id,
-                &Block::SPRUCE_BUTTON,
-            )),
-            445 => Box::new(LeverLikeProperties::from_state_id(
-                state_id,
-                &Block::BIRCH_BUTTON,
-            )),
-            446 => Box::new(LeverLikeProperties::from_state_id(
-                state_id,
-                &Block::JUNGLE_BUTTON,
-            )),
-            447 => Box::new(LeverLikeProperties::from_state_id(
-                state_id,
-                &Block::ACACIA_BUTTON,
-            )),
-            448 => Box::new(LeverLikeProperties::from_state_id(
-                state_id,
-                &Block::CHERRY_BUTTON,
-            )),
-            449 => Box::new(LeverLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_OAK_BUTTON,
-            )),
-            450 => Box::new(LeverLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_OAK_BUTTON,
-            )),
-            451 => Box::new(LeverLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_BUTTON,
-            )),
-            452 => Box::new(LeverLikeProperties::from_state_id(
-                state_id,
-                &Block::BAMBOO_BUTTON,
-            )),
-            897 => Box::new(LeverLikeProperties::from_state_id(
-                state_id,
-                &Block::CRIMSON_BUTTON,
-            )),
-            898 => Box::new(LeverLikeProperties::from_state_id(
-                state_id,
-                &Block::WARPED_BUTTON,
-            )),
-            939 => Box::new(LeverLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_BLACKSTONE_BUTTON,
-            )),
-            369 => Box::new(OakFenceGateLikeProperties::from_state_id(
-                state_id,
-                &Block::OAK_FENCE_GATE,
-            )),
-            628 => Box::new(OakFenceGateLikeProperties::from_state_id(
-                state_id,
-                &Block::SPRUCE_FENCE_GATE,
-            )),
-            629 => Box::new(OakFenceGateLikeProperties::from_state_id(
-                state_id,
-                &Block::BIRCH_FENCE_GATE,
-            )),
-            630 => Box::new(OakFenceGateLikeProperties::from_state_id(
-                state_id,
-                &Block::JUNGLE_FENCE_GATE,
-            )),
-            631 => Box::new(OakFenceGateLikeProperties::from_state_id(
-                state_id,
-                &Block::ACACIA_FENCE_GATE,
-            )),
-            632 => Box::new(OakFenceGateLikeProperties::from_state_id(
-                state_id,
-                &Block::CHERRY_FENCE_GATE,
-            )),
-            633 => Box::new(OakFenceGateLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_OAK_FENCE_GATE,
-            )),
-            634 => Box::new(OakFenceGateLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_OAK_FENCE_GATE,
-            )),
-            635 => Box::new(OakFenceGateLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_FENCE_GATE,
-            )),
-            636 => Box::new(OakFenceGateLikeProperties::from_state_id(
-                state_id,
-                &Block::BAMBOO_FENCE_GATE,
-            )),
-            893 => Box::new(OakFenceGateLikeProperties::from_state_id(
-                state_id,
-                &Block::CRIMSON_FENCE_GATE,
-            )),
-            894 => Box::new(OakFenceGateLikeProperties::from_state_id(
-                state_id,
-                &Block::WARPED_FENCE_GATE,
-            )),
-            20 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_OAK_WOOD,
-            )),
-            49 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::OAK_LOG,
-            )),
-            50 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::SPRUCE_LOG,
-            )),
-            51 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::BIRCH_LOG,
-            )),
-            52 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::JUNGLE_LOG,
-            )),
-            53 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::ACACIA_LOG,
-            )),
-            54 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::CHERRY_LOG,
-            )),
-            55 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_OAK_LOG,
-            )),
-            56 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_OAK_LOG,
-            )),
-            57 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_LOG,
-            )),
-            59 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::MUDDY_MANGROVE_ROOTS,
-            )),
-            60 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::BAMBOO_BLOCK,
-            )),
-            61 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_SPRUCE_LOG,
-            )),
-            62 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_BIRCH_LOG,
-            )),
-            63 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_JUNGLE_LOG,
-            )),
-            64 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_ACACIA_LOG,
-            )),
-            65 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_CHERRY_LOG,
-            )),
-            66 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_DARK_OAK_LOG,
-            )),
-            67 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_PALE_OAK_LOG,
-            )),
-            68 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_OAK_LOG,
-            )),
-            69 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_MANGROVE_LOG,
-            )),
-            70 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_BAMBOO_BLOCK,
-            )),
-            71 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::OAK_WOOD,
-            )),
-            72 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::SPRUCE_WOOD,
-            )),
-            73 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::BIRCH_WOOD,
-            )),
-            74 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::JUNGLE_WOOD,
-            )),
-            75 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::ACACIA_WOOD,
-            )),
-            76 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::CHERRY_WOOD,
-            )),
-            77 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_OAK_WOOD,
-            )),
-            78 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_WOOD,
-            )),
-            79 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_OAK_WOOD,
-            )),
-            80 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_SPRUCE_WOOD,
-            )),
-            81 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_BIRCH_WOOD,
-            )),
-            82 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_JUNGLE_WOOD,
-            )),
-            83 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_ACACIA_WOOD,
-            )),
-            84 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_CHERRY_WOOD,
-            )),
-            85 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_DARK_OAK_WOOD,
-            )),
-            86 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_PALE_OAK_WOOD,
-            )),
-            87 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_MANGROVE_WOOD,
-            )),
-            288 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::BASALT,
-            )),
-            289 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_BASALT,
-            )),
-            480 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::QUARTZ_PILLAR,
-            )),
-            537 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::HAY_BLOCK,
-            )),
-            659 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::PURPUR_PILLAR,
-            )),
-            674 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::BONE_BLOCK,
-            )),
-            862 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::WARPED_STEM,
-            )),
-            863 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_WARPED_STEM,
-            )),
-            864 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::WARPED_HYPHAE,
-            )),
-            865 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_WARPED_HYPHAE,
-            )),
-            871 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::CRIMSON_STEM,
-            )),
-            872 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_CRIMSON_STEM,
-            )),
-            873 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::CRIMSON_HYPHAE,
-            )),
-            874 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::STRIPPED_CRIMSON_HYPHAE,
-            )),
-            1151 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::DEEPSLATE,
-            )),
-            1171 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::INFESTED_DEEPSLATE,
-            )),
-            1178 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::OCHRE_FROGLIGHT,
-            )),
-            1179 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::VERDANT_FROGLIGHT,
-            )),
-            1180 => Box::new(PaleOakWoodLikeProperties::from_state_id(
-                state_id,
-                &Block::PEARLESCENT_FROGLIGHT,
-            )),
-            199 => Box::new(CreakingHeartLikeProperties::from_state_id(
-                state_id,
-                &Block::CREAKING_HEART,
-            )),
-            350 => Box::new(IronChainLikeProperties::from_state_id(
-                state_id,
-                &Block::IRON_CHAIN,
-            )),
-            351 => Box::new(IronChainLikeProperties::from_state_id(
-                state_id,
-                &Block::COPPER_CHAIN,
-            )),
-            352 => Box::new(IronChainLikeProperties::from_state_id(
-                state_id,
-                &Block::EXPOSED_COPPER_CHAIN,
-            )),
-            353 => Box::new(IronChainLikeProperties::from_state_id(
-                state_id,
-                &Block::WEATHERED_COPPER_CHAIN,
-            )),
-            354 => Box::new(IronChainLikeProperties::from_state_id(
-                state_id,
-                &Block::OXIDIZED_COPPER_CHAIN,
-            )),
-            355 => Box::new(IronChainLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_COPPER_CHAIN,
-            )),
-            356 => Box::new(IronChainLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_EXPOSED_COPPER_CHAIN,
-            )),
-            357 => Box::new(IronChainLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_WEATHERED_COPPER_CHAIN,
-            )),
-            358 => Box::new(IronChainLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_OXIDIZED_COPPER_CHAIN,
-            )),
-            298 => Box::new(CakeLikeProperties::from_state_id(state_id, &Block::CAKE)),
-            283 => Box::new(JukeboxLikeProperties::from_state_id(
-                state_id,
-                &Block::JUKEBOX,
-            )),
-            126 => Box::new(PoweredRailLikeProperties::from_state_id(
-                state_id,
-                &Block::POWERED_RAIL,
-            )),
-            127 => Box::new(PoweredRailLikeProperties::from_state_id(
-                state_id,
-                &Block::DETECTOR_RAIL,
-            )),
-            482 => Box::new(PoweredRailLikeProperties::from_state_id(
-                state_id,
-                &Block::ACTIVATOR_RAIL,
-            )),
-            747 => Box::new(DriedGhastLikeProperties::from_state_id(
-                state_id,
-                &Block::DRIED_GHAST,
-            )),
-            200 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::OAK_STAIRS,
-            )),
-            223 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::COBBLESTONE_STAIRS,
-            )),
-            370 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::BRICK_STAIRS,
-            )),
-            371 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::STONE_BRICK_STAIRS,
-            )),
-            372 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::MUD_BRICK_STAIRS,
-            )),
-            377 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::RESIN_BRICK_STAIRS,
-            )),
-            383 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::NETHER_BRICK_STAIRS,
-            )),
-            397 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::SANDSTONE_STAIRS,
-            )),
-            404 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::SPRUCE_STAIRS,
-            )),
-            405 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::BIRCH_STAIRS,
-            )),
-            406 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::JUNGLE_STAIRS,
-            )),
-            481 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::QUARTZ_STAIRS,
-            )),
-            516 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::ACACIA_STAIRS,
-            )),
-            517 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::CHERRY_STAIRS,
-            )),
-            518 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_OAK_STAIRS,
-            )),
-            519 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_OAK_STAIRS,
-            )),
-            520 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_STAIRS,
-            )),
-            521 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::BAMBOO_STAIRS,
-            )),
-            522 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::BAMBOO_MOSAIC_STAIRS,
-            )),
-            530 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::PRISMARINE_STAIRS,
-            )),
-            531 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::PRISMARINE_BRICK_STAIRS,
-            )),
-            532 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_PRISMARINE_STAIRS,
-            )),
-            598 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::RED_SANDSTONE_STAIRS,
-            )),
-            660 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::PURPUR_STAIRS,
-            )),
-            797 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_GRANITE_STAIRS,
-            )),
-            798 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::SMOOTH_RED_SANDSTONE_STAIRS,
-            )),
-            799 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::MOSSY_STONE_BRICK_STAIRS,
-            )),
-            800 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_DIORITE_STAIRS,
-            )),
-            801 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::MOSSY_COBBLESTONE_STAIRS,
-            )),
-            802 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::END_STONE_BRICK_STAIRS,
-            )),
-            803 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::STONE_STAIRS,
-            )),
-            804 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::SMOOTH_SANDSTONE_STAIRS,
-            )),
-            805 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::SMOOTH_QUARTZ_STAIRS,
-            )),
-            806 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::GRANITE_STAIRS,
-            )),
-            807 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::ANDESITE_STAIRS,
-            )),
-            808 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::RED_NETHER_BRICK_STAIRS,
-            )),
-            809 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_ANDESITE_STAIRS,
-            )),
-            810 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::DIORITE_STAIRS,
-            )),
-            895 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::CRIMSON_STAIRS,
-            )),
-            896 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::WARPED_STAIRS,
-            )),
-            925 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::BLACKSTONE_STAIRS,
-            )),
-            933 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_BLACKSTONE_BRICK_STAIRS,
-            )),
-            936 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_BLACKSTONE_STAIRS,
-            )),
-            986 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::TUFF_STAIRS,
-            )),
-            990 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_TUFF_STAIRS,
-            )),
-            995 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::TUFF_BRICK_STAIRS,
-            )),
-            1001 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::SULFUR_STAIRS,
-            )),
-            1005 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_SULFUR_STAIRS,
-            )),
-            1009 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::SULFUR_BRICK_STAIRS,
-            )),
-            1014 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::CINNABAR_STAIRS,
-            )),
-            1018 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_CINNABAR_STAIRS,
-            )),
-            1022 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::CINNABAR_BRICK_STAIRS,
-            )),
-            1060 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::CUT_COPPER_STAIRS,
-            )),
-            1061 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::EXPOSED_CUT_COPPER_STAIRS,
-            )),
-            1062 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::WEATHERED_CUT_COPPER_STAIRS,
-            )),
-            1063 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::OXIDIZED_CUT_COPPER_STAIRS,
-            )),
-            1064 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_CUT_COPPER_STAIRS,
-            )),
-            1065 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_EXPOSED_CUT_COPPER_STAIRS,
-            )),
-            1066 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_WEATHERED_CUT_COPPER_STAIRS,
-            )),
-            1067 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_OXIDIZED_CUT_COPPER_STAIRS,
-            )),
-            1153 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::COBBLED_DEEPSLATE_STAIRS,
-            )),
-            1157 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_DEEPSLATE_STAIRS,
-            )),
-            1161 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::DEEPSLATE_TILE_STAIRS,
-            )),
-            1165 => Box::new(OakStairsLikeProperties::from_state_id(
-                state_id,
-                &Block::DEEPSLATE_BRICK_STAIRS,
-            )),
-            128 => Box::new(StickyPistonLikeProperties::from_state_id(
-                state_id,
-                &Block::STICKY_PISTON,
-            )),
-            138 => Box::new(StickyPistonLikeProperties::from_state_id(
-                state_id,
-                &Block::PISTON,
-            )),
-            220 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::OAK_DOOR,
-            )),
-            260 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::IRON_DOOR,
-            )),
-            646 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::SPRUCE_DOOR,
-            )),
-            647 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::BIRCH_DOOR,
-            )),
-            648 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::JUNGLE_DOOR,
-            )),
-            649 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::ACACIA_DOOR,
-            )),
-            650 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::CHERRY_DOOR,
-            )),
-            651 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_OAK_DOOR,
-            )),
-            652 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_OAK_DOOR,
-            )),
-            653 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_DOOR,
-            )),
-            654 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::BAMBOO_DOOR,
-            )),
-            899 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::CRIMSON_DOOR,
-            )),
-            900 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::WARPED_DOOR,
-            )),
-            1076 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::COPPER_DOOR,
-            )),
-            1077 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::EXPOSED_COPPER_DOOR,
-            )),
-            1078 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::WEATHERED_COPPER_DOOR,
-            )),
-            1079 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::OXIDIZED_COPPER_DOOR,
-            )),
-            1080 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_COPPER_DOOR,
-            )),
-            1081 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_EXPOSED_COPPER_DOOR,
-            )),
-            1082 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_WEATHERED_COPPER_DOOR,
-            )),
-            1083 => Box::new(OakDoorLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_OXIDIZED_COPPER_DOOR,
-            )),
-            179 => Box::new(ChiseledBookshelfLikeProperties::from_state_id(
-                state_id,
-                &Block::CHISELED_BOOKSHELF,
-            )),
-            657 => Box::new(ChorusFlowerLikeProperties::from_state_id(
-                state_id,
-                &Block::CHORUS_FLOWER,
-            )),
-            279 => Box::new(CactusLikeProperties::from_state_id(
-                state_id,
-                &Block::CACTUS,
-            )),
-            282 => Box::new(CactusLikeProperties::from_state_id(
-                state_id,
-                &Block::SUGAR_CANE,
-            )),
-            196 => Box::new(FireLikeProperties::from_state_id(state_id, &Block::FIRE)),
-            110 => Box::new(WhiteBedLikeProperties::from_state_id(
-                state_id,
-                &Block::WHITE_BED,
-            )),
-            111 => Box::new(WhiteBedLikeProperties::from_state_id(
-                state_id,
-                &Block::ORANGE_BED,
-            )),
-            112 => Box::new(WhiteBedLikeProperties::from_state_id(
-                state_id,
-                &Block::MAGENTA_BED,
-            )),
-            113 => Box::new(WhiteBedLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHT_BLUE_BED,
-            )),
-            114 => Box::new(WhiteBedLikeProperties::from_state_id(
-                state_id,
-                &Block::YELLOW_BED,
-            )),
-            115 => Box::new(WhiteBedLikeProperties::from_state_id(
-                state_id,
-                &Block::LIME_BED,
-            )),
-            116 => Box::new(WhiteBedLikeProperties::from_state_id(
-                state_id,
-                &Block::PINK_BED,
-            )),
-            117 => Box::new(WhiteBedLikeProperties::from_state_id(
-                state_id,
-                &Block::GRAY_BED,
-            )),
-            118 => Box::new(WhiteBedLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHT_GRAY_BED,
-            )),
-            119 => Box::new(WhiteBedLikeProperties::from_state_id(
-                state_id,
-                &Block::CYAN_BED,
-            )),
-            120 => Box::new(WhiteBedLikeProperties::from_state_id(
-                state_id,
-                &Block::PURPLE_BED,
-            )),
-            121 => Box::new(WhiteBedLikeProperties::from_state_id(
-                state_id,
-                &Block::BLUE_BED,
-            )),
-            122 => Box::new(WhiteBedLikeProperties::from_state_id(
-                state_id,
-                &Block::BROWN_BED,
-            )),
-            123 => Box::new(WhiteBedLikeProperties::from_state_id(
-                state_id,
-                &Block::GREEN_BED,
-            )),
-            124 => Box::new(WhiteBedLikeProperties::from_state_id(
-                state_id,
-                &Block::RED_BED,
-            )),
-            125 => Box::new(WhiteBedLikeProperties::from_state_id(
-                state_id,
-                &Block::BLACK_BED,
-            )),
-            477 => Box::new(HopperLikeProperties::from_state_id(
-                state_id,
-                &Block::HOPPER,
-            )),
-            1029 => Box::new(CalibratedSculkSensorLikeProperties::from_state_id(
-                state_id,
-                &Block::CALIBRATED_SCULK_SENSOR,
-            )),
-            1028 => Box::new(SculkSensorLikeProperties::from_state_id(
-                state_id,
-                &Block::SCULK_SENSOR,
-            )),
-            1189 => Box::new(PaleMossCarpetLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_MOSS_CARPET,
-            )),
-            837 => Box::new(ScaffoldingLikeProperties::from_state_id(
-                state_id,
-                &Block::SCAFFOLDING,
-            )),
-            1186 => Box::new(VaultLikeProperties::from_state_id(state_id, &Block::VAULT)),
-            1185 => Box::new(TrialSpawnerLikeProperties::from_state_id(
-                state_id,
-                &Block::TRIAL_SPAWNER,
-            )),
-            1033 => Box::new(SculkShriekerLikeProperties::from_state_id(
-                state_id,
-                &Block::SCULK_SHRIEKER,
-            )),
-            848 => Box::new(BellLikeProperties::from_state_id(state_id, &Block::BELL)),
-            180 => Box::new(AcaciaShelfLikeProperties::from_state_id(
-                state_id,
-                &Block::ACACIA_SHELF,
-            )),
-            181 => Box::new(AcaciaShelfLikeProperties::from_state_id(
-                state_id,
-                &Block::BAMBOO_SHELF,
-            )),
-            182 => Box::new(AcaciaShelfLikeProperties::from_state_id(
-                state_id,
-                &Block::BIRCH_SHELF,
-            )),
-            183 => Box::new(AcaciaShelfLikeProperties::from_state_id(
-                state_id,
-                &Block::CHERRY_SHELF,
-            )),
-            184 => Box::new(AcaciaShelfLikeProperties::from_state_id(
-                state_id,
-                &Block::CRIMSON_SHELF,
-            )),
-            185 => Box::new(AcaciaShelfLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_OAK_SHELF,
-            )),
-            186 => Box::new(AcaciaShelfLikeProperties::from_state_id(
-                state_id,
-                &Block::JUNGLE_SHELF,
-            )),
-            187 => Box::new(AcaciaShelfLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_SHELF,
-            )),
-            188 => Box::new(AcaciaShelfLikeProperties::from_state_id(
-                state_id,
-                &Block::OAK_SHELF,
-            )),
-            189 => Box::new(AcaciaShelfLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_OAK_SHELF,
-            )),
-            190 => Box::new(AcaciaShelfLikeProperties::from_state_id(
-                state_id,
-                &Block::SPRUCE_SHELF,
-            )),
-            191 => Box::new(AcaciaShelfLikeProperties::from_state_id(
-                state_id,
-                &Block::WARPED_SHELF,
-            )),
-            299 => Box::new(RepeaterLikeProperties::from_state_id(
-                state_id,
-                &Block::REPEATER,
-            )),
-            918 => Box::new(RespawnAnchorLikeProperties::from_state_id(
-                state_id,
-                &Block::RESPAWN_ANCHOR,
-            )),
-            386 => Box::new(BrewingStandLikeProperties::from_state_id(
-                state_id,
-                &Block::BREWING_STAND,
-            )),
-            276 => Box::new(SnowLikeProperties::from_state_id(state_id, &Block::SNOW)),
-            195 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::WALL_TORCH,
-            )),
-            291 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::SOUL_WALL_TORCH,
-            )),
-            293 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::COPPER_WALL_TORCH,
-            )),
-            296 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::CARVED_PUMPKIN,
-            )),
-            297 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::JACK_O_LANTERN,
-            )),
-            362 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::ATTACHED_PUMPKIN_STEM,
-            )),
-            363 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::ATTACHED_MELON_STEM,
-            )),
-            467 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::ANVIL,
-            )),
-            468 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::CHIPPED_ANVIL,
-            )),
-            469 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::DAMAGED_ANVIL,
-            )),
-            579 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::WHITE_WALL_BANNER,
-            )),
-            580 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::ORANGE_WALL_BANNER,
-            )),
-            581 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::MAGENTA_WALL_BANNER,
-            )),
-            582 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHT_BLUE_WALL_BANNER,
-            )),
-            583 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::YELLOW_WALL_BANNER,
-            )),
-            584 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::LIME_WALL_BANNER,
-            )),
-            585 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::PINK_WALL_BANNER,
-            )),
-            586 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::GRAY_WALL_BANNER,
-            )),
-            587 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHT_GRAY_WALL_BANNER,
-            )),
-            588 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::CYAN_WALL_BANNER,
-            )),
-            589 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::PURPLE_WALL_BANNER,
-            )),
-            590 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::BLUE_WALL_BANNER,
-            )),
-            591 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::BROWN_WALL_BANNER,
-            )),
-            592 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::GREEN_WALL_BANNER,
-            )),
-            593 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::RED_WALL_BANNER,
-            )),
-            594 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::BLACK_WALL_BANNER,
-            )),
-            694 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::WHITE_GLAZED_TERRACOTTA,
-            )),
-            695 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::ORANGE_GLAZED_TERRACOTTA,
-            )),
-            696 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::MAGENTA_GLAZED_TERRACOTTA,
-            )),
-            697 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHT_BLUE_GLAZED_TERRACOTTA,
-            )),
-            698 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::YELLOW_GLAZED_TERRACOTTA,
-            )),
-            699 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::LIME_GLAZED_TERRACOTTA,
-            )),
-            700 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::PINK_GLAZED_TERRACOTTA,
-            )),
-            701 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::GRAY_GLAZED_TERRACOTTA,
-            )),
-            702 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHT_GRAY_GLAZED_TERRACOTTA,
-            )),
-            703 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::CYAN_GLAZED_TERRACOTTA,
-            )),
-            704 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::PURPLE_GLAZED_TERRACOTTA,
-            )),
-            705 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::BLUE_GLAZED_TERRACOTTA,
-            )),
-            706 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::BROWN_GLAZED_TERRACOTTA,
-            )),
-            707 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::GREEN_GLAZED_TERRACOTTA,
-            )),
-            708 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::RED_GLAZED_TERRACOTTA,
-            )),
-            709 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::BLACK_GLAZED_TERRACOTTA,
-            )),
-            838 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::LOOM,
-            )),
-            847 => Box::new(WallTorchLikeProperties::from_state_id(
-                state_id,
-                &Block::STONECUTTER,
-            )),
-            201 => Box::new(ChestLikeProperties::from_state_id(state_id, &Block::CHEST)),
-            470 => Box::new(ChestLikeProperties::from_state_id(
-                state_id,
-                &Block::TRAPPED_CHEST,
-            )),
-            1108 => Box::new(ChestLikeProperties::from_state_id(
-                state_id,
-                &Block::COPPER_CHEST,
-            )),
-            1109 => Box::new(ChestLikeProperties::from_state_id(
-                state_id,
-                &Block::EXPOSED_COPPER_CHEST,
-            )),
-            1110 => Box::new(ChestLikeProperties::from_state_id(
-                state_id,
-                &Block::WEATHERED_COPPER_CHEST,
-            )),
-            1111 => Box::new(ChestLikeProperties::from_state_id(
-                state_id,
-                &Block::OXIDIZED_COPPER_CHEST,
-            )),
-            1112 => Box::new(ChestLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_COPPER_CHEST,
-            )),
-            1113 => Box::new(ChestLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_EXPOSED_COPPER_CHEST,
-            )),
-            1114 => Box::new(ChestLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_WEATHERED_COPPER_CHEST,
-            )),
-            1115 => Box::new(ChestLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_OXIDIZED_COPPER_CHEST,
-            )),
-            454 => Box::new(SkeletonWallSkullLikeProperties::from_state_id(
-                state_id,
-                &Block::SKELETON_WALL_SKULL,
-            )),
-            456 => Box::new(SkeletonWallSkullLikeProperties::from_state_id(
-                state_id,
-                &Block::WITHER_SKELETON_WALL_SKULL,
-            )),
-            458 => Box::new(SkeletonWallSkullLikeProperties::from_state_id(
-                state_id,
-                &Block::ZOMBIE_WALL_HEAD,
-            )),
-            460 => Box::new(SkeletonWallSkullLikeProperties::from_state_id(
-                state_id,
-                &Block::PLAYER_WALL_HEAD,
-            )),
-            462 => Box::new(SkeletonWallSkullLikeProperties::from_state_id(
-                state_id,
-                &Block::CREEPER_WALL_HEAD,
-            )),
-            464 => Box::new(SkeletonWallSkullLikeProperties::from_state_id(
-                state_id,
-                &Block::DRAGON_WALL_HEAD,
-            )),
-            466 => Box::new(SkeletonWallSkullLikeProperties::from_state_id(
-                state_id,
-                &Block::PIGLIN_WALL_HEAD,
-            )),
-            316 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::OAK_TRAPDOOR,
-            )),
-            317 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::SPRUCE_TRAPDOOR,
-            )),
-            318 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::BIRCH_TRAPDOOR,
-            )),
-            319 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::JUNGLE_TRAPDOOR,
-            )),
-            320 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::ACACIA_TRAPDOOR,
-            )),
-            321 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::CHERRY_TRAPDOOR,
-            )),
-            322 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_OAK_TRAPDOOR,
-            )),
-            323 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_OAK_TRAPDOOR,
-            )),
-            324 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_TRAPDOOR,
-            )),
-            325 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::BAMBOO_TRAPDOOR,
-            )),
-            526 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::IRON_TRAPDOOR,
-            )),
-            891 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::CRIMSON_TRAPDOOR,
-            )),
-            892 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::WARPED_TRAPDOOR,
-            )),
-            1084 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::COPPER_TRAPDOOR,
-            )),
-            1085 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::EXPOSED_COPPER_TRAPDOOR,
-            )),
-            1086 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::WEATHERED_COPPER_TRAPDOOR,
-            )),
-            1087 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::OXIDIZED_COPPER_TRAPDOOR,
-            )),
-            1088 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_COPPER_TRAPDOOR,
-            )),
-            1089 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_EXPOSED_COPPER_TRAPDOOR,
-            )),
-            1090 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_WEATHERED_COPPER_TRAPDOOR,
-            )),
-            1091 => Box::new(OakTrapdoorLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_OXIDIZED_COPPER_TRAPDOOR,
-            )),
-            845 => Box::new(LecternLikeProperties::from_state_id(
-                state_id,
-                &Block::LECTERN,
-            )),
-            401 => Box::new(TripwireHookLikeProperties::from_state_id(
-                state_id,
-                &Block::TRIPWIRE_HOOK,
-            )),
-            473 => Box::new(ComparatorLikeProperties::from_state_id(
-                state_id,
-                &Block::COMPARATOR,
-            )),
-            1116 => Box::new(CopperGolemStatueLikeProperties::from_state_id(
-                state_id,
-                &Block::COPPER_GOLEM_STATUE,
-            )),
-            1117 => Box::new(CopperGolemStatueLikeProperties::from_state_id(
-                state_id,
-                &Block::EXPOSED_COPPER_GOLEM_STATUE,
-            )),
-            1118 => Box::new(CopperGolemStatueLikeProperties::from_state_id(
-                state_id,
-                &Block::WEATHERED_COPPER_GOLEM_STATUE,
-            )),
-            1119 => Box::new(CopperGolemStatueLikeProperties::from_state_id(
-                state_id,
-                &Block::OXIDIZED_COPPER_GOLEM_STATUE,
-            )),
-            1120 => Box::new(CopperGolemStatueLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_COPPER_GOLEM_STATUE,
-            )),
-            1121 => Box::new(CopperGolemStatueLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_EXPOSED_COPPER_GOLEM_STATUE,
-            )),
-            1122 => Box::new(CopperGolemStatueLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_WEATHERED_COPPER_GOLEM_STATUE,
-            )),
-            1123 => Box::new(CopperGolemStatueLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_OXIDIZED_COPPER_GOLEM_STATUE,
-            )),
-            392 => Box::new(EndPortalFrameLikeProperties::from_state_id(
-                state_id,
-                &Block::END_PORTAL_FRAME,
-            )),
-            209 => Box::new(FurnaceLikeProperties::from_state_id(
-                state_id,
-                &Block::FURNACE,
-            )),
-            274 => Box::new(FurnaceLikeProperties::from_state_id(
-                state_id,
-                &Block::REDSTONE_WALL_TORCH,
-            )),
-            840 => Box::new(FurnaceLikeProperties::from_state_id(
-                state_id,
-                &Block::SMOKER,
-            )),
-            841 => Box::new(FurnaceLikeProperties::from_state_id(
-                state_id,
-                &Block::BLAST_FURNACE,
-            )),
-            859 => Box::new(CampfireLikeProperties::from_state_id(
-                state_id,
-                &Block::CAMPFIRE,
-            )),
-            860 => Box::new(CampfireLikeProperties::from_state_id(
-                state_id,
-                &Block::SOUL_CAMPFIRE,
-            )),
-            1147 => Box::new(SmallDripleafLikeProperties::from_state_id(
-                state_id,
-                &Block::SMALL_DRIPLEAF,
-            )),
-            911 => Box::new(BeeNestLikeProperties::from_state_id(
-                state_id,
-                &Block::BEE_NEST,
-            )),
-            912 => Box::new(BeeNestLikeProperties::from_state_id(
-                state_id,
-                &Block::BEEHIVE,
-            )),
-            1183 => Box::new(DecoratedPotLikeProperties::from_state_id(
-                state_id,
-                &Block::DECORATED_POT,
-            )),
-            221 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::LADDER,
-            )),
-            224 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::OAK_WALL_SIGN,
-            )),
-            225 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::SPRUCE_WALL_SIGN,
-            )),
-            226 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::BIRCH_WALL_SIGN,
-            )),
-            227 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::ACACIA_WALL_SIGN,
-            )),
-            228 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::CHERRY_WALL_SIGN,
-            )),
-            229 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::JUNGLE_WALL_SIGN,
-            )),
-            230 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_OAK_WALL_SIGN,
-            )),
-            231 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_OAK_WALL_SIGN,
-            )),
-            232 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_WALL_SIGN,
-            )),
-            233 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::BAMBOO_WALL_SIGN,
-            )),
-            246 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::OAK_WALL_HANGING_SIGN,
-            )),
-            247 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::SPRUCE_WALL_HANGING_SIGN,
-            )),
-            248 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::BIRCH_WALL_HANGING_SIGN,
-            )),
-            249 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::ACACIA_WALL_HANGING_SIGN,
-            )),
-            250 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::CHERRY_WALL_HANGING_SIGN,
-            )),
-            251 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::JUNGLE_WALL_HANGING_SIGN,
-            )),
-            252 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_OAK_WALL_HANGING_SIGN,
-            )),
-            253 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_OAK_WALL_HANGING_SIGN,
-            )),
-            254 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_WALL_HANGING_SIGN,
-            )),
-            255 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::CRIMSON_WALL_HANGING_SIGN,
-            )),
-            256 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::WARPED_WALL_HANGING_SIGN,
-            )),
-            257 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::BAMBOO_WALL_HANGING_SIGN,
-            )),
-            400 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::ENDER_CHEST,
-            )),
-            778 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::DEAD_TUBE_CORAL_WALL_FAN,
-            )),
-            779 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::DEAD_BRAIN_CORAL_WALL_FAN,
-            )),
-            780 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::DEAD_BUBBLE_CORAL_WALL_FAN,
-            )),
-            781 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::DEAD_FIRE_CORAL_WALL_FAN,
-            )),
-            782 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::DEAD_HORN_CORAL_WALL_FAN,
-            )),
-            783 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::TUBE_CORAL_WALL_FAN,
-            )),
-            784 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::BRAIN_CORAL_WALL_FAN,
-            )),
-            785 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::BUBBLE_CORAL_WALL_FAN,
-            )),
-            786 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::FIRE_CORAL_WALL_FAN,
-            )),
-            787 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::HORN_CORAL_WALL_FAN,
-            )),
-            903 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::CRIMSON_WALL_SIGN,
-            )),
-            904 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::WARPED_WALL_SIGN,
-            )),
-            1146 => Box::new(LadderLikeProperties::from_state_id(
-                state_id,
-                &Block::BIG_DRIPLEAF_STEM,
-            )),
-            1145 => Box::new(BigDripleafLikeProperties::from_state_id(
-                state_id,
-                &Block::BIG_DRIPLEAF,
-            )),
-            1141 => Box::new(PinkPetalsLikeProperties::from_state_id(
-                state_id,
-                &Block::PINK_PETALS,
-            )),
-            1142 => Box::new(PinkPetalsLikeProperties::from_state_id(
-                state_id,
-                &Block::WILDFLOWERS,
-            )),
-            1143 => Box::new(LeafLitterLikeProperties::from_state_id(
-                state_id,
-                &Block::LEAF_LITTER,
-            )),
-            396 => Box::new(CocoaLikeProperties::from_state_id(state_id, &Block::COCOA)),
-            105 => Box::new(DispenserLikeProperties::from_state_id(
-                state_id,
-                &Block::DISPENSER,
-            )),
-            483 => Box::new(DispenserLikeProperties::from_state_id(
-                state_id,
-                &Block::DROPPER,
-            )),
-            1184 => Box::new(CrafterLikeProperties::from_state_id(
-                state_id,
-                &Block::CRAFTER,
-            )),
-            208 => Box::new(FarmlandLikeProperties::from_state_id(
-                state_id,
-                &Block::FARMLAND,
-            )),
-            38 => Box::new(SuspiciousSandLikeProperties::from_state_id(
-                state_id,
-                &Block::SUSPICIOUS_SAND,
-            )),
-            41 => Box::new(SuspiciousSandLikeProperties::from_state_id(
-                state_id,
-                &Block::SUSPICIOUS_GRAVEL,
-            )),
-            378 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::RESIN_BRICK_SLAB,
-            )),
-            533 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::PRISMARINE_SLAB,
-            )),
-            534 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::PRISMARINE_BRICK_SLAB,
-            )),
-            535 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_PRISMARINE_SLAB,
-            )),
-            599 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::OAK_SLAB,
-            )),
-            600 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::SPRUCE_SLAB,
-            )),
-            601 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::BIRCH_SLAB,
-            )),
-            602 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::JUNGLE_SLAB,
-            )),
-            603 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::ACACIA_SLAB,
-            )),
-            604 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::CHERRY_SLAB,
-            )),
-            605 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_OAK_SLAB,
-            )),
-            606 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_OAK_SLAB,
-            )),
-            607 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_SLAB,
-            )),
-            608 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::BAMBOO_SLAB,
-            )),
-            609 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::BAMBOO_MOSAIC_SLAB,
-            )),
-            610 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::STONE_SLAB,
-            )),
-            611 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::SMOOTH_STONE_SLAB,
-            )),
-            612 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::SANDSTONE_SLAB,
-            )),
-            613 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::CUT_SANDSTONE_SLAB,
-            )),
-            614 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::PETRIFIED_OAK_SLAB,
-            )),
-            615 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::COBBLESTONE_SLAB,
-            )),
-            616 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::BRICK_SLAB,
-            )),
-            617 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::STONE_BRICK_SLAB,
-            )),
-            618 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::MUD_BRICK_SLAB,
-            )),
-            619 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::NETHER_BRICK_SLAB,
-            )),
-            620 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::QUARTZ_SLAB,
-            )),
-            621 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::RED_SANDSTONE_SLAB,
-            )),
-            622 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::CUT_RED_SANDSTONE_SLAB,
-            )),
-            623 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::PURPUR_SLAB,
-            )),
-            811 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_GRANITE_SLAB,
-            )),
-            812 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::SMOOTH_RED_SANDSTONE_SLAB,
-            )),
-            813 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::MOSSY_STONE_BRICK_SLAB,
-            )),
-            814 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_DIORITE_SLAB,
-            )),
-            815 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::MOSSY_COBBLESTONE_SLAB,
-            )),
-            816 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::END_STONE_BRICK_SLAB,
-            )),
-            817 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::SMOOTH_SANDSTONE_SLAB,
-            )),
-            818 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::SMOOTH_QUARTZ_SLAB,
-            )),
-            819 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::GRANITE_SLAB,
-            )),
-            820 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::ANDESITE_SLAB,
-            )),
-            821 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::RED_NETHER_BRICK_SLAB,
-            )),
-            822 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_ANDESITE_SLAB,
-            )),
-            823 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::DIORITE_SLAB,
-            )),
-            885 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::CRIMSON_SLAB,
-            )),
-            886 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::WARPED_SLAB,
-            )),
-            927 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::BLACKSTONE_SLAB,
-            )),
-            932 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_BLACKSTONE_BRICK_SLAB,
-            )),
-            937 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_BLACKSTONE_SLAB,
-            )),
-            985 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::TUFF_SLAB,
-            )),
-            989 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_TUFF_SLAB,
-            )),
-            994 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::TUFF_BRICK_SLAB,
-            )),
-            1000 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::SULFUR_SLAB,
-            )),
-            1004 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_SULFUR_SLAB,
-            )),
-            1008 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::SULFUR_BRICK_SLAB,
-            )),
-            1013 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::CINNABAR_SLAB,
-            )),
-            1017 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_CINNABAR_SLAB,
-            )),
-            1021 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::CINNABAR_BRICK_SLAB,
-            )),
-            1068 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::CUT_COPPER_SLAB,
-            )),
-            1069 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::EXPOSED_CUT_COPPER_SLAB,
-            )),
-            1070 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::WEATHERED_CUT_COPPER_SLAB,
-            )),
-            1071 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::OXIDIZED_CUT_COPPER_SLAB,
-            )),
-            1072 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_CUT_COPPER_SLAB,
-            )),
-            1073 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_EXPOSED_CUT_COPPER_SLAB,
-            )),
-            1074 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_WEATHERED_CUT_COPPER_SLAB,
-            )),
-            1075 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_OXIDIZED_CUT_COPPER_SLAB,
-            )),
-            1154 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::COBBLED_DEEPSLATE_SLAB,
-            )),
-            1158 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_DEEPSLATE_SLAB,
-            )),
-            1162 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::DEEPSLATE_TILE_SLAB,
-            )),
-            1166 => Box::new(ResinBrickSlabLikeProperties::from_state_id(
-                state_id,
-                &Block::DEEPSLATE_BRICK_SLAB,
-            )),
-            259 => Box::new(StonePressurePlateLikeProperties::from_state_id(
-                state_id,
-                &Block::STONE_PRESSURE_PLATE,
-            )),
-            261 => Box::new(StonePressurePlateLikeProperties::from_state_id(
-                state_id,
-                &Block::OAK_PRESSURE_PLATE,
-            )),
-            262 => Box::new(StonePressurePlateLikeProperties::from_state_id(
-                state_id,
-                &Block::SPRUCE_PRESSURE_PLATE,
-            )),
-            263 => Box::new(StonePressurePlateLikeProperties::from_state_id(
-                state_id,
-                &Block::BIRCH_PRESSURE_PLATE,
-            )),
-            264 => Box::new(StonePressurePlateLikeProperties::from_state_id(
-                state_id,
-                &Block::JUNGLE_PRESSURE_PLATE,
-            )),
-            265 => Box::new(StonePressurePlateLikeProperties::from_state_id(
-                state_id,
-                &Block::ACACIA_PRESSURE_PLATE,
-            )),
-            266 => Box::new(StonePressurePlateLikeProperties::from_state_id(
-                state_id,
-                &Block::CHERRY_PRESSURE_PLATE,
-            )),
-            267 => Box::new(StonePressurePlateLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_OAK_PRESSURE_PLATE,
-            )),
-            268 => Box::new(StonePressurePlateLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_OAK_PRESSURE_PLATE,
-            )),
-            269 => Box::new(StonePressurePlateLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_PRESSURE_PLATE,
-            )),
-            270 => Box::new(StonePressurePlateLikeProperties::from_state_id(
-                state_id,
-                &Block::BAMBOO_PRESSURE_PLATE,
-            )),
-            887 => Box::new(StonePressurePlateLikeProperties::from_state_id(
-                state_id,
-                &Block::CRIMSON_PRESSURE_PLATE,
-            )),
-            888 => Box::new(StonePressurePlateLikeProperties::from_state_id(
-                state_id,
-                &Block::WARPED_PRESSURE_PLATE,
-            )),
-            938 => Box::new(StonePressurePlateLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_BLACKSTONE_PRESSURE_PLATE,
-            )),
-            1100 => Box::new(CopperBulbLikeProperties::from_state_id(
-                state_id,
-                &Block::COPPER_BULB,
-            )),
-            1101 => Box::new(CopperBulbLikeProperties::from_state_id(
-                state_id,
-                &Block::EXPOSED_COPPER_BULB,
-            )),
-            1102 => Box::new(CopperBulbLikeProperties::from_state_id(
-                state_id,
-                &Block::WEATHERED_COPPER_BULB,
-            )),
-            1103 => Box::new(CopperBulbLikeProperties::from_state_id(
-                state_id,
-                &Block::OXIDIZED_COPPER_BULB,
-            )),
-            1104 => Box::new(CopperBulbLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_COPPER_BULB,
-            )),
-            1105 => Box::new(CopperBulbLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_EXPOSED_COPPER_BULB,
-            )),
-            1106 => Box::new(CopperBulbLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_WEATHERED_COPPER_BULB,
-            )),
-            1107 => Box::new(CopperBulbLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_OXIDIZED_COPPER_BULB,
-            )),
-            402 => Box::new(TripwireLikeProperties::from_state_id(
-                state_id,
-                &Block::TRIPWIRE,
-            )),
-            676 => Box::new(ObserverLikeProperties::from_state_id(
-                state_id,
-                &Block::OBSERVER,
-            )),
-            1124 => Box::new(LightningRodLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHTNING_ROD,
-            )),
-            1125 => Box::new(LightningRodLikeProperties::from_state_id(
-                state_id,
-                &Block::EXPOSED_LIGHTNING_ROD,
-            )),
-            1126 => Box::new(LightningRodLikeProperties::from_state_id(
-                state_id,
-                &Block::WEATHERED_LIGHTNING_ROD,
-            )),
-            1127 => Box::new(LightningRodLikeProperties::from_state_id(
-                state_id,
-                &Block::OXIDIZED_LIGHTNING_ROD,
-            )),
-            1128 => Box::new(LightningRodLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_LIGHTNING_ROD,
-            )),
-            1129 => Box::new(LightningRodLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_EXPOSED_LIGHTNING_ROD,
-            )),
-            1130 => Box::new(LightningRodLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_WEATHERED_LIGHTNING_ROD,
-            )),
-            1131 => Box::new(LightningRodLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_OXIDIZED_LIGHTNING_ROD,
-            )),
-            109 => Box::new(NoteBlockLikeProperties::from_state_id(
-                state_id,
-                &Block::NOTE_BLOCK,
-            )),
-            453 => Box::new(SkeletonSkullLikeProperties::from_state_id(
-                state_id,
-                &Block::SKELETON_SKULL,
-            )),
-            455 => Box::new(SkeletonSkullLikeProperties::from_state_id(
-                state_id,
-                &Block::WITHER_SKELETON_SKULL,
-            )),
-            457 => Box::new(SkeletonSkullLikeProperties::from_state_id(
-                state_id,
-                &Block::ZOMBIE_HEAD,
-            )),
-            459 => Box::new(SkeletonSkullLikeProperties::from_state_id(
-                state_id,
-                &Block::PLAYER_HEAD,
-            )),
-            461 => Box::new(SkeletonSkullLikeProperties::from_state_id(
-                state_id,
-                &Block::CREEPER_HEAD,
-            )),
-            463 => Box::new(SkeletonSkullLikeProperties::from_state_id(
-                state_id,
-                &Block::DRAGON_HEAD,
-            )),
-            465 => Box::new(SkeletonSkullLikeProperties::from_state_id(
-                state_id,
-                &Block::PIGLIN_HEAD,
-            )),
-            202 => Box::new(RedstoneWireLikeProperties::from_state_id(
-                state_id,
-                &Block::REDSTONE_WIRE,
-            )),
-            909 => Box::new(ComposterLikeProperties::from_state_id(
-                state_id,
-                &Block::COMPOSTER,
-            )),
-            1136 => Box::new(CaveVinesPlantLikeProperties::from_state_id(
-                state_id,
-                &Block::CAVE_VINES_PLANT,
-            )),
-            1135 => Box::new(CaveVinesLikeProperties::from_state_id(
-                state_id,
-                &Block::CAVE_VINES,
-            )),
-            379 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::RESIN_BRICK_WALL,
-            )),
-            409 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::COBBLESTONE_WALL,
-            )),
-            410 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::MOSSY_COBBLESTONE_WALL,
-            )),
-            824 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::BRICK_WALL,
-            )),
-            825 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::PRISMARINE_WALL,
-            )),
-            826 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::RED_SANDSTONE_WALL,
-            )),
-            827 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::MOSSY_STONE_BRICK_WALL,
-            )),
-            828 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::GRANITE_WALL,
-            )),
-            829 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::STONE_BRICK_WALL,
-            )),
-            830 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::MUD_BRICK_WALL,
-            )),
-            831 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::NETHER_BRICK_WALL,
-            )),
-            832 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::ANDESITE_WALL,
-            )),
-            833 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::RED_NETHER_BRICK_WALL,
-            )),
-            834 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::SANDSTONE_WALL,
-            )),
-            835 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::END_STONE_BRICK_WALL,
-            )),
-            836 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::DIORITE_WALL,
-            )),
-            926 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::BLACKSTONE_WALL,
-            )),
-            934 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_BLACKSTONE_BRICK_WALL,
-            )),
-            940 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_BLACKSTONE_WALL,
-            )),
-            987 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::TUFF_WALL,
-            )),
-            991 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_TUFF_WALL,
-            )),
-            996 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::TUFF_BRICK_WALL,
-            )),
-            1002 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::SULFUR_WALL,
-            )),
-            1006 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_SULFUR_WALL,
-            )),
-            1010 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::SULFUR_BRICK_WALL,
-            )),
-            1015 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::CINNABAR_WALL,
-            )),
-            1019 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_CINNABAR_WALL,
-            )),
-            1023 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::CINNABAR_BRICK_WALL,
-            )),
-            1155 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::COBBLED_DEEPSLATE_WALL,
-            )),
-            1159 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::POLISHED_DEEPSLATE_WALL,
-            )),
-            1163 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::DEEPSLATE_TILE_WALL,
-            )),
-            1167 => Box::new(ResinBrickWallLikeProperties::from_state_id(
-                state_id,
-                &Block::DEEPSLATE_BRICK_WALL,
-            )),
-            177 => Box::new(TntLikeProperties::from_state_id(state_id, &Block::TNT)),
-            338 => Box::new(BrownMushroomBlockLikeProperties::from_state_id(
-                state_id,
-                &Block::BROWN_MUSHROOM_BLOCK,
-            )),
-            339 => Box::new(BrownMushroomBlockLikeProperties::from_state_id(
-                state_id,
-                &Block::RED_MUSHROOM_BLOCK,
-            )),
-            340 => Box::new(BrownMushroomBlockLikeProperties::from_state_id(
-                state_id,
-                &Block::MUSHROOM_STEM,
-            )),
-            656 => Box::new(BrownMushroomBlockLikeProperties::from_state_id(
-                state_id,
-                &Block::CHORUS_PLANT,
-            )),
-            367 => Box::new(GlowLichenLikeProperties::from_state_id(
-                state_id,
-                &Block::GLOW_LICHEN,
-            )),
-            368 => Box::new(GlowLichenLikeProperties::from_state_id(
-                state_id,
-                &Block::RESIN_CLUMP,
-            )),
-            1031 => Box::new(GlowLichenLikeProperties::from_state_id(
-                state_id,
-                &Block::SCULK_VEIN,
-            )),
-            366 => Box::new(VineLikeProperties::from_state_id(state_id, &Block::VINE)),
-            271 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::REDSTONE_ORE,
-            )),
-            272 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::DEEPSLATE_REDSTONE_ORE,
-            )),
-            273 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::REDSTONE_TORCH,
-            )),
-            395 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::REDSTONE_LAMP,
-            )),
-            961 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::CANDLE_CAKE,
-            )),
-            962 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::WHITE_CANDLE_CAKE,
-            )),
-            963 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::ORANGE_CANDLE_CAKE,
-            )),
-            964 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::MAGENTA_CANDLE_CAKE,
-            )),
-            965 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHT_BLUE_CANDLE_CAKE,
-            )),
-            966 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::YELLOW_CANDLE_CAKE,
-            )),
-            967 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::LIME_CANDLE_CAKE,
-            )),
-            968 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::PINK_CANDLE_CAKE,
-            )),
-            969 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::GRAY_CANDLE_CAKE,
-            )),
-            970 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHT_GRAY_CANDLE_CAKE,
-            )),
-            971 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::CYAN_CANDLE_CAKE,
-            )),
-            972 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::PURPLE_CANDLE_CAKE,
-            )),
-            973 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::BLUE_CANDLE_CAKE,
-            )),
-            974 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::BROWN_CANDLE_CAKE,
-            )),
-            975 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::GREEN_CANDLE_CAKE,
-            )),
-            976 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::RED_CANDLE_CAKE,
-            )),
-            977 => Box::new(RedstoneOreLikeProperties::from_state_id(
-                state_id,
-                &Block::BLACK_CANDLE_CAKE,
-            )),
-            944 => Box::new(CandleLikeProperties::from_state_id(
-                state_id,
-                &Block::CANDLE,
-            )),
-            945 => Box::new(CandleLikeProperties::from_state_id(
-                state_id,
-                &Block::WHITE_CANDLE,
-            )),
-            946 => Box::new(CandleLikeProperties::from_state_id(
-                state_id,
-                &Block::ORANGE_CANDLE,
-            )),
-            947 => Box::new(CandleLikeProperties::from_state_id(
-                state_id,
-                &Block::MAGENTA_CANDLE,
-            )),
-            948 => Box::new(CandleLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHT_BLUE_CANDLE,
-            )),
-            949 => Box::new(CandleLikeProperties::from_state_id(
-                state_id,
-                &Block::YELLOW_CANDLE,
-            )),
-            950 => Box::new(CandleLikeProperties::from_state_id(
-                state_id,
-                &Block::LIME_CANDLE,
-            )),
-            951 => Box::new(CandleLikeProperties::from_state_id(
-                state_id,
-                &Block::PINK_CANDLE,
-            )),
-            952 => Box::new(CandleLikeProperties::from_state_id(
-                state_id,
-                &Block::GRAY_CANDLE,
-            )),
-            953 => Box::new(CandleLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHT_GRAY_CANDLE,
-            )),
-            954 => Box::new(CandleLikeProperties::from_state_id(
-                state_id,
-                &Block::CYAN_CANDLE,
-            )),
-            955 => Box::new(CandleLikeProperties::from_state_id(
-                state_id,
-                &Block::PURPLE_CANDLE,
-            )),
-            956 => Box::new(CandleLikeProperties::from_state_id(
-                state_id,
-                &Block::BLUE_CANDLE,
-            )),
-            957 => Box::new(CandleLikeProperties::from_state_id(
-                state_id,
-                &Block::BROWN_CANDLE,
-            )),
-            958 => Box::new(CandleLikeProperties::from_state_id(
-                state_id,
-                &Block::GREEN_CANDLE,
-            )),
-            959 => Box::new(CandleLikeProperties::from_state_id(
-                state_id,
-                &Block::RED_CANDLE,
-            )),
-            960 => Box::new(CandleLikeProperties::from_state_id(
-                state_id,
-                &Block::BLACK_CANDLE,
-            )),
-            1190 => Box::new(PaleHangingMossLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_HANGING_MOSS,
-            )),
-            796 => Box::new(BubbleColumnLikeProperties::from_state_id(
-                state_id,
-                &Block::BUBBLE_COLUMN,
-            )),
-            284 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::OAK_FENCE,
-            )),
-            341 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::IRON_BARS,
-            )),
-            342 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::COPPER_BARS,
-            )),
-            343 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::EXPOSED_COPPER_BARS,
-            )),
-            344 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::WEATHERED_COPPER_BARS,
-            )),
-            345 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::OXIDIZED_COPPER_BARS,
-            )),
-            346 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_COPPER_BARS,
-            )),
-            347 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_EXPOSED_COPPER_BARS,
-            )),
-            348 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_WEATHERED_COPPER_BARS,
-            )),
-            349 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_OXIDIZED_COPPER_BARS,
-            )),
-            359 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::GLASS_PANE,
-            )),
-            382 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::NETHER_BRICK_FENCE,
-            )),
-            500 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::WHITE_STAINED_GLASS_PANE,
-            )),
-            501 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::ORANGE_STAINED_GLASS_PANE,
-            )),
-            502 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::MAGENTA_STAINED_GLASS_PANE,
-            )),
-            503 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHT_BLUE_STAINED_GLASS_PANE,
-            )),
-            504 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::YELLOW_STAINED_GLASS_PANE,
-            )),
-            505 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::LIME_STAINED_GLASS_PANE,
-            )),
-            506 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::PINK_STAINED_GLASS_PANE,
-            )),
-            507 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::GRAY_STAINED_GLASS_PANE,
-            )),
-            508 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHT_GRAY_STAINED_GLASS_PANE,
-            )),
-            509 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::CYAN_STAINED_GLASS_PANE,
-            )),
-            510 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::PURPLE_STAINED_GLASS_PANE,
-            )),
-            511 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::BLUE_STAINED_GLASS_PANE,
-            )),
-            512 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::BROWN_STAINED_GLASS_PANE,
-            )),
-            513 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::GREEN_STAINED_GLASS_PANE,
-            )),
-            514 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::RED_STAINED_GLASS_PANE,
-            )),
-            515 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::BLACK_STAINED_GLASS_PANE,
-            )),
-            637 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::SPRUCE_FENCE,
-            )),
-            638 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::BIRCH_FENCE,
-            )),
-            639 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::JUNGLE_FENCE,
-            )),
-            640 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::ACACIA_FENCE,
-            )),
-            641 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::CHERRY_FENCE,
-            )),
-            642 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_OAK_FENCE,
-            )),
-            643 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_OAK_FENCE,
-            )),
-            644 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_FENCE,
-            )),
-            645 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::BAMBOO_FENCE,
-            )),
-            889 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::CRIMSON_FENCE,
-            )),
-            890 => Box::new(OakFenceLikeProperties::from_state_id(
-                state_id,
-                &Block::WARPED_FENCE,
-            )),
-            839 => Box::new(BarrelLikeProperties::from_state_id(
-                state_id,
-                &Block::BARREL,
-            )),
-            1032 => Box::new(SculkCatalystLikeProperties::from_state_id(
-                state_id,
-                &Block::SCULK_CATALYST,
-            )),
-            139 => Box::new(PistonHeadLikeProperties::from_state_id(
-                state_id,
-                &Block::PISTON_HEAD,
-            )),
-            8 => Box::new(GrassBlockLikeProperties::from_state_id(
-                state_id,
-                &Block::GRASS_BLOCK,
-            )),
-            11 => Box::new(GrassBlockLikeProperties::from_state_id(
-                state_id,
-                &Block::PODZOL,
-            )),
-            373 => Box::new(GrassBlockLikeProperties::from_state_id(
-                state_id,
-                &Block::MYCELIUM,
-            )),
-            655 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::END_ROD,
-            )),
-            677 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::SHULKER_BOX,
-            )),
-            678 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::WHITE_SHULKER_BOX,
-            )),
-            679 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::ORANGE_SHULKER_BOX,
-            )),
-            680 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::MAGENTA_SHULKER_BOX,
-            )),
-            681 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHT_BLUE_SHULKER_BOX,
-            )),
-            682 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::YELLOW_SHULKER_BOX,
-            )),
-            683 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::LIME_SHULKER_BOX,
-            )),
-            684 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::PINK_SHULKER_BOX,
-            )),
-            685 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::GRAY_SHULKER_BOX,
-            )),
-            686 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHT_GRAY_SHULKER_BOX,
-            )),
-            687 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::CYAN_SHULKER_BOX,
-            )),
-            688 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::PURPLE_SHULKER_BOX,
-            )),
-            689 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::BLUE_SHULKER_BOX,
-            )),
-            690 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::BROWN_SHULKER_BOX,
-            )),
-            691 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::GREEN_SHULKER_BOX,
-            )),
-            692 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::RED_SHULKER_BOX,
-            )),
-            693 => Box::new(EndRodLikeProperties::from_state_id(
-                state_id,
-                &Block::BLACK_SHULKER_BOX,
-            )),
-            156 => Box::new(MovingPistonLikeProperties::from_state_id(
-                state_id,
-                &Block::MOVING_PISTON,
-            )),
-            980 => Box::new(AmethystClusterLikeProperties::from_state_id(
-                state_id,
-                &Block::AMETHYST_CLUSTER,
-            )),
-            981 => Box::new(AmethystClusterLikeProperties::from_state_id(
-                state_id,
-                &Block::LARGE_AMETHYST_BUD,
-            )),
-            982 => Box::new(AmethystClusterLikeProperties::from_state_id(
-                state_id,
-                &Block::MEDIUM_AMETHYST_BUD,
-            )),
-            983 => Box::new(AmethystClusterLikeProperties::from_state_id(
-                state_id,
-                &Block::SMALL_AMETHYST_BUD,
-            )),
-            407 => Box::new(CommandBlockLikeProperties::from_state_id(
-                state_id,
-                &Block::COMMAND_BLOCK,
-            )),
-            668 => Box::new(CommandBlockLikeProperties::from_state_id(
-                state_id,
-                &Block::REPEATING_COMMAND_BLOCK,
-            )),
-            669 => Box::new(CommandBlockLikeProperties::from_state_id(
-                state_id,
-                &Block::CHAIN_COMMAND_BLOCK,
-            )),
-            295 => Box::new(NetherPortalLikeProperties::from_state_id(
-                state_id,
-                &Block::NETHER_PORTAL,
-            )),
-            88 => Box::new(OakLeavesLikeProperties::from_state_id(
-                state_id,
-                &Block::OAK_LEAVES,
-            )),
-            89 => Box::new(OakLeavesLikeProperties::from_state_id(
-                state_id,
-                &Block::SPRUCE_LEAVES,
-            )),
-            90 => Box::new(OakLeavesLikeProperties::from_state_id(
-                state_id,
-                &Block::BIRCH_LEAVES,
-            )),
-            91 => Box::new(OakLeavesLikeProperties::from_state_id(
-                state_id,
-                &Block::JUNGLE_LEAVES,
-            )),
-            92 => Box::new(OakLeavesLikeProperties::from_state_id(
-                state_id,
-                &Block::ACACIA_LEAVES,
-            )),
-            93 => Box::new(OakLeavesLikeProperties::from_state_id(
-                state_id,
-                &Block::CHERRY_LEAVES,
-            )),
-            94 => Box::new(OakLeavesLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_OAK_LEAVES,
-            )),
-            95 => Box::new(OakLeavesLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_OAK_LEAVES,
-            )),
-            96 => Box::new(OakLeavesLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_LEAVES,
-            )),
-            97 => Box::new(OakLeavesLikeProperties::from_state_id(
-                state_id,
-                &Block::AZALEA_LEAVES,
-            )),
-            98 => Box::new(OakLeavesLikeProperties::from_state_id(
-                state_id,
-                &Block::FLOWERING_AZALEA_LEAVES,
-            )),
-            746 => Box::new(SnifferEggLikeProperties::from_state_id(
-                state_id,
-                &Block::SNIFFER_EGG,
-            )),
-            745 => Box::new(TurtleEggLikeProperties::from_state_id(
-                state_id,
-                &Block::TURTLE_EGG,
-            )),
-            234 => Box::new(OakHangingSignLikeProperties::from_state_id(
-                state_id,
-                &Block::OAK_HANGING_SIGN,
-            )),
-            235 => Box::new(OakHangingSignLikeProperties::from_state_id(
-                state_id,
-                &Block::SPRUCE_HANGING_SIGN,
-            )),
-            236 => Box::new(OakHangingSignLikeProperties::from_state_id(
-                state_id,
-                &Block::BIRCH_HANGING_SIGN,
-            )),
-            237 => Box::new(OakHangingSignLikeProperties::from_state_id(
-                state_id,
-                &Block::ACACIA_HANGING_SIGN,
-            )),
-            238 => Box::new(OakHangingSignLikeProperties::from_state_id(
-                state_id,
-                &Block::CHERRY_HANGING_SIGN,
-            )),
-            239 => Box::new(OakHangingSignLikeProperties::from_state_id(
-                state_id,
-                &Block::JUNGLE_HANGING_SIGN,
-            )),
-            240 => Box::new(OakHangingSignLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_OAK_HANGING_SIGN,
-            )),
-            241 => Box::new(OakHangingSignLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_OAK_HANGING_SIGN,
-            )),
-            242 => Box::new(OakHangingSignLikeProperties::from_state_id(
-                state_id,
-                &Block::CRIMSON_HANGING_SIGN,
-            )),
-            243 => Box::new(OakHangingSignLikeProperties::from_state_id(
-                state_id,
-                &Block::WARPED_HANGING_SIGN,
-            )),
-            244 => Box::new(OakHangingSignLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_HANGING_SIGN,
-            )),
-            245 => Box::new(OakHangingSignLikeProperties::from_state_id(
-                state_id,
-                &Block::BAMBOO_HANGING_SIGN,
-            )),
-            137 => Box::new(TallSeagrassLikeProperties::from_state_id(
-                state_id,
-                &Block::TALL_SEAGRASS,
-            )),
-            557 => Box::new(TallSeagrassLikeProperties::from_state_id(
-                state_id,
-                &Block::SUNFLOWER,
-            )),
-            558 => Box::new(TallSeagrassLikeProperties::from_state_id(
-                state_id,
-                &Block::LILAC,
-            )),
-            559 => Box::new(TallSeagrassLikeProperties::from_state_id(
-                state_id,
-                &Block::ROSE_BUSH,
-            )),
-            560 => Box::new(TallSeagrassLikeProperties::from_state_id(
-                state_id,
-                &Block::PEONY,
-            )),
-            561 => Box::new(TallSeagrassLikeProperties::from_state_id(
-                state_id,
-                &Block::TALL_GRASS,
-            )),
-            562 => Box::new(TallSeagrassLikeProperties::from_state_id(
-                state_id,
-                &Block::LARGE_FERN,
-            )),
-            664 => Box::new(TallSeagrassLikeProperties::from_state_id(
-                state_id,
-                &Block::PITCHER_PLANT,
-            )),
-            663 => Box::new(PitcherCropLikeProperties::from_state_id(
-                state_id,
-                &Block::PITCHER_CROP,
-            )),
-            906 => Box::new(JigsawLikeProperties::from_state_id(
-                state_id,
-                &Block::JIGSAW,
-            )),
-            905 => Box::new(StructureBlockLikeProperties::from_state_id(
-                state_id,
-                &Block::STRUCTURE_BLOCK,
-            )),
-            474 => Box::new(DaylightDetectorLikeProperties::from_state_id(
-                state_id,
-                &Block::DAYLIGHT_DETECTOR,
-            )),
-            388 => Box::new(WaterCauldronLikeProperties::from_state_id(
-                state_id,
-                &Block::WATER_CAULDRON,
-            )),
-            390 => Box::new(WaterCauldronLikeProperties::from_state_id(
-                state_id,
-                &Block::POWDER_SNOW_CAULDRON,
-            )),
-            33 => Box::new(MangrovePropaguleLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_PROPAGULE,
-            )),
-            849 => Box::new(LanternLikeProperties::from_state_id(
-                state_id,
-                &Block::LANTERN,
-            )),
-            850 => Box::new(LanternLikeProperties::from_state_id(
-                state_id,
-                &Block::SOUL_LANTERN,
-            )),
-            851 => Box::new(LanternLikeProperties::from_state_id(
-                state_id,
-                &Block::COPPER_LANTERN,
-            )),
-            852 => Box::new(LanternLikeProperties::from_state_id(
-                state_id,
-                &Block::EXPOSED_COPPER_LANTERN,
-            )),
-            853 => Box::new(LanternLikeProperties::from_state_id(
-                state_id,
-                &Block::WEATHERED_COPPER_LANTERN,
-            )),
-            854 => Box::new(LanternLikeProperties::from_state_id(
-                state_id,
-                &Block::OXIDIZED_COPPER_LANTERN,
-            )),
-            855 => Box::new(LanternLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_COPPER_LANTERN,
-            )),
-            856 => Box::new(LanternLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_EXPOSED_COPPER_LANTERN,
-            )),
-            857 => Box::new(LanternLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_WEATHERED_COPPER_LANTERN,
-            )),
-            858 => Box::new(LanternLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_OXIDIZED_COPPER_LANTERN,
-            )),
-            222 => Box::new(RailLikeProperties::from_state_id(state_id, &Block::RAIL)),
-            1133 => Box::new(PointedDripstoneLikeProperties::from_state_id(
-                state_id,
-                &Block::POINTED_DRIPSTONE,
-            )),
-            1134 => Box::new(PointedDripstoneLikeProperties::from_state_id(
-                state_id,
-                &Block::SULFUR_SPIKE,
-            )),
-            25 => Box::new(OakSaplingLikeProperties::from_state_id(
-                state_id,
-                &Block::OAK_SAPLING,
-            )),
-            26 => Box::new(OakSaplingLikeProperties::from_state_id(
-                state_id,
-                &Block::SPRUCE_SAPLING,
-            )),
-            27 => Box::new(OakSaplingLikeProperties::from_state_id(
-                state_id,
-                &Block::BIRCH_SAPLING,
-            )),
-            28 => Box::new(OakSaplingLikeProperties::from_state_id(
-                state_id,
-                &Block::JUNGLE_SAPLING,
-            )),
-            29 => Box::new(OakSaplingLikeProperties::from_state_id(
-                state_id,
-                &Block::ACACIA_SAPLING,
-            )),
-            30 => Box::new(OakSaplingLikeProperties::from_state_id(
-                state_id,
-                &Block::CHERRY_SAPLING,
-            )),
-            31 => Box::new(OakSaplingLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_OAK_SAPLING,
-            )),
-            32 => Box::new(OakSaplingLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_OAK_SAPLING,
-            )),
-            792 => Box::new(BambooLikeProperties::from_state_id(
-                state_id,
-                &Block::BAMBOO,
-            )),
-            207 => Box::new(WheatLikeProperties::from_state_id(state_id, &Block::WHEAT)),
-            364 => Box::new(WheatLikeProperties::from_state_id(
-                state_id,
-                &Block::PUMPKIN_STEM,
-            )),
-            365 => Box::new(WheatLikeProperties::from_state_id(
-                state_id,
-                &Block::MELON_STEM,
-            )),
-            441 => Box::new(WheatLikeProperties::from_state_id(
-                state_id,
-                &Block::CARROTS,
-            )),
-            442 => Box::new(WheatLikeProperties::from_state_id(
-                state_id,
-                &Block::POTATOES,
-            )),
-            788 => Box::new(SeaPickleLikeProperties::from_state_id(
-                state_id,
-                &Block::SEA_PICKLE,
-            )),
-            58 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_ROOTS,
-            )),
-            524 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::BARRIER,
-            )),
-            758 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::DEAD_TUBE_CORAL,
-            )),
-            759 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::DEAD_BRAIN_CORAL,
-            )),
-            760 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::DEAD_BUBBLE_CORAL,
-            )),
-            761 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::DEAD_FIRE_CORAL,
-            )),
-            762 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::DEAD_HORN_CORAL,
-            )),
-            763 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::TUBE_CORAL,
-            )),
-            764 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::BRAIN_CORAL,
-            )),
-            765 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::BUBBLE_CORAL,
-            )),
-            766 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::FIRE_CORAL,
-            )),
-            767 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::HORN_CORAL,
-            )),
-            768 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::DEAD_TUBE_CORAL_FAN,
-            )),
-            769 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::DEAD_BRAIN_CORAL_FAN,
-            )),
-            770 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::DEAD_BUBBLE_CORAL_FAN,
-            )),
-            771 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::DEAD_FIRE_CORAL_FAN,
-            )),
-            772 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::DEAD_HORN_CORAL_FAN,
-            )),
-            773 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::TUBE_CORAL_FAN,
-            )),
-            774 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::BRAIN_CORAL_FAN,
-            )),
-            775 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::BUBBLE_CORAL_FAN,
-            )),
-            776 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::FIRE_CORAL_FAN,
-            )),
-            777 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::HORN_CORAL_FAN,
-            )),
-            790 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::CONDUIT,
-            )),
-            1092 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::COPPER_GRATE,
-            )),
-            1093 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::EXPOSED_COPPER_GRATE,
-            )),
-            1094 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::WEATHERED_COPPER_GRATE,
-            )),
-            1095 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::OXIDIZED_COPPER_GRATE,
-            )),
-            1096 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_COPPER_GRATE,
-            )),
-            1097 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_EXPOSED_COPPER_GRATE,
-            )),
-            1098 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_WEATHERED_COPPER_GRATE,
-            )),
-            1099 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::WAXED_OXIDIZED_COPPER_GRATE,
-            )),
-            1148 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::HANGING_ROOTS,
-            )),
-            1187 => Box::new(MangroveRootsLikeProperties::from_state_id(
-                state_id,
-                &Block::HEAVY_CORE,
-            )),
-            210 => Box::new(OakSignLikeProperties::from_state_id(
-                state_id,
-                &Block::OAK_SIGN,
-            )),
-            211 => Box::new(OakSignLikeProperties::from_state_id(
-                state_id,
-                &Block::SPRUCE_SIGN,
-            )),
-            212 => Box::new(OakSignLikeProperties::from_state_id(
-                state_id,
-                &Block::BIRCH_SIGN,
-            )),
-            213 => Box::new(OakSignLikeProperties::from_state_id(
-                state_id,
-                &Block::ACACIA_SIGN,
-            )),
-            214 => Box::new(OakSignLikeProperties::from_state_id(
-                state_id,
-                &Block::CHERRY_SIGN,
-            )),
-            215 => Box::new(OakSignLikeProperties::from_state_id(
-                state_id,
-                &Block::JUNGLE_SIGN,
-            )),
-            216 => Box::new(OakSignLikeProperties::from_state_id(
-                state_id,
-                &Block::DARK_OAK_SIGN,
-            )),
-            217 => Box::new(OakSignLikeProperties::from_state_id(
-                state_id,
-                &Block::PALE_OAK_SIGN,
-            )),
-            218 => Box::new(OakSignLikeProperties::from_state_id(
-                state_id,
-                &Block::MANGROVE_SIGN,
-            )),
-            219 => Box::new(OakSignLikeProperties::from_state_id(
-                state_id,
-                &Block::BAMBOO_SIGN,
-            )),
-            901 => Box::new(OakSignLikeProperties::from_state_id(
-                state_id,
-                &Block::CRIMSON_SIGN,
-            )),
-            902 => Box::new(OakSignLikeProperties::from_state_id(
-                state_id,
-                &Block::WARPED_SIGN,
-            )),
-            525 => Box::new(LightLikeProperties::from_state_id(state_id, &Block::LIGHT)),
-            907 => Box::new(TestBlockLikeProperties::from_state_id(
-                state_id,
-                &Block::TEST_BLOCK,
-            )),
-            563 => Box::new(WhiteBannerLikeProperties::from_state_id(
-                state_id,
-                &Block::WHITE_BANNER,
-            )),
-            564 => Box::new(WhiteBannerLikeProperties::from_state_id(
-                state_id,
-                &Block::ORANGE_BANNER,
-            )),
-            565 => Box::new(WhiteBannerLikeProperties::from_state_id(
-                state_id,
-                &Block::MAGENTA_BANNER,
-            )),
-            566 => Box::new(WhiteBannerLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHT_BLUE_BANNER,
-            )),
-            567 => Box::new(WhiteBannerLikeProperties::from_state_id(
-                state_id,
-                &Block::YELLOW_BANNER,
-            )),
-            568 => Box::new(WhiteBannerLikeProperties::from_state_id(
-                state_id,
-                &Block::LIME_BANNER,
-            )),
-            569 => Box::new(WhiteBannerLikeProperties::from_state_id(
-                state_id,
-                &Block::PINK_BANNER,
-            )),
-            570 => Box::new(WhiteBannerLikeProperties::from_state_id(
-                state_id,
-                &Block::GRAY_BANNER,
-            )),
-            571 => Box::new(WhiteBannerLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHT_GRAY_BANNER,
-            )),
-            572 => Box::new(WhiteBannerLikeProperties::from_state_id(
-                state_id,
-                &Block::CYAN_BANNER,
-            )),
-            573 => Box::new(WhiteBannerLikeProperties::from_state_id(
-                state_id,
-                &Block::PURPLE_BANNER,
-            )),
-            574 => Box::new(WhiteBannerLikeProperties::from_state_id(
-                state_id,
-                &Block::BLUE_BANNER,
-            )),
-            575 => Box::new(WhiteBannerLikeProperties::from_state_id(
-                state_id,
-                &Block::BROWN_BANNER,
-            )),
-            576 => Box::new(WhiteBannerLikeProperties::from_state_id(
-                state_id,
-                &Block::GREEN_BANNER,
-            )),
-            577 => Box::new(WhiteBannerLikeProperties::from_state_id(
-                state_id,
-                &Block::RED_BANNER,
-            )),
-            578 => Box::new(WhiteBannerLikeProperties::from_state_id(
-                state_id,
-                &Block::BLACK_BANNER,
-            )),
-            35 => Box::new(WaterLikeProperties::from_state_id(state_id, &Block::WATER)),
-            36 => Box::new(WaterLikeProperties::from_state_id(state_id, &Block::LAVA)),
-            742 => Box::new(KelpLikeProperties::from_state_id(state_id, &Block::KELP)),
-            878 => Box::new(KelpLikeProperties::from_state_id(
-                state_id,
-                &Block::WEEPING_VINES,
-            )),
-            880 => Box::new(KelpLikeProperties::from_state_id(
-                state_id,
-                &Block::TWISTING_VINES,
-            )),
-            471 => Box::new(LightWeightedPressurePlateLikeProperties::from_state_id(
-                state_id,
-                &Block::LIGHT_WEIGHTED_PRESSURE_PLATE,
-            )),
-            472 => Box::new(LightWeightedPressurePlateLikeProperties::from_state_id(
-                state_id,
-                &Block::HEAVY_WEIGHTED_PRESSURE_PLATE,
-            )),
-            910 => Box::new(LightWeightedPressurePlateLikeProperties::from_state_id(
-                state_id,
-                &Block::TARGET,
-            )),
-            662 => Box::new(TorchflowerCropLikeProperties::from_state_id(
-                state_id,
-                &Block::TORCHFLOWER_CROP,
-            )),
-            384 => Box::new(NetherWartLikeProperties::from_state_id(
-                state_id,
-                &Block::NETHER_WART,
-            )),
-            665 => Box::new(NetherWartLikeProperties::from_state_id(
-                state_id,
-                &Block::BEETROOTS,
-            )),
-            670 => Box::new(NetherWartLikeProperties::from_state_id(
-                state_id,
-                &Block::FROSTED_ICE,
-            )),
-            861 => Box::new(NetherWartLikeProperties::from_state_id(
-                state_id,
-                &Block::SWEET_BERRY_BUSH,
-            )),
-            999 => Box::new(PotentSulfurLikeProperties::from_state_id(
-                state_id,
-                &Block::POTENT_SULFUR,
-            )),
+        Some(match self.id {
+            BlockId::GRINDSTONE => {
+                Box::new(GrindstoneLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::LEVER
+            | BlockId::STONE_BUTTON
+            | BlockId::OAK_BUTTON
+            | BlockId::SPRUCE_BUTTON
+            | BlockId::BIRCH_BUTTON
+            | BlockId::JUNGLE_BUTTON
+            | BlockId::ACACIA_BUTTON
+            | BlockId::CHERRY_BUTTON
+            | BlockId::DARK_OAK_BUTTON
+            | BlockId::PALE_OAK_BUTTON
+            | BlockId::MANGROVE_BUTTON
+            | BlockId::BAMBOO_BUTTON
+            | BlockId::CRIMSON_BUTTON
+            | BlockId::WARPED_BUTTON
+            | BlockId::POLISHED_BLACKSTONE_BUTTON => {
+                Box::new(LeverLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::OAK_FENCE_GATE
+            | BlockId::SPRUCE_FENCE_GATE
+            | BlockId::BIRCH_FENCE_GATE
+            | BlockId::JUNGLE_FENCE_GATE
+            | BlockId::ACACIA_FENCE_GATE
+            | BlockId::CHERRY_FENCE_GATE
+            | BlockId::DARK_OAK_FENCE_GATE
+            | BlockId::PALE_OAK_FENCE_GATE
+            | BlockId::MANGROVE_FENCE_GATE
+            | BlockId::BAMBOO_FENCE_GATE
+            | BlockId::CRIMSON_FENCE_GATE
+            | BlockId::WARPED_FENCE_GATE => {
+                Box::new(OakFenceGateLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::PALE_OAK_WOOD
+            | BlockId::OAK_LOG
+            | BlockId::SPRUCE_LOG
+            | BlockId::BIRCH_LOG
+            | BlockId::JUNGLE_LOG
+            | BlockId::ACACIA_LOG
+            | BlockId::CHERRY_LOG
+            | BlockId::DARK_OAK_LOG
+            | BlockId::PALE_OAK_LOG
+            | BlockId::MANGROVE_LOG
+            | BlockId::MUDDY_MANGROVE_ROOTS
+            | BlockId::BAMBOO_BLOCK
+            | BlockId::STRIPPED_SPRUCE_LOG
+            | BlockId::STRIPPED_BIRCH_LOG
+            | BlockId::STRIPPED_JUNGLE_LOG
+            | BlockId::STRIPPED_ACACIA_LOG
+            | BlockId::STRIPPED_CHERRY_LOG
+            | BlockId::STRIPPED_DARK_OAK_LOG
+            | BlockId::STRIPPED_PALE_OAK_LOG
+            | BlockId::STRIPPED_OAK_LOG
+            | BlockId::STRIPPED_MANGROVE_LOG
+            | BlockId::STRIPPED_BAMBOO_BLOCK
+            | BlockId::OAK_WOOD
+            | BlockId::SPRUCE_WOOD
+            | BlockId::BIRCH_WOOD
+            | BlockId::JUNGLE_WOOD
+            | BlockId::ACACIA_WOOD
+            | BlockId::CHERRY_WOOD
+            | BlockId::DARK_OAK_WOOD
+            | BlockId::MANGROVE_WOOD
+            | BlockId::STRIPPED_OAK_WOOD
+            | BlockId::STRIPPED_SPRUCE_WOOD
+            | BlockId::STRIPPED_BIRCH_WOOD
+            | BlockId::STRIPPED_JUNGLE_WOOD
+            | BlockId::STRIPPED_ACACIA_WOOD
+            | BlockId::STRIPPED_CHERRY_WOOD
+            | BlockId::STRIPPED_DARK_OAK_WOOD
+            | BlockId::STRIPPED_PALE_OAK_WOOD
+            | BlockId::STRIPPED_MANGROVE_WOOD
+            | BlockId::BASALT
+            | BlockId::POLISHED_BASALT
+            | BlockId::QUARTZ_PILLAR
+            | BlockId::HAY_BLOCK
+            | BlockId::PURPUR_PILLAR
+            | BlockId::BONE_BLOCK
+            | BlockId::WARPED_STEM
+            | BlockId::STRIPPED_WARPED_STEM
+            | BlockId::WARPED_HYPHAE
+            | BlockId::STRIPPED_WARPED_HYPHAE
+            | BlockId::CRIMSON_STEM
+            | BlockId::STRIPPED_CRIMSON_STEM
+            | BlockId::CRIMSON_HYPHAE
+            | BlockId::STRIPPED_CRIMSON_HYPHAE
+            | BlockId::DEEPSLATE
+            | BlockId::INFESTED_DEEPSLATE
+            | BlockId::OCHRE_FROGLIGHT
+            | BlockId::VERDANT_FROGLIGHT
+            | BlockId::PEARLESCENT_FROGLIGHT => {
+                Box::new(PaleOakWoodLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::CREAKING_HEART => {
+                Box::new(CreakingHeartLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::IRON_CHAIN
+            | BlockId::COPPER_CHAIN
+            | BlockId::EXPOSED_COPPER_CHAIN
+            | BlockId::WEATHERED_COPPER_CHAIN
+            | BlockId::OXIDIZED_COPPER_CHAIN
+            | BlockId::WAXED_COPPER_CHAIN
+            | BlockId::WAXED_EXPOSED_COPPER_CHAIN
+            | BlockId::WAXED_WEATHERED_COPPER_CHAIN
+            | BlockId::WAXED_OXIDIZED_COPPER_CHAIN => {
+                Box::new(IronChainLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::CAKE => Box::new(CakeLikeProperties::from_state_id(state_id, self)),
+            BlockId::JUKEBOX => Box::new(JukeboxLikeProperties::from_state_id(state_id, self)),
+            BlockId::POWERED_RAIL | BlockId::DETECTOR_RAIL | BlockId::ACTIVATOR_RAIL => {
+                Box::new(PoweredRailLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::DRIED_GHAST => {
+                Box::new(DriedGhastLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::OAK_STAIRS
+            | BlockId::COBBLESTONE_STAIRS
+            | BlockId::BRICK_STAIRS
+            | BlockId::STONE_BRICK_STAIRS
+            | BlockId::MUD_BRICK_STAIRS
+            | BlockId::RESIN_BRICK_STAIRS
+            | BlockId::NETHER_BRICK_STAIRS
+            | BlockId::SANDSTONE_STAIRS
+            | BlockId::SPRUCE_STAIRS
+            | BlockId::BIRCH_STAIRS
+            | BlockId::JUNGLE_STAIRS
+            | BlockId::QUARTZ_STAIRS
+            | BlockId::ACACIA_STAIRS
+            | BlockId::CHERRY_STAIRS
+            | BlockId::DARK_OAK_STAIRS
+            | BlockId::PALE_OAK_STAIRS
+            | BlockId::MANGROVE_STAIRS
+            | BlockId::BAMBOO_STAIRS
+            | BlockId::BAMBOO_MOSAIC_STAIRS
+            | BlockId::PRISMARINE_STAIRS
+            | BlockId::PRISMARINE_BRICK_STAIRS
+            | BlockId::DARK_PRISMARINE_STAIRS
+            | BlockId::RED_SANDSTONE_STAIRS
+            | BlockId::PURPUR_STAIRS
+            | BlockId::POLISHED_GRANITE_STAIRS
+            | BlockId::SMOOTH_RED_SANDSTONE_STAIRS
+            | BlockId::MOSSY_STONE_BRICK_STAIRS
+            | BlockId::POLISHED_DIORITE_STAIRS
+            | BlockId::MOSSY_COBBLESTONE_STAIRS
+            | BlockId::END_STONE_BRICK_STAIRS
+            | BlockId::STONE_STAIRS
+            | BlockId::SMOOTH_SANDSTONE_STAIRS
+            | BlockId::SMOOTH_QUARTZ_STAIRS
+            | BlockId::GRANITE_STAIRS
+            | BlockId::ANDESITE_STAIRS
+            | BlockId::RED_NETHER_BRICK_STAIRS
+            | BlockId::POLISHED_ANDESITE_STAIRS
+            | BlockId::DIORITE_STAIRS
+            | BlockId::CRIMSON_STAIRS
+            | BlockId::WARPED_STAIRS
+            | BlockId::BLACKSTONE_STAIRS
+            | BlockId::POLISHED_BLACKSTONE_BRICK_STAIRS
+            | BlockId::POLISHED_BLACKSTONE_STAIRS
+            | BlockId::TUFF_STAIRS
+            | BlockId::POLISHED_TUFF_STAIRS
+            | BlockId::TUFF_BRICK_STAIRS
+            | BlockId::SULFUR_STAIRS
+            | BlockId::POLISHED_SULFUR_STAIRS
+            | BlockId::SULFUR_BRICK_STAIRS
+            | BlockId::CINNABAR_STAIRS
+            | BlockId::POLISHED_CINNABAR_STAIRS
+            | BlockId::CINNABAR_BRICK_STAIRS
+            | BlockId::CUT_COPPER_STAIRS
+            | BlockId::EXPOSED_CUT_COPPER_STAIRS
+            | BlockId::WEATHERED_CUT_COPPER_STAIRS
+            | BlockId::OXIDIZED_CUT_COPPER_STAIRS
+            | BlockId::WAXED_CUT_COPPER_STAIRS
+            | BlockId::WAXED_EXPOSED_CUT_COPPER_STAIRS
+            | BlockId::WAXED_WEATHERED_CUT_COPPER_STAIRS
+            | BlockId::WAXED_OXIDIZED_CUT_COPPER_STAIRS
+            | BlockId::COBBLED_DEEPSLATE_STAIRS
+            | BlockId::POLISHED_DEEPSLATE_STAIRS
+            | BlockId::DEEPSLATE_TILE_STAIRS
+            | BlockId::DEEPSLATE_BRICK_STAIRS => {
+                Box::new(OakStairsLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::STICKY_PISTON | BlockId::PISTON => {
+                Box::new(StickyPistonLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::OAK_DOOR
+            | BlockId::IRON_DOOR
+            | BlockId::SPRUCE_DOOR
+            | BlockId::BIRCH_DOOR
+            | BlockId::JUNGLE_DOOR
+            | BlockId::ACACIA_DOOR
+            | BlockId::CHERRY_DOOR
+            | BlockId::DARK_OAK_DOOR
+            | BlockId::PALE_OAK_DOOR
+            | BlockId::MANGROVE_DOOR
+            | BlockId::BAMBOO_DOOR
+            | BlockId::CRIMSON_DOOR
+            | BlockId::WARPED_DOOR
+            | BlockId::COPPER_DOOR
+            | BlockId::EXPOSED_COPPER_DOOR
+            | BlockId::WEATHERED_COPPER_DOOR
+            | BlockId::OXIDIZED_COPPER_DOOR
+            | BlockId::WAXED_COPPER_DOOR
+            | BlockId::WAXED_EXPOSED_COPPER_DOOR
+            | BlockId::WAXED_WEATHERED_COPPER_DOOR
+            | BlockId::WAXED_OXIDIZED_COPPER_DOOR => {
+                Box::new(OakDoorLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::CHISELED_BOOKSHELF => Box::new(
+                ChiseledBookshelfLikeProperties::from_state_id(state_id, self),
+            ),
+            BlockId::CHORUS_FLOWER => {
+                Box::new(ChorusFlowerLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::CACTUS | BlockId::SUGAR_CANE => {
+                Box::new(CactusLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::FIRE => Box::new(FireLikeProperties::from_state_id(state_id, self)),
+            BlockId::WHITE_BED
+            | BlockId::ORANGE_BED
+            | BlockId::MAGENTA_BED
+            | BlockId::LIGHT_BLUE_BED
+            | BlockId::YELLOW_BED
+            | BlockId::LIME_BED
+            | BlockId::PINK_BED
+            | BlockId::GRAY_BED
+            | BlockId::LIGHT_GRAY_BED
+            | BlockId::CYAN_BED
+            | BlockId::PURPLE_BED
+            | BlockId::BLUE_BED
+            | BlockId::BROWN_BED
+            | BlockId::GREEN_BED
+            | BlockId::RED_BED
+            | BlockId::BLACK_BED => Box::new(WhiteBedLikeProperties::from_state_id(state_id, self)),
+            BlockId::HOPPER => Box::new(HopperLikeProperties::from_state_id(state_id, self)),
+            BlockId::CALIBRATED_SCULK_SENSOR => Box::new(
+                CalibratedSculkSensorLikeProperties::from_state_id(state_id, self),
+            ),
+            BlockId::SCULK_SENSOR => {
+                Box::new(SculkSensorLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::PALE_MOSS_CARPET => {
+                Box::new(PaleMossCarpetLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::SCAFFOLDING => {
+                Box::new(ScaffoldingLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::VAULT => Box::new(VaultLikeProperties::from_state_id(state_id, self)),
+            BlockId::TRIAL_SPAWNER => {
+                Box::new(TrialSpawnerLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::SCULK_SHRIEKER => {
+                Box::new(SculkShriekerLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::BELL => Box::new(BellLikeProperties::from_state_id(state_id, self)),
+            BlockId::ACACIA_SHELF
+            | BlockId::BAMBOO_SHELF
+            | BlockId::BIRCH_SHELF
+            | BlockId::CHERRY_SHELF
+            | BlockId::CRIMSON_SHELF
+            | BlockId::DARK_OAK_SHELF
+            | BlockId::JUNGLE_SHELF
+            | BlockId::MANGROVE_SHELF
+            | BlockId::OAK_SHELF
+            | BlockId::PALE_OAK_SHELF
+            | BlockId::SPRUCE_SHELF
+            | BlockId::WARPED_SHELF => {
+                Box::new(AcaciaShelfLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::REPEATER => Box::new(RepeaterLikeProperties::from_state_id(state_id, self)),
+            BlockId::RESPAWN_ANCHOR => {
+                Box::new(RespawnAnchorLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::BREWING_STAND => {
+                Box::new(BrewingStandLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::SNOW => Box::new(SnowLikeProperties::from_state_id(state_id, self)),
+            BlockId::WALL_TORCH
+            | BlockId::SOUL_WALL_TORCH
+            | BlockId::COPPER_WALL_TORCH
+            | BlockId::CARVED_PUMPKIN
+            | BlockId::JACK_O_LANTERN
+            | BlockId::ATTACHED_PUMPKIN_STEM
+            | BlockId::ATTACHED_MELON_STEM
+            | BlockId::ANVIL
+            | BlockId::CHIPPED_ANVIL
+            | BlockId::DAMAGED_ANVIL
+            | BlockId::WHITE_WALL_BANNER
+            | BlockId::ORANGE_WALL_BANNER
+            | BlockId::MAGENTA_WALL_BANNER
+            | BlockId::LIGHT_BLUE_WALL_BANNER
+            | BlockId::YELLOW_WALL_BANNER
+            | BlockId::LIME_WALL_BANNER
+            | BlockId::PINK_WALL_BANNER
+            | BlockId::GRAY_WALL_BANNER
+            | BlockId::LIGHT_GRAY_WALL_BANNER
+            | BlockId::CYAN_WALL_BANNER
+            | BlockId::PURPLE_WALL_BANNER
+            | BlockId::BLUE_WALL_BANNER
+            | BlockId::BROWN_WALL_BANNER
+            | BlockId::GREEN_WALL_BANNER
+            | BlockId::RED_WALL_BANNER
+            | BlockId::BLACK_WALL_BANNER
+            | BlockId::WHITE_GLAZED_TERRACOTTA
+            | BlockId::ORANGE_GLAZED_TERRACOTTA
+            | BlockId::MAGENTA_GLAZED_TERRACOTTA
+            | BlockId::LIGHT_BLUE_GLAZED_TERRACOTTA
+            | BlockId::YELLOW_GLAZED_TERRACOTTA
+            | BlockId::LIME_GLAZED_TERRACOTTA
+            | BlockId::PINK_GLAZED_TERRACOTTA
+            | BlockId::GRAY_GLAZED_TERRACOTTA
+            | BlockId::LIGHT_GRAY_GLAZED_TERRACOTTA
+            | BlockId::CYAN_GLAZED_TERRACOTTA
+            | BlockId::PURPLE_GLAZED_TERRACOTTA
+            | BlockId::BLUE_GLAZED_TERRACOTTA
+            | BlockId::BROWN_GLAZED_TERRACOTTA
+            | BlockId::GREEN_GLAZED_TERRACOTTA
+            | BlockId::RED_GLAZED_TERRACOTTA
+            | BlockId::BLACK_GLAZED_TERRACOTTA
+            | BlockId::LOOM
+            | BlockId::STONECUTTER => {
+                Box::new(WallTorchLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::CHEST
+            | BlockId::TRAPPED_CHEST
+            | BlockId::COPPER_CHEST
+            | BlockId::EXPOSED_COPPER_CHEST
+            | BlockId::WEATHERED_COPPER_CHEST
+            | BlockId::OXIDIZED_COPPER_CHEST
+            | BlockId::WAXED_COPPER_CHEST
+            | BlockId::WAXED_EXPOSED_COPPER_CHEST
+            | BlockId::WAXED_WEATHERED_COPPER_CHEST
+            | BlockId::WAXED_OXIDIZED_COPPER_CHEST => {
+                Box::new(ChestLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::SKELETON_WALL_SKULL
+            | BlockId::WITHER_SKELETON_WALL_SKULL
+            | BlockId::ZOMBIE_WALL_HEAD
+            | BlockId::PLAYER_WALL_HEAD
+            | BlockId::CREEPER_WALL_HEAD
+            | BlockId::DRAGON_WALL_HEAD
+            | BlockId::PIGLIN_WALL_HEAD => Box::new(
+                SkeletonWallSkullLikeProperties::from_state_id(state_id, self),
+            ),
+            BlockId::OAK_TRAPDOOR
+            | BlockId::SPRUCE_TRAPDOOR
+            | BlockId::BIRCH_TRAPDOOR
+            | BlockId::JUNGLE_TRAPDOOR
+            | BlockId::ACACIA_TRAPDOOR
+            | BlockId::CHERRY_TRAPDOOR
+            | BlockId::DARK_OAK_TRAPDOOR
+            | BlockId::PALE_OAK_TRAPDOOR
+            | BlockId::MANGROVE_TRAPDOOR
+            | BlockId::BAMBOO_TRAPDOOR
+            | BlockId::IRON_TRAPDOOR
+            | BlockId::CRIMSON_TRAPDOOR
+            | BlockId::WARPED_TRAPDOOR
+            | BlockId::COPPER_TRAPDOOR
+            | BlockId::EXPOSED_COPPER_TRAPDOOR
+            | BlockId::WEATHERED_COPPER_TRAPDOOR
+            | BlockId::OXIDIZED_COPPER_TRAPDOOR
+            | BlockId::WAXED_COPPER_TRAPDOOR
+            | BlockId::WAXED_EXPOSED_COPPER_TRAPDOOR
+            | BlockId::WAXED_WEATHERED_COPPER_TRAPDOOR
+            | BlockId::WAXED_OXIDIZED_COPPER_TRAPDOOR => {
+                Box::new(OakTrapdoorLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::LECTERN => Box::new(LecternLikeProperties::from_state_id(state_id, self)),
+            BlockId::TRIPWIRE_HOOK => {
+                Box::new(TripwireHookLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::COMPARATOR => {
+                Box::new(ComparatorLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::COPPER_GOLEM_STATUE
+            | BlockId::EXPOSED_COPPER_GOLEM_STATUE
+            | BlockId::WEATHERED_COPPER_GOLEM_STATUE
+            | BlockId::OXIDIZED_COPPER_GOLEM_STATUE
+            | BlockId::WAXED_COPPER_GOLEM_STATUE
+            | BlockId::WAXED_EXPOSED_COPPER_GOLEM_STATUE
+            | BlockId::WAXED_WEATHERED_COPPER_GOLEM_STATUE
+            | BlockId::WAXED_OXIDIZED_COPPER_GOLEM_STATUE => Box::new(
+                CopperGolemStatueLikeProperties::from_state_id(state_id, self),
+            ),
+            BlockId::END_PORTAL_FRAME => {
+                Box::new(EndPortalFrameLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::FURNACE
+            | BlockId::REDSTONE_WALL_TORCH
+            | BlockId::SMOKER
+            | BlockId::BLAST_FURNACE => {
+                Box::new(FurnaceLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::CAMPFIRE | BlockId::SOUL_CAMPFIRE => {
+                Box::new(CampfireLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::SMALL_DRIPLEAF => {
+                Box::new(SmallDripleafLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::BEE_NEST | BlockId::BEEHIVE => {
+                Box::new(BeeNestLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::DECORATED_POT => {
+                Box::new(DecoratedPotLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::LADDER
+            | BlockId::OAK_WALL_SIGN
+            | BlockId::SPRUCE_WALL_SIGN
+            | BlockId::BIRCH_WALL_SIGN
+            | BlockId::ACACIA_WALL_SIGN
+            | BlockId::CHERRY_WALL_SIGN
+            | BlockId::JUNGLE_WALL_SIGN
+            | BlockId::DARK_OAK_WALL_SIGN
+            | BlockId::PALE_OAK_WALL_SIGN
+            | BlockId::MANGROVE_WALL_SIGN
+            | BlockId::BAMBOO_WALL_SIGN
+            | BlockId::OAK_WALL_HANGING_SIGN
+            | BlockId::SPRUCE_WALL_HANGING_SIGN
+            | BlockId::BIRCH_WALL_HANGING_SIGN
+            | BlockId::ACACIA_WALL_HANGING_SIGN
+            | BlockId::CHERRY_WALL_HANGING_SIGN
+            | BlockId::JUNGLE_WALL_HANGING_SIGN
+            | BlockId::DARK_OAK_WALL_HANGING_SIGN
+            | BlockId::PALE_OAK_WALL_HANGING_SIGN
+            | BlockId::MANGROVE_WALL_HANGING_SIGN
+            | BlockId::CRIMSON_WALL_HANGING_SIGN
+            | BlockId::WARPED_WALL_HANGING_SIGN
+            | BlockId::BAMBOO_WALL_HANGING_SIGN
+            | BlockId::ENDER_CHEST
+            | BlockId::DEAD_TUBE_CORAL_WALL_FAN
+            | BlockId::DEAD_BRAIN_CORAL_WALL_FAN
+            | BlockId::DEAD_BUBBLE_CORAL_WALL_FAN
+            | BlockId::DEAD_FIRE_CORAL_WALL_FAN
+            | BlockId::DEAD_HORN_CORAL_WALL_FAN
+            | BlockId::TUBE_CORAL_WALL_FAN
+            | BlockId::BRAIN_CORAL_WALL_FAN
+            | BlockId::BUBBLE_CORAL_WALL_FAN
+            | BlockId::FIRE_CORAL_WALL_FAN
+            | BlockId::HORN_CORAL_WALL_FAN
+            | BlockId::CRIMSON_WALL_SIGN
+            | BlockId::WARPED_WALL_SIGN
+            | BlockId::BIG_DRIPLEAF_STEM => {
+                Box::new(LadderLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::BIG_DRIPLEAF => {
+                Box::new(BigDripleafLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::PINK_PETALS | BlockId::WILDFLOWERS => {
+                Box::new(PinkPetalsLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::LEAF_LITTER => {
+                Box::new(LeafLitterLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::COCOA => Box::new(CocoaLikeProperties::from_state_id(state_id, self)),
+            BlockId::DISPENSER | BlockId::DROPPER => {
+                Box::new(DispenserLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::CRAFTER => Box::new(CrafterLikeProperties::from_state_id(state_id, self)),
+            BlockId::FARMLAND => Box::new(FarmlandLikeProperties::from_state_id(state_id, self)),
+            BlockId::SUSPICIOUS_SAND | BlockId::SUSPICIOUS_GRAVEL => {
+                Box::new(SuspiciousSandLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::RESIN_BRICK_SLAB
+            | BlockId::PRISMARINE_SLAB
+            | BlockId::PRISMARINE_BRICK_SLAB
+            | BlockId::DARK_PRISMARINE_SLAB
+            | BlockId::OAK_SLAB
+            | BlockId::SPRUCE_SLAB
+            | BlockId::BIRCH_SLAB
+            | BlockId::JUNGLE_SLAB
+            | BlockId::ACACIA_SLAB
+            | BlockId::CHERRY_SLAB
+            | BlockId::DARK_OAK_SLAB
+            | BlockId::PALE_OAK_SLAB
+            | BlockId::MANGROVE_SLAB
+            | BlockId::BAMBOO_SLAB
+            | BlockId::BAMBOO_MOSAIC_SLAB
+            | BlockId::STONE_SLAB
+            | BlockId::SMOOTH_STONE_SLAB
+            | BlockId::SANDSTONE_SLAB
+            | BlockId::CUT_SANDSTONE_SLAB
+            | BlockId::PETRIFIED_OAK_SLAB
+            | BlockId::COBBLESTONE_SLAB
+            | BlockId::BRICK_SLAB
+            | BlockId::STONE_BRICK_SLAB
+            | BlockId::MUD_BRICK_SLAB
+            | BlockId::NETHER_BRICK_SLAB
+            | BlockId::QUARTZ_SLAB
+            | BlockId::RED_SANDSTONE_SLAB
+            | BlockId::CUT_RED_SANDSTONE_SLAB
+            | BlockId::PURPUR_SLAB
+            | BlockId::POLISHED_GRANITE_SLAB
+            | BlockId::SMOOTH_RED_SANDSTONE_SLAB
+            | BlockId::MOSSY_STONE_BRICK_SLAB
+            | BlockId::POLISHED_DIORITE_SLAB
+            | BlockId::MOSSY_COBBLESTONE_SLAB
+            | BlockId::END_STONE_BRICK_SLAB
+            | BlockId::SMOOTH_SANDSTONE_SLAB
+            | BlockId::SMOOTH_QUARTZ_SLAB
+            | BlockId::GRANITE_SLAB
+            | BlockId::ANDESITE_SLAB
+            | BlockId::RED_NETHER_BRICK_SLAB
+            | BlockId::POLISHED_ANDESITE_SLAB
+            | BlockId::DIORITE_SLAB
+            | BlockId::CRIMSON_SLAB
+            | BlockId::WARPED_SLAB
+            | BlockId::BLACKSTONE_SLAB
+            | BlockId::POLISHED_BLACKSTONE_BRICK_SLAB
+            | BlockId::POLISHED_BLACKSTONE_SLAB
+            | BlockId::TUFF_SLAB
+            | BlockId::POLISHED_TUFF_SLAB
+            | BlockId::TUFF_BRICK_SLAB
+            | BlockId::SULFUR_SLAB
+            | BlockId::POLISHED_SULFUR_SLAB
+            | BlockId::SULFUR_BRICK_SLAB
+            | BlockId::CINNABAR_SLAB
+            | BlockId::POLISHED_CINNABAR_SLAB
+            | BlockId::CINNABAR_BRICK_SLAB
+            | BlockId::CUT_COPPER_SLAB
+            | BlockId::EXPOSED_CUT_COPPER_SLAB
+            | BlockId::WEATHERED_CUT_COPPER_SLAB
+            | BlockId::OXIDIZED_CUT_COPPER_SLAB
+            | BlockId::WAXED_CUT_COPPER_SLAB
+            | BlockId::WAXED_EXPOSED_CUT_COPPER_SLAB
+            | BlockId::WAXED_WEATHERED_CUT_COPPER_SLAB
+            | BlockId::WAXED_OXIDIZED_CUT_COPPER_SLAB
+            | BlockId::COBBLED_DEEPSLATE_SLAB
+            | BlockId::POLISHED_DEEPSLATE_SLAB
+            | BlockId::DEEPSLATE_TILE_SLAB
+            | BlockId::DEEPSLATE_BRICK_SLAB => {
+                Box::new(ResinBrickSlabLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::STONE_PRESSURE_PLATE
+            | BlockId::OAK_PRESSURE_PLATE
+            | BlockId::SPRUCE_PRESSURE_PLATE
+            | BlockId::BIRCH_PRESSURE_PLATE
+            | BlockId::JUNGLE_PRESSURE_PLATE
+            | BlockId::ACACIA_PRESSURE_PLATE
+            | BlockId::CHERRY_PRESSURE_PLATE
+            | BlockId::DARK_OAK_PRESSURE_PLATE
+            | BlockId::PALE_OAK_PRESSURE_PLATE
+            | BlockId::MANGROVE_PRESSURE_PLATE
+            | BlockId::BAMBOO_PRESSURE_PLATE
+            | BlockId::CRIMSON_PRESSURE_PLATE
+            | BlockId::WARPED_PRESSURE_PLATE
+            | BlockId::POLISHED_BLACKSTONE_PRESSURE_PLATE => Box::new(
+                StonePressurePlateLikeProperties::from_state_id(state_id, self),
+            ),
+            BlockId::COPPER_BULB
+            | BlockId::EXPOSED_COPPER_BULB
+            | BlockId::WEATHERED_COPPER_BULB
+            | BlockId::OXIDIZED_COPPER_BULB
+            | BlockId::WAXED_COPPER_BULB
+            | BlockId::WAXED_EXPOSED_COPPER_BULB
+            | BlockId::WAXED_WEATHERED_COPPER_BULB
+            | BlockId::WAXED_OXIDIZED_COPPER_BULB => {
+                Box::new(CopperBulbLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::TRIPWIRE => Box::new(TripwireLikeProperties::from_state_id(state_id, self)),
+            BlockId::OBSERVER => Box::new(ObserverLikeProperties::from_state_id(state_id, self)),
+            BlockId::LIGHTNING_ROD
+            | BlockId::EXPOSED_LIGHTNING_ROD
+            | BlockId::WEATHERED_LIGHTNING_ROD
+            | BlockId::OXIDIZED_LIGHTNING_ROD
+            | BlockId::WAXED_LIGHTNING_ROD
+            | BlockId::WAXED_EXPOSED_LIGHTNING_ROD
+            | BlockId::WAXED_WEATHERED_LIGHTNING_ROD
+            | BlockId::WAXED_OXIDIZED_LIGHTNING_ROD => {
+                Box::new(LightningRodLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::NOTE_BLOCK => Box::new(NoteBlockLikeProperties::from_state_id(state_id, self)),
+            BlockId::SKELETON_SKULL
+            | BlockId::WITHER_SKELETON_SKULL
+            | BlockId::ZOMBIE_HEAD
+            | BlockId::PLAYER_HEAD
+            | BlockId::CREEPER_HEAD
+            | BlockId::DRAGON_HEAD
+            | BlockId::PIGLIN_HEAD => {
+                Box::new(SkeletonSkullLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::REDSTONE_WIRE => {
+                Box::new(RedstoneWireLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::COMPOSTER => Box::new(ComposterLikeProperties::from_state_id(state_id, self)),
+            BlockId::CAVE_VINES_PLANT => {
+                Box::new(CaveVinesPlantLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::CAVE_VINES => Box::new(CaveVinesLikeProperties::from_state_id(state_id, self)),
+            BlockId::RESIN_BRICK_WALL
+            | BlockId::COBBLESTONE_WALL
+            | BlockId::MOSSY_COBBLESTONE_WALL
+            | BlockId::BRICK_WALL
+            | BlockId::PRISMARINE_WALL
+            | BlockId::RED_SANDSTONE_WALL
+            | BlockId::MOSSY_STONE_BRICK_WALL
+            | BlockId::GRANITE_WALL
+            | BlockId::STONE_BRICK_WALL
+            | BlockId::MUD_BRICK_WALL
+            | BlockId::NETHER_BRICK_WALL
+            | BlockId::ANDESITE_WALL
+            | BlockId::RED_NETHER_BRICK_WALL
+            | BlockId::SANDSTONE_WALL
+            | BlockId::END_STONE_BRICK_WALL
+            | BlockId::DIORITE_WALL
+            | BlockId::BLACKSTONE_WALL
+            | BlockId::POLISHED_BLACKSTONE_BRICK_WALL
+            | BlockId::POLISHED_BLACKSTONE_WALL
+            | BlockId::TUFF_WALL
+            | BlockId::POLISHED_TUFF_WALL
+            | BlockId::TUFF_BRICK_WALL
+            | BlockId::SULFUR_WALL
+            | BlockId::POLISHED_SULFUR_WALL
+            | BlockId::SULFUR_BRICK_WALL
+            | BlockId::CINNABAR_WALL
+            | BlockId::POLISHED_CINNABAR_WALL
+            | BlockId::CINNABAR_BRICK_WALL
+            | BlockId::COBBLED_DEEPSLATE_WALL
+            | BlockId::POLISHED_DEEPSLATE_WALL
+            | BlockId::DEEPSLATE_TILE_WALL
+            | BlockId::DEEPSLATE_BRICK_WALL => {
+                Box::new(ResinBrickWallLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::TNT => Box::new(TntLikeProperties::from_state_id(state_id, self)),
+            BlockId::BROWN_MUSHROOM_BLOCK
+            | BlockId::RED_MUSHROOM_BLOCK
+            | BlockId::MUSHROOM_STEM
+            | BlockId::CHORUS_PLANT => Box::new(BrownMushroomBlockLikeProperties::from_state_id(
+                state_id, self,
+            )),
+            BlockId::GLOW_LICHEN | BlockId::RESIN_CLUMP | BlockId::SCULK_VEIN => {
+                Box::new(GlowLichenLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::VINE => Box::new(VineLikeProperties::from_state_id(state_id, self)),
+            BlockId::REDSTONE_ORE
+            | BlockId::DEEPSLATE_REDSTONE_ORE
+            | BlockId::REDSTONE_TORCH
+            | BlockId::REDSTONE_LAMP
+            | BlockId::CANDLE_CAKE
+            | BlockId::WHITE_CANDLE_CAKE
+            | BlockId::ORANGE_CANDLE_CAKE
+            | BlockId::MAGENTA_CANDLE_CAKE
+            | BlockId::LIGHT_BLUE_CANDLE_CAKE
+            | BlockId::YELLOW_CANDLE_CAKE
+            | BlockId::LIME_CANDLE_CAKE
+            | BlockId::PINK_CANDLE_CAKE
+            | BlockId::GRAY_CANDLE_CAKE
+            | BlockId::LIGHT_GRAY_CANDLE_CAKE
+            | BlockId::CYAN_CANDLE_CAKE
+            | BlockId::PURPLE_CANDLE_CAKE
+            | BlockId::BLUE_CANDLE_CAKE
+            | BlockId::BROWN_CANDLE_CAKE
+            | BlockId::GREEN_CANDLE_CAKE
+            | BlockId::RED_CANDLE_CAKE
+            | BlockId::BLACK_CANDLE_CAKE => {
+                Box::new(RedstoneOreLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::CANDLE
+            | BlockId::WHITE_CANDLE
+            | BlockId::ORANGE_CANDLE
+            | BlockId::MAGENTA_CANDLE
+            | BlockId::LIGHT_BLUE_CANDLE
+            | BlockId::YELLOW_CANDLE
+            | BlockId::LIME_CANDLE
+            | BlockId::PINK_CANDLE
+            | BlockId::GRAY_CANDLE
+            | BlockId::LIGHT_GRAY_CANDLE
+            | BlockId::CYAN_CANDLE
+            | BlockId::PURPLE_CANDLE
+            | BlockId::BLUE_CANDLE
+            | BlockId::BROWN_CANDLE
+            | BlockId::GREEN_CANDLE
+            | BlockId::RED_CANDLE
+            | BlockId::BLACK_CANDLE => {
+                Box::new(CandleLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::PALE_HANGING_MOSS => {
+                Box::new(PaleHangingMossLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::BUBBLE_COLUMN => {
+                Box::new(BubbleColumnLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::OAK_FENCE
+            | BlockId::IRON_BARS
+            | BlockId::COPPER_BARS
+            | BlockId::EXPOSED_COPPER_BARS
+            | BlockId::WEATHERED_COPPER_BARS
+            | BlockId::OXIDIZED_COPPER_BARS
+            | BlockId::WAXED_COPPER_BARS
+            | BlockId::WAXED_EXPOSED_COPPER_BARS
+            | BlockId::WAXED_WEATHERED_COPPER_BARS
+            | BlockId::WAXED_OXIDIZED_COPPER_BARS
+            | BlockId::GLASS_PANE
+            | BlockId::NETHER_BRICK_FENCE
+            | BlockId::WHITE_STAINED_GLASS_PANE
+            | BlockId::ORANGE_STAINED_GLASS_PANE
+            | BlockId::MAGENTA_STAINED_GLASS_PANE
+            | BlockId::LIGHT_BLUE_STAINED_GLASS_PANE
+            | BlockId::YELLOW_STAINED_GLASS_PANE
+            | BlockId::LIME_STAINED_GLASS_PANE
+            | BlockId::PINK_STAINED_GLASS_PANE
+            | BlockId::GRAY_STAINED_GLASS_PANE
+            | BlockId::LIGHT_GRAY_STAINED_GLASS_PANE
+            | BlockId::CYAN_STAINED_GLASS_PANE
+            | BlockId::PURPLE_STAINED_GLASS_PANE
+            | BlockId::BLUE_STAINED_GLASS_PANE
+            | BlockId::BROWN_STAINED_GLASS_PANE
+            | BlockId::GREEN_STAINED_GLASS_PANE
+            | BlockId::RED_STAINED_GLASS_PANE
+            | BlockId::BLACK_STAINED_GLASS_PANE
+            | BlockId::SPRUCE_FENCE
+            | BlockId::BIRCH_FENCE
+            | BlockId::JUNGLE_FENCE
+            | BlockId::ACACIA_FENCE
+            | BlockId::CHERRY_FENCE
+            | BlockId::DARK_OAK_FENCE
+            | BlockId::PALE_OAK_FENCE
+            | BlockId::MANGROVE_FENCE
+            | BlockId::BAMBOO_FENCE
+            | BlockId::CRIMSON_FENCE
+            | BlockId::WARPED_FENCE => {
+                Box::new(OakFenceLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::BARREL => Box::new(BarrelLikeProperties::from_state_id(state_id, self)),
+            BlockId::SCULK_CATALYST => {
+                Box::new(SculkCatalystLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::PISTON_HEAD => {
+                Box::new(PistonHeadLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::GRASS_BLOCK | BlockId::PODZOL | BlockId::MYCELIUM => {
+                Box::new(GrassBlockLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::END_ROD
+            | BlockId::SHULKER_BOX
+            | BlockId::WHITE_SHULKER_BOX
+            | BlockId::ORANGE_SHULKER_BOX
+            | BlockId::MAGENTA_SHULKER_BOX
+            | BlockId::LIGHT_BLUE_SHULKER_BOX
+            | BlockId::YELLOW_SHULKER_BOX
+            | BlockId::LIME_SHULKER_BOX
+            | BlockId::PINK_SHULKER_BOX
+            | BlockId::GRAY_SHULKER_BOX
+            | BlockId::LIGHT_GRAY_SHULKER_BOX
+            | BlockId::CYAN_SHULKER_BOX
+            | BlockId::PURPLE_SHULKER_BOX
+            | BlockId::BLUE_SHULKER_BOX
+            | BlockId::BROWN_SHULKER_BOX
+            | BlockId::GREEN_SHULKER_BOX
+            | BlockId::RED_SHULKER_BOX
+            | BlockId::BLACK_SHULKER_BOX => {
+                Box::new(EndRodLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::MOVING_PISTON => {
+                Box::new(MovingPistonLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::AMETHYST_CLUSTER
+            | BlockId::LARGE_AMETHYST_BUD
+            | BlockId::MEDIUM_AMETHYST_BUD
+            | BlockId::SMALL_AMETHYST_BUD => {
+                Box::new(AmethystClusterLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::COMMAND_BLOCK
+            | BlockId::REPEATING_COMMAND_BLOCK
+            | BlockId::CHAIN_COMMAND_BLOCK => {
+                Box::new(CommandBlockLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::NETHER_PORTAL => {
+                Box::new(NetherPortalLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::OAK_LEAVES
+            | BlockId::SPRUCE_LEAVES
+            | BlockId::BIRCH_LEAVES
+            | BlockId::JUNGLE_LEAVES
+            | BlockId::ACACIA_LEAVES
+            | BlockId::CHERRY_LEAVES
+            | BlockId::DARK_OAK_LEAVES
+            | BlockId::PALE_OAK_LEAVES
+            | BlockId::MANGROVE_LEAVES
+            | BlockId::AZALEA_LEAVES
+            | BlockId::FLOWERING_AZALEA_LEAVES => {
+                Box::new(OakLeavesLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::SNIFFER_EGG => {
+                Box::new(SnifferEggLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::TURTLE_EGG => Box::new(TurtleEggLikeProperties::from_state_id(state_id, self)),
+            BlockId::OAK_HANGING_SIGN
+            | BlockId::SPRUCE_HANGING_SIGN
+            | BlockId::BIRCH_HANGING_SIGN
+            | BlockId::ACACIA_HANGING_SIGN
+            | BlockId::CHERRY_HANGING_SIGN
+            | BlockId::JUNGLE_HANGING_SIGN
+            | BlockId::DARK_OAK_HANGING_SIGN
+            | BlockId::PALE_OAK_HANGING_SIGN
+            | BlockId::CRIMSON_HANGING_SIGN
+            | BlockId::WARPED_HANGING_SIGN
+            | BlockId::MANGROVE_HANGING_SIGN
+            | BlockId::BAMBOO_HANGING_SIGN => {
+                Box::new(OakHangingSignLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::TALL_SEAGRASS
+            | BlockId::SUNFLOWER
+            | BlockId::LILAC
+            | BlockId::ROSE_BUSH
+            | BlockId::PEONY
+            | BlockId::TALL_GRASS
+            | BlockId::LARGE_FERN
+            | BlockId::PITCHER_PLANT => {
+                Box::new(TallSeagrassLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::PITCHER_CROP => {
+                Box::new(PitcherCropLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::JIGSAW => Box::new(JigsawLikeProperties::from_state_id(state_id, self)),
+            BlockId::STRUCTURE_BLOCK => {
+                Box::new(StructureBlockLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::DAYLIGHT_DETECTOR => Box::new(DaylightDetectorLikeProperties::from_state_id(
+                state_id, self,
+            )),
+            BlockId::WATER_CAULDRON | BlockId::POWDER_SNOW_CAULDRON => {
+                Box::new(WaterCauldronLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::MANGROVE_PROPAGULE => Box::new(
+                MangrovePropaguleLikeProperties::from_state_id(state_id, self),
+            ),
+            BlockId::LANTERN
+            | BlockId::SOUL_LANTERN
+            | BlockId::COPPER_LANTERN
+            | BlockId::EXPOSED_COPPER_LANTERN
+            | BlockId::WEATHERED_COPPER_LANTERN
+            | BlockId::OXIDIZED_COPPER_LANTERN
+            | BlockId::WAXED_COPPER_LANTERN
+            | BlockId::WAXED_EXPOSED_COPPER_LANTERN
+            | BlockId::WAXED_WEATHERED_COPPER_LANTERN
+            | BlockId::WAXED_OXIDIZED_COPPER_LANTERN => {
+                Box::new(LanternLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::RAIL => Box::new(RailLikeProperties::from_state_id(state_id, self)),
+            BlockId::POINTED_DRIPSTONE | BlockId::SULFUR_SPIKE => Box::new(
+                PointedDripstoneLikeProperties::from_state_id(state_id, self),
+            ),
+            BlockId::OAK_SAPLING
+            | BlockId::SPRUCE_SAPLING
+            | BlockId::BIRCH_SAPLING
+            | BlockId::JUNGLE_SAPLING
+            | BlockId::ACACIA_SAPLING
+            | BlockId::CHERRY_SAPLING
+            | BlockId::DARK_OAK_SAPLING
+            | BlockId::PALE_OAK_SAPLING => {
+                Box::new(OakSaplingLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::BAMBOO => Box::new(BambooLikeProperties::from_state_id(state_id, self)),
+            BlockId::WHEAT
+            | BlockId::PUMPKIN_STEM
+            | BlockId::MELON_STEM
+            | BlockId::CARROTS
+            | BlockId::POTATOES => Box::new(WheatLikeProperties::from_state_id(state_id, self)),
+            BlockId::SEA_PICKLE => Box::new(SeaPickleLikeProperties::from_state_id(state_id, self)),
+            BlockId::MANGROVE_ROOTS
+            | BlockId::BARRIER
+            | BlockId::DEAD_TUBE_CORAL
+            | BlockId::DEAD_BRAIN_CORAL
+            | BlockId::DEAD_BUBBLE_CORAL
+            | BlockId::DEAD_FIRE_CORAL
+            | BlockId::DEAD_HORN_CORAL
+            | BlockId::TUBE_CORAL
+            | BlockId::BRAIN_CORAL
+            | BlockId::BUBBLE_CORAL
+            | BlockId::FIRE_CORAL
+            | BlockId::HORN_CORAL
+            | BlockId::DEAD_TUBE_CORAL_FAN
+            | BlockId::DEAD_BRAIN_CORAL_FAN
+            | BlockId::DEAD_BUBBLE_CORAL_FAN
+            | BlockId::DEAD_FIRE_CORAL_FAN
+            | BlockId::DEAD_HORN_CORAL_FAN
+            | BlockId::TUBE_CORAL_FAN
+            | BlockId::BRAIN_CORAL_FAN
+            | BlockId::BUBBLE_CORAL_FAN
+            | BlockId::FIRE_CORAL_FAN
+            | BlockId::HORN_CORAL_FAN
+            | BlockId::CONDUIT
+            | BlockId::COPPER_GRATE
+            | BlockId::EXPOSED_COPPER_GRATE
+            | BlockId::WEATHERED_COPPER_GRATE
+            | BlockId::OXIDIZED_COPPER_GRATE
+            | BlockId::WAXED_COPPER_GRATE
+            | BlockId::WAXED_EXPOSED_COPPER_GRATE
+            | BlockId::WAXED_WEATHERED_COPPER_GRATE
+            | BlockId::WAXED_OXIDIZED_COPPER_GRATE
+            | BlockId::HANGING_ROOTS
+            | BlockId::HEAVY_CORE => {
+                Box::new(MangroveRootsLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::OAK_SIGN
+            | BlockId::SPRUCE_SIGN
+            | BlockId::BIRCH_SIGN
+            | BlockId::ACACIA_SIGN
+            | BlockId::CHERRY_SIGN
+            | BlockId::JUNGLE_SIGN
+            | BlockId::DARK_OAK_SIGN
+            | BlockId::PALE_OAK_SIGN
+            | BlockId::MANGROVE_SIGN
+            | BlockId::BAMBOO_SIGN
+            | BlockId::CRIMSON_SIGN
+            | BlockId::WARPED_SIGN => {
+                Box::new(OakSignLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::LIGHT => Box::new(LightLikeProperties::from_state_id(state_id, self)),
+            BlockId::TEST_BLOCK => Box::new(TestBlockLikeProperties::from_state_id(state_id, self)),
+            BlockId::WHITE_BANNER
+            | BlockId::ORANGE_BANNER
+            | BlockId::MAGENTA_BANNER
+            | BlockId::LIGHT_BLUE_BANNER
+            | BlockId::YELLOW_BANNER
+            | BlockId::LIME_BANNER
+            | BlockId::PINK_BANNER
+            | BlockId::GRAY_BANNER
+            | BlockId::LIGHT_GRAY_BANNER
+            | BlockId::CYAN_BANNER
+            | BlockId::PURPLE_BANNER
+            | BlockId::BLUE_BANNER
+            | BlockId::BROWN_BANNER
+            | BlockId::GREEN_BANNER
+            | BlockId::RED_BANNER
+            | BlockId::BLACK_BANNER => {
+                Box::new(WhiteBannerLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::WATER | BlockId::LAVA => {
+                Box::new(WaterLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::KELP | BlockId::WEEPING_VINES | BlockId::TWISTING_VINES => {
+                Box::new(KelpLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::LIGHT_WEIGHTED_PRESSURE_PLATE
+            | BlockId::HEAVY_WEIGHTED_PRESSURE_PLATE
+            | BlockId::TARGET => Box::new(LightWeightedPressurePlateLikeProperties::from_state_id(
+                state_id, self,
+            )),
+            BlockId::TORCHFLOWER_CROP => {
+                Box::new(TorchflowerCropLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::NETHER_WART
+            | BlockId::BEETROOTS
+            | BlockId::FROSTED_ICE
+            | BlockId::SWEET_BERRY_BUSH => {
+                Box::new(NetherWartLikeProperties::from_state_id(state_id, self))
+            }
+            BlockId::POTENT_SULFUR => {
+                Box::new(PotentSulfurLikeProperties::from_state_id(state_id, self))
+            }
             _ => return None,
         })
     }
     #[track_caller]
     #[doc = r" Get the properties of the block."]
     pub fn from_properties(&self, props: &[(&str, &str)]) -> Box<dyn BlockProperties> {
-        match self.id.as_u16() {
-            844 => Box::new(GrindstoneLikeProperties::from_props(
-                props,
-                &Block::GRINDSTONE,
-            )),
-            258 => Box::new(LeverLikeProperties::from_props(props, &Block::LEVER)),
-            275 => Box::new(LeverLikeProperties::from_props(props, &Block::STONE_BUTTON)),
-            443 => Box::new(LeverLikeProperties::from_props(props, &Block::OAK_BUTTON)),
-            444 => Box::new(LeverLikeProperties::from_props(
-                props,
-                &Block::SPRUCE_BUTTON,
-            )),
-            445 => Box::new(LeverLikeProperties::from_props(props, &Block::BIRCH_BUTTON)),
-            446 => Box::new(LeverLikeProperties::from_props(
-                props,
-                &Block::JUNGLE_BUTTON,
-            )),
-            447 => Box::new(LeverLikeProperties::from_props(
-                props,
-                &Block::ACACIA_BUTTON,
-            )),
-            448 => Box::new(LeverLikeProperties::from_props(
-                props,
-                &Block::CHERRY_BUTTON,
-            )),
-            449 => Box::new(LeverLikeProperties::from_props(
-                props,
-                &Block::DARK_OAK_BUTTON,
-            )),
-            450 => Box::new(LeverLikeProperties::from_props(
-                props,
-                &Block::PALE_OAK_BUTTON,
-            )),
-            451 => Box::new(LeverLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_BUTTON,
-            )),
-            452 => Box::new(LeverLikeProperties::from_props(
-                props,
-                &Block::BAMBOO_BUTTON,
-            )),
-            897 => Box::new(LeverLikeProperties::from_props(
-                props,
-                &Block::CRIMSON_BUTTON,
-            )),
-            898 => Box::new(LeverLikeProperties::from_props(
-                props,
-                &Block::WARPED_BUTTON,
-            )),
-            939 => Box::new(LeverLikeProperties::from_props(
-                props,
-                &Block::POLISHED_BLACKSTONE_BUTTON,
-            )),
-            369 => Box::new(OakFenceGateLikeProperties::from_props(
-                props,
-                &Block::OAK_FENCE_GATE,
-            )),
-            628 => Box::new(OakFenceGateLikeProperties::from_props(
-                props,
-                &Block::SPRUCE_FENCE_GATE,
-            )),
-            629 => Box::new(OakFenceGateLikeProperties::from_props(
-                props,
-                &Block::BIRCH_FENCE_GATE,
-            )),
-            630 => Box::new(OakFenceGateLikeProperties::from_props(
-                props,
-                &Block::JUNGLE_FENCE_GATE,
-            )),
-            631 => Box::new(OakFenceGateLikeProperties::from_props(
-                props,
-                &Block::ACACIA_FENCE_GATE,
-            )),
-            632 => Box::new(OakFenceGateLikeProperties::from_props(
-                props,
-                &Block::CHERRY_FENCE_GATE,
-            )),
-            633 => Box::new(OakFenceGateLikeProperties::from_props(
-                props,
-                &Block::DARK_OAK_FENCE_GATE,
-            )),
-            634 => Box::new(OakFenceGateLikeProperties::from_props(
-                props,
-                &Block::PALE_OAK_FENCE_GATE,
-            )),
-            635 => Box::new(OakFenceGateLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_FENCE_GATE,
-            )),
-            636 => Box::new(OakFenceGateLikeProperties::from_props(
-                props,
-                &Block::BAMBOO_FENCE_GATE,
-            )),
-            893 => Box::new(OakFenceGateLikeProperties::from_props(
-                props,
-                &Block::CRIMSON_FENCE_GATE,
-            )),
-            894 => Box::new(OakFenceGateLikeProperties::from_props(
-                props,
-                &Block::WARPED_FENCE_GATE,
-            )),
-            20 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::PALE_OAK_WOOD,
-            )),
-            49 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::OAK_LOG,
-            )),
-            50 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::SPRUCE_LOG,
-            )),
-            51 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::BIRCH_LOG,
-            )),
-            52 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::JUNGLE_LOG,
-            )),
-            53 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::ACACIA_LOG,
-            )),
-            54 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::CHERRY_LOG,
-            )),
-            55 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::DARK_OAK_LOG,
-            )),
-            56 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::PALE_OAK_LOG,
-            )),
-            57 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_LOG,
-            )),
-            59 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::MUDDY_MANGROVE_ROOTS,
-            )),
-            60 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::BAMBOO_BLOCK,
-            )),
-            61 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_SPRUCE_LOG,
-            )),
-            62 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_BIRCH_LOG,
-            )),
-            63 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_JUNGLE_LOG,
-            )),
-            64 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_ACACIA_LOG,
-            )),
-            65 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_CHERRY_LOG,
-            )),
-            66 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_DARK_OAK_LOG,
-            )),
-            67 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_PALE_OAK_LOG,
-            )),
-            68 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_OAK_LOG,
-            )),
-            69 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_MANGROVE_LOG,
-            )),
-            70 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_BAMBOO_BLOCK,
-            )),
-            71 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::OAK_WOOD,
-            )),
-            72 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::SPRUCE_WOOD,
-            )),
-            73 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::BIRCH_WOOD,
-            )),
-            74 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::JUNGLE_WOOD,
-            )),
-            75 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::ACACIA_WOOD,
-            )),
-            76 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::CHERRY_WOOD,
-            )),
-            77 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::DARK_OAK_WOOD,
-            )),
-            78 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_WOOD,
-            )),
-            79 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_OAK_WOOD,
-            )),
-            80 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_SPRUCE_WOOD,
-            )),
-            81 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_BIRCH_WOOD,
-            )),
-            82 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_JUNGLE_WOOD,
-            )),
-            83 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_ACACIA_WOOD,
-            )),
-            84 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_CHERRY_WOOD,
-            )),
-            85 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_DARK_OAK_WOOD,
-            )),
-            86 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_PALE_OAK_WOOD,
-            )),
-            87 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_MANGROVE_WOOD,
-            )),
-            288 => Box::new(PaleOakWoodLikeProperties::from_props(props, &Block::BASALT)),
-            289 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::POLISHED_BASALT,
-            )),
-            480 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::QUARTZ_PILLAR,
-            )),
-            537 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::HAY_BLOCK,
-            )),
-            659 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::PURPUR_PILLAR,
-            )),
-            674 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::BONE_BLOCK,
-            )),
-            862 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::WARPED_STEM,
-            )),
-            863 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_WARPED_STEM,
-            )),
-            864 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::WARPED_HYPHAE,
-            )),
-            865 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_WARPED_HYPHAE,
-            )),
-            871 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::CRIMSON_STEM,
-            )),
-            872 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_CRIMSON_STEM,
-            )),
-            873 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::CRIMSON_HYPHAE,
-            )),
-            874 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::STRIPPED_CRIMSON_HYPHAE,
-            )),
-            1151 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::DEEPSLATE,
-            )),
-            1171 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::INFESTED_DEEPSLATE,
-            )),
-            1178 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::OCHRE_FROGLIGHT,
-            )),
-            1179 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::VERDANT_FROGLIGHT,
-            )),
-            1180 => Box::new(PaleOakWoodLikeProperties::from_props(
-                props,
-                &Block::PEARLESCENT_FROGLIGHT,
-            )),
-            199 => Box::new(CreakingHeartLikeProperties::from_props(
-                props,
-                &Block::CREAKING_HEART,
-            )),
-            350 => Box::new(IronChainLikeProperties::from_props(
-                props,
-                &Block::IRON_CHAIN,
-            )),
-            351 => Box::new(IronChainLikeProperties::from_props(
-                props,
-                &Block::COPPER_CHAIN,
-            )),
-            352 => Box::new(IronChainLikeProperties::from_props(
-                props,
-                &Block::EXPOSED_COPPER_CHAIN,
-            )),
-            353 => Box::new(IronChainLikeProperties::from_props(
-                props,
-                &Block::WEATHERED_COPPER_CHAIN,
-            )),
-            354 => Box::new(IronChainLikeProperties::from_props(
-                props,
-                &Block::OXIDIZED_COPPER_CHAIN,
-            )),
-            355 => Box::new(IronChainLikeProperties::from_props(
-                props,
-                &Block::WAXED_COPPER_CHAIN,
-            )),
-            356 => Box::new(IronChainLikeProperties::from_props(
-                props,
-                &Block::WAXED_EXPOSED_COPPER_CHAIN,
-            )),
-            357 => Box::new(IronChainLikeProperties::from_props(
-                props,
-                &Block::WAXED_WEATHERED_COPPER_CHAIN,
-            )),
-            358 => Box::new(IronChainLikeProperties::from_props(
-                props,
-                &Block::WAXED_OXIDIZED_COPPER_CHAIN,
-            )),
-            298 => Box::new(CakeLikeProperties::from_props(props, &Block::CAKE)),
-            283 => Box::new(JukeboxLikeProperties::from_props(props, &Block::JUKEBOX)),
-            126 => Box::new(PoweredRailLikeProperties::from_props(
-                props,
-                &Block::POWERED_RAIL,
-            )),
-            127 => Box::new(PoweredRailLikeProperties::from_props(
-                props,
-                &Block::DETECTOR_RAIL,
-            )),
-            482 => Box::new(PoweredRailLikeProperties::from_props(
-                props,
-                &Block::ACTIVATOR_RAIL,
-            )),
-            747 => Box::new(DriedGhastLikeProperties::from_props(
-                props,
-                &Block::DRIED_GHAST,
-            )),
-            200 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::OAK_STAIRS,
-            )),
-            223 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::COBBLESTONE_STAIRS,
-            )),
-            370 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::BRICK_STAIRS,
-            )),
-            371 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::STONE_BRICK_STAIRS,
-            )),
-            372 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::MUD_BRICK_STAIRS,
-            )),
-            377 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::RESIN_BRICK_STAIRS,
-            )),
-            383 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::NETHER_BRICK_STAIRS,
-            )),
-            397 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::SANDSTONE_STAIRS,
-            )),
-            404 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::SPRUCE_STAIRS,
-            )),
-            405 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::BIRCH_STAIRS,
-            )),
-            406 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::JUNGLE_STAIRS,
-            )),
-            481 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::QUARTZ_STAIRS,
-            )),
-            516 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::ACACIA_STAIRS,
-            )),
-            517 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::CHERRY_STAIRS,
-            )),
-            518 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::DARK_OAK_STAIRS,
-            )),
-            519 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::PALE_OAK_STAIRS,
-            )),
-            520 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_STAIRS,
-            )),
-            521 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::BAMBOO_STAIRS,
-            )),
-            522 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::BAMBOO_MOSAIC_STAIRS,
-            )),
-            530 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::PRISMARINE_STAIRS,
-            )),
-            531 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::PRISMARINE_BRICK_STAIRS,
-            )),
-            532 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::DARK_PRISMARINE_STAIRS,
-            )),
-            598 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::RED_SANDSTONE_STAIRS,
-            )),
-            660 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::PURPUR_STAIRS,
-            )),
-            797 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::POLISHED_GRANITE_STAIRS,
-            )),
-            798 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::SMOOTH_RED_SANDSTONE_STAIRS,
-            )),
-            799 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::MOSSY_STONE_BRICK_STAIRS,
-            )),
-            800 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::POLISHED_DIORITE_STAIRS,
-            )),
-            801 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::MOSSY_COBBLESTONE_STAIRS,
-            )),
-            802 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::END_STONE_BRICK_STAIRS,
-            )),
-            803 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::STONE_STAIRS,
-            )),
-            804 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::SMOOTH_SANDSTONE_STAIRS,
-            )),
-            805 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::SMOOTH_QUARTZ_STAIRS,
-            )),
-            806 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::GRANITE_STAIRS,
-            )),
-            807 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::ANDESITE_STAIRS,
-            )),
-            808 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::RED_NETHER_BRICK_STAIRS,
-            )),
-            809 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::POLISHED_ANDESITE_STAIRS,
-            )),
-            810 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::DIORITE_STAIRS,
-            )),
-            895 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::CRIMSON_STAIRS,
-            )),
-            896 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::WARPED_STAIRS,
-            )),
-            925 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::BLACKSTONE_STAIRS,
-            )),
-            933 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::POLISHED_BLACKSTONE_BRICK_STAIRS,
-            )),
-            936 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::POLISHED_BLACKSTONE_STAIRS,
-            )),
-            986 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::TUFF_STAIRS,
-            )),
-            990 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::POLISHED_TUFF_STAIRS,
-            )),
-            995 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::TUFF_BRICK_STAIRS,
-            )),
-            1001 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::SULFUR_STAIRS,
-            )),
-            1005 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::POLISHED_SULFUR_STAIRS,
-            )),
-            1009 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::SULFUR_BRICK_STAIRS,
-            )),
-            1014 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::CINNABAR_STAIRS,
-            )),
-            1018 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::POLISHED_CINNABAR_STAIRS,
-            )),
-            1022 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::CINNABAR_BRICK_STAIRS,
-            )),
-            1060 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::CUT_COPPER_STAIRS,
-            )),
-            1061 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::EXPOSED_CUT_COPPER_STAIRS,
-            )),
-            1062 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::WEATHERED_CUT_COPPER_STAIRS,
-            )),
-            1063 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::OXIDIZED_CUT_COPPER_STAIRS,
-            )),
-            1064 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::WAXED_CUT_COPPER_STAIRS,
-            )),
-            1065 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::WAXED_EXPOSED_CUT_COPPER_STAIRS,
-            )),
-            1066 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::WAXED_WEATHERED_CUT_COPPER_STAIRS,
-            )),
-            1067 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::WAXED_OXIDIZED_CUT_COPPER_STAIRS,
-            )),
-            1153 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::COBBLED_DEEPSLATE_STAIRS,
-            )),
-            1157 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::POLISHED_DEEPSLATE_STAIRS,
-            )),
-            1161 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::DEEPSLATE_TILE_STAIRS,
-            )),
-            1165 => Box::new(OakStairsLikeProperties::from_props(
-                props,
-                &Block::DEEPSLATE_BRICK_STAIRS,
-            )),
-            128 => Box::new(StickyPistonLikeProperties::from_props(
-                props,
-                &Block::STICKY_PISTON,
-            )),
-            138 => Box::new(StickyPistonLikeProperties::from_props(
-                props,
-                &Block::PISTON,
-            )),
-            220 => Box::new(OakDoorLikeProperties::from_props(props, &Block::OAK_DOOR)),
-            260 => Box::new(OakDoorLikeProperties::from_props(props, &Block::IRON_DOOR)),
-            646 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::SPRUCE_DOOR,
-            )),
-            647 => Box::new(OakDoorLikeProperties::from_props(props, &Block::BIRCH_DOOR)),
-            648 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::JUNGLE_DOOR,
-            )),
-            649 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::ACACIA_DOOR,
-            )),
-            650 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::CHERRY_DOOR,
-            )),
-            651 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::DARK_OAK_DOOR,
-            )),
-            652 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::PALE_OAK_DOOR,
-            )),
-            653 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_DOOR,
-            )),
-            654 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::BAMBOO_DOOR,
-            )),
-            899 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::CRIMSON_DOOR,
-            )),
-            900 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::WARPED_DOOR,
-            )),
-            1076 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::COPPER_DOOR,
-            )),
-            1077 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::EXPOSED_COPPER_DOOR,
-            )),
-            1078 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::WEATHERED_COPPER_DOOR,
-            )),
-            1079 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::OXIDIZED_COPPER_DOOR,
-            )),
-            1080 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::WAXED_COPPER_DOOR,
-            )),
-            1081 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::WAXED_EXPOSED_COPPER_DOOR,
-            )),
-            1082 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::WAXED_WEATHERED_COPPER_DOOR,
-            )),
-            1083 => Box::new(OakDoorLikeProperties::from_props(
-                props,
-                &Block::WAXED_OXIDIZED_COPPER_DOOR,
-            )),
-            179 => Box::new(ChiseledBookshelfLikeProperties::from_props(
-                props,
-                &Block::CHISELED_BOOKSHELF,
-            )),
-            657 => Box::new(ChorusFlowerLikeProperties::from_props(
-                props,
-                &Block::CHORUS_FLOWER,
-            )),
-            279 => Box::new(CactusLikeProperties::from_props(props, &Block::CACTUS)),
-            282 => Box::new(CactusLikeProperties::from_props(props, &Block::SUGAR_CANE)),
-            196 => Box::new(FireLikeProperties::from_props(props, &Block::FIRE)),
-            110 => Box::new(WhiteBedLikeProperties::from_props(props, &Block::WHITE_BED)),
-            111 => Box::new(WhiteBedLikeProperties::from_props(
-                props,
-                &Block::ORANGE_BED,
-            )),
-            112 => Box::new(WhiteBedLikeProperties::from_props(
-                props,
-                &Block::MAGENTA_BED,
-            )),
-            113 => Box::new(WhiteBedLikeProperties::from_props(
-                props,
-                &Block::LIGHT_BLUE_BED,
-            )),
-            114 => Box::new(WhiteBedLikeProperties::from_props(
-                props,
-                &Block::YELLOW_BED,
-            )),
-            115 => Box::new(WhiteBedLikeProperties::from_props(props, &Block::LIME_BED)),
-            116 => Box::new(WhiteBedLikeProperties::from_props(props, &Block::PINK_BED)),
-            117 => Box::new(WhiteBedLikeProperties::from_props(props, &Block::GRAY_BED)),
-            118 => Box::new(WhiteBedLikeProperties::from_props(
-                props,
-                &Block::LIGHT_GRAY_BED,
-            )),
-            119 => Box::new(WhiteBedLikeProperties::from_props(props, &Block::CYAN_BED)),
-            120 => Box::new(WhiteBedLikeProperties::from_props(
-                props,
-                &Block::PURPLE_BED,
-            )),
-            121 => Box::new(WhiteBedLikeProperties::from_props(props, &Block::BLUE_BED)),
-            122 => Box::new(WhiteBedLikeProperties::from_props(props, &Block::BROWN_BED)),
-            123 => Box::new(WhiteBedLikeProperties::from_props(props, &Block::GREEN_BED)),
-            124 => Box::new(WhiteBedLikeProperties::from_props(props, &Block::RED_BED)),
-            125 => Box::new(WhiteBedLikeProperties::from_props(props, &Block::BLACK_BED)),
-            477 => Box::new(HopperLikeProperties::from_props(props, &Block::HOPPER)),
-            1029 => Box::new(CalibratedSculkSensorLikeProperties::from_props(
-                props,
-                &Block::CALIBRATED_SCULK_SENSOR,
-            )),
-            1028 => Box::new(SculkSensorLikeProperties::from_props(
-                props,
-                &Block::SCULK_SENSOR,
-            )),
-            1189 => Box::new(PaleMossCarpetLikeProperties::from_props(
-                props,
-                &Block::PALE_MOSS_CARPET,
-            )),
-            837 => Box::new(ScaffoldingLikeProperties::from_props(
-                props,
-                &Block::SCAFFOLDING,
-            )),
-            1186 => Box::new(VaultLikeProperties::from_props(props, &Block::VAULT)),
-            1185 => Box::new(TrialSpawnerLikeProperties::from_props(
-                props,
-                &Block::TRIAL_SPAWNER,
-            )),
-            1033 => Box::new(SculkShriekerLikeProperties::from_props(
-                props,
-                &Block::SCULK_SHRIEKER,
-            )),
-            848 => Box::new(BellLikeProperties::from_props(props, &Block::BELL)),
-            180 => Box::new(AcaciaShelfLikeProperties::from_props(
-                props,
-                &Block::ACACIA_SHELF,
-            )),
-            181 => Box::new(AcaciaShelfLikeProperties::from_props(
-                props,
-                &Block::BAMBOO_SHELF,
-            )),
-            182 => Box::new(AcaciaShelfLikeProperties::from_props(
-                props,
-                &Block::BIRCH_SHELF,
-            )),
-            183 => Box::new(AcaciaShelfLikeProperties::from_props(
-                props,
-                &Block::CHERRY_SHELF,
-            )),
-            184 => Box::new(AcaciaShelfLikeProperties::from_props(
-                props,
-                &Block::CRIMSON_SHELF,
-            )),
-            185 => Box::new(AcaciaShelfLikeProperties::from_props(
-                props,
-                &Block::DARK_OAK_SHELF,
-            )),
-            186 => Box::new(AcaciaShelfLikeProperties::from_props(
-                props,
-                &Block::JUNGLE_SHELF,
-            )),
-            187 => Box::new(AcaciaShelfLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_SHELF,
-            )),
-            188 => Box::new(AcaciaShelfLikeProperties::from_props(
-                props,
-                &Block::OAK_SHELF,
-            )),
-            189 => Box::new(AcaciaShelfLikeProperties::from_props(
-                props,
-                &Block::PALE_OAK_SHELF,
-            )),
-            190 => Box::new(AcaciaShelfLikeProperties::from_props(
-                props,
-                &Block::SPRUCE_SHELF,
-            )),
-            191 => Box::new(AcaciaShelfLikeProperties::from_props(
-                props,
-                &Block::WARPED_SHELF,
-            )),
-            299 => Box::new(RepeaterLikeProperties::from_props(props, &Block::REPEATER)),
-            918 => Box::new(RespawnAnchorLikeProperties::from_props(
-                props,
-                &Block::RESPAWN_ANCHOR,
-            )),
-            386 => Box::new(BrewingStandLikeProperties::from_props(
-                props,
-                &Block::BREWING_STAND,
-            )),
-            276 => Box::new(SnowLikeProperties::from_props(props, &Block::SNOW)),
-            195 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::WALL_TORCH,
-            )),
-            291 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::SOUL_WALL_TORCH,
-            )),
-            293 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::COPPER_WALL_TORCH,
-            )),
-            296 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::CARVED_PUMPKIN,
-            )),
-            297 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::JACK_O_LANTERN,
-            )),
-            362 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::ATTACHED_PUMPKIN_STEM,
-            )),
-            363 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::ATTACHED_MELON_STEM,
-            )),
-            467 => Box::new(WallTorchLikeProperties::from_props(props, &Block::ANVIL)),
-            468 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::CHIPPED_ANVIL,
-            )),
-            469 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::DAMAGED_ANVIL,
-            )),
-            579 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::WHITE_WALL_BANNER,
-            )),
-            580 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::ORANGE_WALL_BANNER,
-            )),
-            581 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::MAGENTA_WALL_BANNER,
-            )),
-            582 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::LIGHT_BLUE_WALL_BANNER,
-            )),
-            583 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::YELLOW_WALL_BANNER,
-            )),
-            584 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::LIME_WALL_BANNER,
-            )),
-            585 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::PINK_WALL_BANNER,
-            )),
-            586 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::GRAY_WALL_BANNER,
-            )),
-            587 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::LIGHT_GRAY_WALL_BANNER,
-            )),
-            588 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::CYAN_WALL_BANNER,
-            )),
-            589 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::PURPLE_WALL_BANNER,
-            )),
-            590 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::BLUE_WALL_BANNER,
-            )),
-            591 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::BROWN_WALL_BANNER,
-            )),
-            592 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::GREEN_WALL_BANNER,
-            )),
-            593 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::RED_WALL_BANNER,
-            )),
-            594 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::BLACK_WALL_BANNER,
-            )),
-            694 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::WHITE_GLAZED_TERRACOTTA,
-            )),
-            695 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::ORANGE_GLAZED_TERRACOTTA,
-            )),
-            696 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::MAGENTA_GLAZED_TERRACOTTA,
-            )),
-            697 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::LIGHT_BLUE_GLAZED_TERRACOTTA,
-            )),
-            698 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::YELLOW_GLAZED_TERRACOTTA,
-            )),
-            699 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::LIME_GLAZED_TERRACOTTA,
-            )),
-            700 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::PINK_GLAZED_TERRACOTTA,
-            )),
-            701 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::GRAY_GLAZED_TERRACOTTA,
-            )),
-            702 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::LIGHT_GRAY_GLAZED_TERRACOTTA,
-            )),
-            703 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::CYAN_GLAZED_TERRACOTTA,
-            )),
-            704 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::PURPLE_GLAZED_TERRACOTTA,
-            )),
-            705 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::BLUE_GLAZED_TERRACOTTA,
-            )),
-            706 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::BROWN_GLAZED_TERRACOTTA,
-            )),
-            707 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::GREEN_GLAZED_TERRACOTTA,
-            )),
-            708 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::RED_GLAZED_TERRACOTTA,
-            )),
-            709 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::BLACK_GLAZED_TERRACOTTA,
-            )),
-            838 => Box::new(WallTorchLikeProperties::from_props(props, &Block::LOOM)),
-            847 => Box::new(WallTorchLikeProperties::from_props(
-                props,
-                &Block::STONECUTTER,
-            )),
-            201 => Box::new(ChestLikeProperties::from_props(props, &Block::CHEST)),
-            470 => Box::new(ChestLikeProperties::from_props(
-                props,
-                &Block::TRAPPED_CHEST,
-            )),
-            1108 => Box::new(ChestLikeProperties::from_props(props, &Block::COPPER_CHEST)),
-            1109 => Box::new(ChestLikeProperties::from_props(
-                props,
-                &Block::EXPOSED_COPPER_CHEST,
-            )),
-            1110 => Box::new(ChestLikeProperties::from_props(
-                props,
-                &Block::WEATHERED_COPPER_CHEST,
-            )),
-            1111 => Box::new(ChestLikeProperties::from_props(
-                props,
-                &Block::OXIDIZED_COPPER_CHEST,
-            )),
-            1112 => Box::new(ChestLikeProperties::from_props(
-                props,
-                &Block::WAXED_COPPER_CHEST,
-            )),
-            1113 => Box::new(ChestLikeProperties::from_props(
-                props,
-                &Block::WAXED_EXPOSED_COPPER_CHEST,
-            )),
-            1114 => Box::new(ChestLikeProperties::from_props(
-                props,
-                &Block::WAXED_WEATHERED_COPPER_CHEST,
-            )),
-            1115 => Box::new(ChestLikeProperties::from_props(
-                props,
-                &Block::WAXED_OXIDIZED_COPPER_CHEST,
-            )),
-            454 => Box::new(SkeletonWallSkullLikeProperties::from_props(
-                props,
-                &Block::SKELETON_WALL_SKULL,
-            )),
-            456 => Box::new(SkeletonWallSkullLikeProperties::from_props(
-                props,
-                &Block::WITHER_SKELETON_WALL_SKULL,
-            )),
-            458 => Box::new(SkeletonWallSkullLikeProperties::from_props(
-                props,
-                &Block::ZOMBIE_WALL_HEAD,
-            )),
-            460 => Box::new(SkeletonWallSkullLikeProperties::from_props(
-                props,
-                &Block::PLAYER_WALL_HEAD,
-            )),
-            462 => Box::new(SkeletonWallSkullLikeProperties::from_props(
-                props,
-                &Block::CREEPER_WALL_HEAD,
-            )),
-            464 => Box::new(SkeletonWallSkullLikeProperties::from_props(
-                props,
-                &Block::DRAGON_WALL_HEAD,
-            )),
-            466 => Box::new(SkeletonWallSkullLikeProperties::from_props(
-                props,
-                &Block::PIGLIN_WALL_HEAD,
-            )),
-            316 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::OAK_TRAPDOOR,
-            )),
-            317 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::SPRUCE_TRAPDOOR,
-            )),
-            318 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::BIRCH_TRAPDOOR,
-            )),
-            319 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::JUNGLE_TRAPDOOR,
-            )),
-            320 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::ACACIA_TRAPDOOR,
-            )),
-            321 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::CHERRY_TRAPDOOR,
-            )),
-            322 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::DARK_OAK_TRAPDOOR,
-            )),
-            323 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::PALE_OAK_TRAPDOOR,
-            )),
-            324 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_TRAPDOOR,
-            )),
-            325 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::BAMBOO_TRAPDOOR,
-            )),
-            526 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::IRON_TRAPDOOR,
-            )),
-            891 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::CRIMSON_TRAPDOOR,
-            )),
-            892 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::WARPED_TRAPDOOR,
-            )),
-            1084 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::COPPER_TRAPDOOR,
-            )),
-            1085 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::EXPOSED_COPPER_TRAPDOOR,
-            )),
-            1086 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::WEATHERED_COPPER_TRAPDOOR,
-            )),
-            1087 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::OXIDIZED_COPPER_TRAPDOOR,
-            )),
-            1088 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::WAXED_COPPER_TRAPDOOR,
-            )),
-            1089 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::WAXED_EXPOSED_COPPER_TRAPDOOR,
-            )),
-            1090 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::WAXED_WEATHERED_COPPER_TRAPDOOR,
-            )),
-            1091 => Box::new(OakTrapdoorLikeProperties::from_props(
-                props,
-                &Block::WAXED_OXIDIZED_COPPER_TRAPDOOR,
-            )),
-            845 => Box::new(LecternLikeProperties::from_props(props, &Block::LECTERN)),
-            401 => Box::new(TripwireHookLikeProperties::from_props(
-                props,
-                &Block::TRIPWIRE_HOOK,
-            )),
-            473 => Box::new(ComparatorLikeProperties::from_props(
-                props,
-                &Block::COMPARATOR,
-            )),
-            1116 => Box::new(CopperGolemStatueLikeProperties::from_props(
-                props,
-                &Block::COPPER_GOLEM_STATUE,
-            )),
-            1117 => Box::new(CopperGolemStatueLikeProperties::from_props(
-                props,
-                &Block::EXPOSED_COPPER_GOLEM_STATUE,
-            )),
-            1118 => Box::new(CopperGolemStatueLikeProperties::from_props(
-                props,
-                &Block::WEATHERED_COPPER_GOLEM_STATUE,
-            )),
-            1119 => Box::new(CopperGolemStatueLikeProperties::from_props(
-                props,
-                &Block::OXIDIZED_COPPER_GOLEM_STATUE,
-            )),
-            1120 => Box::new(CopperGolemStatueLikeProperties::from_props(
-                props,
-                &Block::WAXED_COPPER_GOLEM_STATUE,
-            )),
-            1121 => Box::new(CopperGolemStatueLikeProperties::from_props(
-                props,
-                &Block::WAXED_EXPOSED_COPPER_GOLEM_STATUE,
-            )),
-            1122 => Box::new(CopperGolemStatueLikeProperties::from_props(
-                props,
-                &Block::WAXED_WEATHERED_COPPER_GOLEM_STATUE,
-            )),
-            1123 => Box::new(CopperGolemStatueLikeProperties::from_props(
-                props,
-                &Block::WAXED_OXIDIZED_COPPER_GOLEM_STATUE,
-            )),
-            392 => Box::new(EndPortalFrameLikeProperties::from_props(
-                props,
-                &Block::END_PORTAL_FRAME,
-            )),
-            209 => Box::new(FurnaceLikeProperties::from_props(props, &Block::FURNACE)),
-            274 => Box::new(FurnaceLikeProperties::from_props(
-                props,
-                &Block::REDSTONE_WALL_TORCH,
-            )),
-            840 => Box::new(FurnaceLikeProperties::from_props(props, &Block::SMOKER)),
-            841 => Box::new(FurnaceLikeProperties::from_props(
-                props,
-                &Block::BLAST_FURNACE,
-            )),
-            859 => Box::new(CampfireLikeProperties::from_props(props, &Block::CAMPFIRE)),
-            860 => Box::new(CampfireLikeProperties::from_props(
-                props,
-                &Block::SOUL_CAMPFIRE,
-            )),
-            1147 => Box::new(SmallDripleafLikeProperties::from_props(
-                props,
-                &Block::SMALL_DRIPLEAF,
-            )),
-            911 => Box::new(BeeNestLikeProperties::from_props(props, &Block::BEE_NEST)),
-            912 => Box::new(BeeNestLikeProperties::from_props(props, &Block::BEEHIVE)),
-            1183 => Box::new(DecoratedPotLikeProperties::from_props(
-                props,
-                &Block::DECORATED_POT,
-            )),
-            221 => Box::new(LadderLikeProperties::from_props(props, &Block::LADDER)),
-            224 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::OAK_WALL_SIGN,
-            )),
-            225 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::SPRUCE_WALL_SIGN,
-            )),
-            226 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::BIRCH_WALL_SIGN,
-            )),
-            227 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::ACACIA_WALL_SIGN,
-            )),
-            228 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::CHERRY_WALL_SIGN,
-            )),
-            229 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::JUNGLE_WALL_SIGN,
-            )),
-            230 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::DARK_OAK_WALL_SIGN,
-            )),
-            231 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::PALE_OAK_WALL_SIGN,
-            )),
-            232 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_WALL_SIGN,
-            )),
-            233 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::BAMBOO_WALL_SIGN,
-            )),
-            246 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::OAK_WALL_HANGING_SIGN,
-            )),
-            247 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::SPRUCE_WALL_HANGING_SIGN,
-            )),
-            248 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::BIRCH_WALL_HANGING_SIGN,
-            )),
-            249 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::ACACIA_WALL_HANGING_SIGN,
-            )),
-            250 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::CHERRY_WALL_HANGING_SIGN,
-            )),
-            251 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::JUNGLE_WALL_HANGING_SIGN,
-            )),
-            252 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::DARK_OAK_WALL_HANGING_SIGN,
-            )),
-            253 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::PALE_OAK_WALL_HANGING_SIGN,
-            )),
-            254 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_WALL_HANGING_SIGN,
-            )),
-            255 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::CRIMSON_WALL_HANGING_SIGN,
-            )),
-            256 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::WARPED_WALL_HANGING_SIGN,
-            )),
-            257 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::BAMBOO_WALL_HANGING_SIGN,
-            )),
-            400 => Box::new(LadderLikeProperties::from_props(props, &Block::ENDER_CHEST)),
-            778 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::DEAD_TUBE_CORAL_WALL_FAN,
-            )),
-            779 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::DEAD_BRAIN_CORAL_WALL_FAN,
-            )),
-            780 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::DEAD_BUBBLE_CORAL_WALL_FAN,
-            )),
-            781 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::DEAD_FIRE_CORAL_WALL_FAN,
-            )),
-            782 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::DEAD_HORN_CORAL_WALL_FAN,
-            )),
-            783 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::TUBE_CORAL_WALL_FAN,
-            )),
-            784 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::BRAIN_CORAL_WALL_FAN,
-            )),
-            785 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::BUBBLE_CORAL_WALL_FAN,
-            )),
-            786 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::FIRE_CORAL_WALL_FAN,
-            )),
-            787 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::HORN_CORAL_WALL_FAN,
-            )),
-            903 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::CRIMSON_WALL_SIGN,
-            )),
-            904 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::WARPED_WALL_SIGN,
-            )),
-            1146 => Box::new(LadderLikeProperties::from_props(
-                props,
-                &Block::BIG_DRIPLEAF_STEM,
-            )),
-            1145 => Box::new(BigDripleafLikeProperties::from_props(
-                props,
-                &Block::BIG_DRIPLEAF,
-            )),
-            1141 => Box::new(PinkPetalsLikeProperties::from_props(
-                props,
-                &Block::PINK_PETALS,
-            )),
-            1142 => Box::new(PinkPetalsLikeProperties::from_props(
-                props,
-                &Block::WILDFLOWERS,
-            )),
-            1143 => Box::new(LeafLitterLikeProperties::from_props(
-                props,
-                &Block::LEAF_LITTER,
-            )),
-            396 => Box::new(CocoaLikeProperties::from_props(props, &Block::COCOA)),
-            105 => Box::new(DispenserLikeProperties::from_props(
-                props,
-                &Block::DISPENSER,
-            )),
-            483 => Box::new(DispenserLikeProperties::from_props(props, &Block::DROPPER)),
-            1184 => Box::new(CrafterLikeProperties::from_props(props, &Block::CRAFTER)),
-            208 => Box::new(FarmlandLikeProperties::from_props(props, &Block::FARMLAND)),
-            38 => Box::new(SuspiciousSandLikeProperties::from_props(
-                props,
-                &Block::SUSPICIOUS_SAND,
-            )),
-            41 => Box::new(SuspiciousSandLikeProperties::from_props(
-                props,
-                &Block::SUSPICIOUS_GRAVEL,
-            )),
-            378 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::RESIN_BRICK_SLAB,
-            )),
-            533 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::PRISMARINE_SLAB,
-            )),
-            534 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::PRISMARINE_BRICK_SLAB,
-            )),
-            535 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::DARK_PRISMARINE_SLAB,
-            )),
-            599 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::OAK_SLAB,
-            )),
-            600 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::SPRUCE_SLAB,
-            )),
-            601 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::BIRCH_SLAB,
-            )),
-            602 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::JUNGLE_SLAB,
-            )),
-            603 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::ACACIA_SLAB,
-            )),
-            604 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::CHERRY_SLAB,
-            )),
-            605 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::DARK_OAK_SLAB,
-            )),
-            606 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::PALE_OAK_SLAB,
-            )),
-            607 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_SLAB,
-            )),
-            608 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::BAMBOO_SLAB,
-            )),
-            609 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::BAMBOO_MOSAIC_SLAB,
-            )),
-            610 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::STONE_SLAB,
-            )),
-            611 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::SMOOTH_STONE_SLAB,
-            )),
-            612 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::SANDSTONE_SLAB,
-            )),
-            613 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::CUT_SANDSTONE_SLAB,
-            )),
-            614 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::PETRIFIED_OAK_SLAB,
-            )),
-            615 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::COBBLESTONE_SLAB,
-            )),
-            616 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::BRICK_SLAB,
-            )),
-            617 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::STONE_BRICK_SLAB,
-            )),
-            618 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::MUD_BRICK_SLAB,
-            )),
-            619 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::NETHER_BRICK_SLAB,
-            )),
-            620 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::QUARTZ_SLAB,
-            )),
-            621 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::RED_SANDSTONE_SLAB,
-            )),
-            622 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::CUT_RED_SANDSTONE_SLAB,
-            )),
-            623 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::PURPUR_SLAB,
-            )),
-            811 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::POLISHED_GRANITE_SLAB,
-            )),
-            812 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::SMOOTH_RED_SANDSTONE_SLAB,
-            )),
-            813 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::MOSSY_STONE_BRICK_SLAB,
-            )),
-            814 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::POLISHED_DIORITE_SLAB,
-            )),
-            815 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::MOSSY_COBBLESTONE_SLAB,
-            )),
-            816 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::END_STONE_BRICK_SLAB,
-            )),
-            817 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::SMOOTH_SANDSTONE_SLAB,
-            )),
-            818 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::SMOOTH_QUARTZ_SLAB,
-            )),
-            819 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::GRANITE_SLAB,
-            )),
-            820 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::ANDESITE_SLAB,
-            )),
-            821 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::RED_NETHER_BRICK_SLAB,
-            )),
-            822 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::POLISHED_ANDESITE_SLAB,
-            )),
-            823 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::DIORITE_SLAB,
-            )),
-            885 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::CRIMSON_SLAB,
-            )),
-            886 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::WARPED_SLAB,
-            )),
-            927 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::BLACKSTONE_SLAB,
-            )),
-            932 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::POLISHED_BLACKSTONE_BRICK_SLAB,
-            )),
-            937 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::POLISHED_BLACKSTONE_SLAB,
-            )),
-            985 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::TUFF_SLAB,
-            )),
-            989 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::POLISHED_TUFF_SLAB,
-            )),
-            994 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::TUFF_BRICK_SLAB,
-            )),
-            1000 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::SULFUR_SLAB,
-            )),
-            1004 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::POLISHED_SULFUR_SLAB,
-            )),
-            1008 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::SULFUR_BRICK_SLAB,
-            )),
-            1013 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::CINNABAR_SLAB,
-            )),
-            1017 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::POLISHED_CINNABAR_SLAB,
-            )),
-            1021 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::CINNABAR_BRICK_SLAB,
-            )),
-            1068 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::CUT_COPPER_SLAB,
-            )),
-            1069 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::EXPOSED_CUT_COPPER_SLAB,
-            )),
-            1070 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::WEATHERED_CUT_COPPER_SLAB,
-            )),
-            1071 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::OXIDIZED_CUT_COPPER_SLAB,
-            )),
-            1072 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::WAXED_CUT_COPPER_SLAB,
-            )),
-            1073 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::WAXED_EXPOSED_CUT_COPPER_SLAB,
-            )),
-            1074 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::WAXED_WEATHERED_CUT_COPPER_SLAB,
-            )),
-            1075 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::WAXED_OXIDIZED_CUT_COPPER_SLAB,
-            )),
-            1154 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::COBBLED_DEEPSLATE_SLAB,
-            )),
-            1158 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::POLISHED_DEEPSLATE_SLAB,
-            )),
-            1162 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::DEEPSLATE_TILE_SLAB,
-            )),
-            1166 => Box::new(ResinBrickSlabLikeProperties::from_props(
-                props,
-                &Block::DEEPSLATE_BRICK_SLAB,
-            )),
-            259 => Box::new(StonePressurePlateLikeProperties::from_props(
-                props,
-                &Block::STONE_PRESSURE_PLATE,
-            )),
-            261 => Box::new(StonePressurePlateLikeProperties::from_props(
-                props,
-                &Block::OAK_PRESSURE_PLATE,
-            )),
-            262 => Box::new(StonePressurePlateLikeProperties::from_props(
-                props,
-                &Block::SPRUCE_PRESSURE_PLATE,
-            )),
-            263 => Box::new(StonePressurePlateLikeProperties::from_props(
-                props,
-                &Block::BIRCH_PRESSURE_PLATE,
-            )),
-            264 => Box::new(StonePressurePlateLikeProperties::from_props(
-                props,
-                &Block::JUNGLE_PRESSURE_PLATE,
-            )),
-            265 => Box::new(StonePressurePlateLikeProperties::from_props(
-                props,
-                &Block::ACACIA_PRESSURE_PLATE,
-            )),
-            266 => Box::new(StonePressurePlateLikeProperties::from_props(
-                props,
-                &Block::CHERRY_PRESSURE_PLATE,
-            )),
-            267 => Box::new(StonePressurePlateLikeProperties::from_props(
-                props,
-                &Block::DARK_OAK_PRESSURE_PLATE,
-            )),
-            268 => Box::new(StonePressurePlateLikeProperties::from_props(
-                props,
-                &Block::PALE_OAK_PRESSURE_PLATE,
-            )),
-            269 => Box::new(StonePressurePlateLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_PRESSURE_PLATE,
-            )),
-            270 => Box::new(StonePressurePlateLikeProperties::from_props(
-                props,
-                &Block::BAMBOO_PRESSURE_PLATE,
-            )),
-            887 => Box::new(StonePressurePlateLikeProperties::from_props(
-                props,
-                &Block::CRIMSON_PRESSURE_PLATE,
-            )),
-            888 => Box::new(StonePressurePlateLikeProperties::from_props(
-                props,
-                &Block::WARPED_PRESSURE_PLATE,
-            )),
-            938 => Box::new(StonePressurePlateLikeProperties::from_props(
-                props,
-                &Block::POLISHED_BLACKSTONE_PRESSURE_PLATE,
-            )),
-            1100 => Box::new(CopperBulbLikeProperties::from_props(
-                props,
-                &Block::COPPER_BULB,
-            )),
-            1101 => Box::new(CopperBulbLikeProperties::from_props(
-                props,
-                &Block::EXPOSED_COPPER_BULB,
-            )),
-            1102 => Box::new(CopperBulbLikeProperties::from_props(
-                props,
-                &Block::WEATHERED_COPPER_BULB,
-            )),
-            1103 => Box::new(CopperBulbLikeProperties::from_props(
-                props,
-                &Block::OXIDIZED_COPPER_BULB,
-            )),
-            1104 => Box::new(CopperBulbLikeProperties::from_props(
-                props,
-                &Block::WAXED_COPPER_BULB,
-            )),
-            1105 => Box::new(CopperBulbLikeProperties::from_props(
-                props,
-                &Block::WAXED_EXPOSED_COPPER_BULB,
-            )),
-            1106 => Box::new(CopperBulbLikeProperties::from_props(
-                props,
-                &Block::WAXED_WEATHERED_COPPER_BULB,
-            )),
-            1107 => Box::new(CopperBulbLikeProperties::from_props(
-                props,
-                &Block::WAXED_OXIDIZED_COPPER_BULB,
-            )),
-            402 => Box::new(TripwireLikeProperties::from_props(props, &Block::TRIPWIRE)),
-            676 => Box::new(ObserverLikeProperties::from_props(props, &Block::OBSERVER)),
-            1124 => Box::new(LightningRodLikeProperties::from_props(
-                props,
-                &Block::LIGHTNING_ROD,
-            )),
-            1125 => Box::new(LightningRodLikeProperties::from_props(
-                props,
-                &Block::EXPOSED_LIGHTNING_ROD,
-            )),
-            1126 => Box::new(LightningRodLikeProperties::from_props(
-                props,
-                &Block::WEATHERED_LIGHTNING_ROD,
-            )),
-            1127 => Box::new(LightningRodLikeProperties::from_props(
-                props,
-                &Block::OXIDIZED_LIGHTNING_ROD,
-            )),
-            1128 => Box::new(LightningRodLikeProperties::from_props(
-                props,
-                &Block::WAXED_LIGHTNING_ROD,
-            )),
-            1129 => Box::new(LightningRodLikeProperties::from_props(
-                props,
-                &Block::WAXED_EXPOSED_LIGHTNING_ROD,
-            )),
-            1130 => Box::new(LightningRodLikeProperties::from_props(
-                props,
-                &Block::WAXED_WEATHERED_LIGHTNING_ROD,
-            )),
-            1131 => Box::new(LightningRodLikeProperties::from_props(
-                props,
-                &Block::WAXED_OXIDIZED_LIGHTNING_ROD,
-            )),
-            109 => Box::new(NoteBlockLikeProperties::from_props(
-                props,
-                &Block::NOTE_BLOCK,
-            )),
-            453 => Box::new(SkeletonSkullLikeProperties::from_props(
-                props,
-                &Block::SKELETON_SKULL,
-            )),
-            455 => Box::new(SkeletonSkullLikeProperties::from_props(
-                props,
-                &Block::WITHER_SKELETON_SKULL,
-            )),
-            457 => Box::new(SkeletonSkullLikeProperties::from_props(
-                props,
-                &Block::ZOMBIE_HEAD,
-            )),
-            459 => Box::new(SkeletonSkullLikeProperties::from_props(
-                props,
-                &Block::PLAYER_HEAD,
-            )),
-            461 => Box::new(SkeletonSkullLikeProperties::from_props(
-                props,
-                &Block::CREEPER_HEAD,
-            )),
-            463 => Box::new(SkeletonSkullLikeProperties::from_props(
-                props,
-                &Block::DRAGON_HEAD,
-            )),
-            465 => Box::new(SkeletonSkullLikeProperties::from_props(
-                props,
-                &Block::PIGLIN_HEAD,
-            )),
-            202 => Box::new(RedstoneWireLikeProperties::from_props(
-                props,
-                &Block::REDSTONE_WIRE,
-            )),
-            909 => Box::new(ComposterLikeProperties::from_props(
-                props,
-                &Block::COMPOSTER,
-            )),
-            1136 => Box::new(CaveVinesPlantLikeProperties::from_props(
-                props,
-                &Block::CAVE_VINES_PLANT,
-            )),
-            1135 => Box::new(CaveVinesLikeProperties::from_props(
-                props,
-                &Block::CAVE_VINES,
-            )),
-            379 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::RESIN_BRICK_WALL,
-            )),
-            409 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::COBBLESTONE_WALL,
-            )),
-            410 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::MOSSY_COBBLESTONE_WALL,
-            )),
-            824 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::BRICK_WALL,
-            )),
-            825 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::PRISMARINE_WALL,
-            )),
-            826 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::RED_SANDSTONE_WALL,
-            )),
-            827 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::MOSSY_STONE_BRICK_WALL,
-            )),
-            828 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::GRANITE_WALL,
-            )),
-            829 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::STONE_BRICK_WALL,
-            )),
-            830 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::MUD_BRICK_WALL,
-            )),
-            831 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::NETHER_BRICK_WALL,
-            )),
-            832 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::ANDESITE_WALL,
-            )),
-            833 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::RED_NETHER_BRICK_WALL,
-            )),
-            834 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::SANDSTONE_WALL,
-            )),
-            835 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::END_STONE_BRICK_WALL,
-            )),
-            836 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::DIORITE_WALL,
-            )),
-            926 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::BLACKSTONE_WALL,
-            )),
-            934 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::POLISHED_BLACKSTONE_BRICK_WALL,
-            )),
-            940 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::POLISHED_BLACKSTONE_WALL,
-            )),
-            987 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::TUFF_WALL,
-            )),
-            991 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::POLISHED_TUFF_WALL,
-            )),
-            996 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::TUFF_BRICK_WALL,
-            )),
-            1002 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::SULFUR_WALL,
-            )),
-            1006 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::POLISHED_SULFUR_WALL,
-            )),
-            1010 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::SULFUR_BRICK_WALL,
-            )),
-            1015 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::CINNABAR_WALL,
-            )),
-            1019 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::POLISHED_CINNABAR_WALL,
-            )),
-            1023 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::CINNABAR_BRICK_WALL,
-            )),
-            1155 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::COBBLED_DEEPSLATE_WALL,
-            )),
-            1159 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::POLISHED_DEEPSLATE_WALL,
-            )),
-            1163 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::DEEPSLATE_TILE_WALL,
-            )),
-            1167 => Box::new(ResinBrickWallLikeProperties::from_props(
-                props,
-                &Block::DEEPSLATE_BRICK_WALL,
-            )),
-            177 => Box::new(TntLikeProperties::from_props(props, &Block::TNT)),
-            338 => Box::new(BrownMushroomBlockLikeProperties::from_props(
-                props,
-                &Block::BROWN_MUSHROOM_BLOCK,
-            )),
-            339 => Box::new(BrownMushroomBlockLikeProperties::from_props(
-                props,
-                &Block::RED_MUSHROOM_BLOCK,
-            )),
-            340 => Box::new(BrownMushroomBlockLikeProperties::from_props(
-                props,
-                &Block::MUSHROOM_STEM,
-            )),
-            656 => Box::new(BrownMushroomBlockLikeProperties::from_props(
-                props,
-                &Block::CHORUS_PLANT,
-            )),
-            367 => Box::new(GlowLichenLikeProperties::from_props(
-                props,
-                &Block::GLOW_LICHEN,
-            )),
-            368 => Box::new(GlowLichenLikeProperties::from_props(
-                props,
-                &Block::RESIN_CLUMP,
-            )),
-            1031 => Box::new(GlowLichenLikeProperties::from_props(
-                props,
-                &Block::SCULK_VEIN,
-            )),
-            366 => Box::new(VineLikeProperties::from_props(props, &Block::VINE)),
-            271 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::REDSTONE_ORE,
-            )),
-            272 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::DEEPSLATE_REDSTONE_ORE,
-            )),
-            273 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::REDSTONE_TORCH,
-            )),
-            395 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::REDSTONE_LAMP,
-            )),
-            961 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::CANDLE_CAKE,
-            )),
-            962 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::WHITE_CANDLE_CAKE,
-            )),
-            963 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::ORANGE_CANDLE_CAKE,
-            )),
-            964 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::MAGENTA_CANDLE_CAKE,
-            )),
-            965 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::LIGHT_BLUE_CANDLE_CAKE,
-            )),
-            966 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::YELLOW_CANDLE_CAKE,
-            )),
-            967 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::LIME_CANDLE_CAKE,
-            )),
-            968 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::PINK_CANDLE_CAKE,
-            )),
-            969 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::GRAY_CANDLE_CAKE,
-            )),
-            970 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::LIGHT_GRAY_CANDLE_CAKE,
-            )),
-            971 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::CYAN_CANDLE_CAKE,
-            )),
-            972 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::PURPLE_CANDLE_CAKE,
-            )),
-            973 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::BLUE_CANDLE_CAKE,
-            )),
-            974 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::BROWN_CANDLE_CAKE,
-            )),
-            975 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::GREEN_CANDLE_CAKE,
-            )),
-            976 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::RED_CANDLE_CAKE,
-            )),
-            977 => Box::new(RedstoneOreLikeProperties::from_props(
-                props,
-                &Block::BLACK_CANDLE_CAKE,
-            )),
-            944 => Box::new(CandleLikeProperties::from_props(props, &Block::CANDLE)),
-            945 => Box::new(CandleLikeProperties::from_props(
-                props,
-                &Block::WHITE_CANDLE,
-            )),
-            946 => Box::new(CandleLikeProperties::from_props(
-                props,
-                &Block::ORANGE_CANDLE,
-            )),
-            947 => Box::new(CandleLikeProperties::from_props(
-                props,
-                &Block::MAGENTA_CANDLE,
-            )),
-            948 => Box::new(CandleLikeProperties::from_props(
-                props,
-                &Block::LIGHT_BLUE_CANDLE,
-            )),
-            949 => Box::new(CandleLikeProperties::from_props(
-                props,
-                &Block::YELLOW_CANDLE,
-            )),
-            950 => Box::new(CandleLikeProperties::from_props(props, &Block::LIME_CANDLE)),
-            951 => Box::new(CandleLikeProperties::from_props(props, &Block::PINK_CANDLE)),
-            952 => Box::new(CandleLikeProperties::from_props(props, &Block::GRAY_CANDLE)),
-            953 => Box::new(CandleLikeProperties::from_props(
-                props,
-                &Block::LIGHT_GRAY_CANDLE,
-            )),
-            954 => Box::new(CandleLikeProperties::from_props(props, &Block::CYAN_CANDLE)),
-            955 => Box::new(CandleLikeProperties::from_props(
-                props,
-                &Block::PURPLE_CANDLE,
-            )),
-            956 => Box::new(CandleLikeProperties::from_props(props, &Block::BLUE_CANDLE)),
-            957 => Box::new(CandleLikeProperties::from_props(
-                props,
-                &Block::BROWN_CANDLE,
-            )),
-            958 => Box::new(CandleLikeProperties::from_props(
-                props,
-                &Block::GREEN_CANDLE,
-            )),
-            959 => Box::new(CandleLikeProperties::from_props(props, &Block::RED_CANDLE)),
-            960 => Box::new(CandleLikeProperties::from_props(
-                props,
-                &Block::BLACK_CANDLE,
-            )),
-            1190 => Box::new(PaleHangingMossLikeProperties::from_props(
-                props,
-                &Block::PALE_HANGING_MOSS,
-            )),
-            796 => Box::new(BubbleColumnLikeProperties::from_props(
-                props,
-                &Block::BUBBLE_COLUMN,
-            )),
-            284 => Box::new(OakFenceLikeProperties::from_props(props, &Block::OAK_FENCE)),
-            341 => Box::new(OakFenceLikeProperties::from_props(props, &Block::IRON_BARS)),
-            342 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::COPPER_BARS,
-            )),
-            343 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::EXPOSED_COPPER_BARS,
-            )),
-            344 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::WEATHERED_COPPER_BARS,
-            )),
-            345 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::OXIDIZED_COPPER_BARS,
-            )),
-            346 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::WAXED_COPPER_BARS,
-            )),
-            347 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::WAXED_EXPOSED_COPPER_BARS,
-            )),
-            348 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::WAXED_WEATHERED_COPPER_BARS,
-            )),
-            349 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::WAXED_OXIDIZED_COPPER_BARS,
-            )),
-            359 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::GLASS_PANE,
-            )),
-            382 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::NETHER_BRICK_FENCE,
-            )),
-            500 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::WHITE_STAINED_GLASS_PANE,
-            )),
-            501 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::ORANGE_STAINED_GLASS_PANE,
-            )),
-            502 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::MAGENTA_STAINED_GLASS_PANE,
-            )),
-            503 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::LIGHT_BLUE_STAINED_GLASS_PANE,
-            )),
-            504 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::YELLOW_STAINED_GLASS_PANE,
-            )),
-            505 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::LIME_STAINED_GLASS_PANE,
-            )),
-            506 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::PINK_STAINED_GLASS_PANE,
-            )),
-            507 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::GRAY_STAINED_GLASS_PANE,
-            )),
-            508 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::LIGHT_GRAY_STAINED_GLASS_PANE,
-            )),
-            509 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::CYAN_STAINED_GLASS_PANE,
-            )),
-            510 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::PURPLE_STAINED_GLASS_PANE,
-            )),
-            511 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::BLUE_STAINED_GLASS_PANE,
-            )),
-            512 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::BROWN_STAINED_GLASS_PANE,
-            )),
-            513 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::GREEN_STAINED_GLASS_PANE,
-            )),
-            514 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::RED_STAINED_GLASS_PANE,
-            )),
-            515 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::BLACK_STAINED_GLASS_PANE,
-            )),
-            637 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::SPRUCE_FENCE,
-            )),
-            638 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::BIRCH_FENCE,
-            )),
-            639 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::JUNGLE_FENCE,
-            )),
-            640 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::ACACIA_FENCE,
-            )),
-            641 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::CHERRY_FENCE,
-            )),
-            642 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::DARK_OAK_FENCE,
-            )),
-            643 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::PALE_OAK_FENCE,
-            )),
-            644 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_FENCE,
-            )),
-            645 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::BAMBOO_FENCE,
-            )),
-            889 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::CRIMSON_FENCE,
-            )),
-            890 => Box::new(OakFenceLikeProperties::from_props(
-                props,
-                &Block::WARPED_FENCE,
-            )),
-            839 => Box::new(BarrelLikeProperties::from_props(props, &Block::BARREL)),
-            1032 => Box::new(SculkCatalystLikeProperties::from_props(
-                props,
-                &Block::SCULK_CATALYST,
-            )),
-            139 => Box::new(PistonHeadLikeProperties::from_props(
-                props,
-                &Block::PISTON_HEAD,
-            )),
-            8 => Box::new(GrassBlockLikeProperties::from_props(
-                props,
-                &Block::GRASS_BLOCK,
-            )),
-            11 => Box::new(GrassBlockLikeProperties::from_props(props, &Block::PODZOL)),
-            373 => Box::new(GrassBlockLikeProperties::from_props(
-                props,
-                &Block::MYCELIUM,
-            )),
-            655 => Box::new(EndRodLikeProperties::from_props(props, &Block::END_ROD)),
-            677 => Box::new(EndRodLikeProperties::from_props(props, &Block::SHULKER_BOX)),
-            678 => Box::new(EndRodLikeProperties::from_props(
-                props,
-                &Block::WHITE_SHULKER_BOX,
-            )),
-            679 => Box::new(EndRodLikeProperties::from_props(
-                props,
-                &Block::ORANGE_SHULKER_BOX,
-            )),
-            680 => Box::new(EndRodLikeProperties::from_props(
-                props,
-                &Block::MAGENTA_SHULKER_BOX,
-            )),
-            681 => Box::new(EndRodLikeProperties::from_props(
-                props,
-                &Block::LIGHT_BLUE_SHULKER_BOX,
-            )),
-            682 => Box::new(EndRodLikeProperties::from_props(
-                props,
-                &Block::YELLOW_SHULKER_BOX,
-            )),
-            683 => Box::new(EndRodLikeProperties::from_props(
-                props,
-                &Block::LIME_SHULKER_BOX,
-            )),
-            684 => Box::new(EndRodLikeProperties::from_props(
-                props,
-                &Block::PINK_SHULKER_BOX,
-            )),
-            685 => Box::new(EndRodLikeProperties::from_props(
-                props,
-                &Block::GRAY_SHULKER_BOX,
-            )),
-            686 => Box::new(EndRodLikeProperties::from_props(
-                props,
-                &Block::LIGHT_GRAY_SHULKER_BOX,
-            )),
-            687 => Box::new(EndRodLikeProperties::from_props(
-                props,
-                &Block::CYAN_SHULKER_BOX,
-            )),
-            688 => Box::new(EndRodLikeProperties::from_props(
-                props,
-                &Block::PURPLE_SHULKER_BOX,
-            )),
-            689 => Box::new(EndRodLikeProperties::from_props(
-                props,
-                &Block::BLUE_SHULKER_BOX,
-            )),
-            690 => Box::new(EndRodLikeProperties::from_props(
-                props,
-                &Block::BROWN_SHULKER_BOX,
-            )),
-            691 => Box::new(EndRodLikeProperties::from_props(
-                props,
-                &Block::GREEN_SHULKER_BOX,
-            )),
-            692 => Box::new(EndRodLikeProperties::from_props(
-                props,
-                &Block::RED_SHULKER_BOX,
-            )),
-            693 => Box::new(EndRodLikeProperties::from_props(
-                props,
-                &Block::BLACK_SHULKER_BOX,
-            )),
-            156 => Box::new(MovingPistonLikeProperties::from_props(
-                props,
-                &Block::MOVING_PISTON,
-            )),
-            980 => Box::new(AmethystClusterLikeProperties::from_props(
-                props,
-                &Block::AMETHYST_CLUSTER,
-            )),
-            981 => Box::new(AmethystClusterLikeProperties::from_props(
-                props,
-                &Block::LARGE_AMETHYST_BUD,
-            )),
-            982 => Box::new(AmethystClusterLikeProperties::from_props(
-                props,
-                &Block::MEDIUM_AMETHYST_BUD,
-            )),
-            983 => Box::new(AmethystClusterLikeProperties::from_props(
-                props,
-                &Block::SMALL_AMETHYST_BUD,
-            )),
-            407 => Box::new(CommandBlockLikeProperties::from_props(
-                props,
-                &Block::COMMAND_BLOCK,
-            )),
-            668 => Box::new(CommandBlockLikeProperties::from_props(
-                props,
-                &Block::REPEATING_COMMAND_BLOCK,
-            )),
-            669 => Box::new(CommandBlockLikeProperties::from_props(
-                props,
-                &Block::CHAIN_COMMAND_BLOCK,
-            )),
-            295 => Box::new(NetherPortalLikeProperties::from_props(
-                props,
-                &Block::NETHER_PORTAL,
-            )),
-            88 => Box::new(OakLeavesLikeProperties::from_props(
-                props,
-                &Block::OAK_LEAVES,
-            )),
-            89 => Box::new(OakLeavesLikeProperties::from_props(
-                props,
-                &Block::SPRUCE_LEAVES,
-            )),
-            90 => Box::new(OakLeavesLikeProperties::from_props(
-                props,
-                &Block::BIRCH_LEAVES,
-            )),
-            91 => Box::new(OakLeavesLikeProperties::from_props(
-                props,
-                &Block::JUNGLE_LEAVES,
-            )),
-            92 => Box::new(OakLeavesLikeProperties::from_props(
-                props,
-                &Block::ACACIA_LEAVES,
-            )),
-            93 => Box::new(OakLeavesLikeProperties::from_props(
-                props,
-                &Block::CHERRY_LEAVES,
-            )),
-            94 => Box::new(OakLeavesLikeProperties::from_props(
-                props,
-                &Block::DARK_OAK_LEAVES,
-            )),
-            95 => Box::new(OakLeavesLikeProperties::from_props(
-                props,
-                &Block::PALE_OAK_LEAVES,
-            )),
-            96 => Box::new(OakLeavesLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_LEAVES,
-            )),
-            97 => Box::new(OakLeavesLikeProperties::from_props(
-                props,
-                &Block::AZALEA_LEAVES,
-            )),
-            98 => Box::new(OakLeavesLikeProperties::from_props(
-                props,
-                &Block::FLOWERING_AZALEA_LEAVES,
-            )),
-            746 => Box::new(SnifferEggLikeProperties::from_props(
-                props,
-                &Block::SNIFFER_EGG,
-            )),
-            745 => Box::new(TurtleEggLikeProperties::from_props(
-                props,
-                &Block::TURTLE_EGG,
-            )),
-            234 => Box::new(OakHangingSignLikeProperties::from_props(
-                props,
-                &Block::OAK_HANGING_SIGN,
-            )),
-            235 => Box::new(OakHangingSignLikeProperties::from_props(
-                props,
-                &Block::SPRUCE_HANGING_SIGN,
-            )),
-            236 => Box::new(OakHangingSignLikeProperties::from_props(
-                props,
-                &Block::BIRCH_HANGING_SIGN,
-            )),
-            237 => Box::new(OakHangingSignLikeProperties::from_props(
-                props,
-                &Block::ACACIA_HANGING_SIGN,
-            )),
-            238 => Box::new(OakHangingSignLikeProperties::from_props(
-                props,
-                &Block::CHERRY_HANGING_SIGN,
-            )),
-            239 => Box::new(OakHangingSignLikeProperties::from_props(
-                props,
-                &Block::JUNGLE_HANGING_SIGN,
-            )),
-            240 => Box::new(OakHangingSignLikeProperties::from_props(
-                props,
-                &Block::DARK_OAK_HANGING_SIGN,
-            )),
-            241 => Box::new(OakHangingSignLikeProperties::from_props(
-                props,
-                &Block::PALE_OAK_HANGING_SIGN,
-            )),
-            242 => Box::new(OakHangingSignLikeProperties::from_props(
-                props,
-                &Block::CRIMSON_HANGING_SIGN,
-            )),
-            243 => Box::new(OakHangingSignLikeProperties::from_props(
-                props,
-                &Block::WARPED_HANGING_SIGN,
-            )),
-            244 => Box::new(OakHangingSignLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_HANGING_SIGN,
-            )),
-            245 => Box::new(OakHangingSignLikeProperties::from_props(
-                props,
-                &Block::BAMBOO_HANGING_SIGN,
-            )),
-            137 => Box::new(TallSeagrassLikeProperties::from_props(
-                props,
-                &Block::TALL_SEAGRASS,
-            )),
-            557 => Box::new(TallSeagrassLikeProperties::from_props(
-                props,
-                &Block::SUNFLOWER,
-            )),
-            558 => Box::new(TallSeagrassLikeProperties::from_props(props, &Block::LILAC)),
-            559 => Box::new(TallSeagrassLikeProperties::from_props(
-                props,
-                &Block::ROSE_BUSH,
-            )),
-            560 => Box::new(TallSeagrassLikeProperties::from_props(props, &Block::PEONY)),
-            561 => Box::new(TallSeagrassLikeProperties::from_props(
-                props,
-                &Block::TALL_GRASS,
-            )),
-            562 => Box::new(TallSeagrassLikeProperties::from_props(
-                props,
-                &Block::LARGE_FERN,
-            )),
-            664 => Box::new(TallSeagrassLikeProperties::from_props(
-                props,
-                &Block::PITCHER_PLANT,
-            )),
-            663 => Box::new(PitcherCropLikeProperties::from_props(
-                props,
-                &Block::PITCHER_CROP,
-            )),
-            906 => Box::new(JigsawLikeProperties::from_props(props, &Block::JIGSAW)),
-            905 => Box::new(StructureBlockLikeProperties::from_props(
-                props,
-                &Block::STRUCTURE_BLOCK,
-            )),
-            474 => Box::new(DaylightDetectorLikeProperties::from_props(
-                props,
-                &Block::DAYLIGHT_DETECTOR,
-            )),
-            388 => Box::new(WaterCauldronLikeProperties::from_props(
-                props,
-                &Block::WATER_CAULDRON,
-            )),
-            390 => Box::new(WaterCauldronLikeProperties::from_props(
-                props,
-                &Block::POWDER_SNOW_CAULDRON,
-            )),
-            33 => Box::new(MangrovePropaguleLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_PROPAGULE,
-            )),
-            849 => Box::new(LanternLikeProperties::from_props(props, &Block::LANTERN)),
-            850 => Box::new(LanternLikeProperties::from_props(
-                props,
-                &Block::SOUL_LANTERN,
-            )),
-            851 => Box::new(LanternLikeProperties::from_props(
-                props,
-                &Block::COPPER_LANTERN,
-            )),
-            852 => Box::new(LanternLikeProperties::from_props(
-                props,
-                &Block::EXPOSED_COPPER_LANTERN,
-            )),
-            853 => Box::new(LanternLikeProperties::from_props(
-                props,
-                &Block::WEATHERED_COPPER_LANTERN,
-            )),
-            854 => Box::new(LanternLikeProperties::from_props(
-                props,
-                &Block::OXIDIZED_COPPER_LANTERN,
-            )),
-            855 => Box::new(LanternLikeProperties::from_props(
-                props,
-                &Block::WAXED_COPPER_LANTERN,
-            )),
-            856 => Box::new(LanternLikeProperties::from_props(
-                props,
-                &Block::WAXED_EXPOSED_COPPER_LANTERN,
-            )),
-            857 => Box::new(LanternLikeProperties::from_props(
-                props,
-                &Block::WAXED_WEATHERED_COPPER_LANTERN,
-            )),
-            858 => Box::new(LanternLikeProperties::from_props(
-                props,
-                &Block::WAXED_OXIDIZED_COPPER_LANTERN,
-            )),
-            222 => Box::new(RailLikeProperties::from_props(props, &Block::RAIL)),
-            1133 => Box::new(PointedDripstoneLikeProperties::from_props(
-                props,
-                &Block::POINTED_DRIPSTONE,
-            )),
-            1134 => Box::new(PointedDripstoneLikeProperties::from_props(
-                props,
-                &Block::SULFUR_SPIKE,
-            )),
-            25 => Box::new(OakSaplingLikeProperties::from_props(
-                props,
-                &Block::OAK_SAPLING,
-            )),
-            26 => Box::new(OakSaplingLikeProperties::from_props(
-                props,
-                &Block::SPRUCE_SAPLING,
-            )),
-            27 => Box::new(OakSaplingLikeProperties::from_props(
-                props,
-                &Block::BIRCH_SAPLING,
-            )),
-            28 => Box::new(OakSaplingLikeProperties::from_props(
-                props,
-                &Block::JUNGLE_SAPLING,
-            )),
-            29 => Box::new(OakSaplingLikeProperties::from_props(
-                props,
-                &Block::ACACIA_SAPLING,
-            )),
-            30 => Box::new(OakSaplingLikeProperties::from_props(
-                props,
-                &Block::CHERRY_SAPLING,
-            )),
-            31 => Box::new(OakSaplingLikeProperties::from_props(
-                props,
-                &Block::DARK_OAK_SAPLING,
-            )),
-            32 => Box::new(OakSaplingLikeProperties::from_props(
-                props,
-                &Block::PALE_OAK_SAPLING,
-            )),
-            792 => Box::new(BambooLikeProperties::from_props(props, &Block::BAMBOO)),
-            207 => Box::new(WheatLikeProperties::from_props(props, &Block::WHEAT)),
-            364 => Box::new(WheatLikeProperties::from_props(props, &Block::PUMPKIN_STEM)),
-            365 => Box::new(WheatLikeProperties::from_props(props, &Block::MELON_STEM)),
-            441 => Box::new(WheatLikeProperties::from_props(props, &Block::CARROTS)),
-            442 => Box::new(WheatLikeProperties::from_props(props, &Block::POTATOES)),
-            788 => Box::new(SeaPickleLikeProperties::from_props(
-                props,
-                &Block::SEA_PICKLE,
-            )),
-            58 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_ROOTS,
-            )),
-            524 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::BARRIER,
-            )),
-            758 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::DEAD_TUBE_CORAL,
-            )),
-            759 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::DEAD_BRAIN_CORAL,
-            )),
-            760 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::DEAD_BUBBLE_CORAL,
-            )),
-            761 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::DEAD_FIRE_CORAL,
-            )),
-            762 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::DEAD_HORN_CORAL,
-            )),
-            763 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::TUBE_CORAL,
-            )),
-            764 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::BRAIN_CORAL,
-            )),
-            765 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::BUBBLE_CORAL,
-            )),
-            766 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::FIRE_CORAL,
-            )),
-            767 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::HORN_CORAL,
-            )),
-            768 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::DEAD_TUBE_CORAL_FAN,
-            )),
-            769 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::DEAD_BRAIN_CORAL_FAN,
-            )),
-            770 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::DEAD_BUBBLE_CORAL_FAN,
-            )),
-            771 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::DEAD_FIRE_CORAL_FAN,
-            )),
-            772 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::DEAD_HORN_CORAL_FAN,
-            )),
-            773 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::TUBE_CORAL_FAN,
-            )),
-            774 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::BRAIN_CORAL_FAN,
-            )),
-            775 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::BUBBLE_CORAL_FAN,
-            )),
-            776 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::FIRE_CORAL_FAN,
-            )),
-            777 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::HORN_CORAL_FAN,
-            )),
-            790 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::CONDUIT,
-            )),
-            1092 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::COPPER_GRATE,
-            )),
-            1093 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::EXPOSED_COPPER_GRATE,
-            )),
-            1094 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::WEATHERED_COPPER_GRATE,
-            )),
-            1095 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::OXIDIZED_COPPER_GRATE,
-            )),
-            1096 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::WAXED_COPPER_GRATE,
-            )),
-            1097 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::WAXED_EXPOSED_COPPER_GRATE,
-            )),
-            1098 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::WAXED_WEATHERED_COPPER_GRATE,
-            )),
-            1099 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::WAXED_OXIDIZED_COPPER_GRATE,
-            )),
-            1148 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::HANGING_ROOTS,
-            )),
-            1187 => Box::new(MangroveRootsLikeProperties::from_props(
-                props,
-                &Block::HEAVY_CORE,
-            )),
-            210 => Box::new(OakSignLikeProperties::from_props(props, &Block::OAK_SIGN)),
-            211 => Box::new(OakSignLikeProperties::from_props(
-                props,
-                &Block::SPRUCE_SIGN,
-            )),
-            212 => Box::new(OakSignLikeProperties::from_props(props, &Block::BIRCH_SIGN)),
-            213 => Box::new(OakSignLikeProperties::from_props(
-                props,
-                &Block::ACACIA_SIGN,
-            )),
-            214 => Box::new(OakSignLikeProperties::from_props(
-                props,
-                &Block::CHERRY_SIGN,
-            )),
-            215 => Box::new(OakSignLikeProperties::from_props(
-                props,
-                &Block::JUNGLE_SIGN,
-            )),
-            216 => Box::new(OakSignLikeProperties::from_props(
-                props,
-                &Block::DARK_OAK_SIGN,
-            )),
-            217 => Box::new(OakSignLikeProperties::from_props(
-                props,
-                &Block::PALE_OAK_SIGN,
-            )),
-            218 => Box::new(OakSignLikeProperties::from_props(
-                props,
-                &Block::MANGROVE_SIGN,
-            )),
-            219 => Box::new(OakSignLikeProperties::from_props(
-                props,
-                &Block::BAMBOO_SIGN,
-            )),
-            901 => Box::new(OakSignLikeProperties::from_props(
-                props,
-                &Block::CRIMSON_SIGN,
-            )),
-            902 => Box::new(OakSignLikeProperties::from_props(
-                props,
-                &Block::WARPED_SIGN,
-            )),
-            525 => Box::new(LightLikeProperties::from_props(props, &Block::LIGHT)),
-            907 => Box::new(TestBlockLikeProperties::from_props(
-                props,
-                &Block::TEST_BLOCK,
-            )),
-            563 => Box::new(WhiteBannerLikeProperties::from_props(
-                props,
-                &Block::WHITE_BANNER,
-            )),
-            564 => Box::new(WhiteBannerLikeProperties::from_props(
-                props,
-                &Block::ORANGE_BANNER,
-            )),
-            565 => Box::new(WhiteBannerLikeProperties::from_props(
-                props,
-                &Block::MAGENTA_BANNER,
-            )),
-            566 => Box::new(WhiteBannerLikeProperties::from_props(
-                props,
-                &Block::LIGHT_BLUE_BANNER,
-            )),
-            567 => Box::new(WhiteBannerLikeProperties::from_props(
-                props,
-                &Block::YELLOW_BANNER,
-            )),
-            568 => Box::new(WhiteBannerLikeProperties::from_props(
-                props,
-                &Block::LIME_BANNER,
-            )),
-            569 => Box::new(WhiteBannerLikeProperties::from_props(
-                props,
-                &Block::PINK_BANNER,
-            )),
-            570 => Box::new(WhiteBannerLikeProperties::from_props(
-                props,
-                &Block::GRAY_BANNER,
-            )),
-            571 => Box::new(WhiteBannerLikeProperties::from_props(
-                props,
-                &Block::LIGHT_GRAY_BANNER,
-            )),
-            572 => Box::new(WhiteBannerLikeProperties::from_props(
-                props,
-                &Block::CYAN_BANNER,
-            )),
-            573 => Box::new(WhiteBannerLikeProperties::from_props(
-                props,
-                &Block::PURPLE_BANNER,
-            )),
-            574 => Box::new(WhiteBannerLikeProperties::from_props(
-                props,
-                &Block::BLUE_BANNER,
-            )),
-            575 => Box::new(WhiteBannerLikeProperties::from_props(
-                props,
-                &Block::BROWN_BANNER,
-            )),
-            576 => Box::new(WhiteBannerLikeProperties::from_props(
-                props,
-                &Block::GREEN_BANNER,
-            )),
-            577 => Box::new(WhiteBannerLikeProperties::from_props(
-                props,
-                &Block::RED_BANNER,
-            )),
-            578 => Box::new(WhiteBannerLikeProperties::from_props(
-                props,
-                &Block::BLACK_BANNER,
-            )),
-            35 => Box::new(WaterLikeProperties::from_props(props, &Block::WATER)),
-            36 => Box::new(WaterLikeProperties::from_props(props, &Block::LAVA)),
-            742 => Box::new(KelpLikeProperties::from_props(props, &Block::KELP)),
-            878 => Box::new(KelpLikeProperties::from_props(props, &Block::WEEPING_VINES)),
-            880 => Box::new(KelpLikeProperties::from_props(
-                props,
-                &Block::TWISTING_VINES,
-            )),
-            471 => Box::new(LightWeightedPressurePlateLikeProperties::from_props(
-                props,
-                &Block::LIGHT_WEIGHTED_PRESSURE_PLATE,
-            )),
-            472 => Box::new(LightWeightedPressurePlateLikeProperties::from_props(
-                props,
-                &Block::HEAVY_WEIGHTED_PRESSURE_PLATE,
-            )),
-            910 => Box::new(LightWeightedPressurePlateLikeProperties::from_props(
-                props,
-                &Block::TARGET,
-            )),
-            662 => Box::new(TorchflowerCropLikeProperties::from_props(
-                props,
-                &Block::TORCHFLOWER_CROP,
-            )),
-            384 => Box::new(NetherWartLikeProperties::from_props(
-                props,
-                &Block::NETHER_WART,
-            )),
-            665 => Box::new(NetherWartLikeProperties::from_props(
-                props,
-                &Block::BEETROOTS,
-            )),
-            670 => Box::new(NetherWartLikeProperties::from_props(
-                props,
-                &Block::FROSTED_ICE,
-            )),
-            861 => Box::new(NetherWartLikeProperties::from_props(
-                props,
-                &Block::SWEET_BERRY_BUSH,
-            )),
-            999 => Box::new(PotentSulfurLikeProperties::from_props(
-                props,
-                &Block::POTENT_SULFUR,
-            )),
+        match self.id {
+            BlockId::GRINDSTONE => Box::new(GrindstoneLikeProperties::from_props(props, self)),
+            BlockId::LEVER
+            | BlockId::STONE_BUTTON
+            | BlockId::OAK_BUTTON
+            | BlockId::SPRUCE_BUTTON
+            | BlockId::BIRCH_BUTTON
+            | BlockId::JUNGLE_BUTTON
+            | BlockId::ACACIA_BUTTON
+            | BlockId::CHERRY_BUTTON
+            | BlockId::DARK_OAK_BUTTON
+            | BlockId::PALE_OAK_BUTTON
+            | BlockId::MANGROVE_BUTTON
+            | BlockId::BAMBOO_BUTTON
+            | BlockId::CRIMSON_BUTTON
+            | BlockId::WARPED_BUTTON
+            | BlockId::POLISHED_BLACKSTONE_BUTTON => {
+                Box::new(LeverLikeProperties::from_props(props, self))
+            }
+            BlockId::OAK_FENCE_GATE
+            | BlockId::SPRUCE_FENCE_GATE
+            | BlockId::BIRCH_FENCE_GATE
+            | BlockId::JUNGLE_FENCE_GATE
+            | BlockId::ACACIA_FENCE_GATE
+            | BlockId::CHERRY_FENCE_GATE
+            | BlockId::DARK_OAK_FENCE_GATE
+            | BlockId::PALE_OAK_FENCE_GATE
+            | BlockId::MANGROVE_FENCE_GATE
+            | BlockId::BAMBOO_FENCE_GATE
+            | BlockId::CRIMSON_FENCE_GATE
+            | BlockId::WARPED_FENCE_GATE => {
+                Box::new(OakFenceGateLikeProperties::from_props(props, self))
+            }
+            BlockId::PALE_OAK_WOOD
+            | BlockId::OAK_LOG
+            | BlockId::SPRUCE_LOG
+            | BlockId::BIRCH_LOG
+            | BlockId::JUNGLE_LOG
+            | BlockId::ACACIA_LOG
+            | BlockId::CHERRY_LOG
+            | BlockId::DARK_OAK_LOG
+            | BlockId::PALE_OAK_LOG
+            | BlockId::MANGROVE_LOG
+            | BlockId::MUDDY_MANGROVE_ROOTS
+            | BlockId::BAMBOO_BLOCK
+            | BlockId::STRIPPED_SPRUCE_LOG
+            | BlockId::STRIPPED_BIRCH_LOG
+            | BlockId::STRIPPED_JUNGLE_LOG
+            | BlockId::STRIPPED_ACACIA_LOG
+            | BlockId::STRIPPED_CHERRY_LOG
+            | BlockId::STRIPPED_DARK_OAK_LOG
+            | BlockId::STRIPPED_PALE_OAK_LOG
+            | BlockId::STRIPPED_OAK_LOG
+            | BlockId::STRIPPED_MANGROVE_LOG
+            | BlockId::STRIPPED_BAMBOO_BLOCK
+            | BlockId::OAK_WOOD
+            | BlockId::SPRUCE_WOOD
+            | BlockId::BIRCH_WOOD
+            | BlockId::JUNGLE_WOOD
+            | BlockId::ACACIA_WOOD
+            | BlockId::CHERRY_WOOD
+            | BlockId::DARK_OAK_WOOD
+            | BlockId::MANGROVE_WOOD
+            | BlockId::STRIPPED_OAK_WOOD
+            | BlockId::STRIPPED_SPRUCE_WOOD
+            | BlockId::STRIPPED_BIRCH_WOOD
+            | BlockId::STRIPPED_JUNGLE_WOOD
+            | BlockId::STRIPPED_ACACIA_WOOD
+            | BlockId::STRIPPED_CHERRY_WOOD
+            | BlockId::STRIPPED_DARK_OAK_WOOD
+            | BlockId::STRIPPED_PALE_OAK_WOOD
+            | BlockId::STRIPPED_MANGROVE_WOOD
+            | BlockId::BASALT
+            | BlockId::POLISHED_BASALT
+            | BlockId::QUARTZ_PILLAR
+            | BlockId::HAY_BLOCK
+            | BlockId::PURPUR_PILLAR
+            | BlockId::BONE_BLOCK
+            | BlockId::WARPED_STEM
+            | BlockId::STRIPPED_WARPED_STEM
+            | BlockId::WARPED_HYPHAE
+            | BlockId::STRIPPED_WARPED_HYPHAE
+            | BlockId::CRIMSON_STEM
+            | BlockId::STRIPPED_CRIMSON_STEM
+            | BlockId::CRIMSON_HYPHAE
+            | BlockId::STRIPPED_CRIMSON_HYPHAE
+            | BlockId::DEEPSLATE
+            | BlockId::INFESTED_DEEPSLATE
+            | BlockId::OCHRE_FROGLIGHT
+            | BlockId::VERDANT_FROGLIGHT
+            | BlockId::PEARLESCENT_FROGLIGHT => {
+                Box::new(PaleOakWoodLikeProperties::from_props(props, self))
+            }
+            BlockId::CREAKING_HEART => {
+                Box::new(CreakingHeartLikeProperties::from_props(props, self))
+            }
+            BlockId::IRON_CHAIN
+            | BlockId::COPPER_CHAIN
+            | BlockId::EXPOSED_COPPER_CHAIN
+            | BlockId::WEATHERED_COPPER_CHAIN
+            | BlockId::OXIDIZED_COPPER_CHAIN
+            | BlockId::WAXED_COPPER_CHAIN
+            | BlockId::WAXED_EXPOSED_COPPER_CHAIN
+            | BlockId::WAXED_WEATHERED_COPPER_CHAIN
+            | BlockId::WAXED_OXIDIZED_COPPER_CHAIN => {
+                Box::new(IronChainLikeProperties::from_props(props, self))
+            }
+            BlockId::CAKE => Box::new(CakeLikeProperties::from_props(props, self)),
+            BlockId::JUKEBOX => Box::new(JukeboxLikeProperties::from_props(props, self)),
+            BlockId::POWERED_RAIL | BlockId::DETECTOR_RAIL | BlockId::ACTIVATOR_RAIL => {
+                Box::new(PoweredRailLikeProperties::from_props(props, self))
+            }
+            BlockId::DRIED_GHAST => Box::new(DriedGhastLikeProperties::from_props(props, self)),
+            BlockId::OAK_STAIRS
+            | BlockId::COBBLESTONE_STAIRS
+            | BlockId::BRICK_STAIRS
+            | BlockId::STONE_BRICK_STAIRS
+            | BlockId::MUD_BRICK_STAIRS
+            | BlockId::RESIN_BRICK_STAIRS
+            | BlockId::NETHER_BRICK_STAIRS
+            | BlockId::SANDSTONE_STAIRS
+            | BlockId::SPRUCE_STAIRS
+            | BlockId::BIRCH_STAIRS
+            | BlockId::JUNGLE_STAIRS
+            | BlockId::QUARTZ_STAIRS
+            | BlockId::ACACIA_STAIRS
+            | BlockId::CHERRY_STAIRS
+            | BlockId::DARK_OAK_STAIRS
+            | BlockId::PALE_OAK_STAIRS
+            | BlockId::MANGROVE_STAIRS
+            | BlockId::BAMBOO_STAIRS
+            | BlockId::BAMBOO_MOSAIC_STAIRS
+            | BlockId::PRISMARINE_STAIRS
+            | BlockId::PRISMARINE_BRICK_STAIRS
+            | BlockId::DARK_PRISMARINE_STAIRS
+            | BlockId::RED_SANDSTONE_STAIRS
+            | BlockId::PURPUR_STAIRS
+            | BlockId::POLISHED_GRANITE_STAIRS
+            | BlockId::SMOOTH_RED_SANDSTONE_STAIRS
+            | BlockId::MOSSY_STONE_BRICK_STAIRS
+            | BlockId::POLISHED_DIORITE_STAIRS
+            | BlockId::MOSSY_COBBLESTONE_STAIRS
+            | BlockId::END_STONE_BRICK_STAIRS
+            | BlockId::STONE_STAIRS
+            | BlockId::SMOOTH_SANDSTONE_STAIRS
+            | BlockId::SMOOTH_QUARTZ_STAIRS
+            | BlockId::GRANITE_STAIRS
+            | BlockId::ANDESITE_STAIRS
+            | BlockId::RED_NETHER_BRICK_STAIRS
+            | BlockId::POLISHED_ANDESITE_STAIRS
+            | BlockId::DIORITE_STAIRS
+            | BlockId::CRIMSON_STAIRS
+            | BlockId::WARPED_STAIRS
+            | BlockId::BLACKSTONE_STAIRS
+            | BlockId::POLISHED_BLACKSTONE_BRICK_STAIRS
+            | BlockId::POLISHED_BLACKSTONE_STAIRS
+            | BlockId::TUFF_STAIRS
+            | BlockId::POLISHED_TUFF_STAIRS
+            | BlockId::TUFF_BRICK_STAIRS
+            | BlockId::SULFUR_STAIRS
+            | BlockId::POLISHED_SULFUR_STAIRS
+            | BlockId::SULFUR_BRICK_STAIRS
+            | BlockId::CINNABAR_STAIRS
+            | BlockId::POLISHED_CINNABAR_STAIRS
+            | BlockId::CINNABAR_BRICK_STAIRS
+            | BlockId::CUT_COPPER_STAIRS
+            | BlockId::EXPOSED_CUT_COPPER_STAIRS
+            | BlockId::WEATHERED_CUT_COPPER_STAIRS
+            | BlockId::OXIDIZED_CUT_COPPER_STAIRS
+            | BlockId::WAXED_CUT_COPPER_STAIRS
+            | BlockId::WAXED_EXPOSED_CUT_COPPER_STAIRS
+            | BlockId::WAXED_WEATHERED_CUT_COPPER_STAIRS
+            | BlockId::WAXED_OXIDIZED_CUT_COPPER_STAIRS
+            | BlockId::COBBLED_DEEPSLATE_STAIRS
+            | BlockId::POLISHED_DEEPSLATE_STAIRS
+            | BlockId::DEEPSLATE_TILE_STAIRS
+            | BlockId::DEEPSLATE_BRICK_STAIRS => {
+                Box::new(OakStairsLikeProperties::from_props(props, self))
+            }
+            BlockId::STICKY_PISTON | BlockId::PISTON => {
+                Box::new(StickyPistonLikeProperties::from_props(props, self))
+            }
+            BlockId::OAK_DOOR
+            | BlockId::IRON_DOOR
+            | BlockId::SPRUCE_DOOR
+            | BlockId::BIRCH_DOOR
+            | BlockId::JUNGLE_DOOR
+            | BlockId::ACACIA_DOOR
+            | BlockId::CHERRY_DOOR
+            | BlockId::DARK_OAK_DOOR
+            | BlockId::PALE_OAK_DOOR
+            | BlockId::MANGROVE_DOOR
+            | BlockId::BAMBOO_DOOR
+            | BlockId::CRIMSON_DOOR
+            | BlockId::WARPED_DOOR
+            | BlockId::COPPER_DOOR
+            | BlockId::EXPOSED_COPPER_DOOR
+            | BlockId::WEATHERED_COPPER_DOOR
+            | BlockId::OXIDIZED_COPPER_DOOR
+            | BlockId::WAXED_COPPER_DOOR
+            | BlockId::WAXED_EXPOSED_COPPER_DOOR
+            | BlockId::WAXED_WEATHERED_COPPER_DOOR
+            | BlockId::WAXED_OXIDIZED_COPPER_DOOR => {
+                Box::new(OakDoorLikeProperties::from_props(props, self))
+            }
+            BlockId::CHISELED_BOOKSHELF => {
+                Box::new(ChiseledBookshelfLikeProperties::from_props(props, self))
+            }
+            BlockId::CHORUS_FLOWER => Box::new(ChorusFlowerLikeProperties::from_props(props, self)),
+            BlockId::CACTUS | BlockId::SUGAR_CANE => {
+                Box::new(CactusLikeProperties::from_props(props, self))
+            }
+            BlockId::FIRE => Box::new(FireLikeProperties::from_props(props, self)),
+            BlockId::WHITE_BED
+            | BlockId::ORANGE_BED
+            | BlockId::MAGENTA_BED
+            | BlockId::LIGHT_BLUE_BED
+            | BlockId::YELLOW_BED
+            | BlockId::LIME_BED
+            | BlockId::PINK_BED
+            | BlockId::GRAY_BED
+            | BlockId::LIGHT_GRAY_BED
+            | BlockId::CYAN_BED
+            | BlockId::PURPLE_BED
+            | BlockId::BLUE_BED
+            | BlockId::BROWN_BED
+            | BlockId::GREEN_BED
+            | BlockId::RED_BED
+            | BlockId::BLACK_BED => Box::new(WhiteBedLikeProperties::from_props(props, self)),
+            BlockId::HOPPER => Box::new(HopperLikeProperties::from_props(props, self)),
+            BlockId::CALIBRATED_SCULK_SENSOR => {
+                Box::new(CalibratedSculkSensorLikeProperties::from_props(props, self))
+            }
+            BlockId::SCULK_SENSOR => Box::new(SculkSensorLikeProperties::from_props(props, self)),
+            BlockId::PALE_MOSS_CARPET => {
+                Box::new(PaleMossCarpetLikeProperties::from_props(props, self))
+            }
+            BlockId::SCAFFOLDING => Box::new(ScaffoldingLikeProperties::from_props(props, self)),
+            BlockId::VAULT => Box::new(VaultLikeProperties::from_props(props, self)),
+            BlockId::TRIAL_SPAWNER => Box::new(TrialSpawnerLikeProperties::from_props(props, self)),
+            BlockId::SCULK_SHRIEKER => {
+                Box::new(SculkShriekerLikeProperties::from_props(props, self))
+            }
+            BlockId::BELL => Box::new(BellLikeProperties::from_props(props, self)),
+            BlockId::ACACIA_SHELF
+            | BlockId::BAMBOO_SHELF
+            | BlockId::BIRCH_SHELF
+            | BlockId::CHERRY_SHELF
+            | BlockId::CRIMSON_SHELF
+            | BlockId::DARK_OAK_SHELF
+            | BlockId::JUNGLE_SHELF
+            | BlockId::MANGROVE_SHELF
+            | BlockId::OAK_SHELF
+            | BlockId::PALE_OAK_SHELF
+            | BlockId::SPRUCE_SHELF
+            | BlockId::WARPED_SHELF => Box::new(AcaciaShelfLikeProperties::from_props(props, self)),
+            BlockId::REPEATER => Box::new(RepeaterLikeProperties::from_props(props, self)),
+            BlockId::RESPAWN_ANCHOR => {
+                Box::new(RespawnAnchorLikeProperties::from_props(props, self))
+            }
+            BlockId::BREWING_STAND => Box::new(BrewingStandLikeProperties::from_props(props, self)),
+            BlockId::SNOW => Box::new(SnowLikeProperties::from_props(props, self)),
+            BlockId::WALL_TORCH
+            | BlockId::SOUL_WALL_TORCH
+            | BlockId::COPPER_WALL_TORCH
+            | BlockId::CARVED_PUMPKIN
+            | BlockId::JACK_O_LANTERN
+            | BlockId::ATTACHED_PUMPKIN_STEM
+            | BlockId::ATTACHED_MELON_STEM
+            | BlockId::ANVIL
+            | BlockId::CHIPPED_ANVIL
+            | BlockId::DAMAGED_ANVIL
+            | BlockId::WHITE_WALL_BANNER
+            | BlockId::ORANGE_WALL_BANNER
+            | BlockId::MAGENTA_WALL_BANNER
+            | BlockId::LIGHT_BLUE_WALL_BANNER
+            | BlockId::YELLOW_WALL_BANNER
+            | BlockId::LIME_WALL_BANNER
+            | BlockId::PINK_WALL_BANNER
+            | BlockId::GRAY_WALL_BANNER
+            | BlockId::LIGHT_GRAY_WALL_BANNER
+            | BlockId::CYAN_WALL_BANNER
+            | BlockId::PURPLE_WALL_BANNER
+            | BlockId::BLUE_WALL_BANNER
+            | BlockId::BROWN_WALL_BANNER
+            | BlockId::GREEN_WALL_BANNER
+            | BlockId::RED_WALL_BANNER
+            | BlockId::BLACK_WALL_BANNER
+            | BlockId::WHITE_GLAZED_TERRACOTTA
+            | BlockId::ORANGE_GLAZED_TERRACOTTA
+            | BlockId::MAGENTA_GLAZED_TERRACOTTA
+            | BlockId::LIGHT_BLUE_GLAZED_TERRACOTTA
+            | BlockId::YELLOW_GLAZED_TERRACOTTA
+            | BlockId::LIME_GLAZED_TERRACOTTA
+            | BlockId::PINK_GLAZED_TERRACOTTA
+            | BlockId::GRAY_GLAZED_TERRACOTTA
+            | BlockId::LIGHT_GRAY_GLAZED_TERRACOTTA
+            | BlockId::CYAN_GLAZED_TERRACOTTA
+            | BlockId::PURPLE_GLAZED_TERRACOTTA
+            | BlockId::BLUE_GLAZED_TERRACOTTA
+            | BlockId::BROWN_GLAZED_TERRACOTTA
+            | BlockId::GREEN_GLAZED_TERRACOTTA
+            | BlockId::RED_GLAZED_TERRACOTTA
+            | BlockId::BLACK_GLAZED_TERRACOTTA
+            | BlockId::LOOM
+            | BlockId::STONECUTTER => Box::new(WallTorchLikeProperties::from_props(props, self)),
+            BlockId::CHEST
+            | BlockId::TRAPPED_CHEST
+            | BlockId::COPPER_CHEST
+            | BlockId::EXPOSED_COPPER_CHEST
+            | BlockId::WEATHERED_COPPER_CHEST
+            | BlockId::OXIDIZED_COPPER_CHEST
+            | BlockId::WAXED_COPPER_CHEST
+            | BlockId::WAXED_EXPOSED_COPPER_CHEST
+            | BlockId::WAXED_WEATHERED_COPPER_CHEST
+            | BlockId::WAXED_OXIDIZED_COPPER_CHEST => {
+                Box::new(ChestLikeProperties::from_props(props, self))
+            }
+            BlockId::SKELETON_WALL_SKULL
+            | BlockId::WITHER_SKELETON_WALL_SKULL
+            | BlockId::ZOMBIE_WALL_HEAD
+            | BlockId::PLAYER_WALL_HEAD
+            | BlockId::CREEPER_WALL_HEAD
+            | BlockId::DRAGON_WALL_HEAD
+            | BlockId::PIGLIN_WALL_HEAD => {
+                Box::new(SkeletonWallSkullLikeProperties::from_props(props, self))
+            }
+            BlockId::OAK_TRAPDOOR
+            | BlockId::SPRUCE_TRAPDOOR
+            | BlockId::BIRCH_TRAPDOOR
+            | BlockId::JUNGLE_TRAPDOOR
+            | BlockId::ACACIA_TRAPDOOR
+            | BlockId::CHERRY_TRAPDOOR
+            | BlockId::DARK_OAK_TRAPDOOR
+            | BlockId::PALE_OAK_TRAPDOOR
+            | BlockId::MANGROVE_TRAPDOOR
+            | BlockId::BAMBOO_TRAPDOOR
+            | BlockId::IRON_TRAPDOOR
+            | BlockId::CRIMSON_TRAPDOOR
+            | BlockId::WARPED_TRAPDOOR
+            | BlockId::COPPER_TRAPDOOR
+            | BlockId::EXPOSED_COPPER_TRAPDOOR
+            | BlockId::WEATHERED_COPPER_TRAPDOOR
+            | BlockId::OXIDIZED_COPPER_TRAPDOOR
+            | BlockId::WAXED_COPPER_TRAPDOOR
+            | BlockId::WAXED_EXPOSED_COPPER_TRAPDOOR
+            | BlockId::WAXED_WEATHERED_COPPER_TRAPDOOR
+            | BlockId::WAXED_OXIDIZED_COPPER_TRAPDOOR => {
+                Box::new(OakTrapdoorLikeProperties::from_props(props, self))
+            }
+            BlockId::LECTERN => Box::new(LecternLikeProperties::from_props(props, self)),
+            BlockId::TRIPWIRE_HOOK => Box::new(TripwireHookLikeProperties::from_props(props, self)),
+            BlockId::COMPARATOR => Box::new(ComparatorLikeProperties::from_props(props, self)),
+            BlockId::COPPER_GOLEM_STATUE
+            | BlockId::EXPOSED_COPPER_GOLEM_STATUE
+            | BlockId::WEATHERED_COPPER_GOLEM_STATUE
+            | BlockId::OXIDIZED_COPPER_GOLEM_STATUE
+            | BlockId::WAXED_COPPER_GOLEM_STATUE
+            | BlockId::WAXED_EXPOSED_COPPER_GOLEM_STATUE
+            | BlockId::WAXED_WEATHERED_COPPER_GOLEM_STATUE
+            | BlockId::WAXED_OXIDIZED_COPPER_GOLEM_STATUE => {
+                Box::new(CopperGolemStatueLikeProperties::from_props(props, self))
+            }
+            BlockId::END_PORTAL_FRAME => {
+                Box::new(EndPortalFrameLikeProperties::from_props(props, self))
+            }
+            BlockId::FURNACE
+            | BlockId::REDSTONE_WALL_TORCH
+            | BlockId::SMOKER
+            | BlockId::BLAST_FURNACE => Box::new(FurnaceLikeProperties::from_props(props, self)),
+            BlockId::CAMPFIRE | BlockId::SOUL_CAMPFIRE => {
+                Box::new(CampfireLikeProperties::from_props(props, self))
+            }
+            BlockId::SMALL_DRIPLEAF => {
+                Box::new(SmallDripleafLikeProperties::from_props(props, self))
+            }
+            BlockId::BEE_NEST | BlockId::BEEHIVE => {
+                Box::new(BeeNestLikeProperties::from_props(props, self))
+            }
+            BlockId::DECORATED_POT => Box::new(DecoratedPotLikeProperties::from_props(props, self)),
+            BlockId::LADDER
+            | BlockId::OAK_WALL_SIGN
+            | BlockId::SPRUCE_WALL_SIGN
+            | BlockId::BIRCH_WALL_SIGN
+            | BlockId::ACACIA_WALL_SIGN
+            | BlockId::CHERRY_WALL_SIGN
+            | BlockId::JUNGLE_WALL_SIGN
+            | BlockId::DARK_OAK_WALL_SIGN
+            | BlockId::PALE_OAK_WALL_SIGN
+            | BlockId::MANGROVE_WALL_SIGN
+            | BlockId::BAMBOO_WALL_SIGN
+            | BlockId::OAK_WALL_HANGING_SIGN
+            | BlockId::SPRUCE_WALL_HANGING_SIGN
+            | BlockId::BIRCH_WALL_HANGING_SIGN
+            | BlockId::ACACIA_WALL_HANGING_SIGN
+            | BlockId::CHERRY_WALL_HANGING_SIGN
+            | BlockId::JUNGLE_WALL_HANGING_SIGN
+            | BlockId::DARK_OAK_WALL_HANGING_SIGN
+            | BlockId::PALE_OAK_WALL_HANGING_SIGN
+            | BlockId::MANGROVE_WALL_HANGING_SIGN
+            | BlockId::CRIMSON_WALL_HANGING_SIGN
+            | BlockId::WARPED_WALL_HANGING_SIGN
+            | BlockId::BAMBOO_WALL_HANGING_SIGN
+            | BlockId::ENDER_CHEST
+            | BlockId::DEAD_TUBE_CORAL_WALL_FAN
+            | BlockId::DEAD_BRAIN_CORAL_WALL_FAN
+            | BlockId::DEAD_BUBBLE_CORAL_WALL_FAN
+            | BlockId::DEAD_FIRE_CORAL_WALL_FAN
+            | BlockId::DEAD_HORN_CORAL_WALL_FAN
+            | BlockId::TUBE_CORAL_WALL_FAN
+            | BlockId::BRAIN_CORAL_WALL_FAN
+            | BlockId::BUBBLE_CORAL_WALL_FAN
+            | BlockId::FIRE_CORAL_WALL_FAN
+            | BlockId::HORN_CORAL_WALL_FAN
+            | BlockId::CRIMSON_WALL_SIGN
+            | BlockId::WARPED_WALL_SIGN
+            | BlockId::BIG_DRIPLEAF_STEM => Box::new(LadderLikeProperties::from_props(props, self)),
+            BlockId::BIG_DRIPLEAF => Box::new(BigDripleafLikeProperties::from_props(props, self)),
+            BlockId::PINK_PETALS | BlockId::WILDFLOWERS => {
+                Box::new(PinkPetalsLikeProperties::from_props(props, self))
+            }
+            BlockId::LEAF_LITTER => Box::new(LeafLitterLikeProperties::from_props(props, self)),
+            BlockId::COCOA => Box::new(CocoaLikeProperties::from_props(props, self)),
+            BlockId::DISPENSER | BlockId::DROPPER => {
+                Box::new(DispenserLikeProperties::from_props(props, self))
+            }
+            BlockId::CRAFTER => Box::new(CrafterLikeProperties::from_props(props, self)),
+            BlockId::FARMLAND => Box::new(FarmlandLikeProperties::from_props(props, self)),
+            BlockId::SUSPICIOUS_SAND | BlockId::SUSPICIOUS_GRAVEL => {
+                Box::new(SuspiciousSandLikeProperties::from_props(props, self))
+            }
+            BlockId::RESIN_BRICK_SLAB
+            | BlockId::PRISMARINE_SLAB
+            | BlockId::PRISMARINE_BRICK_SLAB
+            | BlockId::DARK_PRISMARINE_SLAB
+            | BlockId::OAK_SLAB
+            | BlockId::SPRUCE_SLAB
+            | BlockId::BIRCH_SLAB
+            | BlockId::JUNGLE_SLAB
+            | BlockId::ACACIA_SLAB
+            | BlockId::CHERRY_SLAB
+            | BlockId::DARK_OAK_SLAB
+            | BlockId::PALE_OAK_SLAB
+            | BlockId::MANGROVE_SLAB
+            | BlockId::BAMBOO_SLAB
+            | BlockId::BAMBOO_MOSAIC_SLAB
+            | BlockId::STONE_SLAB
+            | BlockId::SMOOTH_STONE_SLAB
+            | BlockId::SANDSTONE_SLAB
+            | BlockId::CUT_SANDSTONE_SLAB
+            | BlockId::PETRIFIED_OAK_SLAB
+            | BlockId::COBBLESTONE_SLAB
+            | BlockId::BRICK_SLAB
+            | BlockId::STONE_BRICK_SLAB
+            | BlockId::MUD_BRICK_SLAB
+            | BlockId::NETHER_BRICK_SLAB
+            | BlockId::QUARTZ_SLAB
+            | BlockId::RED_SANDSTONE_SLAB
+            | BlockId::CUT_RED_SANDSTONE_SLAB
+            | BlockId::PURPUR_SLAB
+            | BlockId::POLISHED_GRANITE_SLAB
+            | BlockId::SMOOTH_RED_SANDSTONE_SLAB
+            | BlockId::MOSSY_STONE_BRICK_SLAB
+            | BlockId::POLISHED_DIORITE_SLAB
+            | BlockId::MOSSY_COBBLESTONE_SLAB
+            | BlockId::END_STONE_BRICK_SLAB
+            | BlockId::SMOOTH_SANDSTONE_SLAB
+            | BlockId::SMOOTH_QUARTZ_SLAB
+            | BlockId::GRANITE_SLAB
+            | BlockId::ANDESITE_SLAB
+            | BlockId::RED_NETHER_BRICK_SLAB
+            | BlockId::POLISHED_ANDESITE_SLAB
+            | BlockId::DIORITE_SLAB
+            | BlockId::CRIMSON_SLAB
+            | BlockId::WARPED_SLAB
+            | BlockId::BLACKSTONE_SLAB
+            | BlockId::POLISHED_BLACKSTONE_BRICK_SLAB
+            | BlockId::POLISHED_BLACKSTONE_SLAB
+            | BlockId::TUFF_SLAB
+            | BlockId::POLISHED_TUFF_SLAB
+            | BlockId::TUFF_BRICK_SLAB
+            | BlockId::SULFUR_SLAB
+            | BlockId::POLISHED_SULFUR_SLAB
+            | BlockId::SULFUR_BRICK_SLAB
+            | BlockId::CINNABAR_SLAB
+            | BlockId::POLISHED_CINNABAR_SLAB
+            | BlockId::CINNABAR_BRICK_SLAB
+            | BlockId::CUT_COPPER_SLAB
+            | BlockId::EXPOSED_CUT_COPPER_SLAB
+            | BlockId::WEATHERED_CUT_COPPER_SLAB
+            | BlockId::OXIDIZED_CUT_COPPER_SLAB
+            | BlockId::WAXED_CUT_COPPER_SLAB
+            | BlockId::WAXED_EXPOSED_CUT_COPPER_SLAB
+            | BlockId::WAXED_WEATHERED_CUT_COPPER_SLAB
+            | BlockId::WAXED_OXIDIZED_CUT_COPPER_SLAB
+            | BlockId::COBBLED_DEEPSLATE_SLAB
+            | BlockId::POLISHED_DEEPSLATE_SLAB
+            | BlockId::DEEPSLATE_TILE_SLAB
+            | BlockId::DEEPSLATE_BRICK_SLAB => {
+                Box::new(ResinBrickSlabLikeProperties::from_props(props, self))
+            }
+            BlockId::STONE_PRESSURE_PLATE
+            | BlockId::OAK_PRESSURE_PLATE
+            | BlockId::SPRUCE_PRESSURE_PLATE
+            | BlockId::BIRCH_PRESSURE_PLATE
+            | BlockId::JUNGLE_PRESSURE_PLATE
+            | BlockId::ACACIA_PRESSURE_PLATE
+            | BlockId::CHERRY_PRESSURE_PLATE
+            | BlockId::DARK_OAK_PRESSURE_PLATE
+            | BlockId::PALE_OAK_PRESSURE_PLATE
+            | BlockId::MANGROVE_PRESSURE_PLATE
+            | BlockId::BAMBOO_PRESSURE_PLATE
+            | BlockId::CRIMSON_PRESSURE_PLATE
+            | BlockId::WARPED_PRESSURE_PLATE
+            | BlockId::POLISHED_BLACKSTONE_PRESSURE_PLATE => {
+                Box::new(StonePressurePlateLikeProperties::from_props(props, self))
+            }
+            BlockId::COPPER_BULB
+            | BlockId::EXPOSED_COPPER_BULB
+            | BlockId::WEATHERED_COPPER_BULB
+            | BlockId::OXIDIZED_COPPER_BULB
+            | BlockId::WAXED_COPPER_BULB
+            | BlockId::WAXED_EXPOSED_COPPER_BULB
+            | BlockId::WAXED_WEATHERED_COPPER_BULB
+            | BlockId::WAXED_OXIDIZED_COPPER_BULB => {
+                Box::new(CopperBulbLikeProperties::from_props(props, self))
+            }
+            BlockId::TRIPWIRE => Box::new(TripwireLikeProperties::from_props(props, self)),
+            BlockId::OBSERVER => Box::new(ObserverLikeProperties::from_props(props, self)),
+            BlockId::LIGHTNING_ROD
+            | BlockId::EXPOSED_LIGHTNING_ROD
+            | BlockId::WEATHERED_LIGHTNING_ROD
+            | BlockId::OXIDIZED_LIGHTNING_ROD
+            | BlockId::WAXED_LIGHTNING_ROD
+            | BlockId::WAXED_EXPOSED_LIGHTNING_ROD
+            | BlockId::WAXED_WEATHERED_LIGHTNING_ROD
+            | BlockId::WAXED_OXIDIZED_LIGHTNING_ROD => {
+                Box::new(LightningRodLikeProperties::from_props(props, self))
+            }
+            BlockId::NOTE_BLOCK => Box::new(NoteBlockLikeProperties::from_props(props, self)),
+            BlockId::SKELETON_SKULL
+            | BlockId::WITHER_SKELETON_SKULL
+            | BlockId::ZOMBIE_HEAD
+            | BlockId::PLAYER_HEAD
+            | BlockId::CREEPER_HEAD
+            | BlockId::DRAGON_HEAD
+            | BlockId::PIGLIN_HEAD => {
+                Box::new(SkeletonSkullLikeProperties::from_props(props, self))
+            }
+            BlockId::REDSTONE_WIRE => Box::new(RedstoneWireLikeProperties::from_props(props, self)),
+            BlockId::COMPOSTER => Box::new(ComposterLikeProperties::from_props(props, self)),
+            BlockId::CAVE_VINES_PLANT => {
+                Box::new(CaveVinesPlantLikeProperties::from_props(props, self))
+            }
+            BlockId::CAVE_VINES => Box::new(CaveVinesLikeProperties::from_props(props, self)),
+            BlockId::RESIN_BRICK_WALL
+            | BlockId::COBBLESTONE_WALL
+            | BlockId::MOSSY_COBBLESTONE_WALL
+            | BlockId::BRICK_WALL
+            | BlockId::PRISMARINE_WALL
+            | BlockId::RED_SANDSTONE_WALL
+            | BlockId::MOSSY_STONE_BRICK_WALL
+            | BlockId::GRANITE_WALL
+            | BlockId::STONE_BRICK_WALL
+            | BlockId::MUD_BRICK_WALL
+            | BlockId::NETHER_BRICK_WALL
+            | BlockId::ANDESITE_WALL
+            | BlockId::RED_NETHER_BRICK_WALL
+            | BlockId::SANDSTONE_WALL
+            | BlockId::END_STONE_BRICK_WALL
+            | BlockId::DIORITE_WALL
+            | BlockId::BLACKSTONE_WALL
+            | BlockId::POLISHED_BLACKSTONE_BRICK_WALL
+            | BlockId::POLISHED_BLACKSTONE_WALL
+            | BlockId::TUFF_WALL
+            | BlockId::POLISHED_TUFF_WALL
+            | BlockId::TUFF_BRICK_WALL
+            | BlockId::SULFUR_WALL
+            | BlockId::POLISHED_SULFUR_WALL
+            | BlockId::SULFUR_BRICK_WALL
+            | BlockId::CINNABAR_WALL
+            | BlockId::POLISHED_CINNABAR_WALL
+            | BlockId::CINNABAR_BRICK_WALL
+            | BlockId::COBBLED_DEEPSLATE_WALL
+            | BlockId::POLISHED_DEEPSLATE_WALL
+            | BlockId::DEEPSLATE_TILE_WALL
+            | BlockId::DEEPSLATE_BRICK_WALL => {
+                Box::new(ResinBrickWallLikeProperties::from_props(props, self))
+            }
+            BlockId::TNT => Box::new(TntLikeProperties::from_props(props, self)),
+            BlockId::BROWN_MUSHROOM_BLOCK
+            | BlockId::RED_MUSHROOM_BLOCK
+            | BlockId::MUSHROOM_STEM
+            | BlockId::CHORUS_PLANT => {
+                Box::new(BrownMushroomBlockLikeProperties::from_props(props, self))
+            }
+            BlockId::GLOW_LICHEN | BlockId::RESIN_CLUMP | BlockId::SCULK_VEIN => {
+                Box::new(GlowLichenLikeProperties::from_props(props, self))
+            }
+            BlockId::VINE => Box::new(VineLikeProperties::from_props(props, self)),
+            BlockId::REDSTONE_ORE
+            | BlockId::DEEPSLATE_REDSTONE_ORE
+            | BlockId::REDSTONE_TORCH
+            | BlockId::REDSTONE_LAMP
+            | BlockId::CANDLE_CAKE
+            | BlockId::WHITE_CANDLE_CAKE
+            | BlockId::ORANGE_CANDLE_CAKE
+            | BlockId::MAGENTA_CANDLE_CAKE
+            | BlockId::LIGHT_BLUE_CANDLE_CAKE
+            | BlockId::YELLOW_CANDLE_CAKE
+            | BlockId::LIME_CANDLE_CAKE
+            | BlockId::PINK_CANDLE_CAKE
+            | BlockId::GRAY_CANDLE_CAKE
+            | BlockId::LIGHT_GRAY_CANDLE_CAKE
+            | BlockId::CYAN_CANDLE_CAKE
+            | BlockId::PURPLE_CANDLE_CAKE
+            | BlockId::BLUE_CANDLE_CAKE
+            | BlockId::BROWN_CANDLE_CAKE
+            | BlockId::GREEN_CANDLE_CAKE
+            | BlockId::RED_CANDLE_CAKE
+            | BlockId::BLACK_CANDLE_CAKE => {
+                Box::new(RedstoneOreLikeProperties::from_props(props, self))
+            }
+            BlockId::CANDLE
+            | BlockId::WHITE_CANDLE
+            | BlockId::ORANGE_CANDLE
+            | BlockId::MAGENTA_CANDLE
+            | BlockId::LIGHT_BLUE_CANDLE
+            | BlockId::YELLOW_CANDLE
+            | BlockId::LIME_CANDLE
+            | BlockId::PINK_CANDLE
+            | BlockId::GRAY_CANDLE
+            | BlockId::LIGHT_GRAY_CANDLE
+            | BlockId::CYAN_CANDLE
+            | BlockId::PURPLE_CANDLE
+            | BlockId::BLUE_CANDLE
+            | BlockId::BROWN_CANDLE
+            | BlockId::GREEN_CANDLE
+            | BlockId::RED_CANDLE
+            | BlockId::BLACK_CANDLE => Box::new(CandleLikeProperties::from_props(props, self)),
+            BlockId::PALE_HANGING_MOSS => {
+                Box::new(PaleHangingMossLikeProperties::from_props(props, self))
+            }
+            BlockId::BUBBLE_COLUMN => Box::new(BubbleColumnLikeProperties::from_props(props, self)),
+            BlockId::OAK_FENCE
+            | BlockId::IRON_BARS
+            | BlockId::COPPER_BARS
+            | BlockId::EXPOSED_COPPER_BARS
+            | BlockId::WEATHERED_COPPER_BARS
+            | BlockId::OXIDIZED_COPPER_BARS
+            | BlockId::WAXED_COPPER_BARS
+            | BlockId::WAXED_EXPOSED_COPPER_BARS
+            | BlockId::WAXED_WEATHERED_COPPER_BARS
+            | BlockId::WAXED_OXIDIZED_COPPER_BARS
+            | BlockId::GLASS_PANE
+            | BlockId::NETHER_BRICK_FENCE
+            | BlockId::WHITE_STAINED_GLASS_PANE
+            | BlockId::ORANGE_STAINED_GLASS_PANE
+            | BlockId::MAGENTA_STAINED_GLASS_PANE
+            | BlockId::LIGHT_BLUE_STAINED_GLASS_PANE
+            | BlockId::YELLOW_STAINED_GLASS_PANE
+            | BlockId::LIME_STAINED_GLASS_PANE
+            | BlockId::PINK_STAINED_GLASS_PANE
+            | BlockId::GRAY_STAINED_GLASS_PANE
+            | BlockId::LIGHT_GRAY_STAINED_GLASS_PANE
+            | BlockId::CYAN_STAINED_GLASS_PANE
+            | BlockId::PURPLE_STAINED_GLASS_PANE
+            | BlockId::BLUE_STAINED_GLASS_PANE
+            | BlockId::BROWN_STAINED_GLASS_PANE
+            | BlockId::GREEN_STAINED_GLASS_PANE
+            | BlockId::RED_STAINED_GLASS_PANE
+            | BlockId::BLACK_STAINED_GLASS_PANE
+            | BlockId::SPRUCE_FENCE
+            | BlockId::BIRCH_FENCE
+            | BlockId::JUNGLE_FENCE
+            | BlockId::ACACIA_FENCE
+            | BlockId::CHERRY_FENCE
+            | BlockId::DARK_OAK_FENCE
+            | BlockId::PALE_OAK_FENCE
+            | BlockId::MANGROVE_FENCE
+            | BlockId::BAMBOO_FENCE
+            | BlockId::CRIMSON_FENCE
+            | BlockId::WARPED_FENCE => Box::new(OakFenceLikeProperties::from_props(props, self)),
+            BlockId::BARREL => Box::new(BarrelLikeProperties::from_props(props, self)),
+            BlockId::SCULK_CATALYST => {
+                Box::new(SculkCatalystLikeProperties::from_props(props, self))
+            }
+            BlockId::PISTON_HEAD => Box::new(PistonHeadLikeProperties::from_props(props, self)),
+            BlockId::GRASS_BLOCK | BlockId::PODZOL | BlockId::MYCELIUM => {
+                Box::new(GrassBlockLikeProperties::from_props(props, self))
+            }
+            BlockId::END_ROD
+            | BlockId::SHULKER_BOX
+            | BlockId::WHITE_SHULKER_BOX
+            | BlockId::ORANGE_SHULKER_BOX
+            | BlockId::MAGENTA_SHULKER_BOX
+            | BlockId::LIGHT_BLUE_SHULKER_BOX
+            | BlockId::YELLOW_SHULKER_BOX
+            | BlockId::LIME_SHULKER_BOX
+            | BlockId::PINK_SHULKER_BOX
+            | BlockId::GRAY_SHULKER_BOX
+            | BlockId::LIGHT_GRAY_SHULKER_BOX
+            | BlockId::CYAN_SHULKER_BOX
+            | BlockId::PURPLE_SHULKER_BOX
+            | BlockId::BLUE_SHULKER_BOX
+            | BlockId::BROWN_SHULKER_BOX
+            | BlockId::GREEN_SHULKER_BOX
+            | BlockId::RED_SHULKER_BOX
+            | BlockId::BLACK_SHULKER_BOX => Box::new(EndRodLikeProperties::from_props(props, self)),
+            BlockId::MOVING_PISTON => Box::new(MovingPistonLikeProperties::from_props(props, self)),
+            BlockId::AMETHYST_CLUSTER
+            | BlockId::LARGE_AMETHYST_BUD
+            | BlockId::MEDIUM_AMETHYST_BUD
+            | BlockId::SMALL_AMETHYST_BUD => {
+                Box::new(AmethystClusterLikeProperties::from_props(props, self))
+            }
+            BlockId::COMMAND_BLOCK
+            | BlockId::REPEATING_COMMAND_BLOCK
+            | BlockId::CHAIN_COMMAND_BLOCK => {
+                Box::new(CommandBlockLikeProperties::from_props(props, self))
+            }
+            BlockId::NETHER_PORTAL => Box::new(NetherPortalLikeProperties::from_props(props, self)),
+            BlockId::OAK_LEAVES
+            | BlockId::SPRUCE_LEAVES
+            | BlockId::BIRCH_LEAVES
+            | BlockId::JUNGLE_LEAVES
+            | BlockId::ACACIA_LEAVES
+            | BlockId::CHERRY_LEAVES
+            | BlockId::DARK_OAK_LEAVES
+            | BlockId::PALE_OAK_LEAVES
+            | BlockId::MANGROVE_LEAVES
+            | BlockId::AZALEA_LEAVES
+            | BlockId::FLOWERING_AZALEA_LEAVES => {
+                Box::new(OakLeavesLikeProperties::from_props(props, self))
+            }
+            BlockId::SNIFFER_EGG => Box::new(SnifferEggLikeProperties::from_props(props, self)),
+            BlockId::TURTLE_EGG => Box::new(TurtleEggLikeProperties::from_props(props, self)),
+            BlockId::OAK_HANGING_SIGN
+            | BlockId::SPRUCE_HANGING_SIGN
+            | BlockId::BIRCH_HANGING_SIGN
+            | BlockId::ACACIA_HANGING_SIGN
+            | BlockId::CHERRY_HANGING_SIGN
+            | BlockId::JUNGLE_HANGING_SIGN
+            | BlockId::DARK_OAK_HANGING_SIGN
+            | BlockId::PALE_OAK_HANGING_SIGN
+            | BlockId::CRIMSON_HANGING_SIGN
+            | BlockId::WARPED_HANGING_SIGN
+            | BlockId::MANGROVE_HANGING_SIGN
+            | BlockId::BAMBOO_HANGING_SIGN => {
+                Box::new(OakHangingSignLikeProperties::from_props(props, self))
+            }
+            BlockId::TALL_SEAGRASS
+            | BlockId::SUNFLOWER
+            | BlockId::LILAC
+            | BlockId::ROSE_BUSH
+            | BlockId::PEONY
+            | BlockId::TALL_GRASS
+            | BlockId::LARGE_FERN
+            | BlockId::PITCHER_PLANT => {
+                Box::new(TallSeagrassLikeProperties::from_props(props, self))
+            }
+            BlockId::PITCHER_CROP => Box::new(PitcherCropLikeProperties::from_props(props, self)),
+            BlockId::JIGSAW => Box::new(JigsawLikeProperties::from_props(props, self)),
+            BlockId::STRUCTURE_BLOCK => {
+                Box::new(StructureBlockLikeProperties::from_props(props, self))
+            }
+            BlockId::DAYLIGHT_DETECTOR => {
+                Box::new(DaylightDetectorLikeProperties::from_props(props, self))
+            }
+            BlockId::WATER_CAULDRON | BlockId::POWDER_SNOW_CAULDRON => {
+                Box::new(WaterCauldronLikeProperties::from_props(props, self))
+            }
+            BlockId::MANGROVE_PROPAGULE => {
+                Box::new(MangrovePropaguleLikeProperties::from_props(props, self))
+            }
+            BlockId::LANTERN
+            | BlockId::SOUL_LANTERN
+            | BlockId::COPPER_LANTERN
+            | BlockId::EXPOSED_COPPER_LANTERN
+            | BlockId::WEATHERED_COPPER_LANTERN
+            | BlockId::OXIDIZED_COPPER_LANTERN
+            | BlockId::WAXED_COPPER_LANTERN
+            | BlockId::WAXED_EXPOSED_COPPER_LANTERN
+            | BlockId::WAXED_WEATHERED_COPPER_LANTERN
+            | BlockId::WAXED_OXIDIZED_COPPER_LANTERN => {
+                Box::new(LanternLikeProperties::from_props(props, self))
+            }
+            BlockId::RAIL => Box::new(RailLikeProperties::from_props(props, self)),
+            BlockId::POINTED_DRIPSTONE | BlockId::SULFUR_SPIKE => {
+                Box::new(PointedDripstoneLikeProperties::from_props(props, self))
+            }
+            BlockId::OAK_SAPLING
+            | BlockId::SPRUCE_SAPLING
+            | BlockId::BIRCH_SAPLING
+            | BlockId::JUNGLE_SAPLING
+            | BlockId::ACACIA_SAPLING
+            | BlockId::CHERRY_SAPLING
+            | BlockId::DARK_OAK_SAPLING
+            | BlockId::PALE_OAK_SAPLING => {
+                Box::new(OakSaplingLikeProperties::from_props(props, self))
+            }
+            BlockId::BAMBOO => Box::new(BambooLikeProperties::from_props(props, self)),
+            BlockId::WHEAT
+            | BlockId::PUMPKIN_STEM
+            | BlockId::MELON_STEM
+            | BlockId::CARROTS
+            | BlockId::POTATOES => Box::new(WheatLikeProperties::from_props(props, self)),
+            BlockId::SEA_PICKLE => Box::new(SeaPickleLikeProperties::from_props(props, self)),
+            BlockId::MANGROVE_ROOTS
+            | BlockId::BARRIER
+            | BlockId::DEAD_TUBE_CORAL
+            | BlockId::DEAD_BRAIN_CORAL
+            | BlockId::DEAD_BUBBLE_CORAL
+            | BlockId::DEAD_FIRE_CORAL
+            | BlockId::DEAD_HORN_CORAL
+            | BlockId::TUBE_CORAL
+            | BlockId::BRAIN_CORAL
+            | BlockId::BUBBLE_CORAL
+            | BlockId::FIRE_CORAL
+            | BlockId::HORN_CORAL
+            | BlockId::DEAD_TUBE_CORAL_FAN
+            | BlockId::DEAD_BRAIN_CORAL_FAN
+            | BlockId::DEAD_BUBBLE_CORAL_FAN
+            | BlockId::DEAD_FIRE_CORAL_FAN
+            | BlockId::DEAD_HORN_CORAL_FAN
+            | BlockId::TUBE_CORAL_FAN
+            | BlockId::BRAIN_CORAL_FAN
+            | BlockId::BUBBLE_CORAL_FAN
+            | BlockId::FIRE_CORAL_FAN
+            | BlockId::HORN_CORAL_FAN
+            | BlockId::CONDUIT
+            | BlockId::COPPER_GRATE
+            | BlockId::EXPOSED_COPPER_GRATE
+            | BlockId::WEATHERED_COPPER_GRATE
+            | BlockId::OXIDIZED_COPPER_GRATE
+            | BlockId::WAXED_COPPER_GRATE
+            | BlockId::WAXED_EXPOSED_COPPER_GRATE
+            | BlockId::WAXED_WEATHERED_COPPER_GRATE
+            | BlockId::WAXED_OXIDIZED_COPPER_GRATE
+            | BlockId::HANGING_ROOTS
+            | BlockId::HEAVY_CORE => Box::new(MangroveRootsLikeProperties::from_props(props, self)),
+            BlockId::OAK_SIGN
+            | BlockId::SPRUCE_SIGN
+            | BlockId::BIRCH_SIGN
+            | BlockId::ACACIA_SIGN
+            | BlockId::CHERRY_SIGN
+            | BlockId::JUNGLE_SIGN
+            | BlockId::DARK_OAK_SIGN
+            | BlockId::PALE_OAK_SIGN
+            | BlockId::MANGROVE_SIGN
+            | BlockId::BAMBOO_SIGN
+            | BlockId::CRIMSON_SIGN
+            | BlockId::WARPED_SIGN => Box::new(OakSignLikeProperties::from_props(props, self)),
+            BlockId::LIGHT => Box::new(LightLikeProperties::from_props(props, self)),
+            BlockId::TEST_BLOCK => Box::new(TestBlockLikeProperties::from_props(props, self)),
+            BlockId::WHITE_BANNER
+            | BlockId::ORANGE_BANNER
+            | BlockId::MAGENTA_BANNER
+            | BlockId::LIGHT_BLUE_BANNER
+            | BlockId::YELLOW_BANNER
+            | BlockId::LIME_BANNER
+            | BlockId::PINK_BANNER
+            | BlockId::GRAY_BANNER
+            | BlockId::LIGHT_GRAY_BANNER
+            | BlockId::CYAN_BANNER
+            | BlockId::PURPLE_BANNER
+            | BlockId::BLUE_BANNER
+            | BlockId::BROWN_BANNER
+            | BlockId::GREEN_BANNER
+            | BlockId::RED_BANNER
+            | BlockId::BLACK_BANNER => Box::new(WhiteBannerLikeProperties::from_props(props, self)),
+            BlockId::WATER | BlockId::LAVA => {
+                Box::new(WaterLikeProperties::from_props(props, self))
+            }
+            BlockId::KELP | BlockId::WEEPING_VINES | BlockId::TWISTING_VINES => {
+                Box::new(KelpLikeProperties::from_props(props, self))
+            }
+            BlockId::LIGHT_WEIGHTED_PRESSURE_PLATE
+            | BlockId::HEAVY_WEIGHTED_PRESSURE_PLATE
+            | BlockId::TARGET => Box::new(LightWeightedPressurePlateLikeProperties::from_props(
+                props, self,
+            )),
+            BlockId::TORCHFLOWER_CROP => {
+                Box::new(TorchflowerCropLikeProperties::from_props(props, self))
+            }
+            BlockId::NETHER_WART
+            | BlockId::BEETROOTS
+            | BlockId::FROSTED_ICE
+            | BlockId::SWEET_BERRY_BUSH => {
+                Box::new(NetherWartLikeProperties::from_props(props, self))
+            }
+            BlockId::POTENT_SULFUR => Box::new(PotentSulfurLikeProperties::from_props(props, self)),
             _ => panic!("Invalid props"),
         }
     }
@@ -645143,7 +640894,7 @@ impl BlockProperties for GrindstoneLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 844u16)
+        matches!(block_id, BlockId::GRINDSTONE)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -645190,7 +640941,7 @@ impl BlockProperties for GrindstoneLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 844u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "GrindstoneLikeProperties"
@@ -645253,22 +641004,22 @@ impl BlockProperties for LeverLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            258u16
-                | 275u16
-                | 443u16
-                | 444u16
-                | 445u16
-                | 446u16
-                | 447u16
-                | 448u16
-                | 449u16
-                | 450u16
-                | 451u16
-                | 452u16
-                | 897u16
-                | 898u16
-                | 939u16
+            block_id,
+            BlockId::LEVER
+                | BlockId::STONE_BUTTON
+                | BlockId::OAK_BUTTON
+                | BlockId::SPRUCE_BUTTON
+                | BlockId::BIRCH_BUTTON
+                | BlockId::JUNGLE_BUTTON
+                | BlockId::ACACIA_BUTTON
+                | BlockId::CHERRY_BUTTON
+                | BlockId::DARK_OAK_BUTTON
+                | BlockId::PALE_OAK_BUTTON
+                | BlockId::MANGROVE_BUTTON
+                | BlockId::BAMBOO_BUTTON
+                | BlockId::CRIMSON_BUTTON
+                | BlockId::WARPED_BUTTON
+                | BlockId::POLISHED_BLACKSTONE_BUTTON
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -645317,24 +641068,7 @@ impl BlockProperties for LeverLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            258u16
-                | 275u16
-                | 443u16
-                | 444u16
-                | 445u16
-                | 446u16
-                | 447u16
-                | 448u16
-                | 449u16
-                | 450u16
-                | 451u16
-                | 452u16
-                | 897u16
-                | 898u16
-                | 939u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "LeverLikeProperties"
@@ -645405,19 +641139,19 @@ impl BlockProperties for OakFenceGateLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            369u16
-                | 628u16
-                | 629u16
-                | 630u16
-                | 631u16
-                | 632u16
-                | 633u16
-                | 634u16
-                | 635u16
-                | 636u16
-                | 893u16
-                | 894u16
+            block_id,
+            BlockId::OAK_FENCE_GATE
+                | BlockId::SPRUCE_FENCE_GATE
+                | BlockId::BIRCH_FENCE_GATE
+                | BlockId::JUNGLE_FENCE_GATE
+                | BlockId::ACACIA_FENCE_GATE
+                | BlockId::CHERRY_FENCE_GATE
+                | BlockId::DARK_OAK_FENCE_GATE
+                | BlockId::PALE_OAK_FENCE_GATE
+                | BlockId::MANGROVE_FENCE_GATE
+                | BlockId::BAMBOO_FENCE_GATE
+                | BlockId::CRIMSON_FENCE_GATE
+                | BlockId::WARPED_FENCE_GATE
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -645467,21 +641201,7 @@ impl BlockProperties for OakFenceGateLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            369u16
-                | 628u16
-                | 629u16
-                | 630u16
-                | 631u16
-                | 632u16
-                | 633u16
-                | 634u16
-                | 635u16
-                | 636u16
-                | 893u16
-                | 894u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "OakFenceGateLikeProperties"
@@ -645530,65 +641250,65 @@ impl BlockProperties for PaleOakWoodLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            20u16
-                | 49u16
-                | 50u16
-                | 51u16
-                | 52u16
-                | 53u16
-                | 54u16
-                | 55u16
-                | 56u16
-                | 57u16
-                | 59u16
-                | 60u16
-                | 61u16
-                | 62u16
-                | 63u16
-                | 64u16
-                | 65u16
-                | 66u16
-                | 67u16
-                | 68u16
-                | 69u16
-                | 70u16
-                | 71u16
-                | 72u16
-                | 73u16
-                | 74u16
-                | 75u16
-                | 76u16
-                | 77u16
-                | 78u16
-                | 79u16
-                | 80u16
-                | 81u16
-                | 82u16
-                | 83u16
-                | 84u16
-                | 85u16
-                | 86u16
-                | 87u16
-                | 288u16
-                | 289u16
-                | 480u16
-                | 537u16
-                | 659u16
-                | 674u16
-                | 862u16
-                | 863u16
-                | 864u16
-                | 865u16
-                | 871u16
-                | 872u16
-                | 873u16
-                | 874u16
-                | 1151u16
-                | 1171u16
-                | 1178u16
-                | 1179u16
-                | 1180u16
+            block_id,
+            BlockId::PALE_OAK_WOOD
+                | BlockId::OAK_LOG
+                | BlockId::SPRUCE_LOG
+                | BlockId::BIRCH_LOG
+                | BlockId::JUNGLE_LOG
+                | BlockId::ACACIA_LOG
+                | BlockId::CHERRY_LOG
+                | BlockId::DARK_OAK_LOG
+                | BlockId::PALE_OAK_LOG
+                | BlockId::MANGROVE_LOG
+                | BlockId::MUDDY_MANGROVE_ROOTS
+                | BlockId::BAMBOO_BLOCK
+                | BlockId::STRIPPED_SPRUCE_LOG
+                | BlockId::STRIPPED_BIRCH_LOG
+                | BlockId::STRIPPED_JUNGLE_LOG
+                | BlockId::STRIPPED_ACACIA_LOG
+                | BlockId::STRIPPED_CHERRY_LOG
+                | BlockId::STRIPPED_DARK_OAK_LOG
+                | BlockId::STRIPPED_PALE_OAK_LOG
+                | BlockId::STRIPPED_OAK_LOG
+                | BlockId::STRIPPED_MANGROVE_LOG
+                | BlockId::STRIPPED_BAMBOO_BLOCK
+                | BlockId::OAK_WOOD
+                | BlockId::SPRUCE_WOOD
+                | BlockId::BIRCH_WOOD
+                | BlockId::JUNGLE_WOOD
+                | BlockId::ACACIA_WOOD
+                | BlockId::CHERRY_WOOD
+                | BlockId::DARK_OAK_WOOD
+                | BlockId::MANGROVE_WOOD
+                | BlockId::STRIPPED_OAK_WOOD
+                | BlockId::STRIPPED_SPRUCE_WOOD
+                | BlockId::STRIPPED_BIRCH_WOOD
+                | BlockId::STRIPPED_JUNGLE_WOOD
+                | BlockId::STRIPPED_ACACIA_WOOD
+                | BlockId::STRIPPED_CHERRY_WOOD
+                | BlockId::STRIPPED_DARK_OAK_WOOD
+                | BlockId::STRIPPED_PALE_OAK_WOOD
+                | BlockId::STRIPPED_MANGROVE_WOOD
+                | BlockId::BASALT
+                | BlockId::POLISHED_BASALT
+                | BlockId::QUARTZ_PILLAR
+                | BlockId::HAY_BLOCK
+                | BlockId::PURPUR_PILLAR
+                | BlockId::BONE_BLOCK
+                | BlockId::WARPED_STEM
+                | BlockId::STRIPPED_WARPED_STEM
+                | BlockId::WARPED_HYPHAE
+                | BlockId::STRIPPED_WARPED_HYPHAE
+                | BlockId::CRIMSON_STEM
+                | BlockId::STRIPPED_CRIMSON_STEM
+                | BlockId::CRIMSON_HYPHAE
+                | BlockId::STRIPPED_CRIMSON_HYPHAE
+                | BlockId::DEEPSLATE
+                | BlockId::INFESTED_DEEPSLATE
+                | BlockId::OCHRE_FROGLIGHT
+                | BlockId::VERDANT_FROGLIGHT
+                | BlockId::PEARLESCENT_FROGLIGHT
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -645633,67 +641353,7 @@ impl BlockProperties for PaleOakWoodLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            20u16
-                | 49u16
-                | 50u16
-                | 51u16
-                | 52u16
-                | 53u16
-                | 54u16
-                | 55u16
-                | 56u16
-                | 57u16
-                | 59u16
-                | 60u16
-                | 61u16
-                | 62u16
-                | 63u16
-                | 64u16
-                | 65u16
-                | 66u16
-                | 67u16
-                | 68u16
-                | 69u16
-                | 70u16
-                | 71u16
-                | 72u16
-                | 73u16
-                | 74u16
-                | 75u16
-                | 76u16
-                | 77u16
-                | 78u16
-                | 79u16
-                | 80u16
-                | 81u16
-                | 82u16
-                | 83u16
-                | 84u16
-                | 85u16
-                | 86u16
-                | 87u16
-                | 288u16
-                | 289u16
-                | 480u16
-                | 537u16
-                | 659u16
-                | 674u16
-                | 862u16
-                | 863u16
-                | 864u16
-                | 865u16
-                | 871u16
-                | 872u16
-                | 873u16
-                | 874u16
-                | 1151u16
-                | 1171u16
-                | 1178u16
-                | 1179u16
-                | 1180u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "PaleOakWoodLikeProperties"
@@ -645756,7 +641416,7 @@ impl BlockProperties for CreakingHeartLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 199u16)
+        matches!(block_id, BlockId::CREAKING_HEART)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -645807,7 +641467,7 @@ impl BlockProperties for CreakingHeartLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 199u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "CreakingHeartLikeProperties"
@@ -645866,8 +641526,16 @@ impl BlockProperties for IronChainLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            350u16 | 351u16 | 352u16 | 353u16 | 354u16 | 355u16 | 356u16 | 357u16 | 358u16
+            block_id,
+            BlockId::IRON_CHAIN
+                | BlockId::COPPER_CHAIN
+                | BlockId::EXPOSED_COPPER_CHAIN
+                | BlockId::WEATHERED_COPPER_CHAIN
+                | BlockId::OXIDIZED_COPPER_CHAIN
+                | BlockId::WAXED_COPPER_CHAIN
+                | BlockId::WAXED_EXPOSED_COPPER_CHAIN
+                | BlockId::WAXED_WEATHERED_COPPER_CHAIN
+                | BlockId::WAXED_OXIDIZED_COPPER_CHAIN
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -645918,10 +641586,7 @@ impl BlockProperties for IronChainLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            350u16 | 351u16 | 352u16 | 353u16 | 354u16 | 355u16 | 356u16 | 357u16 | 358u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "IronChainLikeProperties"
@@ -645967,7 +641632,7 @@ impl BlockProperties for CakeLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 298u16)
+        matches!(block_id, BlockId::CAKE)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -646023,7 +641688,7 @@ impl BlockProperties for CakeLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 298u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "CakeLikeProperties"
@@ -646076,7 +641741,7 @@ impl BlockProperties for JukeboxLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 283u16)
+        matches!(block_id, BlockId::JUKEBOX)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -646123,7 +641788,7 @@ impl BlockProperties for JukeboxLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 283u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "JukeboxLikeProperties"
@@ -646183,7 +641848,10 @@ impl BlockProperties for PoweredRailLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 126u16 | 127u16 | 482u16)
+        matches!(
+            block_id,
+            BlockId::POWERED_RAIL | BlockId::DETECTOR_RAIL | BlockId::ACTIVATOR_RAIL
+        )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -646234,7 +641902,7 @@ impl BlockProperties for PoweredRailLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 126u16 | 127u16 | 482u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "PoweredRailLikeProperties"
@@ -646297,7 +641965,7 @@ impl BlockProperties for DriedGhastLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 747u16)
+        matches!(block_id, BlockId::DRIED_GHAST)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -646357,7 +642025,7 @@ impl BlockProperties for DriedGhastLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 747u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "DriedGhastLikeProperties"
@@ -646436,71 +642104,71 @@ impl BlockProperties for OakStairsLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            200u16
-                | 223u16
-                | 370u16
-                | 371u16
-                | 372u16
-                | 377u16
-                | 383u16
-                | 397u16
-                | 404u16
-                | 405u16
-                | 406u16
-                | 481u16
-                | 516u16
-                | 517u16
-                | 518u16
-                | 519u16
-                | 520u16
-                | 521u16
-                | 522u16
-                | 530u16
-                | 531u16
-                | 532u16
-                | 598u16
-                | 660u16
-                | 797u16
-                | 798u16
-                | 799u16
-                | 800u16
-                | 801u16
-                | 802u16
-                | 803u16
-                | 804u16
-                | 805u16
-                | 806u16
-                | 807u16
-                | 808u16
-                | 809u16
-                | 810u16
-                | 895u16
-                | 896u16
-                | 925u16
-                | 933u16
-                | 936u16
-                | 986u16
-                | 990u16
-                | 995u16
-                | 1001u16
-                | 1005u16
-                | 1009u16
-                | 1014u16
-                | 1018u16
-                | 1022u16
-                | 1060u16
-                | 1061u16
-                | 1062u16
-                | 1063u16
-                | 1064u16
-                | 1065u16
-                | 1066u16
-                | 1067u16
-                | 1153u16
-                | 1157u16
-                | 1161u16
-                | 1165u16
+            block_id,
+            BlockId::OAK_STAIRS
+                | BlockId::COBBLESTONE_STAIRS
+                | BlockId::BRICK_STAIRS
+                | BlockId::STONE_BRICK_STAIRS
+                | BlockId::MUD_BRICK_STAIRS
+                | BlockId::RESIN_BRICK_STAIRS
+                | BlockId::NETHER_BRICK_STAIRS
+                | BlockId::SANDSTONE_STAIRS
+                | BlockId::SPRUCE_STAIRS
+                | BlockId::BIRCH_STAIRS
+                | BlockId::JUNGLE_STAIRS
+                | BlockId::QUARTZ_STAIRS
+                | BlockId::ACACIA_STAIRS
+                | BlockId::CHERRY_STAIRS
+                | BlockId::DARK_OAK_STAIRS
+                | BlockId::PALE_OAK_STAIRS
+                | BlockId::MANGROVE_STAIRS
+                | BlockId::BAMBOO_STAIRS
+                | BlockId::BAMBOO_MOSAIC_STAIRS
+                | BlockId::PRISMARINE_STAIRS
+                | BlockId::PRISMARINE_BRICK_STAIRS
+                | BlockId::DARK_PRISMARINE_STAIRS
+                | BlockId::RED_SANDSTONE_STAIRS
+                | BlockId::PURPUR_STAIRS
+                | BlockId::POLISHED_GRANITE_STAIRS
+                | BlockId::SMOOTH_RED_SANDSTONE_STAIRS
+                | BlockId::MOSSY_STONE_BRICK_STAIRS
+                | BlockId::POLISHED_DIORITE_STAIRS
+                | BlockId::MOSSY_COBBLESTONE_STAIRS
+                | BlockId::END_STONE_BRICK_STAIRS
+                | BlockId::STONE_STAIRS
+                | BlockId::SMOOTH_SANDSTONE_STAIRS
+                | BlockId::SMOOTH_QUARTZ_STAIRS
+                | BlockId::GRANITE_STAIRS
+                | BlockId::ANDESITE_STAIRS
+                | BlockId::RED_NETHER_BRICK_STAIRS
+                | BlockId::POLISHED_ANDESITE_STAIRS
+                | BlockId::DIORITE_STAIRS
+                | BlockId::CRIMSON_STAIRS
+                | BlockId::WARPED_STAIRS
+                | BlockId::BLACKSTONE_STAIRS
+                | BlockId::POLISHED_BLACKSTONE_BRICK_STAIRS
+                | BlockId::POLISHED_BLACKSTONE_STAIRS
+                | BlockId::TUFF_STAIRS
+                | BlockId::POLISHED_TUFF_STAIRS
+                | BlockId::TUFF_BRICK_STAIRS
+                | BlockId::SULFUR_STAIRS
+                | BlockId::POLISHED_SULFUR_STAIRS
+                | BlockId::SULFUR_BRICK_STAIRS
+                | BlockId::CINNABAR_STAIRS
+                | BlockId::POLISHED_CINNABAR_STAIRS
+                | BlockId::CINNABAR_BRICK_STAIRS
+                | BlockId::CUT_COPPER_STAIRS
+                | BlockId::EXPOSED_CUT_COPPER_STAIRS
+                | BlockId::WEATHERED_CUT_COPPER_STAIRS
+                | BlockId::OXIDIZED_CUT_COPPER_STAIRS
+                | BlockId::WAXED_CUT_COPPER_STAIRS
+                | BlockId::WAXED_EXPOSED_CUT_COPPER_STAIRS
+                | BlockId::WAXED_WEATHERED_CUT_COPPER_STAIRS
+                | BlockId::WAXED_OXIDIZED_CUT_COPPER_STAIRS
+                | BlockId::COBBLED_DEEPSLATE_STAIRS
+                | BlockId::POLISHED_DEEPSLATE_STAIRS
+                | BlockId::DEEPSLATE_TILE_STAIRS
+                | BlockId::DEEPSLATE_BRICK_STAIRS
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -646553,73 +642221,7 @@ impl BlockProperties for OakStairsLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            200u16
-                | 223u16
-                | 370u16
-                | 371u16
-                | 372u16
-                | 377u16
-                | 383u16
-                | 397u16
-                | 404u16
-                | 405u16
-                | 406u16
-                | 481u16
-                | 516u16
-                | 517u16
-                | 518u16
-                | 519u16
-                | 520u16
-                | 521u16
-                | 522u16
-                | 530u16
-                | 531u16
-                | 532u16
-                | 598u16
-                | 660u16
-                | 797u16
-                | 798u16
-                | 799u16
-                | 800u16
-                | 801u16
-                | 802u16
-                | 803u16
-                | 804u16
-                | 805u16
-                | 806u16
-                | 807u16
-                | 808u16
-                | 809u16
-                | 810u16
-                | 895u16
-                | 896u16
-                | 925u16
-                | 933u16
-                | 936u16
-                | 986u16
-                | 990u16
-                | 995u16
-                | 1001u16
-                | 1005u16
-                | 1009u16
-                | 1014u16
-                | 1018u16
-                | 1022u16
-                | 1060u16
-                | 1061u16
-                | 1062u16
-                | 1063u16
-                | 1064u16
-                | 1065u16
-                | 1066u16
-                | 1067u16
-                | 1153u16
-                | 1157u16
-                | 1161u16
-                | 1165u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "OakStairsLikeProperties"
@@ -646676,7 +642278,7 @@ impl BlockProperties for StickyPistonLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 128u16 | 138u16)
+        matches!(block_id, BlockId::STICKY_PISTON | BlockId::PISTON)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -646723,7 +642325,7 @@ impl BlockProperties for StickyPistonLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 128u16 | 138u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "StickyPistonLikeProperties"
@@ -646800,28 +642402,28 @@ impl BlockProperties for OakDoorLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            220u16
-                | 260u16
-                | 646u16
-                | 647u16
-                | 648u16
-                | 649u16
-                | 650u16
-                | 651u16
-                | 652u16
-                | 653u16
-                | 654u16
-                | 899u16
-                | 900u16
-                | 1076u16
-                | 1077u16
-                | 1078u16
-                | 1079u16
-                | 1080u16
-                | 1081u16
-                | 1082u16
-                | 1083u16
+            block_id,
+            BlockId::OAK_DOOR
+                | BlockId::IRON_DOOR
+                | BlockId::SPRUCE_DOOR
+                | BlockId::BIRCH_DOOR
+                | BlockId::JUNGLE_DOOR
+                | BlockId::ACACIA_DOOR
+                | BlockId::CHERRY_DOOR
+                | BlockId::DARK_OAK_DOOR
+                | BlockId::PALE_OAK_DOOR
+                | BlockId::MANGROVE_DOOR
+                | BlockId::BAMBOO_DOOR
+                | BlockId::CRIMSON_DOOR
+                | BlockId::WARPED_DOOR
+                | BlockId::COPPER_DOOR
+                | BlockId::EXPOSED_COPPER_DOOR
+                | BlockId::WEATHERED_COPPER_DOOR
+                | BlockId::OXIDIZED_COPPER_DOOR
+                | BlockId::WAXED_COPPER_DOOR
+                | BlockId::WAXED_EXPOSED_COPPER_DOOR
+                | BlockId::WAXED_WEATHERED_COPPER_DOOR
+                | BlockId::WAXED_OXIDIZED_COPPER_DOOR
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -646872,30 +642474,7 @@ impl BlockProperties for OakDoorLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            220u16
-                | 260u16
-                | 646u16
-                | 647u16
-                | 648u16
-                | 649u16
-                | 650u16
-                | 651u16
-                | 652u16
-                | 653u16
-                | 654u16
-                | 899u16
-                | 900u16
-                | 1076u16
-                | 1077u16
-                | 1078u16
-                | 1079u16
-                | 1080u16
-                | 1081u16
-                | 1082u16
-                | 1083u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "OakDoorLikeProperties"
@@ -646988,7 +642567,7 @@ impl BlockProperties for ChiseledBookshelfLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 179u16)
+        matches!(block_id, BlockId::CHISELED_BOOKSHELF)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -647082,7 +642661,7 @@ impl BlockProperties for ChiseledBookshelfLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 179u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "ChiseledBookshelfLikeProperties"
@@ -647133,7 +642712,7 @@ impl BlockProperties for ChorusFlowerLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 657u16)
+        matches!(block_id, BlockId::CHORUS_FLOWER)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -647188,7 +642767,7 @@ impl BlockProperties for ChorusFlowerLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 657u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "ChorusFlowerLikeProperties"
@@ -647240,7 +642819,7 @@ impl BlockProperties for CactusLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 279u16 | 282u16)
+        matches!(block_id, BlockId::CACTUS | BlockId::SUGAR_CANE)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -647305,7 +642884,7 @@ impl BlockProperties for CactusLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 279u16 | 282u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "CactusLikeProperties"
@@ -647404,7 +642983,7 @@ impl BlockProperties for FireLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 196u16)
+        matches!(block_id, BlockId::FIRE)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -647476,7 +643055,7 @@ impl BlockProperties for FireLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 196u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "FireLikeProperties"
@@ -647563,23 +643142,23 @@ impl BlockProperties for WhiteBedLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            110u16
-                | 111u16
-                | 112u16
-                | 113u16
-                | 114u16
-                | 115u16
-                | 116u16
-                | 117u16
-                | 118u16
-                | 119u16
-                | 120u16
-                | 121u16
-                | 122u16
-                | 123u16
-                | 124u16
-                | 125u16
+            block_id,
+            BlockId::WHITE_BED
+                | BlockId::ORANGE_BED
+                | BlockId::MAGENTA_BED
+                | BlockId::LIGHT_BLUE_BED
+                | BlockId::YELLOW_BED
+                | BlockId::LIME_BED
+                | BlockId::PINK_BED
+                | BlockId::GRAY_BED
+                | BlockId::LIGHT_GRAY_BED
+                | BlockId::CYAN_BED
+                | BlockId::PURPLE_BED
+                | BlockId::BLUE_BED
+                | BlockId::BROWN_BED
+                | BlockId::GREEN_BED
+                | BlockId::RED_BED
+                | BlockId::BLACK_BED
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -647628,25 +643207,7 @@ impl BlockProperties for WhiteBedLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            110u16
-                | 111u16
-                | 112u16
-                | 113u16
-                | 114u16
-                | 115u16
-                | 116u16
-                | 117u16
-                | 118u16
-                | 119u16
-                | 120u16
-                | 121u16
-                | 122u16
-                | 123u16
-                | 124u16
-                | 125u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "WhiteBedLikeProperties"
@@ -647702,7 +643263,7 @@ impl BlockProperties for HopperLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 477u16)
+        matches!(block_id, BlockId::HOPPER)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -647749,7 +643310,7 @@ impl BlockProperties for HopperLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 477u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "HopperLikeProperties"
@@ -647821,7 +643382,7 @@ impl BlockProperties for CalibratedSculkSensorLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 1029u16)
+        matches!(block_id, BlockId::CALIBRATED_SCULK_SENSOR)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -647894,7 +643455,7 @@ impl BlockProperties for CalibratedSculkSensorLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 1029u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "CalibratedSculkSensorLikeProperties"
@@ -647983,7 +643544,7 @@ impl BlockProperties for SculkSensorLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 1028u16)
+        matches!(block_id, BlockId::SCULK_SENSOR)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -648055,7 +643616,7 @@ impl BlockProperties for SculkSensorLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 1028u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "SculkSensorLikeProperties"
@@ -648154,7 +643715,7 @@ impl BlockProperties for PaleMossCarpetLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 1189u16)
+        matches!(block_id, BlockId::PALE_MOSS_CARPET)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -648204,7 +643765,7 @@ impl BlockProperties for PaleMossCarpetLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 1189u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "PaleMossCarpetLikeProperties"
@@ -648269,7 +643830,7 @@ impl BlockProperties for ScaffoldingLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 837u16)
+        matches!(block_id, BlockId::SCAFFOLDING)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -648333,7 +643894,7 @@ impl BlockProperties for ScaffoldingLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 837u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "ScaffoldingLikeProperties"
@@ -648408,7 +643969,7 @@ impl BlockProperties for VaultLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 1186u16)
+        matches!(block_id, BlockId::VAULT)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -648456,7 +644017,7 @@ impl BlockProperties for VaultLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 1186u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "VaultLikeProperties"
@@ -648515,7 +644076,7 @@ impl BlockProperties for TrialSpawnerLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 1185u16)
+        matches!(block_id, BlockId::TRIAL_SPAWNER)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -648562,7 +644123,7 @@ impl BlockProperties for TrialSpawnerLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 1185u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "TrialSpawnerLikeProperties"
@@ -648626,7 +644187,7 @@ impl BlockProperties for SculkShriekerLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 1033u16)
+        matches!(block_id, BlockId::SCULK_SHRIEKER)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -648680,7 +644241,7 @@ impl BlockProperties for SculkShriekerLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 1033u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "SculkShriekerLikeProperties"
@@ -648746,7 +644307,7 @@ impl BlockProperties for BellLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 848u16)
+        matches!(block_id, BlockId::BELL)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -648794,7 +644355,7 @@ impl BlockProperties for BellLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 848u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "BellLikeProperties"
@@ -648865,19 +644426,19 @@ impl BlockProperties for AcaciaShelfLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            180u16
-                | 181u16
-                | 182u16
-                | 183u16
-                | 184u16
-                | 185u16
-                | 186u16
-                | 187u16
-                | 188u16
-                | 189u16
-                | 190u16
-                | 191u16
+            block_id,
+            BlockId::ACACIA_SHELF
+                | BlockId::BAMBOO_SHELF
+                | BlockId::BIRCH_SHELF
+                | BlockId::CHERRY_SHELF
+                | BlockId::CRIMSON_SHELF
+                | BlockId::DARK_OAK_SHELF
+                | BlockId::JUNGLE_SHELF
+                | BlockId::MANGROVE_SHELF
+                | BlockId::OAK_SHELF
+                | BlockId::PALE_OAK_SHELF
+                | BlockId::SPRUCE_SHELF
+                | BlockId::WARPED_SHELF
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -648930,21 +644491,7 @@ impl BlockProperties for AcaciaShelfLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            180u16
-                | 181u16
-                | 182u16
-                | 183u16
-                | 184u16
-                | 185u16
-                | 186u16
-                | 187u16
-                | 188u16
-                | 189u16
-                | 190u16
-                | 191u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "AcaciaShelfLikeProperties"
@@ -649015,7 +644562,7 @@ impl BlockProperties for RepeaterLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 299u16)
+        matches!(block_id, BlockId::REPEATER)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -649073,7 +644620,7 @@ impl BlockProperties for RepeaterLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 299u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "RepeaterLikeProperties"
@@ -649129,7 +644676,7 @@ impl BlockProperties for RespawnAnchorLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 918u16)
+        matches!(block_id, BlockId::RESPAWN_ANCHOR)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -649183,7 +644730,7 @@ impl BlockProperties for RespawnAnchorLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 918u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "RespawnAnchorLikeProperties"
@@ -649250,7 +644797,7 @@ impl BlockProperties for BrewingStandLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 386u16)
+        matches!(block_id, BlockId::BREWING_STAND)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -649307,7 +644854,7 @@ impl BlockProperties for BrewingStandLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 386u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "BrewingStandLikeProperties"
@@ -649354,7 +644901,7 @@ impl BlockProperties for SnowLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 276u16)
+        matches!(block_id, BlockId::SNOW)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -649411,7 +644958,7 @@ impl BlockProperties for SnowLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 276u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "SnowLikeProperties"
@@ -649466,51 +645013,51 @@ impl BlockProperties for WallTorchLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            195u16
-                | 291u16
-                | 293u16
-                | 296u16
-                | 297u16
-                | 362u16
-                | 363u16
-                | 467u16
-                | 468u16
-                | 469u16
-                | 579u16
-                | 580u16
-                | 581u16
-                | 582u16
-                | 583u16
-                | 584u16
-                | 585u16
-                | 586u16
-                | 587u16
-                | 588u16
-                | 589u16
-                | 590u16
-                | 591u16
-                | 592u16
-                | 593u16
-                | 594u16
-                | 694u16
-                | 695u16
-                | 696u16
-                | 697u16
-                | 698u16
-                | 699u16
-                | 700u16
-                | 701u16
-                | 702u16
-                | 703u16
-                | 704u16
-                | 705u16
-                | 706u16
-                | 707u16
-                | 708u16
-                | 709u16
-                | 838u16
-                | 847u16
+            block_id,
+            BlockId::WALL_TORCH
+                | BlockId::SOUL_WALL_TORCH
+                | BlockId::COPPER_WALL_TORCH
+                | BlockId::CARVED_PUMPKIN
+                | BlockId::JACK_O_LANTERN
+                | BlockId::ATTACHED_PUMPKIN_STEM
+                | BlockId::ATTACHED_MELON_STEM
+                | BlockId::ANVIL
+                | BlockId::CHIPPED_ANVIL
+                | BlockId::DAMAGED_ANVIL
+                | BlockId::WHITE_WALL_BANNER
+                | BlockId::ORANGE_WALL_BANNER
+                | BlockId::MAGENTA_WALL_BANNER
+                | BlockId::LIGHT_BLUE_WALL_BANNER
+                | BlockId::YELLOW_WALL_BANNER
+                | BlockId::LIME_WALL_BANNER
+                | BlockId::PINK_WALL_BANNER
+                | BlockId::GRAY_WALL_BANNER
+                | BlockId::LIGHT_GRAY_WALL_BANNER
+                | BlockId::CYAN_WALL_BANNER
+                | BlockId::PURPLE_WALL_BANNER
+                | BlockId::BLUE_WALL_BANNER
+                | BlockId::BROWN_WALL_BANNER
+                | BlockId::GREEN_WALL_BANNER
+                | BlockId::RED_WALL_BANNER
+                | BlockId::BLACK_WALL_BANNER
+                | BlockId::WHITE_GLAZED_TERRACOTTA
+                | BlockId::ORANGE_GLAZED_TERRACOTTA
+                | BlockId::MAGENTA_GLAZED_TERRACOTTA
+                | BlockId::LIGHT_BLUE_GLAZED_TERRACOTTA
+                | BlockId::YELLOW_GLAZED_TERRACOTTA
+                | BlockId::LIME_GLAZED_TERRACOTTA
+                | BlockId::PINK_GLAZED_TERRACOTTA
+                | BlockId::GRAY_GLAZED_TERRACOTTA
+                | BlockId::LIGHT_GRAY_GLAZED_TERRACOTTA
+                | BlockId::CYAN_GLAZED_TERRACOTTA
+                | BlockId::PURPLE_GLAZED_TERRACOTTA
+                | BlockId::BLUE_GLAZED_TERRACOTTA
+                | BlockId::BROWN_GLAZED_TERRACOTTA
+                | BlockId::GREEN_GLAZED_TERRACOTTA
+                | BlockId::RED_GLAZED_TERRACOTTA
+                | BlockId::BLACK_GLAZED_TERRACOTTA
+                | BlockId::LOOM
+                | BlockId::STONECUTTER
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -649555,53 +645102,7 @@ impl BlockProperties for WallTorchLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            195u16
-                | 291u16
-                | 293u16
-                | 296u16
-                | 297u16
-                | 362u16
-                | 363u16
-                | 467u16
-                | 468u16
-                | 469u16
-                | 579u16
-                | 580u16
-                | 581u16
-                | 582u16
-                | 583u16
-                | 584u16
-                | 585u16
-                | 586u16
-                | 587u16
-                | 588u16
-                | 589u16
-                | 590u16
-                | 591u16
-                | 592u16
-                | 593u16
-                | 594u16
-                | 694u16
-                | 695u16
-                | 696u16
-                | 697u16
-                | 698u16
-                | 699u16
-                | 700u16
-                | 701u16
-                | 702u16
-                | 703u16
-                | 704u16
-                | 705u16
-                | 706u16
-                | 707u16
-                | 708u16
-                | 709u16
-                | 838u16
-                | 847u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "WallTorchLikeProperties"
@@ -649662,17 +645163,17 @@ impl BlockProperties for ChestLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            201u16
-                | 470u16
-                | 1108u16
-                | 1109u16
-                | 1110u16
-                | 1111u16
-                | 1112u16
-                | 1113u16
-                | 1114u16
-                | 1115u16
+            block_id,
+            BlockId::CHEST
+                | BlockId::TRAPPED_CHEST
+                | BlockId::COPPER_CHEST
+                | BlockId::EXPOSED_COPPER_CHEST
+                | BlockId::WEATHERED_COPPER_CHEST
+                | BlockId::OXIDIZED_COPPER_CHEST
+                | BlockId::WAXED_COPPER_CHEST
+                | BlockId::WAXED_EXPOSED_COPPER_CHEST
+                | BlockId::WAXED_WEATHERED_COPPER_CHEST
+                | BlockId::WAXED_OXIDIZED_COPPER_CHEST
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -649724,19 +645225,7 @@ impl BlockProperties for ChestLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            201u16
-                | 470u16
-                | 1108u16
-                | 1109u16
-                | 1110u16
-                | 1111u16
-                | 1112u16
-                | 1113u16
-                | 1114u16
-                | 1115u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "ChestLikeProperties"
@@ -649793,8 +645282,14 @@ impl BlockProperties for SkeletonWallSkullLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            454u16 | 456u16 | 458u16 | 460u16 | 462u16 | 464u16 | 466u16
+            block_id,
+            BlockId::SKELETON_WALL_SKULL
+                | BlockId::WITHER_SKELETON_WALL_SKULL
+                | BlockId::ZOMBIE_WALL_HEAD
+                | BlockId::PLAYER_WALL_HEAD
+                | BlockId::CREEPER_WALL_HEAD
+                | BlockId::DRAGON_WALL_HEAD
+                | BlockId::PIGLIN_WALL_HEAD
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -649842,10 +645337,7 @@ impl BlockProperties for SkeletonWallSkullLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            454u16 | 456u16 | 458u16 | 460u16 | 462u16 | 464u16 | 466u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "SkeletonWallSkullLikeProperties"
@@ -649922,28 +645414,28 @@ impl BlockProperties for OakTrapdoorLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            316u16
-                | 317u16
-                | 318u16
-                | 319u16
-                | 320u16
-                | 321u16
-                | 322u16
-                | 323u16
-                | 324u16
-                | 325u16
-                | 526u16
-                | 891u16
-                | 892u16
-                | 1084u16
-                | 1085u16
-                | 1086u16
-                | 1087u16
-                | 1088u16
-                | 1089u16
-                | 1090u16
-                | 1091u16
+            block_id,
+            BlockId::OAK_TRAPDOOR
+                | BlockId::SPRUCE_TRAPDOOR
+                | BlockId::BIRCH_TRAPDOOR
+                | BlockId::JUNGLE_TRAPDOOR
+                | BlockId::ACACIA_TRAPDOOR
+                | BlockId::CHERRY_TRAPDOOR
+                | BlockId::DARK_OAK_TRAPDOOR
+                | BlockId::PALE_OAK_TRAPDOOR
+                | BlockId::MANGROVE_TRAPDOOR
+                | BlockId::BAMBOO_TRAPDOOR
+                | BlockId::IRON_TRAPDOOR
+                | BlockId::CRIMSON_TRAPDOOR
+                | BlockId::WARPED_TRAPDOOR
+                | BlockId::COPPER_TRAPDOOR
+                | BlockId::EXPOSED_COPPER_TRAPDOOR
+                | BlockId::WEATHERED_COPPER_TRAPDOOR
+                | BlockId::OXIDIZED_COPPER_TRAPDOOR
+                | BlockId::WAXED_COPPER_TRAPDOOR
+                | BlockId::WAXED_EXPOSED_COPPER_TRAPDOOR
+                | BlockId::WAXED_WEATHERED_COPPER_TRAPDOOR
+                | BlockId::WAXED_OXIDIZED_COPPER_TRAPDOOR
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -649997,30 +645489,7 @@ impl BlockProperties for OakTrapdoorLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            316u16
-                | 317u16
-                | 318u16
-                | 319u16
-                | 320u16
-                | 321u16
-                | 322u16
-                | 323u16
-                | 324u16
-                | 325u16
-                | 526u16
-                | 891u16
-                | 892u16
-                | 1084u16
-                | 1085u16
-                | 1086u16
-                | 1087u16
-                | 1088u16
-                | 1089u16
-                | 1090u16
-                | 1091u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "OakTrapdoorLikeProperties"
@@ -650085,7 +645554,7 @@ impl BlockProperties for LecternLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 845u16)
+        matches!(block_id, BlockId::LECTERN)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -650133,7 +645602,7 @@ impl BlockProperties for LecternLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 845u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "LecternLikeProperties"
@@ -650196,7 +645665,7 @@ impl BlockProperties for TripwireHookLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 401u16)
+        matches!(block_id, BlockId::TRIPWIRE_HOOK)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -650244,7 +645713,7 @@ impl BlockProperties for TripwireHookLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 401u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "TripwireHookLikeProperties"
@@ -650307,7 +645776,7 @@ impl BlockProperties for ComparatorLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 473u16)
+        matches!(block_id, BlockId::COMPARATOR)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -650355,7 +645824,7 @@ impl BlockProperties for ComparatorLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 473u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "ComparatorLikeProperties"
@@ -650422,8 +645891,15 @@ impl BlockProperties for CopperGolemStatueLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            1116u16 | 1117u16 | 1118u16 | 1119u16 | 1120u16 | 1121u16 | 1122u16 | 1123u16
+            block_id,
+            BlockId::COPPER_GOLEM_STATUE
+                | BlockId::EXPOSED_COPPER_GOLEM_STATUE
+                | BlockId::WEATHERED_COPPER_GOLEM_STATUE
+                | BlockId::OXIDIZED_COPPER_GOLEM_STATUE
+                | BlockId::WAXED_COPPER_GOLEM_STATUE
+                | BlockId::WAXED_EXPOSED_COPPER_GOLEM_STATUE
+                | BlockId::WAXED_WEATHERED_COPPER_GOLEM_STATUE
+                | BlockId::WAXED_OXIDIZED_COPPER_GOLEM_STATUE
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -650475,10 +645951,7 @@ impl BlockProperties for CopperGolemStatueLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            1116u16 | 1117u16 | 1118u16 | 1119u16 | 1120u16 | 1121u16 | 1122u16 | 1123u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "CopperGolemStatueLikeProperties"
@@ -650536,7 +646009,7 @@ impl BlockProperties for EndPortalFrameLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 392u16)
+        matches!(block_id, BlockId::END_PORTAL_FRAME)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -650583,7 +646056,7 @@ impl BlockProperties for EndPortalFrameLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 392u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "EndPortalFrameLikeProperties"
@@ -650638,7 +646111,13 @@ impl BlockProperties for FurnaceLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 209u16 | 274u16 | 840u16 | 841u16)
+        matches!(
+            block_id,
+            BlockId::FURNACE
+                | BlockId::REDSTONE_WALL_TORCH
+                | BlockId::SMOKER
+                | BlockId::BLAST_FURNACE
+        )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -650685,7 +646164,7 @@ impl BlockProperties for FurnaceLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 209u16 | 274u16 | 840u16 | 841u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "FurnaceLikeProperties"
@@ -650754,7 +646233,7 @@ impl BlockProperties for CampfireLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 859u16 | 860u16)
+        matches!(block_id, BlockId::CAMPFIRE | BlockId::SOUL_CAMPFIRE)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -650809,7 +646288,7 @@ impl BlockProperties for CampfireLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 859u16 | 860u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "CampfireLikeProperties"
@@ -650873,7 +646352,7 @@ impl BlockProperties for SmallDripleafLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 1147u16)
+        matches!(block_id, BlockId::SMALL_DRIPLEAF)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -650924,7 +646403,7 @@ impl BlockProperties for SmallDripleafLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 1147u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "SmallDripleafLikeProperties"
@@ -650980,7 +646459,7 @@ impl BlockProperties for BeeNestLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 911u16 | 912u16)
+        matches!(block_id, BlockId::BEE_NEST | BlockId::BEEHIVE)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -651038,7 +646517,7 @@ impl BlockProperties for BeeNestLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 911u16 | 912u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "BeeNestLikeProperties"
@@ -651110,7 +646589,7 @@ impl BlockProperties for DecoratedPotLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 1183u16)
+        matches!(block_id, BlockId::DECORATED_POT)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -651161,7 +646640,7 @@ impl BlockProperties for DecoratedPotLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 1183u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "DecoratedPotLikeProperties"
@@ -651218,44 +646697,44 @@ impl BlockProperties for LadderLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            221u16
-                | 224u16
-                | 225u16
-                | 226u16
-                | 227u16
-                | 228u16
-                | 229u16
-                | 230u16
-                | 231u16
-                | 232u16
-                | 233u16
-                | 246u16
-                | 247u16
-                | 248u16
-                | 249u16
-                | 250u16
-                | 251u16
-                | 252u16
-                | 253u16
-                | 254u16
-                | 255u16
-                | 256u16
-                | 257u16
-                | 400u16
-                | 778u16
-                | 779u16
-                | 780u16
-                | 781u16
-                | 782u16
-                | 783u16
-                | 784u16
-                | 785u16
-                | 786u16
-                | 787u16
-                | 903u16
-                | 904u16
-                | 1146u16
+            block_id,
+            BlockId::LADDER
+                | BlockId::OAK_WALL_SIGN
+                | BlockId::SPRUCE_WALL_SIGN
+                | BlockId::BIRCH_WALL_SIGN
+                | BlockId::ACACIA_WALL_SIGN
+                | BlockId::CHERRY_WALL_SIGN
+                | BlockId::JUNGLE_WALL_SIGN
+                | BlockId::DARK_OAK_WALL_SIGN
+                | BlockId::PALE_OAK_WALL_SIGN
+                | BlockId::MANGROVE_WALL_SIGN
+                | BlockId::BAMBOO_WALL_SIGN
+                | BlockId::OAK_WALL_HANGING_SIGN
+                | BlockId::SPRUCE_WALL_HANGING_SIGN
+                | BlockId::BIRCH_WALL_HANGING_SIGN
+                | BlockId::ACACIA_WALL_HANGING_SIGN
+                | BlockId::CHERRY_WALL_HANGING_SIGN
+                | BlockId::JUNGLE_WALL_HANGING_SIGN
+                | BlockId::DARK_OAK_WALL_HANGING_SIGN
+                | BlockId::PALE_OAK_WALL_HANGING_SIGN
+                | BlockId::MANGROVE_WALL_HANGING_SIGN
+                | BlockId::CRIMSON_WALL_HANGING_SIGN
+                | BlockId::WARPED_WALL_HANGING_SIGN
+                | BlockId::BAMBOO_WALL_HANGING_SIGN
+                | BlockId::ENDER_CHEST
+                | BlockId::DEAD_TUBE_CORAL_WALL_FAN
+                | BlockId::DEAD_BRAIN_CORAL_WALL_FAN
+                | BlockId::DEAD_BUBBLE_CORAL_WALL_FAN
+                | BlockId::DEAD_FIRE_CORAL_WALL_FAN
+                | BlockId::DEAD_HORN_CORAL_WALL_FAN
+                | BlockId::TUBE_CORAL_WALL_FAN
+                | BlockId::BRAIN_CORAL_WALL_FAN
+                | BlockId::BUBBLE_CORAL_WALL_FAN
+                | BlockId::FIRE_CORAL_WALL_FAN
+                | BlockId::HORN_CORAL_WALL_FAN
+                | BlockId::CRIMSON_WALL_SIGN
+                | BlockId::WARPED_WALL_SIGN
+                | BlockId::BIG_DRIPLEAF_STEM
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -651306,46 +646785,7 @@ impl BlockProperties for LadderLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            221u16
-                | 224u16
-                | 225u16
-                | 226u16
-                | 227u16
-                | 228u16
-                | 229u16
-                | 230u16
-                | 231u16
-                | 232u16
-                | 233u16
-                | 246u16
-                | 247u16
-                | 248u16
-                | 249u16
-                | 250u16
-                | 251u16
-                | 252u16
-                | 253u16
-                | 254u16
-                | 255u16
-                | 256u16
-                | 257u16
-                | 400u16
-                | 778u16
-                | 779u16
-                | 780u16
-                | 781u16
-                | 782u16
-                | 783u16
-                | 784u16
-                | 785u16
-                | 786u16
-                | 787u16
-                | 903u16
-                | 904u16
-                | 1146u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "LadderLikeProperties"
@@ -651407,7 +646847,7 @@ impl BlockProperties for BigDripleafLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 1145u16)
+        matches!(block_id, BlockId::BIG_DRIPLEAF)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -651458,7 +646898,7 @@ impl BlockProperties for BigDripleafLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 1145u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "BigDripleafLikeProperties"
@@ -651514,7 +646954,7 @@ impl BlockProperties for PinkPetalsLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 1141u16 | 1142u16)
+        matches!(block_id, BlockId::PINK_PETALS | BlockId::WILDFLOWERS)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -651570,7 +647010,7 @@ impl BlockProperties for PinkPetalsLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 1141u16 | 1142u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "PinkPetalsLikeProperties"
@@ -651633,7 +647073,7 @@ impl BlockProperties for LeafLitterLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 1143u16)
+        matches!(block_id, BlockId::LEAF_LITTER)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -651689,7 +647129,7 @@ impl BlockProperties for LeafLitterLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 1143u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "LeafLitterLikeProperties"
@@ -651752,7 +647192,7 @@ impl BlockProperties for CocoaLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 396u16)
+        matches!(block_id, BlockId::COCOA)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -651807,7 +647247,7 @@ impl BlockProperties for CocoaLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 396u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "CocoaLikeProperties"
@@ -651869,7 +647309,7 @@ impl BlockProperties for DispenserLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 105u16 | 483u16)
+        matches!(block_id, BlockId::DISPENSER | BlockId::DROPPER)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -651916,7 +647356,7 @@ impl BlockProperties for DispenserLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 105u16 | 483u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "DispenserLikeProperties"
@@ -651978,7 +647418,7 @@ impl BlockProperties for CrafterLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 1184u16)
+        matches!(block_id, BlockId::CRAFTER)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -652026,7 +647466,7 @@ impl BlockProperties for CrafterLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 1184u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "CrafterLikeProperties"
@@ -652073,7 +647513,7 @@ impl BlockProperties for FarmlandLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 208u16)
+        matches!(block_id, BlockId::FARMLAND)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -652130,7 +647570,7 @@ impl BlockProperties for FarmlandLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 208u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "FarmlandLikeProperties"
@@ -652184,7 +647624,10 @@ impl BlockProperties for SuspiciousSandLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 38u16 | 41u16)
+        matches!(
+            block_id,
+            BlockId::SUSPICIOUS_SAND | BlockId::SUSPICIOUS_GRAVEL
+        )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -652237,7 +647680,7 @@ impl BlockProperties for SuspiciousSandLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 38u16 | 41u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "SuspiciousSandLikeProperties"
@@ -652297,75 +647740,75 @@ impl BlockProperties for ResinBrickSlabLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            378u16
-                | 533u16
-                | 534u16
-                | 535u16
-                | 599u16
-                | 600u16
-                | 601u16
-                | 602u16
-                | 603u16
-                | 604u16
-                | 605u16
-                | 606u16
-                | 607u16
-                | 608u16
-                | 609u16
-                | 610u16
-                | 611u16
-                | 612u16
-                | 613u16
-                | 614u16
-                | 615u16
-                | 616u16
-                | 617u16
-                | 618u16
-                | 619u16
-                | 620u16
-                | 621u16
-                | 622u16
-                | 623u16
-                | 811u16
-                | 812u16
-                | 813u16
-                | 814u16
-                | 815u16
-                | 816u16
-                | 817u16
-                | 818u16
-                | 819u16
-                | 820u16
-                | 821u16
-                | 822u16
-                | 823u16
-                | 885u16
-                | 886u16
-                | 927u16
-                | 932u16
-                | 937u16
-                | 985u16
-                | 989u16
-                | 994u16
-                | 1000u16
-                | 1004u16
-                | 1008u16
-                | 1013u16
-                | 1017u16
-                | 1021u16
-                | 1068u16
-                | 1069u16
-                | 1070u16
-                | 1071u16
-                | 1072u16
-                | 1073u16
-                | 1074u16
-                | 1075u16
-                | 1154u16
-                | 1158u16
-                | 1162u16
-                | 1166u16
+            block_id,
+            BlockId::RESIN_BRICK_SLAB
+                | BlockId::PRISMARINE_SLAB
+                | BlockId::PRISMARINE_BRICK_SLAB
+                | BlockId::DARK_PRISMARINE_SLAB
+                | BlockId::OAK_SLAB
+                | BlockId::SPRUCE_SLAB
+                | BlockId::BIRCH_SLAB
+                | BlockId::JUNGLE_SLAB
+                | BlockId::ACACIA_SLAB
+                | BlockId::CHERRY_SLAB
+                | BlockId::DARK_OAK_SLAB
+                | BlockId::PALE_OAK_SLAB
+                | BlockId::MANGROVE_SLAB
+                | BlockId::BAMBOO_SLAB
+                | BlockId::BAMBOO_MOSAIC_SLAB
+                | BlockId::STONE_SLAB
+                | BlockId::SMOOTH_STONE_SLAB
+                | BlockId::SANDSTONE_SLAB
+                | BlockId::CUT_SANDSTONE_SLAB
+                | BlockId::PETRIFIED_OAK_SLAB
+                | BlockId::COBBLESTONE_SLAB
+                | BlockId::BRICK_SLAB
+                | BlockId::STONE_BRICK_SLAB
+                | BlockId::MUD_BRICK_SLAB
+                | BlockId::NETHER_BRICK_SLAB
+                | BlockId::QUARTZ_SLAB
+                | BlockId::RED_SANDSTONE_SLAB
+                | BlockId::CUT_RED_SANDSTONE_SLAB
+                | BlockId::PURPUR_SLAB
+                | BlockId::POLISHED_GRANITE_SLAB
+                | BlockId::SMOOTH_RED_SANDSTONE_SLAB
+                | BlockId::MOSSY_STONE_BRICK_SLAB
+                | BlockId::POLISHED_DIORITE_SLAB
+                | BlockId::MOSSY_COBBLESTONE_SLAB
+                | BlockId::END_STONE_BRICK_SLAB
+                | BlockId::SMOOTH_SANDSTONE_SLAB
+                | BlockId::SMOOTH_QUARTZ_SLAB
+                | BlockId::GRANITE_SLAB
+                | BlockId::ANDESITE_SLAB
+                | BlockId::RED_NETHER_BRICK_SLAB
+                | BlockId::POLISHED_ANDESITE_SLAB
+                | BlockId::DIORITE_SLAB
+                | BlockId::CRIMSON_SLAB
+                | BlockId::WARPED_SLAB
+                | BlockId::BLACKSTONE_SLAB
+                | BlockId::POLISHED_BLACKSTONE_BRICK_SLAB
+                | BlockId::POLISHED_BLACKSTONE_SLAB
+                | BlockId::TUFF_SLAB
+                | BlockId::POLISHED_TUFF_SLAB
+                | BlockId::TUFF_BRICK_SLAB
+                | BlockId::SULFUR_SLAB
+                | BlockId::POLISHED_SULFUR_SLAB
+                | BlockId::SULFUR_BRICK_SLAB
+                | BlockId::CINNABAR_SLAB
+                | BlockId::POLISHED_CINNABAR_SLAB
+                | BlockId::CINNABAR_BRICK_SLAB
+                | BlockId::CUT_COPPER_SLAB
+                | BlockId::EXPOSED_CUT_COPPER_SLAB
+                | BlockId::WEATHERED_CUT_COPPER_SLAB
+                | BlockId::OXIDIZED_CUT_COPPER_SLAB
+                | BlockId::WAXED_CUT_COPPER_SLAB
+                | BlockId::WAXED_EXPOSED_CUT_COPPER_SLAB
+                | BlockId::WAXED_WEATHERED_CUT_COPPER_SLAB
+                | BlockId::WAXED_OXIDIZED_CUT_COPPER_SLAB
+                | BlockId::COBBLED_DEEPSLATE_SLAB
+                | BlockId::POLISHED_DEEPSLATE_SLAB
+                | BlockId::DEEPSLATE_TILE_SLAB
+                | BlockId::DEEPSLATE_BRICK_SLAB
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -652416,77 +647859,7 @@ impl BlockProperties for ResinBrickSlabLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            378u16
-                | 533u16
-                | 534u16
-                | 535u16
-                | 599u16
-                | 600u16
-                | 601u16
-                | 602u16
-                | 603u16
-                | 604u16
-                | 605u16
-                | 606u16
-                | 607u16
-                | 608u16
-                | 609u16
-                | 610u16
-                | 611u16
-                | 612u16
-                | 613u16
-                | 614u16
-                | 615u16
-                | 616u16
-                | 617u16
-                | 618u16
-                | 619u16
-                | 620u16
-                | 621u16
-                | 622u16
-                | 623u16
-                | 811u16
-                | 812u16
-                | 813u16
-                | 814u16
-                | 815u16
-                | 816u16
-                | 817u16
-                | 818u16
-                | 819u16
-                | 820u16
-                | 821u16
-                | 822u16
-                | 823u16
-                | 885u16
-                | 886u16
-                | 927u16
-                | 932u16
-                | 937u16
-                | 985u16
-                | 989u16
-                | 994u16
-                | 1000u16
-                | 1004u16
-                | 1008u16
-                | 1013u16
-                | 1017u16
-                | 1021u16
-                | 1068u16
-                | 1069u16
-                | 1070u16
-                | 1071u16
-                | 1072u16
-                | 1073u16
-                | 1074u16
-                | 1075u16
-                | 1154u16
-                | 1158u16
-                | 1162u16
-                | 1166u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "ResinBrickSlabLikeProperties"
@@ -652533,21 +647906,21 @@ impl BlockProperties for StonePressurePlateLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            259u16
-                | 261u16
-                | 262u16
-                | 263u16
-                | 264u16
-                | 265u16
-                | 266u16
-                | 267u16
-                | 268u16
-                | 269u16
-                | 270u16
-                | 887u16
-                | 888u16
-                | 938u16
+            block_id,
+            BlockId::STONE_PRESSURE_PLATE
+                | BlockId::OAK_PRESSURE_PLATE
+                | BlockId::SPRUCE_PRESSURE_PLATE
+                | BlockId::BIRCH_PRESSURE_PLATE
+                | BlockId::JUNGLE_PRESSURE_PLATE
+                | BlockId::ACACIA_PRESSURE_PLATE
+                | BlockId::CHERRY_PRESSURE_PLATE
+                | BlockId::DARK_OAK_PRESSURE_PLATE
+                | BlockId::PALE_OAK_PRESSURE_PLATE
+                | BlockId::MANGROVE_PRESSURE_PLATE
+                | BlockId::BAMBOO_PRESSURE_PLATE
+                | BlockId::CRIMSON_PRESSURE_PLATE
+                | BlockId::WARPED_PRESSURE_PLATE
+                | BlockId::POLISHED_BLACKSTONE_PRESSURE_PLATE
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -652592,23 +647965,7 @@ impl BlockProperties for StonePressurePlateLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            259u16
-                | 261u16
-                | 262u16
-                | 263u16
-                | 264u16
-                | 265u16
-                | 266u16
-                | 267u16
-                | 268u16
-                | 269u16
-                | 270u16
-                | 887u16
-                | 888u16
-                | 938u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "StonePressurePlateLikeProperties"
@@ -652659,8 +648016,15 @@ impl BlockProperties for CopperBulbLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            1100u16 | 1101u16 | 1102u16 | 1103u16 | 1104u16 | 1105u16 | 1106u16 | 1107u16
+            block_id,
+            BlockId::COPPER_BULB
+                | BlockId::EXPOSED_COPPER_BULB
+                | BlockId::WEATHERED_COPPER_BULB
+                | BlockId::OXIDIZED_COPPER_BULB
+                | BlockId::WAXED_COPPER_BULB
+                | BlockId::WAXED_EXPOSED_COPPER_BULB
+                | BlockId::WAXED_WEATHERED_COPPER_BULB
+                | BlockId::WAXED_OXIDIZED_COPPER_BULB
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -652708,10 +648072,7 @@ impl BlockProperties for CopperBulbLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            1100u16 | 1101u16 | 1102u16 | 1103u16 | 1104u16 | 1105u16 | 1106u16 | 1107u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "CopperBulbLikeProperties"
@@ -652801,7 +648162,7 @@ impl BlockProperties for TripwireLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 402u16)
+        matches!(block_id, BlockId::TRIPWIRE)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -652853,7 +648214,7 @@ impl BlockProperties for TripwireLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 402u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "TripwireLikeProperties"
@@ -652913,7 +648274,7 @@ impl BlockProperties for ObserverLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 676u16)
+        matches!(block_id, BlockId::OBSERVER)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -652960,7 +648321,7 @@ impl BlockProperties for ObserverLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 676u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "ObserverLikeProperties"
@@ -653023,8 +648384,15 @@ impl BlockProperties for LightningRodLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            1124u16 | 1125u16 | 1126u16 | 1127u16 | 1128u16 | 1129u16 | 1130u16 | 1131u16
+            block_id,
+            BlockId::LIGHTNING_ROD
+                | BlockId::EXPOSED_LIGHTNING_ROD
+                | BlockId::WEATHERED_LIGHTNING_ROD
+                | BlockId::OXIDIZED_LIGHTNING_ROD
+                | BlockId::WAXED_LIGHTNING_ROD
+                | BlockId::WAXED_EXPOSED_LIGHTNING_ROD
+                | BlockId::WAXED_WEATHERED_LIGHTNING_ROD
+                | BlockId::WAXED_OXIDIZED_LIGHTNING_ROD
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -653076,10 +648444,7 @@ impl BlockProperties for LightningRodLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            1124u16 | 1125u16 | 1126u16 | 1127u16 | 1128u16 | 1129u16 | 1130u16 | 1131u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "LightningRodLikeProperties"
@@ -653145,7 +648510,7 @@ impl BlockProperties for NoteBlockLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 109u16)
+        matches!(block_id, BlockId::NOTE_BLOCK)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -653223,7 +648588,7 @@ impl BlockProperties for NoteBlockLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 109u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "NoteBlockLikeProperties"
@@ -653306,8 +648671,14 @@ impl BlockProperties for SkeletonSkullLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            453u16 | 455u16 | 457u16 | 459u16 | 461u16 | 463u16 | 465u16
+            block_id,
+            BlockId::SKELETON_SKULL
+                | BlockId::WITHER_SKELETON_SKULL
+                | BlockId::ZOMBIE_HEAD
+                | BlockId::PLAYER_HEAD
+                | BlockId::CREEPER_HEAD
+                | BlockId::DRAGON_HEAD
+                | BlockId::PIGLIN_HEAD
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -653376,10 +648747,7 @@ impl BlockProperties for SkeletonSkullLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            453u16 | 455u16 | 457u16 | 459u16 | 461u16 | 463u16 | 465u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "SkeletonSkullLikeProperties"
@@ -653475,7 +648843,7 @@ impl BlockProperties for RedstoneWireLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 202u16)
+        matches!(block_id, BlockId::REDSTONE_WIRE)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -653546,7 +648914,7 @@ impl BlockProperties for RedstoneWireLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 202u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "RedstoneWireLikeProperties"
@@ -653615,7 +648983,7 @@ impl BlockProperties for ComposterLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 909u16)
+        matches!(block_id, BlockId::COMPOSTER)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -653673,7 +649041,7 @@ impl BlockProperties for ComposterLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 909u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "ComposterLikeProperties"
@@ -653728,7 +649096,7 @@ impl BlockProperties for CaveVinesPlantLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 1136u16)
+        matches!(block_id, BlockId::CAVE_VINES_PLANT)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -653772,7 +649140,7 @@ impl BlockProperties for CaveVinesPlantLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 1136u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "CaveVinesPlantLikeProperties"
@@ -653822,7 +649190,7 @@ impl BlockProperties for CaveVinesLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 1135u16)
+        matches!(block_id, BlockId::CAVE_VINES)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -653900,7 +649268,7 @@ impl BlockProperties for CaveVinesLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 1135u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "CaveVinesLikeProperties"
@@ -654014,39 +649382,39 @@ impl BlockProperties for ResinBrickWallLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            379u16
-                | 409u16
-                | 410u16
-                | 824u16
-                | 825u16
-                | 826u16
-                | 827u16
-                | 828u16
-                | 829u16
-                | 830u16
-                | 831u16
-                | 832u16
-                | 833u16
-                | 834u16
-                | 835u16
-                | 836u16
-                | 926u16
-                | 934u16
-                | 940u16
-                | 987u16
-                | 991u16
-                | 996u16
-                | 1002u16
-                | 1006u16
-                | 1010u16
-                | 1015u16
-                | 1019u16
-                | 1023u16
-                | 1155u16
-                | 1159u16
-                | 1163u16
-                | 1167u16
+            block_id,
+            BlockId::RESIN_BRICK_WALL
+                | BlockId::COBBLESTONE_WALL
+                | BlockId::MOSSY_COBBLESTONE_WALL
+                | BlockId::BRICK_WALL
+                | BlockId::PRISMARINE_WALL
+                | BlockId::RED_SANDSTONE_WALL
+                | BlockId::MOSSY_STONE_BRICK_WALL
+                | BlockId::GRANITE_WALL
+                | BlockId::STONE_BRICK_WALL
+                | BlockId::MUD_BRICK_WALL
+                | BlockId::NETHER_BRICK_WALL
+                | BlockId::ANDESITE_WALL
+                | BlockId::RED_NETHER_BRICK_WALL
+                | BlockId::SANDSTONE_WALL
+                | BlockId::END_STONE_BRICK_WALL
+                | BlockId::DIORITE_WALL
+                | BlockId::BLACKSTONE_WALL
+                | BlockId::POLISHED_BLACKSTONE_BRICK_WALL
+                | BlockId::POLISHED_BLACKSTONE_WALL
+                | BlockId::TUFF_WALL
+                | BlockId::POLISHED_TUFF_WALL
+                | BlockId::TUFF_BRICK_WALL
+                | BlockId::SULFUR_WALL
+                | BlockId::POLISHED_SULFUR_WALL
+                | BlockId::SULFUR_BRICK_WALL
+                | BlockId::CINNABAR_WALL
+                | BlockId::POLISHED_CINNABAR_WALL
+                | BlockId::CINNABAR_BRICK_WALL
+                | BlockId::COBBLED_DEEPSLATE_WALL
+                | BlockId::POLISHED_DEEPSLATE_WALL
+                | BlockId::DEEPSLATE_TILE_WALL
+                | BlockId::DEEPSLATE_BRICK_WALL
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -654101,41 +649469,7 @@ impl BlockProperties for ResinBrickWallLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            379u16
-                | 409u16
-                | 410u16
-                | 824u16
-                | 825u16
-                | 826u16
-                | 827u16
-                | 828u16
-                | 829u16
-                | 830u16
-                | 831u16
-                | 832u16
-                | 833u16
-                | 834u16
-                | 835u16
-                | 836u16
-                | 926u16
-                | 934u16
-                | 940u16
-                | 987u16
-                | 991u16
-                | 996u16
-                | 1002u16
-                | 1006u16
-                | 1010u16
-                | 1015u16
-                | 1019u16
-                | 1023u16
-                | 1155u16
-                | 1159u16
-                | 1163u16
-                | 1167u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "ResinBrickWallLikeProperties"
@@ -654185,7 +649519,7 @@ impl BlockProperties for TntLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 177u16)
+        matches!(block_id, BlockId::TNT)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -654229,7 +649563,7 @@ impl BlockProperties for TntLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 177u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "TntLikeProperties"
@@ -654310,7 +649644,13 @@ impl BlockProperties for BrownMushroomBlockLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 338u16 | 339u16 | 340u16 | 656u16)
+        matches!(
+            block_id,
+            BlockId::BROWN_MUSHROOM_BLOCK
+                | BlockId::RED_MUSHROOM_BLOCK
+                | BlockId::MUSHROOM_STEM
+                | BlockId::CHORUS_PLANT
+        )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -654361,7 +649701,7 @@ impl BlockProperties for BrownMushroomBlockLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 338u16 | 339u16 | 340u16 | 656u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "BrownMushroomBlockLikeProperties"
@@ -654455,7 +649795,10 @@ impl BlockProperties for GlowLichenLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 367u16 | 368u16 | 1031u16)
+        matches!(
+            block_id,
+            BlockId::GLOW_LICHEN | BlockId::RESIN_CLUMP | BlockId::SCULK_VEIN
+        )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -654510,7 +649853,7 @@ impl BlockProperties for GlowLichenLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 367u16 | 368u16 | 1031u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "GlowLichenLikeProperties"
@@ -654591,7 +649934,7 @@ impl BlockProperties for VineLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 366u16)
+        matches!(block_id, BlockId::VINE)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -654641,7 +649984,7 @@ impl BlockProperties for VineLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 366u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "VineLikeProperties"
@@ -654691,28 +650034,28 @@ impl BlockProperties for RedstoneOreLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            271u16
-                | 272u16
-                | 273u16
-                | 395u16
-                | 961u16
-                | 962u16
-                | 963u16
-                | 964u16
-                | 965u16
-                | 966u16
-                | 967u16
-                | 968u16
-                | 969u16
-                | 970u16
-                | 971u16
-                | 972u16
-                | 973u16
-                | 974u16
-                | 975u16
-                | 976u16
-                | 977u16
+            block_id,
+            BlockId::REDSTONE_ORE
+                | BlockId::DEEPSLATE_REDSTONE_ORE
+                | BlockId::REDSTONE_TORCH
+                | BlockId::REDSTONE_LAMP
+                | BlockId::CANDLE_CAKE
+                | BlockId::WHITE_CANDLE_CAKE
+                | BlockId::ORANGE_CANDLE_CAKE
+                | BlockId::MAGENTA_CANDLE_CAKE
+                | BlockId::LIGHT_BLUE_CANDLE_CAKE
+                | BlockId::YELLOW_CANDLE_CAKE
+                | BlockId::LIME_CANDLE_CAKE
+                | BlockId::PINK_CANDLE_CAKE
+                | BlockId::GRAY_CANDLE_CAKE
+                | BlockId::LIGHT_GRAY_CANDLE_CAKE
+                | BlockId::CYAN_CANDLE_CAKE
+                | BlockId::PURPLE_CANDLE_CAKE
+                | BlockId::BLUE_CANDLE_CAKE
+                | BlockId::BROWN_CANDLE_CAKE
+                | BlockId::GREEN_CANDLE_CAKE
+                | BlockId::RED_CANDLE_CAKE
+                | BlockId::BLACK_CANDLE_CAKE
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -654757,30 +650100,7 @@ impl BlockProperties for RedstoneOreLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            271u16
-                | 272u16
-                | 273u16
-                | 395u16
-                | 961u16
-                | 962u16
-                | 963u16
-                | 964u16
-                | 965u16
-                | 966u16
-                | 967u16
-                | 968u16
-                | 969u16
-                | 970u16
-                | 971u16
-                | 972u16
-                | 973u16
-                | 974u16
-                | 975u16
-                | 976u16
-                | 977u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "RedstoneOreLikeProperties"
@@ -654841,24 +650161,24 @@ impl BlockProperties for CandleLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            944u16
-                | 945u16
-                | 946u16
-                | 947u16
-                | 948u16
-                | 949u16
-                | 950u16
-                | 951u16
-                | 952u16
-                | 953u16
-                | 954u16
-                | 955u16
-                | 956u16
-                | 957u16
-                | 958u16
-                | 959u16
-                | 960u16
+            block_id,
+            BlockId::CANDLE
+                | BlockId::WHITE_CANDLE
+                | BlockId::ORANGE_CANDLE
+                | BlockId::MAGENTA_CANDLE
+                | BlockId::LIGHT_BLUE_CANDLE
+                | BlockId::YELLOW_CANDLE
+                | BlockId::LIME_CANDLE
+                | BlockId::PINK_CANDLE
+                | BlockId::GRAY_CANDLE
+                | BlockId::LIGHT_GRAY_CANDLE
+                | BlockId::CYAN_CANDLE
+                | BlockId::PURPLE_CANDLE
+                | BlockId::BLUE_CANDLE
+                | BlockId::BROWN_CANDLE
+                | BlockId::GREEN_CANDLE
+                | BlockId::RED_CANDLE
+                | BlockId::BLACK_CANDLE
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -654919,26 +650239,7 @@ impl BlockProperties for CandleLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            944u16
-                | 945u16
-                | 946u16
-                | 947u16
-                | 948u16
-                | 949u16
-                | 950u16
-                | 951u16
-                | 952u16
-                | 953u16
-                | 954u16
-                | 955u16
-                | 956u16
-                | 957u16
-                | 958u16
-                | 959u16
-                | 960u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "CandleLikeProperties"
@@ -654993,7 +650294,7 @@ impl BlockProperties for PaleHangingMossLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 1190u16)
+        matches!(block_id, BlockId::PALE_HANGING_MOSS)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -655037,7 +650338,7 @@ impl BlockProperties for PaleHangingMossLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 1190u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "PaleHangingMossLikeProperties"
@@ -655081,7 +650382,7 @@ impl BlockProperties for BubbleColumnLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 796u16)
+        matches!(block_id, BlockId::BUBBLE_COLUMN)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -655125,7 +650426,7 @@ impl BlockProperties for BubbleColumnLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 796u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "BubbleColumnLikeProperties"
@@ -655200,46 +650501,46 @@ impl BlockProperties for OakFenceLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            284u16
-                | 341u16
-                | 342u16
-                | 343u16
-                | 344u16
-                | 345u16
-                | 346u16
-                | 347u16
-                | 348u16
-                | 349u16
-                | 359u16
-                | 382u16
-                | 500u16
-                | 501u16
-                | 502u16
-                | 503u16
-                | 504u16
-                | 505u16
-                | 506u16
-                | 507u16
-                | 508u16
-                | 509u16
-                | 510u16
-                | 511u16
-                | 512u16
-                | 513u16
-                | 514u16
-                | 515u16
-                | 637u16
-                | 638u16
-                | 639u16
-                | 640u16
-                | 641u16
-                | 642u16
-                | 643u16
-                | 644u16
-                | 645u16
-                | 889u16
-                | 890u16
+            block_id,
+            BlockId::OAK_FENCE
+                | BlockId::IRON_BARS
+                | BlockId::COPPER_BARS
+                | BlockId::EXPOSED_COPPER_BARS
+                | BlockId::WEATHERED_COPPER_BARS
+                | BlockId::OXIDIZED_COPPER_BARS
+                | BlockId::WAXED_COPPER_BARS
+                | BlockId::WAXED_EXPOSED_COPPER_BARS
+                | BlockId::WAXED_WEATHERED_COPPER_BARS
+                | BlockId::WAXED_OXIDIZED_COPPER_BARS
+                | BlockId::GLASS_PANE
+                | BlockId::NETHER_BRICK_FENCE
+                | BlockId::WHITE_STAINED_GLASS_PANE
+                | BlockId::ORANGE_STAINED_GLASS_PANE
+                | BlockId::MAGENTA_STAINED_GLASS_PANE
+                | BlockId::LIGHT_BLUE_STAINED_GLASS_PANE
+                | BlockId::YELLOW_STAINED_GLASS_PANE
+                | BlockId::LIME_STAINED_GLASS_PANE
+                | BlockId::PINK_STAINED_GLASS_PANE
+                | BlockId::GRAY_STAINED_GLASS_PANE
+                | BlockId::LIGHT_GRAY_STAINED_GLASS_PANE
+                | BlockId::CYAN_STAINED_GLASS_PANE
+                | BlockId::PURPLE_STAINED_GLASS_PANE
+                | BlockId::BLUE_STAINED_GLASS_PANE
+                | BlockId::BROWN_STAINED_GLASS_PANE
+                | BlockId::GREEN_STAINED_GLASS_PANE
+                | BlockId::RED_STAINED_GLASS_PANE
+                | BlockId::BLACK_STAINED_GLASS_PANE
+                | BlockId::SPRUCE_FENCE
+                | BlockId::BIRCH_FENCE
+                | BlockId::JUNGLE_FENCE
+                | BlockId::ACACIA_FENCE
+                | BlockId::CHERRY_FENCE
+                | BlockId::DARK_OAK_FENCE
+                | BlockId::PALE_OAK_FENCE
+                | BlockId::MANGROVE_FENCE
+                | BlockId::BAMBOO_FENCE
+                | BlockId::CRIMSON_FENCE
+                | BlockId::WARPED_FENCE
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -655293,48 +650594,7 @@ impl BlockProperties for OakFenceLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            284u16
-                | 341u16
-                | 342u16
-                | 343u16
-                | 344u16
-                | 345u16
-                | 346u16
-                | 347u16
-                | 348u16
-                | 349u16
-                | 359u16
-                | 382u16
-                | 500u16
-                | 501u16
-                | 502u16
-                | 503u16
-                | 504u16
-                | 505u16
-                | 506u16
-                | 507u16
-                | 508u16
-                | 509u16
-                | 510u16
-                | 511u16
-                | 512u16
-                | 513u16
-                | 514u16
-                | 515u16
-                | 637u16
-                | 638u16
-                | 639u16
-                | 640u16
-                | 641u16
-                | 642u16
-                | 643u16
-                | 644u16
-                | 645u16
-                | 889u16
-                | 890u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "OakFenceLikeProperties"
@@ -655392,7 +650652,7 @@ impl BlockProperties for BarrelLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 839u16)
+        matches!(block_id, BlockId::BARREL)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -655439,7 +650699,7 @@ impl BlockProperties for BarrelLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 839u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "BarrelLikeProperties"
@@ -655485,7 +650745,7 @@ impl BlockProperties for SculkCatalystLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 1032u16)
+        matches!(block_id, BlockId::SCULK_CATALYST)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -655529,7 +650789,7 @@ impl BlockProperties for SculkCatalystLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 1032u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "SculkCatalystLikeProperties"
@@ -655589,7 +650849,7 @@ impl BlockProperties for PistonHeadLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 139u16)
+        matches!(block_id, BlockId::PISTON_HEAD)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -655637,7 +650897,7 @@ impl BlockProperties for PistonHeadLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 139u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "PistonHeadLikeProperties"
@@ -655684,7 +650944,10 @@ impl BlockProperties for GrassBlockLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 8u16 | 11u16 | 373u16)
+        matches!(
+            block_id,
+            BlockId::GRASS_BLOCK | BlockId::PODZOL | BlockId::MYCELIUM
+        )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -655728,7 +650991,7 @@ impl BlockProperties for GrassBlockLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 8u16 | 11u16 | 373u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "GrassBlockLikeProperties"
@@ -655773,25 +651036,25 @@ impl BlockProperties for EndRodLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            655u16
-                | 677u16
-                | 678u16
-                | 679u16
-                | 680u16
-                | 681u16
-                | 682u16
-                | 683u16
-                | 684u16
-                | 685u16
-                | 686u16
-                | 687u16
-                | 688u16
-                | 689u16
-                | 690u16
-                | 691u16
-                | 692u16
-                | 693u16
+            block_id,
+            BlockId::END_ROD
+                | BlockId::SHULKER_BOX
+                | BlockId::WHITE_SHULKER_BOX
+                | BlockId::ORANGE_SHULKER_BOX
+                | BlockId::MAGENTA_SHULKER_BOX
+                | BlockId::LIGHT_BLUE_SHULKER_BOX
+                | BlockId::YELLOW_SHULKER_BOX
+                | BlockId::LIME_SHULKER_BOX
+                | BlockId::PINK_SHULKER_BOX
+                | BlockId::GRAY_SHULKER_BOX
+                | BlockId::LIGHT_GRAY_SHULKER_BOX
+                | BlockId::CYAN_SHULKER_BOX
+                | BlockId::PURPLE_SHULKER_BOX
+                | BlockId::BLUE_SHULKER_BOX
+                | BlockId::BROWN_SHULKER_BOX
+                | BlockId::GREEN_SHULKER_BOX
+                | BlockId::RED_SHULKER_BOX
+                | BlockId::BLACK_SHULKER_BOX
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -655836,27 +651099,7 @@ impl BlockProperties for EndRodLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            655u16
-                | 677u16
-                | 678u16
-                | 679u16
-                | 680u16
-                | 681u16
-                | 682u16
-                | 683u16
-                | 684u16
-                | 685u16
-                | 686u16
-                | 687u16
-                | 688u16
-                | 689u16
-                | 690u16
-                | 691u16
-                | 692u16
-                | 693u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "EndRodLikeProperties"
@@ -655909,7 +651152,7 @@ impl BlockProperties for MovingPistonLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 156u16)
+        matches!(block_id, BlockId::MOVING_PISTON)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -655956,7 +651199,7 @@ impl BlockProperties for MovingPistonLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 156u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "MovingPistonLikeProperties"
@@ -656011,7 +651254,13 @@ impl BlockProperties for AmethystClusterLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 980u16 | 981u16 | 982u16 | 983u16)
+        matches!(
+            block_id,
+            BlockId::AMETHYST_CLUSTER
+                | BlockId::LARGE_AMETHYST_BUD
+                | BlockId::MEDIUM_AMETHYST_BUD
+                | BlockId::SMALL_AMETHYST_BUD
+        )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -656061,7 +651310,7 @@ impl BlockProperties for AmethystClusterLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 980u16 | 981u16 | 982u16 | 983u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "AmethystClusterLikeProperties"
@@ -656116,7 +651365,12 @@ impl BlockProperties for CommandBlockLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 407u16 | 668u16 | 669u16)
+        matches!(
+            block_id,
+            BlockId::COMMAND_BLOCK
+                | BlockId::REPEATING_COMMAND_BLOCK
+                | BlockId::CHAIN_COMMAND_BLOCK
+        )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -656166,7 +651420,7 @@ impl BlockProperties for CommandBlockLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 407u16 | 668u16 | 669u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "CommandBlockLikeProperties"
@@ -656212,7 +651466,7 @@ impl BlockProperties for NetherPortalLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 295u16)
+        matches!(block_id, BlockId::NETHER_PORTAL)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -656256,7 +651510,7 @@ impl BlockProperties for NetherPortalLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 295u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "NetherPortalLikeProperties"
@@ -656317,8 +651571,18 @@ impl BlockProperties for OakLeavesLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            88u16 | 89u16 | 90u16 | 91u16 | 92u16 | 93u16 | 94u16 | 95u16 | 96u16 | 97u16 | 98u16
+            block_id,
+            BlockId::OAK_LEAVES
+                | BlockId::SPRUCE_LEAVES
+                | BlockId::BIRCH_LEAVES
+                | BlockId::JUNGLE_LEAVES
+                | BlockId::ACACIA_LEAVES
+                | BlockId::CHERRY_LEAVES
+                | BlockId::DARK_OAK_LEAVES
+                | BlockId::PALE_OAK_LEAVES
+                | BlockId::MANGROVE_LEAVES
+                | BlockId::AZALEA_LEAVES
+                | BlockId::FLOWERING_AZALEA_LEAVES
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -656385,10 +651649,7 @@ impl BlockProperties for OakLeavesLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            88u16 | 89u16 | 90u16 | 91u16 | 92u16 | 93u16 | 94u16 | 95u16 | 96u16 | 97u16 | 98u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "OakLeavesLikeProperties"
@@ -656446,7 +651707,7 @@ impl BlockProperties for SnifferEggLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 746u16)
+        matches!(block_id, BlockId::SNIFFER_EGG)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -656498,7 +651759,7 @@ impl BlockProperties for SnifferEggLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 746u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "SnifferEggLikeProperties"
@@ -656556,7 +651817,7 @@ impl BlockProperties for TurtleEggLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 745u16)
+        matches!(block_id, BlockId::TURTLE_EGG)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -656620,7 +651881,7 @@ impl BlockProperties for TurtleEggLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 745u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "TurtleEggLikeProperties"
@@ -656698,19 +651959,19 @@ impl BlockProperties for OakHangingSignLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            234u16
-                | 235u16
-                | 236u16
-                | 237u16
-                | 238u16
-                | 239u16
-                | 240u16
-                | 241u16
-                | 242u16
-                | 243u16
-                | 244u16
-                | 245u16
+            block_id,
+            BlockId::OAK_HANGING_SIGN
+                | BlockId::SPRUCE_HANGING_SIGN
+                | BlockId::BIRCH_HANGING_SIGN
+                | BlockId::ACACIA_HANGING_SIGN
+                | BlockId::CHERRY_HANGING_SIGN
+                | BlockId::JUNGLE_HANGING_SIGN
+                | BlockId::DARK_OAK_HANGING_SIGN
+                | BlockId::PALE_OAK_HANGING_SIGN
+                | BlockId::CRIMSON_HANGING_SIGN
+                | BlockId::WARPED_HANGING_SIGN
+                | BlockId::MANGROVE_HANGING_SIGN
+                | BlockId::BAMBOO_HANGING_SIGN
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -656783,21 +652044,7 @@ impl BlockProperties for OakHangingSignLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            234u16
-                | 235u16
-                | 236u16
-                | 237u16
-                | 238u16
-                | 239u16
-                | 240u16
-                | 241u16
-                | 242u16
-                | 243u16
-                | 244u16
-                | 245u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "OakHangingSignLikeProperties"
@@ -656865,8 +652112,15 @@ impl BlockProperties for TallSeagrassLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            137u16 | 557u16 | 558u16 | 559u16 | 560u16 | 561u16 | 562u16 | 664u16
+            block_id,
+            BlockId::TALL_SEAGRASS
+                | BlockId::SUNFLOWER
+                | BlockId::LILAC
+                | BlockId::ROSE_BUSH
+                | BlockId::PEONY
+                | BlockId::TALL_GRASS
+                | BlockId::LARGE_FERN
+                | BlockId::PITCHER_PLANT
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -656911,10 +652165,7 @@ impl BlockProperties for TallSeagrassLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            137u16 | 557u16 | 558u16 | 559u16 | 560u16 | 561u16 | 562u16 | 664u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "TallSeagrassLikeProperties"
@@ -656967,7 +652218,7 @@ impl BlockProperties for PitcherCropLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 663u16)
+        matches!(block_id, BlockId::PITCHER_CROP)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -657024,7 +652275,7 @@ impl BlockProperties for PitcherCropLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 663u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "PitcherCropLikeProperties"
@@ -657079,7 +652330,7 @@ impl BlockProperties for JigsawLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 906u16)
+        matches!(block_id, BlockId::JIGSAW)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -657123,7 +652374,7 @@ impl BlockProperties for JigsawLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 906u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "JigsawLikeProperties"
@@ -657167,7 +652418,7 @@ impl BlockProperties for StructureBlockLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 905u16)
+        matches!(block_id, BlockId::STRUCTURE_BLOCK)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -657211,7 +652462,7 @@ impl BlockProperties for StructureBlockLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 905u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "StructureBlockLikeProperties"
@@ -657261,7 +652512,7 @@ impl BlockProperties for DaylightDetectorLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 474u16)
+        matches!(block_id, BlockId::DAYLIGHT_DETECTOR)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -657329,7 +652580,7 @@ impl BlockProperties for DaylightDetectorLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 474u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "DaylightDetectorLikeProperties"
@@ -657395,7 +652646,10 @@ impl BlockProperties for WaterCauldronLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 388u16 | 390u16)
+        matches!(
+            block_id,
+            BlockId::WATER_CAULDRON | BlockId::POWDER_SNOW_CAULDRON
+        )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -657447,7 +652701,7 @@ impl BlockProperties for WaterCauldronLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 388u16 | 390u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "WaterCauldronLikeProperties"
@@ -657519,7 +652773,7 @@ impl BlockProperties for MangrovePropaguleLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 33u16)
+        matches!(block_id, BlockId::MANGROVE_PROPAGULE)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -657588,7 +652842,7 @@ impl BlockProperties for MangrovePropaguleLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 33u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "MangrovePropaguleLikeProperties"
@@ -657658,8 +652912,17 @@ impl BlockProperties for LanternLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            849u16 | 850u16 | 851u16 | 852u16 | 853u16 | 854u16 | 855u16 | 856u16 | 857u16 | 858u16
+            block_id,
+            BlockId::LANTERN
+                | BlockId::SOUL_LANTERN
+                | BlockId::COPPER_LANTERN
+                | BlockId::EXPOSED_COPPER_LANTERN
+                | BlockId::WEATHERED_COPPER_LANTERN
+                | BlockId::OXIDIZED_COPPER_LANTERN
+                | BlockId::WAXED_COPPER_LANTERN
+                | BlockId::WAXED_EXPOSED_COPPER_LANTERN
+                | BlockId::WAXED_WEATHERED_COPPER_LANTERN
+                | BlockId::WAXED_OXIDIZED_COPPER_LANTERN
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -657710,10 +652973,7 @@ impl BlockProperties for LanternLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            849u16 | 850u16 | 851u16 | 852u16 | 853u16 | 854u16 | 855u16 | 856u16 | 857u16 | 858u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "LanternLikeProperties"
@@ -657768,7 +653028,7 @@ impl BlockProperties for RailLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 222u16)
+        matches!(block_id, BlockId::RAIL)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -657818,7 +653078,7 @@ impl BlockProperties for RailLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 222u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "RailLikeProperties"
@@ -657886,7 +653146,7 @@ impl BlockProperties for PointedDripstoneLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 1133u16 | 1134u16)
+        matches!(block_id, BlockId::POINTED_DRIPSTONE | BlockId::SULFUR_SPIKE)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -657937,7 +653197,7 @@ impl BlockProperties for PointedDripstoneLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 1133u16 | 1134u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "PointedDripstoneLikeProperties"
@@ -657987,8 +653247,15 @@ impl BlockProperties for OakSaplingLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            25u16 | 26u16 | 27u16 | 28u16 | 29u16 | 30u16 | 31u16 | 32u16
+            block_id,
+            BlockId::OAK_SAPLING
+                | BlockId::SPRUCE_SAPLING
+                | BlockId::BIRCH_SAPLING
+                | BlockId::JUNGLE_SAPLING
+                | BlockId::ACACIA_SAPLING
+                | BlockId::CHERRY_SAPLING
+                | BlockId::DARK_OAK_SAPLING
+                | BlockId::PALE_OAK_SAPLING
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -658040,10 +653307,7 @@ impl BlockProperties for OakSaplingLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            25u16 | 26u16 | 27u16 | 28u16 | 29u16 | 30u16 | 31u16 | 32u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "OakSaplingLikeProperties"
@@ -658107,7 +653371,7 @@ impl BlockProperties for BambooLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 792u16)
+        matches!(block_id, BlockId::BAMBOO)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -658169,7 +653433,7 @@ impl BlockProperties for BambooLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 792u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "BambooLikeProperties"
@@ -658229,8 +653493,12 @@ impl BlockProperties for WheatLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            207u16 | 364u16 | 365u16 | 441u16 | 442u16
+            block_id,
+            BlockId::WHEAT
+                | BlockId::PUMPKIN_STEM
+                | BlockId::MELON_STEM
+                | BlockId::CARROTS
+                | BlockId::POTATOES
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -658288,10 +653556,7 @@ impl BlockProperties for WheatLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            207u16 | 364u16 | 365u16 | 441u16 | 442u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "WheatLikeProperties"
@@ -658354,7 +653619,7 @@ impl BlockProperties for SeaPickleLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 788u16)
+        matches!(block_id, BlockId::SEA_PICKLE)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -658413,7 +653678,7 @@ impl BlockProperties for SeaPickleLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 788u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "SeaPickleLikeProperties"
@@ -658468,40 +653733,40 @@ impl BlockProperties for MangroveRootsLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            58u16
-                | 524u16
-                | 758u16
-                | 759u16
-                | 760u16
-                | 761u16
-                | 762u16
-                | 763u16
-                | 764u16
-                | 765u16
-                | 766u16
-                | 767u16
-                | 768u16
-                | 769u16
-                | 770u16
-                | 771u16
-                | 772u16
-                | 773u16
-                | 774u16
-                | 775u16
-                | 776u16
-                | 777u16
-                | 790u16
-                | 1092u16
-                | 1093u16
-                | 1094u16
-                | 1095u16
-                | 1096u16
-                | 1097u16
-                | 1098u16
-                | 1099u16
-                | 1148u16
-                | 1187u16
+            block_id,
+            BlockId::MANGROVE_ROOTS
+                | BlockId::BARRIER
+                | BlockId::DEAD_TUBE_CORAL
+                | BlockId::DEAD_BRAIN_CORAL
+                | BlockId::DEAD_BUBBLE_CORAL
+                | BlockId::DEAD_FIRE_CORAL
+                | BlockId::DEAD_HORN_CORAL
+                | BlockId::TUBE_CORAL
+                | BlockId::BRAIN_CORAL
+                | BlockId::BUBBLE_CORAL
+                | BlockId::FIRE_CORAL
+                | BlockId::HORN_CORAL
+                | BlockId::DEAD_TUBE_CORAL_FAN
+                | BlockId::DEAD_BRAIN_CORAL_FAN
+                | BlockId::DEAD_BUBBLE_CORAL_FAN
+                | BlockId::DEAD_FIRE_CORAL_FAN
+                | BlockId::DEAD_HORN_CORAL_FAN
+                | BlockId::TUBE_CORAL_FAN
+                | BlockId::BRAIN_CORAL_FAN
+                | BlockId::BUBBLE_CORAL_FAN
+                | BlockId::FIRE_CORAL_FAN
+                | BlockId::HORN_CORAL_FAN
+                | BlockId::CONDUIT
+                | BlockId::COPPER_GRATE
+                | BlockId::EXPOSED_COPPER_GRATE
+                | BlockId::WEATHERED_COPPER_GRATE
+                | BlockId::OXIDIZED_COPPER_GRATE
+                | BlockId::WAXED_COPPER_GRATE
+                | BlockId::WAXED_EXPOSED_COPPER_GRATE
+                | BlockId::WAXED_WEATHERED_COPPER_GRATE
+                | BlockId::WAXED_OXIDIZED_COPPER_GRATE
+                | BlockId::HANGING_ROOTS
+                | BlockId::HEAVY_CORE
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -658549,42 +653814,7 @@ impl BlockProperties for MangroveRootsLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            58u16
-                | 524u16
-                | 758u16
-                | 759u16
-                | 760u16
-                | 761u16
-                | 762u16
-                | 763u16
-                | 764u16
-                | 765u16
-                | 766u16
-                | 767u16
-                | 768u16
-                | 769u16
-                | 770u16
-                | 771u16
-                | 772u16
-                | 773u16
-                | 774u16
-                | 775u16
-                | 776u16
-                | 777u16
-                | 790u16
-                | 1092u16
-                | 1093u16
-                | 1094u16
-                | 1095u16
-                | 1096u16
-                | 1097u16
-                | 1098u16
-                | 1099u16
-                | 1148u16
-                | 1187u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "MangroveRootsLikeProperties"
@@ -658638,19 +653868,19 @@ impl BlockProperties for OakSignLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            210u16
-                | 211u16
-                | 212u16
-                | 213u16
-                | 214u16
-                | 215u16
-                | 216u16
-                | 217u16
-                | 218u16
-                | 219u16
-                | 901u16
-                | 902u16
+            block_id,
+            BlockId::OAK_SIGN
+                | BlockId::SPRUCE_SIGN
+                | BlockId::BIRCH_SIGN
+                | BlockId::ACACIA_SIGN
+                | BlockId::CHERRY_SIGN
+                | BlockId::JUNGLE_SIGN
+                | BlockId::DARK_OAK_SIGN
+                | BlockId::PALE_OAK_SIGN
+                | BlockId::MANGROVE_SIGN
+                | BlockId::BAMBOO_SIGN
+                | BlockId::CRIMSON_SIGN
+                | BlockId::WARPED_SIGN
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -658722,21 +653952,7 @@ impl BlockProperties for OakSignLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            210u16
-                | 211u16
-                | 212u16
-                | 213u16
-                | 214u16
-                | 215u16
-                | 216u16
-                | 217u16
-                | 218u16
-                | 219u16
-                | 901u16
-                | 902u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "OakSignLikeProperties"
@@ -658811,7 +654027,7 @@ impl BlockProperties for LightLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 525u16)
+        matches!(block_id, BlockId::LIGHT)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -658882,7 +654098,7 @@ impl BlockProperties for LightLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 525u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "LightLikeProperties"
@@ -658948,7 +654164,7 @@ impl BlockProperties for TestBlockLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 907u16)
+        matches!(block_id, BlockId::TEST_BLOCK)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -658992,7 +654208,7 @@ impl BlockProperties for TestBlockLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 907u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "TestBlockLikeProperties"
@@ -659037,23 +654253,23 @@ impl BlockProperties for WhiteBannerLikeProperties {
         Self: Sized,
     {
         matches!(
-            block_id.as_u16(),
-            563u16
-                | 564u16
-                | 565u16
-                | 566u16
-                | 567u16
-                | 568u16
-                | 569u16
-                | 570u16
-                | 571u16
-                | 572u16
-                | 573u16
-                | 574u16
-                | 575u16
-                | 576u16
-                | 577u16
-                | 578u16
+            block_id,
+            BlockId::WHITE_BANNER
+                | BlockId::ORANGE_BANNER
+                | BlockId::MAGENTA_BANNER
+                | BlockId::LIGHT_BLUE_BANNER
+                | BlockId::YELLOW_BANNER
+                | BlockId::LIME_BANNER
+                | BlockId::PINK_BANNER
+                | BlockId::GRAY_BANNER
+                | BlockId::LIGHT_GRAY_BANNER
+                | BlockId::CYAN_BANNER
+                | BlockId::PURPLE_BANNER
+                | BlockId::BLUE_BANNER
+                | BlockId::BROWN_BANNER
+                | BlockId::GREEN_BANNER
+                | BlockId::RED_BANNER
+                | BlockId::BLACK_BANNER
         )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
@@ -659119,25 +654335,7 @@ impl BlockProperties for WhiteBannerLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(
-            block.id.as_u16(),
-            563u16
-                | 564u16
-                | 565u16
-                | 566u16
-                | 567u16
-                | 568u16
-                | 569u16
-                | 570u16
-                | 571u16
-                | 572u16
-                | 573u16
-                | 574u16
-                | 575u16
-                | 576u16
-                | 577u16
-                | 578u16
-        ) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "WhiteBannerLikeProperties"
@@ -659199,7 +654397,7 @@ impl BlockProperties for WaterLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 35u16 | 36u16)
+        matches!(block_id, BlockId::WATER | BlockId::LAVA)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -659264,7 +654462,7 @@ impl BlockProperties for WaterLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 35u16 | 36u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "WaterLikeProperties"
@@ -659326,7 +654524,10 @@ impl BlockProperties for KelpLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 742u16 | 878u16 | 880u16)
+        matches!(
+            block_id,
+            BlockId::KELP | BlockId::WEEPING_VINES | BlockId::TWISTING_VINES
+        )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -659401,7 +654602,7 @@ impl BlockProperties for KelpLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 742u16 | 878u16 | 880u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "KelpLikeProperties"
@@ -659473,7 +654674,12 @@ impl BlockProperties for LightWeightedPressurePlateLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 471u16 | 472u16 | 910u16)
+        matches!(
+            block_id,
+            BlockId::LIGHT_WEIGHTED_PRESSURE_PLATE
+                | BlockId::HEAVY_WEIGHTED_PRESSURE_PLATE
+                | BlockId::TARGET
+        )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -659538,7 +654744,7 @@ impl BlockProperties for LightWeightedPressurePlateLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 471u16 | 472u16 | 910u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "LightWeightedPressurePlateLikeProperties"
@@ -659600,7 +654806,7 @@ impl BlockProperties for TorchflowerCropLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 662u16)
+        matches!(block_id, BlockId::TORCHFLOWER_CROP)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -659651,7 +654857,7 @@ impl BlockProperties for TorchflowerCropLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 662u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "TorchflowerCropLikeProperties"
@@ -659699,7 +654905,13 @@ impl BlockProperties for NetherWartLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 384u16 | 665u16 | 670u16 | 861u16)
+        matches!(
+            block_id,
+            BlockId::NETHER_WART
+                | BlockId::BEETROOTS
+                | BlockId::FROSTED_ICE
+                | BlockId::SWEET_BERRY_BUSH
+        )
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -659752,7 +654964,7 @@ impl BlockProperties for NetherWartLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 384u16 | 665u16 | 670u16 | 861u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "NetherWartLikeProperties"
@@ -659805,7 +655017,7 @@ impl BlockProperties for PotentSulfurLikeProperties {
     where
         Self: Sized,
     {
-        matches!(block_id.as_u16(), 999u16)
+        matches!(block_id, BlockId::POTENT_SULFUR)
     }
     fn to_state_id(&self, block: &Block) -> BlockStateId {
         if !Self::handles_block_id(block.id) {
@@ -659849,7 +655061,7 @@ impl BlockProperties for PotentSulfurLikeProperties {
     #[allow(clippy::manual_range_patterns)]
     fn from_props(props: &[(&str, &str)], block: &Block) -> Self {
         #[cfg(debug_assertions)]
-        if !matches!(block.id.as_u16(), 999u16) {
+        if !Self::handles_block_id(block.id) {
             panic!(
                 "{} is not a valid block for {}",
                 block.name, "PotentSulfurLikeProperties"

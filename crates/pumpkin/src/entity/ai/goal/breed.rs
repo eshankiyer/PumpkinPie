@@ -6,7 +6,7 @@ use crate::entity::{
     EntityBase, ai::pathfinder::NavigatorGoal, experience_orb::ExperienceOrbEntity, mob::Mob,
 };
 
-use super::{Controls, Goal, GoalFuture};
+use super::{Controls, Goal};
 
 pub type MatePredicate = fn(&dyn Mob, &dyn EntityBase) -> bool;
 
@@ -58,10 +58,7 @@ impl BreedGoal {
 
         for candidate in nearby.values() {
             let c_entity = candidate.get_entity();
-            if c_entity.entity_uuid == my_uuid {
-                continue;
-            }
-            if c_entity.entity_type != my_type {
+            if c_entity.entity_uuid == my_uuid || c_entity.entity_type != my_type {
                 continue;
             }
             let Some(candidate_mob) = candidate.get_mob() else {
@@ -86,27 +83,25 @@ impl BreedGoal {
             }
         }
 
-        closest.map(|(_, e)| e)
+        closest.map(|(_, entity)| entity)
     }
 
-    async fn breed(mob: &dyn Mob, mate: &dyn EntityBase) {
+    fn breed(mob: &dyn Mob, mate: &dyn EntityBase) {
         let mob_entity = mob.get_mob_entity();
-        if !mob_entity.try_claim_love() {
-            return;
-        }
-        if !mate.try_claim_love() {
+        if !mob_entity.try_claim_love() || !mate.try_claim_love() {
             return;
         }
 
         let entity = mob.get_entity();
         let world = entity.world.load();
-
         mob_entity
             .breeding_cooldown
             .store(6000, std::sync::atomic::Ordering::Relaxed);
 
         let parent_pos = entity.pos.load();
-        let baby = mob.create_offspring(mate, &world).await;
+        // This fork-only hook preserves species-specific offspring (including variants and
+        // non-entity results) while using the upstream synchronous goal boundary.
+        let baby = mob.create_offspring(mate, &world);
 
         let player = mob_entity
             .breeder
@@ -130,25 +125,23 @@ impl BreedGoal {
                     })
             });
         if let Some(player) = player {
-            player
-                .increment_stat(
-                    pumpkin_data::statistic::StatisticCategory::Custom,
-                    pumpkin_data::statistic::CustomStatistic::AnimalsBred as i32,
-                    1,
-                )
-                .await;
-
-            player
-                .trigger_advancement(
-                    crate::entity::player::advancement::trigger::AdvancementTrigger::BredAnimal {
-                        parent_type: format!("minecraft:{}", entity.entity_type.resource_name),
-                    },
-                )
-                .await;
+            let entity_type_name = entity.entity_type.resource_name;
+            player.increment_stat(
+                pumpkin_data::statistic::StatisticCategory::Custom,
+                pumpkin_data::statistic::CustomStatistic::AnimalsBred as i32,
+                1,
+            );
+            player.trigger_advancement_criterion(
+                pumpkin_data::advancement::Advancement::HUSBANDRY_BREED_AN_ANIMAL,
+                "bred",
+            );
+            player.trigger_advancement_criterion(
+                pumpkin_data::advancement::Advancement::HUSBANDRY_BRED_ALL_ANIMALS,
+                &format!("minecraft:{entity_type_name}"),
+            );
         }
 
         mob.on_bred(mate);
-
         let baby = baby.inspect(|baby| {
             if let Some(baby_mob) = baby.get_mob() {
                 baby_mob.set_persistence_required();
@@ -160,7 +153,6 @@ impl BreedGoal {
         // Vanilla `Animal.finalizeSpawnChildFromBreeding` (`Animal.java:219-232`): both parents
         // are aged back to 6000, their love state is cleared, entity event 18 plays the heart
         // particles, and the breeding XP orb only drops when the mob-drops gamerule is enabled.
-        // The offspring is added to the level afterwards.
         mob.get_entity().set_age(6000);
         mob.reset_love();
         mate.get_entity().set_age(6000);
@@ -176,93 +168,78 @@ impl BreedGoal {
 
         if world.level_info.load().game_rules.mob_drops {
             let xp = mob.get_random().random_range(1u32..=7);
-            ExperienceOrbEntity::spawn(&world, parent_pos, xp).await;
+            ExperienceOrbEntity::spawn(&world, parent_pos, xp);
         }
 
-        mob.spawn_breeding_result(baby, &world, parent_pos).await;
+        mob.spawn_breeding_result(baby, &world, parent_pos);
     }
 }
 
 impl Goal for BreedGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            let mob_entity = mob.get_mob_entity();
-            if !mob_entity.is_breeding_ready() || !mob_entity.is_in_love() || !mob.can_breed() {
-                return false;
-            }
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        let mob_entity = mob.get_mob_entity();
+        if !mob_entity.is_breeding_ready() || !mob_entity.is_in_love() || !mob.can_breed() {
+            return false;
+        }
 
-            self.mate = Self::find_mate(mob, self.mate_predicate);
-            self.mate.is_some()
-        })
+        self.mate = Self::find_mate(mob, self.mate_predicate);
+        self.mate.is_some()
     }
 
-    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async {
-            let Some(mate) = &self.mate else {
-                return false;
-            };
-
-            if !mate.get_entity().is_alive() || mate.is_panicking() {
-                return false;
-            }
-
-            mate.is_in_love() && self.timer < 60
-        })
+    fn should_continue(&self, _mob: &dyn Mob) -> bool {
+        let Some(mate) = &self.mate else {
+            return false;
+        };
+        if !mate.get_entity().is_alive() || mate.is_panicking() {
+            return false;
+        }
+        mate.is_in_love() && self.timer < 60
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.timer = 0;
-        })
+    fn start(&mut self, _mob: &dyn Mob) {
+        self.timer = 0;
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.mate = None;
-            self.timer = 0;
-            let mut navigator = mob
-                .get_mob_entity()
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.mate = None;
+        self.timer = 0;
+        let mut navigator = mob
+            .get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        navigator.stop();
+    }
+
+    fn tick(&mut self, mob: &dyn Mob) {
+        let Some(mate) = &self.mate else {
+            return;
+        };
+        let mob_entity = mob.get_mob_entity();
+        let mate_pos = mate.get_entity().pos.load();
+
+        {
+            let mut look_control = mob_entity
+                .look_control
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            look_control.look_at_entity(mob, mate);
+        }
+
+        let my_pos = mob.get_entity().pos.load();
+        let dist_sq = my_pos.squared_distance_to_vec(&mate_pos);
+        {
+            let mut navigator = mob_entity
                 .navigator
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            navigator.stop();
-        })
-    }
+            navigator.set_progress(NavigatorGoal::new(my_pos, mate_pos, self.speed));
+        }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            let Some(mate) = &self.mate else {
-                return;
-            };
-
-            let mob_entity = mob.get_mob_entity();
-            let mate_pos = mate.get_entity().pos.load();
-
-            {
-                let mut look_control = mob_entity
-                    .look_control
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                look_control.look_at_entity(mob, mate);
-            };
-
-            let my_pos = mob.get_entity().pos.load();
-            let dist_sq = my_pos.squared_distance_to_vec(&mate_pos);
-
-            {
-                let mut navigator = mob_entity
-                    .navigator
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                navigator.set_progress(NavigatorGoal::new(my_pos, mate_pos, self.speed));
-            };
-
-            self.timer += 1;
-
-            if self.timer >= 60 && dist_sq < 9.0 {
-                Self::breed(mob, mate.as_ref()).await;
-            }
-        })
+        self.timer += 1;
+        if self.timer >= 60 && dist_sq < 9.0 {
+            Self::breed(mob, mate.as_ref());
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {

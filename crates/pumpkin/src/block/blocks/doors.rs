@@ -1,5 +1,3 @@
-use crate::entity::EntityBase;
-use crate::world::game_event::{GameEventContext, emit_game_event};
 use pumpkin_data::BlockDirection;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::Axis;
@@ -7,517 +5,256 @@ use pumpkin_data::block_properties::BlockProperties;
 use pumpkin_data::block_properties::DoorHinge;
 use pumpkin_data::block_properties::DoubleBlockHalf;
 use pumpkin_data::block_properties::HorizontalFacing;
-use pumpkin_data::game_event::GameEvent;
-use pumpkin_data::sound::Sound;
-use pumpkin_data::sound::SoundCategory;
+use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::Taggable;
 use pumpkin_data::{Block, tag};
 use pumpkin_macros::pumpkin_block_from_tag;
+use pumpkin_util::GameMode;
 use pumpkin_util::math::position::BlockPos;
-use pumpkin_world::world::BlockAccessor;
-use pumpkin_world::world::BlockFlags;
+use pumpkin_world::world::{BlockAccessor, BlockFlags};
 use std::sync::Arc;
 
-use crate::block::BlockBehaviour;
-use crate::block::BlockFuture;
-use crate::block::BrokenArgs;
-use crate::block::CanPlaceAtArgs;
-use crate::block::ExplodeArgs;
-use crate::block::GetStateForNeighborUpdateArgs;
-use crate::block::NormalUseArgs;
-use crate::block::OnNeighborUpdateArgs;
-use crate::block::OnPlaceArgs;
-use crate::block::OnStateReplacedArgs;
-use crate::block::PlacedArgs;
-use crate::block::RandomTickArgs;
 use crate::block::blocks::copper_weathering;
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::registry::BlockActionResult;
+use crate::block::{BlockBehaviour, BrokenArgs, CanPlaceAtArgs, ExplodeArgs, GetStateForNeighborUpdateArgs, NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs, OnStateReplacedArgs, PlacedArgs, RandomTickArgs};
 use crate::entity::player::Player;
-use pumpkin_protocol::java::server::play::SUseItemOn;
-
 use crate::world::World;
+use pumpkin_protocol::java::server::play::SUseItemOn;
 
 type DoorProperties = pumpkin_data::block_properties::OakDoorLikeProperties;
 
-/// Sets a door to an absolute open state (true = open, false = closed).
-/// Does not play sound to a specific player; use `set_door_open_for_world` for that.
-pub async fn set_door_open(world: &Arc<World>, block_pos: &BlockPos, open: bool) {
+fn emit_door_event(world: &World, open: bool, position: &BlockPos) {
+    world.emit_game_event(if open { "block_open" } else { "block_close" }, position.to_centered_f64());
+}
+
+pub fn set_door_open(world: &Arc<World>, block_pos: &BlockPos, open: bool) {
     let (block, block_state) = world.get_block_and_state_id(block_pos);
     let mut door_props = DoorProperties::from_state_id(block_state, block);
-
-    // Only update if state actually changes
     if door_props.open == open {
         return;
     }
-
     door_props.open = open;
-
     let other_half = match door_props.half {
         DoubleBlockHalf::Upper => BlockDirection::Down,
         DoubleBlockHalf::Lower => BlockDirection::Up,
     };
     let other_pos = block_pos.offset(other_half.to_offset());
-
     let (other_block, other_state_id) = world.get_block_and_state_id(&other_pos);
     let mut other_door_props = DoorProperties::from_state_id(other_state_id, other_block);
     other_door_props.open = open;
-
     world.play_block_sound(get_sound(block, open), SoundCategory::Blocks, *block_pos);
-
-    // DoorBlock.java:220 (`setOpen`): fires BLOCK_OPEN/BLOCK_CLOSE with the caller's source
-    // entity; simplified to none() since this entry point isn't passed one (matches the
-    // documented simplification other emission sites in this codebase already use).
-    emit_game_event(
-        world,
-        if open {
-            GameEvent::BlockOpen
-        } else {
-            GameEvent::BlockClose
-        },
-        block_pos.to_centered_f64(),
-        GameEventContext::none(),
-    )
-    .await;
-
-    world
-        .set_block_state(
-            block_pos,
-            door_props.to_state_id(block),
-            BlockFlags::NOTIFY_LISTENERS,
-        )
-        .await;
-    world
-        .set_block_state(
-            &other_pos,
-            other_door_props.to_state_id(other_block),
-            BlockFlags::NOTIFY_LISTENERS,
-        )
-        .await;
+    // DoorBlock.java:220 (`setOpen`) emits the open/close game event.
+    emit_door_event(world, open, block_pos);
+    world.set_block_state(block_pos, door_props.to_state_id(block), BlockFlags::NOTIFY_LISTENERS);
+    if other_block.id == block.id {
+        world.set_block_state(&other_pos, other_door_props.to_state_id(other_block), BlockFlags::NOTIFY_LISTENERS);
+    }
 }
 
-async fn toggle_door(player: &Arc<Player>, world: &Arc<World>, block_pos: &BlockPos) {
+fn toggle_door(player: &Player, world: &Arc<World>, block_pos: &BlockPos) {
     let (block, block_state) = world.get_block_and_state_id(block_pos);
     let mut door_props = DoorProperties::from_state_id(block_state, block);
-    let new_open_state = !door_props.open;
-    door_props.open = new_open_state;
-
+    door_props.open = !door_props.open;
     let other_half = match door_props.half {
         DoubleBlockHalf::Upper => BlockDirection::Down,
         DoubleBlockHalf::Lower => BlockDirection::Up,
     };
     let other_pos = block_pos.offset(other_half.to_offset());
-
     let (other_block, other_state_id) = world.get_block_and_state_id(&other_pos);
     let mut other_door_props = DoorProperties::from_state_id(other_state_id, other_block);
-    other_door_props.open = new_open_state;
-
-    world.play_block_sound_expect(
-        player,
-        get_sound(block, new_open_state),
-        SoundCategory::Blocks,
-        *block_pos,
-    );
-
-    // DoorBlock.java:208 (`useWithoutItem`): fires BLOCK_OPEN/BLOCK_CLOSE with the player as
-    // source entity on every manual toggle.
-    emit_game_event(
-        world,
-        if new_open_state {
-            GameEvent::BlockOpen
-        } else {
-            GameEvent::BlockClose
-        },
-        block_pos.to_centered_f64(),
-        GameEventContext::of_entity(player.clone()),
-    )
-    .await;
-
-    world
-        .set_block_state(
-            block_pos,
-            door_props.to_state_id(block),
-            BlockFlags::NOTIFY_LISTENERS,
-        )
-        .await;
-    world
-        .set_block_state(
-            &other_pos,
-            other_door_props.to_state_id(other_block),
-            BlockFlags::NOTIFY_LISTENERS,
-        )
-        .await;
+    other_door_props.open = door_props.open;
+    world.play_block_sound_expect(player, get_sound(block, door_props.open), SoundCategory::Blocks, *block_pos);
+    // DoorBlock.java:208 (`useWithoutItem`) emits the event with the player as source.
+    emit_door_event(world, door_props.open, block_pos);
+    world.set_block_state(block_pos, door_props.to_state_id(block), BlockFlags::NOTIFY_LISTENERS);
+    world.set_block_state(&other_pos, other_door_props.to_state_id(other_block), BlockFlags::NOTIFY_LISTENERS);
 }
 
 fn can_open_door(block: &Block) -> bool {
-    if block == &Block::IRON_DOOR {
-        return false;
-    }
-
-    true
+    block != &Block::IRON_DOOR
 }
 
-// Todo: The sounds should be from BlockSetType
 fn get_sound(block: &Block, open: bool) -> Sound {
     if open {
-        if block.has_tag(&tag::Block::MINECRAFT_WOODEN_DOORS) {
-            Sound::BlockWoodenDoorOpen
-        } else if block == &Block::IRON_DOOR {
-            Sound::BlockIronDoorOpen
-        } else {
-            Sound::BlockCopperDoorOpen
-        }
-    } else if block.has_tag(&tag::Block::MINECRAFT_WOODEN_DOORS) {
-        Sound::BlockWoodenDoorClose
-    } else if block == &Block::IRON_DOOR {
-        Sound::BlockIronDoorClose
-    } else {
-        Sound::BlockCopperDoorClose
-    }
+        if block.has_tag(&tag::Block::MINECRAFT_WOODEN_DOORS) { Sound::BlockWoodenDoorOpen }
+        else if block == &Block::IRON_DOOR { Sound::BlockIronDoorOpen }
+        else { Sound::BlockCopperDoorOpen }
+    } else if block.has_tag(&tag::Block::MINECRAFT_WOODEN_DOORS) { Sound::BlockWoodenDoorClose }
+    else if block == &Block::IRON_DOOR { Sound::BlockIronDoorClose }
+    else { Sound::BlockCopperDoorClose }
 }
 
 #[expect(clippy::pedantic)]
 #[inline]
-async fn get_hinge(
-    world: &World,
-    pos: &BlockPos,
-    use_item: &SUseItemOn,
-    facing: HorizontalFacing,
-) -> DoorHinge {
+fn get_hinge(world: &World, pos: &BlockPos, use_item: &SUseItemOn, facing: HorizontalFacing) -> DoorHinge {
     let top_pos = pos.up();
     let left_dir = facing.rotate_counter_clockwise();
     let left_pos = pos.offset(left_dir.to_offset());
     let (left_block, left_state) = world.get_block_and_state(&left_pos);
-    let top_facing = top_pos.offset(facing.to_offset());
-    let top_state = world.get_block_state(&top_facing);
+    let top_state = world.get_block_state(&top_pos.offset(facing.to_offset()));
     let right_dir = facing.rotate_clockwise();
     let right_pos = pos.offset(right_dir.to_offset());
     let (right_block, right_state) = world.get_block_and_state(&right_pos);
-    let top_right = top_pos.offset(facing.to_offset());
-    let top_right_state = world.get_block_state(&top_right);
-
-    let has_left_door = world
-        .get_block(&left_pos)
-        .has_tag(&tag::Block::MINECRAFT_DOORS)
+    let top_right_state = world.get_block_state(&top_pos.offset(facing.to_offset()));
+    let has_left_door = left_block.has_tag(&tag::Block::MINECRAFT_DOORS)
         && DoorProperties::from_state_id(left_state.id, left_block).half == DoubleBlockHalf::Lower;
-
-    let has_right_door = world
-        .get_block(&right_pos)
-        .has_tag(&tag::Block::MINECRAFT_DOORS)
-        && DoorProperties::from_state_id(right_state.id, right_block).half
-            == DoubleBlockHalf::Lower;
-
+    let has_right_door = right_block.has_tag(&tag::Block::MINECRAFT_DOORS)
+        && DoorProperties::from_state_id(right_state.id, right_block).half == DoubleBlockHalf::Lower;
     let score = -(left_state.is_full_cube() as i32) - (top_state.is_full_cube() as i32)
-        + right_state.is_full_cube() as i32
-        + top_right_state.is_full_cube() as i32;
-
+        + right_state.is_full_cube() as i32 + top_right_state.is_full_cube() as i32;
     if (!has_left_door || has_right_door) && score <= 0 {
         if (!has_right_door || has_left_door) && score >= 0 {
             let offset = facing.to_offset();
             let hit = use_item.cursor_pos;
-            if (offset.x >= 0 || hit.z > 0.5)
-                && (offset.x <= 0 || hit.z < 0.5)
-                && (offset.z >= 0 || hit.x < 0.5)
-                && (offset.z <= 0 || hit.x > 0.5)
-            {
-                DoorHinge::Left
-            } else {
-                DoorHinge::Right
-            }
-        } else {
-            DoorHinge::Left
-        }
-    } else {
-        DoorHinge::Right
-    }
+            if (offset.x >= 0 || hit.z > 0.5) && (offset.x <= 0 || hit.z < 0.5)
+                && (offset.z >= 0 || hit.x < 0.5) && (offset.z <= 0 || hit.x > 0.5) { DoorHinge::Left }
+            else { DoorHinge::Right }
+        } else { DoorHinge::Left }
+    } else { DoorHinge::Right }
 }
 
 #[pumpkin_block_from_tag("minecraft:doors")]
 pub struct DoorBlock;
 
+impl DoorBlock {
+    #[must_use]
+    pub fn is_wooden_door(world: &World, block_pos: &BlockPos) -> bool {
+        world.get_block(block_pos).has_tag(&tag::Block::MINECRAFT_WOODEN_DOORS)
+    }
+
+    #[must_use]
+    pub fn is_open(world: &World, block_pos: &BlockPos) -> bool {
+        let (block, state) = world.get_block_and_state_id(block_pos);
+        block.has_tag(&tag::Block::MINECRAFT_DOORS)
+            && DoorProperties::from_state_id(state, block).open
+    }
+}
+
 impl BlockBehaviour for DoorBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let powered = block_receives_redstone_power(args.world, args.position).await
-                || block_receives_redstone_power(args.world, &args.position.up()).await;
-
-            let direction = args.player.get_entity().get_horizontal_facing();
-            let hinge = get_hinge(args.world, args.position, args.use_item_on, direction).await;
-
-            let mut door_props = DoorProperties::default(args.block);
-            door_props.half = DoubleBlockHalf::Lower;
-            door_props.facing = direction;
-            door_props.hinge = hinge;
-            door_props.powered = powered;
-            door_props.open = powered;
-
-            door_props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = DoorProperties::default(args.block);
+        let facing = args.player.living_entity.entity.get_horizontal_facing().opposite();
+        props.facing = facing;
+        props.half = DoubleBlockHalf::Lower;
+        props.hinge = get_hinge(args.world, args.position, args.use_item_on, facing);
+        props.open = false;
+        props.powered = false;
+        props.to_state_id(args.block)
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
         has_support(args.block_accessor, args.position)
-            && args
-                .block_accessor
-                .get_block_state(&args.position.up())
-                .replaceable()
+            && args.block_accessor.get_block_state(&args.position.up()).replaceable()
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let mut door_props = DoorProperties::from_state_id(args.state_id, args.block);
-            door_props.half = DoubleBlockHalf::Upper;
-
-            args.world
-                .set_block_state(
-                    &args.position.offset(BlockDirection::Up.to_offset()),
-                    door_props.to_state_id(args.block),
-                    BlockFlags::NOTIFY_ALL | BlockFlags::SKIP_BLOCK_ADDED_CALLBACK,
-                )
-                .await;
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        let mut props = DoorProperties::from_state_id(args.state_id, args.block);
+        props.half = DoubleBlockHalf::Upper;
+        args.world.set_block_state(&args.position.up(), props.to_state_id(args.block), BlockFlags::NOTIFY_ALL | BlockFlags::SKIP_BLOCK_ADDED_CALLBACK);
     }
 
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            if !can_open_door(args.block) {
-                return BlockActionResult::Pass;
-            }
-
-            toggle_door(args.player, args.world, args.position).await;
-
-            BlockActionResult::Success
-        })
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
+        if !can_open_door(args.block) { return BlockActionResult::Pass; }
+        toggle_door(args.player, args.world, args.position);
+        BlockActionResult::Success
     }
 
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let door_props = DoorProperties::from_state_id(args.state.id, args.block);
-            let other_half_pos = match door_props.half {
-                DoubleBlockHalf::Upper => args.position.down(),
-                DoubleBlockHalf::Lower => args.position.up(),
-            };
-
-            let neighbor_state_id = args.world.get_block_state_id(&other_half_pos);
-            if neighbor_state_id.to_block_id() != args.block.id {
-                args.world.update_neighbors(&other_half_pos, None).await;
-                return; // Neighbor is already gone or is a different block
-            }
-
-            // `DoorBlock.playerWillDestroy` (`DoorBlock.java:122-125`) only calls
-            // `DoublePlantBlock.preventDropFromBottomPart` (`DoublePlantBlock.java:121-132`)
-            // when the player broke the UPPER half, and only suppresses that lower half's
-            // drop when `player.preventsBlockDrops() || !player.hasCorrectToolForDrops(state)`
-            // - breaking the LOWER half, or breaking the UPPER half in survival with the right
-            // tool, always lets the other half's loot drop normally.
-            let is_creative = args.player.gamemode.load() == pumpkin_util::GameMode::Creative;
-            let actual_block = Block::from_state_id(args.state.id);
-            let suppress_other_half_drop = door_props.half == DoubleBlockHalf::Upper
-                && (is_creative || !args.player.can_harvest(args.state, actual_block).await);
-            let flags = if suppress_other_half_drop {
-                BlockFlags::SKIP_DROPS | BlockFlags::NOTIFY_ALL
-            } else {
-                BlockFlags::NOTIFY_ALL
-            };
-
-            args.world
-                .break_block(&other_half_pos, Some(args.player.clone()), flags)
-                .await;
-        })
+    fn broken(&self, args: BrokenArgs<'_>) {
+        let props = DoorProperties::from_state_id(args.state.id, args.block);
+        let other_pos = match props.half { DoubleBlockHalf::Upper => args.position.down(), DoubleBlockHalf::Lower => args.position.up() };
+        let (other_block, other_state) = args.world.get_block_and_state(&other_pos);
+        if other_block.id != args.block.id { args.world.update_neighbors(&other_pos, None); return; }
+        let other_props = DoorProperties::from_state_id(other_state.id, other_block);
+        if other_props.half == props.half { return; }
+        // `DoorBlock.playerWillDestroy` (`DoorBlock.java:122-125`) uses
+        // `DoublePlantBlock.preventDropFromBottomPart` (`DoublePlantBlock.java:121-132`) only
+        // for the upper half when the player cannot harvest it.
+        let suppress = props.half == DoubleBlockHalf::Upper
+            && (args.player.gamemode.load() == GameMode::Creative
+                || !args.player.can_harvest(args.state, Block::from_state_id(args.state.id)));
+        let flags = if suppress { BlockFlags::SKIP_DROPS | BlockFlags::NOTIFY_ALL } else { BlockFlags::NOTIFY_ALL };
+        args.world.break_block(&other_pos, Some(args.player), flags);
     }
 
-    fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let block_state = args.world.get_block_state(args.position);
-            let mut door_props = DoorProperties::from_state_id(block_state.id, args.block);
-
-            let other_half = match door_props.half {
-                DoubleBlockHalf::Upper => BlockDirection::Down,
-                DoubleBlockHalf::Lower => BlockDirection::Up,
-            };
-            let other_pos = args.position.offset(other_half.to_offset());
-            let (other_block, other_state_id) = args.world.get_block_and_state_id(&other_pos);
-
-            if other_block.id != args.block.id {
-                return;
+    fn on_neighbor_update(&self, args: OnNeighborUpdateArgs<'_>) {
+        let state = args.world.get_block_state(args.position);
+        let mut props = DoorProperties::from_state_id(state.id, args.block);
+        let other_dir = match props.half { DoubleBlockHalf::Upper => BlockDirection::Down, DoubleBlockHalf::Lower => BlockDirection::Up };
+        let other_pos = args.position.offset(other_dir.to_offset());
+        let (other_block, other_state) = args.world.get_block_and_state_id(&other_pos);
+        if other_block.id != args.block.id { return; }
+        let powered = block_receives_redstone_power(args.world, args.position)
+            || block_receives_redstone_power(args.world, &other_pos);
+        if props.powered != powered {
+            let sound_half = if props.open { DoubleBlockHalf::Lower } else { DoubleBlockHalf::Upper };
+            let mut other_props = DoorProperties::from_state_id(other_state, other_block);
+            props.powered = powered;
+            other_props.powered = powered;
+            if props.open != powered { props.open = powered; other_props.open = powered; }
+            if props.half == sound_half {
+                args.world.play_block_sound(get_sound(args.block, powered), SoundCategory::Blocks, *args.position);
+                // DoorBlock.java:233 (`neighborChanged`) emits the redstone open/close event.
+                emit_door_event(args.world, powered, args.position);
             }
-
-            let powered = block_receives_redstone_power(args.world, args.position).await
-                || block_receives_redstone_power(args.world, &other_pos).await;
-
-            if args.block.id == other_block.id && powered != door_props.powered {
-                let mut other_door_props =
-                    DoorProperties::from_state_id(other_state_id, other_block);
-                door_props.powered = !door_props.powered;
-                other_door_props.powered = door_props.powered;
-
-                if powered != door_props.open {
-                    door_props.open = door_props.powered;
-                    other_door_props.open = other_door_props.powered;
-
-                    args.world.play_block_sound(
-                        get_sound(args.block, powered),
-                        SoundCategory::Blocks,
-                        *args.position,
-                    );
-
-                    // DoorBlock.java:233 (`neighborChanged`): fires BLOCK_OPEN/BLOCK_CLOSE
-                    // with no source entity when a redstone signal flips the door.
-                    emit_game_event(
-                        args.world,
-                        if powered {
-                            GameEvent::BlockOpen
-                        } else {
-                            GameEvent::BlockClose
-                        },
-                        args.position.to_centered_f64(),
-                        GameEventContext::none(),
-                    )
-                    .await;
-                }
-
-                args.world
-                    .set_block_state(
-                        args.position,
-                        door_props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-                args.world
-                    .set_block_state(
-                        &other_pos,
-                        other_door_props.to_state_id(other_block),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-            }
-        })
+            args.world.set_block_state(args.position, props.to_state_id(args.block), BlockFlags::NOTIFY_ALL);
+            args.world.set_block_state(&other_pos, other_props.to_state_id(other_block), BlockFlags::NOTIFY_ALL);
+        }
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let lv = DoorProperties::from_state_id(args.state_id, args.block).half;
-            if args.direction.to_axis() != Axis::Y
-                || (lv == DoubleBlockHalf::Lower) != (args.direction == BlockDirection::Up)
-            {
-                if lv == DoubleBlockHalf::Lower
-                    && args.direction == BlockDirection::Down
-                    && !has_support(args.world, args.position)
-                {
-                    return BlockStateId::AIR;
-                }
-            } else if Block::from_state_id(args.neighbor_state_id).id == args.block.id
-                && DoorProperties::from_state_id(args.neighbor_state_id, args.block).half != lv
-            {
-                let mut new_state =
-                    DoorProperties::from_state_id(args.neighbor_state_id, args.block);
-                new_state.half = lv;
-                return new_state.to_state_id(args.block);
-            } else {
-                return BlockStateId::AIR;
-            }
-            args.state_id
-        })
+    fn get_state_for_neighbor_update(&self, args: GetStateForNeighborUpdateArgs<'_>) -> BlockStateId {
+        let half = DoorProperties::from_state_id(args.state_id, args.block).half;
+        if args.direction.to_axis() != Axis::Y || (half == DoubleBlockHalf::Lower) != (args.direction == BlockDirection::Up) {
+            if half == DoubleBlockHalf::Lower && args.direction == BlockDirection::Down && !has_support(args.world, args.position) { return BlockStateId::AIR; }
+        } else if Block::from_state_id(args.neighbor_state_id).id == args.block.id
+            && DoorProperties::from_state_id(args.neighbor_state_id, args.block).half != half {
+            let mut new_state = DoorProperties::from_state_id(args.neighbor_state_id, args.block);
+            new_state.half = half;
+            return new_state.to_state_id(args.block);
+        } else { return BlockStateId::AIR; }
+        args.state_id
     }
 
-    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if args.moved {
-                return;
-            }
-
-            let new_state_id = args.world.get_block_state_id(args.position);
-            let new_block = Block::from_state_id(new_state_id);
-            if new_block == &Block::AIR {
-                return;
-            }
-
-            let door_props = DoorProperties::from_state_id(args.old_state_id, args.block);
-            let other_half_pos = match door_props.half {
-                DoubleBlockHalf::Upper => args.position.down(),
-                DoubleBlockHalf::Lower => args.position.up(),
-            };
-
-            args.world
-                .break_block(
-                    &other_half_pos,
-                    None,
-                    BlockFlags::SKIP_DROPS | BlockFlags::NOTIFY_ALL,
-                )
-                .await;
-        })
+    fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
+        if args.moved { return; }
+        let props = DoorProperties::from_state_id(args.old_state_id, args.block);
+        let other_pos = match props.half { DoubleBlockHalf::Upper => args.position.down(), DoubleBlockHalf::Lower => args.position.up() };
+        let (other_block, other_state) = args.world.get_block_and_state(&other_pos);
+        if other_block.id == args.block.id && DoorProperties::from_state_id(other_state.id, other_block).half != props.half {
+            args.world.break_block(&other_pos, None, BlockFlags::SKIP_DROPS | BlockFlags::NOTIFY_ALL);
+        }
     }
 
-    /// Vanilla `DoorBlock.java:110-119` (`onExplosionHit`): a wind-charge blast (the only
-    /// explosion whose `canTriggerBlocks()` is true, `ServerExplosion.java:297-302`) swings a
-    /// door open/closed instead of destroying it - but only the lower half, only when the
-    /// block set allows wind-charge opening (`BlockSetType.java:13-14` iron = false,
-    /// `BlockSetType.java:47-56` copper / `BlockSetType.java:200-205` wooden = true), and
-    /// only when not already redstone-powered.
-    fn explode<'a>(&'a self, args: ExplodeArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if !args.can_trigger_blocks {
-                return;
-            }
-
-            let state_id = args.world.get_block_state_id(args.position);
-            let door_props = DoorProperties::from_state_id(state_id, args.block);
-
-            if door_props.half != DoubleBlockHalf::Lower
-                || door_props.powered
-                || !can_open_door(args.block)
-            {
-                return;
-            }
-
-            set_door_open(args.world, args.position, !door_props.open).await;
-        })
+    /// Vanilla `DoorBlock.java:110-119` (`onExplosionHit`) opens the lower half only for a
+    /// trigger-block explosion, and only for non-powered, non-iron doors. The trigger guard is
+    /// defined by `ServerExplosion.java:297-302`; `BlockSetType` gates are represented by the
+    /// iron/copper/wood checks in `can_open_door` (`BlockSetType.java:13-14`,
+    /// `BlockSetType.java:47-56`, `BlockSetType.java:200-205`).
+    fn explode(&self, args: ExplodeArgs<'_>) {
+        if !args.can_trigger_blocks { return; }
+        let state = args.world.get_block_state(args.position);
+        let props = DoorProperties::from_state_id(state.id, args.block);
+        if props.half != DoubleBlockHalf::Lower || props.powered || !can_open_door(args.block) { return; }
+        set_door_open(args.world, args.position, !props.open);
     }
 
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // No tag gate needed here: try_oxidize_copper's oxidation_stages table below only
-            // contains the copper door family, so it's a no-op for every other door type.
-
-            // Only oxidize LOWER half of the door to prevent double oxidation
-            let current_state_id = args.world.get_block_state_id(args.position);
-            let door_props = DoorProperties::from_state_id(current_state_id, args.block);
-            if door_props.half != DoubleBlockHalf::Lower {
-                return;
-            }
-
-            let oxidation_stages = [
-                &Block::COPPER_DOOR,
-                &Block::EXPOSED_COPPER_DOOR,
-                &Block::WEATHERED_COPPER_DOOR,
-                &Block::OXIDIZED_COPPER_DOOR,
-            ];
-
-            copper_weathering::try_oxidize_copper(
-                args.world,
-                args.position,
-                args.block,
-                &oxidation_stages,
-                |next_block| {
-                    let mut new_props = DoorProperties::default(next_block);
-                    new_props.facing = door_props.facing;
-                    new_props.open = door_props.open;
-                    new_props.half = door_props.half;
-                    new_props.hinge = door_props.hinge;
-                    new_props.powered = door_props.powered;
-                    new_props.to_state_id(next_block)
-                },
-            )
-            .await;
-        })
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        let state_id = args.world.get_block_state_id(args.position);
+        let props = DoorProperties::from_state_id(state_id, args.block);
+        if props.half != DoubleBlockHalf::Lower { return; }
+        let stages = [&Block::COPPER_DOOR, &Block::EXPOSED_COPPER_DOOR, &Block::WEATHERED_COPPER_DOOR, &Block::OXIDIZED_COPPER_DOOR];
+        copper_weathering::try_oxidize_copper(args.world, args.position, args.block, &stages, |next| {
+            let mut new_props = DoorProperties::default(next);
+            new_props.facing = props.facing;
+            new_props.open = props.open;
+            new_props.half = props.half;
+            new_props.hinge = props.hinge;
+            new_props.powered = props.powered;
+            new_props.to_state_id(next)
+        });
     }
 }
 
 fn has_support(world: &dyn BlockAccessor, block_pos: &BlockPos) -> bool {
-    world
-        .get_block_state(&block_pos.down())
-        .is_side_solid(BlockDirection::Up)
+    world.get_block_state(&block_pos.down()).is_side_solid(BlockDirection::Up)
 }

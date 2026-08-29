@@ -348,15 +348,7 @@ impl ThrownItemEntity {
         }
     }
 
-    pub fn set_velocity_from(
-        &self,
-        _shooter: &Entity,
-        pitch: f32,
-        yaw: f32,
-        roll: f32,
-        speed: f32,
-        divergence: f32,
-    ) {
+    pub fn set_velocity_from(&self, pitch: f32, yaw: f32, roll: f32, speed: f32, divergence: f32) {
         let yaw_rad = yaw.to_radians();
         let pitch_rad = pitch.to_radians();
         let roll_rad = (pitch + roll).to_radians();
@@ -398,7 +390,7 @@ impl ThrownItemEntity {
 
 impl ThrownItemEntity {
     /// Process a tick for projectile movement and collisions
-    pub async fn process_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>, server: &'a Server) {
+    pub fn process_tick(&self, caller: &dyn EntityBase) {
         let entity = self.get_entity();
         let world = entity.world.load();
 
@@ -454,9 +446,7 @@ impl ThrownItemEntity {
         let mut hit = None;
 
         // Block collisions
-        let (block_cols, block_positions) = world
-            .get_block_collisions(search_box, caller.as_ref())
-            .await;
+        let (block_cols, block_positions) = world.get_block_collisions(search_box, caller);
         for (idx, bb) in block_cols.iter().enumerate() {
             if let Some(t) = calculate_ray_intersection(&start_pos, &delta, bb)
                 && t < closest_t
@@ -519,12 +509,33 @@ impl ThrownItemEntity {
                 pos, face, hit_pos, ..
             } = &h
             {
-                on_projectile_block_hit(&world, server, caller, *pos, *face, *hit_pos).await;
+                if let Some(server) = world.server.upgrade() {
+                    let world_for_hit = world.clone();
+                    let caller_id = caller.get_entity().entity_id;
+                    if let Some(projectile) = world_for_hit.get_entity_by_id(caller_id) {
+                        tokio::spawn(async move {
+                            on_projectile_block_hit(
+                                &world_for_hit,
+                                &server,
+                                &projectile,
+                                *pos,
+                                *face,
+                                *hit_pos,
+                            )
+                            .await;
+                        });
+                    }
+                }
             }
-            caller.on_hit(h).await;
-            emit_projectile_land(&world, caller, land_pos).await;
-
-            entity.remove().await;
+            caller.on_hit(h);
+            let world_for_event = world.clone();
+            let caller_id = caller.get_entity().entity_id;
+            tokio::spawn(async move {
+                if let Some(caller) = world_for_event.get_entity_by_id(caller_id) {
+                    emit_projectile_land(&world_for_event, &caller, land_pos).await;
+                }
+            });
+            entity.remove();
         }
     }
 

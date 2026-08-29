@@ -9,7 +9,6 @@ use pumpkin_world::world::BlockFlags;
 use std::sync::Arc;
 
 use crate::block::BlockBehaviour;
-use crate::block::BlockFuture;
 use crate::block::CanPlaceAtArgs;
 use crate::block::EmitsRedstonePowerArgs;
 use crate::block::GetComparatorOutputArgs;
@@ -67,100 +66,75 @@ const fn direct_signal(powered: bool, direction: BlockDirection) -> u8 {
 pub struct DetectorRailBlock;
 
 impl BlockBehaviour for DetectorRailBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut rail_props = RailProperties::default(args.block);
-            let player_facing = args.player.get_entity().get_horizontal_facing();
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut rail_props = RailProperties::default(args.block);
+        let player_facing = args.player.get_entity().get_horizontal_facing();
 
-            rail_props.set_waterlogged(args.replacing.water_source());
-            rail_props.set_straight_shape(
-                compute_placed_rail_shape(args.world, args.position, player_facing).await,
-            );
+        rail_props.set_waterlogged(args.replacing.water_source());
+        rail_props.set_straight_shape(compute_placed_rail_shape(
+            args.world,
+            args.position,
+            player_facing,
+        ));
 
-            rail_props.to_state_id(args.block)
-        })
+        rail_props.to_state_id(args.block)
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            update_flanking_rails_shape(args.world, args.block, args.state_id, args.position).await;
+    fn placed(&self, args: PlacedArgs<'_>) {
+        update_flanking_rails_shape(args.world, args.block, args.state_id, args.position);
 
-            // `DetectorRailBlock.onPlace` (DetectorRailBlock.java:127-132) runs a pressure check
-            // once the shape has settled, so a rail placed under a standing cart powers up.
-            if Block::from_state_id(args.old_state_id) != args.block {
-                Self::check_pressed(args.world, args.block, args.position).await;
-            }
-        })
+        // `DetectorRailBlock.onPlace` (DetectorRailBlock.java:127-132) runs a pressure check
+        // once the shape has settled, so a rail placed under a standing cart powers up.
+        if Block::from_state_id(args.old_state_id) != args.block {
+            Self::check_pressed(args.world, args.block, args.position);
+        }
     }
 
-    fn on_entity_collision<'a>(&'a self, args: OnEntityCollisionArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // `DetectorRailBlock.entityInside` (DetectorRailBlock.java:56-64).
-            if RailProperties::new(args.state.id, args.block).is_powered() {
-                return;
-            }
-            Self::check_pressed(args.world, args.block, args.position).await;
-        })
+    fn on_entity_collision(&self, args: OnEntityCollisionArgs<'_>) {
+        // `DetectorRailBlock.entityInside` (DetectorRailBlock.java:56-64).
+        if RailProperties::new(args.state.id, args.block).is_powered() {
+            return;
+        }
+        Self::check_pressed(args.world, args.block, args.position);
     }
 
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // `DetectorRailBlock.tick` (DetectorRailBlock.java:67-71).
-            let state_id = args.world.get_block_state_id(args.position);
-            if !RailProperties::new(state_id, args.block).is_powered() {
-                return;
-            }
-            Self::check_pressed(args.world, args.block, args.position).await;
-        })
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        // `DetectorRailBlock.tick` (DetectorRailBlock.java:67-71).
+        let state_id = args.world.get_block_state_id(args.position);
+        if !RailProperties::new(state_id, args.block).is_powered() {
+            return;
+        }
+        Self::check_pressed(args.world, args.block, args.position);
     }
 
-    fn emits_redstone_power<'a>(
-        &'a self,
-        _args: EmitsRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, bool> {
-        Box::pin(async move { true })
+    fn emits_redstone_power(&self, _args: EmitsRedstonePowerArgs<'_>) -> bool {
+        true
     }
 
-    fn get_weak_redstone_power<'a>(
-        &'a self,
-        args: GetRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, u8> {
-        Box::pin(
-            async move { own_signal(RailProperties::new(args.state.id, args.block).is_powered()) },
+    fn get_weak_redstone_power(&self, args: GetRedstonePowerArgs<'_>) -> u8 {
+        own_signal(RailProperties::new(args.state.id, args.block).is_powered())
+    }
+
+    fn get_strong_redstone_power(&self, args: GetRedstonePowerArgs<'_>) -> u8 {
+        direct_signal(
+            RailProperties::new(args.state.id, args.block).is_powered(),
+            args.direction,
         )
     }
 
-    fn get_strong_redstone_power<'a>(
-        &'a self,
-        args: GetRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, u8> {
-        Box::pin(async move {
-            direct_signal(
-                RailProperties::new(args.state.id, args.block).is_powered(),
-                args.direction,
-            )
-        })
-    }
-
-    fn get_comparator_output<'a>(
-        &'a self,
-        _args: GetComparatorOutputArgs<'a>,
-    ) -> BlockFuture<'a, Option<u8>> {
+    fn get_comparator_output(&self, _args: GetComparatorOutputArgs<'_>) -> Option<u8> {
         // `DetectorRailBlock.hasAnalogOutputSignal` (DetectorRailBlock.java:140-142) is true, so a
         // comparator reads the ANALOG value and never the rail's own 15. The container and command
         // block cart values (DetectorRailBlock.java:145-159) still need an inventory accessor on
         // `MinecartEntity`; 0 is vanilla's answer for every other cart.
-        Box::pin(async move { Some(0) })
+        Some(0)
     }
 
-    fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if !rail_placement_is_valid(args.world, args.block, args.position).await {
-                args.world
-                    .break_block(args.position, None, BlockFlags::NOTIFY_ALL)
-                    .await;
-            }
-        })
+    fn on_neighbor_update(&self, args: OnNeighborUpdateArgs<'_>) {
+        if !rail_placement_is_valid(args.world, args.block, args.position) {
+            args.world
+                .break_block(args.position, None, BlockFlags::NOTIFY_ALL);
+        }
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
@@ -170,8 +144,8 @@ impl BlockBehaviour for DetectorRailBlock {
 
 impl DetectorRailBlock {
     /// `DetectorRailBlock.checkPressed` (DetectorRailBlock.java:82-115).
-    async fn check_pressed(world: &Arc<World>, block: &Block, pos: &BlockPos) {
-        if !rail_placement_is_valid(world, block, pos).await {
+    fn check_pressed(world: &Arc<World>, block: &Block, pos: &BlockPos) {
+        if !rail_placement_is_valid(world, block, pos) {
             return;
         }
 
@@ -185,12 +159,10 @@ impl DetectorRailBlock {
 
         if should_be_pressed != was_pressed {
             props.set_powered(should_be_pressed);
-            world
-                .set_block_state(pos, props.to_state_id(block), BlockFlags::NOTIFY_ALL)
-                .await;
-            Self::update_power_to_connected(world, block, pos, &props).await;
-            world.update_neighbors(pos, None).await;
-            world.update_neighbors(&pos.down(), None).await;
+            world.set_block_state(pos, props.to_state_id(block), BlockFlags::NOTIFY_ALL);
+            Self::update_power_to_connected(world, block, pos, &props);
+            world.update_neighbors(pos, None);
+            world.update_neighbors(&pos.down(), None);
         }
 
         if should_be_pressed {
@@ -200,7 +172,7 @@ impl DetectorRailBlock {
 
     /// `DetectorRailBlock.updatePowerToConnected` (DetectorRailBlock.java:117-124): the rails this
     /// one connects to get a neighbour update, so a powered rail chain reacts on the same tick.
-    async fn update_power_to_connected(
+    fn update_power_to_connected(
         world: &Arc<World>,
         block: &Block,
         pos: &BlockPos,
@@ -209,7 +181,7 @@ impl DetectorRailBlock {
         for direction in props.directions() {
             if let Some(rail) = Rail::find_with_elevation(world, pos.offset(direction.to_offset()))
             {
-                world.update_neighbor(&rail.position, block).await;
+                world.update_neighbor(&rail.position, block);
             }
         }
     }

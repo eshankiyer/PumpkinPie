@@ -68,17 +68,13 @@ fn can_sweep_attack(
 }
 
 impl AttackType {
-    pub async fn new(
-        player: &Player,
-        target: &dyn EntityBase,
-        attack_cooldown_progress: f32,
-    ) -> Self {
+    pub fn new(player: &Player, attack_cooldown_progress: f32) -> Self {
         let entity = &player.get_entity();
 
         let sprinting = entity.is_sprinting();
         let on_ground = entity.on_ground.load(Ordering::Relaxed);
         let fall_distance = player.living_entity.fall_distance.load();
-        let held_item = player.inventory().held_item().await;
+        let held_item = player.inventory().held_item();
         let is_mace = held_item.item.id == pumpkin_data::item::Item::MACE.id;
 
         if is_mace && !on_ground && fall_distance > 1.5 && !entity.is_fall_flying() {
@@ -92,11 +88,12 @@ impl AttackType {
         let mobility_restricted = player
             .living_entity
             .get_effect(&pumpkin_data::effect::StatusEffect::BLINDNESS)
-            .await
             .is_some();
         let climbing = player.living_entity.climbing.load(Ordering::Relaxed);
-        let mounted = entity.has_vehicle().await;
-        let target_is_living = target.get_living_entity().is_some();
+        let mounted = entity.has_vehicle();
+        // Upstream's sync constructor no longer receives the victim. The attack path only calls
+        // this after selecting a valid victim, so the target-living gate is represented by true.
+        let target_is_living = true;
         let movement = entity.velocity.load();
         let movement_speed = player
             .living_entity
@@ -239,7 +236,7 @@ const MACE_SMASH_HEAVY_FALL_THRESHOLD: f32 = 5.0;
 /// (`ArmorStand.isMarker`). Pumpkin has no scoreboard-team lookup wired to this call site and no
 /// way to downcast a `dyn EntityBase` to `ArmorStandEntity` without adding an `as_any` override
 /// there, so both checks are left out here rather than guessed at.
-pub async fn mace_smash_knockback(
+pub fn mace_smash_knockback(
     world: &World,
     attacker_uuid: Uuid,
     victim: &Arc<dyn EntityBase>,
@@ -281,7 +278,7 @@ pub async fn mace_smash_knockback(
         }
         if let Some(player) = world.get_player_by_uuid(nearby_entity.entity_uuid)
             && player.is_creative()
-            && player.is_flying().await
+            && player.is_flying()
         {
             continue;
         }
@@ -344,7 +341,7 @@ pub fn spawn_sweep_particle(attacker_entity: &Entity, world: &World, pos: &Vecto
     );
 }
 
-pub async fn player_attack_sound(pos: &Vector3<f64>, world: &World, attack_type: AttackType) {
+pub fn player_attack_sound(pos: &Vector3<f64>, world: &World, attack_type: AttackType) {
     match attack_type {
         AttackType::Knockback => {
             world.play_sound(

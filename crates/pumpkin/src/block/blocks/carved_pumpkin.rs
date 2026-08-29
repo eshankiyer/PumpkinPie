@@ -15,7 +15,7 @@ use pumpkin_world::world::BlockFlags;
 
 use crate::{
     block::{
-        BlockBehaviour, BlockFuture, BlockMetadata, OnPlaceArgs, PlacedArgs,
+        BlockBehaviour, BlockMetadata, OnPlaceArgs, PlacedArgs,
         blocks::copper_weathering,
     },
     entity::{
@@ -142,7 +142,7 @@ impl CarvedPumpkinBlock {
     /// ChestBlock.java:232-236, via `CopperChestBlock.chestCanConnectTo`,
     /// CopperChestBlock.java:118-120) and both halves converging on the least oxidized
     /// variant (`getLeastOxidizedChestOfConnectedBlocks`, CopperChestBlock.java:78-95).
-    async fn replace_copper_block_with_chest(
+    fn replace_copper_block_with_chest(
         world: &Arc<World>,
         pos: &BlockPos,
         copper_block: &Block,
@@ -217,13 +217,11 @@ impl CarvedPumpkinBlock {
         let mut props = ChestLikeProperties::default(final_block);
         props.facing = facing;
         props.r#type = r#type;
-        world
-            .set_block_state(
-                pos,
-                props.to_state_id(final_block),
-                BlockFlags::NOTIFY_LISTENERS,
-            )
-            .await;
+        world.set_block_state(
+            pos,
+            props.to_state_id(final_block),
+            BlockFlags::NOTIFY_LISTENERS,
+        );
 
         // `CopperChestBlock.updateShape` (CopperChestBlock.java:99-114) makes the single
         // partner adopt this block (keeping its own facing/type); mirror that settled state.
@@ -234,56 +232,50 @@ impl CarvedPumpkinBlock {
                 ChestType::Left => ChestType::Right,
                 _ => ChestType::Left,
             };
-            world
-                .set_block_state(
-                    &neighbor_pos,
-                    neighbor_props.to_state_id(final_block),
-                    BlockFlags::NOTIFY_LISTENERS,
-                )
-                .await;
+            world.set_block_state(
+                &neighbor_pos,
+                neighbor_props.to_state_id(final_block),
+                BlockFlags::NOTIFY_LISTENERS,
+            );
         }
     }
 
     /// Vanilla `spawnGolemInWorld`'s closing `updatePatternBlocks` call
     /// (CarvedPumpkinBlock.java:116, 129-136): after the golem spawns, neighbours of every
     /// cleared cell get a shape/neighbor update.
-    async fn update_pattern_blocks(world: &Arc<World>, cleared: &[BlockPos]) {
+    fn update_pattern_blocks(world: &Arc<World>, cleared: &[BlockPos]) {
         for pos in cleared {
-            world.update_neighbors(pos, None).await;
+            world.update_neighbors(pos, None);
         }
     }
 }
 
 impl BlockBehaviour for CarvedPumpkinBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = WallTorchLikeProperties::default(args.block);
-            props.facing = args
-                .player
-                .living_entity
-                .entity
-                .get_horizontal_facing()
-                .opposite();
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = WallTorchLikeProperties::default(args.block);
+        props.facing = args
+            .player
+            .living_entity
+            .entity
+            .get_horizontal_facing()
+            .opposite();
+        props.to_state_id(args.block)
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
+    fn placed(&self, args: PlacedArgs<'_>) {
         // Mojang uses some BlockPattern magic, way too complex tbh
-        Box::pin(async move {
+        {
             let down_pos = args.position.down();
             let upper = args.world.get_block(&down_pos);
             let lower = args.world.get_block(&down_pos.down());
             if upper == &Block::SNOW_BLOCK && lower == &Block::SNOW_BLOCK {
-                let cleared = [*args.position, down_pos, down_pos.down()];
-                for pos in cleared {
-                    args.world
-                        .set_block_state(
-                            &pos,
-                            Block::AIR.default_state.id,
-                            BlockFlags::NOTIFY_LISTENERS,
-                        )
-                        .await;
+                for i in 0..3 {
+                    let pos = args.position.down_height(i);
+                    args.world.set_block_state(
+                        &pos,
+                        Block::AIR.default_state.id,
+                        BlockFlags::NOTIFY_LISTENERS,
+                    );
                     args.world.sync_world_event(
                         WorldEvent::ParticlesDestroyBlock,
                         pos,
@@ -296,8 +288,9 @@ impl BlockBehaviour for CarvedPumpkinBlock {
                     &EntityType::SNOW_GOLEM,
                 );
                 let golem = SnowGolemEntity::new(entity);
-                args.world.spawn_entity(golem).await;
-                Self::update_pattern_blocks(args.world, &cleared).await;
+                args.world.spawn_entity(golem);
+                let cleared = [*args.position, down_pos, down_pos.down()];
+                Self::update_pattern_blocks(args.world, &cleared);
                 return;
             }
 
@@ -313,13 +306,11 @@ impl BlockBehaviour for CarvedPumpkinBlock {
                         let pattern = [*args.position, down_pos, down_pos.down(), arm1, arm2];
 
                         for p in pattern {
-                            args.world
-                                .set_block_state(
-                                    &p,
-                                    Block::AIR.default_state.id,
-                                    BlockFlags::NOTIFY_LISTENERS,
-                                )
-                                .await;
+                            args.world.set_block_state(
+                                &p,
+                                Block::AIR.default_state.id,
+                                BlockFlags::NOTIFY_LISTENERS,
+                            );
                             args.world.sync_world_event(
                                 WorldEvent::ParticlesDestroyBlock,
                                 p,
@@ -337,25 +328,24 @@ impl BlockBehaviour for CarvedPumpkinBlock {
                         golem
                             .player_created
                             .store(true, std::sync::atomic::Ordering::Relaxed);
-                        args.world.spawn_entity(golem).await;
-                        Self::update_pattern_blocks(args.world, &pattern).await;
+                        args.world.spawn_entity(golem);
+                        Self::update_pattern_blocks(args.world, &pattern);
                         return;
                     }
                 }
             }
-
             // Copper golem full pattern `"^", "#"` (CarvedPumpkinBlock.java:204-214):
             // the head sits on any `minecraft:copper` block.
             let copper_block = args.world.get_block(&down_pos);
             if copper_block.has_tag(&tag::Block::MINECRAFT_COPPER) {
-                Self::spawn_copper_golem(&args, down_pos, copper_block).await;
+                Self::spawn_copper_golem(&args, down_pos, copper_block);
             }
-        })
+        }
     }
 }
 
 impl CarvedPumpkinBlock {
-    async fn spawn_copper_golem(args: &PlacedArgs<'_>, down_pos: BlockPos, copper_block: &Block) {
+    fn spawn_copper_golem(args: &PlacedArgs<'_>, down_pos: BlockPos, copper_block: &Block) {
         let weather_state = Self::weather_state_from_copper(copper_block);
         let cleared = [*args.position, down_pos];
         for pos in cleared {
@@ -364,13 +354,11 @@ impl CarvedPumpkinBlock {
             } else {
                 args.block.default_state.id
             };
-            args.world
-                .set_block_state(
-                    &pos,
-                    Block::AIR.default_state.id,
-                    BlockFlags::NOTIFY_LISTENERS,
-                )
-                .await;
+            args.world.set_block_state(
+                &pos,
+                Block::AIR.default_state.id,
+                BlockFlags::NOTIFY_LISTENERS,
+            );
             args.world.sync_world_event(
                 WorldEvent::ParticlesDestroyBlock,
                 pos,
@@ -398,10 +386,10 @@ impl CarvedPumpkinBlock {
             pumpkin_data::sound::SoundCategory::Neutral,
             &spawn_pos,
         );
-        args.world.spawn_entity(golem).await;
+        args.world.spawn_entity(golem);
 
         let facing = WallTorchLikeProperties::from_state_id(args.state_id, args.block).facing;
-        Self::replace_copper_block_with_chest(args.world, &down_pos, copper_block, facing).await;
-        Self::update_pattern_blocks(args.world, &cleared).await;
+        Self::replace_copper_block_with_chest(args.world, &down_pos, copper_block, facing);
+        Self::update_pattern_blocks(args.world, &cleared);
     }
 }

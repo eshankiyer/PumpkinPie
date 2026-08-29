@@ -15,12 +15,11 @@ use pumpkin_util::math::{
     position::BlockPos,
 };
 use std::collections::HashSet;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::MutexGuard as StdMutexGuard;
 use std::sync::atomic::{AtomicI32, AtomicI64, Ordering};
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 use uuid::Uuid;
 
 use crate::entity::NBTStorage;
@@ -266,7 +265,6 @@ fn built_in_config(key: &str) -> Option<TrialSpawnerConfig> {
         spawn_potentials: potentials,
     })
 }
-
 pub struct TrialSpawnerBlockEntity {
     pub position: BlockPos,
     normal_config_nbt: Mutex<Option<NbtTag>>,
@@ -301,14 +299,14 @@ impl TrialSpawnerBlockEntity {
     pub fn new(position: BlockPos) -> Self {
         Self {
             position,
-            normal_config_nbt: Mutex::const_new(None),
-            ominous_config_nbt: Mutex::const_new(None),
+            normal_config_nbt: Mutex::new(None),
+            ominous_config_nbt: Mutex::new(None),
             normal_config: StdMutex::new(TrialSpawnerConfig::default()),
             ominous_config: StdMutex::new(TrialSpawnerConfig::default()),
             target_cooldown_length: DEFAULT_TARGET_COOLDOWN_LENGTH,
             required_player_range: DEFAULT_REQUIRED_PLAYER_RANGE,
-            detected_players: Mutex::const_new(HashSet::new()),
-            current_mobs: Mutex::const_new(HashSet::new()),
+            detected_players: Mutex::new(HashSet::new()),
+            current_mobs: Mutex::new(HashSet::new()),
             cooldown_ends_at: AtomicI64::new(0),
             next_mob_spawns_at: AtomicI64::new(0),
             total_mobs_spawned: AtomicI32::new(0),
@@ -326,19 +324,19 @@ impl TrialSpawnerBlockEntity {
         }
     }
 
-    async fn reset_statistics(&self) {
-        self.detected_players.lock().await.clear();
+    fn reset_statistics(&self) {
+        self.detected_players.lock().unwrap().clear();
         self.total_mobs_spawned.store(0, Ordering::Relaxed);
         self.next_mob_spawns_at.store(0, Ordering::Relaxed);
         self.cooldown_ends_at.store(0, Ordering::Relaxed);
     }
 
-    async fn reset(&self) {
-        self.current_mobs.lock().await.clear();
+    fn reset(&self) {
+        self.current_mobs.lock().unwrap().clear();
         *self.next_spawn_entity.lock().unwrap() = None;
         *self.next_spawn_data.lock().unwrap() = None;
         *self.ejecting_loot_table.lock().unwrap() = None;
-        self.reset_statistics().await;
+        self.reset_statistics();
     }
 
     // TrialSpawnerConfig.java:74-87 (`withSpawning`): replaces the spawn potentials
@@ -361,8 +359,8 @@ impl TrialSpawnerBlockEntity {
     /// which resets the state data, swaps the spawn entity in both configs through
     /// `FullConfig#overrideEntity` (TrialSpawner.java:394-401), and forces the block
     /// state back to INACTIVE.
-    pub async fn set_entity_id(&self, world: &Arc<World>, entity_type: &'static EntityType) {
-        self.reset().await;
+    pub fn set_entity_id(&self, world: &Arc<World>, entity_type: &'static EntityType) {
+        self.reset();
         let normal = Self::with_spawning(&self.active_config(false), entity_type);
         *self.normal_config.lock().unwrap() = normal;
         let ominous = Self::with_spawning(&self.active_config(true), entity_type);
@@ -379,14 +377,13 @@ impl TrialSpawnerBlockEntity {
                     &self.position,
                     props.to_state_id(block),
                     BlockFlags::NOTIFY_ALL,
-                )
-                .await;
+                );
         }
     }
 
-    async fn count_additional_players(&self) -> i32 {
+    fn count_additional_players(&self) -> i32 {
         // StateData.java:113-119
-        (self.detected_players.lock().await.len() as i32 - 1).max(0)
+        (self.detected_players.lock().unwrap().len() as i32 - 1).max(0)
     }
 
     // TrialSpawner.java:150-158. overridePeacefulAndMobSpawnRule is a
@@ -402,8 +399,8 @@ impl TrialSpawnerBlockEntity {
     // StateData.java:121-159, simplified: no line-of-sight raycast, no ominous
     // acquisition (bad omen -> trial omen transform, TrialSpawner.java:103-113;
     // OminousItemSpawner) -- deferred, see report.
-    async fn try_detect_players(&self, world: &Arc<World>, is_ominous: bool) {
-        let game_time = world.get_world_age().await;
+    fn try_detect_players(&self, world: &Arc<World>, is_ominous: bool) {
+        let game_time = world.get_world_age();
         if (self.position.0.x as i64
             + self.position.0.y as i64
             + self.position.0.z as i64
@@ -420,7 +417,7 @@ impl TrialSpawnerBlockEntity {
             .map(|p| p.gameprofile.id)
             .collect();
 
-        let mut detected = self.detected_players.lock().await;
+        let mut detected = self.detected_players.lock().unwrap();
         let before = detected.len();
         detected.extend(found);
         if detected.len() != before {
@@ -435,16 +432,14 @@ impl TrialSpawnerBlockEntity {
         }
     }
 
-    #[allow(clippy::unused_async)]
-    async fn has_mob_to_spawn(&self, config: &TrialSpawnerConfig) -> bool {
+    fn has_mob_to_spawn(&self, config: &TrialSpawnerConfig) -> bool {
         if self.next_spawn_entity.lock().unwrap().is_some() {
             return true;
         }
         !config.spawn_potentials.is_empty()
     }
 
-    #[allow(clippy::unused_async)]
-    async fn get_or_create_next_spawn_data(
+    fn get_or_create_next_spawn_data(
         &self,
         config: &TrialSpawnerConfig,
     ) -> Option<(&'static EntityType, NbtCompound)> {
@@ -468,8 +463,8 @@ impl TrialSpawnerBlockEntity {
 
     // TrialSpawner.java:161-234, simplified: no custom spawn rules / equipment /
     // line-of-sight clip check (only collision + spawn placement rules kept)
-    async fn spawn_mob(&self, world: &Arc<World>, config: &TrialSpawnerConfig) -> Option<Uuid> {
-        let (entity_type, spawn_data) = self.get_or_create_next_spawn_data(config).await?;
+    fn spawn_mob(&self, world: &Arc<World>, config: &TrialSpawnerConfig) -> Option<Uuid> {
+        let (entity_type, spawn_data) = self.get_or_create_next_spawn_data(config)?;
         let pos = self.position.0;
         let spawn_range = f64::from(config.spawn_range);
         let spawn_pos = pumpkin_util::math::vector3::Vector3::new(
@@ -501,13 +496,13 @@ impl TrialSpawnerBlockEntity {
         let entity = crate::entity::r#type::from_type(entity_type, spawn_pos, world, uuid);
         if let Some(entity_nbt) = spawn_data.get_compound("entity") {
             if let Some(living) = entity.get_living_entity() {
-                living.read_nbt_non_mut(entity_nbt).await;
+                living.read_nbt_non_mut(entity_nbt);
             } else {
-                entity.get_entity().read_nbt_non_mut(entity_nbt).await;
+                entity.get_entity().read_nbt_non_mut(entity_nbt);
             }
-            entity.read_nbt_non_mut(entity_nbt).await;
+            entity.read_nbt_non_mut(entity_nbt);
         }
-        world.spawn_entity(entity).await;
+        world.spawn_entity(entity);
         world.sync_world_event(
             WorldEvent::ParticlesTrialSpawnerSpawnMobAt,
             BlockPos::floored(spawn_pos.x, spawn_pos.y, spawn_pos.z),
@@ -526,8 +521,8 @@ impl TrialSpawnerBlockEntity {
     }
 
     // TrialSpawner.java:271-290
-    async fn untrack_dead_mobs(&self, world: &Arc<World>) -> bool {
-        let mut mobs = self.current_mobs.lock().await;
+    fn untrack_dead_mobs(&self, world: &Arc<World>) -> bool {
+        let mut mobs = self.current_mobs.lock().unwrap();
         let before = mobs.len();
         mobs.retain(|id| {
             world.get_entity_by_uuid(*id).is_some_and(|e| {
@@ -545,15 +540,15 @@ impl TrialSpawnerBlockEntity {
 
     // Eject one item from the loot table picked for this reward cycle.
     // TrialSpawner.java:237-251
-    async fn eject_reward(&self, world: &Arc<World>, table: &str) {
+    fn eject_reward(&self, world: &Arc<World>, table: &str) {
         if let Some(item) = spawner_ejection_item(table) {
-            world.drop_stack(&self.position, item).await;
+            world.drop_stack(&self.position, item);
         }
         world.sync_world_event(WorldEvent::AnimationTrialSpawnerEjectItem, self.position, 0);
     }
 
     #[allow(clippy::too_many_lines)]
-    async fn tick_server(&self, world: &Arc<World>) {
+    fn tick_server(&self, world: &Arc<World>) {
         let state_id = world.get_block_state_id(&self.position);
         let block = Block::from_state_id(state_id);
         if !TrialSpawnerLikeProperties::handles_block_id(block.id) {
@@ -561,9 +556,9 @@ impl TrialSpawnerBlockEntity {
         }
         let mut props = TrialSpawnerLikeProperties::from_state_id(state_id, block);
         let is_ominous = props.ominous;
-        let game_time = world.get_world_age().await;
+        let game_time = world.get_world_age();
 
-        if self.untrack_dead_mobs(world).await {
+        if self.untrack_dead_mobs(world) {
             self.next_mob_spawns_at.store(
                 game_time + self.active_config(is_ominous).ticks_between_spawn,
                 Ordering::Relaxed,
@@ -578,20 +573,18 @@ impl TrialSpawnerBlockEntity {
                 is_ominous,
                 &config,
                 game_time,
-            )
-            .await;
+            );
 
         if next_state != props.trial_spawner_state {
             props.trial_spawner_state = next_state;
             let new_state_id = props.to_state_id(block);
             world
-                .set_block_state(&self.position, new_state_id, BlockFlags::NOTIFY_ALL)
-                .await;
+                .set_block_state(&self.position, new_state_id, BlockFlags::NOTIFY_ALL);
         }
     }
 
     // TrialSpawnerState.java:63-155
-    async fn tick_state_machine(
+    fn tick_state_machine(
         &self,
         world: &Arc<World>,
         current: TrialSpawnerState,
@@ -603,14 +596,14 @@ impl TrialSpawnerBlockEntity {
             TrialSpawnerState::Inactive => TrialSpawnerState::WaitingForPlayers,
             TrialSpawnerState::WaitingForPlayers => {
                 if !Self::can_spawn_in_level(world) {
-                    self.reset_statistics().await;
+                    self.reset_statistics();
                     return TrialSpawnerState::WaitingForPlayers;
                 }
-                if !self.has_mob_to_spawn(config).await {
+                if !self.has_mob_to_spawn(config) {
                     return TrialSpawnerState::Inactive;
                 }
-                self.try_detect_players(world, is_ominous).await;
-                if self.detected_players.lock().await.is_empty() {
+                self.try_detect_players(world, is_ominous);
+                if self.detected_players.lock().unwrap().is_empty() {
                     TrialSpawnerState::WaitingForPlayers
                 } else {
                     TrialSpawnerState::Active
@@ -618,7 +611,6 @@ impl TrialSpawnerBlockEntity {
             }
             TrialSpawnerState::Active => {
                 self.tick_active_state(world, is_ominous, config, game_time)
-                    .await
             }
             TrialSpawnerState::WaitingForRewardEjection => {
                 // StateData.java:213-216
@@ -656,7 +648,7 @@ impl TrialSpawnerBlockEntity {
                 if (game_time - cooldown_started_at) % TIME_BETWEEN_EACH_EJECTION != 0 {
                     return TrialSpawnerState::EjectingReward;
                 }
-                if self.detected_players.lock().await.is_empty() {
+                if self.detected_players.lock().unwrap().is_empty() {
                     *self.ejecting_loot_table.lock().unwrap() = None;
                     world.play_block_sound(
                         Sound::BlockTrialSpawnerCloseShutter,
@@ -667,9 +659,9 @@ impl TrialSpawnerBlockEntity {
                 } else {
                     let table = self.ejecting_loot_table.lock().unwrap().clone();
                     if let Some(table) = table.as_deref() {
-                        self.eject_reward(world, table).await;
+                        self.eject_reward(world, table);
                     }
-                    let mut detected = self.detected_players.lock().await;
+                    let mut detected = self.detected_players.lock().unwrap();
                     if let Some(&first) = detected.iter().next() {
                         detected.remove(&first);
                     }
@@ -677,13 +669,13 @@ impl TrialSpawnerBlockEntity {
                 }
             }
             TrialSpawnerState::Cooldown => {
-                self.try_detect_players(world, is_ominous).await;
-                if !self.detected_players.lock().await.is_empty() {
+                self.try_detect_players(world, is_ominous);
+                if !self.detected_players.lock().unwrap().is_empty() {
                     self.total_mobs_spawned.store(0, Ordering::Relaxed);
                     self.next_mob_spawns_at.store(0, Ordering::Relaxed);
                     TrialSpawnerState::Active
                 } else if game_time >= self.cooldown_ends_at.load(Ordering::Relaxed) {
-                    self.reset().await;
+                    self.reset();
                     TrialSpawnerState::WaitingForPlayers
                 } else {
                     TrialSpawnerState::Cooldown
@@ -695,7 +687,7 @@ impl TrialSpawnerBlockEntity {
     /// `TrialSpawnerState.ACTIVE.tick` (`TrialSpawnerState.java`, `ACTIVE` case): counts nearby
     /// players, spawns mobs up to the simultaneous/total caps, and transitions to
     /// `WaitingForRewardEjection` once the total cap is hit and all spawned mobs are dead.
-    async fn tick_active_state(
+    fn tick_active_state(
         &self,
         world: &Arc<World>,
         is_ominous: bool,
@@ -703,18 +695,18 @@ impl TrialSpawnerBlockEntity {
         game_time: i64,
     ) -> TrialSpawnerState {
         if !Self::can_spawn_in_level(world) {
-            self.reset_statistics().await;
+            self.reset_statistics();
             return TrialSpawnerState::WaitingForPlayers;
         }
-        if !self.has_mob_to_spawn(config).await {
+        if !self.has_mob_to_spawn(config) {
             return TrialSpawnerState::Inactive;
         }
-        let additional_players = self.count_additional_players().await;
-        self.try_detect_players(world, is_ominous).await;
+        let additional_players = self.count_additional_players();
+        self.try_detect_players(world, is_ominous);
 
         let total_spawned = self.total_mobs_spawned.load(Ordering::Relaxed);
         if total_spawned >= config.calculate_target_total_mobs(additional_players) {
-            if self.current_mobs.lock().await.is_empty() {
+            if self.current_mobs.lock().unwrap().is_empty() {
                 self.cooldown_ends_at
                     .store(game_time + self.target_cooldown_length, Ordering::Relaxed);
                 self.total_mobs_spawned.store(0, Ordering::Relaxed);
@@ -722,11 +714,11 @@ impl TrialSpawnerBlockEntity {
                 return TrialSpawnerState::WaitingForRewardEjection;
             }
         } else if game_time >= self.next_mob_spawns_at.load(Ordering::Relaxed)
-            && self.current_mobs.lock().await.len()
+            && self.current_mobs.lock().unwrap().len()
                 < config.calculate_target_simultaneous_mobs(additional_players) as usize
-            && let Some(uuid) = self.spawn_mob(world, config).await
+            && let Some(uuid) = self.spawn_mob(world, config)
         {
-            self.current_mobs.lock().await.insert(uuid);
+            self.current_mobs.lock().unwrap().insert(uuid);
             self.total_mobs_spawned.fetch_add(1, Ordering::Relaxed);
             self.next_mob_spawns_at
                 .store(game_time + config.ticks_between_spawn, Ordering::Relaxed);
@@ -769,8 +761,8 @@ impl BlockEntity for TrialSpawnerBlockEntity {
         self.position
     }
 
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move { self.tick_server(world).await })
+    fn tick(&self, world: &Arc<World>) {
+        self.tick_server(world);
     }
 
     fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound, position: BlockPos) -> Self
@@ -832,58 +824,44 @@ impl BlockEntity for TrialSpawnerBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            if let Some(cfg) = self.normal_config_nbt.lock().await.as_ref() {
-                nbt.put("normal_config", cfg.clone());
-            }
-            if let Some(cfg) = self.ominous_config_nbt.lock().await.as_ref() {
-                nbt.put("ominous_config", cfg.clone());
-            }
-            nbt.put_int(
-                "target_cooldown_length",
-                i32::try_from(self.target_cooldown_length).unwrap_or(i32::MAX),
-            );
-            nbt.put_int("required_player_range", self.required_player_range as i32);
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        if let Some(cfg) = self.normal_config_nbt.lock().unwrap().as_ref() {
+            nbt.put("normal_config", cfg.clone());
+        }
+        if let Some(cfg) = self.ominous_config_nbt.lock().unwrap().as_ref() {
+            nbt.put("ominous_config", cfg.clone());
+        }
+        nbt.put_int(
+            "target_cooldown_length",
+            i32::try_from(self.target_cooldown_length).unwrap_or(i32::MAX),
+        );
+        nbt.put_int("required_player_range", self.required_player_range as i32);
 
-            let players: Vec<NbtTag> = self
-                .detected_players
-                .lock()
-                .await
-                .iter()
-                .map(|u| uuid_to_int_array(*u))
-                .collect();
-            nbt.put_list("registered_players", players);
-            let mobs: Vec<NbtTag> = self
-                .current_mobs
-                .lock()
-                .await
-                .iter()
-                .map(|u| uuid_to_int_array(*u))
-                .collect();
-            nbt.put_list("current_mobs", mobs);
-            nbt.put_long(
-                "cooldown_ends_at",
-                self.cooldown_ends_at.load(Ordering::Relaxed),
-            );
-            nbt.put_long(
-                "next_mob_spawns_at",
-                self.next_mob_spawns_at.load(Ordering::Relaxed),
-            );
-            nbt.put_int(
-                "total_mobs_spawned",
-                self.total_mobs_spawned.load(Ordering::Relaxed),
-            );
-            if let Some(spawn_data) = self.next_spawn_data.lock().unwrap().as_ref() {
-                nbt.put_compound("spawn_data", spawn_data.clone());
-            }
-            if let Some(table) = self.ejecting_loot_table.lock().unwrap().as_ref() {
-                nbt.put_string("ejecting_loot_table", table.clone());
-            }
-        })
+        let players: Vec<NbtTag> = self
+            .detected_players
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|u| uuid_to_int_array(*u))
+            .collect();
+        nbt.put_list("registered_players", players);
+        let mobs: Vec<NbtTag> = self
+            .current_mobs
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|u| uuid_to_int_array(*u))
+            .collect();
+        nbt.put_list("current_mobs", mobs);
+        nbt.put_long("cooldown_ends_at", self.cooldown_ends_at.load(Ordering::Relaxed));
+        nbt.put_long("next_mob_spawns_at", self.next_mob_spawns_at.load(Ordering::Relaxed));
+        nbt.put_int("total_mobs_spawned", self.total_mobs_spawned.load(Ordering::Relaxed));
+        if let Some(spawn_data) = self.next_spawn_data.lock().unwrap().as_ref() {
+            nbt.put_compound("spawn_data", spawn_data.clone());
+        }
+        if let Some(table) = self.ejecting_loot_table.lock().unwrap().as_ref() {
+            nbt.put_string("ejecting_loot_table", table.clone());
+        }
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {

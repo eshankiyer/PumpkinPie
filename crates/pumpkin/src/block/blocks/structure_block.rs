@@ -9,8 +9,8 @@ use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::entities::structure_block::StructureBlockBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, CanPlaceAtArgs, NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs,
-    PlacedArgs, PlayerPlacedArgs,
+    BlockBehaviour, CanPlaceAtArgs, NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs, PlacedArgs,
+    PlayerPlacedArgs,
 };
 
 /// `net.minecraft.world.level.block.StructureBlock`.
@@ -38,42 +38,38 @@ impl BlockBehaviour for StructureBlock {
             && player.permission_lvl.load() >= PermissionLvl::Two
     }
 
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let props = StructureBlockLikeProperties::default(args.block);
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let props = StructureBlockLikeProperties::default(args.block);
+        props.to_state_id(args.block)
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            args.world
-                .add_block_entity(Arc::new(StructureBlockBlockEntity::new(*args.position)));
-        })
+    fn placed(&self, args: PlacedArgs<'_>) {
+        args.world
+            .add_block_entity(Arc::new(StructureBlockBlockEntity::new(*args.position)));
     }
 
     /// `StructureBlockEntity.setPlacedBy`: records the placing player's name as the author.
-    fn player_placed<'a>(&'a self, args: PlayerPlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(block_entity) = args.world.get_block_entity(args.position) else {
-                return;
-            };
-            let Some(structure_block) = block_entity
-                .as_any()
-                .downcast_ref::<StructureBlockBlockEntity>()
-            else {
-                return;
-            };
-            *structure_block.author.lock().await = args.player.gameprofile.name.clone();
-        })
+    fn player_placed(&self, args: PlayerPlacedArgs<'_>) {
+        let Some(block_entity) = args.world.get_block_entity(args.position) else {
+            return;
+        };
+        let Some(structure_block) = block_entity
+            .as_any()
+            .downcast_ref::<StructureBlockBlockEntity>()
+        else {
+            return;
+        };
+        let author = args.player.gameprofile.name.clone();
+        tokio::task::block_in_place(|| {
+            *tokio::runtime::Handle::current().block_on(structure_block.author.lock()) = author;
+        });
     }
 
     /// `StructureBlock.useWithoutItem`/`StructureBlockEntity.usedBy`: opens the editor GUI for
     /// operators. `StructureBlock` is a `GameMasterBlock` gated on permission level 2, following
     /// the same shape as `jigsaw.rs`'s `normal_use` (the jigsaw port's additional creative-mode
     /// check has no vanilla citation and is deliberately not copied here, per the design doc).
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
             if args.player.permission_lvl.load() < PermissionLvl::Two {
                 return BlockActionResult::Pass;
             }
@@ -81,8 +77,7 @@ impl BlockBehaviour for StructureBlock {
                 return BlockActionResult::Pass;
             };
             args.world.update_block_entity(&block_entity);
-            BlockActionResult::SuccessServer
-        })
+            BlockActionResult::Success
     }
 
     /// `StructureBlock.neighborChanged` (`StructureBlock.java:67-97`): on a redstone signal,
@@ -95,32 +90,33 @@ impl BlockBehaviour for StructureBlock {
     /// Like `TNTBlock::on_neighbor_update` in this codebase, this checks the current redstone
     /// state rather than tracking a false-to-true edge, so a template can be re-placed on any
     /// neighbor update while already powered, not only on the rising edge.
-    fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if !block_receives_redstone_power(args.world, args.position).await {
+    fn on_neighbor_update(&self, args: OnNeighborUpdateArgs<'_>) {
+        if !block_receives_redstone_power(args.world, args.position) {
                 return;
-            }
-            let Some(block_entity) = args.world.get_block_entity(args.position) else {
-                return;
-            };
-            let Some(structure_block) = block_entity
-                .as_any()
-                .downcast_ref::<StructureBlockBlockEntity>()
-            else {
-                return;
-            };
-            match structure_block.mode.lock().await.as_str() {
-                "LOAD" => {
-                    structure_block.place_structure(args.world).await;
-                }
-                "SAVE" => {
-                    structure_block.save_structure(args.world, false).await;
-                }
-                "CORNER" => {
-                    structure_block.unload_structure().await;
-                }
-                _ => {}
-            }
-        })
+        }
+        let Some(block_entity) = args.world.get_block_entity(args.position) else {
+            return;
+        };
+        let Some(structure_block) = block_entity
+            .as_any()
+            .downcast_ref::<StructureBlockBlockEntity>()
+        else {
+            return;
+        };
+        let mode = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(structure_block.mode.lock()).clone()
+        });
+        match mode.as_str() {
+            "LOAD" => tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(structure_block.place_structure(args.world));
+            }),
+            "SAVE" => tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(structure_block.save_structure(args.world, false));
+            }),
+            "CORNER" => tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(structure_block.unload_structure());
+            }),
+            _ => {}
+        }
     }
 }

@@ -32,41 +32,45 @@ impl GoalSelector {
             .insert(0, PrioritizedGoal::new(TypeId::of::<G>(), priority, goal));
     }
 
-    pub async fn remove_goal<G: Goal + 'static>(&mut self, mob: &dyn Mob) {
-        for prioritized_goal in &mut self.goals {
-            if TypeId::of::<G>() == prioritized_goal.type_id && prioritized_goal.running {
-                prioritized_goal.stop(mob).await;
-            }
+    pub fn remove_goal<G: Goal + 'static>(&mut self, mob: &dyn Mob) {
+        let mut stopped = self.remove_goal_by_type_id(TypeId::of::<G>());
+        for goal in &mut stopped {
+            goal.stop(mob);
         }
-
-        self.remove_goals_of_type(TypeId::of::<G>());
     }
 
-    /// Removes every goal matching `type_id` and fixes up `goals_by_control` to still point at
-    /// the correct surviving goals. Split out from `remove_goal` (which additionally has to
-    /// `stop` running goals, requiring a `&dyn Mob`) so this index-remapping logic can be
-    /// exercised without one.
-    ///
-    /// `Vec::retain` preserves the relative order of the surviving goals, so a goal's new index
-    /// is simply the count of surviving goals before it -- unlike `swap_remove`, this can't move
-    /// an unrelated goal into a slot that `goals_by_control` still references.
-    fn remove_goals_of_type(&mut self, type_id: TypeId) {
+    pub fn remove_goals<G: Goal + 'static>(&mut self) -> Vec<PrioritizedGoal> {
+        self.remove_goal_by_type_id(TypeId::of::<G>())
+    }
+
+    pub fn remove_goal_by_type_id(&mut self, type_id: TypeId) -> Vec<PrioritizedGoal> {
+        let mut stopped = Vec::new();
         let mut new_index = vec![usize::MAX; self.goals.len()];
-        let mut next = 0usize;
-        for (i, goal) in self.goals.iter().enumerate() {
-            if goal.type_id != type_id {
-                new_index[i] = next;
-                next += 1;
+        let mut remaining = Vec::with_capacity(self.goals.len());
+        for (index, goal) in self.goals.drain(..).enumerate() {
+            if goal.type_id == type_id {
+                if goal.running {
+                    stopped.push(goal);
+                }
+            } else {
+                new_index[index] = remaining.len();
+                remaining.push(goal);
             }
         }
-
-        self.goals.retain(|goal| goal.type_id != type_id);
+        self.goals = remaining;
 
         for slot in &mut self.goals_by_control {
             if *slot != usize::MAX {
                 *slot = new_index[*slot];
             }
         }
+
+        stopped
+    }
+
+    /// Retains the fork's testable, order-preserving removal helper.
+    fn remove_goals_of_type(&mut self, type_id: TypeId) {
+        let _ = self.remove_goal_by_type_id(type_id);
     }
 
     pub fn clear(&mut self) -> Vec<PrioritizedGoal> {
@@ -105,13 +109,13 @@ impl GoalSelector {
         true
     }
 
-    pub async fn tick(&mut self, mob: &dyn Mob) {
+    pub fn tick(&mut self, mob: &dyn Mob) {
         for prioritized_goal in &mut self.goals {
             if prioritized_goal.running
                 && (Self::uses_any(prioritized_goal, self.disabled_controls)
-                    || !prioritized_goal.should_continue(mob).await)
+                    || !prioritized_goal.should_continue(mob))
             {
-                prioritized_goal.stop(mob).await;
+                prioritized_goal.stop(mob);
             }
         }
 
@@ -125,28 +129,28 @@ impl GoalSelector {
             if !self.goals[i].running
                 && !Self::uses_any(&self.goals[i], self.disabled_controls)
                 && self.can_replace_all(&self.goals[i])
-                && self.goals[i].can_start(mob).await
+                && self.goals[i].can_start(mob)
             {
                 let controls = self.goals[i].controls();
                 for control in Controls::ITER {
                     if controls.get(control) {
                         if let Some(goal) = self.get_goal_by_control(control) {
-                            goal.stop(mob).await;
+                            goal.stop(mob);
                         }
                         self.goals_by_control[control.idx()] = i;
                     }
                 }
-                self.goals[i].start(mob).await;
+                self.goals[i].start(mob);
             }
         }
 
-        self.tick_goals(mob, true).await;
+        self.tick_goals(mob, true);
     }
 
-    pub async fn tick_goals(&mut self, mob: &dyn Mob, tick_all: bool) {
+    pub fn tick_goals(&mut self, mob: &dyn Mob, tick_all: bool) {
         for prioritized_goal in &mut self.goals {
             if prioritized_goal.running && (tick_all || prioritized_goal.should_run_every_tick()) {
-                prioritized_goal.tick(mob).await;
+                prioritized_goal.tick(mob);
             }
         }
     }

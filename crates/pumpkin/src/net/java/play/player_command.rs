@@ -2,10 +2,10 @@
 use super::*;
 
 impl JavaClient {
-    pub async fn handle_player_command(
+    pub fn handle_player_command(
         &self,
         player: &Arc<Player>,
-        command: SPlayerCommand,
+        command: &SPlayerCommand,
         server: &Arc<Server>,
     ) {
         if command.entity_id != player.entity_id().into() {
@@ -20,27 +20,29 @@ impl JavaClient {
         match command.action {
             Action::StartSprinting => {
                 if !entity.is_sprinting() {
-                    send_cancellable! {{
+                    send_cancellable_blocking! {{
                         server;
                         PlayerToggleSprintEvent::new(player.clone(), true);
                         'after: {
-                            player.get_entity().set_sprinting(event.is_sprinting).await;
+                            player.set_sprinting(event.is_sprinting);
+                            player.update_player_pose();
                         }
                     }}
                 }
             }
             Action::StopSprinting => {
                 if entity.is_sprinting() {
-                    send_cancellable! {{
+                    send_cancellable_blocking! {{
                         server;
                         PlayerToggleSprintEvent::new(player.clone(), false);
                         'after: {
-                            player.get_entity().set_sprinting(event.is_sprinting).await;
+                            player.set_sprinting(event.is_sprinting);
+                            player.update_player_pose();
                         }
                     }}
                 }
             }
-            Action::LeaveBed => player.wake_up().await,
+            Action::LeaveBed => player.wake_up(),
 
             Action::StartHorseJump | Action::StopHorseJump | Action::OpenVehicleInventory => {
                 debug!("todo");
@@ -54,7 +56,7 @@ impl JavaClient {
                 let living = &player.living_entity;
                 let caller: Arc<dyn EntityBase> = player.clone();
                 let try_start = !living.entity.is_fall_flying()
-                    && living.can_glide(&caller).await
+                    && living.can_glide(&caller)
                     && !living
                         .entity
                         .was_touching_water
@@ -64,11 +66,11 @@ impl JavaClient {
                         living.entity.entity_id,
                         true,
                     );
-                    server.plugin_manager.fire(server, &mut event).await;
+                    server.plugin_manager.fire_blocking(server, &mut event);
                     if event.cancelled || !event.is_gliding {
                         living.entity.stop_fall_flying();
                     } else {
-                        living.entity.set_fall_flying(true).await;
+                        living.entity.set_fall_flying(true);
                     }
                 } else {
                     living.entity.stop_fall_flying();
@@ -78,12 +80,11 @@ impl JavaClient {
             Action::StartSneaking | Action::StopSneaking => {
                 self.handle_player_input(
                     player,
-                    SPlayerInput {
+                    &SPlayerInput {
                         input: SPlayerInput::SNEAK,
                     },
                     server,
-                )
-                .await;
+                );
             }
         }
     }

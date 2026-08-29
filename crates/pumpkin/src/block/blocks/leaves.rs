@@ -1,56 +1,77 @@
-use crate::block::{
-    BlockBehaviour, BlockFuture, BonemealArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
-    OnScheduledTickArgs, RandomTickArgs,
+use pumpkin_data::{
+    Block, BlockDirection, BlockStateId,
+    block_properties::{BlockProperties, MangrovePropaguleLikeProperties, OakLeavesLikeProperties},
+    tag,
+    tag::Taggable,
 };
-use pumpkin_data::block_properties::{
-    BlockProperties, MangrovePropaguleLikeProperties, OakLeavesLikeProperties,
-};
-use pumpkin_data::tag::{self, Taggable};
-use pumpkin_data::{Block, BlockDirection, BlockStateId};
 use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_util::math::position::BlockPos;
-use pumpkin_world::tick::TickPriority;
-use pumpkin_world::world::BlockFlags;
+use pumpkin_world::{
+    tick::TickPriority,
+    world::{BlockAccessor, BlockFlags},
+};
 
+use crate::block::{
+    BlockBehaviour, BonemealArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs,
+    RandomTickArgs,
+};
 use crate::world::World;
 
-type LeavesProperties = OakLeavesLikeProperties;
-
-const MAX_DISTANCE: u8 = 7;
+pub const DECAY_DISTANCE: u8 = 7;
 
 #[pumpkin_block_from_tag("minecraft:leaves")]
 pub struct LeavesBlock;
 
+/// Fork-side helper retained for the leaf-distance calculation: logs are the zero-distance
+/// sources, supported leaves contribute their stored distance, and unrelated blocks contribute
+/// nothing.
 fn distance_from_state(block: &'static Block, state_id: BlockStateId) -> Option<u8> {
     if block.has_tag(&tag::Block::MINECRAFT_LOGS) {
         return Some(0);
     }
     if !block.has_tag(&tag::Block::MINECRAFT_LEAVES)
-        || !LeavesProperties::handles_block_id(block.id)
+        || !OakLeavesLikeProperties::handles_block_id(block.id)
     {
         return None;
     }
-    Some(LeavesProperties::from_state_id(state_id, block).distance)
+    Some(OakLeavesLikeProperties::from_state_id(state_id, block).distance)
 }
 
-fn compute_distance(world: &World, position: &BlockPos) -> u8 {
-    let mut distance = MAX_DISTANCE;
+#[must_use]
+pub fn get_distance_at(block: &Block, state_id: BlockStateId) -> u8 {
+    if block.has_tag(&tag::Block::MINECRAFT_PREVENTS_NEARBY_LEAF_DECAY)
+        || block.has_tag(&tag::Block::MINECRAFT_LOGS)
+    {
+        0
+    } else if block.has_tag(&tag::Block::MINECRAFT_LEAVES) {
+        OakLeavesLikeProperties::from_state_id(state_id, block).distance
+    } else {
+        DECAY_DISTANCE
+    }
+}
+
+#[must_use]
+pub fn update_distance(
+    world: &dyn BlockAccessor,
+    pos: &BlockPos,
+    mut props: OakLeavesLikeProperties,
+) -> OakLeavesLikeProperties {
+    let mut min_distance = DECAY_DISTANCE;
     for direction in BlockDirection::all() {
-        let neighbor = position.offset(direction.to_offset());
-        let (block, state) = world.get_block_and_state(&neighbor);
-        if let Some(neighbor_distance) = distance_from_state(block, state.id) {
-            distance = distance.min(neighbor_distance.saturating_add(1));
-            if distance == 1 {
-                break;
-            }
+        let neighbor_pos = pos.offset(direction.to_offset());
+        let (neighbor_block, neighbor_state) = world.get_block_and_state(&neighbor_pos);
+        let dist = get_distance_at(neighbor_block, neighbor_state.id).saturating_add(1);
+        min_distance = min_distance.min(dist);
+        if min_distance == 1 {
+            break;
         }
     }
-    distance
+    props.distance = min_distance.min(DECAY_DISTANCE);
+    props
 }
 
 impl BlockBehaviour for LeavesBlock {
-    /// `MangroveLeavesBlock.isValidBonemealTarget` (`MangroveLeavesBlock.java:32-35`): the
-    /// block below must be empty and inside the build height.
+    /// `MangroveLeavesBlock.isValidBonemealTarget` (`MangroveLeavesBlock.java:32-35`).
     fn is_valid_bonemeal_target(&self, args: BonemealArgs<'_>) -> bool {
         if args.block != &Block::MANGROVE_LEAVES {
             return false;
@@ -61,8 +82,7 @@ impl BlockBehaviour for LeavesBlock {
             && args.world.get_block_state(&below).is_air()
     }
 
-    /// `MangroveLeavesBlock.isBonemealSuccess` (`MangroveLeavesBlock.java:37-39`) always
-    /// succeeds.
+    /// `MangroveLeavesBlock.isBonemealSuccess` (`MangroveLeavesBlock.java:37-39`) always succeeds.
     fn is_bonemeal_success(&self, args: BonemealArgs<'_>) -> bool {
         args.block == &Block::MANGROVE_LEAVES
     }
@@ -70,72 +90,71 @@ impl BlockBehaviour for LeavesBlock {
     /// `MangroveLeavesBlock.performBonemeal` (`MangroveLeavesBlock.java:41-43`) places
     /// `MangrovePropaguleBlock.createNewHangingPropagule` (`MangrovePropaguleBlock.java:142-144`)
     /// below the leaves.
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if args.block != &Block::MANGROVE_LEAVES {
-                return;
-            }
-            let mut props = MangrovePropaguleLikeProperties::default(&Block::MANGROVE_PROPAGULE);
-            props.hanging = true;
-            args.world
-                .set_block_state(
-                    &args.position.down(),
-                    props.to_state_id(&Block::MANGROVE_PROPAGULE),
-                    BlockFlags::NOTIFY_ALL,
-                )
-                .await;
-        })
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        if args.block != &Block::MANGROVE_LEAVES {
+            return;
+        }
+        let mut props = MangrovePropaguleLikeProperties::default(&Block::MANGROVE_PROPAGULE);
+        props.hanging = true;
+        args.world.set_block_state(
+            &args.position.down(),
+            props.to_state_id(&Block::MANGROVE_PROPAGULE),
+            BlockFlags::NOTIFY_ALL,
+        );
     }
 
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = LeavesProperties::default(args.block);
-            props.persistent = true;
-            props.distance = compute_distance(args.world, args.position);
-            props.waterlogged = args.replacing.water_source();
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = OakLeavesLikeProperties::default(args.block);
+        props.persistent = true;
+        props.waterlogged = args.replacing.water_source();
+        props = update_distance(args.world, args.position, props);
+        props.to_state_id(args.block)
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        let current_props = OakLeavesLikeProperties::from_state_id(args.state_id, args.block);
+        if current_props.waterlogged {
+            args.world.schedule_fluid_tick(
+                &pumpkin_data::fluid::Fluid::WATER,
+                *args.position,
+                pumpkin_data::fluid::Fluid::WATER.flow_speed as u8,
+                TickPriority::Normal,
+            );
+        }
+        let neighbor_block = args.world.get_block(args.neighbor_position);
+        let distance_from_neighbor =
+            get_distance_at(neighbor_block, args.neighbor_state_id).saturating_add(1);
+        if distance_from_neighbor != 1 || current_props.distance != distance_from_neighbor {
             args.world
                 .schedule_block_tick(args.block, *args.position, 1, TickPriority::Normal);
-            args.state_id
-        })
+        }
+        args.state_id
     }
 
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let state_id = args.world.get_block_state_id(args.position);
-            let mut props = LeavesProperties::from_state_id(state_id, args.block);
-            let distance = compute_distance(args.world, args.position);
-            if props.distance != distance {
-                props.distance = distance;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-            }
-        })
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        let state_id = args.world.get_block_state_id(args.position);
+        let props = OakLeavesLikeProperties::from_state_id(state_id, args.block);
+        let updated_props = update_distance(&**args.world, args.position, props);
+        let new_state_id = updated_props.to_state_id(args.block);
+        if new_state_id != state_id {
+            args.world.set_block_state(
+                args.position,
+                new_state_id,
+                BlockFlags::NOTIFY_ALL,
+            );
+        }
     }
 
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let state_id = args.world.get_block_state_id(args.position);
-            let props = LeavesProperties::from_state_id(state_id, args.block);
-            if !props.persistent && props.distance >= MAX_DISTANCE {
-                args.world
-                    .break_block(args.position, None, BlockFlags::NOTIFY_ALL)
-                    .await;
-            }
-        })
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        let state_id = args.world.get_block_state_id(args.position);
+        let props = OakLeavesLikeProperties::from_state_id(state_id, args.block);
+        if !props.persistent && props.distance == DECAY_DISTANCE {
+            args.world
+                .break_block(args.position, None, BlockFlags::empty());
+        }
     }
 }
 

@@ -18,7 +18,7 @@ use rand::RngExt;
 use uuid::Uuid;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture,
     ai::goal::{
         active_target::ActiveTargetGoal, breed::BreedGoal, escape_danger::EscapeDangerGoal,
         follow_parent::FollowParentGoal, llama_follow_caravan::LlamaFollowCaravanGoal,
@@ -27,7 +27,7 @@ use crate::entity::{
         run_around_like_crazy::RunAroundLikeCrazyGoal, swim::SwimGoal, tempt::TemptGoal,
         wander_around::WanderAroundGoal,
     },
-    mob::{Mob, MobEntity},
+    mob::{Mob, MobEntity, RangedAttackMob},
     passive::{
         animal::Animal,
         equine::{AbstractChestedHorse, AbstractHorse, AbstractHorseData, ChestedHorseData},
@@ -425,30 +425,33 @@ impl LlamaEntity {
 
         mob_arc
     }
-}
 
-impl NBTStorage for LlamaEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_animal_nbt(nbt);
-            self.write_horse_nbt(nbt);
-            self.write_chested_horse_nbt(nbt);
-            self.write_llama_nbt(nbt);
-        })
-    }
+    pub fn spit(&self, target: &Arc<dyn EntityBase>) {
+        let entity = self.get_entity();
+        let world = entity.world.load_full();
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_animal_nbt(nbt);
-            // Vanilla reads `Strength` before `super.readAdditionalSaveData` on purpose: the
-            // super chain's chest handling sizes the inventory off `getInventoryColumns()`, which
-            // for a llama is strength-dependent (`Llama.java:110-114`).
-            self.read_llama_strength_variant(nbt);
-            self.read_horse_nbt(nbt);
-            self.read_chested_horse_nbt(nbt).await;
-        })
+        let spit_entity = Entity::new(world.clone(), entity.pos.load(), &EntityType::LLAMA_SPIT);
+        let spit = LlamaSpitEntity::new_shot(spit_entity, entity);
+
+        let mob_pos = entity.pos.load();
+        let target_entity = target.get_entity();
+        let target_pos = target_entity.pos.load();
+        let target_height = f64::from(target_entity.entity_dimension.load().height);
+
+        let dx = target_pos.x - mob_pos.x;
+        let dy = (target_pos.y + target_height / 3.0) - spit.get_entity().pos.load().y;
+        let dz = target_pos.z - mob_pos.z;
+        let horizontal_distance = dx.hypot(dz);
+        let yo = horizontal_distance * 0.2;
+
+        spit.thrown.set_velocity(dx, dy + yo, dz, 1.5, 10.0);
+
+        if !entity.silent.load(Ordering::Relaxed) {
+            world.play_sound(Sound::EntityLlamaSpit, SoundCategory::Neutral, &mob_pos);
+        }
+
+        let spit_arc: Arc<dyn EntityBase> = Arc::new(spit);
+        world.spawn_entity(spit_arc);
     }
 }
 
@@ -537,27 +540,42 @@ impl Mob for LlamaEntity {
         &self.mob_entity
     }
 
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        AbstractHorse::tick_horse_ai(self)
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        self.write_horse_nbt(nbt);
+        self.write_chested_horse_nbt(nbt);
+        self.write_llama_nbt(nbt);
+    }
+
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        // Vanilla reads `Strength` before `super.readAdditionalSaveData` on purpose: the
+        // super chain's chest handling sizes the inventory off `getInventoryColumns()`, which
+        // for a llama is strength-dependent (`Llama.java:110-114`).
+        self.read_llama_strength_variant(nbt);
+        self.read_horse_nbt(nbt);
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.read_chested_horse_nbt(nbt));
+        });
+    }
+
+    fn mob_tick(&self, _caller: &dyn EntityBase) {
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(AbstractHorse::tick_horse_ai(self));
+        });
     }
 
     fn get_follow_leash_speed(&self) -> f32 {
         2.0
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        self.chested_mob_interact(player, item_stack)
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.chested_mob_interact(player, item_stack))
+        })
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            send_baby_id_if_baby(self.get_entity());
-            self.send_llama_metadata();
-        })
+    fn mob_init_data_tracker(&self) {
+        send_baby_id_if_baby(self.get_entity());
+        self.send_llama_metadata();
     }
 
     fn create_offspring<'a>(
@@ -590,5 +608,11 @@ mod tests {
         }
         // With a 4% chance per roll of the 1-5 branch, 5000 rolls should hit it at least once.
         assert!(saw_five, "never rolled the rare 1-5 branch in 5000 tries");
+    }
+}
+
+impl RangedAttackMob for LlamaEntity {
+    fn perform_ranged_attack(&self, target: &Arc<dyn EntityBase>, _power: f32) {
+        self.spit(target);
     }
 }

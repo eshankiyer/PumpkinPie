@@ -10,10 +10,10 @@ use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::{chunk::ChunkHeightmapType, world::BlockFlags};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, NBTStorage,
     living::LivingEntity,
     mob::{Mob, MobEntity},
     player::Player,
@@ -163,7 +163,7 @@ impl EnderDragonPart {
     /// whether this part is the head (vanilla `EnderDragon.head`, EnderDragon.java:93,101 -
     /// the first entry of `subEntities`), then routes into `EnderDragonEntity::hurt_part`
     /// (vanilla `EnderDragon.hurt`, EnderDragon.java:446-469).
-    async fn hurt_dragon(
+    fn hurt_dragon(
         &self,
         source: &dyn EntityBase,
         amount: f32,
@@ -171,7 +171,7 @@ impl EnderDragonPart {
     ) -> bool {
         // Vanilla `EnderDragonPart.hurtServer` (EnderDragonPart.java:52-54) checks the part's
         // own `isInvulnerableToBase(source)` before routing into `EnderDragon.hurt`.
-        if self.entity.is_invulnerable_to(&damage_type).await {
+        if self.entity.is_invulnerable_to(&damage_type) {
             return false;
         }
 
@@ -192,11 +192,9 @@ impl EnderDragonPart {
             .parts
             .first()
             .is_some_and(|head| head.entity.entity_uuid == self.entity.entity_uuid);
-        dragon.hurt_part(is_head, source, damage_type, amount).await
+        dragon.hurt_part(is_head, source, damage_type, amount)
     }
 }
-
-impl NBTStorage for EnderDragonPart {}
 
 impl EntityBase for EnderDragonPart {
     fn get_entity(&self) -> &Entity {
@@ -213,28 +211,24 @@ impl EntityBase for EnderDragonPart {
         false
     }
 
-    fn damage<'a>(
-        &'a self,
-        source: &'a dyn EntityBase,
+    fn damage(&self, source: &dyn EntityBase,
         amount: f32,
         damage_type: DamageType,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move { self.hurt_dragon(source, amount, damage_type).await })
+    ) -> bool {
+        self.hurt_dragon(source, amount, damage_type)
     }
 
-    fn damage_with_context<'a>(
-        &'a self,
-        caller: &'a dyn EntityBase,
+    fn damage_with_context(
+        &self,
+        caller: &dyn EntityBase,
         amount: f32,
         damage_type: DamageType,
         _position: Option<Vector3<f64>>,
-        source: Option<&'a dyn EntityBase>,
-        cause: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let attacker = cause.or(source).unwrap_or(caller);
-            self.hurt_dragon(attacker, amount, damage_type).await
-        })
+        source: Option<&dyn EntityBase>,
+        cause: Option<&dyn EntityBase>,
+    ) -> bool {
+        let attacker = cause.or(source).unwrap_or(caller);
+        self.hurt_dragon(attacker, amount, damage_type)
     }
 
     fn cast_any(&self) -> &dyn std::any::Any {
@@ -292,7 +286,7 @@ pub struct EnderDragonEntity {
 
 impl EnderDragonEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
-        entity.no_clip.store(true, Ordering::Relaxed);
+        entity.no_physics.store(true, Ordering::Relaxed);
         let base_id = entity.entity_id;
         let dragon_uuid = entity.entity_uuid;
         let world = entity.world.load();
@@ -342,40 +336,54 @@ impl EnderDragonEntity {
         })
     }
 
-    pub async fn set_fight_origin(&self, pos: BlockPos) {
-        let mut initialized = self.nodes_initialized.lock().await;
-        let mut origin = self.fight_origin.lock().await;
-        if *origin != pos {
+    pub fn set_fight_origin(&self, pos: BlockPos) {
+        if let (Ok(mut initialized), Ok(mut origin)) = (
+            self.nodes_initialized.try_lock(),
+            self.fight_origin.try_lock(),
+        ) && *origin != pos
+        {
             *origin = pos;
             *initialized = false;
         }
     }
 
-    pub async fn set_phase(&self, phase_type: EnderDragonPhase) {
-        let mut phase_lock = self.phase.lock().await;
+    pub fn set_phase(&self, phase_type: EnderDragonPhase) {
+        let mut phase_lock = self
+            .phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if *phase_lock == phase_type {
             return;
         }
 
         let old_phase = self.phase_manager.get_phase(*phase_lock);
-        old_phase.end(self).await;
+        old_phase.end(self);
 
         *phase_lock = phase_type;
 
         let new_phase = self.phase_manager.get_phase(phase_type);
-        new_phase.begin(self).await;
+        new_phase.begin(self);
     }
 
-    async fn ensure_nodes_initialized(&self) {
-        let mut initialized = self.nodes_initialized.lock().await;
+    fn ensure_nodes_initialized(&self) {
+        let mut initialized = self
+            .nodes_initialized
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if *initialized {
             return;
         }
 
         let world = self.mob_entity.living_entity.entity.world.load();
-        let fight_origin = self.fight_origin.lock().await;
+        let fight_origin = self
+            .fight_origin
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
-        let mut nodes = self.nodes.lock().await;
+        let mut nodes = self
+            .nodes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         for i in 0..NODE_COUNT {
             let mut y_adjustment = 5;
             let node_x;
@@ -413,19 +421,28 @@ impl EnderDragonEntity {
         let new_path = find_path(&nodes, nearest, dest, None);
         drop(nodes);
 
-        *self.target_node.lock().await = dest;
-        *self.path.lock().await = new_path;
+        *self
+            .target_node
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = dest;
+        *self
+            .path
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = new_path;
         *initialized = true;
     }
 
-    pub async fn find_closest_node(&self) -> usize {
+    pub fn find_closest_node(&self) -> usize {
         let pos = self.mob_entity.living_entity.entity.pos.load();
-        self.find_closest_node_to(pos).await
+        self.find_closest_node_to(pos)
     }
 
-    pub async fn find_closest_node_to(&self, pos: Vector3<f64>) -> usize {
-        self.ensure_nodes_initialized().await;
-        let nodes = self.nodes.lock().await;
+    pub fn find_closest_node_to(&self, pos: Vector3<f64>) -> usize {
+        self.ensure_nodes_initialized();
+        let nodes = self
+            .nodes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         Self::nearest_node_in(&nodes, pos)
     }
 
@@ -475,13 +492,12 @@ impl EnderDragonEntity {
         Vector3::new(vec.x * cos - vec.z * sin, vec.y, vec.z * cos + vec.x * sin)
     }
 
-    pub async fn steer_toward(
+    pub fn steer_toward(
         &self,
         pos: Vector3<f64>,
         target: Vector3<f64>,
         fly_speed: f32,
         turn_speed: f32,
-        _y_scale: f64,
     ) {
         let xdd = target.x - pos.x;
         let mut ydd = target.y - pos.y;
@@ -526,7 +542,10 @@ impl EnderDragonEntity {
             }
             y_rot_d = y_rot_d.clamp(-50.0, 50.0);
 
-            let mut y_rot_a = self.yaw_rot_accel.lock().await;
+            let mut y_rot_a = self
+                .yaw_rot_accel
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             *y_rot_a *= 0.8;
             *y_rot_a += y_rot_d * turn_speed;
             entity.yaw.store(yaw + *y_rot_a * 0.1);
@@ -552,11 +571,24 @@ impl EnderDragonEntity {
         ));
     }
 
-    async fn update_flap_time(&self) {
-        let sitting = self.phase.lock().await.is_sitting();
-        let in_wall = *self.in_wall.lock().await;
-        let mut flap = self.flap_time.lock().await;
-        let mut o_flap = self.o_flap_time.lock().await;
+    fn update_flap_time(&self) {
+        let sitting = self
+            .phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_sitting();
+        let in_wall = *self
+            .in_wall
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut flap = self
+            .flap_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut o_flap = self
+            .o_flap_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         *o_flap = *flap;
         *flap += if sitting {
@@ -574,9 +606,15 @@ impl EnderDragonEntity {
     /// Vanilla `EnderDragon.isFlapping` (`EnderDragon.java:123-128`): a wing beat is the
     /// `cos(flapTime * 2π)` wave crossing -0.3 upward between the previous and current
     /// sample of the flap phase.
-    async fn is_flapping(&self) -> bool {
-        let flap = *self.flap_time.lock().await;
-        let old_flap = *self.o_flap_time.lock().await;
+    fn is_flapping(&self) -> bool {
+        let flap = *self
+            .flap_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let old_flap = *self
+            .o_flap_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         (old_flap * std::f32::consts::TAU).cos() <= -0.3
             && (flap * std::f32::consts::TAU).cos() >= -0.3
     }
@@ -587,22 +625,33 @@ impl EnderDragonEntity {
     /// default `ALL` emits events - `Entity.java:1533-1535`), which sculk vibration
     /// listeners receive at frequency 1. The client-only local flap sound inside
     /// `onFlap` (`EnderDragon.java:131-138`) has no server counterpart.
-    async fn on_flap(&self, caller: &Arc<dyn EntityBase>) {
+    fn on_flap(&self) {
         let world = self.mob_entity.living_entity.entity.world.load();
-        crate::world::game_event::emit_game_event(
-            &world,
-            pumpkin_data::game_event::GameEvent::Flap,
-            self.mob_entity.living_entity.entity.pos.load(),
-            crate::world::game_event::GameEventContext::of_entity(caller.clone()),
-        )
-        .await;
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(
+                crate::world::game_event::emit_game_event(
+                    &world,
+                    pumpkin_data::game_event::GameEvent::Flap,
+                    self.mob_entity.living_entity.entity.pos.load(),
+                    crate::world::game_event::GameEventContext::none(),
+                ),
+            );
+        });
     }
 
-    async fn tick_growl(&self) {
-        if self.phase.lock().await.is_sitting() {
+    fn tick_growl(&self) {
+        if self
+            .phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_sitting()
+        {
             return;
         }
-        let mut t = self.growl_time.lock().await;
+        let mut t = self
+            .growl_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if *t > 0 {
             *t -= 1;
         } else {
@@ -631,7 +680,7 @@ impl EnderDragonEntity {
             .cloned()
     }
 
-    async fn handle_player_collisions(&self) {
+    fn handle_player_collisions(&self) {
         let world = self.mob_entity.living_entity.entity.world.load();
 
         let dragon_bbox = self.mob_entity.living_entity.entity.bounding_box.load();
@@ -661,8 +710,13 @@ impl EnderDragonEntity {
                 );
                 player.get_entity().send_velocity();
 
-                if !self.phase.lock().await.is_sitting() {
-                    player.damage(self, 5.0, DamageType::MOB_ATTACK).await;
+                if !self
+                    .phase
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .is_sitting()
+                {
+                    player.damage(self, 5.0, DamageType::MOB_ATTACK);
                 }
             }
         }
@@ -694,8 +748,11 @@ impl EnderDragonEntity {
         }
     }
 
-    async fn tick_block_breaking(&self) {
-        let phase_type = *self.phase.lock().await;
+    fn tick_block_breaking(&self) {
+        let phase_type = *self
+            .phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if phase_type.is_sitting() || phase_type == EnderDragonPhase::Dying {
             return;
         }
@@ -715,16 +772,16 @@ impl EnderDragonEntity {
                 && block != &Block::END_PORTAL
                 && block != &Block::END_PORTAL_FRAME
             {
-                world
-                    .set_block_state(&pos, BlockStateId::AIR, BlockFlags::NOTIFY_ALL)
-                    .await;
+                world.set_block_state(&pos, BlockStateId::AIR, BlockFlags::NOTIFY_ALL);
             }
         }
     }
 
-    async fn tick_parts(&self) {
-        let history: tokio::sync::MutexGuard<'_, DragonFlightHistory> =
-            self.flight_history.lock().await;
+    fn tick_parts(&self) {
+        let history = self
+            .flight_history
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let p5 = history.get(5);
         let p10 = history.get(10);
         let p0 = history.get(0);
@@ -757,13 +814,21 @@ impl EnderDragonEntity {
             pos.z - ss1 * 4.5,
         ));
 
-        let head_y_offset = if self.phase.lock().await.is_sitting() {
+        let head_y_offset = if self
+            .phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_sitting()
+        {
             -1.0
         } else {
-            (p5.y - p0.y) as f64
+            p5.y - p0.y
         };
 
-        let yaw_accel = *self.yaw_rot_accel.lock().await;
+        let yaw_accel = *self
+            .yaw_rot_accel
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let rot2 = (yaw - yaw_accel * 0.01) * (std::f32::consts::PI / 180.0);
         let ss2 = rot2.sin() as f64;
         let cc2 = rot2.cos() as f64;
@@ -801,75 +866,88 @@ impl EnderDragonEntity {
         }
     }
 
-    pub async fn ai_step(&self, caller: &Arc<dyn EntityBase>) {
+    pub fn ai_step(&self) {
         if !self.parts_registered.swap(true, Ordering::AcqRel) {
             let world = self.mob_entity.living_entity.entity.world.load();
             for part in &self.parts {
-                world
-                    .add_entity_silent(part.clone() as Arc<dyn EntityBase>)
-                    .await;
+                world.add_entity_silent(part.clone() as Arc<dyn EntityBase>);
             }
         }
 
+        if self.mob_entity.living_entity.entity.is_removed() {
+            return;
+        }
         self.mob_entity.living_entity.entity.update_last_pos();
-        self.ensure_nodes_initialized().await;
-        self.update_flap_time().await;
-        if self.is_flapping().await {
-            self.on_flap(caller).await;
+        self.ensure_nodes_initialized();
+        self.update_flap_time();
+        if self.is_flapping() {
+            self.on_flap();
         }
 
         {
             let y = self.mob_entity.living_entity.entity.pos.load().y;
             let yaw = self.mob_entity.living_entity.entity.yaw.load();
-            self.flight_history.lock().await.record(y, yaw);
+            self.flight_history
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .record(y, yaw);
         };
 
-        self.tick_growl().await;
+        self.tick_growl();
         self.tick_crystal_healing();
 
         {
             let world = self.mob_entity.living_entity.entity.world.load();
             if let Some(ref fight_mutex) = world.dragon_fight {
                 let living = &self.mob_entity.living_entity;
-                fight_mutex
-                    .lock()
-                    .await
-                    .update_dragon(&world, living.health.load(), living.get_max_health())
-                    .await;
+                if let Ok(mut fight) = fight_mutex.lock() {
+                    let custom_name = living.entity.custom_name.load();
+                    fight.update_dragon(
+                        &world,
+                        living.entity.entity_uuid,
+                        living.health.load(),
+                        living.get_max_health(),
+                        custom_name.as_ref().as_ref(),
+                    );
+                }
             }
         }
 
-        let phase_type: EnderDragonPhase = *self.phase.lock().await;
+        let phase_type: EnderDragonPhase = *self
+            .phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let phase = self.phase_manager.get_phase(phase_type);
 
         if phase_type.is_sitting() {
-            *self.ticks_sitting.lock().await += 1;
+            *self
+                .ticks_sitting
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
         } else {
-            self.handle_player_collisions().await;
-            self.tick_block_breaking().await;
+            self.handle_player_collisions();
+            self.tick_block_breaking();
         }
 
-        phase.tick(self).await;
+        phase.tick(self);
 
-        if phase_type == EnderDragonPhase::Dying {
+        if self.mob_entity.living_entity.entity.is_removed() {
             return;
         }
 
-        let target_location = *self.target_location.lock().await;
-        if let Some(target) = target_location {
-            let pos = self.mob_entity.living_entity.entity.pos.load();
-            self.steer_toward(
-                pos,
-                target,
-                phase.get_fly_speed(),
-                phase.get_turn_speed(),
-                0.5,
-            )
-            .await;
+        if phase_type != EnderDragonPhase::Dying {
+            let target_location = *self
+                .target_location
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(target) = target_location {
+                let pos = self.mob_entity.living_entity.entity.pos.load();
+                self.steer_toward(pos, target, phase.get_fly_speed(), phase.get_turn_speed());
+            }
         }
 
         self.mob_entity.living_entity.entity.send_pos_rot();
-        self.tick_parts().await;
+        self.tick_parts();
     }
 
     /// Vanilla `EnderDragon.hurt` (EnderDragon.java:446-469). Applies the
@@ -877,14 +955,30 @@ impl EnderDragonEntity {
     /// reduction, the 0.01 cutoff, the player/`ALWAYS_HURTS_ENDER_DRAGONS`
     /// gate, and the sitting-damage accumulation that triggers the TAKEOFF
     /// transition at `0.25 * max health`.
-    pub async fn hurt_part(
+    pub fn hurt(&self, damage: f32) {
+        let phase_type: EnderDragonPhase = *self
+            .phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if phase_type.is_sitting() {
+            *self
+                .sitting_damage_received
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) += damage;
+        }
+    }
+
+    pub fn hurt_part(
         &self,
         is_head: bool,
         source: &dyn EntityBase,
         damage_type: DamageType,
         mut damage: f32,
     ) -> bool {
-        let phase_type = *self.phase.lock().await;
+        let phase_type = *self
+            .phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if phase_type == EnderDragonPhase::Dying {
             return false;
         }
@@ -915,23 +1009,28 @@ impl EnderDragonEntity {
             || damage_type.has_tag(&tag::DamageType::MINECRAFT_ALWAYS_HURTS_ENDER_DRAGONS)
         {
             let health_before = self.mob_entity.living_entity.health.load();
-            self.damage_with_context(self, damage, damage_type, None, Some(source), Some(source))
-                .await;
+            self.damage_with_context(self, damage, damage_type, None, Some(source), Some(source));
             let health_after = self.mob_entity.living_entity.health.load();
             // Race: a concurrent damage/heal landing between the two loads above can skew
             // this delta (vanilla is single-threaded and has no such window). Clamped at
-            // zero rather than restructured, since the two health loads can't be merged
-            // into one atomic op and this call already holds no lock across the `.await`.
+            // zero rather than restructured, since the two health loads cannot be merged
+            // into one atomic operation.
             let delta = (health_before - health_after).max(0.0);
 
-            let phase_type: EnderDragonPhase = *self.phase.lock().await;
+            let phase_type: EnderDragonPhase = *self
+                .phase
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if phase_type.is_sitting() {
-                let mut received = self.sitting_damage_received.lock().await;
+                let mut received = self
+                    .sitting_damage_received
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 *received += delta;
                 if *received > 0.25 * self.mob_entity.living_entity.get_max_health() {
                     *received = 0.0;
                     drop(received);
-                    self.set_phase(EnderDragonPhase::TakingOff).await;
+                    self.set_phase(EnderDragonPhase::TakingOff);
                 }
             }
         }
@@ -941,29 +1040,48 @@ impl EnderDragonEntity {
 }
 
 impl NBTStorage for EnderDragonEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            nbt.put_int("DragonPhase", *self.phase.lock().await as i32);
-            nbt.put_int("DragonDeathTime", *self.dragon_death_time.lock().await);
-            nbt.put_float(
-                "sitting_damage_received",
-                *self.sitting_damage_received.lock().await,
-            );
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.entity.write_nbt(nbt);
+        self.mob_entity.living_entity.write_living_nbt(nbt);
+        nbt.put_int(
+            "DragonPhase",
+            *self
+                .phase
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) as i32,
+        );
+        nbt.put_int(
+            "DragonDeathTime",
+            *self
+                .dragon_death_time
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        nbt.put_float(
+            "sitting_damage_received",
+            *self
+                .sitting_damage_received
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            if let Some(phase_id) = nbt.get_int("DragonPhase") {
-                self.set_phase(EnderDragonPhase::from_ordinal(phase_id))
-                    .await;
-            }
-            *self.dragon_death_time.lock().await = nbt.get_int("DragonDeathTime").unwrap_or(0);
-            *self.sitting_damage_received.lock().await =
-                nbt.get_float("sitting_damage_received").unwrap_or(0.0);
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.entity.read_nbt_non_mut(nbt);
+        self.mob_entity.living_entity.read_living_nbt_non_mut(nbt);
+        if let Some(phase_id) = nbt.get_int("DragonPhase") {
+            self.set_phase(EnderDragonPhase::from_ordinal(phase_id));
+        }
+        *self
+            .dragon_death_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            nbt.get_int("DragonDeathTime").unwrap_or(0);
+        *self
+            .sitting_damage_received
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            nbt.get_float("sitting_damage_received").unwrap_or(0.0);
     }
 }
 
@@ -986,23 +1104,15 @@ impl Mob for EnderDragonEntity {
         SoundCategory::Hostile
     }
 
-    fn mob_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.ai_step(caller).await;
-        })
+    fn mob_tick(&self, _caller: &dyn EntityBase) {
+        self.ai_step();
     }
 
-    fn on_damage<'a>(
-        &'a self,
-        _damage_type: DamageType,
-        _source: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let living = &self.mob_entity.living_entity;
-            if living.health.load() <= 0.0 {
-                self.set_phase(EnderDragonPhase::Dying).await;
-            }
-        })
+    fn on_damage(&self, _damage_type: DamageType, _source: Option<&dyn EntityBase>) {
+        let living = &self.mob_entity.living_entity;
+        if living.health.load() <= 0.0 {
+            self.set_phase(EnderDragonPhase::Dying);
+        }
     }
 
     fn get_mob_gravity(&self) -> f64 {
@@ -1023,28 +1133,27 @@ impl Mob for EnderDragonEntity {
     /// `LivingEntity::damage_with_context` rather than after a `death_time` delay like vanilla -
     /// from deleting the dragon mid-animation, so the dying phase's XP shower and
     /// `setDragonKilled` still run.
-    fn mob_pre_apply_damage(&self, health: f32, amount: f32) -> EntityBaseFuture<'_, (f32, bool)> {
-        Box::pin(async move {
-            let phase_type = *self.phase.lock().await;
-            if phase_type != EnderDragonPhase::Dying
-                && !phase_type.is_sitting()
-                && amount.is_finite()
-                && health > 0.0
-                && health - amount <= 0.0
-            {
-                // Land just above 0 so the blow registers as damage, then the DYING
-                // phase takes over; the floor keeps sub-1-HP dragons rescuable too.
-                ((health - 1.0).max(0.01), true)
-            } else {
-                (amount, false)
-            }
-        })
+    fn mob_pre_apply_damage(&self, health: f32, amount: f32) -> (f32, bool) {
+        let phase_type = *self
+            .phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if phase_type != EnderDragonPhase::Dying
+            && !phase_type.is_sitting()
+            && amount.is_finite()
+            && health > 0.0
+            && health - amount <= 0.0
+        {
+            // Land just above 0 so the blow registers as damage, then the DYING
+            // phase takes over; the floor keeps sub-1-HP dragons rescuable too.
+            ((health - 1.0).max(0.01), true)
+        } else {
+            (amount, false)
+        }
     }
 
-    fn mob_on_lethal_rescue(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.set_phase(EnderDragonPhase::Dying).await;
-        })
+    fn mob_on_lethal_rescue(&self) {
+        self.set_phase(EnderDragonPhase::Dying);
     }
 }
 

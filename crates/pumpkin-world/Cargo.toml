@@ -58,7 +58,6 @@ tokio-util = { workspace = true, features = ["rt"] }
 rand.workspace = true
 rustc-hash.workspace = true
 slotmap.workspace = true
-crossfire.workspace = true
 
 # EXPERIMENTAL, feature-gated: raw Vulkan bindings for the GPU compute paths.
 ash = { version = "0.38", optional = true }

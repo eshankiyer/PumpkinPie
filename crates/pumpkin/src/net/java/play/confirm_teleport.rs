@@ -2,12 +2,11 @@
 use super::*;
 
 impl JavaClient {
-    pub async fn handle_confirm_teleport(
-        &self,
-        player: &Player,
-        confirm_teleport: SConfirmTeleport,
-    ) {
-        let mut awaiting_teleport = player.awaiting_teleport.lock().await;
+    pub fn handle_confirm_teleport(&self, player: &Player, confirm_teleport: &SConfirmTeleport) {
+        let mut awaiting_teleport = player
+            .awaiting_teleport
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if teleport_confirm_action(
             awaiting_teleport.as_ref().map(|(id, _)| id.0),
             confirm_teleport.teleport_id.0,

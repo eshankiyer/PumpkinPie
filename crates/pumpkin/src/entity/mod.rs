@@ -49,7 +49,7 @@ use pumpkin_protocol::{
         },
         move_player::CMovePlayer,
         set_actor_data::{
-            CSetActorData, EntityMetadata, MetadataValue, PropertySyncData, entity_data_flag,
+            CSetActorData, MetadataValue, PropertySyncData, SyncedActorDataList, entity_data_flag,
             entity_data_key,
         },
     },
@@ -74,7 +74,6 @@ use pumpkin_util::text::TextComponent;
 use pumpkin_util::text::hover::HoverEvent;
 use pumpkin_util::version::JavaMinecraftVersion;
 use std::collections::{BTreeMap, HashSet};
-use std::pin::Pin;
 use std::sync::{
     Arc,
     atomic::{
@@ -82,8 +81,35 @@ use std::sync::{
         Ordering::{self, Relaxed},
     },
 };
-use tokio::sync::Mutex;
 use uuid::Uuid;
+
+/// Vanilla `EntitySelector.pushableBy` applies scoreboard collision rules to entity pushes.
+fn team_allows_push(
+    world: &World,
+    pusher_rule: crate::world::scoreboard::CollisionRule,
+    pusher_team_name: Option<&str>,
+    other: &dyn EntityBase,
+) -> bool {
+    use crate::world::scoreboard::{CollisionRule, collision_rule_permits_push, entity_scoreboard_name};
+    if matches!(pusher_rule, CollisionRule::Never) { return false; }
+    let other_name = entity_scoreboard_name(other);
+    let scoreboard = world.scoreboard.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let other_team = scoreboard.get_team_for_scoreboard_name(&other_name);
+    let other_rule = other_team.map_or(CollisionRule::Always, |team| team.collision_rule);
+    let same_team = pusher_team_name.is_some_and(|name| other_team.is_some_and(|team| team.name == name));
+    collision_rule_permits_push(pusher_rule, other_rule, same_team)
+}
+
+fn pusher_team_state(
+    world: &World,
+    pusher: &dyn EntityBase,
+) -> (crate::world::scoreboard::CollisionRule, Option<String>, bool) {
+    use crate::world::scoreboard::{CollisionRule, entity_scoreboard_name};
+    let scoreboard = world.scoreboard.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if scoreboard.get_teams().is_empty() { return (CollisionRule::Always, None, false); }
+    let team = scoreboard.get_team_for_scoreboard_name(&entity_scoreboard_name(pusher));
+    (team.map_or(CollisionRule::Always, |team| team.collision_rule), team.map(|team| team.name.clone()), true)
+}
 
 pub mod ageable;
 pub mod ai;
@@ -137,65 +163,26 @@ pub const fn equipment_break_status(slot: &EquipmentSlot) -> EntityStatus {
     }
 }
 
-pub type EntityBaseFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-
-pub type TeleportFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
-
-/// vanilla `EntitySelector.pushableBy`.
-///
-/// Whether scoreboard team collision rules allow an entity with the resolved `pusher_rule`/
-/// `pusher_team_name` (see [`pusher_team_state`]) to push `other`. Entities with no team resolve
-/// to `CollisionRule::Always`, so untagged entities always push normally.
-/// (net.minecraft.world.entity.EntitySelector, decompiled 26.2, lines 29-56)
-async fn team_allows_push(
-    world: &World,
-    pusher_rule: crate::world::scoreboard::CollisionRule,
-    pusher_team_name: Option<&str>,
-    other: &dyn EntityBase,
-) -> bool {
-    use crate::world::scoreboard::{
-        CollisionRule, collision_rule_permits_push, entity_scoreboard_name,
-    };
-
-    if matches!(pusher_rule, CollisionRule::Never) {
-        return false;
+pub trait EntityBase: Send + Sync + std::any::Any {
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.get_entity().write_nbt(nbt);
+        if let Some(living) = self.get_living_entity() {
+            living.write_living_nbt(nbt);
+        }
+        self.write_custom_nbt(nbt);
     }
 
-    let other_name = entity_scoreboard_name(other);
-    let scoreboard = world.scoreboard.lock().await;
-    let other_team = scoreboard.get_team_for_scoreboard_name(&other_name);
-    let other_rule = other_team.map_or(CollisionRule::Always, |t| t.collision_rule);
-    let same_team = pusher_team_name.is_some_and(|name| other_team.is_some_and(|t| t.name == name));
+    fn write_custom_nbt(&self, _nbt: &mut NbtCompound) {}
 
-    collision_rule_permits_push(pusher_rule, other_rule, same_team)
-}
-
-/// Resolves the pusher's own collision rule/team name once per `push_entities` call, and whether
-/// any teams exist at all (so the common no-teams case can skip per-candidate locking entirely).
-async fn pusher_team_state(
-    world: &World,
-    pusher: &dyn EntityBase,
-) -> (
-    crate::world::scoreboard::CollisionRule,
-    Option<String>,
-    bool,
-) {
-    use crate::world::scoreboard::{CollisionRule, entity_scoreboard_name};
-
-    let scoreboard = world.scoreboard.lock().await;
-    if scoreboard.get_teams().is_empty() {
-        return (CollisionRule::Always, None, false);
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.get_entity().read_nbt_non_mut(nbt);
+        if let Some(living) = self.get_living_entity() {
+            living.read_living_nbt_non_mut(nbt);
+        }
+        self.read_custom_nbt(nbt);
     }
-    let pusher_name = entity_scoreboard_name(pusher);
-    let team = scoreboard.get_team_for_scoreboard_name(&pusher_name);
-    (
-        team.map_or(CollisionRule::Always, |t| t.collision_rule),
-        team.map(|t| t.name.clone()),
-        true,
-    )
-}
 
-pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
+    fn read_custom_nbt(&self, _nbt: &NbtCompound) {}
     /// Called every tick for this entity.
     ///
     /// The `caller` parameter is a reference to the entity that initiated the tick.
@@ -203,26 +190,17 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
     /// but in some scenarios (e.g., interactions or events), it might be a different entity.
     ///
     /// The `server` parameter provides access to the game server instance.
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(living) = self.get_living_entity() {
-                living.tick(caller, server).await;
-            } else {
-                self.get_entity().tick(caller, server).await;
-            }
-        })
+    fn tick(&self, caller: &dyn EntityBase, server: &Server) {
+        if let Some(living) = self.get_living_entity() {
+            living.tick(caller, server);
+        } else {
+            self.get_entity().tick(caller, server);
+        }
     }
 
-    /// Vanilla calls `Entity.checkDespawn` from the server entity tick loop.
-    /// Non-mobs keep the default no-op; the blanket mob implementation below
-    /// supplies `Mob.checkDespawn`.
-    fn check_despawn(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async {})
-    }
+    /// Vanilla calls `Entity.checkDespawn` from the server entity tick loop; mobs provide the
+    /// concrete `Mob.checkDespawn` behavior (`Mob.java:1298-1305`).
+    fn check_despawn(&self) {}
 
     fn get_job_site_pos(&self) -> Option<pumpkin_util::math::position::BlockPos> {
         None
@@ -247,16 +225,10 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         self.get_entity().get_eye_pos()
     }
 
-    /// Whether this entity was restored from saved NBT instead of freshly spawned. Guards the
-    /// work vanilla only does in `Mob.finalizeSpawn`, which chunk loading never runs.
     fn is_restored_from_nbt(&self) -> bool {
         self.get_entity().restored_from_nbt.load(Ordering::Relaxed)
     }
 
-    /// Whether this entity is written to its chunk's entity data on unload.
-    ///
-    /// Vanilla gates serialization on `EntityType.canSerialize()`
-    /// (`Entity.getEncodeId`) plus `Entity.shouldBeSaved()`.
     fn should_be_saved(&self) -> bool {
         self.get_entity().entity_type.saveable
     }
@@ -266,136 +238,89 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         Vector3::from_yaw_pitch(entity.yaw.load(), entity.pitch.load())
     }
 
-    fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
+    fn init_data_tracker(&self) {
+        let entity = self.get_entity();
 
-            // If the internal age is negative, it's a baby
-            let is_baby = entity.age.load(Ordering::Relaxed) < 0;
+        // If the internal age is negative, it's a baby
+        let is_baby = entity.age.load(Ordering::Relaxed) < 0;
 
-            if is_baby {
-                let mut bedrock_meta = EntityMetadata::new();
-                bedrock_meta.set_flag(entity_data_key::FLAGS, entity_data_flag::BABY as u8, true);
-                entity.send_meta_data(
-                    &[Metadata::new(tracked_data::ageable_mob::DATA_BABY_ID, true)],
-                    Some(&bedrock_meta),
-                );
-            }
-        })
+        if is_baby {
+            let mut bedrock_meta = SyncedActorDataList::new();
+            bedrock_meta.set_flag(entity_data_key::FLAGS, entity_data_flag::BABY as u8, true);
+            entity.send_meta_data(
+                &[Metadata::new(tracked_data::ageable_mob::DATA_BABY_ID, true)],
+                Some(&bedrock_meta),
+            );
+        }
     }
     fn set_variant_name(&self, _name: &str) {}
 
-    // This method takes ownership of Arc<Self>, so the lifetime bounds are different.
     fn teleport(
-        self: Arc<Self>,
+        &self,
         position: Vector3<f64>,
         yaw: Option<f32>,
         pitch: Option<f32>,
         world: Arc<World>,
-    ) -> TeleportFuture
-    where
-        Self: 'static,
-    {
-        Box::pin(async move {
-            self.get_entity().teleport(position, yaw, pitch, world);
-            self.get_entity().sync_passenger_positions().await;
-        })
+    ) {
+        self.get_entity().teleport(position, yaw, pitch, &world);
+        self.get_entity().sync_passenger_positions();
     }
 
     fn is_pushed_by_fluids(&self) -> bool {
         true
     }
 
-    /// Vanilla `AbstractBoat.rideHeight` (`AbstractBoat.java:132`): the Y offset at which a
-    /// passenger sits relative to the vehicle's base position (the Y component of
-    /// `AbstractBoat.getPassengerAttachmentPoint`, `AbstractBoat.java:135-151`). The generic
-    /// fallback matches `Entity.positionRider`'s existing top-surface attachment; vehicle types
-    /// override this (e.g. `Boat` returns `dimensions.height() / 3.0`, `Boat.java:14-17`).
+    /// Vanilla `AbstractBoat.rideHeight` (`AbstractBoat.java:132`) and its attachment point
+    /// (`AbstractBoat.java:135-151`); boats override the generic fallback (`Boat.java:14-17`).
     fn get_passengers_riding_offset(&self) -> f64 {
         f64::from(self.get_entity().entity_dimension.load().height)
     }
 
-    /// Vanilla `LivingEntity.isSensitiveToWater` (`LivingEntity.java:3174-3176`). A sensitive mob
-    /// takes a point of drown damage every tick it spends in water or rain
-    /// (`LivingEntity.java:3163-3166`).
+    /// Vanilla `LivingEntity.isSensitiveToWater` (`LivingEntity.java:3174-3176`), applied by
+    /// the water/rain damage path (`LivingEntity.java:3163-3166`).
     fn is_sensitive_to_water(&self) -> bool {
         false
     }
 
-    /// Vanilla `Entity.canUsePortal` (`Entity.java:3193-3195`): `(ignorePassenger ||
-    /// !this.isPassenger()) && this.isAlive()`. The one call site (`Entity.handlePortal`,
-    /// `Entity.java:2610`) always passes `ignorePassenger = false`, so this only needs the
-    /// `isAlive()` half; some entities refuse outright regardless - e.g. the ender dragon
-    /// always returns false (`EnderDragon.java:852-854`). The passenger check is not ported:
-    /// `vehicle` is behind an async `Mutex` here and this method is called synchronously.
+    /// Vanilla `Entity.canUsePortal` (`Entity.java:3193-3195`), used by portal handling
+    /// (`Entity.java:2610`); the Ender Dragon overrides it (`EnderDragon.java:852-854`).
     fn can_use_portal(&self) -> bool {
         self.get_entity().is_alive()
     }
 
-    /// Vanilla `LivingEntity.calculateFallDamage` (`LivingEntity.java:1845-1852`), the virtual
-    /// that `causeFallDamage` (`LivingEntity.java:1801`) consults. Overriders subtract a flat
-    /// amount from the `LivingEntity` result; a non-living entity takes no fall damage.
+    /// Vanilla `LivingEntity.calculateFallDamage` (`LivingEntity.java:1845-1852`), called by
+    /// `causeFallDamage` (`LivingEntity.java:1801`).
     fn calculate_fall_damage(&self, fall_distance: f64, damage_modifier: f32) -> i32 {
         self.get_living_entity().map_or(0, |living| {
             living.default_calculate_fall_damage(fall_distance, damage_modifier)
         })
     }
 
-    /// Sound played after this entity takes fall damage. Entities with a custom fall sound
-    /// override this; the generic living-entity sound remains the default.
     fn get_fall_sound(&self, fall_distance: i32) -> Sound {
-        if fall_distance > 4 {
-            Sound::EntityGenericBigFall
-        } else {
-            Sound::EntityGenericSmallFall
-        }
+        if fall_distance > 4 { Sound::EntityGenericBigFall } else { Sound::EntityGenericSmallFall }
     }
 
-    /// Per-entity opt-out from explosions, independent of the vanilla
-    /// `Entity.ignoreExplosion` rules below (kept because several entity types
-    /// override only this one).
-    fn is_immune_to_explosion(&self) -> bool {
+    /// Vanilla `Entity.ignoreExplosion`, including the Warden's digging/emerging exception.
+    fn ignores_explosion(&self, affects_blocklike_entities: bool) -> bool {
+        let entity = self.get_entity();
+        let id = entity.entity_type.id;
+        if id == EntityType::ARMOR_STAND.id {
+            return if affects_blocklike_entities { entity.invisible.load(Ordering::Relaxed) } else { true };
+        }
+        if [EntityType::ITEM.id, EntityType::PAINTING.id, EntityType::ITEM_FRAME.id,
+            EntityType::GLOW_ITEM_FRAME.id, EntityType::LEASH_KNOT.id].contains(&id) {
+            return !affects_blocklike_entities;
+        }
+        // `Warden.isDiggingOrEmerging` (`Warden.java:165-167`) drives
+        // `Warden.ignoreExplosion` (`Warden.java:367-370`).
+        if id == EntityType::WARDEN.id {
+            return matches!(entity.pose.load(), EntityPose::Digging | EntityPose::Emerging);
+        }
         false
     }
 
     /// Whether the entity is immune from explosion knockback and damage
-    /// Vanilla `Entity.ignoreExplosion`. `affects_blocklike_entities` is the explosion's
-    /// `shouldAffectBlocklikeEntities`, which only the block-destroying interactions set: a
-    /// block-preserving blast leaves armour stands, dropped items, paintings, item frames and
-    /// leash knots alone entirely, and a destroying one still passes over an invisible armour
-    /// stand.
-    fn ignores_explosion(&self, affects_blocklike_entities: bool) -> bool {
-        let entity = self.get_entity();
-        let id = entity.entity_type.id;
-
-        if id == EntityType::ARMOR_STAND.id {
-            return if affects_blocklike_entities {
-                entity.invisible.load(Ordering::Relaxed)
-            } else {
-                true
-            };
-        }
-
-        if id == EntityType::ITEM.id
-            || id == EntityType::PAINTING.id
-            || id == EntityType::ITEM_FRAME.id
-            || id == EntityType::GLOW_ITEM_FRAME.id
-            || id == EntityType::LEASH_KNOT.id
-        {
-            return !affects_blocklike_entities;
-        }
-
-        // `Warden.ignoreExplosion` (`Warden.java:367-370`) returns `isDiggingOrEmerging`,
-        // which is `hasPose(DIGGING) || hasPose(EMERGING)` (`Warden.java:165-167`). The
-        // explosion loop skips such an entity outright, so this single check covers both the
-        // damage and the knockback halves, exactly as vanilla's does.
-        if id == EntityType::WARDEN.id {
-            return matches!(
-                entity.pose.load(),
-                EntityPose::Digging | EntityPose::Emerging
-            );
-        }
-
+    fn is_immune_to_explosion(&self) -> bool {
         false
     }
 
@@ -407,44 +332,32 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         None
     }
 
-    fn tick_in_void<'a>(&'a self, _dyn_self: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move { self.get_entity().remove().await })
+    fn tick_in_void(&self, _dyn_self: &dyn EntityBase) {
+        self.get_entity().remove();
     }
 
     /// Returns if damage was successful or not
-    fn damage<'a>(
-        &'a self,
-        caller: &'a dyn EntityBase,
-        amount: f32,
-        damage_type: DamageType,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            caller
-                .damage_with_context(caller, amount, damage_type, None, None, None)
-                .await
-        })
+    fn damage(&self, caller: &dyn EntityBase, amount: f32, damage_type: DamageType) -> bool {
+        caller.damage_with_context(caller, amount, damage_type, None, None, None)
     }
 
-    fn on_lightning_strike<'a>(
-        &'a self,
-        caller: &'a dyn EntityBase,
-        lightning: &'a lightning::LightningBoltEntity,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if self.get_living_entity().is_some() {
-                self.set_on_fire_for(8.0);
-                let cause = lightning.get_cause().await;
-                self.damage_with_context(
-                    caller,
-                    5.0,
-                    DamageType::LIGHTNING_BOLT,
-                    None,
-                    Some(lightning),
-                    cause.as_deref().map(|p| p as &dyn EntityBase),
-                )
-                .await;
-            }
-        })
+    fn on_lightning_strike(
+        &self,
+        caller: &dyn EntityBase,
+        lightning: &lightning::LightningBoltEntity,
+    ) {
+        if self.get_living_entity().is_some() {
+            self.set_on_fire_for(8.0);
+            let cause = lightning.get_cause();
+            self.damage_with_context(
+                caller,
+                5.0,
+                DamageType::LIGHTNING_BOLT,
+                None,
+                Some(lightning),
+                cause.as_deref().map(|p| p as &dyn EntityBase),
+            );
+        }
     }
 
     fn is_spectator(&self) -> bool {
@@ -455,13 +368,12 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         false
     }
 
-    /// Vanilla `Entity.canBeCollidedWith` used by collision queries whose source
-    /// entity is null. Most entities, including ordinary mobs, return false.
-    fn can_be_collided_with(&self) -> bool {
+    fn can_hit(&self) -> bool {
         false
     }
 
-    fn can_hit(&self) -> bool {
+    /// Vanilla `Entity.canBeCollidedWith` used by collision queries with no source entity.
+    fn can_be_collided_with(&self) -> bool {
         false
     }
 
@@ -470,9 +382,7 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         false
     }
 
-    /// Vanilla `LivingEntity.canBeSeenByAnyone` (`LivingEntity.java:956-958`). Entity
-    /// implementations with additional visibility rules override this; armor stands hide
-    /// themselves when invisible or marker-configured.
+    /// Vanilla `LivingEntity.canBeSeenByAnyone` (`LivingEntity.java:956-958`).
     fn can_be_seen_by_anyone(&self) -> bool {
         !self.get_entity().is_spectator() && self.get_entity().is_alive()
     }
@@ -482,33 +392,18 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         self.get_entity().is_alive() && self.is_pickable()
     }
 
-    /// Vanilla `Entity.isAttackable` (`Entity.java:2970-2972`), default `true`. Gates the whole
-    /// of `Player.attack`/`Player.cannotAttack` (`Player.java:1017-1018`): when an entity
-    /// returns `false` here, attacking it has no effect at all -- no cooldown reset, no sound,
-    /// no swing -- not merely no damage. Override to `false` where vanilla does.
-    fn is_attackable(&self) -> bool {
-        true
-    }
+    /// Vanilla `Entity.isAttackable` (`Entity.java:2970-2972`), consumed by
+    /// `Player.cannotAttack` (`Player.java:1017-1018`).
+    fn is_attackable(&self) -> bool { true }
 
-    /// Vanilla `Entity.isEffectiveAi` (`Entity.java:3592-3594`). The server-side default is
-    /// effective; special entities can suppress their living movement path.
-    fn is_effective_ai(&self) -> bool {
-        true
-    }
+    /// Vanilla `Entity.isEffectiveAi` (`Entity.java:3592-3594`).
+    fn is_effective_ai(&self) -> bool { true }
 
-    /// Vanilla `Entity.skipAttackInteraction` (`Entity.java:2974-2976`). This is async because
-    /// the server's spawn-protection and world-border state are asynchronous in Pumpkin.
-    fn skip_attack_interaction<'a>(&'a self, _source: &'a Player) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async { false })
-    }
+    /// Vanilla `Entity.skipAttackInteraction` (`Entity.java:2974-2976`).
+    fn skip_attack_interaction(&self, _source: &Player) -> bool { false }
 
-    /// Vanilla `Projectile.calculateHorizontalHurtKnockbackDirection` defaults to the
-    /// projectile's horizontal movement. Projectile subclasses may override this when their
-    /// damage uses a different horizontal direction.
-    fn calculate_horizontal_hurt_knockback_direction(
-        &self,
-        _hurt_entity: &living::LivingEntity,
-    ) -> (f64, f64) {
+    /// Vanilla `Projectile.calculateHorizontalHurtKnockbackDirection` uses horizontal movement.
+    fn calculate_horizontal_hurt_knockback_direction(&self, _hurt_entity: &LivingEntity) -> (f64, f64) {
         let velocity = self.get_entity().velocity.load();
         (velocity.x, velocity.z)
     }
@@ -517,120 +412,125 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         false
     }
 
+    fn set_sprinting(&self, is_sprinting: bool) {
+        if let Some(living) = self.get_living_entity() {
+            living.set_sprinting(is_sprinting);
+        } else {
+            self.get_entity().set_sprinting(is_sprinting);
+        }
+    }
+
+    fn get_block_speed_factor(&self) -> f32 {
+        self.get_living_entity().map_or_else(
+            || self.get_entity().get_block_speed_factor(),
+            LivingEntity::get_block_speed_factor,
+        )
+    }
+
     /// Custom Y-axis velocity drag multiplier applied during `travel_in_air`.
     /// Bats return `Some(0.6)` to match vanilla's `travel()` override.
     fn get_y_velocity_drag(&self) -> Option<f64> {
         None
     }
 
-    fn send_bedrock_spawn_packet<'a>(
-        &'a self,
-        client: &'a BedrockClient,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let runtime_id = entity.entity_id as u64;
-            let identifier = self
+    fn send_bedrock_spawn_packet(&self, client: &BedrockClient) {
+        let entity = self.get_entity();
+        let runtime_id = entity.entity_id as u64;
+        let identifier = self
+            .get_mob()
+            .and_then(mob::Mob::mob_bedrock_identifier)
+            .unwrap_or(entity.entity_type.resource_name);
+        let mut metadata = entity.bedrock_metadata();
+        if let Some(mob) = self.get_mob()
+            && let Some(mob_metadata) = mob.mob_bedrock_spawn_metadata()
+        {
+            metadata.0.extend(mob_metadata.0);
+        }
+        let packet = CAddActor {
+            target_actor_id: VarLong(runtime_id as i64),
+            target_runtime_id: VarULong(runtime_id),
+            actor_type: identifier.to_string(),
+            position: entity.pos.load().to_f32_lossy(),
+            velocity: entity.velocity.load().to_f32_lossy(),
+            rotation: Vector2::new(entity.pitch.load(), entity.yaw.load()),
+            y_head_rotation: entity.head_yaw.load(),
+            y_body_rotation: entity.body_yaw.load(),
+            attributes_list: Vec::new(),
+            actor_data: metadata,
+            synced_properties: PropertySyncData {
+                int_entries_list: std::collections::HashMap::new(),
+                float_entries_list: std::collections::HashMap::new(),
+            },
+            actor_links: Vec::new(),
+        };
+        if let Ok(data) = client.serialize_packet(&packet) {
+            client.try_enqueue_packet(data);
+        }
+    }
+
+    fn send_java_spawn_packet(&self, client: &JavaClient) {
+        let entity = self.get_entity();
+        let version = client.version.load();
+        let is_mob = entity.entity_type.mob || self.get_mob().is_some();
+        if version < JavaMinecraftVersion::V_1_19 && is_mob {
+            let metadata = self
                 .get_mob()
-                .and_then(mob::Mob::mob_bedrock_identifier)
-                .unwrap_or(entity.entity_type.resource_name);
-            let mut metadata = entity.bedrock_metadata();
-            if let Some(mob) = self.get_mob()
-                && let Some(mob_metadata) = mob.mob_bedrock_spawn_metadata().await
+                .and_then(|mob| mob.mob_java_spawn_metadata(version));
+            let spawn_packet = entity.create_spawn_living_packet(metadata.clone());
+            if let Ok(data) = client.serialize_packet(&spawn_packet) {
+                client.try_enqueue_packet(data);
+            }
+            if version >= JavaMinecraftVersion::V_1_15
+                && let Some(meta) = metadata
             {
-                metadata.0.extend(mob_metadata.0);
+                let meta_packet = CSetEntityMetadata::new(entity.entity_id.into(), meta);
+                if let Ok(meta_data) = client.serialize_packet(&meta_packet) {
+                    client.try_enqueue_packet(meta_data);
+                }
             }
-            let packet = CAddActor::new(
-                VarLong(runtime_id as i64),
-                VarULong(runtime_id),
-                identifier.to_string(),
-                entity.pos.load().to_f32_lossy(),
-                entity.velocity.load().to_f32_lossy(),
-                entity.pitch.load(),
-                entity.yaw.load(),
-                entity.head_yaw.load(),
-                entity.body_yaw.load(),
-                Vec::new(),
-                metadata,
-                PropertySyncData {
-                    int_properties: std::collections::HashMap::new(),
-                    float_properties: std::collections::HashMap::new(),
-                },
-                Vec::new(),
-            );
-            if let Ok(data) = client.serialize_packet(&packet) {
-                client.send_game_packet(data).await;
+        } else {
+            let spawn_packet = entity.create_spawn_packet();
+            if let Ok(data) = client.serialize_packet(&spawn_packet) {
+                client.try_enqueue_packet(data);
             }
-        })
+            if let Some(mob) = self.get_mob()
+                && let Some(metadata) = mob.mob_java_spawn_metadata(version)
+            {
+                let meta_packet = CSetEntityMetadata::new(entity.entity_id.into(), metadata);
+                if let Ok(meta_data) = client.serialize_packet(&meta_packet) {
+                    client.try_enqueue_packet(meta_data);
+                }
+            }
+        }
     }
 
-    fn send_java_spawn_packet<'a>(&'a self, client: &'a JavaClient) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = self.get_entity();
-            let version = client.version.load();
-            let is_mob = entity.entity_type.mob || self.get_mob().is_some();
-            if version < JavaMinecraftVersion::V_1_19 && is_mob {
-                let metadata = if let Some(mob) = self.get_mob() {
-                    mob.mob_java_spawn_metadata(version).await
-                } else {
-                    None
-                };
-                let spawn_packet = entity.create_spawn_living_packet(metadata.clone());
-                if let Ok(data) = client.serialize_packet(&spawn_packet) {
-                    client.enqueue_packet(data).await;
-                }
-                if version >= JavaMinecraftVersion::V_1_15
-                    && let Some(meta) = metadata
-                {
-                    let meta_packet = CSetEntityMetadata::new(entity.entity_id.into(), meta);
-                    if let Ok(meta_data) = client.serialize_packet(&meta_packet) {
-                        client.enqueue_packet(meta_data).await;
-                    }
-                }
-            } else {
-                let spawn_packet = entity.create_spawn_packet();
-                if let Ok(data) = client.serialize_packet(&spawn_packet) {
-                    client.enqueue_packet(data).await;
-                }
-                if let Some(mob) = self.get_mob()
-                    && let Some(metadata) = mob.mob_java_spawn_metadata(version).await
-                {
-                    let meta_packet = CSetEntityMetadata::new(entity.entity_id.into(), metadata);
-                    if let Ok(meta_data) = client.serialize_packet(&meta_packet) {
-                        client.enqueue_packet(meta_data).await;
-                    }
-                }
-            }
-        })
-    }
-
-    fn damage_with_context<'a>(
-        &'a self,
-        caller: &'a dyn EntityBase,
+    fn damage_with_context(
+        &self,
+        caller: &dyn EntityBase,
         amount: f32,
         damage_type: DamageType,
         position: Option<Vector3<f64>>,
-        source: Option<&'a dyn EntityBase>,
-        cause: Option<&'a dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            if caller.get_living_entity().is_some() {
-                return caller
-                    .damage_with_context(caller, amount, damage_type, position, source, cause)
-                    .await;
-            }
-            false
-        })
+        source: Option<&dyn EntityBase>,
+        cause: Option<&dyn EntityBase>,
+    ) -> bool {
+        if let Some(living) = caller.get_living_entity() {
+            return living.damage_with_context(
+                caller,
+                amount,
+                damage_type,
+                position,
+                source,
+                cause,
+            );
+        }
+        false
     }
 
     /// Called when a player right-clicks this entity with an item.
+    /// Called when a player right-clicks this entity with an item.
     /// Returns true if the interaction was handled.
-    fn interact<'a>(
-        &'a self,
-        _player: &'a Arc<Player>,
-        _item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async { false })
+    fn interact(&self, _player: &Arc<Player>, _item_stack: &mut ItemStack) -> bool {
+        false
     }
 
     fn set_on_fire_for(&self, seconds: f32) {
@@ -648,11 +548,7 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
             ticks as f32 / 20.0,
         );
         if let Some(server) = entity.world.load().server.upgrade() {
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    server.plugin_manager.fire(&server, &mut event).await;
-                });
-            });
+            server.plugin_manager.fire_blocking(&server, &mut event);
             if event.cancelled {
                 return;
             }
@@ -660,339 +556,244 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         if entity.fire_ticks.load(Ordering::Relaxed) < ticks as i32 {
             entity.fire_ticks.store(ticks as i32, Ordering::Relaxed);
         }
-        entity.clear_freeze();
+        // TODO: defrost
     }
 
-    /// Called when a player collides with a entity
-    fn on_player_collision<'a>(&'a self, _player: &'a Arc<Player>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async {})
+    /// Called when a player collides with an entity
+    fn on_player_collision(&self, _player: &Arc<Player>) {}
+
+    fn is_passenger(&self) -> bool {
+        self.get_entity().has_vehicle()
     }
 
-    fn is_passenger(&self) -> EntityBaseFuture<'_, bool> {
-        Box::pin(async move { self.get_entity().has_vehicle().await })
+    fn is_vehicle(&self) -> bool {
+        self.get_entity().has_passengers()
     }
 
-    fn is_vehicle(&self) -> EntityBaseFuture<'_, bool> {
-        Box::pin(async move { self.get_entity().has_passengers().await })
+    fn has_passenger(&self, other: &dyn EntityBase) -> bool {
+        self.get_entity()
+            .has_passenger(other.get_entity().entity_id)
     }
 
-    fn has_passenger<'a>(&'a self, other: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            self.get_entity()
-                .passengers
-                .lock()
-                .await
-                .iter()
-                .any(|p| p.get_entity().entity_id == other.get_entity().entity_id)
-        })
-    }
+    /// Vanilla `Entity.canAddPassenger`/`couldAcceptPassenger` admission hooks.
+    fn can_add_passenger(&self, _passenger: &dyn EntityBase) -> bool { true }
+    fn could_accept_passenger(&self) -> bool { true }
 
-    /// Whether this entity accepts the passenger (`Entity.canAddPassenger`).
-    /// Entity types with no passenger support override this synchronously because
-    /// vanilla performs the check before mutating either passenger list.
-    fn can_add_passenger(&self, _passenger: &dyn EntityBase) -> bool {
-        true
-    }
-
-    /// Whether this entity can accept any passenger (`Entity.couldAcceptPassenger`).
-    fn could_accept_passenger(&self) -> bool {
-        true
-    }
-
-    fn move_entity<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        motion: Vector3<f64>,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.get_entity().move_entity(caller, motion).await;
-        })
+    fn move_entity(&self, caller: &dyn EntityBase, motion: Vector3<f64>) {
+        self.get_entity().move_entity(caller, motion);
     }
 
     fn is_pushable(&self) -> bool {
         false
     }
 
-    /// Whether a piston may move this entity. Marker armor stands override this to match
-    /// `ArmorStand.getPistonPushReaction() == IGNORE`.
-    fn can_be_pushed_by_piston(&self) -> bool {
-        true
-    }
+    /// Marker armor stands override this to match `ArmorStand.getPistonPushReaction() == IGNORE`.
+    fn can_be_pushed_by_piston(&self) -> bool { true }
 
-    fn push<'a>(&'a self, entity: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let self_entity = self.get_entity();
-            let other_entity = entity.get_entity();
+    fn push(&self, entity: &dyn EntityBase) {
+        let self_entity = self.get_entity();
+        let other_entity = entity.get_entity();
 
-            // Vanilla `IronGolem.doPush` (`IronGolem.java:103-110`) gives the golem a
-            // target with a 1/20 roll when it physically collides with an Enemy other
-            // than a creeper. `push_entities` reaches this shared collision method for
-            // every overlapping mob, so keep the species hook here rather than adding a
-            // second collision loop to IronGolemEntity.
-            if self_entity.entity_type == &EntityType::IRON_GOLEM
-                && other_entity.entity_type.category == &pumpkin_data::entity::MobCategory::MONSTER
-                && other_entity.entity_type != &EntityType::CREEPER
-                && rand::random_range(0..20) == 0
-                && let Some(iron_golem) =
-                    self.cast_any()
-                        .downcast_ref::<crate::entity::passive::iron_golem::IronGolemEntity>()
-            {
-                iron_golem.mob_entity.set_target(Some(entity.clone())).await;
+        // Vanilla `IronGolem.doPush` (`IronGolem.java:103-110`) occasionally acquires a
+        // nearby hostile target as a consequence of physical collision.
+        if self_entity.entity_type == &EntityType::IRON_GOLEM
+            && other_entity.entity_type.category == &pumpkin_data::entity::MobCategory::MONSTER
+            && other_entity.entity_type != &EntityType::CREEPER
+            && rand::random_range(0..20) == 0
+            && let Some(iron_golem) = self.cast_any().downcast_ref::<crate::entity::passive::iron_golem::IronGolemEntity>()
+            && let Some(other_arc) = self_entity.world.load().get_entity_by_id(other_entity.entity_id)
+        {
+            iron_golem.mob_entity.set_target(Some(other_arc));
+        }
+
+        if self_entity.no_physics.load(Ordering::Relaxed)
+            || other_entity.no_physics.load(Ordering::Relaxed)
+        {
+            return;
+        }
+
+        if self_entity.has_passenger(other_entity.entity_id)
+            || other_entity.has_passenger(self_entity.entity_id)
+        {
+            return;
+        }
+
+        let mut dx = other_entity.pos.load().x - self_entity.pos.load().x;
+        let mut dz = other_entity.pos.load().z - self_entity.pos.load().z;
+        let mut d = dx.abs().max(dz.abs());
+        if d >= 0.01 {
+            d = d.sqrt();
+            dx /= d;
+            dz /= d;
+            let mut d2 = 1.0 / d;
+            if d2 > 1.0 {
+                d2 = 1.0;
+            }
+            dx *= d2;
+            dz *= d2;
+            dx *= 0.05;
+            dz *= 0.05;
+
+            if !self_entity.has_passengers() && self.is_pushable() {
+                let mut vel = self_entity.velocity.load();
+                vel.x -= dx;
+                vel.z -= dz;
+                self_entity.velocity.store(vel);
+                self_entity.send_velocity();
             }
 
-            if self_entity.no_clip.load(Ordering::Relaxed)
-                || other_entity.no_clip.load(Ordering::Relaxed)
-            {
-                return;
+            if !other_entity.has_passengers() && entity.is_pushable() {
+                let mut vel = other_entity.velocity.load();
+                vel.x += dx;
+                vel.z += dz;
+                other_entity.velocity.store(vel);
+                other_entity.send_velocity();
             }
-
-            {
-                let passengers = self_entity.passengers.lock().await;
-                if passengers
-                    .iter()
-                    .any(|p| p.get_entity().entity_id == other_entity.entity_id)
-                {
-                    return;
-                }
-            }
-            {
-                let passengers = other_entity.passengers.lock().await;
-                if passengers
-                    .iter()
-                    .any(|p| p.get_entity().entity_id == self_entity.entity_id)
-                {
-                    return;
-                }
-            }
-
-            let mut dx = other_entity.pos.load().x - self_entity.pos.load().x;
-            let mut dz = other_entity.pos.load().z - self_entity.pos.load().z;
-            let mut d = dx.abs().max(dz.abs());
-            if d >= 0.01 {
-                d = d.sqrt();
-                dx /= d;
-                dz /= d;
-                let mut d2 = 1.0 / d;
-                if d2 > 1.0 {
-                    d2 = 1.0;
-                }
-                dx *= d2;
-                dz *= d2;
-                dx *= 0.05;
-                dz *= 0.05;
-
-                if !self_entity.has_passengers().await && self.is_pushable() {
-                    let mut vel = self_entity.velocity.load();
-                    vel.x -= dx;
-                    vel.z -= dz;
-                    self_entity.velocity.store(vel);
-                    self_entity.send_velocity();
-                }
-
-                if !other_entity.has_passengers().await && entity.is_pushable() {
-                    let mut vel = other_entity.velocity.load();
-                    vel.x += dx;
-                    vel.z += dz;
-                    other_entity.velocity.store(vel);
-                    other_entity.send_velocity();
-                }
-            }
-        })
+        }
     }
 
     #[allow(clippy::too_many_lines)]
-    fn push_entities<'a>(
-        &'a self,
-        dyn_self: &'a Arc<dyn EntityBase>,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            let mut picked_up = false;
-            let mut pushed = false;
-            let self_entity = self.get_entity();
-            let entity_bb = self_entity.bounding_box.load();
+    fn push_entities(&self, dyn_self: &dyn EntityBase) -> bool {
+        let mut picked_up = false;
+        let mut pushed = false;
+        let self_entity = self.get_entity();
+        let entity_bb = self_entity.bounding_box.load();
 
-            if !self.is_pushable() {
-                return false;
-            }
+        if !self.is_pushable() {
+            return false;
+        }
 
-            let world = self_entity.world.load();
+        let world = self_entity.world.load();
+        let (pusher_collision_rule, pusher_team_name, has_teams) =
+            pusher_team_state(&world, dyn_self);
+        if has_teams && matches!(pusher_collision_rule, crate::world::scoreboard::CollisionRule::Never) {
+            // Vanilla `EntitySelector.pushableBy`: a `NEVER` pusher has no candidates.
+            return false;
+        }
 
-            let (pusher_collision_rule, pusher_team_name, has_teams) =
-                pusher_team_state(&world, dyn_self.as_ref()).await;
-            if has_teams
-                && matches!(
-                    pusher_collision_rule,
-                    crate::world::scoreboard::CollisionRule::Never
-                )
-            {
-                // vanilla `EntitySelector.pushableBy`: own CollisionRule::NEVER makes the
-                // predicate `Predicates.alwaysFalse()`, emptying the candidate list entirely.
-                return false;
-            }
+        let is_rideable_minecart = self_entity.entity_type.id == EntityType::MINECART.id;
+        let is_abstract_minecart = is_rideable_minecart
+            || self_entity.entity_type.id == EntityType::CHEST_MINECART.id
+            || self_entity.entity_type.id == EntityType::COMMAND_BLOCK_MINECART.id
+            || self_entity.entity_type.id == EntityType::FURNACE_MINECART.id
+            || self_entity.entity_type.id == EntityType::HOPPER_MINECART.id
+            || self_entity.entity_type.id == EntityType::SPAWNER_MINECART.id
+            || self_entity.entity_type.id == EntityType::TNT_MINECART.id;
 
-            let is_rideable_minecart = self_entity.entity_type.id == EntityType::MINECART.id;
-            let is_abstract_minecart = is_rideable_minecart
-                || self_entity.entity_type.id == EntityType::CHEST_MINECART.id
-                || self_entity.entity_type.id == EntityType::COMMAND_BLOCK_MINECART.id
-                || self_entity.entity_type.id == EntityType::FURNACE_MINECART.id
-                || self_entity.entity_type.id == EntityType::HOPPER_MINECART.id
-                || self_entity.entity_type.id == EntityType::SPAWNER_MINECART.id
-                || self_entity.entity_type.id == EntityType::TNT_MINECART.id;
+        let is_minecart_fn = |id| -> bool {
+            id == EntityType::MINECART.id
+                || id == EntityType::CHEST_MINECART.id
+                || id == EntityType::COMMAND_BLOCK_MINECART.id
+                || id == EntityType::FURNACE_MINECART.id
+                || id == EntityType::HOPPER_MINECART.id
+                || id == EntityType::SPAWNER_MINECART.id
+                || id == EntityType::TNT_MINECART.id
+        };
 
-            let is_minecart_fn = |id| -> bool {
-                id == EntityType::MINECART.id
-                    || id == EntityType::CHEST_MINECART.id
-                    || id == EntityType::COMMAND_BLOCK_MINECART.id
-                    || id == EntityType::FURNACE_MINECART.id
-                    || id == EntityType::HOPPER_MINECART.id
-                    || id == EntityType::SPAWNER_MINECART.id
-                    || id == EntityType::TNT_MINECART.id
-            };
+        if is_abstract_minecart {
+            let is_vehicle = self.is_vehicle();
 
-            if is_abstract_minecart {
-                let is_vehicle = self.is_vehicle().await;
+            if is_rideable_minecart && !is_vehicle {
+                let pickup_bb = entity_bb.expand(0.2, 0.0, 0.2);
+                let other_entities = world.get_entities_at_box(&pickup_bb);
 
-                if is_rideable_minecart && !is_vehicle {
-                    let pickup_bb = entity_bb.expand(0.2, 0.0, 0.2);
-                    let other_entities = world.get_entities_at_box(&pickup_bb);
-
-                    for other in other_entities {
-                        if other.get_entity().entity_id != self_entity.entity_id {
-                            let other_type = other.get_entity().entity_type.id;
-                            let is_iron_golem = other_type == EntityType::IRON_GOLEM.id;
-                            let is_other_minecart = is_minecart_fn(other_type);
-
-                            if !is_iron_golem
-                                && !is_other_minecart
-                                && !other.is_passenger().await
-                                && other.is_pushable()
-                                && other.get_entity().riding_cooldown.load(Relaxed) == 0
-                                && (!has_teams
-                                    || team_allows_push(
-                                        &world,
-                                        pusher_collision_rule,
-                                        pusher_team_name.as_deref(),
-                                        other.as_ref(),
-                                    )
-                                    .await)
-                            {
-                                dyn_self
-                                    .get_entity()
-                                    .add_passenger(dyn_self.clone(), other.clone())
-                                    .await;
-                                picked_up = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                let push_bb = entity_bb.expand(1.0e-7, 1.0e-7, 1.0e-7);
-
-                let other_entities = world.get_entities_at_box(&push_bb);
                 for other in other_entities {
                     if other.get_entity().entity_id != self_entity.entity_id {
                         let other_type = other.get_entity().entity_type.id;
-                        let is_other_minecart = is_minecart_fn(other_type);
                         let is_iron_golem = other_type == EntityType::IRON_GOLEM.id;
+                        let is_other_minecart = is_minecart_fn(other_type);
 
-                        if is_rideable_minecart {
-                            if (is_iron_golem
-                                || is_other_minecart
-                                || is_vehicle
-                                || !other.get_entity().has_vehicle().await)
-                                && other.is_pushable()
-                                && (!has_teams
-                                    || team_allows_push(
-                                        &world,
-                                        pusher_collision_rule,
-                                        pusher_team_name.as_deref(),
-                                        other.as_ref(),
-                                    )
-                                    .await)
-                            {
-                                dyn_self.push(&other).await;
-                                pushed = true;
-                            }
-                        } else if !self.has_passenger(&other).await
+                        if !is_iron_golem
+                            && !is_other_minecart
+                            && !other.is_passenger()
                             && other.is_pushable()
-                            && is_other_minecart
-                        {
-                            dyn_self.push(&other).await;
-                            pushed = true;
-                        }
-                    }
-                }
-
-                let players = world.get_players_at_box(&push_bb);
-                for player in players {
-                    if player.get_entity().entity_id != self_entity.entity_id
-                        && is_rideable_minecart
-                        && (!has_teams
-                            || team_allows_push(
-                                &world,
-                                pusher_collision_rule,
-                                pusher_team_name.as_deref(),
-                                player.as_ref(),
-                            )
-                            .await)
-                    {
-                        let player_base: Arc<dyn EntityBase> = player.clone();
-                        dyn_self.push(&player_base).await;
-                        pushed = true;
-                        // Non-rideable minecarts (hoppers, chests) do not push players in vanilla.
-                    }
-                }
-            } else {
-                let other_entities = world.get_entities_at_box(&entity_bb);
-                for other in other_entities {
-                    if other.get_entity().entity_id != self_entity.entity_id
-                        && (!has_teams
-                            || team_allows_push(
+                            && other.get_entity().riding_cooldown.load(Relaxed) == 0
+                            && let Some(self_arc) = world.get_entity_by_id(self_entity.entity_id)
+                            && (!has_teams || team_allows_push(
                                 &world,
                                 pusher_collision_rule,
                                 pusher_team_name.as_deref(),
                                 other.as_ref(),
-                            )
-                            .await)
-                    {
-                        dyn_self.push(&other).await;
-                        pushed = true;
+                            ))
+                        {
+                            self_entity.add_passenger(self_arc, other.clone());
+                            picked_up = true;
+                            break;
+                        }
                     }
                 }
+            }
 
-                let players = world.get_players_at_box(&entity_bb);
-                for player in players {
-                    if player.get_entity().entity_id != self_entity.entity_id
-                        && (!has_teams
-                            || team_allows_push(
-                                &world,
-                                pusher_collision_rule,
-                                pusher_team_name.as_deref(),
-                                player.as_ref(),
-                            )
-                            .await)
+            let push_bb = entity_bb.expand(1.0e-7, 1.0e-7, 1.0e-7);
+
+            let other_entities = world.get_entities_at_box(&push_bb);
+            for other in other_entities {
+                if other.get_entity().entity_id != self_entity.entity_id {
+                    let other_type = other.get_entity().entity_type.id;
+                    let is_other_minecart = is_minecart_fn(other_type);
+                    let is_iron_golem = other_type == EntityType::IRON_GOLEM.id;
+
+                    if is_rideable_minecart {
+                        if (is_iron_golem
+                            || is_other_minecart
+                            || is_vehicle
+                            || !other.get_entity().has_vehicle())
+                            && other.is_pushable()
+                        {
+                            if !has_teams || team_allows_push(&world, pusher_collision_rule, pusher_team_name.as_deref(), other.as_ref()) {
+                                dyn_self.push(other.as_ref());
+                            }
+                            pushed = true;
+                        }
+                    } else if !self.has_passenger(other.as_ref())
+                        && other.is_pushable()
+                        && is_other_minecart
                     {
-                        let player_base: Arc<dyn EntityBase> = player.clone();
-                        dyn_self.push(&player_base).await;
+                        dyn_self.push(other.as_ref());
                         pushed = true;
                     }
                 }
             }
 
-            picked_up && !pushed
-        })
+            let players = world.get_players_at_box(&push_bb);
+            for player in players {
+                if player.get_entity().entity_id != self_entity.entity_id && is_rideable_minecart {
+                    if !has_teams || team_allows_push(&world, pusher_collision_rule, pusher_team_name.as_deref(), player.as_ref()) {
+                        dyn_self.push(player.as_ref());
+                    }
+                    pushed = true;
+                    // Non-rideable minecarts (hoppers, chests) do not push players in vanilla.
+                }
+            }
+        } else {
+            let other_entities = world.get_entities_at_box(&entity_bb);
+            for other in other_entities {
+                if other.get_entity().entity_id != self_entity.entity_id {
+                    if !has_teams || team_allows_push(&world, pusher_collision_rule, pusher_team_name.as_deref(), other.as_ref()) {
+                        dyn_self.push(other.as_ref());
+                    }
+                    pushed = true;
+                }
+            }
+
+            let players = world.get_players_at_box(&entity_bb);
+            for player in players {
+                if player.get_entity().entity_id != self_entity.entity_id {
+                    if !has_teams || team_allows_push(&world, pusher_collision_rule, pusher_team_name.as_deref(), player.as_ref()) {
+                        dyn_self.push(player.as_ref());
+                    }
+                    pushed = true;
+                }
+            }
+        }
+
+        picked_up && !pushed
     }
 
-    fn on_hit(&self, _hit: crate::entity::projectile::ProjectileHit) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async {})
-    }
+    fn on_hit(&self, _hit: crate::entity::projectile::ProjectileHit) {}
 
-    /// `Entity.deflection` (`Entity.java:3491-3493`): what happens to a projectile that would
-    /// hit this entity. Vanilla's base implementation returns `REVERSE` for anything tagged
-    /// `DEFLECTS_PROJECTILES` and `NONE` otherwise; the only entity in that tag is the breeze,
-    /// which overrides the method anyway (`Breeze.java:196-202`), so the default here is `None`
-    /// and the tag test lives in `BreezeEntity`.
+    /// `Entity.deflection` (`Entity.java:3491-3493`): the base entity does not deflect projectiles;
+    /// Breeze supplies its own override (`Breeze.java:196-202`).
     fn projectile_deflection(
         &self,
         _projectile: &dyn EntityBase,
@@ -1000,9 +801,7 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         crate::entity::projectile_deflection::ProjectileDeflectionType::None
     }
 
-    fn set_paddle_state(&self, _left: bool, _right: bool) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async {})
-    }
+    fn set_paddle_state(&self, _left: bool, _right: bool) {}
 
     fn is_in_love(&self) -> bool {
         false
@@ -1014,9 +813,7 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
 
     fn reset_love(&self) {}
 
-    fn try_claim_love(&self) -> bool {
-        false
-    }
+    fn try_claim_love(&self) -> bool { false }
 
     fn set_breeding_cooldown(&self, _ticks: i32) {}
 
@@ -1030,7 +827,7 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
 
     fn cast_any(&self) -> &dyn std::any::Any;
 
-    fn get_item_entity(self: Arc<Self>) -> Option<Arc<ItemEntity>> {
+    fn get_item_entity(&self) -> Option<&ItemEntity> {
         None
     }
 
@@ -1053,44 +850,39 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
             ))
     }
 
-    fn get_display_name(&self) -> EntityBaseFuture<'_, TextComponent> {
-        Box::pin(async move {
-            // TODO: team color
-            let entity = self.get_entity();
-            let mut name = entity.custom_name.load().as_ref().clone().unwrap_or(
-                TextComponent::translate_cross(
+    fn get_display_name(&self) -> TextComponent {
+        // TODO: team color
+        let entity = self.get_entity();
+        let mut name =
+            entity
+                .custom_name
+                .load()
+                .as_ref()
+                .clone()
+                .unwrap_or(TextComponent::translate_cross(
                     format!("entity.minecraft.{}", entity.entity_type.resource_name),
                     format!("entity.minecraft.{}", entity.entity_type.resource_name),
                     [],
-                ),
-            );
-            let name_clone = name.clone();
-            name = name.hover_event(HoverEvent::show_entity(
-                entity.entity_uuid.to_string(),
-                entity.entity_type.resource_name.into(),
-                Some(name_clone),
-            ));
-            name = name.insertion(entity.entity_uuid.to_string());
-            name
-        })
+                ));
+        let name_clone = name.clone();
+        name = name.hover_event(HoverEvent::show_entity(
+            entity.entity_uuid.to_string(),
+            entity.entity_type.resource_name.into(),
+            Some(name_clone),
+        ));
+        name = name.insertion(entity.entity_uuid.to_string());
+        name
     }
 
     /// Kills the Entity.
-    fn kill<'a>(&'a self, caller: &'a dyn EntityBase) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if self.get_living_entity().is_some() {
-                caller
-                    .damage(caller, f32::MAX, DamageType::GENERIC_KILL)
-                    .await;
-            } else {
-                // TODO this should be removed once all entities are implemented
-                self.get_entity().remove().await;
-            }
-        })
+    fn kill(&self, caller: &dyn EntityBase) {
+        if self.get_living_entity().is_some() {
+            caller.damage(caller, f32::MAX, DamageType::GENERIC_KILL);
+        } else {
+            // TODO this should be removed once all entities are implemented
+            self.get_entity().remove();
+        }
     }
-
-    /// Returns itself as the nbt storage for saving and loading data.
-    fn as_nbt_storage(&self) -> &dyn NBTStorage;
 
     fn get_experience_reward(&self, _killer: Option<&dyn EntityBase>) -> u32 {
         0
@@ -1133,36 +925,50 @@ impl RemovalReason {
 // IMPORTANT: have that 1 and not 0 because fetch_add returns previous value and 0 would be invalid
 static CURRENT_ID: AtomicI32 = AtomicI32::new(1);
 
-/// Represents a non-living Entity (e.g. Item, Egg, Snowball...)
-/// Vanilla `ServerEntity.sendChanges`: the motion packet goes out only when the velocity moved
-/// more than 1e-7 from the one the client was last given, or when it has just become exactly
-/// zero. Without this an idle world resends every entity's unchanged velocity every tick.
+/// Vanilla `ServerEntity.sendChanges` only resends changed velocity, including a transition to
+/// exactly zero.
 fn velocity_needs_resend(current: Vector3<f64>, last_sent: Vector3<f64>) -> bool {
     let difference = current.squared_distance_to_vec(&last_sent);
     difference > 1.0e-7 || (difference > 0.0 && current.length_squared() == 0.0)
 }
-/// Vanilla `ServerEntity.teleportDelay`: an absolute position sync is forced once this many ticks
-/// have passed without one, so a client that drifted is put right.
+
 const MAX_TICKS_BEFORE_POSITION_SYNC: i32 = 400;
 
-/// Vanilla `ServerEntity.sendChanges`: a move-entity packet carries the delta as a short in
-/// units of 1/4096 of a block, so anything further than about eight blocks since the last
-/// update has to go out as an absolute position instead.
 const fn delta_needs_position_sync(encoded: Vector3<i64>) -> bool {
-    encoded.x < i16::MIN as i64
-        || encoded.x > i16::MAX as i64
-        || encoded.y < i16::MIN as i64
-        || encoded.y > i16::MAX as i64
-        || encoded.z < i16::MIN as i64
-        || encoded.z > i16::MAX as i64
+    encoded.x < i16::MIN as i64 || encoded.x > i16::MAX as i64
+        || encoded.y < i16::MIN as i64 || encoded.y > i16::MAX as i64
+        || encoded.z < i16::MIN as i64 || encoded.z > i16::MAX as i64
 }
 
-/// Shared ordinary-interaction mount admission. The first two conditions are vanilla
-/// `Entity.canRide`; retaining an existing vehicle prevents the invalid double attachment that
-/// Pumpkin's current low-level mount primitive cannot safely transfer.
-const fn can_start_riding_state(sneaking: bool, riding_cooldown: i32, has_vehicle: bool) -> bool {
-    !sneaking && riding_cooldown <= 0 && !has_vehicle
+pub struct TrackedDataEntry {
+    pub index: TrackedId,
+    pub r#type: MetaDataType,
+    pub value: Box<[u8]>,
 }
+
+fn record_tracked_data_into<T: MetadataSerializer>(snapshot: &mut Vec<TrackedDataEntry>, meta: &[Metadata<T>]) {
+    for entry in meta {
+        let mut value = Vec::new();
+        if entry.write(&mut value, &CURRENT_MC_VERSION).is_err() { continue; }
+        let saved = TrackedDataEntry { index: entry.index, r#type: entry.r#type, value: value.into_boxed_slice() };
+        if let Some(old) = snapshot.iter_mut().find(|old| old.index == saved.index) {
+            *old = saved;
+        } else {
+            snapshot.push(saved);
+        }
+    }
+}
+
+fn serialize_tracked_data(snapshot: &[TrackedDataEntry], version: JavaMinecraftVersion) -> Option<Vec<u8>> {
+    let mut buf = Vec::new();
+    for entry in snapshot {
+        let meta = Metadata::new_raw(entry.index, entry.r#type, RawMetadataValue(entry.value.clone()));
+        if meta.write(&mut buf, &version).is_err() { return None; }
+    }
+    (!buf.is_empty()).then_some(buf)
+}
+
+/// Represents a non-living Entity (e.g. Item, Egg, Snowball...)
 pub struct Entity {
     /// A unique identifier for the entity
     pub entity_id: i32,
@@ -1181,16 +987,12 @@ pub struct Entity {
     pub movement: AtomicCell<Vector3<f64>>,
     /// The entity's position rounded to the nearest block coordinates
     pub block_pos: AtomicCell<BlockPos>,
+    /// Set when loaded from NBT; vanilla spawn-only initialization must not rerun.
+    pub restored_from_nbt: AtomicBool,
     /// The block supporting the entity
     pub supporting_block_pos: AtomicCell<Option<BlockPos>>,
     /// The chunk coordinates of the entity's current position
     pub chunk_pos: AtomicCell<Vector2<i32>>,
-    /// Set once this entity's state has been restored from saved NBT, so the spawn-only work
-    /// vanilla does in `Mob.finalizeSpawn` (equipment, loot pickup, variant and baby rolls) is
-    /// skipped. Vanilla reaches `finalizeSpawn` only from a real spawn
-    /// (`ServerLevel.addFreshEntityWithPassengers` callers), never from chunk deserialization,
-    /// where `EntityType.loadEntityRecursive` just reads the tag.
-    pub restored_from_nbt: AtomicBool,
     /// Indicates whether the entity is sneaking
     pub sneaking: AtomicBool,
     /// Indicates whether the entity is sprinting
@@ -1199,8 +1001,6 @@ pub struct Entity {
     pub swimming: AtomicBool,
     /// Indicates whether the entity is invisible
     pub invisible: AtomicBool,
-    /// Entity-specific invisibility that must survive potion visibility updates. Armor stands
-    /// use this for their saved `Invisible` flag; other entities leave it false.
     pub persistent_invisible: AtomicBool,
     /// Indicates whether the entity is glowing
     pub glowing: AtomicBool,
@@ -1215,18 +1015,11 @@ pub struct Entity {
     /// Indicates whether the entity is touching water
     pub touching_water: AtomicBool,
     pub was_touching_water: AtomicBool,
-    /// Indicates whether the entity's eyes were in water at the start of the current tick.
-    /// This is the server-side equivalent of vanilla's `wasEyeInWater` field.
     pub was_eye_in_water: AtomicBool,
-    /// Cached eye-in-water result from the most recent fluid interaction update.
     eye_in_water: AtomicBool,
     /// Indicates the fluid height
     pub water_height: AtomicCell<f64>,
-    /// `Projectile.lastDeflectedBy` (`Projectile.java:46`), stored as an entity id or `-1`.
-    /// Only meaningful on projectiles. Vanilla keeps it on `Projectile`; here it lives on
-    /// `Entity` because `ThrownItemEntity` is built by struct literal from files outside this
-    /// change's reach (`block/blocks/redstone/dispenser.rs` among them), and because the arrow
-    /// has its own projectile struct that needs the same guard.
+    /// Vanilla `Projectile.lastDeflectedBy` (`Projectile.java:46`).
     pub last_deflected_by: AtomicI32,
     /// Indicates whether the entity is touching lava
     pub touching_lava: AtomicBool,
@@ -1246,15 +1039,12 @@ pub struct Entity {
     pub bounding_box: AtomicCell<BoundingBox>,
     ///The size (width and height) of the bounding box
     pub entity_dimension: AtomicCell<EntityDimensions>,
-    /// Vanilla `LivingEntity.getDefaultDimensions` (`LivingEntity.java:3731-3733`) resolves an
-    /// entity's pose-independent size from its type and baby state. This caches that value so a
-    /// pose change can restore it, rather than leaving whatever size the previous pose stored in
-    /// `entity_dimension`.
+    /// Cached pose-independent dimensions for restoring the box after a pose change.
     pub base_dimension: AtomicCell<EntityDimensions>,
     /// Whether this entity is invulnerable to all damage
     pub invulnerable: AtomicBool,
     /// List of damage types this entity is immune to
-    pub damage_immunities: Mutex<Vec<DamageType>>,
+    pub damage_immunities: std::sync::Mutex<Vec<DamageType>>,
     // Whether the entity is immune to fire (to disable visual fire and fire damage)
     pub fire_immune: AtomicBool,
     pub fire_ticks: AtomicI32,
@@ -1268,20 +1058,16 @@ pub struct Entity {
     pub was_in_powder_snow: AtomicBool,
     pub removal_reason: AtomicCell<Option<RemovalReason>>,
     // The passengers that entity has
-    pub passengers: Mutex<Vec<Arc<dyn EntityBase>>>,
+    pub passengers: std::sync::Mutex<Vec<Arc<dyn EntityBase>>>,
     /// The vehicle that entity is in
-    pub vehicle: Mutex<Option<Arc<dyn EntityBase>>>,
+    pub vehicle: std::sync::Mutex<Option<Arc<dyn EntityBase>>>,
     /// The entity this entity is attached/leashed to (if any)
-    pub leashed_to: Mutex<Option<Arc<dyn EntityBase>>>,
-    /// Vanilla `Mob.persistenceRequired`. Kept on the shared entity because
-    /// every mob's NBT path already delegates its base data here.
+    pub leashed_to: std::sync::Mutex<Option<Arc<dyn EntityBase>>>,
+    /// Vanilla `Mob.persistenceRequired` and relationship persistence state.
     pub persistence_required: AtomicBool,
-    /// Cached vanilla `Mob.requiresCustomPersistence` state for passenger and
-    /// leash relationships. Keeping the two sources separate avoids clearing
-    /// one relationship when the other ends.
     pub vehicle_persistence_required: AtomicBool,
     pub leash_persistence_required: AtomicBool,
-    /// Vanilla `Mob.isNoAi`, shared with `LivingEntity` for subclass tick behavior.
+    /// Vanilla `Mob.isNoAi` state shared with living entities.
     pub no_ai: AtomicBool,
     /// Cooldown before entity can mount again after dismounting
     pub riding_cooldown: AtomicI32,
@@ -1293,7 +1079,7 @@ pub struct Entity {
 
     pub portal_cooldown: AtomicU32,
 
-    pub portal_manager: Mutex<Option<Mutex<PortalProcessor>>>,
+    pub portal_manager: std::sync::Mutex<Option<PortalProcessor>>,
     /// Custom name for the entity
     pub custom_name: ArcSwap<Option<TextComponent>>,
     /// Indicates whether the entity's custom name is visible
@@ -1302,7 +1088,7 @@ pub struct Entity {
     pub has_no_gravity: AtomicBool,
     /// Scoreboard tags attached to this entity, managed with `/tag`.
     /// Vanilla allows at most [`MAX_SCOREBOARD_TAGS`] tags per entity.
-    pub scoreboard_tags: Mutex<HashSet<String>>,
+    pub scoreboard_tags: std::sync::Mutex<HashSet<String>>,
     /// The data send in the Entity Spawn packet
     pub data: AtomicI32,
     /// Stores entity boolean flags (on fire, sneaking, invisible, glowing, etc.)
@@ -1311,8 +1097,8 @@ pub struct Entity {
     pub bedrock_flags: std::sync::atomic::AtomicI64,
     /// Stores more Bedrock-specific entity boolean flags (bit 0-63)
     pub bedrock_flags_two: std::sync::atomic::AtomicI64,
-    /// If true, the entity cannot collide with anything (e.g. spectator)
-    pub no_clip: AtomicBool,
+    /// If true, the entity bypasses physics, collisions, and block effects (e.g. spectator, markers, display entities)
+    pub no_physics: AtomicBool,
     /// Multiplies movement for one tick before being reset
     pub movement_multiplier: AtomicCell<Vector3<f64>>,
     /// Determines whether the entity's velocity needs to be sent
@@ -1325,91 +1111,15 @@ pub struct Entity {
     pub last_sent_pitch: AtomicU8,
     /// Cache for the last sent position to optimize Entity Pos update packets
     pub last_sent_pos: AtomicCell<Vector3<f64>>,
-    /// Vanilla `ServerEntity.lastSentMovement`: the velocity the tracking players were last
-    /// given, so an unchanged one is not resent every tick.
+    /// Vanilla `ServerEntity.lastSentMovement` and `teleportDelay` caches.
     pub last_sent_velocity: AtomicCell<Vector3<f64>>,
-    /// Vanilla `ServerEntity.teleportDelay`: ticks since the last absolute position sync.
     pub teleport_delay: AtomicI32,
-    /// Vanilla `ServerEntity.wasOnGround`: the ground flag the client was last told about.
     pub last_sent_on_ground: AtomicBool,
     /// Cache for the last sent head yaw byte
     pub last_sent_head_yaw: AtomicU8,
-    /// Every tracked-data value ever published for this entity through
-    /// [`Entity::send_meta_data`], in publish order, one entry per tracked id.
-    ///
-    /// Vanilla's `DataTracker` keeps the full set of tracked entries on the
-    /// entity and its `ServerEntity` sends the non-default entries to each
-    /// player as the entity enters that player's tracking range, right after
-    /// the spawn packet. Pumpkin previously only ever broadcast a value at the
-    /// moment it changed, so a player who started tracking an already-spawned
-    /// entity saw the client-side default for every field until it next
-    /// changed. This snapshot is what gets replayed to such a player; see
-    /// [`Entity::send_tracked_data_to`].
     pub tracked_data_snapshot: std::sync::Mutex<Vec<TrackedDataEntry>>,
     /// Persistent custom data container for plugins (matching Bukkit's `PersistentDataHolder`)
-    pub custom_data: Mutex<NbtCompound>,
-}
-
-/// Adds the given tracked-data values to a snapshot, replacing any earlier value
-/// for the same tracked id so a replay never ships a stale duplicate.
-fn record_tracked_data_into<T: MetadataSerializer>(
-    snapshot: &mut Vec<TrackedDataEntry>,
-    meta: &[Metadata<T>],
-) {
-    for m in meta {
-        let mut value = Vec::new();
-        // The payload is recorded once at the server's native version; `Metadata::write`
-        // does the per-client index and type-id remapping when the snapshot is replayed.
-        if m.value
-            .write_metadata(&mut value, &JavaMinecraftVersion::V_26_2)
-            .is_err()
-        {
-            continue;
-        }
-        let entry = TrackedDataEntry {
-            index: m.index,
-            r#type: m.r#type,
-            value: value.into_boxed_slice(),
-        };
-        if let Some(existing) = snapshot.iter_mut().find(|e| e.index == entry.index) {
-            *existing = entry;
-        } else {
-            snapshot.push(entry);
-        }
-    }
-}
-
-/// Writes a snapshot as an entity-metadata body (without the 0xFF terminator)
-/// for one client's protocol version.
-///
-/// Returns `None` when nothing would be written, which includes the case where
-/// every stored field is absent in that version (resolved index 255).
-fn serialize_tracked_data(
-    snapshot: &[TrackedDataEntry],
-    version: JavaMinecraftVersion,
-) -> Option<Vec<u8>> {
-    let mut buf = Vec::new();
-    for entry in snapshot {
-        let meta = Metadata::new_raw(
-            entry.index,
-            entry.r#type,
-            RawMetadataValue(entry.value.clone()),
-        );
-        if meta.write(&mut buf, &version).is_err() {
-            return None;
-        }
-    }
-    if buf.is_empty() { None } else { Some(buf) }
-}
-
-/// One serialized tracked-data value, retained so it can be re-sent to a player
-/// who only later starts seeing the entity.
-pub struct TrackedDataEntry {
-    pub index: TrackedId,
-    pub r#type: MetaDataType,
-    /// The value as produced by `MetadataSerializer::write_metadata` at the
-    /// server's native version.
-    pub value: Box<[u8]>,
+    pub custom_data: std::sync::Mutex<NbtCompound>,
 }
 
 impl Entity {
@@ -1425,26 +1135,18 @@ impl Entity {
         CURRENT_ID.fetch_add(count, Relaxed)
     }
 
-    /// Vanilla `Entity.isInRain` (`Entity.java:1595-1598`): rain at the feet, or at the block
-    /// containing the top of the bounding box directly above them.
-    pub async fn is_in_rain(&self) -> bool {
+    /// Vanilla `Entity.isInRain` (`Entity.java:1595-1598`).
+    pub fn is_in_rain(&self) -> bool {
         let world = self.world.load();
         let pos = self.block_pos.load();
-        if world.is_raining_at(&pos).await {
-            return true;
-        }
-        #[allow(clippy::cast_possible_truncation)]
-        let top = BlockPos::new(
-            pos.0.x,
-            self.bounding_box.load().max.y.floor() as i32,
-            pos.0.z,
-        );
-        world.is_raining_at(&top).await
+        if world.is_raining_at(&pos) { return true; }
+        let top = BlockPos::new(pos.0.x, self.bounding_box.load().max.y.floor() as i32, pos.0.z);
+        world.is_raining_at(&top)
     }
 
     /// Vanilla `Entity.isInWaterOrRain` (`Entity.java:1600-1602`).
-    pub async fn is_in_water_or_rain(&self) -> bool {
-        self.touching_water.load(Ordering::SeqCst) || self.is_in_rain().await
+    pub fn is_in_water_or_rain(&self) -> bool {
+        self.touching_water.load(Ordering::SeqCst) || self.is_in_rain()
     }
 
     pub fn from_uuid(
@@ -1477,14 +1179,18 @@ impl Entity {
             width: entity_type.dimension[0],
             height: entity_type.dimension[1],
             eye_height: entity_type.eye_height,
-            fixed: false,
         };
+
+        let current_biome = world
+            .level
+            .get_rough_biome(&BlockPos::new(floor_x, floor_y, floor_z));
 
         Self {
             entity_id,
             entity_uuid,
             entity_type,
             on_ground: AtomicBool::new(false),
+            restored_from_nbt: AtomicBool::new(false),
             touching_water: AtomicBool::new(false),
             was_touching_water: AtomicBool::new(false),
             was_eye_in_water: AtomicBool::new(false),
@@ -1503,7 +1209,6 @@ impl Entity {
                 get_section_cord(floor_x),
                 get_section_cord(floor_z),
             )),
-            restored_from_nbt: AtomicBool::new(false),
             sneaking: AtomicBool::new(false),
             swimming: AtomicBool::new(false),
             invisible: AtomicBool::new(false),
@@ -1527,7 +1232,7 @@ impl Entity {
             entity_dimension: AtomicCell::new(bounding_box_size),
             base_dimension: AtomicCell::new(bounding_box_size),
             invulnerable: AtomicBool::new(false),
-            damage_immunities: Mutex::new(Vec::new()),
+            damage_immunities: std::sync::Mutex::new(Vec::new()),
             data: AtomicI32::new(0),
             flags: std::sync::atomic::AtomicI8::new(0),
             bedrock_flags: std::sync::atomic::AtomicI64::new(0),
@@ -1539,9 +1244,9 @@ impl Entity {
             is_in_powder_snow: AtomicBool::new(false),
             was_in_powder_snow: AtomicBool::new(false),
             removal_reason: AtomicCell::new(None),
-            passengers: Mutex::new(Vec::new()),
-            vehicle: Mutex::new(None),
-            leashed_to: Mutex::new(None),
+            passengers: std::sync::Mutex::new(Vec::new()),
+            vehicle: std::sync::Mutex::new(None),
+            leashed_to: std::sync::Mutex::new(None),
             persistence_required: AtomicBool::new(false),
             vehicle_persistence_required: AtomicBool::new(false),
             leash_persistence_required: AtomicBool::new(false),
@@ -1549,16 +1254,16 @@ impl Entity {
 
             riding_cooldown: AtomicI32::new(0),
             age: AtomicI32::new(0),
-            current_biome: ArcSwap::new(Arc::new(&Biome::PLAINS)),
+            current_biome: ArcSwap::new(Arc::new(current_biome)),
             last_biome_update_pos: AtomicCell::new(BlockPos::new(floor_x, floor_y, floor_z)),
             portal_cooldown: AtomicU32::new(0),
-            portal_manager: Mutex::new(None),
+            portal_manager: std::sync::Mutex::new(None),
             custom_name: ArcSwap::new(Arc::new(None)),
             custom_name_visible: AtomicBool::new(false),
             silent: AtomicBool::new(false),
             has_no_gravity: AtomicBool::new(false),
-            scoreboard_tags: Mutex::new(HashSet::new()),
-            no_clip: AtomicBool::new(false),
+            scoreboard_tags: std::sync::Mutex::new(HashSet::new()),
+            no_physics: AtomicBool::new(false),
             movement_multiplier: AtomicCell::new(Vector3::default()),
             velocity_dirty: AtomicBool::new(true),
             removed: AtomicBool::new(false),
@@ -1566,11 +1271,11 @@ impl Entity {
             last_sent_pitch: AtomicU8::new(0),
             last_sent_head_yaw: AtomicU8::new(0),
             last_sent_pos: AtomicCell::new(position),
-            last_sent_velocity: AtomicCell::new(Vector3::new(0.0, 0.0, 0.0)),
+            last_sent_velocity: AtomicCell::new(Vector3::default()),
             teleport_delay: AtomicI32::new(0),
             last_sent_on_ground: AtomicBool::new(false),
             tracked_data_snapshot: std::sync::Mutex::new(Vec::new()),
-            custom_data: Mutex::new(NbtCompound::new()),
+            custom_data: std::sync::Mutex::new(NbtCompound::new()),
         }
     }
 
@@ -1586,10 +1291,14 @@ impl Entity {
     /// Updates the world reference for this entity.
     /// Called when the entity changes dimensions (e.g., through a nether portal).
     pub fn set_world(&self, world: Arc<World>) {
+        let block_pos = self.block_pos.load();
+        let biome = world.level.get_rough_biome(&block_pos);
+        self.current_biome.store(Arc::new(biome));
+        self.last_biome_update_pos.store(block_pos);
         self.world.store(world);
     }
 
-    pub fn bedrock_metadata(&self) -> EntityMetadata {
+    pub fn bedrock_metadata(&self) -> SyncedActorDataList {
         if self.bedrock_flags.load(Ordering::Relaxed) == 0 {
             self.bedrock_flags.fetch_or(
                 (1i64 << entity_data_flag::HAS_GRAVITY)
@@ -1600,7 +1309,7 @@ impl Entity {
             );
         }
 
-        let mut metadata = EntityMetadata::new();
+        let mut metadata = SyncedActorDataList::new();
         metadata.set(
             entity_data_key::WIDTH,
             MetadataValue::Float(self.entity_type.dimension[0]),
@@ -1612,11 +1321,11 @@ impl Entity {
         metadata.set(entity_data_key::SCALE, MetadataValue::Float(1.0));
         metadata.set(
             entity_data_key::FLAGS,
-            MetadataValue::Long(self.bedrock_flags.load(Ordering::Relaxed)),
+            MetadataValue::Int64(self.bedrock_flags.load(Ordering::Relaxed)),
         );
         metadata.set(
             entity_data_key::FLAGS_TWO,
-            MetadataValue::Long(self.bedrock_flags_two.load(Ordering::Relaxed)),
+            MetadataValue::Int64(self.bedrock_flags_two.load(Ordering::Relaxed)),
         );
 
         if let Some(name) = &**self.custom_name.load() {
@@ -1651,22 +1360,28 @@ impl Entity {
     ///
     /// Returns `false` if the entity already has the tag or already carries
     /// [`MAX_SCOREBOARD_TAGS`] tags.
-    pub async fn add_scoreboard_tag(&self, tag: &str) -> bool {
-        let mut tags = self.scoreboard_tags.lock().await;
+    pub fn add_scoreboard_tag(&self, tag: &str) -> bool {
+        let mut tags = self
+            .scoreboard_tags
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         tags.len() < MAX_SCOREBOARD_TAGS && tags.insert(tag.to_owned())
     }
 
     /// Removes a scoreboard tag from this entity.
     ///
     /// Returns `false` if the entity did not have the tag.
-    pub async fn remove_scoreboard_tag(&self, tag: &str) -> bool {
-        self.scoreboard_tags.lock().await.remove(tag)
+    pub fn remove_scoreboard_tag(&self, tag: &str) -> bool {
+        self.scoreboard_tags
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(tag)
     }
 
     /// Sets a custom name for the entity, typically used with nametags
     pub fn set_custom_name(&self, name: TextComponent) {
         self.custom_name.store(Arc::new(Some(name.clone())));
-        let mut bedrock_meta = EntityMetadata::new();
+        let mut bedrock_meta = SyncedActorDataList::new();
         bedrock_meta.set(
             entity_data_key::NAME,
             MetadataValue::String(name.clone().get_text()),
@@ -1693,7 +1408,7 @@ impl Entity {
 
     pub fn set_custom_name_visible(&self, visible: bool) {
         self.custom_name_visible.store(visible, Ordering::Relaxed);
-        let mut bedrock_meta = EntityMetadata::new();
+        let mut bedrock_meta = SyncedActorDataList::new();
         if let Some(name) = &**self.custom_name.load() {
             bedrock_meta.set(
                 entity_data_key::NAME,
@@ -1721,12 +1436,6 @@ impl Entity {
 
     pub fn is_silent(&self) -> bool {
         self.silent.load(Ordering::Relaxed)
-    }
-
-    /// Vanilla `Entity.shouldPlayLavaHurtSound` (`Entity.java:614-628`) has no
-    /// overrides and permits the lava damage path to play its burn sound.
-    pub const fn should_play_lava_hurt_sound(&self) -> bool {
-        true
     }
 
     pub fn set_silent(&self, silent: bool) {
@@ -1759,28 +1468,17 @@ impl Entity {
         }
         self.last_sent_velocity.store(velocity);
         let chunk_pos = self.chunk_pos.load();
-        self.world.load().broadcast_to_chunk_editioned_sync(
+        self.world.load().broadcast_to_chunk_editioned(
             chunk_pos,
             &CEntityVelocity::new(self.entity_id.into(), velocity),
-            &CSetActorMotion::new(
-                VarULong(self.entity_id as u64),
-                Vector3::new(velocity.x as f32, velocity.y as f32, velocity.z as f32),
-                VarULong(0),
-            ),
+            &CSetActorMotion {
+                target_runtime_id: VarULong(self.entity_id as u64),
+                motion: Vector3::new(velocity.x as f32, velocity.y as f32, velocity.z as f32),
+                tick: VarULong(0),
+            },
         );
     }
 
-    /// Vanilla `LivingEntity.SLEEPING_DIMENSIONS` (`LivingEntity.java:191`). Every living entity
-    /// shrinks to this box while asleep, whatever its type is.
-    pub const SLEEPING_DIMENSIONS: EntityDimensions = EntityDimensions::new(0.2, 0.2, 0.2);
-
-    /// `Warden.getDefaultDimensions` (`Warden.java:516-521`): the fixed height a digging or
-    /// emerging warden is squashed to.
-    pub const WARDEN_EMERGING_HEIGHT: f32 = 1.0;
-
-    /// Vanilla `Avatar.getDefaultDimensions` (`Avatar.java:66-68`), reading `Avatar.POSES`
-    /// (`Avatar.java:24-37`). This table is **player-shaped** and must not be applied to other
-    /// entity types, which keep their own type dimensions in every pose.
     #[must_use]
     pub const fn get_entity_dimensions(pose: EntityPose) -> EntityDimensions {
         match pose {
@@ -1794,59 +1492,51 @@ impl Entity {
         }
     }
 
-    /// Vanilla `Avatar` covers the player and the mannequin (`Mannequin.java:28` extends
-    /// `Avatar`); only these two carry the pose-dependent size table.
-    #[must_use]
+    /// `EntityDimensions` eye-height calculation (`EntityDimensions.java:7-13`).
+    pub const SLEEPING_DIMENSIONS: EntityDimensions = EntityDimensions::new(0.2, 0.2, 0.2);
+    pub const WARDEN_EMERGING_HEIGHT: f32 = 1.0;
+
+    /// Vanilla `Avatar.getDefaultDimensions` (`Avatar.java:66-68`), reading `Avatar.POSES`
+    /// (`Avatar.java:24-37`); only players and mannequins use this table.
     pub const fn is_avatar(&self) -> bool {
         type_is_avatar(self.entity_type)
     }
 
-    /// Vanilla `LivingEntity.getDefaultDimensions` (`LivingEntity.java:3731-3733`): the type's own
-    /// size, already scaled for the baby state by `AgeableMob::set_age`. `Avatar` overrides this
-    /// with its pose table (`Avatar.java:66-68`).
-    #[must_use]
+    /// Vanilla `LivingEntity.getDefaultDimensions` (`LivingEntity.java:3731-3733`).
     pub fn get_default_dimensions(&self, pose: EntityPose) -> EntityDimensions {
         if self.is_avatar() {
             return Self::get_entity_dimensions(pose);
         }
-
-        let base = self.base_dimension.load();
-
-        if self.entity_type.id == EntityType::WARDEN.id
-            && let Some(squashed) = Self::warden_pose_dimensions(base, pose)
-        {
-            return squashed;
-        }
-
-        base
+        self.base_dimension.load()
     }
 
-    /// `Warden.getDefaultDimensions` (`Warden.java:516-521`): a digging or emerging warden keeps
-    /// its width but is shrunk to `EntityDimensions.fixed(width, 1.0F)`, whose eye height is
-    /// `defaultEyeHeight` = `height * 0.85` (`EntityDimensions.java:7-13`). `None` for every
-    /// other pose -- `ROARING` included, which vanilla does not resize.
-    #[must_use]
-    pub fn warden_pose_dimensions(
-        base: EntityDimensions,
-        pose: EntityPose,
-    ) -> Option<EntityDimensions> {
+    /// `Warden.getDefaultDimensions` (`Warden.java:516-521`).
+    pub fn warden_pose_dimensions(base: EntityDimensions, pose: EntityPose) -> Option<EntityDimensions> {
         matches!(pose, EntityPose::Digging | EntityPose::Emerging)
             .then(|| EntityDimensions::fixed(base.width, Self::WARDEN_EMERGING_HEIGHT))
     }
 
-    /// Vanilla `LivingEntity.getDimensions` (`LivingEntity.java:3727-3729`): sleeping is a fixed
-    /// box for every living entity, everything else defers to `getDefaultDimensions`.
-    #[must_use]
+    /// Vanilla `LivingEntity.getDimensions` (`LivingEntity.java:3727-3729`).
     pub fn get_dimensions(&self, pose: EntityPose) -> EntityDimensions {
         if pose == EntityPose::Sleeping {
             Self::SLEEPING_DIMENSIONS
+        } else if self.entity_type.id == EntityType::WARDEN.id {
+            Self::warden_pose_dimensions(self.base_dimension.load(), pose)
+                .unwrap_or_else(|| self.get_default_dimensions(pose))
         } else {
             self.get_default_dimensions(pose)
         }
     }
 
+    /// Vanilla `Entity.getHandHoldingItemAngle` (`Entity.java:2575-2583`).
+    pub fn get_hand_holding_item_angle(&self, right_arm: bool) -> Vector3<f64> {
+        let hand_yaw = f64::from(self.yaw.load()) + if right_arm { 80.0 } else { -80.0 };
+        let yaw = -hand_yaw.to_radians();
+        Vector3::new(yaw.sin() * 0.5, 0.0, yaw.cos() * 0.5)
+    }
+
     pub fn get_eye_height(&self) -> f64 {
-        f64::from(self.entity_dimension.load().eye_height)
+        f64::from(self.get_dimensions(self.pose.load()).eye_height)
     }
 
     /// Updates the entity's position, block position, and chunk position.
@@ -1874,7 +1564,13 @@ impl Entity {
                 || floor_z != block_pos_vec.z
             {
                 let new_block_pos = Vector3::new(floor_x, floor_y, floor_z);
-                self.block_pos.store(BlockPos(new_block_pos));
+                let new_bp = BlockPos(new_block_pos);
+                self.block_pos.store(new_bp);
+
+                let world = self.world.load();
+                let biome = world.level.get_rough_biome(&new_bp);
+                self.current_biome.store(Arc::new(biome));
+                self.last_biome_update_pos.store(new_bp);
 
                 let chunk_pos = self.chunk_pos.load();
                 if get_section_cord(floor_x) != chunk_pos.x
@@ -1900,16 +1596,6 @@ impl Entity {
         let sin_pitch = pitch_rad.sin();
 
         Vector3::new(sin_yaw * cos_pitch, -sin_pitch, cos_yaw * cos_pitch)
-    }
-
-    /// Vanilla `Entity.getHandHoldingItemAngle` (`Entity.java:2575-2583`): the horizontal
-    /// direction from the selected arm, scaled to the hand attachment distance. The caller
-    /// resolves which arm holds the item because inventory state is player-specific.
-    #[must_use]
-    pub fn get_hand_holding_item_angle(&self, right_arm: bool) -> Vector3<f64> {
-        let hand_yaw = f64::from(self.yaw.load()) + if right_arm { 80.0 } else { -80.0 };
-        let yaw = -hand_yaw.to_radians();
-        Vector3::new(yaw.sin() * 0.5, 0.0, yaw.cos() * 0.5)
     }
 
     /// Changes this entity's pitch and yaw to look at target
@@ -1966,8 +1652,7 @@ impl Entity {
     }
 
     fn default_portal_cooldown(&self) -> u32 {
-        // `Projectile.getDimensionChangingDelay` (`Projectile.java:386-389`) overrides
-        // `Entity.getDimensionChangingDelay` with two ticks.
+        /// Vanilla `Projectile.getDimensionChangingDelay` (`Projectile.java:386-389`).
         if crate::entity::projectile::is_projectile(self.entity_type) {
             2
         } else if self.entity_type == &EntityType::PLAYER {
@@ -1988,7 +1673,7 @@ impl Entity {
     }
 
     #[expect(clippy::float_cmp)]
-    async fn adjust_movement_for_collisions(
+    fn adjust_movement_for_collisions(
         &self,
         movement: Vector3<f64>,
         caller: &dyn EntityBase,
@@ -2006,8 +1691,7 @@ impl Entity {
         let (collisions, block_positions) = self
             .world
             .load()
-            .get_block_collisions(bounding_box.stretch(movement), caller)
-            .await;
+            .get_block_collisions(bounding_box.stretch(movement), caller);
 
         if collisions.is_empty() {
             return movement;
@@ -2158,14 +1842,14 @@ impl Entity {
     }
 
     #[expect(dead_code)]
-    fn tick_block_underneath(_caller: &Arc<dyn EntityBase>) {
+    const fn tick_block_underneath() {
         // let world = self.world.read();
 
         // let (pos, block, state) = self.get_block_with_y_offset(0.2);
 
         // world
         //     .block_registry
-        //     .on_stepped_on(&world, caller.as_ref(), pos, block, state)
+        //     .on_stepped_on(&world, caller, pos, block, state)
         //     ;
 
         // TODO: Add this to on_stepped_on
@@ -2221,7 +1905,11 @@ impl Entity {
         */
     }
 
-    async fn tick_block_collisions(&self, caller: &Arc<dyn EntityBase>, server: &Server) -> bool {
+    pub fn tick_block_collisions(&self, caller: &dyn EntityBase) -> bool {
+        if !self.is_affected_by_blocks() {
+            return false;
+        }
+
         let bounding_box = self.bounding_box.load();
         let aabb = bounding_box.expand(-1.0e-7, -1.0e-7, -1.0e-7);
 
@@ -2260,26 +1948,27 @@ impl Entity {
             );
 
             let collision_shape = if block == &Block::POWDER_SNOW {
-                crate::block::blocks::powder_snow::inside_collision_shape_for_entity(
-                    caller.as_ref(),
-                    &pos,
-                )
-                .await
+                crate::block::blocks::powder_snow::inside_collision_shape_for_entity(caller, &pos)
             } else {
                 world
                     .block_registry
                     .get_inside_collision_shape(block, &world, state, &pos)
-                    .await
             };
 
             if bounding_box.intersects(&collision_shape.at_pos(pos)) {
                 if block == &Block::POWDER_SNOW {
                     self.is_in_powder_snow.store(true, Relaxed);
                 }
-                world
-                    .block_registry
-                    .on_entity_collision(block, &world, caller.as_ref(), &pos, state, server)
-                    .await;
+                if let Some(server_arc) = world.server.upgrade() {
+                    world.block_registry.on_entity_collision(
+                        block,
+                        &world,
+                        caller,
+                        &pos,
+                        state,
+                        &server_arc,
+                    );
+                }
             }
         }
 
@@ -2292,26 +1981,30 @@ impl Entity {
         let new = self.pos.load();
         let chunk_pos = self.chunk_pos.load();
 
-        // `ServerEntity.sendChanges` encodes the delta in units of 1/4096 of a block and falls
-        // back to an absolute position sync when it no longer fits in a short. Casting an
-        // out-of-range value to i16 wraps, putting the entity somewhere else on the client.
-        let encoded = Vector3::new(
-            new.x.mul_add(4096.0, -(old.x * 4096.0)) as i64,
-            new.y.mul_add(4096.0, -(old.y * 4096.0)) as i64,
-            new.z.mul_add(4096.0, -(old.z * 4096.0)) as i64,
+        let raw_delta = Vector3::new(
+            (new.x.mul_add(4096.0, -(old.x * 4096.0))) as i64,
+            (new.y.mul_add(4096.0, -(old.y * 4096.0))) as i64,
+            (new.z.mul_add(4096.0, -(old.z * 4096.0))) as i64,
         );
-        // `ServerEntity.sendChanges`: an absolute sync also goes out every 400 ticks and whenever
-        // the ground flag flips, not only when the delta overflows.
         let teleport_delay = self.teleport_delay.fetch_add(1, Relaxed) + 1;
-        let on_ground = self.on_ground.load(Relaxed);
-        if delta_needs_position_sync(encoded)
-            || teleport_delay > MAX_TICKS_BEFORE_POSITION_SYNC
-            || on_ground != self.last_sent_on_ground.load(Relaxed)
-        {
-            self.send_position_sync(chunk_pos, new);
+        if delta_needs_position_sync(raw_delta) || teleport_delay > MAX_TICKS_BEFORE_POSITION_SYNC {
+            self.teleport_delay.store(0, Relaxed);
+            self.last_sent_pos.store(new);
+            self.world.load().broadcast_to_chunk(
+                chunk_pos,
+                &CEntityPositionSync::new(
+                    self.entity_id.into(), new, self.velocity.load(), self.yaw.load(),
+                    self.pitch.load(), self.on_ground.load(Relaxed),
+                ),
+            );
             return;
         }
-        let converted = Vector3::new(encoded.x as i16, encoded.y as i16, encoded.z as i16);
+
+        let converted = Vector3::new(
+            new.x.mul_add(4096.0, -(old.x * 4096.0)) as i16,
+            new.y.mul_add(4096.0, -(old.y * 4096.0)) as i16,
+            new.z.mul_add(4096.0, -(old.z * 4096.0)) as i16,
+        );
 
         let yaw = self.yaw.load();
 
@@ -2342,7 +2035,7 @@ impl Entity {
                 self.on_ground.load(Relaxed),
             );
             if self.entity_type == &EntityType::PLAYER {
-                self.world.load().broadcast_to_chunk_editioned_sync(
+                self.world.load().broadcast_to_chunk_editioned(
                     chunk_pos,
                     &je_packet,
                     &CMovePlayer::new(
@@ -2369,7 +2062,7 @@ impl Entity {
                 if self.on_ground.load(Relaxed) {
                     flags |= MOVE_ACTOR_DELTA_FLAG_ON_GROUND;
                 }
-                self.world.load().broadcast_to_chunk_editioned_sync(
+                self.world.load().broadcast_to_chunk_editioned(
                     chunk_pos,
                     &je_packet,
                     &CMoveActorDelta::new(
@@ -2391,7 +2084,7 @@ impl Entity {
                 self.on_ground.load(Relaxed),
             );
             if self.entity_type == &EntityType::PLAYER {
-                self.world.load().broadcast_to_chunk_editioned_sync(
+                self.world.load().broadcast_to_chunk_editioned(
                     chunk_pos,
                     &je_packet,
                     &CMovePlayer::new(
@@ -2416,7 +2109,7 @@ impl Entity {
                     flags |= MOVE_ACTOR_DELTA_FLAG_ON_GROUND;
                 }
 
-                self.world.load().broadcast_to_chunk_editioned_sync(
+                self.world.load().broadcast_to_chunk_editioned(
                     chunk_pos,
                     &je_packet,
                     &CMoveActorDelta::new(
@@ -2439,7 +2132,7 @@ impl Entity {
                 self.on_ground.load(Relaxed),
             );
             if self.entity_type == &EntityType::PLAYER {
-                self.world.load().broadcast_to_chunk_editioned_sync(
+                self.world.load().broadcast_to_chunk_editioned(
                     chunk_pos,
                     &je_packet,
                     &CMovePlayer::new(
@@ -2463,7 +2156,7 @@ impl Entity {
                 if self.on_ground.load(Relaxed) {
                     flags |= MOVE_ACTOR_DELTA_FLAG_ON_GROUND;
                 }
-                self.world.load().broadcast_to_chunk_editioned_sync(
+                self.world.load().broadcast_to_chunk_editioned(
                     chunk_pos,
                     &je_packet,
                     &CMoveActorDelta::new(
@@ -2512,58 +2205,16 @@ impl Entity {
         old
     }
 
-    /// Vanilla falls back to `ClientboundEntityPositionSyncPacket` whenever the delta cannot be
-    /// expressed as a short, so the client is told where the entity actually is.
-    fn send_position_sync(&self, chunk_pos: Vector2<i32>, position: Vector3<f64>) {
-        let yaw = self.yaw.load();
-        let pitch = self.pitch.load();
-        self.last_sent_pos.store(position);
-        self.teleport_delay.store(0, Relaxed);
-        self.last_sent_on_ground
-            .store(self.on_ground.load(Relaxed), Relaxed);
-        self.last_sent_yaw
-            .store((yaw * 256.0 / 360.0).rem_euclid(256.0) as u8, Relaxed);
-        self.last_sent_pitch
-            .store((pitch * 256.0 / 360.0).rem_euclid(256.0) as u8, Relaxed);
-
-        self.world.load().broadcast_to_chunk(
-            chunk_pos,
-            &CEntityPositionSync::new(
-                self.entity_id.into(),
-                position,
-                self.velocity.load(),
-                yaw,
-                pitch,
-                self.on_ground.load(Relaxed),
-            ),
-        );
-    }
-
     pub fn send_pos(&self) {
         let old = self.last_sent_pos.load();
         let new = self.pos.load();
         let chunk_pos = self.chunk_pos.load();
 
-        // `ServerEntity.sendChanges` encodes the delta in units of 1/4096 of a block and falls
-        // back to an absolute position sync when it no longer fits in a short. Casting an
-        // out-of-range value to i16 wraps, putting the entity somewhere else on the client.
-        let encoded = Vector3::new(
-            new.x.mul_add(4096.0, -(old.x * 4096.0)) as i64,
-            new.y.mul_add(4096.0, -(old.y * 4096.0)) as i64,
-            new.z.mul_add(4096.0, -(old.z * 4096.0)) as i64,
+        let converted = Vector3::new(
+            new.x.mul_add(4096.0, -(old.x * 4096.0)) as i16,
+            new.y.mul_add(4096.0, -(old.y * 4096.0)) as i16,
+            new.z.mul_add(4096.0, -(old.z * 4096.0)) as i16,
         );
-        // `ServerEntity.sendChanges`: an absolute sync also goes out every 400 ticks and whenever
-        // the ground flag flips, not only when the delta overflows.
-        let teleport_delay = self.teleport_delay.fetch_add(1, Relaxed) + 1;
-        let on_ground = self.on_ground.load(Relaxed);
-        if delta_needs_position_sync(encoded)
-            || teleport_delay > MAX_TICKS_BEFORE_POSITION_SYNC
-            || on_ground != self.last_sent_on_ground.load(Relaxed)
-        {
-            self.send_position_sync(chunk_pos, new);
-            return;
-        }
-        let converted = Vector3::new(encoded.x as i16, encoded.y as i16, encoded.z as i16);
 
         // Only broadcast when position has actually changed.
         if converted.x == 0 && converted.y == 0 && converted.z == 0 {
@@ -2579,7 +2230,7 @@ impl Entity {
         );
 
         if self.entity_type == &EntityType::PLAYER {
-            self.world.load().broadcast_to_chunk_editioned_sync(
+            self.world.load().broadcast_to_chunk_editioned(
                 chunk_pos,
                 &je_packet,
                 &CMovePlayer::new(
@@ -2604,7 +2255,7 @@ impl Entity {
                 flags |= MOVE_ACTOR_DELTA_FLAG_ON_GROUND;
             }
 
-            self.world.load().broadcast_to_chunk_editioned_sync(
+            self.world.load().broadcast_to_chunk_editioned(
                 chunk_pos,
                 &je_packet,
                 &CMoveActorDelta::new(
@@ -2623,7 +2274,7 @@ impl Entity {
 
     // updateWaterState() in yarn
 
-    async fn update_fluid_state(&self, caller: &Arc<dyn EntityBase>) {
+    fn update_fluid_state(&self, caller: &dyn EntityBase) {
         let is_pushed = caller.is_pushed_by_fluids();
         let mut fluids = BTreeMap::new();
 
@@ -2661,9 +2312,8 @@ impl Entity {
                     let (fluid, state) = world.get_fluid_and_fluid_state(&pos);
 
                     if fluid.id != Fluid::EMPTY.id {
-                        let marginal_height = world.get_fluid_height(&pos, fluid, state)
-                            + f64::from(y)
-                            - bounding_box.min.y;
+                        let marginal_height =
+                            f64::from(state.height) + f64::from(y) - bounding_box.min.y;
 
                         if marginal_height >= 0.0 {
                             let i = usize::from(
@@ -2702,8 +2352,7 @@ impl Entity {
         for (_, fluid) in fluids {
             world
                 .block_registry
-                .on_entity_collision_fluid(fluid, caller.as_ref())
-                .await;
+                .on_entity_collision_fluid(fluid, caller);
         }
 
         let lava_speed = if world.dimension == Dimension::THE_NETHER {
@@ -2720,15 +2369,13 @@ impl Entity {
 
         let in_water = in_fluid[0];
 
-        self.was_touching_water.store(in_water, Ordering::SeqCst);
-
         if in_water {
             if let Some(living) = caller.get_living_entity() {
                 living.fall_distance.store(0.0);
             }
 
             if !self.touching_water.load(Ordering::SeqCst) {
-                self.do_water_splash_effect().await;
+                self.do_water_splash_effect();
             }
         }
 
@@ -2753,53 +2400,17 @@ impl Entity {
         self.touching_lava.store(in_lava, Ordering::SeqCst);
     }
 
-    /// `Entity.isEyeInFluid` (`Entity.java:1730-1731`).
-    pub fn is_eye_in_fluid(&self, world: &World, fluid_tag: &'static tag::Tag) -> bool {
-        let pos = self.pos.load();
-        let eye_y = self.get_eye_y();
-        let eye_block = BlockPos::floored(pos.x, eye_y, pos.z);
-        let (fluid, state) = world.get_fluid_and_fluid_state(&eye_block);
-
-        fluid.has_tag(fluid_tag)
-            && f64::from(eye_block.0.y) + world.get_fluid_height(&eye_block, fluid, state) >= eye_y
-    }
-
-    /// Port of vanilla's `Entity::doWaterSplashEffect`. Simplified: no controlling-passenger
-    /// volume modifier, no firstTick guard, and `play_sound` has no volume/pitch parameters.
-    async fn do_water_splash_effect(&self) {
+    /// Vanilla `Entity.doWaterSplashEffect`, retaining Pumpkin's simplified particle API.
+    fn do_water_splash_effect(&self) {
         let pos = self.pos.load();
         let width = self.entity_dimension.load().width;
-
         self.play_sound(Sound::EntityGenericSplash);
-
-        let particle_count = (1.0f32 + width * 20.0) as i32;
-        let splash_origin = Vector3::new(pos.x, pos.y.floor() + 1.0, pos.z);
-        let scatter_offset = Vector3::new(width, 0.0, width);
-
+        let count = (1.0_f32 + width * 20.0) as i32;
+        let origin = Vector3::new(pos.x, pos.y.floor() + 1.0, pos.z);
+        let offset = Vector3::new(f64::from(width), 0.0, f64::from(width));
         let world = self.world.load();
-        world.spawn_particle(
-            splash_origin,
-            scatter_offset,
-            0.2,
-            particle_count,
-            pumpkin_data::particle::Particle::Bubble,
-        );
-        world.spawn_particle(
-            splash_origin,
-            scatter_offset,
-            0.2,
-            particle_count,
-            pumpkin_data::particle::Particle::Splash,
-        );
-
-        // No Arc<dyn EntityBase> available here, so GameEventContext::none().
-        crate::world::game_event::emit_game_event(
-            &world,
-            pumpkin_data::game_event::GameEvent::Splash,
-            splash_origin,
-            crate::world::game_event::GameEventContext::none(),
-        )
-        .await;
+        world.spawn_particle(origin, offset, 0.2, count, pumpkin_data::particle::Particle::Bubble);
+        world.spawn_particle(origin, offset, 0.2, count, pumpkin_data::particle::Particle::Splash);
     }
 
     fn push_by_fluid(&self, speed: f64, mut push: Vector3<f64>, n: usize) {
@@ -2881,6 +2492,18 @@ impl Entity {
         }
     }
 
+    /// Vanilla `Entity.isEyeInFluid` (`Entity.java:1730-1731`).
+    pub fn is_eye_in_fluid(&self, world: &World, fluid_tag: &'static tag::Tag) -> bool {
+        let pos = self.pos.load();
+        let eye_y = self.get_eye_y();
+        let eye_block = BlockPos::floored(pos.x, eye_y, pos.z);
+        let (fluid, state) = world.get_fluid_and_fluid_state(&eye_block);
+        fluid.has_tag(fluid_tag)
+            && f64::from(eye_block.0.y)
+                + world.get_fluid_height(&eye_block, fluid, state)
+                >= eye_y
+    }
+
     /// Vanilla `Entity.getBlockStateOnLegacy` (`Entity.java:1697-1700`).
     pub(crate) fn get_block_state_on_legacy(&self) -> &'static BlockState {
         let (pos, _, state) = self.get_pos_with_y_offset(0.2);
@@ -2889,7 +2512,7 @@ impl Entity {
 
     // Entity.updateVelocity in yarn
 
-    pub(crate) fn update_velocity_from_input(&self, movement_input: Vector3<f64>, speed: f64) {
+    fn update_velocity_from_input(&self, movement_input: Vector3<f64>, speed: f64) {
         let final_input = self.movement_input_to_velocity(movement_input, speed);
 
         self.velocity.store(self.velocity.load() + final_input);
@@ -2923,18 +2546,38 @@ impl Entity {
         )
     }
 
+    #[must_use]
+    pub fn get_block_pos_below_that_affects_my_movement(&self) -> BlockPos {
+        self.get_pos_with_y_offset(0.500_001).0
+    }
+
+    #[must_use]
+    #[expect(clippy::float_cmp)]
+    pub fn get_block_speed_factor(&self) -> f32 {
+        let world = self.world.load();
+        let (block, _state) = world.get_block_and_state(&self.block_pos.load());
+        let speed_factor_here = block.get_speed_factor();
+        if block != &Block::WATER && block != &Block::BUBBLE_COLUMN {
+            if speed_factor_here == 1.0 {
+                let below_pos = self.get_block_pos_below_that_affects_my_movement();
+                let (below_block, _below_state) = world.get_block_and_state(&below_pos);
+                below_block.get_speed_factor()
+            } else {
+                speed_factor_here
+            }
+        } else {
+            speed_factor_here
+        }
+    }
+
     #[expect(clippy::float_cmp)]
     fn get_velocity_multiplier(&self) -> f32 {
-        let block = self.world.load().get_block(&self.block_pos.load());
-
-        let multiplier = block.velocity_multiplier;
-
-        if multiplier != 1.0 || block == &Block::WATER || block == &Block::BUBBLE_COLUMN {
-            multiplier
-        } else {
-            let (_pos, block, _state) = self.get_block_with_y_offset(0.500_001);
-
+        let world = self.world.load();
+        let block = world.get_block(&self.block_pos.load());
+        if block.velocity_multiplier != 1.0 || block == &Block::WATER || block == &Block::BUBBLE_COLUMN {
             block.velocity_multiplier
+        } else {
+            self.get_block_with_y_offset(0.500_001).1.velocity_multiplier
         }
     }
 
@@ -2958,36 +2601,33 @@ impl Entity {
         self.set_pos(self.pos.load() + delta);
     }
 
-    /// Applies a small self movement through the normal block collision solver.
-    /// Player movement is handled by the player packet path, so `move_entity`
-    /// deliberately skips players; vanilla uses this path for Riptide's lift.
-    pub async fn move_self_with_collisions(&self, caller: &dyn EntityBase, motion: Vector3<f64>) {
-        if self.no_clip.load(Ordering::Relaxed) {
-            self.move_pos(motion);
-            self.sync_passenger_positions().await;
-            return;
-        }
-
-        let final_move = self.adjust_movement_for_collisions(motion, caller).await;
-        self.move_pos(final_move);
-        self.sync_passenger_positions().await;
+    /// Vanilla `Entity.touchingUnloadedChunk` (`Entity.java:3659-3666`).
+    #[must_use]
+    pub fn touching_unloaded_chunk(&self) -> bool {
+        let bounding_box = self.bounding_box.load().expand_all(1.0);
+        let min_x = bounding_box.min.x.floor() as i32;
+        let max_x = bounding_box.max.x.ceil() as i32;
+        let min_z = bounding_box.min.z.floor() as i32;
+        let max_z = bounding_box.max.z.ceil() as i32;
+        let level = &self.world.load().level;
+        (get_section_cord(min_x)..=get_section_cord(max_x)).any(|x| {
+            (get_section_cord(min_z)..=get_section_cord(max_z))
+                .any(|z| !level.is_chunk_loaded(&Vector2::new(x, z)))
+        })
     }
 
     // Move by a delta, adjust for collisions, and send
 
     // Does not send movement. That must be done separately
-    pub async fn move_entity<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        mut motion: Vector3<f64>,
-    ) {
+    pub fn move_entity(&self, caller: &dyn EntityBase, mut motion: Vector3<f64>) {
         if caller.get_player().is_some() {
             return;
         }
 
-        if self.no_clip.load(Ordering::Relaxed) {
+        if self.no_physics.load(Ordering::Relaxed) {
             self.move_pos(motion);
-            self.sync_passenger_positions().await;
+            self.horizontal_collision.store(false, Ordering::Relaxed);
+            self.on_ground.store(false, Ordering::Relaxed);
 
             return;
         }
@@ -3004,28 +2644,17 @@ impl Entity {
             self.velocity.store(Vector3::default());
         }
 
-        let final_move = self
-            .adjust_movement_for_collisions(motion, caller.as_ref())
-            .await;
+        let final_move = self.adjust_movement_for_collisions(motion, caller);
 
         self.move_pos(final_move);
-        self.sync_passenger_positions().await;
 
         let velocity_multiplier = f64::from(self.get_velocity_multiplier());
 
         self.velocity.store(final_move * velocity_multiplier);
 
-        if !self.touching_unloaded_chunk()
-            && let Some(living) = caller.get_living_entity()
-        {
-            living
-                .fall(
-                    caller.clone(),
-                    final_move.y,
-                    self.on_ground.load(Ordering::SeqCst),
-                    false,
-                )
-                .await;
+        if !self.touching_unloaded_chunk() && let Some(living) = caller.get_living_entity() {
+            let on_ground = self.on_ground.load(Ordering::SeqCst);
+            living.fall(caller, final_move.y, on_ground, false);
         }
 
         if motion.y != final_move.y {
@@ -3033,27 +2662,20 @@ impl Entity {
             let block = self.get_block_with_y_offset(0.2).1;
             world
                 .block_registry
-                .update_entity_movement_after_fall_on(block, caller.as_ref())
-                .await;
+                .update_entity_movement_after_fall_on(block, caller);
         }
     }
 
-    /// Vanilla `Entity.touchingUnloadedChunk` (`Entity.java:3659-3666`) checks the entity's
-    /// one-block-inflated bounding box before fall processing. The server must not accumulate or
-    /// resolve fall damage from terrain whose chunks are no longer loaded.
-    #[must_use]
-    pub fn touching_unloaded_chunk(&self) -> bool {
-        let bounding_box = self.bounding_box.load().expand_all(1.0);
-        let min_x = bounding_box.min.x.floor() as i32;
-        let max_x = bounding_box.max.x.ceil() as i32;
-        let min_z = bounding_box.min.z.floor() as i32;
-        let max_z = bounding_box.max.z.ceil() as i32;
-        let level = &self.world.load().level;
-
-        (get_section_cord(min_x)..=get_section_cord(max_x)).any(|x| {
-            (get_section_cord(min_z)..=get_section_cord(max_z))
-                .any(|z| !level.is_chunk_loaded(&Vector2::new(x, z)))
-        })
+    /// Applies self movement through the normal collision solver (used by Riptide-like motion).
+    pub fn move_self_with_collisions(&self, caller: &dyn EntityBase, motion: Vector3<f64>) {
+        if self.no_physics.load(Ordering::Relaxed) {
+            self.move_pos(motion);
+            self.sync_passenger_positions();
+            return;
+        }
+        let final_move = self.adjust_movement_for_collisions(motion, caller);
+        self.move_pos(final_move);
+        self.sync_passenger_positions();
     }
 
     pub fn push_out_of_blocks(&self, center_pos: Vector3<f64>) {
@@ -3111,52 +2733,58 @@ impl Entity {
         self.velocity.store(velo);
     }
 
-    async fn tick_portal(&self, caller: &Arc<dyn EntityBase>) {
+    fn tick_portal(&self, caller: &dyn EntityBase) {
         if self.portal_cooldown.load(Ordering::Relaxed) > 0 {
             self.portal_cooldown.fetch_sub(1, Ordering::Relaxed);
         }
-        let mut manager_guard = self.portal_manager.lock().await;
+        let Ok(mut manager_guard) = self.portal_manager.try_lock() else {
+            return;
+        };
         let mut should_remove = false;
-        if let Some(pmanager_mutex) = manager_guard.as_ref() {
-            let mut portal_processor = pmanager_mutex.lock().await;
-            if portal_processor.process_portal_teleportation(
-                &self.world.load(),
-                caller.as_ref(),
-                caller.can_use_portal(),
-            ) {
+        if let Some(portal_processor) = manager_guard.as_mut() {
+            if portal_processor.process_portal_teleportation(&self.world.load(), caller, caller.can_use_portal()) {
                 self.portal_cooldown
                     .store(self.default_portal_cooldown(), Ordering::Relaxed);
 
-                let transition = portal_processor
-                    .portal_type
-                    .get_portal_destination(
-                        &self.world.load(),
-                        portal_processor.destination_world.clone(),
-                        caller,
-                        portal_processor.entry_position,
-                        portal_processor.source_portal.clone(),
-                    )
-                    .await;
+                let world_clone = self.world.load_full();
+                let portal_type = portal_processor.portal_type;
+                let dest_world_opt = portal_processor.destination_world.clone();
+                let src_portal = portal_processor.source_portal.clone();
+                let entity_id = self.entity_id;
+                let yaw = self.yaw.load();
 
-                drop(portal_processor);
+                let rt_handle = world_clone.server.upgrade().map(|s| s.runtime.clone());
+                rayon::spawn(move || {
+                    let _guard = rt_handle.as_ref().map(tokio::runtime::Handle::enter);
+                    let Some(entity_arc) = world_clone.get_entity_by_id(entity_id) else {
+                        return;
+                    };
+                    let transition = portal_type.get_portal_destination(
+                        &world_clone,
+                        dest_world_opt,
+                        entity_arc.as_ref(),
+                        src_portal.as_ref(),
+                    );
 
-                if let Some(transition) = transition {
-                    let dest_world = transition.new_world.clone();
-                    let yaw = transition.yaw;
-                    let pitch = transition.pitch;
-                    let teleport_pos = transition.position;
+                    if let Some(transition) = transition {
+                        let dest_world = transition.new_world.clone();
+                        let yaw_val = transition.yaw;
+                        let pitch = transition.pitch;
+                        let teleport_pos = transition.position;
 
-                    // Teleport the main entity
-                    caller
-                        .clone()
-                        .teleport(teleport_pos, yaw, pitch, dest_world.clone())
-                        .await;
+                        // Teleport the main entity
+                        entity_arc.teleport(teleport_pos, yaw_val, pitch, dest_world.clone());
 
-                    // Teleport all passengers recursively along with the vehicle
-                    let yaw_delta = yaw.map(|y| y - self.yaw.load());
-                    Self::teleport_passengers_recursive(self, teleport_pos, yaw_delta, &dest_world)
-                        .await;
-                }
+                        // Teleport all passengers recursively along with the vehicle
+                        let yaw_delta = yaw_val.map(|y| y - yaw);
+                        Self::teleport_passengers_recursive(
+                            entity_arc.get_entity(),
+                            teleport_pos,
+                            yaw_delta,
+                            &dest_world,
+                        );
+                    }
+                });
             } else if portal_processor.portal_time == 0 {
                 should_remove = true;
             }
@@ -3167,72 +2795,62 @@ impl Entity {
     }
 
     /// Recursively teleports all passengers (and their passengers) to the destination
-    fn teleport_passengers_recursive<'a>(
-        entity: &'a Self,
+    fn teleport_passengers_recursive(
+        entity: &Self,
         position: Vector3<f64>,
         yaw_delta: Option<f32>,
-        dest_world: &'a Arc<World>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let passengers = entity.passengers.lock().await.clone();
-            for passenger in passengers {
-                let passenger_entity = passenger.get_entity();
-                let passenger_yaw = yaw_delta.map(|delta| passenger_entity.yaw.load() + delta);
-                passenger_entity.portal_cooldown.store(
-                    passenger_entity.default_portal_cooldown(),
-                    Ordering::Relaxed,
-                );
+        dest_world: &Arc<World>,
+    ) {
+        let passengers = entity
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        for passenger in passengers {
+            let passenger_entity = passenger.get_entity();
+            let passenger_yaw = yaw_delta.map(|delta| passenger_entity.yaw.load() + delta);
+            passenger_entity.portal_cooldown.store(
+                passenger_entity.default_portal_cooldown(),
+                Ordering::Relaxed,
+            );
 
-                // Get nested passengers before teleporting
-                let nested_passengers = passenger_entity.passengers.lock().await.clone();
+            // Get nested passengers before teleporting
+            let nested_passengers = passenger_entity
+                .passengers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
 
-                passenger
-                    .teleport(position, passenger_yaw, None, dest_world.clone())
-                    .await;
+            passenger.teleport(position, passenger_yaw, None, dest_world.clone());
 
-                // Recursively teleport nested passengers
-                for nested in nested_passengers {
-                    let nested_entity = nested.get_entity();
-                    Self::teleport_passengers_recursive(
-                        nested_entity,
-                        position,
-                        yaw_delta,
-                        dest_world,
-                    )
-                    .await;
-                }
+            // Recursively teleport nested passengers
+            for nested in nested_passengers {
+                let nested_entity = nested.get_entity();
+                Self::teleport_passengers_recursive(nested_entity, position, yaw_delta, dest_world);
             }
-        })
+        }
     }
 
-    pub async fn try_use_portal(
-        &self,
-        _portal_delay: u32,
-        portal_world: Arc<World>,
-        pos: BlockPos,
-    ) {
-        // Matches vanilla `Entity.canUsePortal(false)` (Entity.java:3207-3209): `(ignorePassenger
-        // || !isPassenger()) && isAlive()`, gating `Portal.entityInside`'s call to
-        // `setAsInsidePortal` (e.g. NetherPortalBlock.java:115, EndPortalBlock.java:64). A dead
-        // entity must never enter the portal-crossing state machine.
-        if !self.is_alive() {
-            return;
-        }
-
+    pub fn try_use_portal(&self, portal_world: Arc<World>, pos: BlockPos) {
+        // `Entity.canUsePortal(false)` (`Entity.java:3193-3195`) also requires that the entity
+        // is alive; dead entities never enter the portal state machine.
+        if !self.is_alive() { return; }
         let mut portal_event =
             crate::plugin::api::events::entity::entity_portal::EntityPortalEvent::new(
                 self.entity_id,
                 pos,
             );
         if let Some(server) = self.world.load().server.upgrade() {
-            server.plugin_manager.fire(&server, &mut portal_event).await;
+            server
+                .plugin_manager
+                .fire_blocking(&server, &mut portal_event);
         }
         if portal_event.cancelled {
             return;
         }
 
         // Passengers don't teleport independently - they wait for their vehicle
-        if self.has_vehicle().await {
+        if self.has_vehicle() {
             return;
         }
 
@@ -3252,43 +2870,31 @@ impl Entity {
             return;
         }
 
-        let mut manager = self.portal_manager.lock().await;
+        let mut manager = self
+            .portal_manager
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let world = self.world.load();
-        let portal_type = if portal_world.dimension == Dimension::THE_END
-            || self.world.load().dimension == Dimension::THE_END
-        {
-            PortalType::End
-        } else {
-            PortalType::Nether
-        };
-
-        let replace_manager = if let Some(existing) = manager.as_ref() {
-            let existing = existing.lock().await;
-            !existing.is_same_portal(portal_type)
-        } else {
-            true
-        };
-
-        if replace_manager {
-            let mut new_manager = PortalProcessor::new(portal_type, pos, portal_world.clone());
-
-            if let Some(portal) = NetherPortal::get_on_axis(
-                &world,
-                &pos,
-                pumpkin_data::block_properties::HorizontalAxis::X,
-            ) && portal.was_already_valid()
+        if manager.is_none() {
+            let portal_type = if portal_world.dimension == Dimension::THE_END
+                || self.world.load().dimension == Dimension::THE_END
             {
-                new_manager.set_source_portal(SourcePortalInfo {
-                    lower_corner: portal.lower_corner(),
-                    axis: portal.axis(),
-                    width: portal.width(),
-                    height: portal.height(),
-                });
-            } else if let Some(portal) = NetherPortal::get_on_axis(
-                &world,
-                &pos,
-                pumpkin_data::block_properties::HorizontalAxis::Z,
-            ) && portal.was_already_valid()
+                PortalType::End
+            } else {
+                PortalType::Nether
+            };
+
+            let mut new_manager = PortalProcessor::new(portal_type, pos, portal_world);
+
+            let (block, state) = world.get_block_and_state(&pos);
+            let source_axis = (block == &pumpkin_data::Block::NETHER_PORTAL).then(|| {
+                let props = <pumpkin_data::block_properties::NetherPortalLikeProperties as pumpkin_data::block_properties::BlockProperties>::from_state_id(state.id, block);
+                props.axis
+            });
+
+            if let Some(axis) = source_axis
+                && let Some(portal) = NetherPortal::get_on_axis(&world, &pos, axis)
+                && portal.was_already_valid()
             {
                 new_manager.set_source_portal(SourcePortalInfo {
                     lower_corner: portal.lower_corner(),
@@ -3298,11 +2904,26 @@ impl Entity {
                 });
             }
 
-            *manager = Some(Mutex::new(new_manager));
-        } else if let Some(manager) = manager.as_ref() {
-            let mut manager = manager.lock().await;
+            *manager = Some(new_manager);
+        } else if let Some(manager) = manager.as_mut() {
             manager.entry_position = pos;
             manager.inside_portal_this_tick = true;
+            if manager.source_portal.is_none() {
+                let (block, state) = world.get_block_and_state(&pos);
+                if block == &pumpkin_data::Block::NETHER_PORTAL {
+                    let props = <pumpkin_data::block_properties::NetherPortalLikeProperties as pumpkin_data::block_properties::BlockProperties>::from_state_id(state.id, block);
+                    if let Some(portal) = NetherPortal::get_on_axis(&world, &pos, props.axis)
+                        && portal.was_already_valid()
+                    {
+                        manager.set_source_portal(SourcePortalInfo {
+                            lower_corner: portal.lower_corner(),
+                            axis: portal.axis(),
+                            width: portal.width(),
+                            height: portal.height(),
+                        });
+                    }
+                }
+            }
         }
     }
 
@@ -3333,7 +2954,7 @@ impl Entity {
 
     /// Mirrors vanilla `LivingEntity#canFreeze`: spectators and entities wearing
     /// freeze-immune wearables (e.g. leather armor) cannot freeze.
-    async fn can_freeze(&self, caller: &dyn EntityBase) -> bool {
+    fn can_freeze(&self, caller: &dyn EntityBase) -> bool {
         if caller.is_spectator() || self.is_freeze_immune() {
             return false;
         }
@@ -3342,17 +2963,18 @@ impl Entity {
             return true;
         };
 
-        let equipment = living.entity_equipment.lock().await;
-        for (slot, stack) in &equipment.equipment {
-            if (*slot == EquipmentSlot::HEAD
-                || *slot == EquipmentSlot::CHEST
-                || *slot == EquipmentSlot::LEGS
-                || *slot == EquipmentSlot::FEET)
-                && stack
-                    .get_item()
-                    .has_tag(&tag::Item::MINECRAFT_FREEZE_IMMUNE_WEARABLES)
-            {
-                return false;
+        if let Ok(equipment) = living.entity_equipment.try_lock() {
+            for (slot, stack) in &equipment.equipment {
+                if (*slot == EquipmentSlot::HEAD
+                    || *slot == EquipmentSlot::CHEST
+                    || *slot == EquipmentSlot::LEGS
+                    || *slot == EquipmentSlot::FEET)
+                    && stack
+                        .get_item()
+                        .has_tag(&tag::Item::MINECRAFT_FREEZE_IMMUNE_WEARABLES)
+                {
+                    return false;
+                }
             }
         }
 
@@ -3363,8 +2985,8 @@ impl Entity {
     /// In powder snow and freezeable: `frozen_ticks` increases by 1 (up to `MAX_FROZEN_TICKS`)
     /// Otherwise: `frozen_ticks` decreases by 2 (down to 0)
     /// When fully frozen, deals 1 damage every 40 ticks
-    pub async fn tick_frozen(&self, caller: &dyn EntityBase) {
-        let can_freeze = self.can_freeze(caller).await;
+    pub fn tick_frozen(&self, caller: &dyn EntityBase) {
+        let can_freeze = self.can_freeze(caller);
         let in_powder_snow = self.is_in_powder_snow();
         let old_frozen_ticks = self.frozen_ticks.load(Ordering::Relaxed);
 
@@ -3379,7 +3001,7 @@ impl Entity {
         // Only update and send metadata if the value changed
         if new_frozen_ticks != old_frozen_ticks {
             self.frozen_ticks.store(new_frozen_ticks, Ordering::Relaxed);
-            let mut bedrock_meta = EntityMetadata::new();
+            let mut bedrock_meta = SyncedActorDataList::new();
             bedrock_meta.set(
                 entity_data_key::FREEZING_EFFECT_STRENGTH,
                 MetadataValue::Float(new_frozen_ticks as f32),
@@ -3398,28 +3020,19 @@ impl Entity {
             && new_frozen_ticks >= Self::MAX_FROZEN_TICKS
             && self.age.load(Ordering::Relaxed) % Self::FREEZE_DAMAGE_INTERVAL == 0
         {
-            caller.damage(caller, 1.0, DamageType::FREEZE).await;
+            let world = self.world.load_full();
+            if let Some(entity) = world.get_entity_by_id(self.entity_id) {
+                entity.damage(entity.as_ref(), 1.0, DamageType::FREEZE);
+            }
         }
     }
 
-    /// Mirrors vanilla `Entity.clearFreeze`, including the tracked-data update.
+    /// Mirrors vanilla `Entity.clearFreeze`, including tracked-data synchronization.
     pub fn clear_freeze(&self) {
-        if self.frozen_ticks.swap(0, Ordering::Relaxed) == 0 {
-            return;
-        }
-
-        let mut bedrock_meta = EntityMetadata::new();
-        bedrock_meta.set(
-            entity_data_key::FREEZING_EFFECT_STRENGTH,
-            MetadataValue::Float(0.0),
-        );
-        self.send_meta_data(
-            &[Metadata::new(
-                tracked_data::entity::DATA_TICKS_FROZEN,
-                VarInt(0),
-            )],
-            Some(&bedrock_meta),
-        );
+        if self.frozen_ticks.swap(0, Relaxed) == 0 { return; }
+        let mut bedrock_meta = SyncedActorDataList::new();
+        bedrock_meta.set(entity_data_key::FREEZING_EFFECT_STRENGTH, MetadataValue::Float(0.0));
+        self.send_meta_data(&[Metadata::new(tracked_data::entity::DATA_TICKS_FROZEN, VarInt(0))], Some(&bedrock_meta));
     }
 
     /// Sets the `Entity` yaw & pitch rotation
@@ -3434,8 +3047,8 @@ impl Entity {
     }
 
     /// Removes the `Entity` from their current `World`
-    pub async fn remove(&self) {
-        self.world.load().remove_entity(self).await;
+    pub fn remove(&self) {
+        self.world.load().remove_entity(self);
     }
 
     pub fn create_spawn_packet(&self) -> CSpawnEntity {
@@ -3502,8 +3115,7 @@ impl Entity {
         ));
     }
 
-    #[expect(clippy::unused_async)]
-    pub async fn set_sneaking(&self, sneaking: bool) {
+    pub fn set_sneaking(&self, sneaking: bool) {
         //assert!(self.sneaking.load(Relaxed) != sneaking);
         self.sneaking.store(sneaking, Relaxed);
         self.set_flag(Flag::Sneaking, sneaking);
@@ -3512,7 +3124,42 @@ impl Entity {
         self.sneaking.load(Ordering::Relaxed)
     }
 
-    pub async fn set_swimming(&self, swimming: bool) {
+    #[must_use]
+    pub fn is_swimming(&self) -> bool {
+        self.swimming.load(Ordering::Relaxed)
+    }
+
+    #[must_use]
+    pub fn is_visually_swimming(&self) -> bool {
+        self.pose.load() == EntityPose::Swimming
+    }
+
+    #[must_use]
+    pub fn is_in_water(&self) -> bool {
+        self.touching_water.load(Ordering::Relaxed)
+    }
+
+    #[must_use]
+    pub fn is_submerged_in_water(&self) -> bool {
+        let pos = self.pos.load();
+        let eye_height = self.get_eye_height();
+        let eye_pos = BlockPos::floored(pos.x, pos.y + eye_height - 0.111_111_11, pos.z);
+        let world = self.world.load();
+        let (fluid, _) = world.get_fluid_and_fluid_state(&eye_pos);
+        fluid.id == Fluid::WATER.id || fluid.id == Fluid::FLOWING_WATER.id
+    }
+
+    #[must_use]
+    pub fn is_under_water(&self) -> bool {
+        self.is_in_water() && self.is_submerged_in_water()
+    }
+
+    #[must_use]
+    pub fn is_visually_crawling(&self) -> bool {
+        self.is_visually_swimming() && !self.is_in_water()
+    }
+
+    pub fn set_swimming(&self, swimming: bool) {
         if self.swimming.load(Ordering::Relaxed) != swimming {
             let mut event =
                 crate::plugin::api::events::entity::entity_toggle_swim::EntityToggleSwimEvent::new(
@@ -3520,7 +3167,7 @@ impl Entity {
                     swimming,
                 );
             if let Some(server) = self.world.load().server.upgrade() {
-                server.plugin_manager.fire(&server, &mut event).await;
+                server.plugin_manager.fire_blocking(&server, &mut event);
             }
             if event.cancelled {
                 return;
@@ -3531,9 +3178,7 @@ impl Entity {
     }
 
     /// Sets whether the entity is invisible and sends updated metadata.
-    #[expect(clippy::unused_async)]
-    #[allow(clippy::unused_async_trait_impl)]
-    pub async fn set_invisible(&self, invisible: bool) {
+    pub fn set_invisible(&self, invisible: bool) {
         if self.invisible.load(Ordering::Relaxed) != invisible {
             self.invisible.store(invisible, Relaxed);
             self.set_flag(Flag::Invisible, invisible);
@@ -3541,9 +3186,7 @@ impl Entity {
     }
 
     /// Sets whether the entity is glowing and sends updated metadata.
-    #[expect(clippy::unused_async)]
-    #[allow(clippy::unused_async_trait_impl)]
-    pub async fn set_glowing(&self, glowing: bool) {
+    pub fn set_glowing(&self, glowing: bool) {
         if self.glowing.load(Ordering::Relaxed) != glowing {
             self.glowing.store(glowing, Ordering::Relaxed);
             self.set_flag(Flag::Glowing, glowing);
@@ -3551,14 +3194,15 @@ impl Entity {
     }
 
     /// Sets whether the entity is on fire for visual and damage purposes. This is separate from `fire_ticks` which tracks the damage aspect of being on fire.
-    #[expect(clippy::unused_async)]
-    #[allow(clippy::unused_async_trait_impl)]
-    pub async fn set_on_fire(&self, on_fire: bool) {
+    pub fn set_on_fire(&self, on_fire: bool) {
         if self.has_visual_fire.load(Ordering::Relaxed) != on_fire {
             self.has_visual_fire.store(on_fire, Ordering::Relaxed);
             self.set_flag(Flag::OnFire, on_fire);
         }
     }
+
+    /// Vanilla `Entity.shouldPlayLavaHurtSound` (`Entity.java:614-628`).
+    pub const fn should_play_lava_hurt_sound(&self) -> bool { true }
 
     pub fn get_horizontal_facing(&self) -> HorizontalFacing {
         let yaw = self.yaw.load();
@@ -3665,8 +3309,7 @@ impl Entity {
         ]
     }
 
-    #[expect(clippy::unused_async)]
-    pub async fn set_sprinting(&self, sprinting: bool) {
+    pub fn set_sprinting(&self, sprinting: bool) {
         //assert!(self.sprinting.load(Relaxed) != sprinting);
         self.sprinting.store(sprinting, Relaxed);
         self.set_flag(Flag::Sprinting, sprinting);
@@ -3679,8 +3322,7 @@ impl Entity {
         !self.on_ground.load(Relaxed)
     }
 
-    #[expect(clippy::unused_async)]
-    pub async fn set_fall_flying(&self, fall_flying: bool) {
+    pub fn set_fall_flying(&self, fall_flying: bool) {
         assert_ne!(self.fall_flying.load(Relaxed), fall_flying);
         self.fall_flying.store(fall_flying, Relaxed);
         self.set_flag(Flag::FallFlying, fall_flying);
@@ -3689,15 +3331,9 @@ impl Entity {
         self.fall_flying.load(Ordering::Relaxed)
     }
 
-    /// Vanilla `LivingEntity.stopFallFlying` (`LivingEntity.java:2585-2589`): clears the glide
-    /// state and forces a shared-flags resync even when the flag was already off, by arming
-    /// the bit in place and clearing it through [`Self::set_flag`], so clients always receive
-    /// the update that ends their local glide animation.
+    /// Vanilla `LivingEntity.stopFallFlying` (`LivingEntity.java:2585-2589`).
     pub fn stop_fall_flying(&self) {
         self.fall_flying.store(false, Relaxed);
-        let index = Flag::FallFlying as u8;
-        let mask = (1i8).wrapping_shl(index as u32);
-        self.flags.fetch_or(mask, Relaxed);
         self.set_flag(Flag::FallFlying, false);
     }
 
@@ -3743,21 +3379,21 @@ impl Entity {
 
             let world = self.world.load();
             let chunk_pos = self.chunk_pos.load();
-            let mut metadata = EntityMetadata(std::collections::HashMap::new());
+            let mut metadata = SyncedActorDataList(std::collections::HashMap::new());
             metadata.set(
                 entity_data_key::FLAGS,
-                MetadataValue::Long(self.bedrock_flags.load(Ordering::Relaxed)),
+                MetadataValue::Int64(self.bedrock_flags.load(Ordering::Relaxed)),
             );
             metadata.set(
                 entity_data_key::FLAGS_TWO,
-                MetadataValue::Long(self.bedrock_flags_two.load(Ordering::Relaxed)),
+                MetadataValue::Int64(self.bedrock_flags_two.load(Ordering::Relaxed)),
             );
             let packet = CSetActorData {
-                actor_runtime_id: VarULong(self.entity_id as u64),
-                metadata,
+                target_runtime_id: VarULong(self.entity_id as u64),
+                actor_data: metadata,
                 synced_properties: PropertySyncData {
-                    int_properties: std::collections::HashMap::new(),
-                    float_properties: std::collections::HashMap::new(),
+                    int_entries_list: std::collections::HashMap::new(),
+                    float_entries_list: std::collections::HashMap::new(),
                 },
                 tick: VarULong(0),
             };
@@ -3772,50 +3408,26 @@ impl Entity {
             .play_sound(sound, SoundCategory::Neutral, &self.pos.load());
     }
 
-    /// Stores the given tracked-data values so they can be replayed to a player
-    /// who only starts seeing this entity later.
     fn record_tracked_data<T: MetadataSerializer>(&self, meta: &[Metadata<T>]) {
-        let mut snapshot = match self.tracked_data_snapshot.lock() {
-            Ok(snapshot) => snapshot,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let mut snapshot = self.tracked_data_snapshot.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         record_tracked_data_into(&mut snapshot, meta);
     }
 
-    /// Records initial tracked data for an entity that has not been announced yet.
-    /// Spawn code uses this to finalize state before the spawn packet without sending an
-    /// out-of-order metadata update.
     pub(crate) fn record_tracked_data_only<T: MetadataSerializer>(&self, meta: &[Metadata<T>]) {
         self.record_tracked_data(meta);
     }
 
-    /// Sends every tracked-data value published so far for this entity to a
-    /// single player, without touching any other viewer.
-    ///
-    /// Call this right after the spawn packet on the path where the entity
-    /// enters that one player's view.
+    /// Replays published metadata for a client that has just begun tracking this entity.
     pub fn send_tracked_data_to(&self, client: &ClientPlatform) {
-        let ClientPlatform::Java(java) = client else {
-            // Bedrock gets its full actor state from `bedrock_metadata()` on the
-            // paths that spawn actors; nothing to replay here.
-            return;
-        };
-
+        let ClientPlatform::Java(java) = client else { return; };
         let version = java.version.load();
-        let buf = {
-            let snapshot = match self.tracked_data_snapshot.lock() {
-                Ok(snapshot) => snapshot,
-                Err(poisoned) => poisoned.into_inner(),
-            };
-            serialize_tracked_data(&snapshot, version)
-        };
-        let Some(mut buf) = buf else {
-            // Nothing published yet, or every stored field is absent in this
-            // client's protocol version.
-            return;
-        };
-        buf.put_u8(255);
-        let packet = CSetEntityMetadata::new(self.entity_id.into(), buf.into());
+        let Some(mut data) = serialize_tracked_data(
+            &self.tracked_data_snapshot.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
+            version,
+        ) else { return; };
+        data.put_u8(255);
+        let packet = CSetEntityMetadata::new(self.entity_id.into(), data.into());
         if let Ok(data) = JavaClient::serialize_packet_for_version(&packet, version) {
             java.try_enqueue_packet(data);
         }
@@ -3824,10 +3436,9 @@ impl Entity {
     pub fn send_meta_data<T: MetadataSerializer>(
         &self,
         meta: &[Metadata<T>],
-        bedrock_meta: Option<&EntityMetadata>,
+        bedrock_meta: Option<&SyncedActorDataList>,
     ) {
         self.record_tracked_data(meta);
-
         let world = self.world.load();
         let chunk_pos = self.chunk_pos.load();
         let players = world.players.load();
@@ -3851,7 +3462,7 @@ impl Entity {
             World::collect_java_recipients_by_version(java_recipients.into_iter());
 
         for (version, recipients) in recipients_by_version {
-            if version < CURRENT_MC_VERSION {
+            if version < JavaMinecraftVersion::V_1_21 {
                 continue;
             }
             let mut buf = Vec::new();
@@ -3869,36 +3480,36 @@ impl Entity {
 
         if let Some(bedrock_meta) = bedrock_meta {
             let packet = CSetActorData {
-                actor_runtime_id: VarULong(self.entity_id as u64),
-                metadata: EntityMetadata(bedrock_meta.0.clone()),
+                target_runtime_id: VarULong(self.entity_id as u64),
+                actor_data: SyncedActorDataList(bedrock_meta.0.clone()),
                 synced_properties: PropertySyncData {
-                    int_properties: std::collections::HashMap::new(),
-                    float_properties: std::collections::HashMap::new(),
+                    int_entries_list: std::collections::HashMap::new(),
+                    float_entries_list: std::collections::HashMap::new(),
                 },
                 tick: VarULong(0),
             };
-            if let Ok(packet_data) =
-                pumpkin_protocol::bedrock::packet_encoder::serialize_packet(&packet)
-            {
-                for recipient in bedrock_recipients {
-                    recipient.try_enqueue_packet(packet_data.clone());
+            for recipient in bedrock_recipients {
+                if let Ok(packet_data) = recipient.serialize_packet(&packet) {
+                    recipient.try_enqueue_packet(packet_data);
                 }
             }
         }
     }
 
     pub fn set_pose(&self, pose: EntityPose) {
+        if self.pose.load() == pose {
+            return;
+        }
+
         let mut pose_event =
             crate::plugin::api::events::entity::entity_pose_change::EntityPoseChangeEvent::new(
                 self.entity_id,
                 (pose as u8).to_string(),
             );
         if let Some(server) = self.world.load().server.upgrade() {
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    server.plugin_manager.fire(&server, &mut pose_event).await;
-                });
-            });
+            server
+                .plugin_manager
+                .fire_blocking(&server, &mut pose_event);
             if pose_event.cancelled {
                 return;
             }
@@ -3907,40 +3518,39 @@ impl Entity {
         let dimension = self.get_dimensions(pose);
         let position = self.pos.load();
         let aabb = BoundingBox::new_from_pos(position.x, position.y, position.z, &dimension);
-        if self.world.load().is_space_empty(aabb.contract_all(1.0E-7)) {
-            self.pose.store(pose);
-            self.bounding_box.store(aabb);
-            self.entity_dimension.store(dimension);
-            let pose = pose as i32;
-            let mut bedrock_meta = EntityMetadata::new();
-            bedrock_meta.set(entity_data_key::POSE_INDEX, MetadataValue::Int(pose));
-            bedrock_meta.set(
-                entity_data_key::WIDTH,
-                MetadataValue::Float(dimension.width),
-            );
-            bedrock_meta.set(
-                entity_data_key::HEIGHT,
-                MetadataValue::Float(dimension.height),
-            );
-            self.send_meta_data(
-                &[Metadata::new(tracked_data::entity::DATA_POSE, VarInt(pose))],
-                Some(&bedrock_meta),
-            );
-        }
+        self.pose.store(pose);
+        self.bounding_box.store(aabb);
+        self.entity_dimension.store(dimension);
+        let pose = pose as i32;
+        let mut bedrock_meta = SyncedActorDataList::new();
+        bedrock_meta.set(entity_data_key::POSE_INDEX, MetadataValue::Int(pose));
+        bedrock_meta.set(
+            entity_data_key::WIDTH,
+            MetadataValue::Float(dimension.width),
+        );
+        bedrock_meta.set(
+            entity_data_key::HEIGHT,
+            MetadataValue::Float(dimension.height),
+        );
+        self.send_meta_data(
+            &[Metadata::new(tracked_data::entity::DATA_POSE, VarInt(pose))],
+            Some(&bedrock_meta),
+        );
     }
 
     /// Checks if the entity is invulnerable to the given damage type, considering both general invulnerability and specific immunities.
-    pub async fn is_invulnerable_to(&self, damage_type: &DamageType) -> bool {
-        if damage_type.has_tag(&tag::DamageType::MINECRAFT_BYPASSES_INVULNERABILITY) {
+    pub fn is_invulnerable_to(&self, damage_type: &DamageType) -> bool {
+        // Nothing is immune to void or kill
+        if matches!(
+            *damage_type,
+            DamageType::GENERIC_KILL | DamageType::OUT_OF_WORLD
+        ) {
             return false;
         }
 
-        // `Entity.fireImmune` is the entity type's flag; the atomic is the per-instance one that
-        // fire-resistant item stacks set. Vanilla checks the type, so blazes, striders, withers
-        // and the rest shrug off fireballs and campfires, not just lava.
+        // Vanilla `Entity.fireImmune` is a type property as well as an instance property.
         if damage_type.has_tag(&tag::DamageType::MINECRAFT_IS_FIRE)
-            && (self.entity_type.fire_immune || self.fire_immune.load(Ordering::Relaxed))
-        {
+            && (self.entity_type.fire_immune || self.fire_immune.load(Ordering::Relaxed)) {
             return true;
         }
 
@@ -3950,12 +3560,18 @@ impl Entity {
         }
 
         // Specific type immunities
-        self.damage_immunities.lock().await.contains(damage_type)
+        self.damage_immunities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(damage_type)
     }
 
     /// Sets if the entity is invulnerable to a specific damage type
-    pub async fn set_damage_immunity(&self, damage_type: DamageType, immune: bool) {
-        let mut immunities = self.damage_immunities.lock().await;
+    pub fn set_damage_immunity(&self, damage_type: DamageType, immune: bool) {
+        let mut immunities = self
+            .damage_immunities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if immune {
             if !immunities.contains(&damage_type) {
                 immunities.push(damage_type);
@@ -3971,7 +3587,7 @@ impl Entity {
         self.invulnerable.store(invulnerable, Relaxed);
     }
 
-    pub async fn check_block_collision(entity: &dyn EntityBase, server: &Server) {
+    pub fn check_block_collision(entity: &dyn EntityBase, server: &Server) {
         let aabb = entity.get_entity().bounding_box.load();
         let blockpos = BlockPos::new(
             (aabb.min.x + 0.001).floor() as i32,
@@ -3995,13 +3611,11 @@ impl Entity {
                     if state.outline_shapes.is_empty() {
                         world
                             .block_registry
-                            .on_entity_collision(block, &world, entity, &pos, state, server)
-                            .await;
+                            .on_entity_collision(block, &world, entity, &pos, state, server);
                         let fluid = world.get_fluid(&pos);
                         world
                             .block_registry
-                            .on_entity_collision_fluid(fluid, entity)
-                            .await;
+                            .on_entity_collision_fluid(fluid, entity);
                         continue;
                     }
                     for outline in block_outlines {
@@ -4009,13 +3623,11 @@ impl Entity {
                         if outline_aabb.intersects(&aabb) {
                             world
                                 .block_registry
-                                .on_entity_collision(block, &world, entity, &pos, state, server)
-                                .await;
+                                .on_entity_collision(block, &world, entity, &pos, state, server);
                             let fluid = world.get_fluid(&pos);
                             world
                                 .block_registry
-                                .on_entity_collision_fluid(fluid, entity)
-                                .await;
+                                .on_entity_collision_fluid(fluid, entity);
                             break;
                         }
                     }
@@ -4024,12 +3636,12 @@ impl Entity {
         }
     }
 
-    fn teleport(
+    pub fn teleport(
         &self,
         position: Vector3<f64>,
         yaw: Option<f32>,
         pitch: Option<f32>,
-        _world: Arc<World>,
+        world: &World,
     ) {
         // Update server-side position and bounding box
         self.set_pos(position);
@@ -4052,7 +3664,7 @@ impl Entity {
                 .store((pitch * 256.0 / 360.0).rem_euclid(256.0) as u8, Relaxed);
         }
         let chunk_pos = self.chunk_pos.load();
-        self.world.load().broadcast_to_chunk(
+        world.broadcast_to_chunk(
             chunk_pos,
             &CEntityPositionSync::new(
                 self.entity_id.into(),
@@ -4086,39 +3698,60 @@ impl Entity {
         !self.is_removed()
     }
 
+    #[must_use]
+    pub fn is_affected_by_blocks(&self) -> bool {
+        !self.is_removed() && !self.no_physics.load(Ordering::Relaxed)
+    }
+
+    #[must_use]
+    pub fn is_in_wall(&self) -> bool {
+        if self.no_physics.load(Ordering::Relaxed) {
+            return false;
+        }
+
+        let eye_pos = self.get_eye_pos();
+        let half_width = (f64::from(self.entity_dimension.load().width) * 0.8) / 2.0;
+        let eye_bb = BoundingBox::new(
+            Vector3::new(eye_pos.x - half_width, eye_pos.y, eye_pos.z - half_width),
+            Vector3::new(
+                eye_pos.x + half_width,
+                eye_pos.y + 1.0e-6,
+                eye_pos.z + half_width,
+            ),
+        );
+        let min = eye_bb.min_block_pos();
+        let max = eye_bb.max_block_pos();
+        let world = self.world.load();
+
+        for pos in BlockPos::iterate(min, max) {
+            let (block, state) = world.get_block_and_state(&pos);
+            if state.is_air() {
+                continue;
+            }
+
+            if blocks_movement(state, block.id) && state.is_full_cube() {
+                return true;
+            }
+        }
+
+        false
+    }
+
     pub const LEASH_SNAP_DISTANCE: f64 = 12.0;
     pub const LEASH_ELASTIC_DISTANCE: f64 = 6.0;
 
-    /// Vanilla `HappyGhast.leashElasticDistance`/`leashSnapDistance`
-    /// (`HappyGhast.java:509-516`) override the shared leash thresholds.
-    #[must_use]
+    /// Vanilla `HappyGhast.leashElasticDistance`/`leashSnapDistance` (`HappyGhast.java:509-516`).
     pub const fn leash_elastic_distance(&self) -> f64 {
-        if self.entity_type.id == EntityType::HAPPY_GHAST.id {
-            10.0
-        } else {
-            Self::LEASH_ELASTIC_DISTANCE
-        }
+        if self.entity_type.id == EntityType::HAPPY_GHAST.id { 10.0 } else { Self::LEASH_ELASTIC_DISTANCE }
     }
 
-    #[must_use]
     pub const fn leash_snap_distance(&self) -> f64 {
-        if self.entity_type.id == EntityType::HAPPY_GHAST.id {
-            16.0
-        } else {
-            Self::LEASH_SNAP_DISTANCE
-        }
+        if self.entity_type.id == EntityType::HAPPY_GHAST.id { 16.0 } else { Self::LEASH_SNAP_DISTANCE }
     }
 
-    /// `Entity.dropAllLeashConnections` (`Entity.java:2343-2361`): break every leash
-    /// held by this entity in the vanilla 32-block search volume and drop one lead per
-    /// released target. The firework launch path is the current server caller.
-    ///
-    /// Vanilla's `Leashable.leashableInArea` (`Leashable.java:356-358`) centers a 32x32x32
-    /// cube on the entity's bounding-box center, i.e. +-16 on every axis; `pos` here is the
-    /// entity's base position rather than its box center, so this is off by roughly half the
-    /// entity's height on the vertical axis -- a documented, narrow simplification, still far
-    /// closer to vanilla than an asymmetric box that only searches upward.
-    pub async fn drop_all_leash_connections(&self) -> bool {
+    /// `Entity.dropAllLeashConnections` (`Entity.java:2343-2361`) and
+    /// `Leashable.leashableInArea` (`Leashable.java:356-358`).
+    pub fn drop_all_leash_connections(&self) -> bool {
         let world = self.world.load();
         let pos = self.pos.load();
         let search_box = BoundingBox {
@@ -4126,77 +3759,48 @@ impl Entity {
             max: Vector3::new(pos.x + 16.0, pos.y + 16.0, pos.z + 16.0),
         };
         let mut attached = Vec::new();
-
         for entity_base in world.get_entities_at_box(&search_box) {
             let entity = entity_base.get_entity();
-            let is_attached = entity
-                .leashed_to
-                .lock()
-                .await
+            let is_attached = entity.leashed_to.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .as_ref()
                 .is_some_and(|holder| holder.get_entity().entity_id == self.entity_id);
-            if is_attached {
-                attached.push(entity_base);
-            }
+            if is_attached { attached.push(entity_base); }
         }
-
-        if attached.is_empty() {
-            return false;
-        }
-
+        if attached.is_empty() { return false; }
         for entity_base in attached {
             let entity = entity_base.get_entity();
-            entity.unleash().await;
-            let lead_item = ItemStack::new(1, &pumpkin_data::item::Item::LEAD);
-            world.drop_stack(&entity.block_pos.load(), lead_item).await;
+            entity.unleash();
+            world.drop_stack(&entity.block_pos.load(), ItemStack::new(1, &pumpkin_data::item::Item::LEAD));
         }
-
-        crate::world::game_event::emit_game_event(
-            &world,
-            pumpkin_data::game_event::GameEvent::Shear,
-            pos,
-            crate::world::game_event::GameEventContext::none(),
-        )
-        .await;
-
         true
     }
 
-    /// `Entity.shearOffAllLeashConnections` (`Entity.java:2334-2341`): break the
-    /// leashes held by this entity, then play the shears sound.
-    pub async fn shear_off_all_leash_connections(
-        &self,
-        sound_category: pumpkin_data::sound::SoundCategory,
-    ) -> bool {
-        let dropped = self.drop_all_leash_connections().await;
-
-        if dropped {
-            let world = self.world.load();
-            world.play_sound(
-                pumpkin_data::sound::Sound::ItemShearsSnip,
-                sound_category,
-                &self.pos.load(),
-            );
-        }
-
+    /// `Entity.shearOffAllLeashConnections` (`Entity.java:2334-2341`).
+    pub fn shear_off_all_leash_connections(&self, sound_category: SoundCategory) -> bool {
+        let dropped = self.drop_all_leash_connections();
+        if dropped { self.world.load().play_sound(Sound::ItemShearsSnip, sound_category, &self.pos.load()); }
         dropped
     }
 
-    pub async fn leash_to(&self, holder: Arc<dyn EntityBase>) {
-        let holder_entity = holder.get_entity();
-        *self.leashed_to.lock().await = Some(holder.clone());
+    pub fn leash_to(&self, holder: Arc<dyn EntityBase>) {
+        let holder_entity_id = holder.get_entity().entity_id;
+        *self
+            .leashed_to
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(holder);
         self.leash_persistence_required.store(true, Relaxed);
 
         let je_packet = pumpkin_protocol::java::client::play::CSetEntityLink::new(
             self.entity_id,
-            holder_entity.entity_id,
+            holder_entity_id,
             true,
         );
         let be_packet = pumpkin_protocol::bedrock::client::CSetActorLink {
-            link: pumpkin_protocol::bedrock::client::common::EntityLink {
+            link: pumpkin_protocol::bedrock::client::common::ActorLink {
                 ridden_unique_id: pumpkin_protocol::codec::var_long::VarLong(self.entity_id as i64),
                 rider_unique_id: pumpkin_protocol::codec::var_long::VarLong(
-                    holder_entity.entity_id as i64,
+                    holder_entity_id as i64,
                 ),
                 link_type: 1, // Leash link
                 immediate: true,
@@ -4205,15 +3809,19 @@ impl Entity {
             },
         };
 
-        self.world.load().broadcast_to_chunk_editioned_sync(
+        self.world.load().broadcast_to_chunk_editioned(
             self.chunk_pos.load(),
             &je_packet,
             &be_packet,
         );
     }
 
-    pub async fn unleash(&self) {
-        let old_holder = self.leashed_to.lock().await.take();
+    pub fn unleash(&self) {
+        let old_holder = self
+            .leashed_to
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
         if old_holder.is_none() {
             return;
         }
@@ -4222,7 +3830,7 @@ impl Entity {
         let je_packet =
             pumpkin_protocol::java::client::play::CSetEntityLink::new(self.entity_id, -1, true);
         let be_packet = pumpkin_protocol::bedrock::client::CSetActorLink {
-            link: pumpkin_protocol::bedrock::client::common::EntityLink {
+            link: pumpkin_protocol::bedrock::client::common::ActorLink {
                 ridden_unique_id: pumpkin_protocol::codec::var_long::VarLong(self.entity_id as i64),
                 rider_unique_id: pumpkin_protocol::codec::var_long::VarLong(-1),
                 link_type: 0, // Unlink
@@ -4232,16 +3840,18 @@ impl Entity {
             },
         };
 
-        self.world.load().broadcast_to_chunk_editioned_sync(
+        self.world.load().broadcast_to_chunk_editioned(
             self.chunk_pos.load(),
             &je_packet,
             &be_packet,
         );
     }
 
-    pub async fn tick_leash(&self) -> Option<(Vector3<f64>, f64)> {
+    pub fn tick_leash(&self) {
         let holder = {
-            let guard = self.leashed_to.lock().await;
+            let Ok(guard) = self.leashed_to.try_lock() else {
+                return;
+            };
             guard.clone()
         };
 
@@ -4250,12 +3860,12 @@ impl Entity {
 
             // Drop leash if entity or holder is removed or dead
             if !self.is_alive() || !holder_entity.is_alive() {
-                self.unleash().await;
-                return None;
+                self.unleash();
+                return;
             }
 
             if !Arc::ptr_eq(&self.world.load_full(), &holder_entity.world.load_full()) {
-                return None;
+                return;
             }
 
             let self_pos = self.pos.load();
@@ -4264,165 +3874,117 @@ impl Entity {
             let distance = diff.length();
 
             if distance > self.leash_snap_distance() {
-                // Too far: snap/break leash and drop lead item. Vanilla plays the break
-                // sound at the HOLDER's position before dropping the leash
-                // (`Leashable.tickLeash`, `Leashable.java:161`).
-                self.world.load().play_sound(
-                    pumpkin_data::sound::Sound::ItemLeadBreak,
-                    pumpkin_data::sound::SoundCategory::Neutral,
-                    &holder_pos,
-                );
-                self.unleash().await;
+                // Too far: snap/break leash and drop lead item. Vanilla plays the break sound
+                // at the holder (`Leashable.tickLeash`, `Leashable.java:161`).
+                self.world.load().play_sound(Sound::ItemLeadBreak, SoundCategory::Neutral, &holder_pos);
+                self.unleash();
                 let lead_item =
                     pumpkin_data::item_stack::ItemStack::new(1, &pumpkin_data::item::Item::LEAD);
                 self.world
                     .load()
-                    .drop_stack(&self.block_pos.load(), lead_item)
-                    .await;
-                None
-            } else if distance
-                > self.leash_elastic_distance()
-                    - f64::from(holder_entity.width())
-                    - f64::from(self.width())
-                && {
-                    let yaw = -f64::from(self.yaw.load()).to_radians();
-                    let entity_offset_z = f64::from(self.width()) * 0.5;
-                    let entity_attachment = self_pos
-                        + Vector3::new(
-                            entity_offset_z * yaw.sin(),
-                            f64::from(self.height()) * 0.5,
-                            entity_offset_z * yaw.cos(),
-                        );
-                    let holder_attachment = holder_pos
-                        + Vector3::new(0.0, f64::from(holder_entity.height()) * 0.5, 0.0);
-                    let attachment_delta = holder_attachment - entity_attachment;
-                    let attachment_distance = attachment_delta.length();
-                    if attachment_distance < self.leash_elastic_distance() {
-                        false
-                    } else {
-                        let displacement = attachment_delta.normalize()
-                            * (attachment_distance - self.leash_elastic_distance());
-                        let holder_velocity = if holder
-                            .get_mob()
-                            .is_some_and(|mob| mob.get_mob_entity().is_no_ai())
-                        {
-                            Vector3::new(0.0, 0.0, 0.0)
-                        } else {
-                            holder_entity.velocity.load()
-                        };
-                        let relative_velocity = (holder_velocity - self.velocity.load()) * 0.11;
-                        let force = Vector3::new(
-                            displacement.x * 0.8,
-                            displacement.y * 0.2,
-                            displacement.z * 0.8,
-                        ) + relative_velocity;
-                        self.velocity.store(self.velocity.load() + force);
-                        self.velocity_dirty.store(true, Relaxed);
-                        true
-                    }
-                }
+                    .drop_stack(&self.block_pos.load(), lead_item);
+            } else if distance > self.leash_elastic_distance()
+                - f64::from(holder_entity.width()) - f64::from(self.width())
             {
-                None
-            } else {
-                Some((holder_pos, distance))
+                let yaw = -f64::from(self.yaw.load()).to_radians();
+                let offset = f64::from(self.width()) * 0.5;
+                let attachment = self_pos + Vector3::new(offset * yaw.sin(), f64::from(self.height()) * 0.5, offset * yaw.cos());
+                let holder_attachment = holder_pos + Vector3::new(0.0, f64::from(holder_entity.height()) * 0.5, 0.0);
+                let delta = holder_attachment - attachment;
+                let attachment_distance = delta.length();
+                if attachment_distance >= self.leash_elastic_distance() {
+                    let displacement = delta.normalize() * (attachment_distance - self.leash_elastic_distance());
+                    let holder_velocity = if holder.get_mob().is_some_and(|mob| mob.get_mob_entity().is_no_ai()) { Vector3::default() } else { holder_entity.velocity.load() };
+                    let relative_velocity = (holder_velocity - self.velocity.load()) * 0.11;
+                    let force = Vector3::new(displacement.x * 0.8, displacement.y * 0.2, displacement.z * 0.8) + relative_velocity;
+                    self.velocity.store(self.velocity.load() + force);
+                    self.velocity_dirty.store(true, Relaxed);
+                }
             }
-        } else {
-            None
         }
     }
 
-    pub async fn has_passengers(&self) -> bool {
-        !self.passengers.lock().await.is_empty()
+    pub fn has_passengers(&self) -> bool {
+        !self
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
     }
 
-    pub async fn has_vehicle(&self) -> bool {
-        let vehicle = self.vehicle.lock().await;
-        vehicle.is_some()
+    pub fn has_passenger(&self, id: i32) -> bool {
+        self.passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .any(|passenger| passenger.get_entity().entity_id == id)
     }
 
-    /// Admission for Pumpkin's ordinary player-initiated mount interactions.
-    ///
-    /// The sneak and cooldown conditions mirror vanilla `Entity.canRide`. Pumpkin's interaction
-    /// paths also retain their existing no-transfer rule: vanilla can detach a rider from a
-    /// different vehicle first, but Pumpkin's `add_passenger` is not that full transfer API.
-    /// System paths such as raid spawning and saved-vehicle restoration intentionally bypass this
-    /// check, just as vanilla's forced `startRiding` overload does.
-    pub async fn can_start_riding(&self) -> bool {
-        can_start_riding_state(
-            self.is_sneaking(),
-            self.riding_cooldown.load(Ordering::Relaxed),
-            self.has_vehicle().await,
-        )
+    pub fn has_vehicle(&self) -> bool {
+        self.vehicle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
     }
 
-    /// Vanilla `Entity.positionRider` with Pumpkin's shared fallback attachment geometry.
-    ///
-    /// Vanilla stores entity-specific attachment points in generated entity data. That data is
-    /// not yet exposed by Pumpkin, so keep every rider attached to the vehicle's top surface and
-    /// fan multiple riders out sideways in vehicle-local space. Crucially, this is a server-side
-    /// position update: rider collision, interaction, fall, and nested-vehicle state now move
-    /// with the vehicle even before individual boat/minecart/mob seat data is ported.
-    async fn position_rider(
-        &self,
-        passenger: &Arc<dyn EntityBase>,
-        passenger_index: usize,
-        passenger_count: usize,
-    ) {
+    pub fn get_vehicle(&self) -> Option<Arc<dyn EntityBase>> {
+        self.vehicle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub fn is_leashed(&self) -> bool {
+        self.leashed_to
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+    }
+
+    /// Ordinary mount admission mirrors vanilla `Entity.canRide`.
+    pub fn can_start_riding(&self) -> bool {
+        !self.is_sneaking() && self.riding_cooldown.load(Relaxed) <= 0 && !self.has_vehicle()
+    }
+
+    /// Vanilla `Entity.positionRider` with the shared fallback attachment geometry.
+    pub fn position_rider(&self, passenger: &Arc<dyn EntityBase>, passenger_index: usize, passenger_count: usize) {
         let vehicle_position = self.pos.load();
-        let vehicle_height = self.get_passengers_riding_offset();
-        let passenger_width = f64::from(passenger.get_entity().entity_dimension.load().width);
-        let yaw = f64::from(self.yaw.load().to_radians());
-        let lateral =
-            passenger_width * (passenger_index as f64 - (passenger_count as f64 - 1.0) / 2.0);
-        let position = Vector3::new(
+        let lateral = f64::from(passenger.get_entity().width())
+            * (passenger_index as f64 - (passenger_count as f64 - 1.0) / 2.0);
+        let yaw = f64::from(self.yaw.load()).to_radians();
+        passenger.get_entity().set_pos(Vector3::new(
             vehicle_position.x + lateral * yaw.cos(),
-            vehicle_position.y + vehicle_height,
+            vehicle_position.y + self.get_passengers_riding_offset(),
             vehicle_position.z + lateral * yaw.sin(),
-        );
-        passenger.get_entity().set_pos(position);
-        passenger.get_entity().sync_passenger_positions().await;
+        ));
     }
 
-    /// Reapply `Entity.positionRider` to every direct passenger, then recurse through nested
-    /// vehicles. Snapshotting the list before awaiting prevents passenger list locks from being
-    /// held while a nested position update mutates entity state.
-    pub fn sync_passenger_positions(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let passengers = self.passengers.lock().await.clone();
-            let passenger_count = passengers.len();
-            for (passenger_index, passenger) in passengers.iter().enumerate() {
-                self.position_rider(passenger, passenger_index, passenger_count)
-                    .await;
-            }
-        })
-    }
-
-    pub async fn is_leashed(&self) -> bool {
-        let leashed_to = self.leashed_to.lock().await;
-        leashed_to.is_some()
+    pub fn sync_passenger_positions(&self) {
+        let passengers = self.passengers.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        let count = passengers.len();
+        for (index, passenger) in passengers.iter().enumerate() {
+            self.position_rider(passenger, index, count);
+            passenger.get_entity().sync_passenger_positions();
+        }
     }
 
     /// Returns the root vehicle id used by vanilla's `isPassengerOfSameVehicle`.
-    pub async fn root_vehicle_id(&self) -> i32 {
+    pub fn root_vehicle_id(&self) -> i32 {
         let mut root_id = self.entity_id;
-        let mut vehicle = self.vehicle.lock().await.clone();
-        while let Some(next) = vehicle.clone() {
+        let mut vehicle = self.get_vehicle();
+        while let Some(next) = vehicle {
             let next_entity = next.get_entity();
             root_id = next_entity.entity_id;
-            vehicle.clone_from(&*next_entity.vehicle.lock().await);
+            vehicle = next_entity.get_vehicle();
         }
         root_id
     }
 
-    pub async fn add_passenger(
-        &self,
-        vehicle: Arc<dyn EntityBase>,
-        passenger: Arc<dyn EntityBase>,
-    ) {
+    pub fn add_passenger(&self, vehicle: Arc<dyn EntityBase>, passenger: Arc<dyn EntityBase>) {
         if !vehicle.could_accept_passenger() || !vehicle.can_add_passenger(passenger.as_ref()) {
             return;
         }
-
         let mut mount_event =
             crate::plugin::api::events::entity::entity_mount::EntityMountEvent::new(
                 passenger.get_entity().entity_id,
@@ -4434,11 +3996,12 @@ impl Entity {
                 passenger.get_entity().entity_id,
             );
         if let Some(server) = self.world.load().server.upgrade() {
-            server.plugin_manager.fire(&server, &mut mount_event).await;
             server
                 .plugin_manager
-                .fire(&server, &mut vehicle_enter)
-                .await;
+                .fire_blocking(&server, &mut mount_event);
+            server
+                .plugin_manager
+                .fire_blocking(&server, &mut vehicle_enter);
         }
         if mount_event.cancelled || vehicle_enter.cancelled {
             return;
@@ -4446,29 +4009,25 @@ impl Entity {
 
         let mounted_passenger = passenger.clone();
         let passenger_entity = mounted_passenger.get_entity();
-        passenger_entity
-            .vehicle_persistence_required
-            .store(true, Relaxed);
-        *passenger_entity.vehicle.lock().await = Some(vehicle);
+        passenger_entity.vehicle_persistence_required.store(true, Relaxed);
+        *passenger_entity
+            .vehicle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(vehicle);
 
-        let mut passengers = self.passengers.lock().await;
-        // Vanilla keeps a server-side player ahead of non-player passengers. The first
-        // passenger controls rideable entities, so preserving this ordering is observable in
-        // mounted input handling and in the passenger list sent to clients.
-        if passenger.get_player().is_some()
-            && passengers
-                .first()
-                .is_none_or(|first| first.get_player().is_none())
-        {
-            passengers.insert(0, passenger);
+        let mut passengers = self
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if mounted_passenger.get_player().is_some()
+            && passengers.first().is_none_or(|first| first.get_player().is_none()) {
+            passengers.insert(0, mounted_passenger.clone());
         } else {
-            passengers.push(passenger);
+            passengers.push(mounted_passenger.clone());
         }
-
-        let mounted_index = passengers
-            .iter()
-            .position(|p| p.get_entity().entity_id == mounted_passenger.get_entity().entity_id)
-            .expect("new passenger must be present in the vehicle passenger list");
+        let mounted_index = passengers.iter()
+            .position(|p| p.get_entity().entity_id == passenger_entity.entity_id)
+            .unwrap_or(passengers.len().saturating_sub(1));
 
         let passenger_ids: Vec<VarInt> = passengers
             .iter()
@@ -4482,31 +4041,29 @@ impl Entity {
             &CSetPassengers::new(VarInt(self.entity_id), &passenger_ids),
         );
         drop(passengers);
-        self.position_rider(&mounted_passenger, mounted_index, passenger_ids.len())
-            .await;
-
-        // Vanilla `Mob.startRiding` (`Mob.java:1298-1305`) drops a mob's leash after a
-        // successful mount. The shared passenger path is Pumpkin's equivalent of that
-        // operation, so perform the same cleanup for mob passengers here.
-        if passenger_entity.leashed_to.lock().await.as_ref().is_some()
-            && mounted_passenger.get_mob().is_some()
-        {
-            passenger_entity.unleash().await;
-            let lead_item = ItemStack::new(1, &pumpkin_data::item::Item::LEAD);
-            world
-                .drop_stack(&passenger_entity.block_pos.load(), lead_item)
-                .await;
+        self.position_rider(&mounted_passenger, mounted_index, passenger_ids.len());
+        if passenger_entity.leashed_to.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some()
+            && mounted_passenger.get_mob().is_some() {
+            passenger_entity.unleash();
+            world.drop_stack(&passenger_entity.block_pos.load(), ItemStack::new(1, &pumpkin_data::item::Item::LEAD));
         }
     }
 
-    pub(crate) async fn remove_passenger_on_disconnect(&self, passenger_id: i32) {
-        let mut passengers = self.passengers.lock().await;
+    pub(crate) fn remove_passenger_on_disconnect(&self, passenger_id: i32) {
+        let mut passengers = self
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(index) = passengers
             .iter()
             .position(|passenger| passenger.get_entity().entity_id == passenger_id)
         {
             let passenger = passengers.remove(index);
-            *passenger.get_entity().vehicle.lock().await = None;
+            *passenger
+                .get_entity()
+                .vehicle
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         }
 
         let passenger_ids: Vec<VarInt> = passengers
@@ -4521,8 +4078,20 @@ impl Entity {
         );
     }
 
+    pub fn remove_passenger_sync(&self, passenger_id: i32) {
+        self.remove_passenger_on_disconnect(passenger_id);
+    }
+
+    pub fn remove_passenger(&self, passenger_id: i32) {
+        self.remove_passenger_internal(passenger_id, true);
+    }
+
+    pub fn remove_passenger_before_teleport(&self, passenger_id: i32) {
+        self.remove_passenger_internal(passenger_id, false);
+    }
+
     #[allow(clippy::too_many_lines)]
-    pub async fn remove_passenger(&self, passenger_id: i32) {
+    fn remove_passenger_internal(&self, passenger_id: i32, reposition: bool) {
         let mut dismount_event =
             crate::plugin::api::events::entity::entity_dismount::EntityDismountEvent::new(
                 passenger_id,
@@ -4536,35 +4105,40 @@ impl Entity {
         if let Some(server) = self.world.load().server.upgrade() {
             server
                 .plugin_manager
-                .fire(&server, &mut dismount_event)
-                .await;
-            server.plugin_manager.fire(&server, &mut vehicle_exit).await;
+                .fire_blocking(&server, &mut dismount_event);
+            server
+                .plugin_manager
+                .fire_blocking(&server, &mut vehicle_exit);
         }
         if dismount_event.cancelled || vehicle_exit.cancelled {
             return;
         }
 
-        let mut passengers = self.passengers.lock().await;
-        let removed_passenger = if let Some(idx) = passengers
-            .iter()
-            .position(|p| p.get_entity().entity_id == passenger_id)
-        {
-            let passenger = passengers.remove(idx);
-            let passenger_entity = passenger.get_entity();
-            *passenger_entity.vehicle.lock().await = None;
-            passenger_entity
-                .vehicle_persistence_required
-                .store(false, Relaxed);
-            Some(passenger)
-        } else {
-            None
-        };
+        let (removed_passenger, passenger_ids) = {
+            let mut passengers = self
+                .passengers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let removed_passenger = passengers
+                .iter()
+                .position(|p| p.get_entity().entity_id == passenger_id)
+                .map(|idx| {
+                    let passenger = passengers.remove(idx);
+                    *passenger
+                        .get_entity()
+                        .vehicle
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+                    passenger.get_entity().vehicle_persistence_required.store(false, Relaxed);
+                    passenger
+                });
 
-        let passenger_ids: Vec<VarInt> = passengers
-            .iter()
-            .map(|p| VarInt(p.get_entity().entity_id))
-            .collect();
-        drop(passengers);
+            let passenger_ids: Vec<VarInt> = passengers
+                .iter()
+                .map(|p| VarInt(p.get_entity().entity_id))
+                .collect();
+            (removed_passenger, passenger_ids)
+        };
 
         let chunk_pos = self.chunk_pos.load();
 
@@ -4576,7 +4150,7 @@ impl Entity {
             // CSetPassengers. This prevents a race condition where the client receives
             // the dismount packet, sends stale position packets from the old riding
             // position, and the server processes them before the teleport arrives.
-            let teleport_id = if let Some(player) = passenger.get_player() {
+            let teleport_id = if reposition && let Some(player) = passenger.get_player() {
                 let id = player
                     .teleport_id_count
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
@@ -4584,7 +4158,11 @@ impl Entity {
                 // Use fallback position as placeholder — updated below with real position
                 let placeholder =
                     Vector3::new(self.pos.load().x, vehicle_box.max.y, self.pos.load().z);
-                *player.awaiting_teleport.lock().await = Some((id.into(), placeholder));
+                *player
+                    .awaiting_teleport
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                    Some((id.into(), placeholder));
                 Some(id)
             } else {
                 None
@@ -4592,30 +4170,17 @@ impl Entity {
 
             // Vanilla: ridingCooldown = 60 (prevents immediate re-mount)
             passenger_entity.riding_cooldown.store(60, Relaxed);
-            // `Player.removeVehicle` (`Player.java:864-867`) clears the player's boarding
-            // cooldown after the superclass removes the passenger. The generic dismount path
-            // above serves every passenger type, so restore that player-specific result here.
+            /// Vanilla `Player.removeVehicle` (`Player.java:864-867`) clears this for players.
             if passenger.get_player().is_some() {
                 passenger_entity.riding_cooldown.store(0, Relaxed);
             }
+            // TODO: world.emitGameEvent(passenger, GameEvent.ENTITY_DISMOUNT, vehicle.pos)
 
-            // Entity.java:2490 -- `this.level().gameEvent(this, GameEvent.ENTITY_DISMOUNT,
-            // oldVehicle.position)`, fired on the passenger with the vehicle's own position.
-            crate::world::game_event::emit_game_event(
-                &self.world.load(),
-                pumpkin_data::game_event::GameEvent::EntityDismount,
-                self.pos.load(),
-                crate::world::game_event::GameEventContext::of_entity(passenger.clone()),
-            )
-            .await;
-
-            // Now send CSetPassengers — client movement is already blocked.
-            // Vanilla sends this directly to the dismounting player's connection,
-            // then broadcasts to other players separately.
+            // Send CSetPassengers directly to the dismounting player before broadcasting it.
             let world = self.world.load();
             let passengers_packet = CSetPassengers::new(VarInt(self.entity_id), &passenger_ids);
             if let Some(player) = passenger.get_player() {
-                player.send_client_packet(&passengers_packet).await;
+                player.try_send_client_packet(&passengers_packet);
                 world.broadcast_to_chunk_except(
                     chunk_pos,
                     &[player.get_entity().entity_uuid],
@@ -4623,6 +4188,10 @@ impl Entity {
                 );
             } else {
                 world.broadcast_to_chunk(chunk_pos, &passengers_packet);
+            }
+
+            if !reposition {
+                return;
             }
 
             // Calculate dismount directions and offsets (vanilla DismountHelper)
@@ -4704,9 +4273,9 @@ impl Entity {
             let fallback_pos =
                 Vector3::new(self.pos.load().x, vehicle_box.max.y, self.pos.load().z);
 
-            // HappyGhast.getDismountLocationForPassenger (`HappyGhast.java:593-596`) always
-            // returns the vehicle's top center, rather than searching for a side exit.
-            let dismount_pos = if self.entity_type == &EntityType::HAPPY_GHAST || is_water {
+            // `HappyGhast.getDismountLocationForPassenger` (`HappyGhast.java:593-596`) uses
+            // the vehicle top center instead of a side-exit search.
+            let dismount_pos = if self.entity_type.id == EntityType::HAPPY_GHAST.id || is_water {
                 fallback_pos
             } else {
                 // Vanilla checks Standing, Crouching, Swimming poses and their respective height checks
@@ -4720,7 +4289,7 @@ impl Entity {
                 let mut found = None;
 
                 'search: for (pose, y_offsets) in poses_and_heights {
-                    let dims = passenger_entity.get_dimensions(pose);
+                    let dims = Self::get_entity_dimensions(pose);
 
                     for y_offset in y_offsets {
                         for &(ox, oz) in &offsets {
@@ -4771,7 +4340,7 @@ impl Entity {
                     ];
 
                     for pose in poses {
-                        let dims = passenger_entity.get_dimensions(pose);
+                        let dims = Self::get_entity_dimensions(pose);
                         let bbox = BoundingBox::new_from_pos(
                             self.pos.load().x,
                             vehicle_top,
@@ -4806,32 +4375,34 @@ impl Entity {
                 if let Some(id) = teleport_id {
                     player.get_entity().set_pos(dismount_pos);
                     // Update awaiting_teleport with the real dismount position
-                    *player.awaiting_teleport.lock().await = Some((id.into(), dismount_pos));
+                    *player
+                        .awaiting_teleport
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                        Some((id.into(), dismount_pos));
                     // Use send_client_packet so the teleport goes through
                     // the same packet queue as CSetPassengers, preserving send order.
                     // Vanilla uses DELTA | ROT flags: position absolute, delta/rotation relative.
                     // With rotation relative and yaw/pitch=0, the client preserves its current look.
-                    player
-                        .send_client_packet(&CPlayerPosition::new(
-                            id.into(),
-                            dismount_pos,
-                            Vector3::new(0.0, 0.0, 0.0),
-                            0.0,
-                            0.0,
-                            vec![
-                                PositionFlag::DeltaX,
-                                PositionFlag::DeltaY,
-                                PositionFlag::DeltaZ,
-                                PositionFlag::YRot,
-                                PositionFlag::XRot,
-                            ],
-                        ))
-                        .await;
+                    player.try_send_client_packet(&CPlayerPosition::new(
+                        id.into(),
+                        dismount_pos,
+                        Vector3::new(0.0, 0.0, 0.0),
+                        0.0,
+                        0.0,
+                        vec![
+                            PositionFlag::DeltaX,
+                            PositionFlag::DeltaY,
+                            PositionFlag::DeltaZ,
+                            PositionFlag::YRot,
+                            PositionFlag::XRot,
+                        ],
+                    ));
                 }
 
                 // Vanilla: setSneaking(false) after dismount via sneak input
                 if passenger_entity.sneaking.load(Relaxed) {
-                    passenger_entity.set_sneaking(false).await;
+                    passenger_entity.set_sneaking(false);
                 }
             } else {
                 passenger_entity.set_pos(dismount_pos);
@@ -4846,24 +4417,24 @@ impl Entity {
         }
     }
 
-    pub async fn check_out_of_world(&self, dyn_self: &dyn EntityBase) {
+    pub fn check_out_of_world(&self, dyn_self: &dyn EntityBase) {
         if self.pos.load().y < f64::from(self.world.load().dimension.min_y) - 64.0 {
-            dyn_self.tick_in_void(dyn_self).await;
+            dyn_self.tick_in_void(dyn_self);
         }
     }
 
-    pub async fn reset_state(&self) {
+    pub fn reset_state(&self) {
         self.pose.store(EntityPose::Standing);
         self.fall_flying.store(false, Relaxed);
         self.extinguish();
-        self.set_on_fire(false).await;
+        self.set_on_fire(false);
     }
 
-    pub async fn slow_movement(&self, state: &BlockState, multiplier: Vector3<f64>) {
+    pub fn slow_movement(&self, state: &BlockState, multiplier: Vector3<f64>) {
         match self.entity_type.id {
             v if v == EntityType::PLAYER.id => {
                 if let Some(player_entity) = self.get_player()
-                    && player_entity.is_flying().await
+                    && player_entity.is_flying()
                 {
                     return;
                 }
@@ -4884,8 +4455,11 @@ impl Entity {
         self.movement_multiplier.store(multiplier);
     }
 
-    pub async fn set_custom_data(&self, namespace: &str, key: &str, value: NbtTag) {
-        let mut custom_data = self.custom_data.lock().await;
+    pub fn set_custom_data(&self, namespace: &str, key: &str, value: NbtTag) {
+        let mut custom_data = self
+            .custom_data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let mut namespace_data = custom_data
             .child_tags
@@ -4902,8 +4476,11 @@ impl Entity {
             .insert(namespace.into(), NbtTag::Compound(namespace_data));
     }
 
-    pub async fn get_custom_data(&self, namespace: &str, key: &str) -> Option<NbtTag> {
-        let custom_data = self.custom_data.lock().await;
+    pub fn get_custom_data(&self, namespace: &str, key: &str) -> Option<NbtTag> {
+        let custom_data = self
+            .custom_data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         custom_data
             .get(namespace)?
             .extract_compound()?
@@ -4911,8 +4488,11 @@ impl Entity {
             .cloned()
     }
 
-    pub async fn remove_custom_data(&self, namespace: &str, key: &str) {
-        let mut custom_data = self.custom_data.lock().await;
+    pub fn remove_custom_data(&self, namespace: &str, key: &str) {
+        let mut custom_data = self
+            .custom_data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let Some(NbtTag::Compound(mut namespace_data)) = custom_data.child_tags.remove(namespace)
         else {
@@ -4927,286 +4507,232 @@ impl Entity {
         }
     }
 
-    pub async fn has_custom_data(&self, namespace: &str, key: &str) -> bool {
-        self.get_custom_data(namespace, key).await.is_some()
+    pub fn has_custom_data(&self, namespace: &str, key: &str) -> bool {
+        self.get_custom_data(namespace, key).is_some()
     }
 }
 
-impl NBTStorage for Entity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            let position = self.pos.load();
-            nbt.put_string(
-                "id",
-                format!("minecraft:{}", self.entity_type.resource_name),
-            );
-            nbt.put_uuid("UUID", self.entity_uuid);
-            nbt.put(
-                "Pos",
-                NbtTag::List(vec![
-                    position.x.into(),
-                    position.y.into(),
-                    position.z.into(),
-                ]),
-            );
-            let velocity = self.velocity.load();
-            nbt.put(
-                "Motion",
-                NbtTag::List(vec![
-                    velocity.x.into(),
-                    velocity.y.into(),
-                    velocity.z.into(),
-                ]),
-            );
-            nbt.put(
-                "Rotation",
-                NbtTag::List(vec![self.yaw.load().into(), self.pitch.load().into()]),
-            );
-            nbt.put_short("Fire", self.fire_ticks.load(Relaxed) as i16);
-            nbt.put_bool("OnGround", self.on_ground.load(Relaxed));
-            nbt.put_bool("Invulnerable", self.invulnerable.load(Relaxed));
-            nbt.put_int("PortalCooldown", self.portal_cooldown.load(Relaxed) as i32);
-            if self.has_visual_fire.load(Relaxed) {
-                nbt.put_bool("HasVisualFire", true);
-            }
-            nbt.put_int("TicksFrozen", self.frozen_ticks.load(Relaxed));
-            if let Some(custom_name) = &**self.custom_name.load()
-                && let Ok(name_json) = pumpkin_util::serde_json::to_string(custom_name)
-            {
-                nbt.put_string("CustomName", name_json);
-            }
-            nbt.put_bool("CustomNameVisible", self.custom_name_visible.load(Relaxed));
-            if self.entity_type.mob {
-                nbt.put_bool(
-                    "PersistenceRequired",
-                    self.persistence_required.load(Relaxed),
-                );
-                if self.no_ai.load(Relaxed) {
-                    nbt.put_bool("NoAI", true);
-                }
-            }
+impl Entity {
+    pub fn write_nbt(&self, nbt: &mut NbtCompound) {
+        let position = self.pos.load();
+        nbt.put_string(
+            "id",
+            format!("minecraft:{}", self.entity_type.resource_name),
+        );
+        nbt.put_uuid("UUID", self.entity_uuid);
+        nbt.put(
+            "Pos",
+            NbtTag::List(vec![
+                position.x.into(),
+                position.y.into(),
+                position.z.into(),
+            ]),
+        );
+        let velocity = self.velocity.load();
+        nbt.put(
+            "Motion",
+            NbtTag::List(vec![
+                velocity.x.into(),
+                velocity.y.into(),
+                velocity.z.into(),
+            ]),
+        );
+        nbt.put(
+            "Rotation",
+            NbtTag::List(vec![self.yaw.load().into(), self.pitch.load().into()]),
+        );
+        nbt.put_short("Fire", self.fire_ticks.load(Relaxed) as i16);
+        nbt.put_bool("OnGround", self.on_ground.load(Relaxed));
+        nbt.put_bool("Invulnerable", self.invulnerable.load(Relaxed));
+        nbt.put_int("PortalCooldown", self.portal_cooldown.load(Relaxed) as i32);
+        if self.has_visual_fire.load(Relaxed) {
+            nbt.put_bool("HasVisualFire", true);
+        }
+        nbt.put_int("TicksFrozen", self.frozen_ticks.load(Relaxed));
+        if let Some(custom_name) = &**self.custom_name.load()
+            && let Ok(name_json) = pumpkin_util::serde_json::to_string(custom_name)
+        {
+            nbt.put_string("CustomName", name_json);
+        }
+        nbt.put_bool("CustomNameVisible", self.custom_name_visible.load(Relaxed));
+        if self.entity_type.mob {
+            nbt.put_bool("PersistenceRequired", self.persistence_required.load(Relaxed));
+            if self.no_ai.load(Relaxed) { nbt.put_bool("NoAI", true); }
+        }
 
-            let tags = self.scoreboard_tags.lock().await;
-            if !tags.is_empty() {
-                nbt.put(
-                    "Tags",
-                    NbtTag::List(
-                        tags.iter()
-                            .map(|tag| NbtTag::String(tag.as_str().into()))
-                            .collect(),
-                    ),
-                );
-            }
+        let tags = self
+            .scoreboard_tags
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !tags.is_empty() {
+            nbt.put(
+                "Tags",
+                NbtTag::List(
+                    tags.iter()
+                        .map(|tag| NbtTag::String(tag.as_str().into()))
+                        .collect(),
+                ),
+            );
+        }
 
-            let custom_data = self.custom_data.lock().await;
-            if !custom_data.is_empty() {
-                nbt.put_compound("PumpkinCustomData", custom_data.clone());
-            }
+        let custom_data = self
+            .custom_data
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !custom_data.is_empty() {
+            nbt.put_compound("PumpkinCustomData", custom_data.clone());
+        }
 
-            // todo more...
-        })
+        // todo more...
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            // Every deserialization path reaches this, which is what makes it the right place to
-            // record that this entity came off disk rather than out of a spawn.
-            self.restored_from_nbt.store(true, Relaxed);
-            if let Some(position) = nbt.get_list("Pos")
-                && position.len() >= 3
-            {
-                let x = position[0].extract_double().unwrap_or(0.0);
-                let y = position[1].extract_double().unwrap_or(0.0);
-                let z = position[2].extract_double().unwrap_or(0.0);
-                let pos = Vector3::new(x, y, z);
-                self.set_pos(pos);
-                self.last_sent_pos.store(pos);
+    pub fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        // Chunk loading reaches this path, unlike fresh spawning/finalization.
+        self.restored_from_nbt.store(true, Relaxed);
+        if let Some(position) = nbt.get_list("Pos")
+            && position.len() >= 3
+        {
+            let x = position[0].extract_double().unwrap_or(0.0);
+            let y = position[1].extract_double().unwrap_or(0.0);
+            let z = position[2].extract_double().unwrap_or(0.0);
+            let pos = Vector3::new(x, y, z);
+            self.set_pos(pos);
+            self.last_sent_pos.store(pos);
+        }
+        if let Some(velocity) = nbt.get_list("Motion")
+            && velocity.len() >= 3
+        {
+            let x = velocity[0].extract_double().unwrap_or(0.0);
+            let y = velocity[1].extract_double().unwrap_or(0.0);
+            let z = velocity[2].extract_double().unwrap_or(0.0);
+            self.velocity.store(Vector3::new(x, y, z));
+        }
+        if let Some(rotation) = nbt.get_list("Rotation")
+            && rotation.len() >= 2
+        {
+            let yaw = rotation[0].extract_float().unwrap_or(0.0);
+            let pitch = rotation[1].extract_float().unwrap_or(0.0);
+            self.set_rotation(yaw, pitch);
+            let yaw_byte = (yaw * 256.0 / 360.0).rem_euclid(256.0) as u8;
+            let pitch_byte = (pitch * 256.0 / 360.0).rem_euclid(256.0) as u8;
+            self.last_sent_yaw.store(yaw_byte, Relaxed);
+            self.last_sent_pitch.store(pitch_byte, Relaxed);
+            self.head_yaw.store(yaw);
+            self.last_sent_head_yaw.store(yaw_byte, Relaxed);
+        }
+        self.fire_ticks
+            .store(i32::from(nbt.get_short("Fire").unwrap_or(0)), Relaxed);
+        self.on_ground
+            .store(nbt.get_bool("OnGround").unwrap_or(false), Relaxed);
+        self.invulnerable
+            .store(nbt.get_bool("Invulnerable").unwrap_or(false), Relaxed);
+        self.portal_cooldown
+            .store(nbt.get_int("PortalCooldown").unwrap_or(0) as u32, Relaxed);
+        self.has_visual_fire
+            .store(nbt.get_bool("HasVisualFire").unwrap_or(false), Relaxed);
+        self.frozen_ticks
+            .store(nbt.get_int("TicksFrozen").unwrap_or(0), Relaxed);
+        if let Some(name_json) = nbt.get_string("CustomName")
+            && let Ok(component) = pumpkin_util::serde_json::from_str(name_json)
+        {
+            self.custom_name.store(Arc::new(Some(component)));
+        }
+        self.custom_name_visible
+            .store(nbt.get_bool("CustomNameVisible").unwrap_or(false), Relaxed);
+        if self.entity_type.mob {
+            self.persistence_required.store(nbt.get_bool("PersistenceRequired").unwrap_or(false), Relaxed);
+            let no_ai = nbt.get_bool("NoAI").unwrap_or(false);
+            self.no_ai.store(no_ai, Relaxed);
+            if no_ai {
+                let mut meta = SyncedActorDataList::new();
+                meta.set(entity_data_key::FLAGS, MetadataValue::Byte(1));
+                self.send_meta_data(&[Metadata::new(tracked_data::mob::DATA_MOB_FLAGS_ID, 1u8)], Some(&meta));
             }
-            if let Some(velocity) = nbt.get_list("Motion")
-                && velocity.len() >= 3
-            {
-                let x = velocity[0].extract_double().unwrap_or(0.0);
-                let y = velocity[1].extract_double().unwrap_or(0.0);
-                let z = velocity[2].extract_double().unwrap_or(0.0);
-                self.velocity.store(Vector3::new(x, y, z));
-            }
-            if let Some(rotation) = nbt.get_list("Rotation")
-                && rotation.len() >= 2
-            {
-                let yaw = rotation[0].extract_float().unwrap_or(0.0);
-                let pitch = rotation[1].extract_float().unwrap_or(0.0);
-                self.set_rotation(yaw, pitch);
-                let yaw_byte = (yaw * 256.0 / 360.0).rem_euclid(256.0) as u8;
-                let pitch_byte = (pitch * 256.0 / 360.0).rem_euclid(256.0) as u8;
-                self.last_sent_yaw.store(yaw_byte, Relaxed);
-                self.last_sent_pitch.store(pitch_byte, Relaxed);
-                self.head_yaw.store(yaw);
-                self.last_sent_head_yaw.store(yaw_byte, Relaxed);
-            }
-            self.fire_ticks
-                .store(i32::from(nbt.get_short("Fire").unwrap_or(0)), Relaxed);
-            self.on_ground
-                .store(nbt.get_bool("OnGround").unwrap_or(false), Relaxed);
-            self.invulnerable
-                .store(nbt.get_bool("Invulnerable").unwrap_or(false), Relaxed);
-            self.portal_cooldown
-                .store(nbt.get_int("PortalCooldown").unwrap_or(0) as u32, Relaxed);
-            self.has_visual_fire
-                .store(nbt.get_bool("HasVisualFire").unwrap_or(false), Relaxed);
-            self.frozen_ticks
-                .store(nbt.get_int("TicksFrozen").unwrap_or(0), Relaxed);
-            if let Some(name_json) = nbt.get_string("CustomName")
-                && let Ok(component) = pumpkin_util::serde_json::from_str(name_json)
-            {
-                self.custom_name.store(Arc::new(Some(component)));
-            }
-            self.custom_name_visible
-                .store(nbt.get_bool("CustomNameVisible").unwrap_or(false), Relaxed);
+        }
 
-            if self.entity_type.mob {
-                self.persistence_required.store(
-                    nbt.get_bool("PersistenceRequired").unwrap_or(false),
-                    Relaxed,
-                );
-                let no_ai = nbt.get_bool("NoAI").unwrap_or(false);
-                self.no_ai.store(no_ai, Relaxed);
-                if no_ai {
-                    self.send_meta_data(
-                        &[Metadata::new(tracked_data::mob::DATA_MOB_FLAGS_ID, 1u8)],
-                        None,
-                    );
-                }
-            }
+        if let Some(tag_list) = nbt.get_list("Tags") {
+            let mut tags = self
+                .scoreboard_tags
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            tags.clear();
+            tags.extend(
+                tag_list
+                    .iter()
+                    .filter_map(|tag| tag.extract_string().map(str::to_owned))
+                    .take(MAX_SCOREBOARD_TAGS),
+            );
+        }
 
-            if let Some(tag_list) = nbt.get_list("Tags") {
-                let mut tags = self.scoreboard_tags.lock().await;
-                tags.clear();
-                tags.extend(
-                    tag_list
-                        .iter()
-                        .filter_map(|tag| tag.extract_string().map(str::to_owned))
-                        .take(MAX_SCOREBOARD_TAGS),
-                );
-            }
+        if let Some(custom_data) = nbt
+            .get_compound("PumpkinCustomData")
+            .or_else(|| nbt.get_compound("BukkitValues"))
+        {
+            let mut data = self
+                .custom_data
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            *data = custom_data.clone();
+        }
 
-            if let Some(custom_data) = nbt
-                .get_compound("PumpkinCustomData")
-                .or_else(|| nbt.get_compound("BukkitValues"))
-            {
-                let mut data = self.custom_data.lock().await;
-                *data = custom_data.clone();
-            }
-
-            // todo more...
-        })
+        // todo more...
     }
 }
 
 impl EntityBase for Entity {
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        _server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            // Recomputed during movement/block-collision handling in the same tick.
-            let was_in_powder_snow = self.is_in_powder_snow.load(Ordering::Relaxed);
-            self.was_in_powder_snow
-                .store(was_in_powder_snow, Ordering::Relaxed);
-            self.is_in_powder_snow.store(false, Ordering::Relaxed);
+    fn tick(&self, caller: &dyn EntityBase, _server: &Server) {
+        // Recomputed during movement/block-collision handling in the same tick.
+        let was_in_powder_snow = self.is_in_powder_snow.load(Ordering::Relaxed);
+        self.was_in_powder_snow
+            .store(was_in_powder_snow, Ordering::Relaxed);
+        self.is_in_powder_snow.store(false, Ordering::Relaxed);
 
-            let block_pos = self.block_pos.load();
-            if self.last_biome_update_pos.load() != block_pos {
-                let world = self.world.load();
-                // If the biome cannot be resolved (chunk not loaded yet), keep the last
-                // known value and leave `last_biome_update_pos` alone so the next tick
-                // retries, rather than caching a substituted biome for this position.
-                if let Some(biome) = world.level.get_rough_biome(&block_pos) {
-                    self.current_biome.store(Arc::new(biome));
-                    self.last_biome_update_pos.store(block_pos);
-                }
-            }
+        self.update_last_pos();
+        self.was_eye_in_water.store(self.eye_in_water.load(Relaxed), Relaxed);
+        let vehicle = self.get_vehicle();
+        if vehicle.is_some_and(|vehicle| vehicle.get_entity().is_removed()) {
+            if let Some(vehicle) = vehicle { vehicle.get_entity().remove_passenger(self.entity_id); }
+        }
+        self.tick_portal(caller);
+        self.update_fluid_state(caller);
+        self.eye_in_water.store(self.is_eye_in_fluid(&self.world.load(), &tag::Fluid::MINECRAFT_WATER), Relaxed);
+        self.check_out_of_world(caller);
+        let world = self.world.load();
+        if self.fire_ticks.load(Relaxed) > 0 {
+            let pos = self.block_pos.load();
+            let head = BlockPos::floored(self.pos.load().x, self.bounding_box.load().max.y, self.pos.load().z);
+            if world.is_raining_at(&pos) || world.is_raining_at(&head) { self.extinguish(); }
+        }
+        let fire_ticks = self.fire_ticks.load(Ordering::Relaxed);
 
-            self.update_last_pos();
-
-            // Vanilla `Entity.baseTick` stops riding when the vehicle was removed
-            // (Entity.java:517-519). Keep the bidirectional relationship in sync
-            // before any portal or movement work can observe the stale vehicle.
-            let vehicle = self.vehicle.lock().await.clone();
-            if let Some(vehicle) = vehicle
-                && vehicle.get_entity().is_removed()
-            {
-                vehicle.get_entity().remove_passenger(self.entity_id).await;
-            }
-
-            self.tick_portal(caller).await;
-            self.was_eye_in_water
-                .store(self.eye_in_water.load(Relaxed), Relaxed);
-            self.update_fluid_state(caller).await;
-            let world = self.world.load();
-            let eye_in_water = self.is_eye_in_fluid(&world, &tag::Fluid::MINECRAFT_WATER);
-            self.eye_in_water.store(eye_in_water, Relaxed);
-            self.check_out_of_world(&**caller).await;
-
-            // `Entity.baseTick`: rain puts a burning entity out. `isInRain` tests the block the
-            // entity stands in and the one at the top of its bounding box.
-            if self.fire_ticks.load(Ordering::Relaxed) > 0 {
-                let block_pos = self.block_pos.load();
-                let pos = self.pos.load();
-                let head_pos = BlockPos::floored(pos.x, self.bounding_box.load().max.y, pos.z);
-                if world.is_raining_at(&block_pos).await || world.is_raining_at(&head_pos).await {
+        // Check for fire immunity (or if the specific entity is)
+        let is_immune = self.entity_type.fire_immune || self.fire_immune.load(Ordering::Relaxed);
+        if fire_ticks > 0 {
+            if is_immune {
+                self.fire_ticks.store(fire_ticks - 4, Ordering::Relaxed);
+                if self.fire_ticks.load(Ordering::Relaxed) < 0 {
                     self.extinguish();
                 }
-            }
-
-            let fire_ticks = self.fire_ticks.load(Ordering::Relaxed);
-
-            // Check for fire immunity (or if the specific entity is)
-            let is_immune =
-                self.entity_type.fire_immune || self.fire_immune.load(Ordering::Relaxed);
-            if fire_ticks > 0 {
-                if is_immune {
-                    self.fire_ticks.store(fire_ticks - 4, Ordering::Relaxed);
-                    if self.fire_ticks.load(Ordering::Relaxed) < 0 {
-                        self.extinguish();
-                    }
-                } else {
-                    if fire_ticks % 20 == 0 {
-                        (**caller).damage(&**caller, 1.0, DamageType::ON_FIRE).await;
-                    }
-
-                    self.fire_ticks.store(fire_ticks - 1, Ordering::Relaxed);
+            } else {
+                if fire_ticks % 20 == 0 {
+                    caller.damage(caller, 1.0, DamageType::ON_FIRE);
                 }
+
+                self.fire_ticks.store(fire_ticks - 1, Ordering::Relaxed);
             }
+        }
 
-            // Check if visual fire should be sent.
-            // MagmaCube.java isOnFire(): always false, purely a render override; it still
-            // takes normal fire damage above since is_immune is untouched.
-            let is_magma_cube = self.entity_type == &EntityType::MAGMA_CUBE;
-            let should_render_fire =
-                self.fire_ticks.load(Ordering::Relaxed) > 0 && !is_immune && !is_magma_cube;
-            self.set_on_fire(should_render_fire).await;
+        // Check if visual fire should be sent
+        // MagmaCube.isOnFire is a render override; it still receives fire damage.
+        let should_render_fire = self.fire_ticks.load(Ordering::Relaxed) > 0
+            && !is_immune && self.entity_type.id != EntityType::MAGMA_CUBE.id;
+        self.set_on_fire(should_render_fire);
 
-            let riding_cooldown = self.riding_cooldown.load(Ordering::Relaxed);
-            if riding_cooldown > 0 {
-                self.riding_cooldown
-                    .store(riding_cooldown - 1, Ordering::Relaxed);
-            }
-        })
-    }
-
-    fn teleport(
-        self: Arc<Self>,
-        position: Vector3<f64>,
-        yaw: Option<f32>,
-        pitch: Option<f32>,
-        world: Arc<World>,
-    ) -> TeleportFuture {
-        // TODO: handle world change
-        Box::pin(async move {
-            self.get_entity().teleport(position, yaw, pitch, world);
-            self.get_entity().sync_passenger_positions().await;
-        })
+        let riding_cooldown = self.riding_cooldown.load(Ordering::Relaxed);
+        if riding_cooldown > 0 {
+            self.riding_cooldown
+                .store(riding_cooldown - 1, Ordering::Relaxed);
+        }
     }
 
     fn get_entity(&self) -> &Entity {
@@ -5220,38 +4746,31 @@ impl EntityBase for Entity {
     fn cast_any(&self) -> &dyn std::any::Any {
         self
     }
-
-    fn as_nbt_storage(&self) -> &dyn NBTStorage {
-        self
-    }
 }
 
-pub type NbtFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+impl<T: EntityBase + ?Sized> NBTStorage for T {
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        EntityBase::write_nbt(self, nbt);
+    }
+
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        EntityBase::read_nbt_non_mut(self, nbt);
+    }
+}
 
 pub trait NBTStorage: Send + Sync {
-    fn write_nbt<'a>(&'a self, _nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {})
+    fn write_nbt(&self, _nbt: &mut NbtCompound) {}
+
+    fn read_nbt(&mut self, nbt: &mut NbtCompound) {
+        self.read_nbt_non_mut(nbt);
     }
 
-    fn read_nbt<'a>(&'a mut self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.read_nbt_non_mut(nbt).await;
-        })
-    }
-
-    fn read_nbt_non_mut<'a>(&'a self, _nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {})
-    }
+    fn read_nbt_non_mut(&self, _nbt: &NbtCompound) {}
 }
 
-pub type NBTInitFuture<'a, T> = Pin<Box<dyn Future<Output = Option<T>> + Send + 'a>>;
-
 pub trait NBTStorageInit: Send + Sync + Sized {
-    fn create_from_nbt<'a>(_nbt: &'a mut NbtCompound) -> NBTInitFuture<'a, Self>
-    where
-        Self: 'a,
-    {
-        Box::pin(async move { None })
+    fn create_from_nbt(_nbt: &mut NbtCompound) -> Option<Self> {
+        None
     }
 }
 
@@ -5295,81 +4814,11 @@ impl Flag {
     }
 }
 
-#[cfg(test)]
-mod position_sync_tests {
-    use super::delta_needs_position_sync;
-    use pumpkin_util::math::vector3::Vector3;
-
-    #[test]
-    fn a_small_step_stays_a_delta_packet() {
-        assert!(!delta_needs_position_sync(Vector3::new(4096, -2048, 0)));
-    }
-
-    #[test]
-    fn eight_blocks_is_the_edge() {
-        assert!(!delta_needs_position_sync(Vector3::new(
-            i16::MAX as i64,
-            0,
-            0
-        )));
-        assert!(delta_needs_position_sync(Vector3::new(
-            i16::MAX as i64 + 1,
-            0,
-            0
-        )));
-        assert!(delta_needs_position_sync(Vector3::new(
-            0,
-            i16::MIN as i64 - 1,
-            0
-        )));
-    }
-
-    #[test]
-    fn a_teleport_across_the_world_needs_a_sync() {
-        assert!(delta_needs_position_sync(Vector3::new(
-            4096 * 10_000,
-            0,
-            -4096 * 10_000
-        )));
-    }
-}
-
-#[cfg(test)]
-mod velocity_resend_tests {
-    use super::velocity_needs_resend;
-    use pumpkin_util::math::vector3::Vector3;
-
-    #[test]
-    fn an_unchanged_velocity_is_not_resent() {
-        let velocity = Vector3::new(0.1, -0.2, 0.3);
-        assert!(!velocity_needs_resend(velocity, velocity));
-    }
-
-    #[test]
-    fn a_knockback_sized_change_is_sent() {
-        assert!(velocity_needs_resend(
-            Vector3::new(0.4, 0.4, 0.0),
-            Vector3::new(0.0, 0.0, 0.0)
-        ));
-    }
-
-    #[test]
-    fn a_change_below_the_threshold_is_dropped() {
-        assert!(!velocity_needs_resend(
-            Vector3::new(1.0e-5, 0.0, 0.0),
-            Vector3::new(0.0, 0.0, 0.0)
-        ));
-    }
-
-    #[test]
-    fn coming_to_a_stop_is_always_sent() {
-        // Vanilla sends the stop even when the change is under the threshold, so the client
-        // does not keep dead-reckoning a moving entity.
-        assert!(velocity_needs_resend(
-            Vector3::new(0.0, 0.0, 0.0),
-            Vector3::new(1.0e-5, 0.0, 0.0)
-        ));
-    }
+/// Whether this is a vanilla `Avatar`: the player or mannequin (`Mannequin.java:28`).
+/// `Avatar.getDefaultDimensions` (`Avatar.java:66-68`) is the only pose-dependent entity table.
+#[must_use]
+pub const fn type_is_avatar(entity_type: &'static EntityType) -> bool {
+    entity_type.id == EntityType::PLAYER.id || entity_type.id == EntityType::MANNEQUIN.id
 }
 
 #[cfg(test)]
@@ -5399,504 +4848,13 @@ mod tests {
         }
     }
 
+    /// `Avatar.POSES` (`Avatar.java:24-37`) must not resize unrelated entities.
     #[test]
-    fn ordinary_mounting_requires_an_eligible_rider() {
-        assert!(can_start_riding_state(false, 0, false));
-        assert!(!can_start_riding_state(true, 0, false));
-        assert!(!can_start_riding_state(false, 1, false));
-        assert!(!can_start_riding_state(false, 0, true));
-    }
-}
-
-// The fork's `tracked_data_bounds_tests` module was dropped in the 2026-08-20 upstream
-// merge: it audited the old flat `TrackedData::NAME` table (one namespace for every
-// entity, with per-version index fields) against hand-written vanilla slot counts.
-// Upstream's regenerated `pumpkin_data::tracked_data` is scoped per entity, so the
-// name-collision class those tests guarded (salmon/horse/cat/creeper/slime reusing a
-// flattened key) can no longer be expressed. Re-add an equivalent audit against the
-// new per-entity modules if index drift shows up again.
-
-/// Guard against silently-dropped entity metadata.
-///
-/// `Metadata::write` returns `Ok(())` without emitting a single byte when the metadata
-/// type constant resolves to a negative id on the wire version
-/// (`pumpkin-protocol/src/java/client/play/entity_metadata.rs`). That makes a wrong type
-/// constant a no-op rather than an error, which is how 28 call sites came to use
-/// `MetaDataType::INTEGER` - id 1 on every 1.21.x but -1 on `v26_1`/`v26_2`, where the int
-/// type moved to `MetaDataType::INT`. Every one of those fields had never reached a 26.x
-/// client.
-///
-/// This walks the crate's own sources and fails the build if any `MetaDataType::NAME`
-/// mentioned in `pumpkin/src` resolves negative on 26.2, so the next such constant is a
-/// test failure instead of an invisible no-op.
-///
-/// A site that is knowingly left silent must carry a `PENDING-INDEX-FIX` marker comment
-/// within the preceding few lines, explaining why. Exemptions are per-site and greppable
-/// on purpose: allowlisting a constant *name* would reopen the exact hole for every
-/// future use of that name.
-#[cfg(test)]
-mod metadata_type_resolves_on_target_version_tests {
-    use pumpkin_data::meta_data_type::MetaDataType;
-    use pumpkin_util::version::JavaMinecraftVersion;
-    use std::path::{Path, PathBuf};
-
-    const MARKER: &str = "PENDING-INDEX-FIX";
-    /// How many preceding lines a `PENDING-INDEX-FIX` comment may sit above its site.
-    const MARKER_LOOKBACK: usize = 12;
-
-    fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
-        for entry in std::fs::read_dir(dir).expect("readable source directory") {
-            let path = entry.expect("readable directory entry").path();
-            if path.is_dir() {
-                rust_sources(&path, out);
-            } else if path.extension().is_some_and(|ext| ext == "rs") {
-                out.push(path);
-            }
-        }
-    }
-
-    fn constant_name_at(line: &str) -> Option<&str> {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("//") || trimmed.starts_with('*') {
-            return None;
-        }
-        let rest = line.split_once("MetaDataType::")?.1;
-        let end = rest
-            .find(|c: char| !c.is_ascii_uppercase() && !c.is_ascii_digit() && c != '_')
-            .unwrap_or(rest.len());
-        let name = &rest[..end];
-        if name.is_empty() { None } else { Some(name) }
-    }
-
-    /// Kept in sync by hand with `MetaDataType`'s associated constants: the generated type
-    /// has no reflection, so a name is mapped to its value here. An unknown name fails the
-    /// test rather than being skipped.
-    fn resolve(name: &str) -> Option<MetaDataType> {
-        Some(match name {
-            "ARM" => MetaDataType::ARM,
-            "ARMADILLO_STATE" => MetaDataType::ARMADILLO_STATE,
-            "BLOCK_POS" => MetaDataType::BLOCK_POS,
-            "BLOCK_STATE" => MetaDataType::BLOCK_STATE,
-            "BOOLEAN" => MetaDataType::BOOLEAN,
-            "BYTE" => MetaDataType::BYTE,
-            "CAT_SOUND_VARIANT" => MetaDataType::CAT_SOUND_VARIANT,
-            "CAT_VARIANT" => MetaDataType::CAT_VARIANT,
-            "CHICKEN_SOUND_VARIANT" => MetaDataType::CHICKEN_SOUND_VARIANT,
-            "CHICKEN_VARIANT" => MetaDataType::CHICKEN_VARIANT,
-            "COMPONENT" => MetaDataType::COMPONENT,
-            "COPPER_GOLEM_STATE" => MetaDataType::COPPER_GOLEM_STATE,
-            "COW_SOUND_VARIANT" => MetaDataType::COW_SOUND_VARIANT,
-            "COW_VARIANT" => MetaDataType::COW_VARIANT,
-            "DIRECTION" => MetaDataType::DIRECTION,
-            "ENTITY_POSE" => MetaDataType::ENTITY_POSE,
-            "FACING" => MetaDataType::FACING,
-            "FLOAT" => MetaDataType::FLOAT,
-            "FROG_VARIANT" => MetaDataType::FROG_VARIANT,
-            "HUMANOID_ARM" => MetaDataType::HUMANOID_ARM,
-            "INT" => MetaDataType::INT,
-            "INTEGER" => MetaDataType::INTEGER,
-            "ITEM_STACK" => MetaDataType::ITEM_STACK,
-            "LAZY_ENTITY_REFERENCE" => MetaDataType::LAZY_ENTITY_REFERENCE,
-            "LONG" => MetaDataType::LONG,
-            "NBT_COMPOUND" => MetaDataType::NBT_COMPOUND,
-            "OPTIONAL_BLOCK_POS" => MetaDataType::OPTIONAL_BLOCK_POS,
-            "OPTIONAL_BLOCK_STATE" => MetaDataType::OPTIONAL_BLOCK_STATE,
-            "OPTIONAL_COMPONENT" => MetaDataType::OPTIONAL_COMPONENT,
-            "OPTIONAL_GLOBAL_POS" => MetaDataType::OPTIONAL_GLOBAL_POS,
-            "OPTIONAL_INT" => MetaDataType::OPTIONAL_INT,
-            "OPTIONAL_LIVING_ENTITY_REFERENCE" => MetaDataType::OPTIONAL_LIVING_ENTITY_REFERENCE,
-            "OPTIONAL_TEXT_COMPONENT" => MetaDataType::OPTIONAL_TEXT_COMPONENT,
-            "OPTIONAL_UNSIGNED_INT" => MetaDataType::OPTIONAL_UNSIGNED_INT,
-            "OPTIONAL_UUID" => MetaDataType::OPTIONAL_UUID,
-            "OXIDATION_LEVEL" => MetaDataType::OXIDATION_LEVEL,
-            "PAINTING_VARIANT" => MetaDataType::PAINTING_VARIANT,
-            "PARTICLE" => MetaDataType::PARTICLE,
-            "PARTICLE_LIST" => MetaDataType::PARTICLE_LIST,
-            "PARTICLES" => MetaDataType::PARTICLES,
-            "PIG_SOUND_VARIANT" => MetaDataType::PIG_SOUND_VARIANT,
-            "PIG_VARIANT" => MetaDataType::PIG_VARIANT,
-            "POSE" => MetaDataType::POSE,
-            "PROFILE" => MetaDataType::PROFILE,
-            "QUATERNION" => MetaDataType::QUATERNION,
-            "QUATERNION_F" => MetaDataType::QUATERNION_F,
-            "RESOLVABLE_PROFILE" => MetaDataType::RESOLVABLE_PROFILE,
-            "ROTATION" => MetaDataType::ROTATION,
-            "ROTATIONS" => MetaDataType::ROTATIONS,
-            "SNIFFER_STATE" => MetaDataType::SNIFFER_STATE,
-            "STRING" => MetaDataType::STRING,
-            "TEXT_COMPONENT" => MetaDataType::TEXT_COMPONENT,
-            "VECTOR3" => MetaDataType::VECTOR3,
-            "VECTOR_3F" => MetaDataType::VECTOR_3F,
-            "VILLAGER_DATA" => MetaDataType::VILLAGER_DATA,
-            "WEATHERING_COPPER_STATE" => MetaDataType::WEATHERING_COPPER_STATE,
-            "WOLF_SOUND_VARIANT" => MetaDataType::WOLF_SOUND_VARIANT,
-            "WOLF_VARIANT" => MetaDataType::WOLF_VARIANT,
-            "ZOMBIE_NAUTILUS_VARIANT" => MetaDataType::ZOMBIE_NAUTILUS_VARIANT,
-            _ => return None,
-        })
-    }
-
-    #[test]
-    fn no_metadata_type_used_in_this_crate_is_dropped_on_26_2() {
-        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut files = Vec::new();
-        rust_sources(&src, &mut files);
-        assert!(!files.is_empty(), "no Rust sources found under {src:?}");
-
-        let mut checked = 0usize;
-        let mut unresolved = Vec::new();
-        let mut dropped = Vec::new();
-
-        for file in &files {
-            let text = std::fs::read_to_string(file).expect("readable Rust source");
-            let lines: Vec<&str> = text.lines().collect();
-            for (number, line) in lines.iter().enumerate() {
-                let Some(name) = constant_name_at(line) else {
-                    continue;
-                };
-                // Skip this test's own mapping table.
-                if line.contains("=> MetaDataType::") {
-                    continue;
-                }
-                let Some(constant) = resolve(name) else {
-                    unresolved.push(format!("{}:{}: {name}", file.display(), number + 1));
-                    continue;
-                };
-                checked += 1;
-                if constant.id(JavaMinecraftVersion::V_26_2) >= 0 {
-                    continue;
-                }
-                let start = number.saturating_sub(MARKER_LOOKBACK);
-                if lines[start..number].iter().any(|l| l.contains(MARKER)) {
-                    continue;
-                }
-                dropped.push(format!("{}:{}: {name}", file.display(), number + 1));
-            }
-        }
-
-        assert!(
-            unresolved.is_empty(),
-            "MetaDataType constants used in this crate are missing from this test's mapping \
-             table, so they were never checked. Add them to `resolve`:\n  {}",
-            unresolved.join("\n  ")
-        );
-        assert!(
-            checked > 0,
-            "found no MetaDataType uses to check; the scanner is broken"
-        );
-        assert!(
-            dropped.is_empty(),
-            "these metadata sends resolve to a negative type id on 26.2, so \
-             `Metadata::write` silently emits nothing and the client keeps its default. \
-             Use the 26.2-valid constant (for integers: `MetaDataType::INT`, not \
-             `INTEGER`), or annotate the site with a `{MARKER}` comment explaining why it \
-             must stay silent:\n  {}",
-            dropped.join("\n  ")
-        );
-    }
-
-    /// The concrete swap this guard was written for is gone: upstream's regenerated
-    /// `meta_data_type.rs` (2026-08-20 merge) makes `INTEGER` a plain alias of `INT`
-    /// with id 1 on every supported version, so the old
-    /// `int_and_integer_swapped_between_1_21_and_26_x` assertions no longer hold and
-    /// were dropped. The scanner above still earns its keep for any *other* constant
-    /// that resolves negative on 26.2.
-    #[test]
-    fn integer_is_now_an_alias_of_int() {
-        // PENDING-INDEX-FIX: not a send site - this asserts the table shape itself, so
-        // the scanner above must not treat these lines as dropped metadata.
-        assert_eq!(
-            MetaDataType::INTEGER.id(JavaMinecraftVersion::V_26_2),
-            MetaDataType::INT.id(JavaMinecraftVersion::V_26_2)
-        );
-        assert!(MetaDataType::INT.id(JavaMinecraftVersion::V_26_2) >= 0);
-    }
-
-    /// Parse `pumpkin-data`'s generated tracked-data table into `module -> const -> id`.
-    ///
-    /// Resolving aliases (`pub const FLAGS: TrackedData = DATA_FLAGS_ID;`) matters: most
-    /// constants are reachable under several names in the same module.
-    fn tracked_data_table()
-    -> std::collections::HashMap<String, std::collections::HashMap<String, u8>> {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../pumpkin-data/src/generated/tracked_data.rs");
-        let text = std::fs::read_to_string(&path).expect("readable generated tracked_data.rs");
-
-        let mut table: std::collections::HashMap<String, std::collections::HashMap<String, u8>> =
-            std::collections::HashMap::new();
-        let mut module = String::new();
-        let mut pending: Option<String> = None;
-        let mut aliases: Vec<(String, String, String)> = Vec::new();
-
-        for line in text.lines() {
-            let trimmed = line.trim();
-            if let Some(rest) = trimmed.strip_prefix("pub mod ")
-                && let Some(name) = rest.strip_suffix(" {")
-            {
-                module = name.to_string();
-                continue;
-            }
-            if let Some(rest) = trimmed.strip_prefix("pub const ")
-                && let Some((name, tail)) = rest.split_once(": TrackedData = ")
-            {
-                if tail.starts_with("TrackedData {") {
-                    pending = Some(name.to_string());
-                } else if let Some(source) = tail.strip_suffix(';') {
-                    aliases.push((module.clone(), name.to_string(), source.to_string()));
-                }
-                continue;
-            }
-            if let Some(name) = pending.take()
-                && let Some(rest) = trimmed.strip_prefix("id: TrackedId { v26_2: ")
-                && let Some(value) = rest.strip_suffix("u8 },")
-                && let Ok(id) = value.parse::<u8>()
-            {
-                table.entry(module.clone()).or_default().insert(name, id);
-            }
-        }
-
-        for (module, name, source) in aliases {
-            if let Some(id) = table.get(&module).and_then(|m| m.get(&source)).copied() {
-                table.entry(module).or_default().insert(name, id);
-            }
-        }
-        table
-    }
-
-    /// Guard the per-entity tracked-data migration: a call site must not name another
-    /// entity's module.
-    ///
-    /// Upstream replaced one flat `TrackedData::NAME` namespace with per-entity modules, and
-    /// 24 files were migrated onto it. Naming the wrong module still compiles and still sends
-    /// a well-formed packet -- it just sends the right value under another entity's id, which
-    /// nothing else here would catch. `DATA_VILLAGER_DATA` is 19 under `villager` but 20 under
-    /// `zombie_villager`, so the two are not interchangeable.
-    ///
-    /// A cross-module reference is only accepted when the constant resolves to the SAME id in
-    /// the file's own entity module, which is what inheriting it from a shared superclass looks
-    /// like in the generated table. That keeps the check data-driven: it needs no hand-written
-    /// copy of the vanilla class hierarchy, which would rot.
-    #[test]
-    fn tracked_data_call_sites_use_their_own_entity_module() {
-        let table = tracked_data_table();
-        assert!(
-            table.len() > 50,
-            "parsed only {} modules -- did the generated table change shape?",
-            table.len()
-        );
-
-        let roots = ["entity/passive", "entity/mob", "entity/decoration"];
-        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut files = Vec::new();
-        rust_sources(&src, &mut files);
-
-        let mut checked = 0usize;
-        let mut wrong = Vec::new();
-
-        for file in &files {
-            let as_text = file.to_string_lossy().replace('\\', "/");
-            if !roots.iter().any(|root| as_text.contains(root)) {
-                continue;
-            }
-            let Some(stem) = file.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
-                continue;
-            };
-            let text = std::fs::read_to_string(file).expect("readable Rust source");
-            // A file can host more than one entity: `decoration/display.rs` defines all three
-            // display entities, so its filename alone is the wrong ownership signal. Treat a
-            // module as owned by the file when the file declares the matching `*Entity` struct.
-            let owned: Vec<&String> = table
-                .keys()
-                .filter(|module| {
-                    **module == stem || {
-                        let camel: String = module
-                            .split('_')
-                            .map(|word| {
-                                let mut chars = word.chars();
-                                chars.next().map_or_else(String::new, |first| {
-                                    first.to_ascii_uppercase().to_string() + chars.as_str()
-                                })
-                            })
-                            .collect();
-                        text.contains(&format!("struct {camel}Entity"))
-                    }
-                })
-                .collect();
-            let Some(own) = owned.first().map(|module| (*module).clone()) else {
-                continue;
-            };
-            let owned_names: std::collections::HashSet<&str> =
-                owned.iter().map(|module| module.as_str()).collect();
-            let Some(own_module) = table.get(&own) else {
-                continue;
-            };
-            let lines: Vec<&str> = text.lines().collect();
-            for (number, line) in lines.iter().enumerate() {
-                // Same per-site, greppable exemption the sibling scanner above uses: a site
-                // knowingly left as-is carries a marker comment saying why.
-                let start = number.saturating_sub(MARKER_LOOKBACK);
-                if lines[start..number].iter().any(|l| l.contains(MARKER)) {
-                    continue;
-                }
-                let mut rest = *line;
-                while let Some(at) = rest.find("tracked_data::") {
-                    rest = &rest[at + "tracked_data::".len()..];
-                    let mut parts = rest.splitn(3, "::");
-                    let (Some(module), Some(tail)) = (parts.next(), parts.next()) else {
-                        break;
-                    };
-                    let name: String = tail
-                        .chars()
-                        .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '_')
-                        .collect();
-                    if name.is_empty() || owned_names.contains(module) {
-                        continue;
-                    }
-                    let Some(referenced) = table.get(module).and_then(|m| m.get(&name)).copied()
-                    else {
-                        continue;
-                    };
-                    checked += 1;
-                    match own_module.get(&name) {
-                        Some(&mine) if mine == referenced => {}
-                        Some(&mine) => wrong.push(format!(
-                            "{}:{}: uses `{module}::{name}` (id {referenced}) but `{own}::{name}` is id {mine}",
-                            file.display(),
-                            number + 1
-                        )),
-                        None => wrong.push(format!(
-                            "{}:{}: uses `{module}::{name}`, which `{own}` does not have at all",
-                            file.display(),
-                            number + 1
-                        )),
-                    }
-                }
-            }
-        }
-
-        assert!(
-            wrong.is_empty(),
-            "tracked data sent under another entity's id ({checked} cross-module references checked):\n{}",
-            wrong.join("\n")
-        );
-    }
-}
-
-#[cfg(test)]
-mod tracked_data_replay_tests {
-    use pumpkin_data::tracked_data;
-    use pumpkin_protocol::codec::var_int::VarInt;
-    use pumpkin_protocol::java::client::play::Metadata;
-    use pumpkin_util::version::JavaMinecraftVersion;
-
-    use super::{record_tracked_data_into, serialize_tracked_data};
-
-    /// A value published once must stay retrievable so it can be replayed to a
-    /// player who only later starts seeing the entity. Before this change nothing
-    /// retained the value at all: `send_meta_data` broadcast it and dropped it,
-    /// so the enters-view path had nothing to send and the client kept its
-    /// default (slime size 1, sheep white, creeper not ignited, ...).
-    #[test]
-    fn published_values_are_retained_and_replayable() {
-        let mut snapshot = Vec::new();
-        record_tracked_data_into(
-            &mut snapshot,
-            &[Metadata::new(tracked_data::slime::ID_SIZE, VarInt(4))],
-        );
-
-        assert_eq!(snapshot.len(), 1);
-
-        let buf = serialize_tracked_data(&snapshot, JavaMinecraftVersion::V_26_2)
-            .expect("a retained value must serialize for the client");
-        // Index byte, then the type id, then the payload.
-        assert_eq!(buf[0], tracked_data::slime::ID_SIZE.id.v26_2);
-        assert_eq!(buf[0], 18);
-        assert!(buf.len() > 2, "payload must not be empty: {buf:?}");
-        // VarInt(4) is a single byte at the end.
-        assert_eq!(*buf.last().unwrap(), 4);
-    }
-
-    /// The snapshot is keyed by tracked id, so republishing a field replaces the
-    /// old value instead of shipping both on replay.
-    #[test]
-    fn republishing_a_field_replaces_the_stored_value() {
-        let mut snapshot = Vec::new();
-        for size in [1i32, 4] {
-            record_tracked_data_into(
-                &mut snapshot,
-                &[Metadata::new(tracked_data::slime::ID_SIZE, VarInt(size))],
-            );
-        }
-        assert_eq!(snapshot.len(), 1);
-        let buf = serialize_tracked_data(&snapshot, JavaMinecraftVersion::V_26_2).unwrap();
-        assert_eq!(*buf.last().unwrap(), 4);
-    }
-
-    /// Distinct fields accumulate, and each keeps its own slot.
-    #[test]
-    fn distinct_fields_accumulate() {
-        let mut snapshot = Vec::new();
-        record_tracked_data_into(
-            &mut snapshot,
-            &[Metadata::new(
-                tracked_data::creeper::DATA_SWELL_DIR,
-                VarInt(1),
-            )],
-        );
-        record_tracked_data_into(
-            &mut snapshot,
-            &[Metadata::new(tracked_data::creeper::DATA_IS_IGNITED, true)],
-        );
-        assert_eq!(snapshot.len(), 2);
-        let buf = serialize_tracked_data(&snapshot, JavaMinecraftVersion::V_26_2).unwrap();
-        assert!(buf.contains(&tracked_data::creeper::DATA_SWELL_DIR.id.v26_2));
-        assert!(buf.contains(&tracked_data::creeper::DATA_IS_IGNITED.id.v26_2));
-    }
-}
-
-/// Whether this type is a vanilla `Avatar`: the player, or the mannequin
-/// (`Mannequin.java:28` extends `Avatar`).
-///
-/// `Avatar.getDefaultDimensions` (`Avatar.java:66-68`) is the only override that makes an
-/// entity's size depend on its pose. Every other entity keeps its type dimensions in every
-/// pose, per `LivingEntity.getDefaultDimensions` (`LivingEntity.java:3731-3733`).
-#[must_use]
-pub const fn type_is_avatar(entity_type: &'static EntityType) -> bool {
-    entity_type.id == EntityType::PLAYER.id || entity_type.id == EntityType::MANNEQUIN.id
-}
-
-#[cfg(test)]
-mod default_dimension_tests {
-    use super::{Entity, EntityPose, type_is_avatar};
-    use pumpkin_data::entity::EntityType;
-
-    /// `Avatar.POSES` (`Avatar.java:24-37`). These numbers are player-shaped and applying them
-    /// to any other type is the bug this table guards against.
-    #[test]
-    fn avatar_pose_table_matches_vanilla() {
-        let standing = Entity::get_entity_dimensions(EntityPose::Standing);
-        assert_eq!(
-            (standing.width, standing.height, standing.eye_height),
-            (0.6, 1.8, 1.62)
-        );
-        let crouching = Entity::get_entity_dimensions(EntityPose::Crouching);
-        assert_eq!(
-            (crouching.width, crouching.height, crouching.eye_height),
-            (0.6, 1.5, 1.27)
-        );
-        for pose in [
-            EntityPose::Swimming,
-            EntityPose::FallFlying,
-            EntityPose::SpinAttack,
-        ] {
-            let dims = Entity::get_entity_dimensions(pose);
-            assert_eq!((dims.width, dims.height, dims.eye_height), (0.6, 0.6, 0.4));
-        }
-        let dying = Entity::get_entity_dimensions(EntityPose::Dying);
-        assert_eq!(
-            (dying.width, dying.height, dying.eye_height),
-            (0.2, 0.2, 1.62)
-        );
+    fn only_avatars_use_the_pose_table() {
+        assert!(type_is_avatar(&EntityType::PLAYER));
+        assert!(type_is_avatar(&EntityType::MANNEQUIN));
+        assert!(!type_is_avatar(&EntityType::VILLAGER));
+        assert!(!type_is_avatar(&EntityType::WARDEN));
     }
 
     /// `LivingEntity.SLEEPING_DIMENSIONS` (`LivingEntity.java:191`).
@@ -5904,22 +4862,5 @@ mod default_dimension_tests {
     fn sleeping_dimensions_match_vanilla() {
         let dims = Entity::SLEEPING_DIMENSIONS;
         assert_eq!((dims.width, dims.height, dims.eye_height), (0.2, 0.2, 0.2));
-    }
-
-    /// Only the two `Avatar` subclasses may reach the pose table; a villager, a breeze and a
-    /// cat must all keep their own type dimensions whatever pose they are put in.
-    #[test]
-    fn only_avatars_use_the_pose_table() {
-        assert!(type_is_avatar(&EntityType::PLAYER));
-        assert!(type_is_avatar(&EntityType::MANNEQUIN));
-        for entity_type in [
-            &EntityType::VILLAGER,
-            &EntityType::BREEZE,
-            &EntityType::CAT,
-            &EntityType::WARDEN,
-            &EntityType::FROG,
-        ] {
-            assert!(!type_is_avatar(entity_type));
-        }
     }
 }

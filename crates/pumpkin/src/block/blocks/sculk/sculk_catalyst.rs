@@ -6,8 +6,7 @@ use std::sync::Arc;
 
 use crate::block::entities::sculk_catalyst::SculkCatalystBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, OnPlaceArgs, OnScheduledTickArgs,
-    PlacedArgs,
+    BlockBehaviour, BlockMetadata, BrokenArgs, OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
 };
 use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::world::World;
@@ -40,62 +39,54 @@ impl BlockMetadata for SculkCatalystBlock {
 }
 
 impl BlockBehaviour for SculkCatalystBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = SculkCatalystLikeProperties::default(args.block);
-            props.bloom = false;
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = SculkCatalystLikeProperties::default(args.block);
+        props.bloom = false;
+        props.to_state_id(args.block)
     }
 
     /// The block entity itself is created by the generic `on_placed` path in
     /// `block/registry.rs` (`create_block_entity`); what vanilla gets from constructing
     /// `CatalystListener` alongside it has to be done explicitly here.
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            args.world
-                .register_game_event_listener(Arc::new(CatalystListener {
-                    pos: *args.position,
-                }))
+    fn placed(&self, args: PlacedArgs<'_>) {
+        let world = args.world.clone();
+        let pos = *args.position;
+        tokio::spawn(async move {
+            world
+                .register_game_event_listener(Arc::new(CatalystListener { pos }))
                 .await;
-        })
+        });
     }
 
     /// `SculkCatalystBlock.tick` (lines 43-48): clear `PULSE` once the bloom expires.
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let state = args.world.get_block_state(args.position);
-            let mut props = SculkCatalystLikeProperties::from_state_id(state.id, args.block);
-            if props.bloom {
-                props.bloom = false;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-            }
-        })
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        let state = args.world.get_block_state(args.position);
+        let mut props = SculkCatalystLikeProperties::from_state_id(state.id, args.block);
+        if props.bloom {
+            props.bloom = false;
+            args.world.set_block_state(
+                args.position,
+                props.to_state_id(args.block),
+                BlockFlags::NOTIFY_ALL,
+            );
+        }
     }
 
     /// `SculkCatalystBlock.spawnAfterBreak` (`SculkCatalystBlock.java:61-66`) awards 5
     /// experience when the break is allowed to drop experience and the tool lacks Silk Touch.
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if args.player.gamemode.load() == pumpkin_util::GameMode::Creative
-                || !args.world.level_info.load().game_rules.block_drops
-            {
-                return;
-            }
+    fn broken(&self, args: BrokenArgs<'_>) {
+        if args.player.gamemode.load() == pumpkin_util::GameMode::Creative
+            || !args.world.level_info.load().game_rules.block_drops
+        {
+            return;
+        }
 
-            let tool = args.player.inventory().held_item().await;
-            if tool.get_enchantment_level(&pumpkin_data::Enchantment::SILK_TOUCH) > 0 {
-                return;
-            }
+        let tool = args.player.inventory().held_item();
+        if tool.get_enchantment_level(&pumpkin_data::Enchantment::SILK_TOUCH) > 0 {
+            return;
+        }
 
-            ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), 5).await;
-        })
+        ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), 5);
     }
 }
 

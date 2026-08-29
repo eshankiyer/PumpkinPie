@@ -166,15 +166,13 @@ impl CommandContext<'_> {
     ///
     /// struct Executor;
     /// impl CommandExecutor for Executor {
-    ///     fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-    ///         Box::pin(async move {
-    ///             // The `get_argument` method returns a `Result<&i32, CommandSyntaxError>`.
-    ///             // We apply the `?` operator first, propagating the `CommandSyntaxError` if contained.
-    ///             // Finally, we dereference the `&i32`, as `i32` implements Copy.
-    ///             let operand1: i32 = *context.get_argument("operand1")?;
-    ///             let operand2: i32 = *context.get_argument("operand2")?;
-    ///             Ok(operand1 + operand2)
-    ///         })
+    ///     fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+    ///         // The `get_argument` method returns a `Result<&i32, CommandSyntaxError>`.
+    ///         // We apply the `?` operator first, propagating the `CommandSyntaxError` if contained.
+    ///         // Finally, we dereference the `&i32`, as `i32` implements Copy.
+    ///         let operand1: i32 = *context.get_argument("operand1")?;
+    ///         let operand2: i32 = *context.get_argument("operand2")?;
+    ///         Ok(operand1 + operand2)
     ///     }
     /// }
     /// ```
@@ -266,7 +264,7 @@ impl<'a> ContextChain<'a> {
     }
 
     /// Runs the given modifier with provided details.
-    pub async fn run_modifier(
+    pub fn run_modifier(
         modifier: &CommandContext<'a>,
         source: &Arc<CommandSource>,
         result_consumer: &dyn ResultConsumer,
@@ -279,19 +277,15 @@ impl<'a> ContextChain<'a> {
         }
 
         let context_to_use = modifier.with_source(source.clone());
-        match source_modifier.sources(&context_to_use).await {
+        match source_modifier.sources(&context_to_use) {
             Ok(sources) => {
                 if sources.is_empty() {
-                    result_consumer
-                        .on_command_completion(&context_to_use, ReturnValue::Failure)
-                        .await;
+                    result_consumer.on_command_completion(&context_to_use, ReturnValue::Failure);
                 }
                 Ok(sources)
             }
             Err(error) => {
-                result_consumer
-                    .on_command_completion(&context_to_use, ReturnValue::Failure)
-                    .await;
+                result_consumer.on_command_completion(&context_to_use, ReturnValue::Failure);
                 if forked_mode { Ok(vec![]) } else { Err(error) }
             }
         }
@@ -302,7 +296,7 @@ impl<'a> ContextChain<'a> {
     /// # Panics
     ///
     /// Panics if the `executable` provided cannot be executed.
-    pub async fn run_executable(
+    pub fn run_executable(
         executable: &CommandContext<'a>,
         source: &Arc<CommandSource>,
         result_consumer: &dyn ResultConsumer,
@@ -310,20 +304,16 @@ impl<'a> ContextChain<'a> {
     ) -> Result<i32, CommandSyntaxError> {
         let context_to_use = executable.with_source(source.clone());
 
-        let mut result = match &executable.command {
-            None => panic!("Expected `executable` to be executable"),
-            Some(command) => command.execute(&context_to_use).await,
-        };
+        let mut result = executable.command.as_ref().map_or_else(
+            || panic!("Expected `executable` to be executable"),
+            |command| command.execute(&context_to_use),
+        );
 
         if let Ok(result) = result {
-            result_consumer
-                .on_command_completion(&context_to_use, ReturnValue::Success(result))
-                .await;
+            result_consumer.on_command_completion(&context_to_use, ReturnValue::Success(result));
             Ok(if forked_mode { 1 } else { result })
         } else {
-            result_consumer
-                .on_command_completion(&context_to_use, ReturnValue::Failure)
-                .await;
+            result_consumer.on_command_completion(&context_to_use, ReturnValue::Failure);
             if forked_mode {
                 result = Ok(0);
             }
@@ -338,13 +328,13 @@ impl<'a> ContextChain<'a> {
     /// sources out through `run_modifier` (the `ContextChain.runModifier` call
     /// at `BuildContexts.java:71`), tracking vanilla's forked flag as
     /// `forked_mode` (set from the forked node at `:54-56`, read at `:66`).
-    pub async fn execute_all(
+    pub fn execute_all(
         &self,
         source: &Arc<CommandSource>,
         result_consumer: &dyn ResultConsumer,
     ) -> Result<i32, CommandSyntaxError> {
         if self.modifiers.is_empty() {
-            return Self::run_executable(&self.execute, source, result_consumer, false).await;
+            return Self::run_executable(&self.execute, source, result_consumer, false);
         }
 
         let mut forked_mode = false;
@@ -357,7 +347,7 @@ impl<'a> ContextChain<'a> {
             let mut next_sources = Vec::new();
             for source in current_sources {
                 let mut to_add =
-                    Self::run_modifier(modifier, &source, result_consumer, forked_mode).await?;
+                    Self::run_modifier(modifier, &source, result_consumer, forked_mode)?;
                 next_sources.append(&mut to_add);
                 // Port of the fork-limit check (`BuildContexts.java:72-74`):
                 // once the accumulated context count reaches the limit, abort.
@@ -386,8 +376,7 @@ impl<'a> ContextChain<'a> {
                 &execution_source,
                 result_consumer,
                 forked_mode,
-            )
-            .await?;
+            )?;
         }
 
         Ok(result)
@@ -605,7 +594,6 @@ impl<'a> CommandContextBuilder<'a> {
 
 #[cfg(test)]
 mod test {
-    use std::pin::Pin;
     use std::sync::{Arc, Mutex};
 
     use crate::command::argument_builder::{ArgumentBuilder, CommandArgumentBuilder};
@@ -627,18 +615,16 @@ mod test {
 
     struct TenExecutor;
     impl CommandExecutor for TenExecutor {
-        fn execute<'a>(&'a self, _context: &'a CommandContext) -> CommandExecutorResult<'a> {
-            Box::pin(async move { Ok(10) })
+        fn execute(&self, _context: &CommandContext) -> CommandExecutorResult {
+            Ok(10)
         }
     }
 
     struct RecordingCallback(Arc<Mutex<Vec<ReturnValue>>>);
 
     impl ReturnValueCallable for RecordingCallback {
-        fn call(&self, value: ReturnValue) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-            Box::pin(async move {
-                self.0.lock().unwrap().push(value);
-            })
+        fn call(&self, value: ReturnValue) {
+            self.0.lock().unwrap().push(value);
         }
     }
 
@@ -687,26 +673,23 @@ mod test {
         assert!(context.get_argument::<f32>("foo").is_err());
     }
 
-    #[tokio::test]
-    async fn execute_single_command_chain() {
+    #[test]
+    fn execute_single_command_chain() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher
             .register(CommandArgumentBuilder::new("foo", "A test command").executes(TenExecutor));
 
         let source = Arc::new(CommandSource::dummy());
-        let result = dispatcher.parse_input("foo", &source).await;
+        let result = dispatcher.parse_input("foo", &source);
         let top_context = result.context.build("foo");
         let chain = ContextChain::try_flatten(&top_context)
             .expect("The context should have properly flattened, as it has a command to execute");
 
-        assert_eq!(
-            chain.execute_all(&source, &EmptyResultConsumer).await,
-            Ok(10)
-        );
+        assert_eq!(chain.execute_all(&source, &EmptyResultConsumer), Ok(10));
     }
 
-    #[tokio::test]
-    async fn execute_redirected_command_chain() {
+    #[test]
+    fn execute_redirected_command_chain() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher
             .register(CommandArgumentBuilder::new("foo", "A test command").executes(TenExecutor));
@@ -715,24 +698,21 @@ mod test {
         );
 
         let source = Arc::new(CommandSource::dummy());
-        let result = dispatcher.parse_input("bar foo", &source).await;
+        let result = dispatcher.parse_input("bar foo", &source);
         let top_context = result.context.build("bar foo");
         let chain = ContextChain::try_flatten(&top_context)
             .expect("The context should have properly flattened, as it has a command to execute");
 
-        assert_eq!(
-            chain.execute_all(&source, &EmptyResultConsumer).await,
-            Ok(10)
-        );
+        assert_eq!(chain.execute_all(&source, &EmptyResultConsumer), Ok(10));
     }
 
-    #[tokio::test]
-    async fn empty_modifier_reports_command_failure() {
+    #[test]
+    fn empty_modifier_reports_command_failure() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher.register(
             CommandArgumentBuilder::new("condition", "A failed condition").redirect_with_modifier(
                 Redirection::Root,
-                RedirectModifier::Custom(Arc::new(|_| Box::pin(async { Ok(vec![]) }))),
+                RedirectModifier::Custom(Arc::new(|_| Ok(vec![]))),
             ),
         );
         dispatcher
@@ -744,21 +724,18 @@ mod test {
                 RecordingCallback(recorded.clone()),
             )]));
 
-        assert_eq!(
-            dispatcher.execute_input("condition foo", &source).await,
-            Ok(0)
-        );
+        assert_eq!(dispatcher.execute_input("condition foo", &source), Ok(0));
         assert_eq!(*recorded.lock().unwrap(), vec![ReturnValue::Failure]);
     }
 
-    #[tokio::test]
-    async fn single_stage_execution() {
+    #[test]
+    fn single_stage_execution() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher
             .register(CommandArgumentBuilder::new("foo", "A test command").executes(TenExecutor));
 
         let source = Arc::new(CommandSource::dummy());
-        let result = dispatcher.parse_input("foo", &source).await;
+        let result = dispatcher.parse_input("foo", &source);
         let top_context = result.context.build("foo");
         let chain = ContextChain::try_flatten(&top_context)
             .expect("The context should have properly flattened, as it has a command to execute");
@@ -767,8 +744,8 @@ mod test {
         assert!(chain.next_stage().is_none());
     }
 
-    #[tokio::test]
-    async fn multi_stage_execution() {
+    #[test]
+    fn multi_stage_execution() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher
             .register(CommandArgumentBuilder::new("foo", "A test command").executes(TenExecutor));
@@ -781,7 +758,7 @@ mod test {
         );
 
         let source = Arc::new(CommandSource::dummy());
-        let result = dispatcher.parse_input("bar qux foo", &source).await;
+        let result = dispatcher.parse_input("bar qux foo", &source);
         let top_context = result.context.build("bar qux foo");
         let chain = ContextChain::try_flatten(&top_context)
             .expect("The context should have properly flattened, as it has a command to execute");
@@ -799,13 +776,13 @@ mod test {
         assert!(chain3.next_stage().is_none());
     }
 
-    #[tokio::test]
-    async fn missing_command() {
+    #[test]
+    fn missing_command() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher.register(CommandArgumentBuilder::new("foo", "A test command"));
 
         let source = Arc::new(CommandSource::dummy());
-        let result = dispatcher.parse_input("foo", &source).await;
+        let result = dispatcher.parse_input("foo", &source);
         let top_context = result.context.build("foo");
 
         assert!(ContextChain::try_flatten(&top_context).is_none());
@@ -813,17 +790,15 @@ mod test {
 
     struct CustomExecutor;
     impl CommandExecutor for CustomExecutor {
-        fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-            Box::pin(async move {
-                let source = &context.source;
-                assert_eq!(source.position, Vector3::new(0f64, 10f64, 0f64));
-                Ok(1)
-            })
+        fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+            let source = &context.source;
+            assert_eq!(source.position, Vector3::new(0f64, 10f64, 0f64));
+            Ok(1)
         }
     }
 
-    #[tokio::test]
-    async fn multi_stage_modifier_execution() {
+    #[test]
+    fn multi_stage_modifier_execution() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher.register(
             CommandArgumentBuilder::new("foo", "A test command").executes(CustomExecutor),
@@ -832,16 +807,14 @@ mod test {
             CommandArgumentBuilder::new("bar", "Another test command").redirect_with_modifier(
                 Redirection::Root,
                 RedirectModifier::Custom(Arc::new(|context| {
-                    Box::pin(async move {
-                        let mut new_source = context.source.as_ref().clone();
-                        new_source.position = Vector3::new(0f64, 10f64, 0f64);
-                        Ok(vec![Arc::new(new_source)])
-                    })
+                    let mut new_source = context.source.as_ref().clone();
+                    new_source.position = Vector3::new(0f64, 10f64, 0f64);
+                    Ok(vec![Arc::new(new_source)])
                 })),
             ),
         );
         let source = Arc::new(CommandSource::dummy());
-        let result = dispatcher.parse_input("bar foo", &source).await;
+        let result = dispatcher.parse_input("bar foo", &source);
         let top_context = result.context.build("bar foo");
         let chain = ContextChain::try_flatten(&top_context)
             .expect("The context should have properly flattened, as it has a command to execute");
@@ -850,9 +823,7 @@ mod test {
             .next_stage()
             .expect("There should have been the next stage");
         assert!(chain2.next_stage().is_none());
-        let res = chain
-            .execute_all(&source, dispatcher.consumer.as_ref())
-            .await;
+        let res = chain.execute_all(&source, dispatcher.consumer.as_ref());
         assert!(res.is_ok_and(|val| val == 1));
     }
 
@@ -860,20 +831,18 @@ mod test {
     /// (`GameRules.java:52`) through a custom modifier.
     fn oversized_fork_modifier() -> RedirectModifier {
         RedirectModifier::Custom(Arc::new(|context| {
-            Box::pin(async move {
-                let sources = std::iter::repeat_n(
-                    Arc::new(context.source.as_ref().clone()),
-                    // Above the 65536 default, so the fork limit must trip.
-                    70_000,
-                )
-                .collect::<Vec<_>>();
-                Ok(sources)
-            })
+            let sources = std::iter::repeat_n(
+                Arc::new(context.source.as_ref().clone()),
+                // Above the 65536 default, so the fork limit must trip.
+                70_000,
+            )
+            .collect::<Vec<_>>();
+            Ok(sources)
         }))
     }
 
-    #[tokio::test]
-    async fn fork_limit_stops_forked_chain_silently() {
+    #[test]
+    fn fork_limit_stops_forked_chain_silently() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher
             .register(CommandArgumentBuilder::new("foo", "A test command").executes(TenExecutor));
@@ -883,7 +852,7 @@ mod test {
         );
 
         let source = Arc::new(CommandSource::dummy());
-        let result = dispatcher.parse_input("fork foo", &source).await;
+        let result = dispatcher.parse_input("fork foo", &source);
         let top_context = result.context.build("fork foo");
         let chain = ContextChain::try_flatten(&top_context)
             .expect("The context should have properly flattened, as it has a command to execute");
@@ -891,14 +860,11 @@ mod test {
         // Vanilla reports the fork limit through `handleError`, which is
         // silent beyond tracing when forked (`CommandSourceStack.java:572-578`),
         // so the chain ends without an error result.
-        assert_eq!(
-            chain.execute_all(&source, &EmptyResultConsumer).await,
-            Ok(0)
-        );
+        assert_eq!(chain.execute_all(&source, &EmptyResultConsumer), Ok(0));
     }
 
-    #[tokio::test]
-    async fn fork_limit_errors_unforked_chain() {
+    #[test]
+    fn fork_limit_errors_unforked_chain() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher
             .register(CommandArgumentBuilder::new("foo", "A test command").executes(TenExecutor));
@@ -908,14 +874,13 @@ mod test {
         );
 
         let source = Arc::new(CommandSource::dummy());
-        let result = dispatcher.parse_input("fork foo", &source).await;
+        let result = dispatcher.parse_input("fork foo", &source);
         let top_context = result.context.build("fork foo");
         let chain = ContextChain::try_flatten(&top_context)
             .expect("The context should have properly flattened, as it has a command to execute");
 
         let error = chain
             .execute_all(&source, &EmptyResultConsumer)
-            .await
             .expect_err("The fork limit should have aborted this unforked chain");
         assert!(error.is(&ERROR_FORK_LIMIT_REACHED));
     }

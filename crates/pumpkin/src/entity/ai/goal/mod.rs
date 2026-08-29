@@ -1,5 +1,5 @@
 use crate::entity::mob::Mob;
-use std::{any::TypeId, ops::BitOr, pin::Pin, ptr};
+use std::{any::TypeId, ops::BitOr, ptr};
 
 pub mod active_target;
 pub mod ambient_stand;
@@ -36,6 +36,7 @@ pub mod drowned_go_to_beach;
 pub mod drowned_go_to_water;
 pub mod drowned_swim_up;
 pub(crate) mod drowned_util;
+pub mod door_interact;
 pub mod eat_grass;
 pub mod escape_danger;
 pub mod evoker_spell;
@@ -109,6 +110,7 @@ pub mod phantom_attack_player_target;
 pub mod phantom_attack_strategy;
 pub mod phantom_circle_anchor;
 pub mod phantom_sweep_attack;
+pub mod open_door;
 pub mod pick_up_block;
 pub mod piglin_admire;
 pub mod piglin_avoid_repellent;
@@ -120,12 +122,13 @@ pub mod rabbit_avoid_entity;
 pub mod raid_garden;
 pub mod random_pos;
 pub mod ranged_bow_attack;
-pub mod ranged_crossbow_attack;
 pub mod ranged_llama_spit_attack;
 pub mod ranged_snowball_attack;
 pub mod ranged_trident_attack;
 pub mod reset_universal_anger_target;
 pub mod restrict_sun;
+pub mod ranged_attack;
+pub mod ranged_crossbow_attack;
 pub mod revenge;
 pub mod ring_bell;
 pub mod run_around_like_crazy;
@@ -172,34 +175,25 @@ pub const fn to_goal_ticks(server_ticks: i32) -> i32 {
     -(-server_ticks).div_euclid(2)
 }
 
-pub type GoalFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-
 pub trait Goal: Send + Sync {
     /// How should the `Goal` initially start?
-    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { false })
+    fn can_start(&mut self, _mob: &dyn Mob) -> bool {
+        false
     }
 
     /// When it's started, how should it continue to run?
-    /// Defaults to whether the goal could still start fresh (vanilla: `Goal.canContinueToUse` defaults to `this.canUse()`).
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        self.can_start(mob)
+    fn should_continue(&self, _mob: &dyn Mob) -> bool {
+        false
     }
 
     /// Call when goal start
-    fn start<'a>(&'a mut self, _: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {})
-    }
+    fn start(&mut self, _mob: &dyn Mob) {}
 
     /// Call when goal stop
-    fn stop<'a>(&'a mut self, _: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {})
-    }
+    fn stop(&mut self, _mob: &dyn Mob) {}
 
     /// If the `Goal` is running, this gets called every tick.
-    fn tick<'a>(&'a mut self, _: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {})
-    }
+    fn tick(&mut self, _mob: &dyn Mob) {}
 
     fn should_run_every_tick(&self) -> bool {
         false
@@ -230,7 +224,7 @@ pub trait Goal: Send + Sync {
     }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 // We actually only use the first 4 bits ;)
 pub struct Controls(u8);
 
@@ -243,32 +237,44 @@ impl Controls {
     pub const ITER: [Self; 4] = [Self::MOVE, Self::LOOK, Self::JUMP, Self::TARGET];
 
     #[must_use]
-    pub fn empty() -> Self {
-        Self::default()
+    pub const fn empty() -> Self {
+        Self(0)
     }
 
-    pub const fn set(&mut self, control: Self, val: bool) {
-        if val {
-            self.0 |= control.0;
+    #[must_use]
+    pub const fn contains(&self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
+
+    pub const fn insert(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+
+    pub const fn remove(&mut self, other: Self) {
+        self.0 &= !other.0;
+    }
+
+    pub const fn set(&mut self, control: Self, value: bool) {
+        if value {
+            self.insert(control);
         } else {
-            self.0 &= !control.0;
+            self.remove(control);
         }
+    }
+
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.0 == 0
     }
 
     #[must_use]
     pub const fn get(&self, control: Self) -> bool {
-        self.0 & control.0 != 0
+        (self.0 & control.0) != 0
     }
 
     #[must_use]
-    pub fn idx(&self) -> usize {
-        for (i, control) in Self::ITER.into_iter().enumerate() {
-            if self.get(control) {
-                return i;
-            }
-        }
-        tracing::error!("Controls::idx called with no controls set");
-        0
+    pub const fn idx(&self) -> usize {
+        self.0.trailing_zeros() as usize
     }
 }
 
@@ -305,36 +311,30 @@ impl PrioritizedGoal {
 }
 
 impl Goal for PrioritizedGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async { self.goal.can_start(mob).await })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        self.goal.can_start(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+    fn should_continue(&self, mob: &dyn Mob) -> bool {
         self.goal.should_continue(mob)
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            if !self.running {
-                self.running = true;
-                self.goal.start(mob).await;
-            }
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        if !self.running {
+            self.running = true;
+            self.goal.start(mob);
+        }
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            if self.running {
-                self.running = false;
-                self.goal.stop(mob).await;
-            }
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        if self.running {
+            self.running = false;
+            self.goal.stop(mob);
+        }
     }
 
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
-            self.goal.tick(mob).await;
-        })
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.goal.tick(mob);
     }
 
     fn should_run_every_tick(&self) -> bool {

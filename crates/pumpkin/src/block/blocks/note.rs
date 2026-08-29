@@ -2,14 +2,11 @@ use std::sync::Arc;
 
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    AttackArgs, BlockFuture, GetStateForNeighborUpdateArgs, NormalUseArgs, OnNeighborUpdateArgs,
-    OnPlaceArgs, UseWithItemArgs,
+    GetStateForNeighborUpdateArgs, NormalUseArgs, OnNeighborUpdateArgs, OnPlaceArgs,
+    UseWithItemArgs,
 };
-use crate::entity::EntityBase;
-use crate::world::game_event::{GameEventContext, emit_game_event};
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{Axis, NoteblockInstrument};
-use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::{
     Block,
@@ -18,7 +15,6 @@ use pumpkin_data::{
 };
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
-use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::world::BlockFlags;
 
 use crate::{
@@ -32,16 +28,7 @@ use super::redstone::block_receives_redstone_power;
 pub struct NoteBlock;
 
 impl NoteBlock {
-    /// NoteBlock.java `playNote`: triggers the client-visible block event (sound) and,
-    /// separately, `level.gameEvent(source, GameEvent.NOTE_BLOCK_PLAY, pos)` — this is
-    /// the emission Allay's `AllayAi.hearNoteblock` / `VibrationSystem.User` listens
-    /// for (Allay.java `VibrationUser.onReceiveVibration`).
-    pub async fn play_note(
-        props: &NoteBlockLikeProperties,
-        world: &Arc<World>,
-        pos: &BlockPos,
-        context: GameEventContext,
-    ) {
+    pub fn play_note(props: &NoteBlockLikeProperties, world: &World, pos: &BlockPos) {
         if !is_base_block(props.instrument) || world.get_block_state(&pos.up()).is_air() {
             let mut event = crate::plugin::api::events::block::note_play::NotePlayEvent::new(
                 *pos,
@@ -49,23 +36,14 @@ impl NoteBlock {
                 props.note,
             );
             if let Some(server) = world.server.upgrade() {
-                server.plugin_manager.fire(&server, &mut event).await;
+                server.plugin_manager.fire_blocking(&server, &mut event);
             }
             if event.cancelled {
                 return;
             }
-            world.add_synced_block_event(*pos, 0, 0).await;
-            emit_game_event(
-                world,
-                GameEvent::NoteBlockPlay,
-                Vector3::new(
-                    f64::from(pos.0.x) + 0.5,
-                    f64::from(pos.0.y) + 0.5,
-                    f64::from(pos.0.z) + 0.5,
-                ),
-                context,
-            )
-            .await;
+            world.add_synced_block_event(*pos, 0, 0);
+            // NoteBlock.java `playNote` emits NOTE_BLOCK_PLAY for vibration listeners.
+            world.emit_game_event("note_block_play", pos.to_centered_f64());
         }
     }
     fn get_note_pitch(note: u16) -> f32 {
@@ -97,159 +75,103 @@ impl NoteBlock {
 }
 
 impl BlockBehaviour for NoteBlock {
-    fn attack<'a>(&'a self, args: AttackArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let props = NoteBlockLikeProperties::from_state_id(args.state.id, args.block);
-            Self::play_note(
-                &props,
-                args.world,
-                args.position,
-                GameEventContext::of_entity(args.player.clone() as Arc<dyn EntityBase>),
-            )
-            .await;
-            args.player
-                .increment_stat(
-                    pumpkin_data::statistic::StatisticCategory::Custom,
-                    pumpkin_data::statistic::CustomStatistic::PlayNoteblock as i32,
-                    1,
-                )
-                .await;
-        })
-    }
-
-    fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let block_state = args.world.get_block_state(args.position);
-            let mut note_props = NoteBlockLikeProperties::from_state_id(block_state.id, args.block);
-            let powered = block_receives_redstone_power(args.world, args.position).await;
-            // check if powered state changed
-            if note_props.powered != powered {
-                if powered {
-                    Self::play_note(
-                        &note_props,
-                        args.world,
-                        args.position,
-                        GameEventContext::none(),
-                    )
-                    .await;
-                }
-                note_props.powered = powered;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        note_props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
+    fn on_neighbor_update(&self, args: OnNeighborUpdateArgs<'_>) {
+        let block_state = args.world.get_block_state(args.position);
+        let mut note_props = NoteBlockLikeProperties::from_state_id(block_state.id, args.block);
+        let powered = block_receives_redstone_power(args.world, args.position);
+        // check if powered state changed
+        if note_props.powered != powered {
+            if powered {
+                Self::play_note(&note_props, args.world, args.position);
             }
-        })
-    }
-
-    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            let block_state = args.world.get_block_state(args.position);
-            let mut note_props = NoteBlockLikeProperties::from_state_id(block_state.id, args.block);
-            note_props.note = (note_props.note + 1) % 25;
-            args.world
-                .set_block_state(
-                    args.position,
-                    note_props.to_state_id(args.block),
-                    BlockFlags::NOTIFY_ALL,
-                )
-                .await;
-            Self::play_note(
-                &note_props,
-                args.world,
+            note_props.powered = powered;
+            args.world.set_block_state(
                 args.position,
-                GameEventContext::of_entity(args.player.clone() as Arc<dyn EntityBase>),
-            )
-            .await;
-
-            args.player
-                .increment_stat(
-                    pumpkin_data::statistic::StatisticCategory::Custom,
-                    pumpkin_data::statistic::CustomStatistic::TuneNoteblock as i32,
-                    1,
-                )
-                .await;
-
-            BlockActionResult::Success
-        })
-    }
-
-    fn use_with_item<'a>(
-        &'a self,
-        args: UseWithItemArgs<'a>,
-    ) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
-            // Vanilla `NoteBlock.useItemOn` (`NoteBlock.java:109-120`) leaves the
-            // interaction to the item when a top-instrument item is used on the top face;
-            // every other item falls through to the note block's empty-hand action.
-            if args
-                .item_stack
-                .item
-                .has_tag(&tag::Item::MINECRAFT_NOTEBLOCK_TOP_INSTRUMENTS)
-                && *args.hit.face == pumpkin_data::BlockDirection::Up
-            {
-                BlockActionResult::Pass
-            } else {
-                BlockActionResult::PassToDefaultBlockAction
-            }
-        })
-    }
-
-    fn on_synced_block_event<'a>(
-        &'a self,
-        args: OnSyncedBlockEventArgs<'a>,
-    ) -> BlockFuture<'a, bool> {
-        Box::pin(async move {
-            let block_state = args.world.get_block_state(args.position);
-            let note_props = NoteBlockLikeProperties::from_state_id(block_state.id, args.block);
-            let instrument = note_props.instrument;
-            let pitch = if is_base_block(instrument) {
-                // checks if can be pitched
-                Self::get_note_pitch(u16::from(note_props.note))
-            } else {
-                1.0 // default pitch
-            };
-            // check hasCustomSound
-            args.world.play_sound_raw(
-                convert_instrument_to_sound(instrument) as u16,
-                SoundCategory::Records,
-                &args.position.to_f64(),
-                3.0,
-                pitch,
+                note_props.to_state_id(args.block),
+                BlockFlags::NOTIFY_ALL,
             );
-            true
-        })
+        }
     }
 
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            Self::get_state_with_instrument(
+    fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
+        let block_state = args.world.get_block_state(args.position);
+        let mut note_props = NoteBlockLikeProperties::from_state_id(block_state.id, args.block);
+        note_props.note = (note_props.note + 1) % 25;
+        args.world.set_block_state(
+            args.position,
+            note_props.to_state_id(args.block),
+            BlockFlags::NOTIFY_ALL,
+        );
+        Self::play_note(&note_props, args.world, args.position);
+
+        args.player.increment_stat(
+            pumpkin_data::statistic::StatisticCategory::Custom,
+            pumpkin_data::statistic::CustomStatistic::TuneNoteblock as i32,
+            1,
+        );
+
+        BlockActionResult::Success
+    }
+
+    fn use_with_item(&self, args: UseWithItemArgs<'_>) -> BlockActionResult {
+        // Vanilla `NoteBlock.useItemOn` (`NoteBlock.java:109-120`) leaves the interaction to
+        // the item when a top-instrument item is used on the top face; every other item falls
+        // through to the note block's empty-hand action.
+        if args
+            .item_stack
+            .item
+            .has_tag(&tag::Item::MINECRAFT_NOTEBLOCK_TOP_INSTRUMENTS)
+            && *args.hit.face == pumpkin_data::BlockDirection::Up
+        {
+            BlockActionResult::Pass
+        } else {
+            BlockActionResult::PassToDefaultBlockAction
+        }
+    }
+
+    fn on_synced_block_event(&self, args: OnSyncedBlockEventArgs<'_>) -> bool {
+        let block_state = args.world.get_block_state(args.position);
+        let note_props = NoteBlockLikeProperties::from_state_id(block_state.id, args.block);
+        let instrument = note_props.instrument;
+        let pitch = if is_base_block(instrument) {
+            // checks if can be pitched
+            Self::get_note_pitch(u16::from(note_props.note))
+        } else {
+            1.0 // default pitch
+        };
+        // check hasCustomSound
+        args.world.play_sound_raw(
+            convert_instrument_to_sound(instrument) as u16,
+            SoundCategory::Records,
+            &args.position.to_f64(),
+            3.0,
+            pitch,
+        );
+        true
+    }
+
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        Self::get_state_with_instrument(
+            args.world,
+            args.position,
+            Block::NOTE_BLOCK.default_state.id,
+            args.block,
+        )
+    }
+
+    fn get_state_for_neighbor_update(
+        &self,
+        args: GetStateForNeighborUpdateArgs<'_>,
+    ) -> BlockStateId {
+        if args.direction.to_axis() == Axis::Y {
+            return Self::get_state_with_instrument(
                 args.world,
                 args.position,
-                Block::NOTE_BLOCK.default_state.id,
+                args.state_id,
                 args.block,
-            )
-        })
-    }
-
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            if args.direction.to_axis() == Axis::Y {
-                return Self::get_state_with_instrument(
-                    args.world,
-                    args.position,
-                    args.state_id,
-                    args.block,
-                );
-            }
-            args.state_id
-        })
+            );
+        }
+        args.state_id
     }
 }
 

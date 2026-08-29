@@ -5,8 +5,6 @@ use pumpkin_util::Difficulty;
 use crate::entity::living::LivingEntity;
 use crate::world::World;
 use pumpkin_util::math::vector3::Vector3;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::Ordering::{Relaxed, SeqCst};
 
@@ -39,7 +37,7 @@ impl TargetData {
 }
 
 pub type PredicateFn =
-    dyn Fn(TargetData, Arc<World>) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync;
+    dyn Fn(&LivingEntity, &World) -> bool + Send + Sync;
 
 pub struct TargetPredicate {
     pub attackable: bool,
@@ -108,19 +106,16 @@ impl TargetPredicate {
         self
     }
 
-    pub fn set_predicate<F, Fut>(&mut self, predicate: F)
+    pub fn set_predicate<F>(&mut self, predicate: F)
     where
-        F: Fn(TargetData, Arc<World>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = bool> + Send + 'static,
+        F: Fn(&LivingEntity, &World) -> bool + Send + Sync + 'static,
     {
-        self.predicate = Some(Arc::new(move |target, world| {
-            Box::pin(predicate(target, world))
-        }));
+        self.predicate = Some(Arc::new(predicate));
     }
 
-    pub async fn test(
+    pub fn test(
         &self,
-        world: &Arc<World>,
+        world: &World,
         tester: Option<&LivingEntity>,
         target: &LivingEntity,
     ) -> bool {
@@ -132,9 +127,7 @@ impl TargetPredicate {
             return false;
         }
 
-        if let Some(predicate) = &self.predicate
-            && !(predicate)(TargetData::from_living(target), world.clone()).await
-        {
+        if let Some(predicate) = &self.predicate && !(predicate)(target, world) {
             return false;
         }
 
@@ -150,7 +143,7 @@ impl TargetPredicate {
             && self.base_max_distance > 0.0
         {
             let visibility_modifier = if self.use_distance_scaling_factor {
-                targeter_visibility_modifier(tester_ent, target).await
+                targeter_visibility_modifier(tester_ent, target)
             } else {
                 1.0
             };
@@ -175,9 +168,8 @@ impl TargetPredicate {
                 .raycast(
                     tester_ent.entity.get_eye_pos(),
                     target.entity.get_eye_pos(),
-                    async |block_pos, world| world.get_block_state(block_pos).is_solid(),
+                    |block_pos, world| world.get_block_state(block_pos).is_solid(),
                 )
-                .await
                 .is_some()
         {
             return false;
@@ -187,7 +179,7 @@ impl TargetPredicate {
     }
 }
 
-async fn targeter_visibility_modifier(targeter: &LivingEntity, target: &LivingEntity) -> f64 {
+fn targeter_visibility_modifier(targeter: &LivingEntity, target: &LivingEntity) -> f64 {
     let mut modifier = 1.0;
 
     // `LivingEntity.getVisibilityPercent` (`LivingEntity.java:919-922`): a discrete target is
@@ -198,7 +190,10 @@ async fn targeter_visibility_modifier(targeter: &LivingEntity, target: &LivingEn
     }
 
     if target.entity.invisible.load(Relaxed) {
-        let equipment = target.entity_equipment.lock().await;
+        let equipment = target
+            .entity_equipment
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let armor_slots = [
             EquipmentSlot::HEAD,
             EquipmentSlot::CHEST,
@@ -217,7 +212,7 @@ async fn targeter_visibility_modifier(targeter: &LivingEntity, target: &LivingEn
     let head_item = target
         .entity_equipment
         .lock()
-        .await
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .get(&EquipmentSlot::HEAD)
         .item
         .id;

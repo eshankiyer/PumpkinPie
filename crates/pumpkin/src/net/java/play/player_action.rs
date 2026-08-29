@@ -3,10 +3,10 @@ use super::*;
 
 impl JavaClient {
     #[expect(clippy::too_many_lines)]
-    pub async fn handle_player_action(
+    pub fn handle_player_action(
         &self,
         player: &Arc<Player>,
-        player_action: SPlayerAction,
+        player_action: &SPlayerAction,
         server: &Server,
     ) {
         if !player.has_client_loaded() {
@@ -21,60 +21,13 @@ impl JavaClient {
                             "Player {0} tried to interact with block out of reach at {1}",
                             player.gameprofile.name, player_action.position
                         );
-                        self.update_sequence(player, player_action.sequence.0);
-                        return;
-                    }
-                    if player.gamemode.load() == GameMode::Spectator {
-                        self.update_sequence(player, player_action.sequence.0);
+                        self.update_sequence(player_action.sequence.0);
                         return;
                     }
                     let position = player_action.position;
                     let entity = &player.get_entity();
                     let world = entity.world.load_full();
-
-                    // ServerPlayerGameMode rejects positions above the level's
-                    // maximum build height before starting a destroy action.
-                    if position.0.y > world.get_top_y() {
-                        self.sync_block_state_to_client(&world, position).await;
-                        self.update_sequence(player, player_action.sequence.0);
-                        return;
-                    }
-
-                    if player
-                        .is_under_spawn_protection(server, &world, &position)
-                        .await
-                    {
-                        let message = TextComponent::translate_cross(
-                            translation::java::BUILD_SPAWN_PROTECTION,
-                            translation::java::BUILD_SPAWN_PROTECTION,
-                            vec![TextComponent::text(format!("[{position}]"))],
-                        );
-                        player.send_system_message_raw(&message, true).await;
-                        self.update_sequence(player, player_action.sequence.0);
-                        return;
-                    }
-
-                    // ServerLevel.mayInteract also applies the world border.
-                    let inside_world_border = {
-                        let border = world.worldborder.lock().await;
-                        border.contains_block(position.0.x, position.0.z)
-                    };
-                    if !inside_world_border {
-                        self.sync_block_state_to_client(&world, position).await;
-                        self.update_sequence(player, player_action.sequence.0);
-                        return;
-                    }
-
                     let (block, state) = world.get_block_and_state(&position);
-
-                    // Vanilla checks Player.blockActionRestricted at the start of a
-                    // destroy action and defers the held item's destruction rules to
-                    // ServerPlayerGameMode.destroyBlock.
-                    if !player.can_start_block_break(block, state).await {
-                        self.sync_block_state_to_client(&world, position).await;
-                        self.update_sequence(player, player_action.sequence.0);
-                        return;
-                    }
 
                     if let Some(server_arc) = world.server.upgrade() {
                         let mut event =
@@ -86,81 +39,168 @@ impl JavaClient {
                             );
                         server_arc
                             .plugin_manager
-                            .fire(&server_arc, &mut event)
-                            .await;
+                            .fire_blocking(&server_arc, &mut event);
                         if event.cancelled {
-                            self.update_sequence(player, player_action.sequence.0);
+                            self.update_sequence(player_action.sequence.0);
                             return;
                         }
                     }
 
+                    // Fork-only `AttackArgs` hook: BlockState.attack runs before any break
+                    // decision, including air-target handling. Keep it in this pre-break phase.
+                    if let Some(server_arc) = world.server.upgrade() {
+                        let world_for_attack = world.clone();
+                        let player_for_attack = player.clone();
+                        tokio::spawn(async move {
+                            server_arc
+                                .block_registry
+                                .attack(
+                                    &world_for_attack,
+                                    block,
+                                    state,
+                                    &position,
+                                    &player_for_attack,
+                                )
+                                .await;
+                        });
+                    }
+
+                    if block == &pumpkin_data::Block::NOTE_BLOCK {
+                        let props =
+                            pumpkin_data::block_properties::NoteBlockLikeProperties::from_state_id(
+                                state.id, block,
+                            );
+                        crate::block::blocks::note::NoteBlock::play_note(&props, &world, &position);
+                        player.increment_stat(
+                            StatisticCategory::Custom,
+                            CustomStatistic::PlayNoteblock as i32,
+                            1,
+                        );
+                    }
+
+                    let inventory = player.inventory();
+                    let held = inventory.held_item();
+                    if !server.item_registry.can_mine(held.item, player) {
+                        player.try_send_client_packet(&CBlockUpdate::new(
+                            position,
+                            VarInt(i32::from(state.id.as_u16())),
+                        ));
+                        self.update_sequence(player_action.sequence.0);
+                        return;
+                    }
+
+                    // TODO: do validation
+                    // TODO: Config
                     if player.gamemode.load() == GameMode::Creative {
-                        player.finish_block_break(server, &world, position).await;
-                        self.sync_block_state_to_client(&world, position).await;
-                        self.update_sequence(player, player_action.sequence.0);
+                        // Block break & play sound
+                        if let Some(server_arc) = world.server.upgrade() {
+                            let world_for_destroy = world.clone();
+                            let player_for_destroy = player.clone();
+                            tokio::spawn(async move {
+                                server_arc
+                                    .block_registry
+                                    .player_will_destroy(
+                                        &world_for_destroy,
+                                        block,
+                                        &player_for_destroy,
+                                        &position,
+                                        state,
+                                    )
+                                    .await;
+                            });
+                        }
+                        let new_state = world.break_block(
+                            &position,
+                            Some(player),
+                            BlockFlags::NOTIFY_ALL | BlockFlags::SKIP_DROPS,
+                        );
+                        if new_state.is_some() {
+                            server
+                                .block_registry
+                                .broken(&world, block, player, &position, server, state);
+                        }
+                        self.sync_block_state_to_client(&world, position);
+                        self.update_sequence(player_action.sequence.0);
                         return;
                     }
                     player.start_mining_time.store(
                         player.tick_counter.load(Ordering::Relaxed),
                         Ordering::Relaxed,
                     );
-                    // Vanilla starts an air target with progress 1.0, dispatches
-                    // BlockState.attack for every other block, and only then decides
-                    // between an instant break and a tracked destroy target.
-                    let speed = if state.is_air() {
-                        1.0f32
-                    } else {
-                        server
-                            .block_registry
-                            .attack(&world, block, state, &position, player)
-                            .await;
-                        block::calc_block_breaking(player, state, block).await
-                    };
-
-                    if !state.is_air() && speed >= 1.0 {
+                    if !state.is_air() {
+                        let speed = block::calc_block_breaking(player, state, block);
                         // Instant break
-                        player.finish_block_break(server, &world, position).await;
-                        self.sync_block_state_to_client(&world, position).await;
-                    } else {
-                        // Vanilla tracks an air target as an active destroy target so a
-                        // subsequent STOP for another position cannot complete it.
-                        let old_position = *player.mining_pos.lock().await;
-                        let already_mining = player.mining.load(Ordering::Relaxed);
-                        if already_mining && old_position != position {
-                            self.send_packet(&CBlockUpdate::new(
-                                old_position,
-                                VarInt(i32::from(world.get_block_state(&old_position).id.as_u16())),
-                            ))
-                            .await;
-                            world
-                                .set_block_breaking(
-                                    entity,
-                                    old_position,
-                                    BlockBreakingProgress::Stop,
-                                )
-                                .await;
-                        }
-                        player.mining.store(true, Ordering::Relaxed);
-                        *player.mining_pos.lock().await = position;
-                        let progress = (speed * 10.0) as i32;
-                        player
-                            .current_block_breaking_speed
-                            .store(speed.to_bits(), Ordering::Relaxed);
-                        world
-                            .set_block_breaking(
+                        if speed >= 1.0 {
+                            let broken_state = world.get_block_state(&position);
+                            if let Some(server_arc) = world.server.upgrade() {
+                                let world_for_destroy = world.clone();
+                                let player_for_destroy = player.clone();
+                                tokio::spawn(async move {
+                                    server_arc
+                                        .block_registry
+                                        .player_will_destroy(
+                                            &world_for_destroy,
+                                            block,
+                                            &player_for_destroy,
+                                            &position,
+                                            broken_state,
+                                        )
+                                        .await;
+                                });
+                            }
+                            let can_harvest = player.can_harvest(broken_state, block);
+                            let flags = if can_harvest {
+                                BlockFlags::NOTIFY_ALL
+                            } else {
+                                BlockFlags::SKIP_DROPS | BlockFlags::NOTIFY_ALL
+                            };
+                            let new_state = world.break_block(&position, Some(player), flags);
+                            if new_state.is_some() {
+                                server.block_registry.broken(
+                                    &world,
+                                    block,
+                                    player,
+                                    &position,
+                                    server,
+                                    broken_state,
+                                );
+                                player.apply_tool_damage_for_block_break(broken_state);
+                                if can_harvest {
+                                    player.add_exhaustion(MINE_BLOCK_EXHAUSTION);
+                                }
+                                let item_id = player.inventory().held_item().item.id;
+                                player.increment_stat(StatisticCategory::Used, item_id as i32, 1);
+                                player.increment_stat(
+                                    StatisticCategory::Mined,
+                                    broken_state.id.as_u16() as i32,
+                                    1,
+                                );
+                            }
+                            self.sync_block_state_to_client(&world, position);
+                        } else {
+                            player.mining.store(true, Ordering::Relaxed);
+                            *player
+                                .mining_pos
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner) = position;
+                            let progress = (speed * 10.0) as i32;
+                            player
+                                .current_block_breaking_speed
+                                .store(speed.to_bits(), Ordering::Relaxed);
+                            world.set_block_breaking(
                                 entity,
                                 position,
                                 BlockBreakingProgress::Start {
                                     stage: progress,
                                     speed,
                                 },
-                            )
-                            .await;
-                        player
-                            .current_block_destroy_stage
-                            .store(progress, Ordering::Relaxed);
+                            );
+                            player
+                                .current_block_destroy_stage
+                                .store(progress, Ordering::Relaxed);
+                        }
                     }
-                    self.update_sequence(player, player_action.sequence.0);
+                    self.update_sequence(player_action.sequence.0);
                 }
                 Status::CancelledDigging => {
                     if !player.can_interact_with_block_at(&player_action.position, 1.0) {
@@ -168,47 +208,27 @@ impl JavaClient {
                             "Player {0} tried to interact with block out of reach at {1}",
                             player.gameprofile.name, player_action.position
                         );
-                        self.update_sequence(player, player_action.sequence.0);
+                        self.update_sequence(player_action.sequence.0);
                         return;
                     }
-                    let entity = &player.get_entity();
-                    let world = entity.world.load_full();
-                    // ServerPlayerGameMode rejects any block action above the level's
-                    // maximum build height, including ABORT_DESTROY_BLOCK.
-                    if player_action.position.0.y > world.get_top_y() {
-                        self.sync_block_state_to_client(&world, player_action.position)
-                            .await;
-                        self.update_sequence(player, player_action.sequence.0);
-                        return;
-                    }
-                    let active_position = *player.mining_pos.lock().await;
                     player.mining.store(false, Ordering::Relaxed);
-                    if active_position != player_action.position {
-                        world
-                            .set_block_breaking(
-                                entity,
-                                active_position,
-                                BlockBreakingProgress::Stop,
-                            )
-                            .await;
-                    }
-                    world
-                        .set_block_breaking(
-                            entity,
-                            player_action.position,
-                            BlockBreakingProgress::Stop,
-                        )
-                        .await;
-                    self.update_sequence(player, player_action.sequence.0);
+                    let entity = &player.get_entity();
+                    entity.world.load().set_block_breaking(
+                        entity,
+                        player_action.position,
+                        BlockBreakingProgress::Stop,
+                    );
+                    self.update_sequence(player_action.sequence.0);
                 }
                 Status::FinishedDigging => {
+                    // TODO: do validation
                     let location = player_action.position;
                     if !player.can_interact_with_block_at(&location, 1.0) {
                         warn!(
                             "Player {0} tried to interact with block out of reach at {1}",
                             player.gameprofile.name, player_action.position
                         );
-                        self.update_sequence(player, player_action.sequence.0);
+                        self.update_sequence(player_action.sequence.0);
                         return;
                     }
 
@@ -216,111 +236,94 @@ impl JavaClient {
                     let entity = &player.get_entity();
                     let world = entity.world.load_full();
 
-                    // ServerPlayerGameMode rejects any block action above the level's
-                    // maximum build height, including STOP_DESTROY_BLOCK.
-                    if location.0.y > world.get_top_y() {
-                        self.sync_block_state_to_client(&world, location).await;
-                        self.update_sequence(player, player_action.sequence.0);
-                        return;
-                    }
+                    player.mining.store(false, Ordering::Relaxed);
+                    world.set_block_breaking(entity, location, BlockBreakingProgress::Stop);
 
                     let (block, state) = world.get_block_and_state(&location);
-                    if player.gamemode.load() == GameMode::Spectator {
-                        player.mining.store(false, Ordering::Relaxed);
-                        player.delayed_mining.store(false, Ordering::Relaxed);
-                        self.sync_block_state_to_client(&world, location).await;
-                        self.update_sequence(player, player_action.sequence.0);
-                        return;
-                    }
+                    let block_drop = player.gamemode.load() != GameMode::Creative
+                        && player.can_harvest(state, block);
 
-                    let mining_position = *player.mining_pos.lock().await;
-                    let delayed_position = *player.delayed_mining_pos.lock().await;
-                    let delayed_target = player.delayed_mining.load(Ordering::Relaxed)
-                        && delayed_position == location;
-                    let same_mining_target = (player.mining.load(Ordering::Relaxed)
-                        && mining_position == location)
-                        || delayed_target;
-                    // Vanilla only evaluates STOP_DESTROY_BLOCK for the target
-                    // currently held by ServerPlayerGameMode.
-                    if !same_mining_target {
-                        self.update_sequence(player, player_action.sequence.0);
-                        return;
+                    // `player_will_destroy` is deliberately before `break_block`: the fork
+                    // uses this hook for pre-removal behavior and it must not be moved to
+                    // `broken`, which runs after the block has become air.
+                    if let Some(server_arc) = world.server.upgrade() {
+                        let world_for_destroy = world.clone();
+                        let player_for_destroy = player.clone();
+                        tokio::spawn(async move {
+                            server_arc
+                                .block_registry
+                                .player_will_destroy(
+                                    &world_for_destroy,
+                                    block,
+                                    &player_for_destroy,
+                                    &location,
+                                    state,
+                                )
+                                .await;
+                        });
                     }
-                    // ServerPlayerGameMode leaves the active target untouched
-                    // when STOP arrives after that target became air.
-                    if state.is_air() {
-                        self.update_sequence(player, player_action.sequence.0);
-                        return;
-                    }
+                    let new_state = world.break_block(
+                        &location,
+                        Some(player),
+                        if block_drop {
+                            BlockFlags::NOTIFY_ALL
+                        } else {
+                            BlockFlags::SKIP_DROPS | BlockFlags::NOTIFY_ALL
+                        },
+                    );
+                    if new_state.is_some() {
+                        server
+                            .block_registry
+                            .broken(&world, block, player, &location, server, state);
 
-                    let destroy_start = if delayed_target {
-                        player.delayed_mining_start_time.load(Ordering::Relaxed)
-                    } else {
-                        player.start_mining_time.load(Ordering::Relaxed)
-                    };
-                    let elapsed_ticks = player
-                        .tick_counter
-                        .load(Ordering::Relaxed)
-                        .saturating_sub(destroy_start);
-                    let speed = block::calc_block_breaking(player, state, block).await;
-                    // ServerPlayerGameMode only destroys a non-instant block after the
-                    // STOP packet has accumulated vanilla's 0.7 progress threshold.
-                    // A client cannot bypass this by sending START and STOP back to back.
-                    if player.gamemode.load() != GameMode::Creative
-                        && speed * ((elapsed_ticks + 1).max(0) as f32) < 0.7
-                    {
-                        if !delayed_target {
-                            *player.delayed_mining_pos.lock().await = location;
-                            player
-                                .delayed_mining_start_time
-                                .store(destroy_start, Ordering::Relaxed);
-                            player.delayed_mining.store(true, Ordering::Relaxed);
+                        player.apply_tool_damage_for_block_break(state);
+                        if block_drop {
+                            player.add_exhaustion(MINE_BLOCK_EXHAUSTION);
                         }
-                        player.mining.store(false, Ordering::Relaxed);
-                        self.update_sequence(player, player_action.sequence.0);
-                        return;
+                        let item_id = player.inventory().held_item().item.id;
+                        player.increment_stat(StatisticCategory::Used, item_id as i32, 1);
+                        player.increment_stat(
+                            StatisticCategory::Mined,
+                            state.id.as_u16() as i32,
+                            1,
+                        );
                     }
 
-                    player.mining.store(false, Ordering::Relaxed);
-                    world
-                        .set_block_breaking(entity, location, BlockBreakingProgress::Stop)
-                        .await;
-                    if !player.finish_block_break(server, &world, location).await {
-                        self.sync_block_state_to_client(&world, location).await;
-                        self.update_sequence(player, player_action.sequence.0);
-                        return;
-                    }
+                    self.sync_block_state_to_client(&world, location);
 
-                    self.sync_block_state_to_client(&world, location).await;
-
-                    self.update_sequence(player, player_action.sequence.0);
+                    self.update_sequence(player_action.sequence.0);
                 }
                 Status::DropItem => {
-                    player.drop_held_item(false).await;
+                    player.drop_held_item(false);
                 }
                 Status::DropItemStack => {
-                    player.drop_held_item(true).await;
+                    player.drop_held_item(true);
                 }
                 Status::ReleaseItemInUse => {
-                    let item_in_use = player.living_entity.item_in_use.lock().await.clone();
+                    let item_in_use = player
+                        .living_entity
+                        .item_in_use
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone();
                     if let Some(stack) = item_in_use {
-                        server.item_registry.on_stopped_using(&stack, player).await;
+                        server.item_registry.on_stopped_using(&stack, player);
                     }
 
-                    player.living_entity.clear_active_hand().await;
+                    player.living_entity.clear_active_hand();
                 }
                 Status::SwapItem => {
-                    player.swap_item().await;
+                    player.swap_item();
                 }
                 Status::SpearJab => {
                     debug!("todo");
                 }
             },
-            Err(_) => self.kick(TextComponent::text("Invalid status")).await,
+            Err(_) => self.try_kick(&TextComponent::text("Invalid status")),
         }
     }
 
-    pub fn update_sequence(&self, _player: &Player, sequence: i32) {
+    pub fn update_sequence(&self, sequence: i32) {
         if sequence < 0 {
             error!("Expected packet sequence >= 0");
         }
@@ -330,12 +333,11 @@ impl JavaClient {
         );
     }
 
-    async fn sync_block_state_to_client(&self, world: &World, position: BlockPos) {
+    fn sync_block_state_to_client(&self, world: &World, position: BlockPos) {
         let synced_state_id = world.get_block_state_id(&position);
-        self.send_packet(&CBlockUpdate::new(
+        self.try_send_packet(&CBlockUpdate::new(
             position,
             VarInt(i32::from(synced_state_id.as_u16())),
-        ))
-        .await;
+        ));
     }
 }

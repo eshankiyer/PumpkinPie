@@ -1,6 +1,4 @@
 use std::any::Any;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::block::blocks::coral::coral_fan::CoralWallFanLikeProperties;
@@ -31,28 +29,26 @@ impl ItemMetadata for BoneMealItem {
 
 impl ItemBehaviour for BoneMealItem {
     #[allow(clippy::too_many_lines)]
-    fn use_on_block<'a>(
-        &'a self,
-        item: &'a mut ItemStack,
-        player: &'a Player,
+    fn use_on_block(
+        &self,
+        item: &mut ItemStack,
+        player: &Player,
         location: BlockPos,
         face: BlockDirection,
         _cursor_pos: Vector3<f32>,
-        block: &'a Block,
-        server: &'a Server,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let world = player.world();
-            let state_id = world.get_block_state_id(&location);
-            if server
-                .block_registry
-                .bone_meal(block, &world, &location, state_id)
-                .await
-            {
-                world.sync_world_event(WorldEvent::ParticlesAndSoundPlantGrowth, location, 15);
-                item.decrement_unless_creative(player.gamemode.load(), 1);
-                return;
-            }
+        block: &Block,
+        server: &Server,
+    ) {
+        let world = player.world();
+        let state_id = world.get_block_state_id(&location);
+        if server
+            .block_registry
+            .bone_meal(block, &world, &location, state_id)
+        {
+            world.sync_world_event(WorldEvent::ParticlesAndSoundPlantGrowth, location, 15);
+            item.decrement_unless_creative(player.gamemode.load(), 1);
+            return;
+        }
 
             // Saplings still have no registered bone-meal behaviour; vanilla
             // SaplingBlock.performBonemeal advances stage 0 -> 1 before growing the tree.
@@ -72,26 +68,23 @@ impl ItemBehaviour for BoneMealItem {
                     })
             });
 
-            if let Some(new_state_id) = sapling_action {
-                world
-                    .set_block_state(&location, new_state_id, BlockFlags::NOTIFY_ALL)
-                    .await;
-                world.sync_world_event(WorldEvent::ParticlesAndSoundPlantGrowth, location, 15);
-                item.decrement_unless_creative(player.gamemode.load(), 1);
-                return;
-            }
+        if let Some(new_state_id) = sapling_action {
+            world.set_block_state(&location, new_state_id, BlockFlags::NOTIFY_ALL);
+            world.sync_world_event(WorldEvent::ParticlesAndSoundPlantGrowth, location, 15);
+            item.decrement_unless_creative(player.gamemode.load(), 1);
+            return;
+        }
 
             // BoneMealItem.java:49-57: when growCrop fails, bone meal applied to a sturdy face
             // seeds sea plants in the water block against that face.
-            if !world.get_block_state(&location).is_side_solid(face) {
-                return;
-            }
-            let relative = BlockPos(location.0 + face.to_offset());
-            if grow_water_plant(&world, server, relative, face).await {
-                world.sync_world_event(WorldEvent::ParticlesAndSoundPlantGrowth, relative, 15);
-                item.decrement_unless_creative(player.gamemode.load(), 1);
-            }
-        })
+        if !world.get_block_state(&location).is_side_solid(face) {
+            return;
+        }
+        let relative = BlockPos(location.0 + face.to_offset());
+        if grow_water_plant(&world, server, relative, face) {
+            world.sync_world_event(WorldEvent::ParticlesAndSoundPlantGrowth, relative, 15);
+            item.decrement_unless_creative(player.gamemode.load(), 1);
+        }
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -145,7 +138,7 @@ fn can_survive(
 /// Vanilla `BoneMealItem.growWaterPlant` (BoneMealItem.java:81-142): 128 attempts spreading out
 /// from the clicked water block, placing seagrass, or coral in biomes tagged
 /// `produces_corals_from_bonemeal`, and bone-mealing existing seagrass one time in ten.
-async fn grow_water_plant(
+fn grow_water_plant(
     world: &Arc<World>,
     server: &Server,
     pos: BlockPos,
@@ -214,8 +207,7 @@ async fn grow_water_plant(
 
         if is_water_source(world, &test_pos) {
             world
-                .set_block_state(&test_pos, grow_state, BlockFlags::NOTIFY_ALL)
-                .await;
+                .set_block_state(&test_pos, grow_state, BlockFlags::NOTIFY_ALL);
         } else {
             let test_state_id = world.get_block_state_id(&test_pos);
             if Block::from_state_id(test_state_id).id == Block::SEAGRASS.id
@@ -223,8 +215,7 @@ async fn grow_water_plant(
             {
                 server
                     .block_registry
-                    .bone_meal(&Block::SEAGRASS, world, &test_pos, test_state_id)
-                    .await;
+                    .bone_meal(&Block::SEAGRASS, world, &test_pos, test_state_id);
             }
         }
     }

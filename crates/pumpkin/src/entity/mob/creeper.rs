@@ -14,7 +14,7 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::{codec::var_int::VarInt, java::client::play::Metadata};
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase,
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal,
         creeper_ignite::CreeperIgniteGoal, look_around::RandomLookAroundGoal,
@@ -129,7 +129,7 @@ impl CreeperEntity {
         );
     }
 
-    async fn explode(&self) {
+    pub fn explode(&self) {
         let entity = &self.mob_entity.living_entity.entity;
         let radius = self.explosion_radius.load(Ordering::Relaxed) as f32;
         let multiplier = if self.charged.load(Ordering::Relaxed) {
@@ -143,20 +143,18 @@ impl CreeperEntity {
             .store(true, Ordering::Relaxed);
         let world = entity.world.load();
         let pos = entity.pos.load();
-        world
-            .explode(
-                pos,
-                radius * multiplier,
-                crate::world::ExplosionInteraction::Mob,
-            )
-            .await;
+        world.explode(
+            pos,
+            radius * multiplier,
+            crate::world::ExplosionInteraction::Mob,
+        );
 
         let effects = self
             .mob_entity
             .living_entity
             .active_effects
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
             .map(|effect| {
                 (
@@ -181,183 +179,156 @@ impl CreeperEntity {
                 10,
                 -0.5,
                 0,
-                -2.5 / 300.0,
             );
-            world.spawn_entity(cloud).await;
+            world.spawn_entity(cloud);
         }
-        entity.remove().await;
-    }
-}
-
-impl NBTStorage for CreeperEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            nbt.put_bool("powered", self.charged.load(Ordering::Relaxed));
-            nbt.put_short("Fuse", self.fuse_time.load(Ordering::Relaxed) as i16);
-            nbt.put_byte(
-                "ExplosionRadius",
-                self.explosion_radius.load(Ordering::Relaxed) as i8,
-            );
-            nbt.put_bool("ignited", self.ignited.load(Ordering::Relaxed));
-        })
-    }
-
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            if let Some(powered) = nbt.get_bool("powered") {
-                self.charged.store(powered, Ordering::Relaxed);
-            }
-            if let Some(fuse) = nbt.get_short("Fuse") {
-                self.fuse_time.store(i32::from(fuse), Ordering::Relaxed);
-            }
-            if let Some(radius) = nbt.get_byte("ExplosionRadius") {
-                self.explosion_radius
-                    .store(i32::from(radius), Ordering::Relaxed);
-            }
-            if let Some(ignited) = nbt.get_bool("ignited") {
-                self.ignited.store(ignited, Ordering::Relaxed);
-            }
-        })
+        entity.remove();
     }
 }
 
 impl Mob for CreeperEntity {
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_bool("powered", self.charged.load(Ordering::Relaxed));
+        nbt.put_short("Fuse", self.fuse_time.load(Ordering::Relaxed) as i16);
+        nbt.put_byte(
+            "ExplosionRadius",
+            self.explosion_radius.load(Ordering::Relaxed) as i8,
+        );
+        nbt.put_bool("ignited", self.ignited.load(Ordering::Relaxed));
+    }
+
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        if let Some(powered) = nbt.get_bool("powered") {
+            self.charged.store(powered, Ordering::Relaxed);
+        }
+        if let Some(fuse) = nbt.get_short("Fuse") {
+            self.fuse_time.store(i32::from(fuse), Ordering::Relaxed);
+        }
+        if let Some(radius) = nbt.get_byte("ExplosionRadius") {
+            self.explosion_radius
+                .store(i32::from(radius), Ordering::Relaxed);
+        }
+        if let Some(ignited) = nbt.get_bool("ignited") {
+            self.ignited.store(ignited, Ordering::Relaxed);
+        }
+    }
+
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
     }
 
-    fn mob_on_lightning_strike<'a>(
-        &'a self,
-        caller: &'a dyn EntityBase,
-        lightning: &'a crate::entity::lightning::LightningBoltEntity,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.charged.store(true, Ordering::Relaxed);
-            self.mob_entity.living_entity.entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::creeper::CHARGED,
-                    true,
-                )],
-                None,
-            );
-            self.mob_entity
-                .living_entity
-                .on_lightning_strike(caller, lightning)
-                .await;
-        })
+    fn mob_on_lightning_strike(
+        &self,
+        caller: &dyn EntityBase,
+        lightning: &crate::entity::lightning::LightningBoltEntity,
+    ) {
+        self.charged.store(true, Ordering::Relaxed);
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::creeper::CHARGED,
+                true,
+            )],
+            None,
+        );
+        self.mob_entity
+            .living_entity
+            .on_lightning_strike(caller, lightning);
     }
 
     /// Match vanilla's inherited `Mob.canAttack`: ghasts are never valid
     /// combat targets. The Creeper-specific goat exclusion is enforced by
     /// `set_mob_target`, matching `Creeper.setTarget`.
-    fn can_attack(&self, target: &Entity) -> bool {
-        can_attack_target(target.entity_type)
+    fn set_mob_target(&self, target: Option<Arc<dyn EntityBase>>) {
+        let target = target.filter(|target| can_set_target(target.get_entity().entity_type));
+        Mob::set_mob_target(self, target);
     }
 
-    fn set_mob_target(&self, target: Option<Arc<dyn EntityBase>>) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let target = target.filter(|target| can_set_target(target.get_entity().entity_type));
-            let mut mob_target = self.mob_entity.target.lock().await;
-            *mob_target = target;
-        })
-    }
+    fn mob_tick(&self, caller: &dyn EntityBase) {
+        let entity = &self.mob_entity.living_entity.entity;
+        if !entity.is_alive() {
+            return;
+        }
 
-    fn mob_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = &self.mob_entity.living_entity.entity;
-            if !entity.is_alive() {
-                return;
-            }
+        self.last_fuse_time.store(
+            self.current_fuse_time.load(Ordering::Relaxed),
+            Ordering::Relaxed,
+        );
 
-            self.last_fuse_time.store(
-                self.current_fuse_time.load(Ordering::Relaxed),
-                Ordering::Relaxed,
+        if self.ignited.load(Ordering::Relaxed) {
+            self.set_fuse_speed(1);
+        }
+
+        let fuse_speed = self.fuse_speed.load(Ordering::Relaxed);
+        let current = self.current_fuse_time.load(Ordering::Relaxed);
+
+        if fuse_speed > 0 && current == 0 {
+            let world = entity.world.load();
+            world.play_sound_fine(
+                Sound::EntityCreeperPrimed,
+                SoundCategory::Hostile,
+                &entity.pos.load(),
+                1.0,
+                0.5,
             );
-
-            if self.ignited.load(Ordering::Relaxed) {
-                self.set_fuse_speed(1);
-            }
-
-            let fuse_speed = self.fuse_speed.load(Ordering::Relaxed);
-            let current = self.current_fuse_time.load(Ordering::Relaxed);
-
-            if fuse_speed > 0 && current == 0 {
-                let world = entity.world.load();
-                world.play_sound_fine(
-                    Sound::EntityCreeperPrimed,
-                    SoundCategory::Hostile,
-                    &entity.pos.load(),
-                    1.0,
-                    0.5,
-                );
-                // Creeper.java:136 (`tick`, `swellDir > 0 && this.swell == 0`): fires
-                // PRIME_FUSE with itself as source entity the tick the fuse starts.
-                emit_game_event(
+            // Creeper.java:136 (`tick`, `swellDir > 0 && this.swell == 0`): fires
+            // PRIME_FUSE with itself as source entity the tick the fuse starts.
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(emit_game_event(
                     &world,
                     GameEvent::PrimeFuse,
                     entity.pos.load(),
-                    GameEventContext::of_entity(caller.clone()),
-                )
-                .await;
-            }
+                    world
+                        .get_entity_by_id(caller.get_entity().entity_id)
+                        .map_or_else(GameEventContext::none, GameEventContext::of_entity),
+                ));
+            });
+        }
 
-            let fuse_time = self.fuse_time.load(Ordering::Relaxed);
-            let new_fuse = (current + fuse_speed).max(0);
-            self.current_fuse_time.store(new_fuse, Ordering::Relaxed);
+        let fuse_time = self.fuse_time.load(Ordering::Relaxed);
+        let new_fuse = (current + fuse_speed).max(0);
+        self.current_fuse_time.store(new_fuse, Ordering::Relaxed);
 
-            if new_fuse >= fuse_time {
-                self.current_fuse_time.store(fuse_time, Ordering::Relaxed);
-                self.explode().await;
-            }
-        })
+        if new_fuse >= fuse_time {
+            self.current_fuse_time.store(fuse_time, Ordering::Relaxed);
+            self.explode();
+        }
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            if item_stack.item.id != Item::FLINT_AND_STEEL.id {
-                return self
-                    .mob_entity
-                    .mob_interact(player, item_stack, self.can_be_leashed())
-                    .await;
-            }
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        if item_stack.item.id != Item::FLINT_AND_STEEL.id {
+            return self.mob_entity.mob_interact(player, item_stack);
+        }
 
-            let entity = &self.mob_entity.living_entity.entity;
-            let world = entity.world.load();
-            let pos = entity.pos.load();
+        let entity = &self.mob_entity.living_entity.entity;
+        let world = entity.world.load();
+        let pos = entity.pos.load();
 
-            world.play_sound_fine(
-                Sound::ItemFlintandsteelUse,
-                SoundCategory::Hostile,
-                &pos,
-                1.0,
-                rand::random::<f32>() * 0.4 + 0.8,
-            );
+        world.play_sound_fine(
+            Sound::ItemFlintandsteelUse,
+            SoundCategory::Hostile,
+            &pos,
+            1.0,
+            rand::random::<f32>() * 0.4 + 0.8,
+        );
 
-            self.ignited.store(true, Ordering::Relaxed);
-            entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::creeper::IS_IGNITED,
-                    true,
-                )],
-                None,
-            );
+        self.ignited.store(true, Ordering::Relaxed);
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::creeper::IS_IGNITED,
+                true,
+            )],
+            None,
+        );
 
-            if player.gamemode.load() != pumpkin_util::GameMode::Creative
-                && item_stack.damage_item(1) == pumpkin_data::item_stack::DamageResult::Broken
-            {
-                player
-                    .increment_stat(
-                        pumpkin_data::statistic::StatisticCategory::Broken,
-                        item_stack.item.id as i32,
-                        1,
-                    )
-                    .await;
+        if player.gamemode.load() != pumpkin_util::GameMode::Creative {
+            let broken =
+                item_stack.damage_item(1) == pumpkin_data::item_stack::DamageResult::Broken;
+            if broken {
+                player.increment_stat(
+                    pumpkin_data::statistic::StatisticCategory::Broken,
+                    item_stack.item.id as i32,
+                    1,
+                );
                 world.send_entity_status(
                     &player.living_entity.entity,
                     crate::entity::equipment_break_status(
@@ -366,16 +337,72 @@ impl Mob for CreeperEntity {
                     None,
                 );
                 *item_stack = ItemStack::EMPTY.clone();
-                player
-                    .sync_hand_slot(
-                        player.inventory.get_selected_slot() as usize,
-                        item_stack.clone(),
-                    )
-                    .await;
+                player.sync_hand_slot(
+                    player.inventory.get_selected_slot() as usize,
+                    item_stack.clone(),
+                );
             }
+        }
 
-            true
-        })
+        true
+    }
+}
+
+impl CreeperEntity {
+    /// Fork extension retained for callers that need the Creeper-specific `canAttack` rule.
+    #[must_use]
+    pub fn can_attack(&self, target: &Entity) -> bool {
+        can_attack_target(target.entity_type)
+    }
+}
+
+impl CreeperEntity {
+    pub fn is_charged(&self) -> bool {
+        self.charged.load(Ordering::Relaxed)
+    }
+
+    pub fn set_charged(&self, charged: bool) {
+        self.charged.store(charged, Ordering::Relaxed);
+        let entity = &self.mob_entity.living_entity.entity;
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::creeper::CHARGED,
+                charged,
+            )],
+            None,
+        );
+    }
+
+    pub fn is_ignited(&self) -> bool {
+        self.ignited.load(Ordering::Relaxed)
+    }
+
+    pub fn set_ignited(&self, ignited: bool) {
+        self.ignited.store(ignited, Ordering::Relaxed);
+        let entity = &self.mob_entity.living_entity.entity;
+        entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::creeper::IS_IGNITED,
+                ignited,
+            )],
+            None,
+        );
+    }
+
+    pub fn get_fuse(&self) -> i32 {
+        self.fuse_time.load(Ordering::Relaxed)
+    }
+
+    pub fn set_fuse(&self, fuse: i32) {
+        self.fuse_time.store(fuse, Ordering::Relaxed);
+    }
+
+    pub fn get_explosion_radius(&self) -> i32 {
+        self.explosion_radius.load(Ordering::Relaxed)
+    }
+
+    pub fn set_explosion_radius(&self, radius: i32) {
+        self.explosion_radius.store(radius, Ordering::Relaxed);
     }
 }
 

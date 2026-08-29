@@ -1,27 +1,24 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+use std::sync::Arc;
+
+use pumpkin_data::{Block, damage::DamageType, effect::StatusEffect, potion::Effect, tag::Taggable, tracked_data};
+use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::{Difficulty, math::vector3::Vector3};
 
 use crate::{
     entity::{
-        Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+        Entity, EntityBase,
         projectile::{ProjectileHit, ThrownItemEntity},
     },
     server::Server,
-    world::{
-        World,
-        explosion::{DefaultExplosionDamageCalculator, Explosion, ExplosionDamageCalculator},
-    },
+    world::{World, ExplosionInteraction, explosion::{DefaultExplosionDamageCalculator, Explosion, ExplosionDamageCalculator}},
 };
-use pumpkin_data::damage::DamageType;
-use pumpkin_data::effect::StatusEffect;
-use pumpkin_data::potion::Effect;
-use pumpkin_data::{Block, tag::Taggable};
-use pumpkin_nbt::compound::NbtCompound;
-use pumpkin_util::Difficulty;
 
-/// `WitherSkull.getBlockExplosionResistance` (`WitherSkull.java:50-55`): a "dangerous"
-/// (charged-boss) skull caps a destructible block's resistance at 0.8, matching
-/// `WitherBoss.canDestroy` (`WitherBoss.java:355-357`: not air, not wither-immune).
+/// `WitherSkull.getBlockExplosionResistance` (`WitherSkull.java:50-55`) applies the same
+/// protection as `WitherBoss.canDestroy` (`WitherBoss.java:355-357`): dangerous skulls cap
+/// destructible block resistance at 0.8, while wither-immune blocks remain protected.
 struct WitherSkullExplosionCalculator {
     dangerous: bool,
 }
@@ -48,39 +45,23 @@ impl ExplosionDamageCalculator for WitherSkullExplosionCalculator {
     }
 }
 
-/// `AbstractHurtingProjectile.getInertia` (`AbstractHurtingProjectile.java:155-157`).
+/// `AbstractHurtingProjectile.applyInertia` (`AbstractHurtingProjectile.java:102-127`) uses
+/// acceleration followed by the inertia selected by `getInertia` (`AbstractHurtingProjectile.java:155-157`).
 pub const AIR_INERTIA: f64 = 0.95;
 /// `AbstractHurtingProjectile.getLiquidInertia` (`AbstractHurtingProjectile.java:159-161`).
 pub const WATER_INERTIA: f64 = 0.8;
-/// `WitherSkull.getInertia` (`WitherSkull.java:41-44`): a `dangerous` (charged-boss) skull
-/// decelerates much harder in air.
+/// `WitherSkull.getInertia` (`WitherSkull.java:41-44`).
 pub const DANGEROUS_INERTIA: f64 = 0.73;
-/// `AbstractHurtingProjectile.accelerationPower` default (`AbstractHurtingProjectile.java:24`).
+/// `AbstractHurtingProjectile.accelerationPower` (`AbstractHurtingProjectile.java:24`).
 const ACCELERATION_POWER: f64 = 0.1;
 
-const EXPLOSION_POWER: f32 = 1.0;
 const GRAVITY: f64 = 0.0;
 const OWNER_DAMAGE: f32 = 8.0;
 const NO_OWNER_DAMAGE: f32 = 5.0;
 const OWNER_HEAL_ON_KILL: f32 = 5.0;
-const WITHER_AMPLIFIER: u8 = 1;
-
-/// `WitherSkull#onHitEntity` (WitherSkull.java): the Wither effect's duration is picked from
-/// the world's `Difficulty`, not from the skull's `dangerous` flag. `dangerous` only changes
-/// flight inertia and which blocks the resulting explosion can destroy (see `getInertia` /
-/// `getBlockExplosionResistance`), neither of which affects this duration.
-const fn wither_duration_ticks(difficulty: Difficulty) -> i32 {
-    match difficulty {
-        Difficulty::Normal => 20 * 10,
-        Difficulty::Hard => 20 * 40,
-        Difficulty::Peaceful | Difficulty::Easy => 0,
-    }
-}
 
 pub struct WitherSkullEntity {
     pub thrown: ThrownItemEntity,
-    /// Fired by charged Wither boss attacks. Data-only for now: the boss AI that sets this
-    /// (and the inertia/block-resistance behavior it should drive) is out of scope here.
     pub dangerous: AtomicBool,
 }
 
@@ -102,74 +83,85 @@ impl WitherSkullEntity {
     }
 
     #[must_use]
-    pub fn new_shot(entity: Entity, shooter: &Entity, dangerous: bool) -> Self {
+    pub fn new_shot(
+        entity: Entity,
+        shooter: &Entity,
+        dangerous: bool,
+        direction: Vector3<f64>,
+    ) -> Self {
         let thrown = ThrownItemEntity::new(entity, shooter, GRAVITY);
+        let speed = 0.95;
+        let vel = direction.normalize().multiply(speed, speed, speed);
+        thrown.entity.velocity.store(vel);
+
+        let len = vel.horizontal_length();
+        thrown.entity.set_rotation(
+            vel.x.atan2(vel.z) as f32 * 57.295_776,
+            vel.y.atan2(len) as f32 * 57.295_776,
+        );
+
         Self {
             thrown,
             dangerous: AtomicBool::new(dangerous),
         }
     }
 
+    #[must_use]
     pub fn is_dangerous(&self) -> bool {
         self.dangerous.load(Ordering::Relaxed)
     }
 
-    pub fn set_dangerous(&self, value: bool) {
-        self.dangerous.store(value, Ordering::Relaxed);
-    }
-}
-
-impl NBTStorage for WitherSkullEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            nbt.put_bool("dangerous", self.is_dangerous());
-        })
-    }
-
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.set_dangerous(nbt.get_bool("dangerous").unwrap_or(false));
-        })
+    pub fn set_dangerous(&self, dangerous: bool) {
+        self.dangerous.store(dangerous, Ordering::Relaxed);
+        self.thrown.entity.send_meta_data(
+            &[Metadata::new(
+                tracked_data::wither_skull::DATA_DANGEROUS,
+                dangerous,
+            )],
+            None,
+        );
     }
 }
 
 impl EntityBase for WitherSkullEntity {
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            // `AbstractHurtingProjectile.applyInertia`
-            // (`AbstractHurtingProjectile.java:102-127`): v' = (v + normalize(v) *
-            // accelerationPower) * inertia. `WitherSkull.getInertia`
-            // (`WitherSkull.java:41-44`) overrides the base 0.95F with 0.73F while the
-            // skull is `dangerous`; water always uses the liquid inertia 0.8F
-            // (`AbstractHurtingProjectile.java:159-161`), which the dangerous override
-            // does not touch.
-            let entity = self.get_entity();
-            let velocity = entity.velocity.load();
+    fn write_custom_nbt(&self, nbt: &mut NbtCompound) {
+        nbt.put_bool("dangerous", self.is_dangerous());
+    }
 
-            let inertia = if entity.touching_water.load(Ordering::Relaxed) {
-                WATER_INERTIA
-            } else if self.is_dangerous() {
-                DANGEROUS_INERTIA
-            } else {
-                AIR_INERTIA
-            };
+    fn read_custom_nbt(&self, nbt: &NbtCompound) {
+        if let Some(dangerous) = nbt.get_bool("dangerous") {
+            self.dangerous.store(dangerous, Ordering::Relaxed);
+        }
+    }
 
-            // `Vec3::normalize()` already returns a zero vector for a zero-length input, so
-            // this needs no separate near-zero-speed guard - vanilla applies the inertia
-            // multiply unconditionally, even when velocity is (near) zero.
-            let norm = velocity.normalize();
-            let velocity = norm
-                .multiply(ACCELERATION_POWER, ACCELERATION_POWER, ACCELERATION_POWER)
-                .add(&velocity)
-                .multiply(inertia, inertia, inertia);
-            entity.velocity.store(velocity);
+    fn init_data_tracker(&self) {
+        let entity = self.get_entity();
+        entity.send_meta_data(
+            &[Metadata::new(
+                tracked_data::wither_skull::DATA_DANGEROUS,
+                self.is_dangerous(),
+            )],
+            None,
+        );
+    }
 
-            self.thrown.process_tick(caller, server).await;
-        })
+    fn tick(&self, caller: &dyn EntityBase, _server: &Server) {
+        let entity = self.get_entity();
+        let velocity = entity.velocity.load();
+        let inertia = if entity.touching_water.load(Ordering::Relaxed) {
+            WATER_INERTIA
+        } else if self.is_dangerous() {
+            DANGEROUS_INERTIA
+        } else {
+            AIR_INERTIA
+        };
+        let velocity = velocity
+            .normalize()
+            .multiply(ACCELERATION_POWER, ACCELERATION_POWER, ACCELERATION_POWER)
+            .add(&velocity)
+            .multiply(inertia, inertia, inertia);
+        entity.velocity.store(velocity);
+        self.thrown.process_tick(caller);
     }
 
     fn get_entity(&self) -> &Entity {
@@ -180,89 +172,63 @@ impl EntityBase for WitherSkullEntity {
         None
     }
 
-    fn as_nbt_storage(&self) -> &dyn NBTStorage {
-        self
-    }
-
     fn cast_any(&self) -> &dyn std::any::Any {
         self
     }
 
-    fn on_hit(&self, hit: ProjectileHit) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let world = self.get_entity().world.load();
+    fn on_hit(&self, hit: ProjectileHit) {
+        let world = self.get_entity().world.load();
 
-            if let ProjectileHit::Entity { ref entity, .. } = hit {
-                let owner = self
-                    .thrown
-                    .owner_id
-                    .and_then(|id| world.get_entity_by_id(id));
-                let owner_living = owner.as_ref().and_then(|o| o.get_living_entity());
+        if let ProjectileHit::Entity { ref entity, .. } = hit {
+            let owner = self
+                .thrown
+                .owner_id
+                .and_then(|id| world.get_entity_by_id(id));
+            let owner_living = owner.as_ref().and_then(|o| o.get_living_entity());
+            let was_hurt = if let Some(owner_living) = owner_living {
+                let hurt = entity.damage(self, OWNER_DAMAGE, DamageType::WITHER_SKULL);
+                if hurt && !entity.get_entity().is_alive() {
+                    owner_living.heal(OWNER_HEAL_ON_KILL);
+                }
+                hurt
+            } else {
+                entity.damage(self, NO_OWNER_DAMAGE, DamageType::MAGIC)
+            };
 
-                let was_hurt = if let Some(owner_living) = owner_living {
-                    let hurt = entity
-                        .damage(self, OWNER_DAMAGE, DamageType::WITHER_SKULL)
-                        .await;
-                    if hurt && !entity.get_entity().is_alive() {
-                        owner_living.heal(OWNER_HEAL_ON_KILL);
-                    }
-                    hurt
-                } else {
-                    entity
-                        .damage(self, NO_OWNER_DAMAGE, DamageType::MAGIC)
-                        .await
+            if was_hurt && let Some(living) = entity.get_living_entity() {
+                let difficulty = world.level_info.load().difficulty;
+                let duration = match difficulty {
+                    Difficulty::Hard => 800,   // 40 seconds
+                    Difficulty::Normal => 200, // 10 seconds
+                    Difficulty::Easy | Difficulty::Peaceful => 0,
                 };
 
-                if was_hurt && let Some(living) = entity.get_living_entity() {
-                    let difficulty = world.level_info.load().difficulty;
-                    let duration = wither_duration_ticks(difficulty);
-                    if duration > 0 {
-                        let effect = Effect {
-                            effect_type: &StatusEffect::WITHER,
-                            duration,
-                            amplifier: WITHER_AMPLIFIER,
-                            ambient: false,
-                            show_particles: true,
-                            show_icon: true,
-                            blend: true,
-                        };
-                        if let Some(player) = entity.get_player() {
-                            player.send_effect(effect.clone()).await;
-                        }
-                        living.add_effect(effect).await;
+                if duration > 0 {
+                    let effect = Effect {
+                        effect_type: &StatusEffect::WITHER,
+                        duration,
+                        amplifier: 1,
+                        ambient: false,
+                        show_particles: true,
+                        show_icon: true,
+                        blend: true,
+                    };
+                    if let Some(player) = entity.get_player() {
+                        player.add_effect(effect.clone());
                     }
+                    living.add_effect(effect);
                 }
             }
+        }
 
-            let hit_pos = hit.hit_pos();
-            // Vanilla `WitherSkull.onHit` (WitherSkull.java:97) always explodes with
-            // `ExplosionInteraction.MOB`; the `mobGriefing` game rule is applied inside
-            // `World::get_block_interaction`, which demotes a MOB blast to `Keep`. A
-            // dangerous skull additionally caps destructible-block resistance at 0.8
-            // (`WitherSkull.getBlockExplosionResistance`, WitherSkull.java:50-55).
-            world
-                .explode_with_calculator(
-                    hit_pos,
-                    EXPLOSION_POWER,
-                    crate::world::ExplosionInteraction::Mob,
-                    Some(Arc::new(WitherSkullExplosionCalculator {
-                        dangerous: self.is_dangerous(),
-                    })),
-                )
-                .await;
-        })
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn wither_duration_scales_with_difficulty_not_dangerous() {
-        assert_eq!(wither_duration_ticks(Difficulty::Peaceful), 0);
-        assert_eq!(wither_duration_ticks(Difficulty::Easy), 0);
-        assert_eq!(wither_duration_ticks(Difficulty::Normal), 200);
-        assert_eq!(wither_duration_ticks(Difficulty::Hard), 800);
+        let hit_pos = hit.hit_pos();
+        world.explode_with_calculator(
+            hit_pos,
+            1.0,
+            ExplosionInteraction::Mob,
+            Some(Arc::new(WitherSkullExplosionCalculator {
+                dangerous: self.is_dangerous(),
+            })),
+        );
     }
 }

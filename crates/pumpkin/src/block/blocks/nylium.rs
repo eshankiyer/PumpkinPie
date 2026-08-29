@@ -1,121 +1,297 @@
-use pumpkin_data::configured_feature::ConfiguredFeature;
-use pumpkin_data::{Block, BlockDirection, BlockId};
-use pumpkin_util::math::position::BlockPos;
-use pumpkin_util::random::RandomGenerator;
-use pumpkin_util::random::xoroshiro128::Xoroshiro;
-use pumpkin_world::lighting::light_dampening_into;
-use pumpkin_world::world::BlockFlags;
-use rand::RngExt;
 use std::sync::Arc;
 
-use crate::block::{BlockBehaviour, BlockFuture, BlockMetadata, BonemealArgs, RandomTickArgs};
+use pumpkin_data::BlockDirection;
+use pumpkin_data::tag::Taggable;
+use pumpkin_data::{Block, tag};
+use pumpkin_macros::pumpkin_block_from_tag;
+use pumpkin_util::math::position::BlockPos;
+use pumpkin_world::world::BlockFlags;
+use pumpkin_world::lighting::light_dampening_into;
+use rand::RngExt;
+
+use crate::block::{BlockBehaviour, BonemealArgs, RandomTickArgs};
 use crate::world::World;
-use crate::world::feature_placer::place_configured_feature;
 
-/// Above this light dampening, nylium is considered covered and reverts to netherrack.
-const MAX_LIGHT_LEVEL: u8 = 15;
-
-/// `NyliumBlock`: nylium dies back to netherrack once the block above it blocks all light.
-///
-/// Bone meal grows nether vegetation on it by placing configured features
-/// (`NyliumBlock.performBonemeal`, `NyliumBlock.java:56-71`).
+#[pumpkin_block_from_tag("minecraft:nylium")]
 pub struct NyliumBlock;
 
-impl BlockMetadata for NyliumBlock {
-    fn ids() -> Box<[BlockId]> {
-        [BlockId::CRIMSON_NYLIUM, BlockId::WARPED_NYLIUM].into()
+impl NyliumBlock {
+    fn can_be_nylium(block: &Block, world: &World, pos: &BlockPos) -> bool {
+        let above_pos = pos.up();
+        if !world.is_loaded(&above_pos) {
+            return true;
+        }
+        let above_state = world.get_block_state(&above_pos);
+        // Nylium uses the light-dampening calculation, not opacity alone.
+        light_dampening_into(
+            block.default_state,
+            above_state,
+            BlockDirection::Up,
+            above_state.opacity,
+        ) < 15
     }
 }
 
 impl BlockBehaviour for NyliumBlock {
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if can_be_nylium(args.block, args.world, args.position) {
-                return;
-            }
-            args.world
-                .set_block_state(
-                    args.position,
-                    Block::NETHERRACK.default_state.id,
-                    BlockFlags::NOTIFY_ALL,
-                )
-                .await;
-        })
-    }
-
     /// `NyliumBlock.isValidBonemealTarget` (`NyliumBlock.java:46-49`): air above, inside the
     /// build height. The loaded check is additional; an unloaded read reports air.
     fn is_valid_bonemeal_target(&self, args: BonemealArgs<'_>) -> bool {
         let above = args.position.up();
-        args.world.is_in_build_limit(above)
+        args.world.is_in_height_limit(above.0.y)
             && args.world.is_loaded(&above)
             && args.world.get_block_state(&above).is_air()
     }
 
+    fn random_tick(&self, args: RandomTickArgs<'_>) {
+        if !Self::can_be_nylium(args.block, args.world, args.position) {
+            args.world.set_block_state(
+                args.position,
+                Block::NETHERRACK.default_state.id,
+                BlockFlags::NOTIFY_ALL,
+            );
+        }
+    }
+
+    fn is_bonemeal_success(&self, _args: BonemealArgs<'_>) -> bool {
+        true
+    }
+
     /// `NyliumBlock.performBonemeal` (`NyliumBlock.java:56-71`).
-    fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let above = args.position.up();
-            let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(rand::rng().random()));
-            if args.block == &Block::CRIMSON_NYLIUM {
-                place(
-                    args.world,
-                    ConfiguredFeature::CrimsonForestVegetationBonemeal,
-                    above,
-                    &mut random,
-                )
-                .await;
-            } else if args.block == &Block::WARPED_NYLIUM {
-                place(
-                    args.world,
-                    ConfiguredFeature::WarpedForestVegetationBonemeal,
-                    above,
-                    &mut random,
-                )
-                .await;
-                place(
-                    args.world,
-                    ConfiguredFeature::NetherSproutsBonemeal,
-                    above,
-                    &mut random,
-                )
-                .await;
-                if rand::rng().random_range(0..8) == 0 {
-                    place(
-                        args.world,
-                        ConfiguredFeature::TwistingVinesBonemeal,
-                        above,
-                        &mut random,
-                    )
-                    .await;
+    fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
+        let world = args.world;
+        let block = args.block;
+        let above_pos = args.position.up();
+
+        // `NyliumBlock.place` (`NyliumBlock.java:73-84`) is represented by the
+        // build-height/loaded checks in each synchronous vegetation placer below.
+        if block == &Block::CRIMSON_NYLIUM {
+            place_crimson_vegetation(world, &above_pos);
+        } else if block == &Block::WARPED_NYLIUM {
+            place_warped_vegetation(world, &above_pos);
+            place_nether_sprouts(world, &above_pos);
+            if rand::rng().random_range(0..8) == 0 {
+                place_twisting_vines(world, &above_pos);
+            }
+        }
+    }
+}
+
+fn place_crimson_vegetation(world: &Arc<World>, origin: &BlockPos) {
+    for _ in 0..9 {
+        let dx = rand::rng().random_range(0..3) - rand::rng().random_range(0..3);
+        let dy = rand::rng().random_range(0..1) - rand::rng().random_range(0..1);
+        let dz = rand::rng().random_range(0..3) - rand::rng().random_range(0..3);
+        let target_pos = origin.add(dx, dy, dz);
+
+        if !world.is_in_height_limit(target_pos.0.y)
+            || !world.is_loaded(&target_pos)
+            || !world.get_block_state(&target_pos).is_air()
+        {
+            continue;
+        }
+
+        let below_pos = target_pos.down();
+        if !world.is_loaded(&below_pos) {
+            continue;
+        }
+        let below_block = world.get_block(&below_pos);
+        if !below_block.has_tag(&tag::Block::MINECRAFT_NYLIUM) {
+            continue;
+        }
+
+        let roll = rand::rng().random_range(0..99);
+        let placed_block = if roll < 87 {
+            &Block::CRIMSON_ROOTS
+        } else if roll < 98 {
+            &Block::CRIMSON_FUNGUS
+        } else {
+            &Block::WARPED_FUNGUS
+        };
+
+        let state = placed_block.default_state;
+        if !world.block_registry.can_place_at(
+            None,
+            Some(world),
+            world.as_ref(),
+            None,
+            placed_block,
+            state,
+            &target_pos,
+            None,
+            None,
+        ) {
+            continue;
+        }
+
+        world.set_block_state(&target_pos, state.id, BlockFlags::NOTIFY_ALL);
+    }
+}
+
+fn place_warped_vegetation(world: &Arc<World>, origin: &BlockPos) {
+    for _ in 0..9 {
+        let dx = rand::rng().random_range(0..3) - rand::rng().random_range(0..3);
+        let dy = rand::rng().random_range(0..1) - rand::rng().random_range(0..1);
+        let dz = rand::rng().random_range(0..3) - rand::rng().random_range(0..3);
+        let target_pos = origin.add(dx, dy, dz);
+
+        if !world.is_in_height_limit(target_pos.0.y)
+            || !world.is_loaded(&target_pos)
+            || !world.get_block_state(&target_pos).is_air()
+        {
+            continue;
+        }
+
+        let below_pos = target_pos.down();
+        if !world.is_loaded(&below_pos) {
+            continue;
+        }
+        let below_block = world.get_block(&below_pos);
+        if !below_block.has_tag(&tag::Block::MINECRAFT_NYLIUM) {
+            continue;
+        }
+
+        let roll = rand::rng().random_range(0..100);
+        let placed_block = if roll < 85 {
+            &Block::WARPED_ROOTS
+        } else if roll < 86 {
+            &Block::CRIMSON_ROOTS
+        } else if roll < 99 {
+            &Block::WARPED_FUNGUS
+        } else {
+            &Block::CRIMSON_FUNGUS
+        };
+
+        let state = placed_block.default_state;
+        if !world.block_registry.can_place_at(
+            None,
+            Some(world),
+            world.as_ref(),
+            None,
+            placed_block,
+            state,
+            &target_pos,
+            None,
+            None,
+        ) {
+            continue;
+        }
+
+        world.set_block_state(&target_pos, state.id, BlockFlags::NOTIFY_ALL);
+    }
+}
+
+fn place_nether_sprouts(world: &Arc<World>, origin: &BlockPos) {
+    for _ in 0..9 {
+        let dx = rand::rng().random_range(0..3) - rand::rng().random_range(0..3);
+        let dy = rand::rng().random_range(0..1) - rand::rng().random_range(0..1);
+        let dz = rand::rng().random_range(0..3) - rand::rng().random_range(0..3);
+        let target_pos = origin.add(dx, dy, dz);
+
+        if !world.is_in_height_limit(target_pos.0.y)
+            || !world.is_loaded(&target_pos)
+            || !world.get_block_state(&target_pos).is_air()
+        {
+            continue;
+        }
+
+        let below_pos = target_pos.down();
+        if !world.is_loaded(&below_pos) {
+            continue;
+        }
+        let below_block = world.get_block(&below_pos);
+        if !below_block.has_tag(&tag::Block::MINECRAFT_NYLIUM) {
+            continue;
+        }
+
+        let placed_block = &Block::NETHER_SPROUTS;
+        let state = placed_block.default_state;
+        if !world.block_registry.can_place_at(
+            None,
+            Some(world),
+            world.as_ref(),
+            None,
+            placed_block,
+            state,
+            &target_pos,
+            None,
+            None,
+        ) {
+            continue;
+        }
+
+        world.set_block_state(&target_pos, state.id, BlockFlags::NOTIFY_ALL);
+    }
+}
+
+fn place_twisting_vines(world: &Arc<World>, origin: &BlockPos) {
+    for _ in 0..9 {
+        let dx = rand::rng().random_range(0..3) - rand::rng().random_range(0..3);
+        let dy = rand::rng().random_range(0..1) - rand::rng().random_range(0..1);
+        let dz = rand::rng().random_range(0..3) - rand::rng().random_range(0..3);
+        let mut target_pos = origin.add(dx, dy, dz);
+
+        if !find_twisting_vines_target_y(world, &mut target_pos) {
+            continue;
+        }
+
+        let mut height = rand::rng().random_range(0..2) + 1;
+        if rand::rng().random_range(0..6) == 0 {
+            height *= 2;
+        }
+        if rand::rng().random_range(0..10) == 0 {
+            height = 1;
+        }
+
+        let mut current_pos = target_pos;
+        for i in 0..height {
+            if !world.is_in_height_limit(current_pos.0.y)
+                || !world.is_loaded(&current_pos)
+                || !world.get_block_state(&current_pos).is_air()
+            {
+                break;
+            }
+
+            let is_top = i == height - 1
+                || !world.is_in_height_limit(current_pos.up().0.y)
+                || !world.is_loaded(&current_pos.up())
+                || !world.get_block_state(&current_pos.up()).is_air();
+
+            if is_top {
+                world.set_block_state(
+                    &current_pos,
+                    Block::TWISTING_VINES.default_state.id,
+                    BlockFlags::NOTIFY_ALL,
+                );
+                break;
+            }
+            world.set_block_state(
+                &current_pos,
+                Block::TWISTING_VINES_PLANT.default_state.id,
+                BlockFlags::NOTIFY_ALL,
+            );
+            current_pos = current_pos.up();
+        }
+    }
+}
+
+fn find_twisting_vines_target_y(world: &World, pos: &mut BlockPos) -> bool {
+    let mut current = *pos;
+    for _ in 0..1 {
+        if world.is_loaded(&current) && world.get_block_state(&current).is_air() {
+            let below = current.down();
+            if world.is_loaded(&below) {
+                let block_below = world.get_block(&below);
+                if block_below == &Block::WARPED_NYLIUM
+                    || block_below == &Block::WARPED_WART_BLOCK
+                    || block_below == &Block::TWISTING_VINES
+                    || block_below == &Block::TWISTING_VINES_PLANT
+                {
+                    *pos = current;
+                    return true;
                 }
             }
-        })
+        }
+        current = current.down();
     }
-}
-
-/// `NyliumBlock.place` (`NyliumBlock.java:73-84`): the build-height guard each placement repeats.
-async fn place(
-    world: &Arc<World>,
-    feature: ConfiguredFeature,
-    pos: BlockPos,
-    random: &mut RandomGenerator,
-) {
-    if world.is_in_build_limit(pos) {
-        place_configured_feature(world, feature, pos, random).await;
-    }
-}
-
-fn can_be_nylium(
-    block: &Block,
-    world: &crate::world::World,
-    position: &pumpkin_util::math::position::BlockPos,
-) -> bool {
-    let above_state = world.get_block_state(&position.up());
-    light_dampening_into(
-        block.default_state,
-        above_state,
-        BlockDirection::Up,
-        above_state.opacity,
-    ) < MAX_LIGHT_LEVEL
+    false
 }

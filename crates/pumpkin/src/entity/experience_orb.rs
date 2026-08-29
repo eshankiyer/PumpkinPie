@@ -8,9 +8,9 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::vector3::Vector3;
 
-use crate::{entity::EntityBaseFuture, server::Server, world::World};
+use crate::{server::Server, world::World};
 
-use super::{Entity, EntityBase, NBTStorage, living::LivingEntity, player::Player};
+use super::{Entity, EntityBase, living::LivingEntity, player::Player};
 
 pub struct ExperienceOrbEntity {
     entity: Entity,
@@ -55,12 +55,12 @@ impl ExperienceOrbEntity {
         }
     }
 
-    pub async fn spawn(world: &Arc<World>, position: Vector3<f64>, amount: u32) {
-        Self::spawn_with_direction(world, position, Vector3::default(), amount).await;
+    pub fn spawn(world: &Arc<World>, position: Vector3<f64>, amount: u32) {
+        Self::spawn_with_direction(world, position, Vector3::default(), amount);
     }
 
     /// Vanilla `ExperienceOrb.awardWithDirection` (`net/minecraft/world/entity/ExperienceOrb.java:196-203`).
-    pub async fn spawn_with_direction(
+    pub fn spawn_with_direction(
         world: &Arc<World>,
         position: Vector3<f64>,
         rough_direction: Vector3<f64>,
@@ -78,7 +78,7 @@ impl ExperienceOrbEntity {
             }
             let entity = Entity::new(world.clone(), position, &EntityType::EXPERIENCE_ORB);
             let orb = Arc::new(Self::new_with_direction(entity, rough_direction, i));
-            world.spawn_entity(orb).await;
+            world.spawn_entity(orb);
         }
     }
 
@@ -136,7 +136,7 @@ impl ExperienceOrbEntity {
 
     /// Port of vanilla's `scanForMerges`. Merges compatible orbs (same `amount`, entity ID
     /// difference divisible by 40) within `bounding_box.expand_all(0.5)` into `self`.
-    async fn scan_for_merges(&self) {
+    fn scan_for_merges(&self) {
         let bounding_box = self.entity.bounding_box.load().expand_all(0.5);
         let world = self.entity.world.load();
 
@@ -162,156 +162,138 @@ impl ExperienceOrbEntity {
             self.count.fetch_add(other_count, Ordering::Relaxed);
             let other_age = other_orb.orb_age.load(Ordering::Relaxed);
             self.orb_age.fetch_min(other_age, Ordering::Relaxed);
-            other_orb.entity.remove().await;
+            other_orb.entity.remove();
         }
     }
 }
 
-impl NBTStorage for ExperienceOrbEntity {
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut pumpkin_nbt::compound::NbtCompound,
-    ) -> super::NbtFuture<'a, ()> {
-        Box::pin(async move {
-            // Vanilla `ExperienceOrb.addAdditionalSaveData`. `Health` is not tracked here.
-            nbt.put_short("Age", self.orb_age.load(Ordering::Relaxed) as i16);
-            nbt.put_short("Value", self.amount.load(Ordering::Relaxed) as i16);
-            nbt.put_int("Count", self.count.load(Ordering::Relaxed) as i32);
-        })
-    }
-
-    fn read_nbt_non_mut<'a>(
-        &'a self,
-        nbt: &'a pumpkin_nbt::compound::NbtCompound,
-    ) -> super::NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.orb_age.store(
-                nbt.get_short("Age").unwrap_or(0).max(0) as u32,
-                Ordering::Relaxed,
-            );
-            self.amount.store(
-                nbt.get_short("Value").unwrap_or(0).max(0) as u32,
-                Ordering::Relaxed,
-            );
-            self.count.store(
-                nbt.get_int("Count").unwrap_or(1).max(1) as u32,
-                Ordering::Relaxed,
-            );
-        })
-    }
-}
-
 impl EntityBase for ExperienceOrbEntity {
+    /// Vanilla `ExperienceOrb.addAdditionalSaveData`. `Health` is not tracked here.
+    fn write_custom_nbt(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        nbt.put_short("Age", self.orb_age.load(Ordering::Relaxed) as i16);
+        nbt.put_short("Value", self.amount.load(Ordering::Relaxed) as i16);
+        nbt.put_int("Count", self.count.load(Ordering::Relaxed) as i32);
+    }
+
+    fn read_custom_nbt(&self, nbt: &pumpkin_nbt::compound::NbtCompound) {
+        self.orb_age.store(
+            nbt.get_short("Age").unwrap_or(0).max(0) as u32,
+            Ordering::Relaxed,
+        );
+        self.amount.store(
+            nbt.get_short("Value").unwrap_or(0).max(0) as u32,
+            Ordering::Relaxed,
+        );
+        self.count.store(
+            nbt.get_int("Count").unwrap_or(1).max(1) as u32,
+            Ordering::Relaxed,
+        );
+    }
+
     /// Vanilla `ExperienceOrb.isAttackable` (`ExperienceOrb.java:375-378`).
     /// Experience orbs are collected by touching them, not admitted to player attacks.
     fn is_attackable(&self) -> bool {
         false
     }
 
-    fn tick<'a>(
-        &'a self,
-        caller: &'a Arc<dyn EntityBase>,
-        server: &'a Server,
-    ) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let entity = &self.entity;
-            entity.tick(caller, server).await;
+    fn tick(&self, caller: &dyn EntityBase, server: &Server) {
+        let entity = &self.entity;
+        entity.tick(caller, server);
 
-            let age = self.orb_age.fetch_add(1, Ordering::Relaxed);
-            if age > 0 && age.is_multiple_of(20) {
-                self.scan_for_merges().await;
+        let age = self.orb_age.fetch_add(1, Ordering::Relaxed);
+        if age > 0 && age.is_multiple_of(20) {
+            self.scan_for_merges();
+        }
+
+        let bounding_box = entity.bounding_box.load();
+
+        let original_velo = entity.velocity.load();
+
+        let mut velo = original_velo;
+
+        let world = entity.world.load();
+        if let Some(player) = world.get_closest_player(entity.pos.load(), 8.0)
+            && !player.is_spectator()
+        {
+            let player_entity = player.get_entity();
+            let target = player_entity.pos.load()
+                + Vector3::new(0.0, player_entity.get_eye_height() / 2.0, 0.0);
+            let delta = target - entity.pos.load();
+            let distance = delta.length();
+            if distance > 1.0e-4 {
+                let power = (1.0 - distance / 8.0).max(0.0);
+                velo += delta.normalize() * (power * power * 0.1);
             }
+        }
 
-            let bounding_box = entity.bounding_box.load();
+        let no_physics = !self
+            .entity
+            .world
+            .load()
+            .is_space_empty(bounding_box.expand(-1.0e-7, -1.0e-7, -1.0e-7));
+        self.entity.no_physics.store(no_physics, Ordering::Relaxed);
+        // TODO: isSubmergedIn
+        if !no_physics {
+            velo.y -= self.get_gravity();
+        }
 
-            let original_velo = entity.velocity.load();
+        entity.velocity.store(velo);
 
-            let mut velo = original_velo;
+        let fall_speed = velo.y;
+        entity.move_entity(caller, velo);
 
-            let world = entity.world.load();
-            if let Some(player) = world.get_closest_player(entity.pos.load(), 8.0)
-                && !player.is_spectator()
-            {
-                let player_entity = player.get_entity();
-                let target = player_entity.pos.load()
-                    + Vector3::new(0.0, player_entity.get_eye_height() / 2.0, 0.0);
-                let delta = target - entity.pos.load();
-                let distance = delta.length();
-                if distance > 1.0e-4 {
-                    let power = (1.0 - distance / 8.0).max(0.0);
-                    velo += delta.normalize() * (power * power * 0.1);
-                }
-            }
+        entity.tick_block_collisions(caller);
 
-            let no_clip = !self
-                .entity
-                .world
-                .load()
-                .is_space_empty(bounding_box.expand(-1.0e-7, -1.0e-7, -1.0e-7));
-            // TODO: isSubmergedIn
-            if !no_clip {
-                velo.y -= self.get_gravity();
-            }
+        // `ExperienceOrb.tick`: air drag of 0.98 on every axis, multiplied by the slipperiness
+        // of the block below when grounded, then a small bounce off the floor. Without it an
+        // orb kept accelerating and the pull toward a player made it overshoot and oscillate
+        // instead of converging.
+        let on_ground = entity.on_ground.load(Ordering::Relaxed);
+        let mut friction = 0.98;
+        if on_ground {
+            friction *= f64::from(entity.get_block_with_y_offset(0.999_999).1.slipperiness);
+        }
+        let mut damped = entity.velocity.load() * friction;
+        if on_ground && fall_speed < -self.get_gravity() {
+            damped.y = -fall_speed * 0.4;
+        }
+        entity.velocity.store(damped);
 
-            entity.velocity.store(velo);
-
-            let fall_speed = velo.y;
-            entity.move_entity(caller, velo).await;
-
-            entity.tick_block_collisions(caller, server).await;
-
-            // `ExperienceOrb.tick`: air drag of 0.98 on every axis, multiplied by the slipperiness
-            // of the block below when grounded, then a small bounce off the floor. Without it an
-            // orb kept accelerating and the pull toward a player made it overshoot and oscillate
-            // instead of converging.
-            let on_ground = entity.on_ground.load(Ordering::Relaxed);
-            let mut friction = 0.98;
-            if on_ground {
-                friction *= f64::from(entity.get_block_with_y_offset(0.999_999).1.slipperiness);
-            }
-            let mut damped = entity.velocity.load() * friction;
-            if on_ground && fall_speed < -self.get_gravity() {
-                damped.y = -fall_speed * 0.4;
-            }
-            entity.velocity.store(damped);
-
-            if age >= 6000 {
-                self.entity.remove().await;
-            }
-        })
+        if age >= 6000 {
+            entity.remove();
+        }
     }
 
     fn get_entity(&self) -> &Entity {
         &self.entity
     }
 
-    fn on_player_collision<'a>(&'a self, player: &'a Arc<Player>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if player.living_entity.health.load() > 0.0 {
-                let mut delay = player.experience_pick_up_delay.lock().await;
-                if *delay == 0 {
-                    *delay = 2;
-                    player.living_entity.pickup(&self.entity, 1);
-                    let remaining = player
-                        .apply_mending_from_xp(self.amount.load(Ordering::Relaxed) as i32)
-                        .await;
-                    if remaining > 0 {
-                        player.add_experience_points(remaining).await;
-                    }
-                    if self.count.fetch_sub(1, Ordering::Relaxed) <= 1 {
-                        self.entity.remove().await;
-                    }
+    fn on_player_collision(&self, player: &Arc<Player>) {
+        if player.living_entity.health.load() > 0.0 {
+            let can_pickup = if let Ok(mut delay) = player.experience_pick_up_delay.try_lock()
+                && *delay == 0
+            {
+                *delay = 2;
+                true
+            } else {
+                false
+            };
+            if can_pickup {
+                player.living_entity.pickup(&self.entity, 1);
+                let remaining =
+                    player.apply_mending_from_xp(self.amount.load(Ordering::Relaxed) as i32);
+                if remaining > 0 {
+                    player.add_experience_points(remaining);
+                }
+                if self.count.fetch_sub(1, Ordering::Relaxed) <= 1 {
+                    self.entity.remove();
                 }
             }
-        })
+        }
     }
 
     fn get_living_entity(&self) -> Option<&LivingEntity> {
         None
-    }
-
-    fn as_nbt_storage(&self) -> &dyn NBTStorage {
-        self
     }
 
     fn get_gravity(&self) -> f64 {

@@ -3,8 +3,8 @@ use pumpkin_data::{Block, FacingExt};
 use pumpkin_macros::pumpkin_block;
 use pumpkin_world::world::BlockFlags;
 
+use crate::block::BlockBehaviour;
 use crate::block::BrokenArgs;
-use crate::block::{BlockBehaviour, BlockFuture};
 
 use super::piston::PistonProps;
 
@@ -14,8 +14,8 @@ pub(crate) type MovingPistonProps = pumpkin_data::block_properties::MovingPiston
 pub struct PistonExtensionBlock;
 
 impl BlockBehaviour for PistonExtensionBlock {
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
+    fn broken(&self, args: BrokenArgs<'_>) {
+        {
             let props = MovingPistonProps::from_state_id(args.state.id, &Block::MOVING_PISTON);
             let pos = args
                 .position
@@ -24,11 +24,9 @@ impl BlockBehaviour for PistonExtensionBlock {
             if &Block::PISTON == new_block || &Block::STICKY_PISTON == new_block {
                 let props = PistonProps::from_state_id(new_state, new_block);
                 if props.extended {
-                    args.world
-                        .break_block(&pos, None, BlockFlags::empty())
-                        .await;
+                    args.world.break_block(&pos, None, BlockFlags::empty());
                 }
             }
-        })
+        }
     }
 }

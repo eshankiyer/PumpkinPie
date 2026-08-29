@@ -1,170 +1,90 @@
 use std::sync::Arc;
 
 use crate::block::{
-    BlockFuture, EmitsRedstonePowerArgs, GetRedstonePowerArgs, GetStateForNeighborUpdateArgs,
+    BlockBehaviour, EmitsRedstonePowerArgs, GetRedstonePowerArgs, GetStateForNeighborUpdateArgs,
     OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs,
 };
 use crate::entity::EntityBase;
-use pumpkin_data::{
-    Block, BlockStateId, FacingExt,
-    block_properties::{BlockProperties, ObserverLikeProperties},
-};
+use pumpkin_data::{Block, BlockStateId, FacingExt, block_properties::{BlockProperties, ObserverLikeProperties}};
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::{tick::TickPriority, world::BlockFlags};
-
-use crate::{block::BlockBehaviour, world::World};
+use crate::world::World;
 
 #[pumpkin_block("minecraft:observer")]
 pub struct ObserverBlock;
 
 impl BlockBehaviour for ObserverBlock {
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = ObserverLikeProperties::default(args.block);
-            props.facing = args.player.get_entity().get_facing();
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = ObserverLikeProperties::default(args.block);
+        props.facing = args.player.get_entity().get_facing();
+        props.to_state_id(args.block)
     }
 
-    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            let state = args.world.get_block_state(args.position);
-            let mut props = ObserverLikeProperties::from_state_id(state.id, args.block);
-
-            if props.powered {
-                props.powered = false;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_LISTENERS,
-                    )
-                    .await;
-            } else {
-                props.powered = true;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_LISTENERS,
-                    )
-                    .await;
-                args.world
-                    .schedule_block_tick(args.block, *args.position, 2, TickPriority::Normal);
-            }
-
-            Self::update_neighbors(args.world, args.block, args.position, &props).await;
-        })
+    fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
+        let state = args.world.get_block_state(args.position);
+        let mut props = ObserverLikeProperties::from_state_id(state.id, args.block);
+        if props.powered {
+            props.powered = false;
+            args.world.set_block_state(args.position, props.to_state_id(args.block), BlockFlags::NOTIFY_LISTENERS);
+        } else {
+            props.powered = true;
+            args.world.set_block_state(args.position, props.to_state_id(args.block), BlockFlags::NOTIFY_LISTENERS);
+            args.world.schedule_block_tick(args.block, *args.position, 2, TickPriority::Normal);
+        }
+        Self::update_neighbors(args.world, args.block, args.position, props);
     }
 
-    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // `ObserverBlock.onPlace` (ObserverBlock.java:115-123): an observer that arrives
-            // already POWERED with no pending tick (piston move, /setblock, chunk edit) is reset
-            // to unpowered, otherwise it emits 15 forever with nothing left to turn it off.
-            if Block::from_state_id(args.old_state_id) == args.block {
-                return;
-            }
-            let mut props = ObserverLikeProperties::from_state_id(args.state_id, args.block);
-            if props.powered
-                && !args
-                    .world
-                    .is_block_tick_scheduled(args.position, &Block::OBSERVER)
-            {
-                props.powered = false;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_LISTENERS,
-                    )
-                    .await;
-                Self::update_neighbors(args.world, args.block, args.position, &props).await;
-            }
-        })
+    /// `ObserverBlock.onPlace` (ObserverBlock.java:115-123): reset an already-powered observer
+    /// when no pending tick will turn it off.
+    fn placed(&self, args: PlacedArgs<'_>) {
+        if Block::from_state_id(args.old_state_id) == args.block { return; }
+        let mut props = ObserverLikeProperties::from_state_id(args.state_id, args.block);
+        if props.powered && !args.world.is_block_tick_scheduled(args.position, &Block::OBSERVER) {
+            props.powered = false;
+            args.world.set_block_state(args.position, props.to_state_id(args.block), BlockFlags::NOTIFY_LISTENERS);
+            Self::update_neighbors(args.world, args.block, args.position, props);
+        }
     }
 
-    fn get_state_for_neighbor_update<'a>(
-        &'a self,
-        args: GetStateForNeighborUpdateArgs<'a>,
-    ) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let props = ObserverLikeProperties::from_state_id(args.state_id, args.block);
-
-            if props.facing.to_block_direction() == args.direction
-                && !props.powered
-                && !args
-                    .world
-                    .is_block_tick_scheduled(args.position, &Block::OBSERVER)
-            {
-                Self::schedule_tick(args.world, args.position);
-            }
-
-            args.state_id
-        })
+    fn get_state_for_neighbor_update(&self, args: GetStateForNeighborUpdateArgs<'_>) -> BlockStateId {
+        let props = ObserverLikeProperties::from_state_id(args.state_id, args.block);
+        if props.facing.to_block_direction() == args.direction && !props.powered
+            && !args.world.is_block_tick_scheduled(args.position, &Block::OBSERVER)
+        {
+            Self::schedule_tick(args.world, args.position);
+        }
+        args.state_id
     }
 
-    fn emits_redstone_power<'a>(
-        &'a self,
-        _args: EmitsRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, bool> {
-        Box::pin(async move { true })
+    fn emits_redstone_power(&self, _args: EmitsRedstonePowerArgs<'_>) -> bool { true }
+
+    fn get_weak_redstone_power(&self, args: GetRedstonePowerArgs<'_>) -> u8 {
+        let props = ObserverLikeProperties::from_state_id(args.state.id, args.block);
+        if props.facing.to_block_direction() == args.direction && props.powered { 15 } else { 0 }
     }
 
-    fn get_weak_redstone_power<'a>(
-        &'a self,
-        args: GetRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, u8> {
-        Box::pin(async move {
-            let props = ObserverLikeProperties::from_state_id(args.state.id, args.block);
-            if props.facing.to_block_direction() == args.direction && props.powered {
-                15
-            } else {
-                0
-            }
-        })
+    fn get_strong_redstone_power(&self, args: GetRedstonePowerArgs<'_>) -> u8 {
+        self.get_weak_redstone_power(args)
     }
 
-    fn get_strong_redstone_power<'a>(
-        &'a self,
-        args: GetRedstonePowerArgs<'a>,
-    ) -> BlockFuture<'a, u8> {
-        Box::pin(async move { self.get_weak_redstone_power(args).await })
-    }
-
-    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // `ObserverBlock.affectNeighborsAfterRemoval` ignores whether a piston moved the
-            // block, unlike `DiodeBlock`'s: an observer removed mid-pulse still has to clear the
-            // neighbour in front, or that neighbour keeps a stale powered reading.
-            let mut props = ObserverLikeProperties::from_state_id(args.old_state_id, args.block);
-            if props.powered
-                && args
-                    .world
-                    .is_block_tick_scheduled(args.position, &Block::OBSERVER)
-            {
-                props.powered = false;
-                Self::update_neighbors(args.world, args.block, args.position, &props).await;
-            }
-        })
+    /// `ObserverBlock.affectNeighborsAfterRemoval`: an observer removed mid-pulse clears the
+    /// neighbour in front, including when the removal is caused by a piston move.
+    fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
+        let mut props = ObserverLikeProperties::from_state_id(args.old_state_id, args.block);
+        if props.powered && args.world.is_block_tick_scheduled(args.position, &Block::OBSERVER) {
+            props.powered = false;
+            Self::update_neighbors(args.world, args.block, args.position, props);
+        }
     }
 }
 
 impl ObserverBlock {
-    async fn update_neighbors(
-        world: &Arc<World>,
-        block: &Block,
-        block_pos: &BlockPos,
-        props: &ObserverLikeProperties,
-    ) {
+    fn update_neighbors(world: &Arc<World>, block: &Block, block_pos: &BlockPos, props: ObserverLikeProperties) {
         let facing = props.facing.to_block_direction();
         let opposite_facing_pos = block_pos.offset(facing.opposite().to_offset());
-
-        world.update_neighbor(&opposite_facing_pos, block).await;
-        world
-            .update_neighbors(&opposite_facing_pos, Some(facing))
-            .await;
+        world.update_neighbor(&opposite_facing_pos, block);
+        world.update_neighbors(&opposite_facing_pos, Some(facing));
     }
 
     fn schedule_tick(world: &World, block_pos: &BlockPos) {

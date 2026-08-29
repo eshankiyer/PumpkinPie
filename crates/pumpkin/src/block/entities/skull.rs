@@ -1,8 +1,7 @@
 use super::BlockEntity;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
-use std::pin::Pin;
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 pub struct SkullBlockEntity {
     pub position: BlockPos,
@@ -38,21 +37,22 @@ impl BlockEntity for SkullBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            if let Some(sound) = self.note_block_sound.lock().await.as_ref() {
-                nbt.put_string("note_block_sound", sound.clone());
-            }
-            if let Some(prof) = self.profile.lock().await.as_ref() {
-                nbt.put_compound("profile", prof.clone());
-            }
-            if let Some(name) = self.custom_name.lock().await.as_ref() {
-                nbt.put_string("custom_name", name.clone());
-            }
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        if let Ok(sound) = self.note_block_sound.lock()
+            && let Some(sound) = sound.as_ref()
+        {
+            nbt.put_string("note_block_sound", sound.clone());
+        }
+        if let Ok(prof) = self.profile.lock()
+            && let Some(prof) = prof.as_ref()
+        {
+            nbt.put_compound("profile", prof.clone());
+        }
+        if let Ok(name) = self.custom_name.lock()
+            && let Some(name) = name.as_ref()
+        {
+            nbt.put_string("custom_name", name.clone());
+        }
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -86,9 +86,9 @@ impl SkullBlockEntity {
     pub const fn new(position: BlockPos) -> Self {
         Self {
             position,
-            note_block_sound: Mutex::const_new(None),
-            profile: Mutex::const_new(None),
-            custom_name: Mutex::const_new(None),
+            note_block_sound: Mutex::new(None),
+            profile: Mutex::new(None),
+            custom_name: Mutex::new(None),
         }
     }
 }
@@ -104,15 +104,14 @@ mod tests {
     fn custom_name_round_trips_through_nbt() {
         let pos = BlockPos::new(3, 70, 5);
         let entity = SkullBlockEntity::new(pos);
-        *futures::executor::block_on(entity.custom_name.lock()) =
-            Some("{\"text\":\"Steve\"}".to_string());
+        *entity.custom_name.lock().unwrap() = Some("{\"text\":\"Steve\"}".to_string());
 
         let mut nbt = NbtCompound::new();
-        futures::executor::block_on(entity.write_nbt(&mut nbt));
+        entity.write_nbt(&mut nbt);
         let loaded = SkullBlockEntity::from_nbt(&nbt, pos);
 
         assert_eq!(
-            *futures::executor::block_on(loaded.custom_name.lock()),
+            *loaded.custom_name.lock().unwrap(),
             Some("{\"text\":\"Steve\"}".to_string())
         );
     }
@@ -121,7 +120,7 @@ mod tests {
     fn absent_custom_name_stays_absent() {
         let entity = SkullBlockEntity::new(BlockPos::new(0, 0, 0));
         let mut nbt = NbtCompound::new();
-        futures::executor::block_on(entity.write_nbt(&mut nbt));
+        entity.write_nbt(&mut nbt);
         assert!(nbt.get_string("custom_name").is_none());
     }
 }

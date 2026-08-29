@@ -10,7 +10,6 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::random::RandomGenerator;
 use pumpkin_util::random::xoroshiro128::Xoroshiro;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
@@ -23,9 +22,9 @@ use crate::world::World;
 pub struct SculkCatalystBlockEntity {
     pub position: BlockPos,
     /// `CatalystListener.sculkSpreader` — `SculkSpreader.createLevelSpreader()`.
-    pub spreader: Mutex<SculkSpreader>,
+    pub spreader: Arc<Mutex<SculkSpreader>>,
     /// Guards the lazy `GameEventListener` registration performed on the first tick.
-    listener_registered: AtomicBool,
+    listener_registered: Arc<AtomicBool>,
 }
 
 impl BlockEntity for SculkCatalystBlockEntity {
@@ -46,18 +45,15 @@ impl BlockEntity for SculkCatalystBlockEntity {
         spreader.load_nbt(nbt);
         Self {
             position,
-            spreader: Mutex::new(spreader),
-            listener_registered: AtomicBool::new(false),
+            spreader: Arc::new(Mutex::new(spreader)),
+            listener_registered: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            self.spreader.lock().await.save_nbt(nbt);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        if let Ok(spreader) = self.spreader.try_lock() {
+            spreader.save_nbt(nbt);
+        }
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
@@ -68,19 +64,25 @@ impl BlockEntity for SculkCatalystBlockEntity {
 
     /// `SculkCatalystBlockEntity.serverTick` (lines 37-39):
     /// `getSculkSpreader().updateCursors(level, pos, level.getRandom(), true)`.
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            self.ensure_listener_registered(world).await;
+    fn tick(&self, world: &Arc<World>) {
+        let entity = Self {
+            position: self.position,
+            spreader: self.spreader.clone(),
+            listener_registered: self.listener_registered.clone(),
+        };
+        let world = world.clone();
+        tokio::spawn(async move {
+            entity.ensure_listener_registered(&world).await;
 
-            let mut spreader = self.spreader.lock().await;
+            let mut spreader = entity.spreader.lock().await;
             if spreader.cursors().is_empty() {
                 return;
             }
             let mut random =
                 RandomGenerator::Xoroshiro(Xoroshiro::from_seed(rand::random::<u64>()));
-            let target = WorldSpreadTarget { world };
+            let target = WorldSpreadTarget { world: &world };
             let events = spreader
-                .update_cursors(&target, self.position, &mut random, true)
+                .update_cursors(&target, entity.position, &mut random, true)
                 .await;
             drop(spreader);
 
@@ -91,20 +93,15 @@ impl BlockEntity for SculkCatalystBlockEntity {
                     event.data,
                 );
             }
-        })
+        });
     }
 
-    fn on_block_replaced<'a>(
-        self: Arc<Self>,
-        world: Arc<World>,
-        position: BlockPos,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
-    where
-        Self: 'a,
-    {
-        Box::pin(async move {
+    fn on_block_replaced(self: Arc<Self>, world: &Arc<World>, position: &BlockPos) {
+        let world = world.clone();
+        let position = *position;
+        tokio::spawn(async move {
             world.unregister_game_event_listener_at(&position).await;
-        })
+        });
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -119,8 +116,8 @@ impl SculkCatalystBlockEntity {
     pub fn new(position: BlockPos) -> Self {
         Self {
             position,
-            spreader: Mutex::new(SculkSpreader::level_spreader()),
-            listener_registered: AtomicBool::new(false),
+            spreader: Arc::new(Mutex::new(SculkSpreader::level_spreader())),
+            listener_registered: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -169,7 +166,7 @@ mod tests {
             .add_cursors(BlockPos::new(4, 6, 6), 1500);
 
         let mut nbt = NbtCompound::new();
-        entity.write_nbt(&mut nbt).await;
+        entity.write_nbt(&mut nbt);
 
         let loaded = SculkCatalystBlockEntity::from_nbt(&nbt, BlockPos::new(4, 5, 6));
         let cursors: Vec<i32> = loaded

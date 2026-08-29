@@ -17,10 +17,9 @@ use crate::block::entities::beehive::{
 };
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, GetComparatorOutputArgs, OnPlaceArgs,
+    BlockBehaviour, BlockMetadata, GetComparatorOutputArgs, OnPlaceArgs,
     UseWithItemArgs,
 };
-use crate::entity::mob::Mob;
 use crate::entity::passive::bee::as_bee;
 use crate::entity::{Entity, EntityBase, item::ItemEntity};
 use crate::world::World;
@@ -55,31 +54,20 @@ impl BlockBehaviour for BeehiveBlock {
     /// `BeehiveBlock.getStateForPlacement` (`BeehiveBlock.java:269-272`): hives face away
     /// from the player that placed them. The facing is part of the block state consumed by
     /// bee release and smoke checks, so it must be selected before the block is installed.
-    fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
-        Box::pin(async move {
-            let mut props = BeeNestLikeProperties::default(args.block);
-            props.facing = args.player.get_entity().get_horizontal_facing().opposite();
-            props.to_state_id(args.block)
-        })
+    fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
+        let mut props = BeeNestLikeProperties::default(args.block);
+        props.facing = args.player.get_entity().get_horizontal_facing().opposite();
+        props.to_state_id(args.block)
     }
 
-    fn get_comparator_output<'a>(
-        &'a self,
-        args: GetComparatorOutputArgs<'a>,
-    ) -> BlockFuture<'a, Option<u8>> {
-        Box::pin(async move {
-            let state_id = args.world.get_block_state_id(args.position);
-            let props = BeeNestLikeProperties::from_state_id(state_id, args.block);
-            Some(props.honey_level)
-        })
+    fn get_comparator_output(&self, args: GetComparatorOutputArgs<'_>) -> Option<u8> {
+        let state_id = args.world.get_block_state_id(args.position);
+        let props = BeeNestLikeProperties::from_state_id(state_id, args.block);
+        Some(props.honey_level)
     }
 
     /// `BeehiveBlock.useItemOn`.
-    fn use_with_item<'a>(
-        &'a self,
-        args: UseWithItemArgs<'a>,
-    ) -> BlockFuture<'a, BlockActionResult> {
-        Box::pin(async move {
+    fn use_with_item(&self, args: UseWithItemArgs<'_>) -> BlockActionResult {
             let state_id = args.world.get_block_state_id(args.position);
             let props = BeeNestLikeProperties::from_state_id(state_id, args.block);
             if props.honey_level < MAX_HONEY_LEVELS {
@@ -89,10 +77,10 @@ impl BlockBehaviour for BeehiveBlock {
             let player_pos = args.player.get_entity().pos.load();
             let item = args.item_stack.item;
             if item.id == Item::SHEARS.id {
-                drop_honeycomb(args.world, args.position).await;
+                drop_honeycomb(args.world, args.position);
                 args.world
                     .play_sound(Sound::BlockBeehiveShear, SoundCategory::Blocks, &player_pos);
-                args.player.damage_held_item(1).await;
+                args.player.damage_held_item(1);
             } else if item.id == Item::GLASS_BOTTLE.id {
                 if args.player.gamemode.load() != GameMode::Creative {
                     args.item_stack.decrement(1);
@@ -104,9 +92,8 @@ impl BlockBehaviour for BeehiveBlock {
                     .player
                     .inventory()
                     .insert_stack_anywhere(&mut honey)
-                    .await
                 {
-                    args.player.drop_item(honey).await;
+                    args.player.drop_item(honey);
                 }
             } else {
                 return BlockActionResult::PassToDefaultBlockAction;
@@ -115,30 +102,35 @@ impl BlockBehaviour for BeehiveBlock {
             // `hiveEmptied`: the harvest happened, so the honey level resets either way, and the
             // bees stay calm only if a campfire is smoking underneath the hive.
             let sedated = is_smokey_pos(args.world, args.position);
-            reset_honey_level(args.world, args.block, args.position, state_id).await;
+            reset_honey_level(args.world, args.block, args.position, state_id);
 
-            if !sedated
-                && let Some(handle) = args.world.get_block_entity(args.position)
-                && let Some(hive) = handle.as_any().downcast_ref::<BeehiveBlockEntity>()
-            {
-                if !hive.is_empty().await {
-                    anger_nearby_bees(args.world, args.position).await;
-                }
-                hive.empty_all_living_from_hive(
-                    args.world,
-                    Some(args.player),
-                    BeeReleaseStatus::Emergency,
-                )
-                .await;
+            if !sedated {
+                let world = args.world.clone();
+                let position = *args.position;
+                let player = args.player.clone();
+                tokio::spawn(async move {
+                    if let Some(handle) = world.get_block_entity(&position)
+                        && let Some(hive) = handle.as_any().downcast_ref::<BeehiveBlockEntity>()
+                    {
+                        if !hive.is_empty().await {
+                            anger_nearby_bees(&world, &position).await;
+                        }
+                        hive.empty_all_living_from_hive(
+                            &world,
+                            Some(&player),
+                            BeeReleaseStatus::Emergency,
+                        )
+                        .await;
+                    }
+                });
             }
 
             BlockActionResult::Success
-        })
     }
 }
 
 /// `BeehiveBlock.resetHoneyLevel`.
-async fn reset_honey_level(
+fn reset_honey_level(
     world: &Arc<World>,
     block: &Block,
     position: &BlockPos,
@@ -146,13 +138,11 @@ async fn reset_honey_level(
 ) {
     let mut props = BeeNestLikeProperties::from_state_id(state_id, block);
     props.honey_level = 0;
-    world
-        .set_block_state(position, props.to_state_id(block), BlockFlags::NOTIFY_ALL)
-        .await;
+    world.set_block_state(position, props.to_state_id(block), BlockFlags::NOTIFY_ALL);
 }
 
 /// `BeehiveBlock.dropHoneycomb`.
-async fn drop_honeycomb(world: &Arc<World>, position: &BlockPos) {
+fn drop_honeycomb(world: &Arc<World>, position: &BlockPos) {
     let drop_pos = Vector3::new(
         f64::from(position.0.x) + 0.5,
         f64::from(position.0.y) + 0.5,
@@ -162,7 +152,7 @@ async fn drop_honeycomb(world: &Arc<World>, position: &BlockPos) {
         Entity::new(world.clone(), drop_pos, &EntityType::ITEM),
         ItemStack::new(HONEYCOMB_PER_HARVEST, &Item::HONEYCOMB),
     ));
-    world.spawn_entity(item_entity).await;
+    world.spawn_entity(item_entity);
 }
 
 /// `BeehiveBlock.angerNearbyBees`: every bee within the box that has no target picks a random

@@ -3,19 +3,20 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, Ordering, Ordering::Relaxed};
 
+use pumpkin_data::entity::EntityType;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_data::sound::Sound;
+use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 use rand::RngExt;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
+    Entity, EntityBase, EntityBaseFuture,
     ai::goal::{
         escape_danger::EscapeDangerGoal,
         trader_llama_defend_wandering_trader::TraderLlamaDefendWanderingTraderGoal,
     },
-    mob::{Mob, MobEntity},
+    mob::{Mob, MobEntity, RangedAttackMob},
     passive::{
         animal::Animal,
         equine::{AbstractChestedHorse, AbstractHorse, AbstractHorseData, ChestedHorseData},
@@ -23,6 +24,7 @@ use crate::entity::{
         wandering_trader::WanderingTraderEntity,
     },
     player::Player,
+    projectile::llama_spit::LlamaSpitEntity,
 };
 
 /// Vanilla `TraderLlama::despawnDelay` default (`TraderLlama.java:28-29`).
@@ -89,31 +91,33 @@ impl TraderLlamaEntity {
 
         mob_arc
     }
-}
 
-impl NBTStorage for TraderLlamaEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt).await;
-            self.write_animal_nbt(nbt);
-            self.write_horse_nbt(nbt);
-            self.write_chested_horse_nbt(nbt);
-            self.write_llama_nbt(nbt);
-            nbt.put_int("DespawnDelay", self.despawn_delay.load(Ordering::Relaxed));
-        })
-    }
+    pub fn spit(&self, target: &Arc<dyn EntityBase>) {
+        let entity = self.get_entity();
+        let world = entity.world.load_full();
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
-            self.read_animal_nbt(nbt);
-            self.read_llama_strength_variant(nbt);
-            self.read_horse_nbt(nbt);
-            self.read_chested_horse_nbt(nbt).await;
-            if let Some(delay) = nbt.get_int("DespawnDelay") {
-                self.despawn_delay.store(delay, Ordering::Relaxed);
-            }
-        })
+        let spit_entity = Entity::new(world.clone(), entity.pos.load(), &EntityType::LLAMA_SPIT);
+        let spit = LlamaSpitEntity::new_shot(spit_entity, entity);
+
+        let mob_pos = entity.pos.load();
+        let target_entity = target.get_entity();
+        let target_pos = target_entity.pos.load();
+        let target_height = f64::from(target_entity.entity_dimension.load().height);
+
+        let dx = target_pos.x - mob_pos.x;
+        let dy = (target_pos.y + target_height / 3.0) - spit.get_entity().pos.load().y;
+        let dz = target_pos.z - mob_pos.z;
+        let horizontal_distance = dx.hypot(dz);
+        let yo = horizontal_distance * 0.2;
+
+        spit.thrown.set_velocity(dx, dy + yo, dz, 1.5, 10.0);
+
+        if !entity.silent.load(Ordering::Relaxed) {
+            world.play_sound(Sound::EntityLlamaSpit, SoundCategory::Neutral, &mob_pos);
+        }
+
+        let spit_arc: Arc<dyn EntityBase> = Arc::new(spit);
+        world.spawn_entity(spit_arc);
     }
 }
 
@@ -196,23 +200,39 @@ impl Mob for TraderLlamaEntity {
         &self.mob_entity
     }
 
+    fn mob_write_nbt(&self, nbt: &mut NbtCompound) {
+        self.write_horse_nbt(nbt);
+        self.write_chested_horse_nbt(nbt);
+        self.write_llama_nbt(nbt);
+        nbt.put_int("DespawnDelay", self.despawn_delay.load(Ordering::Relaxed));
+    }
+
+    fn mob_read_nbt(&self, nbt: &NbtCompound) {
+        // Strength must be restored before the chest inventory is resized, matching
+        // `Llama.readAdditionalSaveData` (`Llama.java:110-114`).
+        self.read_llama_strength_variant(nbt);
+        self.read_horse_nbt(nbt);
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.read_chested_horse_nbt(nbt));
+        });
+        if let Some(delay) = nbt.get_int("DespawnDelay") {
+            self.despawn_delay.store(delay, Ordering::Relaxed);
+        }
+    }
+
     fn get_follow_leash_speed(&self) -> f32 {
         2.0
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> EntityBaseFuture<'a, bool> {
-        self.chested_mob_interact(player, item_stack)
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.chested_mob_interact(player, item_stack))
+        })
     }
 
-    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            crate::entity::passive::llama::send_baby_id_if_baby(self.get_entity());
-            self.send_llama_metadata();
-        })
+    fn mob_init_data_tracker(&self) {
+        crate::entity::passive::llama::send_baby_id_if_baby(self.get_entity());
+        self.send_llama_metadata();
     }
 
     fn create_offspring<'a>(
@@ -231,8 +251,8 @@ impl Mob for TraderLlamaEntity {
     /// `WanderingTrader`, the countdown slaves itself to the trader's own `despawn_delay` minus
     /// one every tick (`TraderLlama.java:93-95`) so it automatically tracks any reset/extension of
     /// the trader's timer; otherwise it decrements independently.
-    fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
+    fn mob_tick(&self, _caller: &dyn EntityBase) {
+        tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(async {
             self.tick_horse_ai().await;
             let entity = &self.mob_entity.living_entity.entity;
             let holder = entity.leashed_to.lock().await.clone();
@@ -259,10 +279,16 @@ impl Mob for TraderLlamaEntity {
             self.despawn_delay.store(new_delay, Ordering::Relaxed);
 
             if new_delay <= 0 {
-                entity.unleash().await;
+                entity.unleash();
                 let world = entity.world.load();
-                world.remove_entity(self).await;
+                world.remove_entity(self);
             }
-        })
+        }))
+    }
+}
+
+impl RangedAttackMob for TraderLlamaEntity {
+    fn perform_ranged_attack(&self, target: &Arc<dyn EntityBase>, _power: f32) {
+        self.spit(target);
     }
 }

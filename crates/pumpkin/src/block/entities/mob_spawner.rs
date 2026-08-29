@@ -1,15 +1,16 @@
-use std::{
-    pin::Pin,
-    sync::{
-        Arc,
-        atomic::{AtomicI32, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicI32, Ordering},
 };
 
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::{entity::EntityType, world::WorldEvent};
 use pumpkin_nbt::compound::NbtCompound;
-use pumpkin_util::math::{boundingbox::BoundingBox, position::BlockPos, vector3::Vector3};
+use pumpkin_util::math::{
+    boundingbox::BoundingBox,
+    position::BlockPos,
+    vector3::Vector3,
+};
 
 use crate::{block::entities::BlockEntity, entity::EntityBase, world::World};
 
@@ -63,12 +64,7 @@ impl MobSpawnerBlockEntity {
         }
     }
 
-    pub fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) {
-        nbt.put_string("id", self.resource_location().to_string());
-        let position = self.get_position();
-        nbt.put_int("x", position.0.x);
-        nbt.put_int("y", position.0.y);
-        nbt.put_int("z", position.0.z);
+    pub fn write_spawner_nbt(&self, nbt: &mut NbtCompound) {
         nbt.put_short("Delay", self.delay.load(Ordering::Relaxed) as i16);
         nbt.put_short("MinSpawnDelay", self.min_delay as i16);
         nbt.put_short("MaxSpawnDelay", self.max_delay as i16);
@@ -115,57 +111,70 @@ impl BlockEntity for MobSpawnerBlockEntity {
         self.position
     }
 
-    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            // For the block form, vanilla's `broadcastEvent` override is
-            // `level.blockEvent(pos, this, 1, 0)`; the shared core returns whether
-            // vanilla reached a `delay()` call site so the notification stays here.
-            if base_spawner_server_tick(
-                world,
-                self.position,
-                &self.delay,
-                self.config(),
-                self.entity_type.load(),
-            )
-            .await
-            {
-                world.add_synced_block_event(self.position, 1, 0).await;
-            }
-        })
+    fn tick(&self, world: &Arc<World>) {
+        // For the block form, vanilla's `broadcastEvent` override is
+        // `level.blockEvent(pos, this, 1, 0)`; the shared core returns whether
+        // vanilla reached a `delay()` call site so the notification stays here.
+        if base_spawner_server_tick(
+            world,
+            self.position,
+            &self.delay,
+            self.config(),
+            self.entity_type.load(),
+        ) {
+            world.add_synced_block_event(self.position, 1, 0);
+        }
     }
 
     fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound, position: BlockPos) -> Self
     where
         Self: Sized,
     {
-        let delay = nbt.get_short("Delay").unwrap_or(Self::DEFAULT_DELAY as i16) as i32;
-        let min_delay = nbt
-            .get_short("MinSpawnDelay")
-            .unwrap_or(Self::DEFAULT_MIN_SPAWN_DELAY as i16) as i32;
-        let max_delay = nbt
-            .get_short("MaxSpawnDelay")
-            .unwrap_or(Self::DEFAULT_MAX_SPAWN_DELAY as i16) as i32;
-        let spawn_count = nbt
-            .get_short("SpawnCount")
-            .unwrap_or(Self::DEFAULT_SPAWN_COUNT as i16) as i32;
+        let get_num = |name: &str| {
+            nbt.get_short(name)
+                .map(i32::from)
+                .or_else(|| nbt.get_int(name))
+                .or_else(|| nbt.get_byte(name).map(i32::from))
+        };
+
+        let delay = get_num("Delay").unwrap_or(Self::DEFAULT_DELAY);
+        let min_delay = get_num("MinSpawnDelay").unwrap_or(Self::DEFAULT_MIN_SPAWN_DELAY);
+        let max_delay = get_num("MaxSpawnDelay").unwrap_or(Self::DEFAULT_MAX_SPAWN_DELAY);
+        let spawn_count = get_num("SpawnCount").unwrap_or(Self::DEFAULT_SPAWN_COUNT);
+        let spawn_range = get_num("SpawnRange").unwrap_or(Self::DEFAULT_SPAWN_RANGE);
         let max_nearby_entities =
-            nbt.get_short("MaxNearbyEntities")
-                .unwrap_or(Self::DEFAULT_MAX_NEARBY_ENTITIES as i16) as i32;
+            get_num("MaxNearbyEntities").unwrap_or(Self::DEFAULT_MAX_NEARBY_ENTITIES);
         let required_player_range =
-            nbt.get_short("RequiredPlayerRange")
-                .unwrap_or(Self::DEFAULT_REQUIRED_PLAYER_RANGE as i16) as i32;
-        let spawn_range = nbt
-            .get_short("SpawnRange")
-            .unwrap_or(Self::DEFAULT_SPAWN_RANGE as i16) as i32;
+            get_num("RequiredPlayerRange").unwrap_or(Self::DEFAULT_REQUIRED_PLAYER_RANGE);
 
         let entity_type = nbt
             .get_compound("SpawnData")
-            .and_then(|data| data.get_compound("entity"))
-            .and_then(|entity| entity.get_string("id"))
-            .and_then(|id| {
-                let name = id.strip_prefix("minecraft:").unwrap_or(id);
-                EntityType::from_name(name)
-            });
+            .and_then(|data| {
+                data.get_compound("entity")
+                    .and_then(|entity| entity.get_string("id"))
+                    .or_else(|| data.get_string("id"))
+            })
+            .or_else(|| {
+                nbt.get_list("SpawnPotentials")
+                    .and_then(|list| list.first())
+                    .and_then(|tag| tag.extract_compound())
+                    .and_then(|entry| {
+                        entry
+                            .get_compound("data")
+                            .and_then(|data| {
+                                data.get_compound("entity")
+                                    .and_then(|entity| entity.get_string("id"))
+                                    .or_else(|| data.get_string("id"))
+                            })
+                            .or_else(|| {
+                                entry
+                                    .get_compound("entity")
+                                    .and_then(|entity| entity.get_string("id"))
+                            })
+                    })
+            })
+            .or_else(|| nbt.get_string("EntityId"))
+            .and_then(EntityType::from_name);
 
         Self {
             position,
@@ -180,17 +189,20 @@ impl BlockEntity for MobSpawnerBlockEntity {
         }
     }
 
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut NbtCompound,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            self.write_nbt(nbt);
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.write_spawner_nbt(nbt);
     }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
         let mut final_nbt = NbtCompound::new();
+        final_nbt.put_short("Delay", self.delay.load(Ordering::Relaxed) as i16);
+        final_nbt.put_short("MinSpawnDelay", self.min_delay as i16);
+        final_nbt.put_short("MaxSpawnDelay", self.max_delay as i16);
+        final_nbt.put_short("SpawnCount", self.spawn_count as i16);
+        final_nbt.put_short("SpawnRange", self.spawn_range as i16);
+        final_nbt.put_short("MaxNearbyEntities", self.max_nearby_entities as i16);
+        final_nbt.put_short("RequiredPlayerRange", self.required_player_range as i16);
+
         if let Some(entity_type) = self.entity_type.load() {
             let mut spawn_entry = NbtCompound::new();
 
@@ -233,7 +245,7 @@ fn roll_delay(delay: &AtomicI32, config: BaseSpawnerConfig) {
 /// (BaseSpawner.java:91, 149, 186); the caller emits the matching event-1
 /// notification. The delay reset itself happens here so both callers stay in
 /// lockstep with vanilla's ordering.
-pub(crate) async fn base_spawner_server_tick(
+pub(crate) fn base_spawner_server_tick(
     world: &Arc<World>,
     position: BlockPos,
     delay: &AtomicI32,
@@ -337,7 +349,7 @@ pub(crate) async fn base_spawner_server_tick(
         entity
             .get_entity()
             .set_rotation(rand::random::<f32>() * 360.0, 0.0);
-        world.spawn_entity(entity).await;
+        world.spawn_entity(entity);
         world.sync_world_event(WorldEvent::ParticlesMobblockSpawn, position, 0);
         update_spawns = true;
     }

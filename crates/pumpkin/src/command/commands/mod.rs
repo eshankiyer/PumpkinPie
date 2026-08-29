@@ -1,6 +1,6 @@
 use crate::command::node::dispatcher::CommandDispatcher;
 use crate::command::tree::Command;
-use pumpkin_config::{BasicConfiguration, CommandsConfig};
+use pumpkin_config::CommandsConfig;
 use pumpkin_util::{
     PermissionLvl,
     permission::{Permission, PermissionDefault, PermissionManager, PermissionRegistry},
@@ -55,8 +55,10 @@ mod playsound;
 mod plugin;
 mod plugins;
 mod pumpkin;
+mod raid;
 mod random;
 mod recipe;
+mod reload;
 mod ride;
 mod rotate;
 mod saveall;
@@ -99,7 +101,6 @@ mod worldborder;
 #[must_use]
 pub fn default_dispatcher(
     permission_manager: &PermissionManager,
-    _basic_config: &BasicConfiguration,
     commands_config: &CommandsConfig,
 ) -> CommandDispatcher {
     let mut dispatcher = crate::command::dispatcher::CommandDispatcher::default();
@@ -163,6 +164,7 @@ pub fn default_dispatcher(
     dispatcher.register(spectate::init_command_tree(), "minecraft:command.spectate");
     dispatcher.register(data::init_command_tree(), "minecraft:command.data");
     dispatcher.register(waypoint::init_command_tree(), "minecraft:command.waypoint");
+    dispatcher.register(raid::init_command_tree(), "minecraft:command.raid");
     // Three
     dispatcher.register(deop::init_command_tree(), "minecraft:command.deop");
     dispatcher.register(kick::init_command_tree(), "minecraft:command.kick");
@@ -196,6 +198,7 @@ pub fn default_dispatcher(
     forceload::register(&mut dispatcher, registry);
     ride::register(&mut dispatcher, registry);
     recipe::register(&mut dispatcher, registry);
+    reload::register(&mut dispatcher, registry);
     help::register(&mut dispatcher, registry);
     kill::register(&mut dispatcher, registry);
     op::register(&mut dispatcher, registry);
@@ -676,7 +679,7 @@ fn register_level_3_permissions(registry: &PermissionRegistry) {
 
 #[cfg(test)]
 mod override_tests {
-    use pumpkin_config::{BasicConfiguration, CommandOverride, CommandsConfig};
+    use pumpkin_config::{CommandOverride, CommandsConfig};
     use pumpkin_util::PermissionLvl;
     use pumpkin_util::permission::{PermissionDefault, PermissionManager};
 
@@ -704,14 +707,13 @@ mod override_tests {
 
     #[test]
     fn disabling_a_command_removes_and_hides_it() {
-        let basic = BasicConfiguration::default();
         let mut commands = CommandsConfig::default();
         // `gamemode` lives on the legacy dispatcher; disabling it should remove
         // it there and flag it on the wrapper.
         disabled(&mut commands, "gamemode");
 
         let manager = PermissionManager::new();
-        let dispatcher = default_dispatcher(&manager, &basic, &commands);
+        let dispatcher = default_dispatcher(&manager, &commands);
 
         assert!(dispatcher.is_disabled("gamemode"));
         assert!(
@@ -726,14 +728,13 @@ mod override_tests {
 
     #[test]
     fn disabling_an_alias_turns_off_the_whole_command() {
-        let basic = BasicConfiguration::default();
         let mut commands = CommandsConfig::default();
         // `tp` is an alias of `teleport`; disabling it should take the whole
         // command down, including the primary name.
         disabled(&mut commands, "tp");
 
         let manager = PermissionManager::new();
-        let dispatcher = default_dispatcher(&manager, &basic, &commands);
+        let dispatcher = default_dispatcher(&manager, &commands);
 
         assert!(dispatcher.is_disabled("tp"));
         assert!(dispatcher.is_disabled("teleport"));
@@ -743,13 +744,12 @@ mod override_tests {
 
     #[test]
     fn disabling_a_node_command_also_disables_its_aliases() {
-        let basic = BasicConfiguration::default();
         let mut commands = CommandsConfig::default();
         // `help` is a node-based command with the aliases `h` and `?`.
         disabled(&mut commands, "help");
 
         let manager = PermissionManager::new();
-        let dispatcher = default_dispatcher(&manager, &basic, &commands);
+        let dispatcher = default_dispatcher(&manager, &commands);
 
         assert!(dispatcher.is_disabled("help"));
         assert!(dispatcher.is_disabled("h"));
@@ -758,14 +758,13 @@ mod override_tests {
 
     #[test]
     fn override_for_unknown_command_is_ignored() {
-        let basic = BasicConfiguration::default();
         let mut commands = CommandsConfig::default();
         // A command name that does not exist (usually a typo in the config)
         // should be ignored, not silently swallow a real command or panic.
         disabled(&mut commands, "notacommand");
 
         let manager = PermissionManager::new();
-        let dispatcher = default_dispatcher(&manager, &basic, &commands);
+        let dispatcher = default_dispatcher(&manager, &commands);
 
         assert!(!dispatcher.is_disabled("notacommand"));
         assert!(dispatcher.fallback_dispatcher.get_tree("gamemode").is_ok());
@@ -773,25 +772,23 @@ mod override_tests {
 
     #[test]
     fn override_is_case_insensitive() {
-        let basic = BasicConfiguration::default();
         let mut commands = CommandsConfig::default();
         disabled(&mut commands, "GameMode");
 
         let manager = PermissionManager::new();
-        let dispatcher = default_dispatcher(&manager, &basic, &commands);
+        let dispatcher = default_dispatcher(&manager, &commands);
 
         assert!(dispatcher.is_disabled("gamemode"));
     }
 
     #[test]
     fn permission_level_override_rewrites_the_registry_default() {
-        let basic = BasicConfiguration::default();
         let mut commands = CommandsConfig::default();
         // `gamemode` is normally level 2; bump it to owner-only.
         permission(&mut commands, "gamemode", PermissionLvl::Four);
 
         let manager = PermissionManager::new();
-        let _dispatcher = default_dispatcher(&manager, &basic, &commands);
+        let _dispatcher = default_dispatcher(&manager, &commands);
 
         let permission = manager
             .get_permission("minecraft:command.gamemode")
@@ -804,7 +801,6 @@ mod override_tests {
 
     #[test]
     fn permission_override_resolves_node_command_by_convention() {
-        let basic = BasicConfiguration::default();
         let mut commands = CommandsConfig::default();
         // `kill` is a node-based command whose permission node is not recorded in
         // the legacy dispatcher, so the override must fall back to the
@@ -812,7 +808,7 @@ mod override_tests {
         permission(&mut commands, "kill", PermissionLvl::Four);
 
         let manager = PermissionManager::new();
-        let _dispatcher = default_dispatcher(&manager, &basic, &commands);
+        let _dispatcher = default_dispatcher(&manager, &commands);
 
         let permission = manager
             .get_permission("minecraft:command.kill")
@@ -825,12 +821,11 @@ mod override_tests {
 
     #[test]
     fn permission_level_zero_allows_everyone() {
-        let basic = BasicConfiguration::default();
         let mut commands = CommandsConfig::default();
         permission(&mut commands, "gamemode", PermissionLvl::Zero);
 
         let manager = PermissionManager::new();
-        let _dispatcher = default_dispatcher(&manager, &basic, &commands);
+        let _dispatcher = default_dispatcher(&manager, &commands);
 
         let permission = manager
             .get_permission("minecraft:command.gamemode")

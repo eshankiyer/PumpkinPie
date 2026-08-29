@@ -1,4 +1,4 @@
-use super::{Controls, Goal, GoalFuture, to_goal_ticks};
+use super::{Controls, Goal, to_goal_ticks};
 use crate::block::pathfindable::{PathComputationType, is_pathfindable};
 use crate::entity::{ai::pathfinder::NavigatorGoal, mob::Mob};
 use pumpkin_data::tag::Taggable;
@@ -132,6 +132,29 @@ impl WanderAroundGoal {
         is_pathfindable(world.get_block_state(pos), PathComputationType::Water)
     }
 
+    fn has_controlling_passenger(mob: &dyn Mob) -> bool {
+        if mob.get_mob_entity().is_no_ai() {
+            return false;
+        }
+        let Some(passenger) = mob
+            .get_entity()
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .first()
+            .cloned()
+        else {
+            return false;
+        };
+        let Some(passenger_mob) = passenger.get_mob() else {
+            return false;
+        };
+        !passenger_mob
+            .get_entity()
+            .entity_type
+            .has_tag(&pumpkin_data::tag::EntityType::MINECRAFT_NON_CONTROLLING_RIDER)
+    }
+
     /// Mirrors vanilla `DefaultRandomPos` and `LandRandomPos` for the two random-stroll goals.
     /// The client-visible result is the selected bottom-center block, not an unchecked offset.
     fn find_random_target(
@@ -248,83 +271,75 @@ impl WanderAroundGoal {
 }
 
 impl Goal for WanderAroundGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            if mob.has_controlling_passenger().await {
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if Self::has_controlling_passenger(mob) {
+            return false;
+        }
+
+        if mob.get_mob_entity().is_schooling_follower() {
+            return false;
+        }
+
+        if !self.force_trigger {
+            if mob.get_mob_entity().no_action_time.load(Ordering::Relaxed) >= 100 {
                 return false;
             }
 
-            if mob.get_mob_entity().is_schooling_follower() {
+            if mob.get_random().random_range(0..self.chance) != 0 {
                 return false;
             }
+        }
 
-            if !self.force_trigger {
-                if mob.get_mob_entity().no_action_time.load(Ordering::Relaxed) >= 100 {
-                    return false;
-                }
-
-                if mob.get_random().random_range(0..self.chance) != 0 {
-                    return false;
-                }
-            }
-
-            if self.avoid_water {
-                let in_water = mob.get_entity().was_touching_water.load(Ordering::Relaxed);
-                self.target = if in_water {
-                    Self::find_random_target(mob, 15, 7, true, false)
-                        .or_else(|| Self::find_random_target(mob, 10, 7, false, false))
-                } else if mob.get_random().random::<f32>() >= self.probability {
-                    Self::find_random_target(mob, 10, 7, true, false)
-                } else {
-                    Self::find_random_target(mob, 10, 7, false, false)
-                };
+        if self.avoid_water {
+            let in_water = mob.get_entity().was_touching_water.load(Ordering::Relaxed);
+            self.target = if in_water {
+                Self::find_random_target(mob, 15, 7, true, false)
+                    .or_else(|| Self::find_random_target(mob, 10, 7, false, false))
+            } else if mob.get_random().random::<f32>() >= self.probability {
+                Self::find_random_target(mob, 10, 7, true, false)
             } else {
-                self.target = Self::find_random_target(mob, 10, 7, false, self.swim_only);
-            }
-            if self.target.is_some() {
-                self.force_trigger = false;
-                true
-            } else {
-                false
-            }
-        })
+                Self::find_random_target(mob, 10, 7, false, false)
+            };
+        } else {
+            self.target = Self::find_random_target(mob, 10, 7, false, self.swim_only);
+        }
+        if self.target.is_some() {
+            self.force_trigger = false;
+            true
+        } else {
+            false
+        }
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let navigator_idle = mob
+    fn should_continue(&self, mob: &dyn Mob) -> bool {
+        let navigator_idle = mob
+            .get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_idle();
+        !navigator_idle && !Self::has_controlling_passenger(mob)
+    }
+
+    fn start(&mut self, mob: &dyn Mob) {
+        if let Some(target) = self.target {
+            let pos = mob.get_mob_entity().living_entity.entity.pos.load();
+            let mut navigator = mob
                 .get_mob_entity()
                 .navigator
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .is_idle();
-            !navigator_idle && !mob.has_controlling_passenger().await
-        })
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            navigator.set_progress(NavigatorGoal::new(pos, target, self.speed));
+        }
     }
 
-    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(target) = self.target {
-                let pos = mob.get_mob_entity().living_entity.entity.pos.load();
-                let mut navigator = mob
-                    .get_mob_entity()
-                    .navigator
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                navigator.set_progress(NavigatorGoal::new(pos, target, self.speed));
-            }
-        })
-    }
-
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.target = None;
-            mob.get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .stop();
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        self.target = None;
+        mob.get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stop();
     }
 
     fn controls(&self) -> Controls {

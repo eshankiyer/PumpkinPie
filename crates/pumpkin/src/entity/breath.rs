@@ -30,7 +30,7 @@ impl Default for BreathManager {
 }
 
 impl BreathManager {
-    pub async fn tick(&self, player: &Player) {
+    pub fn tick(&self, player: &Player) {
         let mode = player.gamemode.load();
 
         if matches!(mode, GameMode::Creative | GameMode::Spectator) {
@@ -44,6 +44,10 @@ impl BreathManager {
             return;
         }
 
+        if !player.world().level_info.load().game_rules.drowning_damage {
+            return;
+        }
+
         let world = player.world();
         let eye_block = {
             let entity = &player.get_entity();
@@ -52,21 +56,21 @@ impl BreathManager {
         };
         let in_water = player.living_entity.is_eye_in_water(&world)
             && world.get_block(&eye_block) != &pumpkin_data::Block::BUBBLE_COLUMN;
-
         if in_water {
             let has_water_breathing = player
                 .living_entity
-                .has_effect(&StatusEffect::WATER_BREATHING)
-                .await;
+                .has_effect(&StatusEffect::WATER_BREATHING);
             let has_conduit_power = player
                 .living_entity
-                .has_effect(&StatusEffect::CONDUIT_POWER)
-                .await;
+                .has_effect(&StatusEffect::CONDUIT_POWER);
             let has_breath_of_the_nautilus = player
                 .living_entity
-                .has_effect(&StatusEffect::BREATH_OF_THE_NAUTILUS)
-                .await;
-            let player_invulnerable = player.abilities.lock().await.invulnerable;
+                .has_effect(&StatusEffect::BREATH_OF_THE_NAUTILUS);
+            let player_invulnerable = player
+                .abilities
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .invulnerable;
             if player.living_entity.dead.load(Ordering::Relaxed)
                 || player.living_entity.health.load() <= 0.0
                 || player.get_entity().is_removed()
@@ -98,10 +102,7 @@ impl BreathManager {
                         player.entity_id(),
                         new_air,
                     );
-                    tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current()
-                            .block_on(server.plugin_manager.fire(&server, &mut event));
-                    });
+                    server.plugin_manager.fire_blocking(&server, &mut event);
                     if event.cancelled {
                         self.air_supply.store(prev, Ordering::Relaxed);
                         return;
@@ -122,8 +123,7 @@ impl BreathManager {
                 world.send_entity_status(player.get_entity(), EntityStatus::DrownParticles, None);
                 player
                     .living_entity
-                    .damage(player, DROWNING_DAMAGE, DamageType::DROWN)
-                    .await;
+                    .damage(player, DROWNING_DAMAGE, DamageType::DROWN);
             }
         } else {
             let prev = self.air_supply.load(Ordering::Relaxed);
@@ -137,7 +137,7 @@ impl BreathManager {
     }
 
     pub fn send_air_supply(&self, player: &Player) {
-        let air = self.air_supply.load(Ordering::Relaxed);
+        let air = self.air_supply.load(Ordering::Relaxed).clamp(0, MAX_AIR);
 
         let mut bedrock_meta =
             pumpkin_protocol::bedrock::client::set_actor_data::EntityMetadata::new();

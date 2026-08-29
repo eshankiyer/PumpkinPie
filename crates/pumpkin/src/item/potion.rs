@@ -137,7 +137,7 @@ impl PotionContents {
     }
 
     /// Apply instant or duration effects to a target living entity.
-    pub async fn apply_effects_to(
+    pub fn apply_effects_to(
         target: &LivingEntity,
         effects: Vec<(&'static StatusEffect, i32, u8, bool, bool, bool)>,
         scale: f32,
@@ -158,22 +158,17 @@ impl PotionContents {
                 if LivingEntity::instant_effect_is_damage(effect_type, inverted) {
                     let amount = (6 * ((amplifier as i32) + 1)) as f32 * instant_scale;
 
-                    target
-                        .damage(
-                            target.get_entity(),
-                            amount,
-                            pumpkin_data::damage::DamageType::MAGIC,
-                        )
-                        .await;
+                    let _ = target.damage(
+                        target.get_entity(),
+                        amount,
+                        pumpkin_data::damage::DamageType::MAGIC,
+                    );
                 } else {
                     let amount = (4 * ((amplifier as i32) + 1)) as f32 * instant_scale;
                     target.heal(amount);
                 }
-                // Vanilla applies instant effects via a direct heal/damage call only
-                // (ThrownSplashPotion#applyInstantaneousEffect / HealOrHarmMobEffect), never
-                // through addEffect -- calling `target.add_effect` here as well would apply the
-                // heal/damage a second time, since `LivingEntity::add_effect` independently
-                // re-implements the instant-effect heal/damage branch.
+                // Vanilla applies instant effects via direct heal/damage only; routing the
+                // result through add_effect would apply the instant effect a second time.
             } else {
                 // Vanilla ThrownSplashPotion#applyEffects: duration is rounded (not truncated),
                 // and effects whose scaled duration would end within 20 ticks are dropped
@@ -213,7 +208,7 @@ impl PotionContents {
                     show_icon,
                     blend: false,
                 };
-                target.add_effect(eff).await;
+                target.add_effect(eff);
             }
         }
     }

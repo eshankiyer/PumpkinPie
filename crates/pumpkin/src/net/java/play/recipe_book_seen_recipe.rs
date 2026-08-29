@@ -5,18 +5,18 @@ impl JavaClient {
     /// `ServerGamePacketListenerImpl.handleRecipeBookSeenRecipePacket`: the client has
     /// displayed the recipe, so it stops being highlighted
     /// (`ServerRecipeBook.removeHighlight`, `ServerRecipeBook.java:53-55`).
-    pub async fn handle_recipe_book_seen_recipe(
+    pub fn handle_recipe_book_seen_recipe(
         &self,
         server: &Arc<Server>,
         player: &Arc<Player>,
-        packet: SRecipeBookSeenRecipe,
+        packet: &SRecipeBookSeenRecipe,
     ) {
         let mut event = crate::plugin::api::events::player::player_recipe_discover::PlayerRecipeDiscoverEvent::new(
             player.clone(),
             format!("display_{}", packet.recipe_display_id.0),
         );
-        server.plugin_manager.fire(server, &mut event).await;
+        server.plugin_manager.fire_blocking(server, &mut event);
 
-        player.mark_recipe_seen(packet.recipe_display_id.0).await;
+        player.mark_recipe_seen(packet.recipe_display_id.0);
     }
 }

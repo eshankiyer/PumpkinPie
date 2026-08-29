@@ -3,11 +3,7 @@ use super::*;
 use crossbeam::atomic::AtomicCell;
 
 impl JavaClient {
-    pub async fn handle_set_command_block(
-        &self,
-        player: &Arc<Player>,
-        command: SSetCommandBlock<'_>,
-    ) {
+    pub fn handle_set_command_block(&self, player: &Arc<Player>, command: &SSetCommandBlock<'_>) {
         if !player.is_creative() {
             return;
         }
@@ -23,8 +19,7 @@ impl JavaClient {
             }
 
             let Ok(command_block_mode) = CommandBlockMode::try_from(command.mode) else {
-                self.kick(TextComponent::text("Invalid Command block mode"))
-                    .await;
+                self.try_kick(&TextComponent::text("Invalid Command block mode"));
                 return;
             };
 
@@ -47,14 +42,11 @@ impl JavaClient {
             props.conditional = command.is_conditional();
 
             let new_state_id = props.to_state_id(&block_type);
-            player
-                .world()
-                .set_block_state(
-                    &command.pos,
-                    new_state_id,
-                    BlockFlags::SKIP_BLOCK_ADDED_CALLBACK,
-                )
-                .await;
+            player.world().set_block_state(
+                &command.pos,
+                new_state_id,
+                BlockFlags::SKIP_BLOCK_ADDED_CALLBACK,
+            );
 
             let mut cmd = command.command;
             if cmd.starts_with('/') {
@@ -70,8 +62,14 @@ impl JavaClient {
                     .into(),
                 auto: command.is_automatic().into(),
                 dirty: old_command_block.dirty.load(Ordering::SeqCst).into(),
-                command: Mutex::new(cmd.to_string()),
-                last_output: old_command_block.last_output.lock().await.clone().into(),
+                command: std::sync::Mutex::new(cmd.to_string()),
+                last_output: std::sync::Mutex::new(
+                    old_command_block
+                        .last_output
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone(),
+                ),
                 track_output: command.track_output().into(),
                 success_count: AtomicU32::new(0),
             });
@@ -79,12 +77,10 @@ impl JavaClient {
             command_block.mark_condition_met(&player.world());
             command_block.on_updated(&player.world());
 
-            player
-                .send_system_message(&TextComponent::text(format!(
-                    "Command set: {}",
-                    command.command
-                )))
-                .await;
+            player.send_system_message(&TextComponent::text(format!(
+                "Command set: {}",
+                command.command
+            )));
 
             // Vanilla `CommandBlockEntity.setAutomatic` (CommandBlockEntity.java:102-108):
             // newly enabling "always active" schedules a tick unless this is a sequence

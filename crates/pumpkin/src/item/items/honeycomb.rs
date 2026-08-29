@@ -1,6 +1,5 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::block::UseWithItemArgs;
@@ -32,22 +31,20 @@ impl ItemMetadata for HoneyCombItem {
 }
 
 impl ItemBehaviour for HoneyCombItem {
-    fn use_on_block<'a>(
-        &'a self,
-        item: &'a mut ItemStack,
-        player: &'a Player,
+    fn use_on_block(
+        &self,
+        item: &mut ItemStack,
+        player: &Player,
         location: BlockPos,
         _face: BlockDirection,
         _cursor_pos: Vector3<f32>,
-        block: &'a Block,
-        _server: &'a Server,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let world = player.world();
-            if try_wax_block(&world, location, block).await {
-                item.decrement_unless_creative(player.gamemode.load(), 1);
-            }
-        })
+        block: &Block,
+        _server: &Server,
+    ) {
+        let world = player.world();
+        if try_wax_block(&world, location, block) {
+            item.decrement_unless_creative(player.gamemode.load(), 1);
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -57,7 +54,7 @@ impl ItemBehaviour for HoneyCombItem {
 
 /// Waxes the block at `location` if it has a waxed equivalent, emitting the wax
 /// particles and sound on success.
-pub(crate) async fn try_wax_block(world: &Arc<World>, location: BlockPos, block: &Block) -> bool {
+pub(crate) fn try_wax_block(world: &Arc<World>, location: BlockPos, block: &Block) -> bool {
     let Some(replacement) = get_waxed_equivalent(block.id) else {
         return false;
     };
@@ -83,9 +80,7 @@ pub(crate) async fn try_wax_block(world: &Arc<World>, location: BlockPos, block:
         crate::item::items::state_with_properties_of(block, old_state_id, new_block)
     };
 
-    world
-        .set_block_state(&location, new_state_id, BlockFlags::NOTIFY_ALL)
-        .await;
+    world.set_block_state(&location, new_state_id, BlockFlags::NOTIFY_ALL);
     world.sync_world_event(WorldEvent::ParticlesAndSoundWaxOn, location, 0);
     true
 }

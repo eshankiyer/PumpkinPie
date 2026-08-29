@@ -1,204 +1,193 @@
-// Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-use std::sync::atomic::Ordering::Relaxed;
+use std::sync::Arc;
 
+use pumpkin_data::BlockStateId;
+use pumpkin_data::world::WorldEvent;
 use pumpkin_util::Difficulty;
-use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockFlags;
+use rand::RngExt;
 
-use super::interact_with_door::InteractWithDoorGoal;
-use super::{Controls, Goal, GoalFuture};
+use super::door_interact::DoorInteractGoal;
+use super::{Controls, Goal};
+use crate::block::blocks::doors::DoorBlock;
 use crate::entity::mob::Mob;
-use crate::world::BlockBreakingProgress;
 
-/// Vanilla: `BreakDoorGoal` (via `Vindicator.VindicatorBreakDoorGoal`).
-///
-/// Ports `net.minecraft.world.entity.ai.goal.BreakDoorGoal`: shares `DoorInteractGoal`'s door
-/// discovery, but breaks the door open over time (destroying the block) rather than opening it,
-/// gated on the `MOB_GRIEFING` gamerule and a caller-supplied valid-difficulty predicate. Note
-/// vanilla's `getDoorBreakTime` is `Math.max(240, doorBreakTime)`, so the constructor's `seconds`
-/// parameter (Vindicator passes `6`) is actually irrelevant in practice -- break time is always
-/// 240 ticks (12 seconds).
-///
-/// The base `BreakDoorGoal.canUse`/`canContinueToUse` (`BreakDoorGoal.java:30-53`) has no raid
-/// check at all -- that's added only by Vindicator's private `VindicatorBreakDoorGoal` inner
-/// class, and only as an extra `canContinueToUse` clause (`Vindicator.java:188-192`:
-/// `vindicator.hasActiveRaid() && super.canContinueToUse()`), not `canUse`. `raid_gated` opts a
-/// caller into that same extra clause; other users (e.g. `Zombie`, whose `DOOR_BREAKING_PREDICATE`
-/// is plain `d == Difficulty.HARD` with no raid involvement) leave it off.
+const DEFAULT_DOOR_BREAK_TIME: i32 = 240;
+
+pub type DifficultyPredicate = Arc<dyn Fn(Difficulty) -> bool + Send + Sync>;
+
+/// Vanilla `BreakDoorGoal` (via `Vindicator.VindicatorBreakDoorGoal`). The base
+/// `canUse`/`canContinueToUse` behavior is described by `BreakDoorGoal.java:30-53`;
+/// the raid restriction is the extra `Vindicator.java:188-192` clause.
 pub struct BreakDoorGoal {
+    pub door_interact_goal: DoorInteractGoal,
+    valid_difficulties: DifficultyPredicate,
     only_during_raid: bool,
-    door_pos: Option<BlockPos>,
-    break_time: i32,
-    last_break_progress: i32,
-    valid_difficulties: fn(Difficulty) -> bool,
+    pub break_time: i32,
+    pub last_break_progress: i32,
+    pub door_break_time: i32,
 }
 
 impl BreakDoorGoal {
-    const DOOR_BREAK_TIME: i32 = 240;
-
     #[must_use]
-    pub const fn new(valid_difficulties: fn(Difficulty) -> bool) -> Self {
+    pub fn new<F>(valid_difficulties: F) -> Self
+    where
+        F: Fn(Difficulty) -> bool + Send + Sync + 'static,
+    {
         Self {
+            door_interact_goal: DoorInteractGoal::new(),
+            valid_difficulties: Arc::new(valid_difficulties),
             only_during_raid: false,
-            door_pos: None,
             break_time: 0,
             last_break_progress: -1,
-            valid_difficulties,
+            door_break_time: -1,
         }
     }
 
-    /// Vanilla: `Vindicator.VindicatorBreakDoorGoal.canContinueToUse` -- gates continued use on
-    /// `hasActiveRaid()`. See the struct doc for why this is a builder rather than baked in.
+    #[must_use]
+    pub fn with_door_break_time<F>(door_break_time: i32, valid_difficulties: F) -> Self
+    where
+        F: Fn(Difficulty) -> bool + Send + Sync + 'static,
+    {
+        Self {
+            door_interact_goal: DoorInteractGoal::new(),
+            valid_difficulties: Arc::new(valid_difficulties),
+            only_during_raid: false,
+            break_time: 0,
+            last_break_progress: -1,
+            door_break_time,
+        }
+    }
+
+    #[must_use]
+    pub const fn get_door_break_time(&self) -> i32 {
+        if self.door_break_time > DEFAULT_DOOR_BREAK_TIME {
+            self.door_break_time
+        } else {
+            DEFAULT_DOOR_BREAK_TIME
+        }
+    }
+
+    /// Vanilla `VindicatorBreakDoorGoal.canContinueToUse` gates continued use
+    /// on `hasActiveRaid()`; other users leave this disabled.
     #[must_use]
     pub const fn raid_gated(mut self, only_during_raid: bool) -> Self {
         self.only_during_raid = only_during_raid;
         self
     }
 
-    fn is_valid_difficulty(&self, difficulty: Difficulty) -> bool {
+    #[must_use]
+    pub fn is_valid_difficulty(&self, difficulty: Difficulty) -> bool {
         (self.valid_difficulties)(difficulty)
     }
 }
 
+impl Default for BreakDoorGoal {
+    fn default() -> Self {
+        Self::new(Arc::new(|d| d == Difficulty::Hard))
+    }
+}
+
 impl Goal for BreakDoorGoal {
-    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let mob_entity = mob.get_mob_entity();
-            let entity = &mob_entity.living_entity.entity;
-
-            if !entity.horizontal_collision.load(Relaxed) {
-                return false;
-            }
-
-            let world = entity.world.load_full();
-            if !world.level_info.load().game_rules.mob_griefing {
-                return false;
-            }
-            let difficulty = world.level_info.load().difficulty;
-            if !self.is_valid_difficulty(difficulty) {
-                return false;
-            }
-
-            let navigator = mob_entity.navigator.lock().unwrap();
-            let Some(path) = navigator.get_current_path() else {
-                return false;
-            };
-            if path.is_done() {
-                return false;
-            }
-
-            let next_index = path.get_next_node_index();
-            let node_count = path.get_node_count();
-            let scan_end = std::cmp::min(next_index + 2, node_count);
-
-            for i in next_index..scan_end {
-                if let Some(node) = path.get_node(i) {
-                    let check_pos = BlockPos::new(node.pos.0.x, node.pos.0.y + 1, node.pos.0.z);
-                    let dx = check_pos.0.x as f64 + 0.5 - entity.pos.load().x;
-                    let dz = check_pos.0.z as f64 + 0.5 - entity.pos.load().z;
-                    if dx * dx + dz * dz <= 2.25
-                        && InteractWithDoorGoal::is_mob_interactable_door(&world, &check_pos)
-                        && !InteractWithDoorGoal::is_door_open(&world, &check_pos)
-                    {
-                        self.door_pos = Some(check_pos);
-                        return true;
-                    }
-                }
-            }
-
-            let mob_pos = entity.block_pos.load();
-            let check_pos = BlockPos::new(mob_pos.0.x, mob_pos.0.y + 1, mob_pos.0.z);
-            if InteractWithDoorGoal::is_mob_interactable_door(&world, &check_pos)
-                && !InteractWithDoorGoal::is_door_open(&world, &check_pos)
-            {
-                self.door_pos = Some(check_pos);
-                return true;
-            }
-
-            false
-        })
+    fn can_start(&mut self, mob: &dyn Mob) -> bool {
+        if !self.door_interact_goal.can_use(mob) {
+            return false;
+        }
+        let world = mob.get_entity().world.load();
+        let level_info = world.level_info.load();
+        if !level_info.game_rules.mob_griefing {
+            return false;
+        }
+        self.is_valid_difficulty(level_info.difficulty) && !self.door_interact_goal.is_open(mob)
     }
 
-    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
-        Box::pin(async move {
-            let Some(door_pos) = self.door_pos else {
-                return false;
-            };
-            let mob_entity = mob.get_mob_entity();
-            if self.only_during_raid && !mob_entity.living_entity.has_active_raid() {
-                return false;
-            }
-            let entity = &mob_entity.living_entity.entity;
-            let world = entity.world.load_full();
+    fn should_continue(&self, mob: &dyn Mob) -> bool {
+        if self.only_during_raid && !mob.get_mob_entity().living_entity.has_active_raid() {
+            return false;
+        }
+        let world = mob.get_entity().world.load();
+        let level_info = world.level_info.load();
+        let mob_pos = mob.get_entity().pos.load();
+        let door_pos = self.door_interact_goal.door_pos;
+        let center_x = f64::from(door_pos.0.x) + 0.5;
+        let center_y = f64::from(door_pos.0.y) + 0.5;
+        let center_z = f64::from(door_pos.0.z) + 0.5;
+        let dx = center_x - mob_pos.x;
+        let dy = center_y - mob_pos.y;
+        let dz = center_z - mob_pos.z;
+        let dist_sq = dx * dx + dy * dy + dz * dz;
 
-            if self.break_time > Self::DOOR_BREAK_TIME
-                || InteractWithDoorGoal::is_door_open(&world, &door_pos)
-            {
-                return false;
-            }
-            let dist_sq = door_pos
-                .to_centered_f64()
-                .squared_distance_to_vec(&entity.pos.load());
-            if dist_sq > 4.0 {
-                return false;
-            }
-            self.is_valid_difficulty(world.level_info.load().difficulty)
-        })
+        self.break_time <= self.get_door_break_time()
+            && !DoorBlock::is_open(&world, &door_pos)
+            && dist_sq < 4.0
+            && self.is_valid_difficulty(level_info.difficulty)
     }
 
-    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            self.break_time = 0;
-        })
+    fn start(&mut self, mob: &dyn Mob) {
+        self.door_interact_goal.start_interaction(mob);
+        self.break_time = 0;
+        self.last_break_progress = -1;
     }
 
-    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            if let Some(door_pos) = self.door_pos {
-                let entity = &mob.get_mob_entity().living_entity.entity;
-                let world = entity.world.load_full();
-                world
-                    .set_block_breaking(entity, door_pos, BlockBreakingProgress::Stop)
-                    .await;
-            }
-        })
+    fn stop(&mut self, mob: &dyn Mob) {
+        let world = mob.get_entity().world.load();
+        world.set_block_destroy_stage(
+            mob.get_entity().entity_id,
+            self.door_interact_goal.door_pos,
+            -1,
+        );
     }
 
-    // Scope reduction: vanilla's 1-in-20-per-tick `levelEvent(1019, ...)` door-hit sound plus
-    // arm swing is a pure client/animation effect and is not ported here.
-    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async move {
-            let Some(door_pos) = self.door_pos else {
-                return;
-            };
-            let entity = &mob.get_mob_entity().living_entity.entity;
-            let world = entity.world.load_full();
+    fn tick(&mut self, mob: &dyn Mob) {
+        self.door_interact_goal.tick_interaction(mob);
+        let world = mob.get_entity().world.load_full();
 
-            self.break_time += 1;
-            let progress = ((self.break_time as f32 / Self::DOOR_BREAK_TIME as f32) * 10.0) as i32;
-            if progress != self.last_break_progress {
-                world
-                    .set_block_breaking(
-                        entity,
-                        door_pos,
-                        BlockBreakingProgress::Update {
-                            stage: progress,
-                            speed: None,
-                        },
-                    )
-                    .await;
-                self.last_break_progress = progress;
-            }
+        if mob.get_random().random_range(0..20) == 0 {
+            world.sync_world_event(
+                WorldEvent::SoundZombieWoodenDoor,
+                self.door_interact_goal.door_pos,
+                0,
+            );
+            mob.get_mob_entity().living_entity.swing_hand();
+        }
 
-            if self.break_time == Self::DOOR_BREAK_TIME
-                && self.is_valid_difficulty(world.level_info.load().difficulty)
-            {
-                world
-                    .break_block(&door_pos, None, BlockFlags::SKIP_DROPS)
-                    .await;
+        self.break_time += 1;
+        let progress = (self.break_time as f32 / self.get_door_break_time() as f32 * 10.0) as i32;
+        if progress != self.last_break_progress {
+            world.set_block_destroy_stage(
+                mob.get_entity().entity_id,
+                self.door_interact_goal.door_pos,
+                progress as i8,
+            );
+            self.last_break_progress = progress;
+        }
+
+        let level_info = world.level_info.load();
+        if self.break_time == self.get_door_break_time()
+            && self.is_valid_difficulty(level_info.difficulty)
+        {
+            let (_, block_state_id) =
+                world.get_block_and_state_id(&self.door_interact_goal.door_pos);
+            let door_pos = self.door_interact_goal.door_pos;
+            let mut event =
+                crate::plugin::api::events::entity::entity_break_door::EntityBreakDoorEvent::new(
+                    mob.get_entity().entity_id,
+                    door_pos,
+                );
+            if let Some(server) = world.server.upgrade() {
+                server.plugin_manager.fire_blocking(&server, &mut event);
             }
-        })
+            world.set_block_state(&door_pos, BlockStateId::AIR, BlockFlags::NOTIFY_ALL);
+            world.sync_world_event(
+                WorldEvent::SoundZombieDoorCrash,
+                self.door_interact_goal.door_pos,
+                0,
+            );
+            world.sync_world_event(
+                WorldEvent::ParticlesDestroyBlock,
+                self.door_interact_goal.door_pos,
+                i32::from(block_state_id.as_u16()),
+            );
+        }
     }
 
     fn should_run_every_tick(&self) -> bool {
@@ -206,12 +195,11 @@ impl Goal for BreakDoorGoal {
     }
 
     fn controls(&self) -> Controls {
-        Controls::MOVE
+        Controls::empty()
     }
 }
 
-/// Vanilla: `Vindicator.DOOR_BREAKING_PREDICATE` (`d -> d == Difficulty.NORMAL || d ==
-/// Difficulty.HARD`).
+/// Vanilla: `Vindicator.DOOR_BREAKING_PREDICATE` (`d -> d == Difficulty.NORMAL || d == Difficulty.HARD`).
 #[must_use]
 pub const fn normal_or_hard(difficulty: Difficulty) -> bool {
     matches!(difficulty, Difficulty::Normal | Difficulty::Hard)
@@ -225,22 +213,36 @@ pub const fn hard_only(difficulty: Difficulty) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{hard_only, normal_or_hard};
-    use pumpkin_util::Difficulty;
+    use super::*;
 
     #[test]
-    fn door_break_predicate_excludes_easy_and_peaceful() {
+    fn door_break_predicates_match_vanilla() {
         assert!(!normal_or_hard(Difficulty::Peaceful));
         assert!(!normal_or_hard(Difficulty::Easy));
         assert!(normal_or_hard(Difficulty::Normal));
         assert!(normal_or_hard(Difficulty::Hard));
+        assert!(!hard_only(Difficulty::Normal));
+        assert!(hard_only(Difficulty::Hard));
     }
 
     #[test]
-    fn zombie_door_break_predicate_is_hard_only() {
-        assert!(!hard_only(Difficulty::Peaceful));
-        assert!(!hard_only(Difficulty::Easy));
-        assert!(!hard_only(Difficulty::Normal));
-        assert!(hard_only(Difficulty::Hard));
+    fn door_break_time_default_and_custom() {
+        assert_eq!(BreakDoorGoal::default().get_door_break_time(), 240);
+        assert_eq!(
+            BreakDoorGoal::with_door_break_time(300, Arc::new(|d| d == Difficulty::Hard))
+                .get_door_break_time(),
+            300
+        );
+        assert_eq!(
+            BreakDoorGoal::with_door_break_time(100, Arc::new(|d| d == Difficulty::Hard))
+                .get_door_break_time(),
+            240
+        );
+    }
+
+    #[test]
+    fn break_progress_calculation() {
+        assert_eq!((120.0f32 / 240.0f32 * 10.0) as i32, 5);
+        assert_eq!((240.0f32 / 240.0f32 * 10.0) as i32, 10);
     }
 }
