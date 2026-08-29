@@ -2259,7 +2259,9 @@ impl Entity {
 
         self.velocity.store(final_move * velocity_multiplier);
 
-        if let Some(living) = caller.get_living_entity() {
+        if !self.touching_unloaded_chunk()
+            && let Some(living) = caller.get_living_entity()
+        {
             let on_ground = self.on_ground.load(Ordering::SeqCst);
             living.fall(caller, final_move.y, on_ground, false);
         }
@@ -2271,6 +2273,24 @@ impl Entity {
                 .block_registry
                 .update_entity_movement_after_fall_on(block, caller);
         }
+    }
+
+    /// Vanilla `Entity.touchingUnloadedChunk` (`Entity.java:3659-3666`) checks the entity's
+    /// one-block-inflated bounding box before fall processing. The server must not accumulate or
+    /// resolve fall damage from terrain whose chunks are no longer loaded.
+    #[must_use]
+    pub fn touching_unloaded_chunk(&self) -> bool {
+        let bounding_box = self.bounding_box.load().expand_all(1.0);
+        let min_x = bounding_box.min.x.floor() as i32;
+        let max_x = bounding_box.max.x.ceil() as i32;
+        let min_z = bounding_box.min.z.floor() as i32;
+        let max_z = bounding_box.max.z.ceil() as i32;
+        let level = &self.world.load().level;
+
+        (get_section_cord(min_x)..=get_section_cord(max_x)).any(|x| {
+            (get_section_cord(min_z)..=get_section_cord(max_z))
+                .any(|z| !level.is_chunk_loaded(&Vector2::new(x, z)))
+        })
     }
 
     pub fn push_out_of_blocks(&self, center_pos: Vector3<f64>) {
