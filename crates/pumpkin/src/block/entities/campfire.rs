@@ -6,7 +6,7 @@ use pumpkin_data::recipes::CookingRecipeKind;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
-use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture};
+use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture, sync_write_items_to_nbt};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -186,6 +186,20 @@ impl BlockEntity for CampfireBlockEntity {
         self.dirty.store(false, Ordering::Relaxed);
     }
 
+    fn chunk_data_nbt(&self) -> Option<NbtCompound> {
+        // `CampfireBlockEntity.getUpdateTag` (`CampfireBlockEntity.java:159-177`) sends the
+        // current item list to clients; expose the same payload for block-entity updates.
+        let mut items: [ItemStack; 4] = std::array::from_fn(|_| ItemStack::EMPTY.clone());
+        for (index, item) in self.items.iter().enumerate() {
+            if let Ok(guard) = item.try_lock() {
+                items[index] = guard.clone();
+            }
+        }
+        let mut nbt = NbtCompound::new();
+        sync_write_items_to_nbt(&items, &mut nbt);
+        Some(nbt)
+    }
+
     fn get_inventory(self: Arc<Self>) -> Option<Arc<dyn Inventory>> {
         Some(self)
     }
@@ -290,5 +304,25 @@ impl Clearable for CampfireBlockEntity {
             }
             self.dirty.store(true, Ordering::Relaxed);
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BlockEntity, CampfireBlockEntity};
+    use pumpkin_data::{item::Item, item_stack::ItemStack};
+    use pumpkin_util::math::position::BlockPos;
+    use pumpkin_world::inventory::Inventory;
+
+    #[tokio::test]
+    async fn chunk_data_contains_campfire_items() {
+        // `CampfireBlockEntity.getUpdateTag` (`CampfireBlockEntity.java:159-163`) includes items.
+        let campfire = CampfireBlockEntity::new(BlockPos::new(0, 64, 0));
+        campfire.set_stack(2, ItemStack::new(1, &Item::BEEF)).await;
+
+        let nbt = campfire.chunk_data_nbt().expect("campfire update data");
+        let items = nbt.get_list("Items").expect("serialized item list");
+        let item = items[0].extract_compound().expect("item compound");
+        assert_eq!(item.get_byte("Slot"), Some(2));
     }
 }

@@ -170,7 +170,14 @@ impl ItemEntity {
 
     /// Vanilla `ItemEntity.setPickUpDelay` (`ItemEntity.java:412-414`).
     pub fn set_pickup_delay(&self, ticks: i32) {
-        self.pickup_delay.store(ticks, Ordering::Relaxed);
+        Self::store_pickup_delay(&self.never_pickup, &self.pickup_delay, ticks);
+    }
+
+    fn store_pickup_delay(never_pickup: &AtomicBool, pickup_delay: &AtomicI32, ticks: i32) {
+        // `ItemEntity.setPickUpDelay` (`ItemEntity.java:412-414`) overwrites the one vanilla
+        // delay field, so a finite explicit delay must clear the never-pick-up sentinel.
+        never_pickup.store(false, Ordering::Relaxed);
+        pickup_delay.store(ticks, Ordering::Relaxed);
     }
 
     /// Vanilla `ItemEntity.setUnlimitedLifetime` (`ItemEntity.java:420-422`).
@@ -918,5 +925,17 @@ mod tests {
             INFINITE_PICKUP_DELAY
         );
         assert_eq!(ItemEntity::next_pickup_delay(1), 0);
+    }
+
+    #[test]
+    fn explicit_pickup_delay_clears_never_pickup_state() {
+        // `ItemEntity.setPickUpDelay` (`ItemEntity.java:412-414`) replaces the delay value.
+        let never_pickup = std::sync::atomic::AtomicBool::new(true);
+        let pickup_delay = std::sync::atomic::AtomicI32::new(INFINITE_PICKUP_DELAY);
+
+        ItemEntity::store_pickup_delay(&never_pickup, &pickup_delay, 4);
+
+        assert!(!never_pickup.load(std::sync::atomic::Ordering::Relaxed));
+        assert_eq!(pickup_delay.load(std::sync::atomic::Ordering::Relaxed), 4);
     }
 }

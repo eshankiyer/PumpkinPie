@@ -10,7 +10,7 @@ use crate::block::blocks::wither_skull::can_spawn_mob as can_spawn_wither;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
     BlockBehaviour, BlockFuture, GetComparatorOutputArgs, NormalUseArgs, OnNeighborUpdateArgs,
-    OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
+    OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs,
 };
 use crate::entity::decoration::armor_stand::ArmorStandEntity;
 use crate::entity::item::ItemEntity;
@@ -222,8 +222,33 @@ impl BlockBehaviour for DispenserBlock {
                 } else {
                     args.world
                         .sync_world_event(WorldEvent::SoundDispenserFail, *args.position, 0);
+                    // Vanilla `DispenserBlock.dispenseFrom` emits BLOCK_ACTIVATE for an empty
+                    // dispenser (`DispenserBlock.java:88-105`).
+                    emit_game_event(
+                        args.world,
+                        GameEvent::BlockActivate,
+                        args.position.to_centered_f64(),
+                        GameEventContext {
+                            source_entity: None,
+                            affected_block_state: Some(
+                                args.world.get_block_state(args.position).id,
+                            ),
+                        },
+                    )
+                    .await;
                 }
             }
+        })
+    }
+
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // Vanilla `DispenserBlock.affectNeighborsAfterRemoval`
+            // (`DispenserBlock.java:156-159`) refreshes adjacent comparator inputs on every
+            // removal; unlike most blocks it does not gate on `movedByPiston`.
+            args.world
+                .update_comparators(args.position, args.block)
+                .await;
         })
     }
 
