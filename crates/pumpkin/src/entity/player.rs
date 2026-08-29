@@ -3576,10 +3576,13 @@ impl Player {
     }
 
     pub fn block_interaction_range(&self) -> f64 {
+        let range = self
+            .living_entity
+            .get_attribute_value(&Attributes::BLOCK_INTERACTION_RANGE);
         if self.gamemode.load() == GameMode::Creative {
-            5.0
+            range + 0.5
         } else {
-            4.5
+            range
         }
     }
 
