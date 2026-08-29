@@ -3381,7 +3381,14 @@ impl Entity {
             let distance = diff.length();
 
             if distance > Self::LEASH_SNAP_DISTANCE {
-                // Too far: snap/break leash and drop lead item
+                // Too far: snap/break leash and drop lead item. Vanilla plays the break
+                // sound at the HOLDER's position before dropping the leash
+                // (`Leashable.tickLeash`, `Leashable.java:161`).
+                self.world.load().play_sound(
+                    pumpkin_data::sound::Sound::ItemLeadBreak,
+                    pumpkin_data::sound::SoundCategory::Neutral,
+                    &holder_pos,
+                );
                 self.unleash();
                 let lead_item =
                     pumpkin_data::item_stack::ItemStack::new(1, &pumpkin_data::item::Item::LEAD);
