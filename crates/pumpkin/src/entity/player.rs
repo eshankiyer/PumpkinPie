@@ -6988,6 +6988,17 @@ impl Player {
         self.gamemode.load() == GameMode::Creative
     }
 
+    /// Vanilla `Player.canUseGameMasterBlocks` (`Player.java:1863-1865`) requires
+    /// instabuild and game-master permission level two. The live packet and block-use callers
+    /// below use this predicate instead of carrying separate permission checks.
+    #[must_use]
+    pub fn can_use_game_master_blocks(&self) -> bool {
+        can_use_game_master_blocks_state(
+            self.is_creative(),
+            self.permission_lvl.load() >= PermissionLvl::Two,
+        )
+    }
+
     /// Swing the hand of the player
     pub async fn swing_hand(&self, hand: Hand, all: bool) {
         let world = self.world();
@@ -7740,6 +7751,10 @@ impl NBTStorageInit for EnderChestInventory {}
 
 fn ability_invulnerability_blocks(damage_type: &DamageType) -> bool {
     !damage_type.has_tag(&tag::DamageType::MINECRAFT_BYPASSES_INVULNERABILITY)
+}
+
+const fn can_use_game_master_blocks_state(creative: bool, has_permission: bool) -> bool {
+    creative && has_permission
 }
 
 /// Mirrors vanilla's `RespawnAnchorBlock` gate in `ServerPlayer.findRespawnAndUseSpawnBlock`:
@@ -8988,11 +9003,11 @@ const fn player_fire_immune_ticks() -> i32 {
 mod tests {
     use super::{
         Player, ability_invulnerability_blocks, attack_charge_ready, bedrock_inventory_slot,
-        can_harm_player_teams, can_start_fall_flying, damage_dealt_stat_points,
-        extract_parrot_variant, is_crossbow_held_projectile, is_crossbow_inventory_projectile,
-        is_valid_for_forced_respawn, is_vanishing_cursed, player_death_experience_reward,
-        player_fire_immune_ticks, read_last_death_location, read_root_vehicle,
-        write_last_death_location, write_root_vehicle,
+        can_harm_player_teams, can_start_fall_flying, can_use_game_master_blocks_state,
+        damage_dealt_stat_points, extract_parrot_variant, is_crossbow_held_projectile,
+        is_crossbow_inventory_projectile, is_valid_for_forced_respawn, is_vanishing_cursed,
+        player_death_experience_reward, player_fire_immune_ticks, read_last_death_location,
+        read_root_vehicle, write_last_death_location, write_root_vehicle,
     };
     use pumpkin_data::Block;
     use pumpkin_data::attributes::Attributes;
@@ -9109,6 +9124,15 @@ mod tests {
     fn invulnerability_allows_bypass_tagged_damage() {
         assert!(ability_invulnerability_blocks(&DamageType::MOB_ATTACK));
         assert!(!ability_invulnerability_blocks(&DamageType::OUT_OF_WORLD));
+    }
+
+    #[test]
+    fn game_master_blocks_require_creative_and_permission() {
+        // `Player.canUseGameMasterBlocks` requires instabuild and permission level two
+        // (`Player.java:1863-1865`).
+        assert!(can_use_game_master_blocks_state(true, true));
+        assert!(!can_use_game_master_blocks_state(false, true));
+        assert!(!can_use_game_master_blocks_state(true, false));
     }
 
     #[test]

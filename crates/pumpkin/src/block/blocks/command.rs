@@ -17,7 +17,7 @@ use pumpkin_data::{
     Block, BlockId, BlockStateId, FacingExt,
     block_properties::{BlockProperties, CommandBlockLikeProperties, Facing},
 };
-use pumpkin_util::{GameMode, PermissionLvl, math::position::BlockPos};
+use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::tick::TickPriority;
 use tracing::warn;
 
@@ -217,7 +217,9 @@ impl BlockBehaviour for CommandBlock {
 
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
-            if args.player.permission_lvl.load() < PermissionLvl::Two {
+            // `CommandBlock.useWithoutItem` requires `Player.canUseGameMasterBlocks`
+            // (`CommandBlock.java:131-133`; `Player.java:1863-1865`).
+            if !args.player.can_use_game_master_blocks() {
                 return BlockActionResult::Pass;
             }
             let Some(block_entity) = args.world.get_block_entity(args.position) else {
@@ -332,8 +334,7 @@ impl BlockBehaviour for CommandBlock {
             return true;
         };
 
-        player.gamemode.load() == GameMode::Creative
-            && player.permission_lvl.load() >= PermissionLvl::Two
+        player.can_use_game_master_blocks()
     }
 
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {

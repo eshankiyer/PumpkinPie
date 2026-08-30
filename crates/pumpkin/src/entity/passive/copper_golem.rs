@@ -384,6 +384,9 @@ impl CopperGolemEntity {
                 .downcast_ref::<CopperGolemStatueBlockEntity>()
         {
             statue.create_statue();
+            // Vanilla `CopperGolem.turnToStatue` drops preserved equipment after creating the
+            // statue and before discarding the entity (`CopperGolem.java:286-301`).
+            self.drop_preserved_equipment().await;
         }
 
         entity.remove().await;

@@ -30,8 +30,12 @@ use crate::entity::{
 use crate::world::World;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{
-    damage::DamageType, data_component_impl::EquipmentSlot, entity::EntityType, item::Item,
-    item_stack::ItemStack, sound::Sound,
+    damage::DamageType,
+    data_component_impl::{EquipmentSlot, KineticWeaponImpl},
+    entity::EntityType,
+    item::Item,
+    item_stack::ItemStack,
+    sound::Sound,
 };
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
@@ -470,6 +474,13 @@ impl NBTStorage for PiglinEntity {
 impl Mob for PiglinEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// Vanilla `Piglin.canUseNonMeleeWeapon` (`Piglin.java:352-356`) permits crossbows and
+    /// kinetic weapons as non-melee weapons.
+    fn can_use_non_melee_weapon(&self, item: &ItemStack) -> bool {
+        item.item.id == Item::CROSSBOW.id
+            || item.get_data_component::<KineticWeaponImpl>().is_some()
     }
 
     /// `AbstractPiglin`'s constructor calls `setCanPickUpLoot(true)` unconditionally

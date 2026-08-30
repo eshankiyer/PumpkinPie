@@ -5017,11 +5017,15 @@ impl World {
                         // stale data.
                         base_entity.velocity.store(Vector3::default());
 
-                        player.client.enqueue_spawn_packet(&entity).await;
-                        // Vanilla `ServerEntity.sendPairingData` sends all per-entity state to
-                        // this newly tracking player (`ServerEntity.java:274-319`).
-                        entity.send_pairing_data_to(player.as_ref()).await;
-                        player.try_restore_vehicle(&entity).await;
+                        // Vanilla `ServerPlayer.broadcastToPlayer` filters this pairing
+                        // (`ServerPlayer.java:1175-1181`).
+                        if entity.broadcast_to_player(&player) {
+                            player.client.enqueue_spawn_packet(&entity).await;
+                            // Vanilla `ServerEntity.sendPairingData` sends all per-entity state to
+                            // this newly tracking player (`ServerEntity.java:274-319`).
+                            entity.send_pairing_data_to(player.as_ref()).await;
+                            player.try_restore_vehicle(&entity).await;
+                        }
                         entities_to_add.push(entity);
                     }
 
@@ -5039,6 +5043,11 @@ impl World {
                     for entity in world.entities.load().iter() {
                         let base_entity = entity.get_entity();
                         if base_entity.chunk_pos.load() == position {
+                            // Vanilla `ServerPlayer.broadcastToPlayer` filters this pairing
+                            // (`ServerPlayer.java:1175-1181`).
+                            if !base_entity.broadcast_to_player(&player) {
+                                continue;
+                            }
                             player.client.enqueue_spawn_packet(entity).await;
                             // Vanilla `ServerEntity.sendPairingData` sends all per-entity state to
                             // this newly tracking player (`ServerEntity.java:274-319`).
@@ -5577,7 +5586,11 @@ impl World {
             let center = player.get_entity().chunk_pos.load();
             let view_distance = get_view_distance(player).get() as i32;
 
-            if is_within_view_distance(chunk_pos, center, view_distance) {
+            // Vanilla `ServerPlayer.broadcastToPlayer` filters this pairing
+            // (`ServerPlayer.java:1175-1181`).
+            if is_within_view_distance(chunk_pos, center, view_distance)
+                && entity.broadcast_to_player(player)
+            {
                 player.client.try_enqueue_spawn_packet(entity);
                 // Covers respawn/redimension and `spawn_entity_non_save`, which
                 // never runs `init_data_tracker`. On the plain `spawn_entity`

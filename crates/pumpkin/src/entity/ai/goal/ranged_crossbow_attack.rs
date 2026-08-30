@@ -29,6 +29,13 @@ enum CrossbowState {
 /// enchant applied (mobs never have it).
 const CHARGE_DURATION_TICKS: i32 = 25;
 
+/// Vanilla `BehaviorUtils.isWithinAttackRange` requires a projectile weapon and the mob's
+/// `canUseNonMeleeWeapon` predicate (`BehaviorUtils.java:115-121`).
+#[must_use]
+const fn should_use_crossbow(is_crossbow: bool, can_use_non_melee_weapon: bool) -> bool {
+    is_crossbow && can_use_non_melee_weapon
+}
+
 pub struct RangedCrossbowAttackGoal {
     state: CrossbowState,
     speed_modifier: f64,
@@ -53,7 +60,12 @@ impl RangedCrossbowAttackGoal {
 
     async fn has_crossbow(mob: &dyn Mob) -> bool {
         let stack = mob.get_mob_entity().living_entity.held_item(mob).await;
-        stack.item.id == Item::CROSSBOW.id
+        // Vanilla `BehaviorUtils.isWithinAttackRange` requires both a projectile weapon and
+        // `Mob.canUseNonMeleeWeapon` (`BehaviorUtils.java:115-121`; `Mob.java:260-262`).
+        should_use_crossbow(
+            stack.item.id == Item::CROSSBOW.id,
+            mob.can_use_non_melee_weapon(&stack),
+        )
     }
 
     async fn has_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool {
@@ -234,5 +246,18 @@ impl Goal for RangedCrossbowAttackGoal {
 
     fn controls(&self) -> Controls {
         Controls::MOVE | Controls::LOOK
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_use_crossbow;
+
+    /// `BehaviorUtils.java:115-121`: both weapon type and mob capability are required.
+    #[test]
+    fn crossbow_selection_requires_both_predicates() {
+        assert!(should_use_crossbow(true, true));
+        assert!(!should_use_crossbow(true, false));
+        assert!(!should_use_crossbow(false, true));
     }
 }

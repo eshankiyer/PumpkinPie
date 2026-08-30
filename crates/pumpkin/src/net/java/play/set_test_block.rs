@@ -6,6 +6,11 @@ impl JavaClient {
         if !player.has_client_loaded() {
             return;
         }
+        // `ServerGamePacketListenerImpl.handleSetTestBlock` gates the packet with
+        // `Player.canUseGameMasterBlocks` (`ServerGamePacketListenerImpl.java:881-885`).
+        if !player.can_use_game_master_blocks() {
+            return;
+        }
         player.update_last_action_time();
         debug!(
             "Set test block at {:?}: mode={:?}, message={}",

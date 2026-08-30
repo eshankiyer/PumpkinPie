@@ -12,7 +12,6 @@ use pumpkin_data::block_properties::{
 use pumpkin_data::block_rotation::{Mirror, Rotation};
 use pumpkin_data::{BlockDirection, BlockStateId};
 use pumpkin_macros::pumpkin_block;
-use pumpkin_util::{GameMode, PermissionLvl};
 
 use pumpkin_world::generation::structure::structures::jigsaw::JigsawJointType;
 
@@ -113,8 +112,7 @@ impl BlockBehaviour for JigsawBlock {
         let Some(player) = args.player else {
             return true;
         };
-        player.gamemode.load() == GameMode::Creative
-            && player.permission_lvl.load() >= PermissionLvl::Two
+        player.can_use_game_master_blocks()
     }
 
     fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
@@ -135,10 +133,9 @@ impl BlockBehaviour for JigsawBlock {
 
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
-            if args.player.permission_lvl.load() < PermissionLvl::Two {
-                return BlockActionResult::Pass;
-            }
-            if args.player.gamemode.load() != GameMode::Creative {
+            // `JigsawBlock.useWithoutItem` requires `Player.canUseGameMasterBlocks`
+            // (`JigsawBlock.java:72-74`; `Player.java:1863-1865`).
+            if !args.player.can_use_game_master_blocks() {
                 return BlockActionResult::Pass;
             }
             let Some(block_entity) = args.world.get_block_entity(args.position) else {

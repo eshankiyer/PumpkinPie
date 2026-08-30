@@ -4,7 +4,6 @@ use pumpkin_data::data_component_impl::BlockStateImpl;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_macros::pumpkin_block;
-use pumpkin_util::{GameMode, PermissionLvl};
 use pumpkin_world::world::BlockFlags;
 
 use crate::block::registry::BlockActionResult;
@@ -39,9 +38,9 @@ impl BlockBehaviour for LightBlock {
     /// `PASS`, so the click is swallowed rather than falling through to a block placement.
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
-            if args.player.permission_lvl.load() < PermissionLvl::Two
-                || args.player.gamemode.load() != GameMode::Creative
-            {
+            // `LightBlock.useWithoutItem` requires `Player.canUseGameMasterBlocks`
+            // (`LightBlock.java:53-63`; `Player.java:1863-1865`).
+            if !args.player.can_use_game_master_blocks() {
                 return BlockActionResult::Consume;
             }
 
