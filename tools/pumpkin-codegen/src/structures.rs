@@ -33,9 +33,20 @@ pub struct StructurePlacementStruct {
     pub salt: u32,
     /// Optional exclusion zone to prevent this structure from generating near others.
     pub exclusion_zone: Option<ExclusionZoneStruct>,
+    /// Optional locate offset for the structure position (default: 0, 0, 0).
+    #[serde(default)]
+    pub locate_offset: Option<Vec3iStruct>,
     /// The specific placement algorithm and its parameters.
     #[serde(flatten)]
     pub r#type: StructurePlacementTypeStruct,
+}
+
+/// Deserialized 3D integer vector for locate offset.
+#[derive(Deserialize, Default)]
+pub struct Vec3iStruct {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
 }
 
 /// Deserialized exclusion zone configuration.
@@ -225,6 +236,15 @@ impl ToTokens for StructurePlacementStruct {
             quote!(None)
         };
 
+        let locate_offset = if let Some(offset) = &self.locate_offset {
+            let x = offset.x;
+            let y = offset.y;
+            let z = offset.z;
+            quote!(BlockPos::new(#x, #y, #z))
+        } else {
+            quote!(BlockPos::new(0, 0, 0))
+        };
+
         let salt = self.salt;
         let placement_type = &self.r#type;
 
@@ -234,6 +254,7 @@ impl ToTokens for StructurePlacementStruct {
                 frequency: #frequency,
                 salt: #salt,
                 exclusion_zone: #exclusion_zone,
+                locate_offset: #locate_offset,
                 placement_type: #placement_type,
             }
         ));
@@ -793,7 +814,7 @@ pub fn build() -> TokenStream {
         .collect();
 
     quote!(
-        use pumpkin_util::math::floor_div;
+        use pumpkin_util::math::{floor_div, position::BlockPos};
         use pumpkin_util::random::{
             RandomGenerator, RandomImpl, get_carver_seed, get_region_seed,
             legacy_rand::LegacyRand, xoroshiro128::Xoroshiro,
@@ -881,6 +902,7 @@ pub fn build() -> TokenStream {
             pub frequency: Option<f32>,
             pub salt: u32,
             pub exclusion_zone: Option<ExclusionZone>,
+            pub locate_offset: BlockPos,
             pub placement_type: StructurePlacementType,
         }
 

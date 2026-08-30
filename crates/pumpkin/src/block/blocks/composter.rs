@@ -297,3 +297,72 @@ pub async fn hopper_take_output(world: &Arc<World>, position: &BlockPos) {
         .update_level_composter(world, position, state_id, block, 0)
         .await;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pumpkin_data::item::Item;
+
+    #[test]
+    fn composter_chance_matches_vanilla_bootstrap() {
+        // Low tier (0.3): leaves, saplings, seeds, etc.
+        assert_eq!(
+            get_composter_increase_chance_from_item_id(Item::OAK_LEAVES.id),
+            Some(0.3)
+        );
+        assert_eq!(
+            get_composter_increase_chance_from_item_id(Item::WHEAT_SEEDS.id),
+            Some(0.3)
+        );
+
+        // Mid tier (0.5): tall grass, dried kelp block, etc.
+        assert_eq!(
+            get_composter_increase_chance_from_item_id(Item::TALL_GRASS.id),
+            Some(0.5)
+        );
+        assert_eq!(
+            get_composter_increase_chance_from_item_id(Item::DRIED_KELP_BLOCK.id),
+            Some(0.5)
+        );
+
+        // High tier (0.65): pumpkin, melon, apple, etc.
+        assert_eq!(
+            get_composter_increase_chance_from_item_id(Item::PUMPKIN.id),
+            Some(0.65)
+        );
+        assert_eq!(
+            get_composter_increase_chance_from_item_id(Item::APPLE.id),
+            Some(0.65)
+        );
+
+        // Very high tier (0.85): hay block, bread, etc.
+        assert_eq!(
+            get_composter_increase_chance_from_item_id(Item::HAY_BLOCK.id),
+            Some(0.85)
+        );
+        assert_eq!(
+            get_composter_increase_chance_from_item_id(Item::BREAD.id),
+            Some(0.85)
+        );
+
+        // Maximum tier (1.0): cake, pumpkin pie
+        assert_eq!(
+            get_composter_increase_chance_from_item_id(Item::CAKE.id),
+            Some(1.0)
+        );
+        assert_eq!(
+            get_composter_increase_chance_from_item_id(Item::PUMPKIN_PIE.id),
+            Some(1.0)
+        );
+
+        // Non-compostable items return None
+        assert_eq!(
+            get_composter_increase_chance_from_item_id(Item::DIAMOND.id),
+            None
+        );
+        assert_eq!(
+            get_composter_increase_chance_from_item_id(Item::STONE.id),
+            None
+        );
+    }
+}
