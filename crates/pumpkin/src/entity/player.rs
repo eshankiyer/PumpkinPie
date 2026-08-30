@@ -209,7 +209,7 @@ use pumpkin_data::attributes::Attributes;
 use pumpkin_data::block_properties::{BlockProperties, HorizontalFacing};
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::data_component_impl::{
-    AttributeModifiersImpl, CanBreakImpl, EnchantmentsImpl, Operation,
+    AttributeModifiersImpl, CanBreakImpl, EnchantmentsImpl, MinimumAttackChargeImpl, Operation,
 };
 use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, ToolImpl, WeaponImpl};
 use pumpkin_data::effect::StatusEffect;
@@ -1727,6 +1727,23 @@ impl Player {
 
         let attack_speed = base_attack_speed + add_speed;
 
+        // `Player.cannotAttackWithItem` rejects spear attacks until the optimistic attack
+        // strength reaches the item's minimum charge (`Player.java:1820-1824`); spear items set
+        // that component to 1.0 (`Item.java:516-527`). The generated component is a marker, so
+        // the value is taken from the vanilla spear definition.
+        if item_stack
+            .get_data_component::<MinimumAttackChargeImpl>()
+            .is_some()
+            && !attack_charge_ready(
+                self.last_attacked_ticks.load(Ordering::Acquire),
+                5,
+                attack_speed,
+                1.0,
+            )
+        {
+            return;
+        }
+
         let is_bedrock = matches!(self.client.as_ref(), ClientPlatform::Bedrock(_));
         let attack_cooldown_progress = if is_bedrock {
             1.0
@@ -1881,6 +1898,14 @@ impl Player {
             let mut velocity = self.living_entity.entity.velocity.load();
             velocity.y = 0.01;
             self.living_entity.entity.set_velocity(velocity);
+            // `MaceItem.hurtEnemy` stores the impact position after setting the attacker's
+            // vertical motion (`MaceItem.java:51-58`), so the ensuing fall cannot damage the
+            // attacker through the smash impulse.
+            self.living_entity
+                .set_ignore_fall_damage_from_current_impulse(
+                    true,
+                    self.living_entity.entity.pos.load(),
+                );
             self.living_entity.fall_distance.store(0.0);
             if victim_entity.on_ground.load(Ordering::Relaxed) {
                 // `MaceItem.hurtEnemy` enables the attacker's extra fall particles for
@@ -4224,6 +4249,26 @@ impl Player {
         let world = self.world();
         let sb = world.scoreboard.lock().await;
         sb.get_entity_team(&self.gameprofile.name).cloned()
+    }
+
+    /// `Player.canHarmPlayer` applies `PvP` and scoreboard-team `friendly_fire` rules
+    /// (`Player.java:727-735`; `ServerPlayer.java:1001-1006`).
+    pub async fn can_harm_player(&self, target: &Self) -> bool {
+        if let Some(server) = self.world().server.upgrade()
+            && !server.advanced_config.pvp.enabled
+        {
+            return false;
+        }
+
+        let attacker_team = self.get_team().await;
+        let target_team = target.get_team().await;
+        can_harm_player_teams(
+            attacker_team.as_ref().map(|team| team.name.as_str()),
+            attacker_team
+                .as_ref()
+                .is_some_and(|team| (team.options & 1) != 0),
+            target_team.as_ref().map(|team| team.name.as_str()),
+        )
     }
 
     pub async fn set_compass_target(&self, pos: pumpkin_util::math::position::BlockPos) {
@@ -7489,6 +7534,29 @@ fn damage_dealt_stat_points(health_before: f32, health_after: f32) -> i32 {
     ((health_before - health_after).max(0.0) * 10.0).round() as i32
 }
 
+/// `Player.canHarmPlayer` permits attacks across teams and permits same-team attacks only when
+/// friendly fire is enabled (`Player.java:727-735`; `ServerPlayer.java:1001-1006`).
+fn can_harm_player_teams(
+    attacker_team: Option<&str>,
+    friendly_fire: bool,
+    target_team: Option<&str>,
+) -> bool {
+    attacker_team.is_none_or(|team| target_team != Some(team) || friendly_fire)
+}
+
+/// `Player.cannotAttackWithItem` compares the attack ticker plus packet tolerance with the
+/// current attack-strength delay (`Player.java:1820-1824`).
+fn attack_charge_ready(
+    attack_ticks: u32,
+    tolerance: u32,
+    attack_speed: f64,
+    required_strength: f64,
+) -> bool {
+    required_strength <= 0.0
+        || (f64::from(attack_ticks) + f64::from(tolerance)) / (20.0 / attack_speed)
+            >= required_strength
+}
+
 impl EntityBase for Player {
     /// Vanilla `Player.getFallSounds` (`Player.java:1504-1506`).
     fn get_fall_sound(&self, fall_distance: i32) -> Sound {
@@ -7509,11 +7577,29 @@ impl EntityBase for Player {
         cause: Option<&'a dyn EntityBase>,
     ) -> EntityBaseFuture<'a, bool> {
         Box::pin(async move {
+            // `ServerPlayer.hurtServer` rejects direct player damage and player-owned arrow
+            // damage through `canHarmPlayer` (`ServerPlayer.java:985-1006`).
+            let direct_player = source
+                .and_then(EntityBase::get_player)
+                .or_else(|| cause.and_then(EntityBase::get_player));
+            if let Some(attacker) = direct_player {
+                if !attacker.can_harm_player(self).await {
+                    return false;
+                }
+            } else if let Some(projectile) = source.or(cause)
+                && let Some(owner_id) = crate::entity::projectile::projectile_owner_id(projectile)
+                && let Some(attacker) = self.world().get_player_by_id(owner_id)
+                && !attacker.can_harm_player(self).await
+            {
+                return false;
+            }
+
             if self.abilities.lock().await.invulnerable
                 && ability_invulnerability_blocks(&damage_type)
             {
                 return false;
             }
+            let health_before = self.living_entity.health.load();
             // TODO: Implement shield blocking durability.
             let result = self
                 .living_entity
@@ -7521,6 +7607,11 @@ impl EntityBase for Player {
                 .await;
             if result {
                 let health = self.living_entity.health.load();
+                // `Player.actuallyHurt` exhausts only when damage remains after absorption
+                // (`Player.java:748-770`); a health decrease is the shared path's equivalent.
+                if health < health_before {
+                    self.add_exhaustion(damage_type.exhaustion).await;
+                }
                 if health <= 0.0 {
                     let death_message =
                         LivingEntity::get_death_message(caller, damage_type, source, cause).await;
@@ -8577,9 +8668,10 @@ fn is_valid_for_forced_respawn(state: &BlockState) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        Player, ability_invulnerability_blocks, bedrock_inventory_slot, damage_dealt_stat_points,
-        is_crossbow_held_projectile, is_crossbow_inventory_projectile, is_valid_for_forced_respawn,
-        is_vanishing_cursed, player_death_experience_reward, read_root_vehicle, write_root_vehicle,
+        Player, ability_invulnerability_blocks, attack_charge_ready, bedrock_inventory_slot,
+        can_harm_player_teams, damage_dealt_stat_points, is_crossbow_held_projectile,
+        is_crossbow_inventory_projectile, is_valid_for_forced_respawn, is_vanishing_cursed,
+        player_death_experience_reward, read_root_vehicle, write_root_vehicle,
     };
     use pumpkin_data::Block;
     use pumpkin_data::damage::DamageType;
@@ -8792,5 +8884,26 @@ mod tests {
         assert_eq!(damage_dealt_stat_points(20.0, 0.0), 200);
         assert_eq!(damage_dealt_stat_points(1.0, 0.875), 1);
         assert_eq!(damage_dealt_stat_points(1.0, 0.25), 8);
+    }
+
+    /// `Player.canHarmPlayer` uses team identity and the friendly-fire option
+    /// (`Player.java:727-735`).
+    #[test]
+    fn team_friendly_fire_controls_player_damage() {
+        assert!(can_harm_player_teams(None, false, Some("red")));
+        assert!(can_harm_player_teams(Some("red"), false, Some("blue")));
+        assert!(!can_harm_player_teams(Some("red"), false, Some("red")));
+        assert!(can_harm_player_teams(Some("red"), true, Some("red")));
+        assert!(can_harm_player_teams(Some("red"), false, None));
+    }
+
+    /// `Player.cannotAttackWithItem` applies the five-tick packet tolerance
+    /// (`ServerGamePacketListenerImpl.java:1277-1279,1817-1819`).
+    #[test]
+    fn minimum_attack_charge_uses_packet_tolerance() {
+        assert!(!attack_charge_ready(0, 0, 4.0, 1.0));
+        assert!(attack_charge_ready(0, 5, 4.0, 1.0));
+        assert!(attack_charge_ready(5, 5, 4.0, 1.0));
+        assert!(attack_charge_ready(0, 5, 4.0, 0.0));
     }
 }

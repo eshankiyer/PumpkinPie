@@ -188,6 +188,13 @@ impl EntityBase for LingeringPotionEntity {
                 -3.0 / 600.0,
             );
 
+            // `ThrownLingeringPotion` applies the potion stack's implicit entity components
+            // before adding the cloud (`ThrownLingeringPotion.java:39-45`).
+            cloud
+                .get_entity()
+                .apply_components_from_item_stack(&stack)
+                .await;
+
             world.spawn_entity(cloud).await;
         })
     }

@@ -185,13 +185,22 @@ impl PortalType {
                             return None;
                         }
 
-                        let info = dest_world.level_info.load();
+                        let spawn_pos = {
+                            let info = dest_world.level_info.load();
+                            let suggestion =
+                                BlockPos::new(info.spawn_x, info.spawn_y, info.spawn_z);
+                            caller
+                                .get_entity()
+                                .adjust_spawn_location(&dest_world, suggestion)
+                        };
                         Some(TeleportTransition {
                             new_world: dest_world,
+                            // `TeleportTransition.findAdjustedSharedSpawnPos` uses the entity's
+                            // adjusted bottom-center position (`TeleportTransition.java:93-95`).
                             position: Vector3::new(
-                                f64::from(info.spawn_x) + 0.5,
-                                f64::from(info.spawn_y),
-                                f64::from(info.spawn_z) + 0.5,
+                                f64::from(spawn_pos.0.x) + 0.5,
+                                f64::from(spawn_pos.0.y),
+                                f64::from(spawn_pos.0.z) + 0.5,
                             ),
                             yaw: None,
                             pitch: None,

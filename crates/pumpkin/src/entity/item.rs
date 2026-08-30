@@ -727,6 +727,12 @@ impl EntityBase for ItemEntity {
                 return false;
             }
 
+            // Vanilla `ItemEntity.hurt`: damage is rejected by the held stack's
+            // `canBeHurtBy` check (`ItemStack.java:1112-1115`, `ItemEntity.java:280-305`).
+            if !self.item_stack.lock().await.can_be_hurt_by(&damage_type) {
+                return false;
+            }
+
             loop {
                 let current = self.health.load(Relaxed);
                 let new = current - amount;

@@ -460,6 +460,11 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         false
     }
 
+    /// Vanilla `Entity.canInteractWithLevel` (`Entity.java:341-343`).
+    fn can_interact_with_level(&self) -> bool {
+        self.get_entity().is_alive() && !self.is_spectator()
+    }
+
     fn is_collidable(&self, _entity: Option<Box<dyn EntityBase>>) -> bool {
         false
     }
@@ -1847,6 +1852,37 @@ impl Entity {
         );
     }
 
+    /// Vanilla `Entity.applyComponentsFromItemStack` (`Entity.java:4019-4060`) applies the
+    /// custom-name and custom-data components that are meaningful to entities. The two callers
+    /// below are the server-side equivalents of `SpawnEggItem` and `ThrownLingeringPotion`.
+    pub async fn apply_components_from_item_stack(&self, stack: &ItemStack) {
+        if let Some(custom_name) =
+            stack.get_data_component::<pumpkin_data::data_component_impl::CustomNameImpl>()
+        {
+            self.set_custom_name(custom_name.name.clone());
+        }
+        if let Some(custom_data) =
+            stack.get_data_component::<pumpkin_data::data_component_impl::CustomDataImpl>()
+        {
+            *self.custom_data.lock().await = custom_data.data.clone();
+        }
+    }
+
+    /// Vanilla `Entity.adjustSpawnLocation` (`Entity.java:1406-1410`) uses the destination
+    /// world's respawn X/Z and its motion-blocking height for shared portal spawn positions.
+    #[must_use]
+    pub fn adjust_spawn_location(&self, level: &World, _spawn_suggestion: BlockPos) -> BlockPos {
+        let level_info = level.level_info.load();
+        let spawn_x = level_info.spawn_x;
+        let spawn_z = level_info.spawn_z;
+        let spawn_height = level.get_heightmap_height(
+            pumpkin_world::chunk::ChunkHeightmapType::MotionBlockingNoLeaves,
+            spawn_x,
+            spawn_z,
+        ) + 1;
+        BlockPos::new(spawn_x, spawn_height, spawn_z)
+    }
+
     pub fn is_silent(&self) -> bool {
         self.silent.load(Ordering::Relaxed)
     }
@@ -3141,7 +3177,29 @@ impl Entity {
 
         let velocity_multiplier = f64::from(self.get_velocity_multiplier());
 
-        self.velocity.store(final_move * velocity_multiplier);
+        let mut velocity = final_move * velocity_multiplier;
+        if motion.y < 0.0
+            && motion.y != final_move.y
+            && let Some(supporting_block_pos) = self.supporting_block_pos.load()
+        {
+            let world = self.world.load();
+            let block = world.get_block(&supporting_block_pos);
+            let restitution = crate::block::block_bounce_restitution(block);
+            if restitution > 0.0
+                && !block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_SUPPRESSES_BOUNCE)
+            {
+                // `Entity.restituteMovementAfterCollisions` (`Entity.java:803-843`) reflects
+                // downward velocity using the supporting block's restitution; non-living
+                // entities receive the `Entity.java:846-852` 0.8 multiplier.
+                let entity_factor = if caller.get_living_entity().is_some() {
+                    1.0
+                } else {
+                    0.8
+                };
+                velocity.y = -motion.y * restitution * entity_factor;
+            }
+        }
+        self.velocity.store(velocity);
 
         if !self.touching_unloaded_chunk()
             && let Some(living) = caller.get_living_entity()
@@ -4376,9 +4434,21 @@ impl Entity {
         if let Some(holder) = holder {
             let holder_entity = holder.get_entity();
 
-            // Drop leash if entity or holder is removed or dead
-            if !self.is_alive() || !holder_entity.is_alive() {
+            // `Leashable.tickLeash` drops or removes the leash when either side cannot interact
+            // with the level (`Leashable.java:147-154`).
+            if !self.can_interact_with_level() || !holder.can_interact_with_level() {
+                let world = self.world.load();
+                let entity_drops = world.level_info.load().game_rules.entity_drops;
+                let block_pos = self.block_pos.load();
                 self.unleash().await;
+                if entity_drops {
+                    world
+                        .drop_stack(
+                            &block_pos,
+                            ItemStack::new(1, &pumpkin_data::item::Item::LEAD),
+                        )
+                        .await;
+                }
                 return None;
             }
 

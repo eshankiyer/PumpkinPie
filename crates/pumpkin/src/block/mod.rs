@@ -27,6 +27,7 @@ use pumpkin_data::BlockDirection;
 use pumpkin_data::block_rotation::{Mirror, Rotation};
 use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::tag::Taggable;
 use pumpkin_protocol::java::server::play::SUseItemOn;
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::vector3::Vector3;
@@ -65,6 +66,18 @@ pub(crate) fn bounce_entity_after_fall(entity: &dyn EntityBase, bounce_multiplie
     }
 
     base_entity.velocity.store(velocity);
+}
+
+pub(crate) fn block_bounce_restitution(block: &Block) -> f64 {
+    // `Block.getBounceRestitution` (`Block.java:494-499`) returns the property set by
+    // `Blocks.java:675-685` for beds and `Blocks.java:2922-2926` for slime blocks.
+    if block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_BEDS) {
+        0.75
+    } else if block == &Block::SLIME_BLOCK {
+        1.0
+    } else {
+        0.0
+    }
 }
 
 pub trait BlockBehaviour: Send + Sync {
@@ -691,6 +704,13 @@ pub async fn calculate_comparator_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn block_bounce_restitution_matches_vanilla_properties() {
+        assert_eq!(block_bounce_restitution(&Block::RED_BED), 0.75);
+        assert_eq!(block_bounce_restitution(&Block::SLIME_BLOCK), 1.0);
+        assert_eq!(block_bounce_restitution(&Block::STONE), 0.0);
+    }
 
     /// Ore experience is data-driven through `Block.experience` and `block::drop_loot`, not a
     /// per-block behaviour: `DropExperienceBlock.spawnAfterBreak` (DropExperienceBlock.java:30-35)

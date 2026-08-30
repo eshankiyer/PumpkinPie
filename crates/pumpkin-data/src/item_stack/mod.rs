@@ -1,9 +1,12 @@
+#[cfg(feature = "damage")]
+use crate::damage::DamageType;
 use crate::data_component::DataComponent;
 use crate::data_component::DataComponent::Enchantments;
 use crate::data_component_impl::{
-    BlocksAttacksImpl, ConsumableImpl, CustomDataImpl, DamageImpl, DataComponentImpl,
-    EnchantmentsImpl, IDSet, MaxDamageImpl, MaxStackSizeImpl, PotionContentsImpl, RepairableImpl,
-    ToolImpl, UnbreakableImpl, UseCooldownImpl, get, get_mut, read_data,
+    BlocksAttacksImpl, ConsumableImpl, CustomDataImpl, DamageImpl, DamageResistantImpl,
+    DamageResistantType, DataComponentImpl, EnchantmentsImpl, IDSet, MaxDamageImpl,
+    MaxStackSizeImpl, PotionContentsImpl, RepairableImpl, ToolImpl, UnbreakableImpl,
+    UseCooldownImpl, get, get_mut, read_data,
 };
 use crate::item::Item;
 use crate::recipes::RecipeResultStruct;
@@ -577,6 +580,19 @@ impl ItemStack {
         stack
     }
 
+    /// Vanilla `ItemStack.copyAndClear` (`ItemStack.java:334-342`) returns a copy and empties
+    /// the original stack, preserving the empty-stack fast path.
+    #[must_use]
+    pub fn copy_and_clear(&mut self) -> Self {
+        if self.is_empty() {
+            return Self::EMPTY.clone();
+        }
+
+        let stack = self.clone();
+        self.set_count(0);
+        stack
+    }
+
     #[must_use]
     pub fn copy_with_count(&self, count: u8) -> Self {
         let mut stack = self.clone();
@@ -609,6 +625,49 @@ impl ItemStack {
     /// Completely resets the stack to air
     pub fn clear(&mut self) {
         *self = Self::EMPTY.clone();
+    }
+
+    /// Vanilla `ItemStack.canBeHurtBy` (`ItemStack.java:1112-1115`) rejects damage covered by
+    /// the stack's `damage_resistant` component and accepts all other damage.
+    #[cfg(feature = "damage")]
+    #[must_use]
+    pub fn can_be_hurt_by(&self, damage_type: &DamageType) -> bool {
+        let Some(resistant) = self.get_data_component::<DamageResistantImpl>() else {
+            return true;
+        };
+
+        let resists = match resistant.res_type {
+            DamageResistantType::Fire => {
+                damage_type.has_tag(&crate::tag::DamageType::MINECRAFT_IS_FIRE)
+            }
+            DamageResistantType::Explosion => {
+                damage_type.has_tag(&crate::tag::DamageType::MINECRAFT_IS_EXPLOSION)
+            }
+            DamageResistantType::Fall => {
+                damage_type.has_tag(&crate::tag::DamageType::MINECRAFT_IS_FALL)
+            }
+            DamageResistantType::Freezing => {
+                damage_type.has_tag(&crate::tag::DamageType::MINECRAFT_IS_FREEZING)
+            }
+            DamageResistantType::Lightning => {
+                damage_type.has_tag(&crate::tag::DamageType::MINECRAFT_IS_LIGHTNING)
+            }
+            DamageResistantType::Drowning => {
+                damage_type.has_tag(&crate::tag::DamageType::MINECRAFT_IS_DROWNING)
+            }
+            DamageResistantType::Projectile => {
+                damage_type.has_tag(&crate::tag::DamageType::MINECRAFT_IS_PROJECTILE)
+            }
+            DamageResistantType::PlayerAttack => {
+                damage_type.has_tag(&crate::tag::DamageType::MINECRAFT_IS_PLAYER_ATTACK)
+            }
+            DamageResistantType::MaceSmash => {
+                damage_type.has_tag(&crate::tag::DamageType::MINECRAFT_MACE_SMASH)
+            }
+            _ => false,
+        };
+
+        !resists
     }
 
     pub fn enchant(&mut self, enchantment: &'static Enchantment, level: i32) {
@@ -806,6 +865,37 @@ mod tests {
     /// Helper: creates a fresh Iron Sword (max_damage 250, damage 0).
     fn iron_sword() -> ItemStack {
         ItemStack::new(1, &Item::IRON_SWORD)
+    }
+
+    #[test]
+    fn copy_and_clear_returns_copy_and_empties_source() {
+        // Vanilla `ItemStack.copyAndClear` (`ItemStack.java:334-342`) copies before clearing.
+        let mut stack = ItemStack::new(3, &Item::COAL);
+
+        let copy = stack.copy_and_clear();
+
+        assert_eq!(copy.item_count, 3);
+        assert_eq!(copy.item.id, Item::COAL.id);
+        assert!(stack.is_empty());
+    }
+
+    #[cfg(feature = "damage")]
+    #[test]
+    fn can_be_hurt_by_respects_damage_resistant_component() {
+        // Vanilla `ItemStack.canBeHurtBy` (`ItemStack.java:1112-1115`) tests the damage type tag.
+        let mut stack = ItemStack::new(1, &Item::COAL);
+        stack.patch.push((
+            DataComponent::DamageResistant,
+            Some(
+                DamageResistantImpl {
+                    res_type: DamageResistantType::Fire,
+                }
+                .to_dyn(),
+            ),
+        ));
+
+        assert!(!stack.can_be_hurt_by(&DamageType::IN_FIRE));
+        assert!(stack.can_be_hurt_by(&DamageType::PLAYER_ATTACK));
     }
 
     #[test]

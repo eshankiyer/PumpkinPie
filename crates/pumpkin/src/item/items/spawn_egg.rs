@@ -88,6 +88,12 @@ async fn spawn_egg_mob(
 
     apply_entity_variant(stack, mob.as_ref());
 
+    // `SpawnEggItem.spawn` applies the stack's implicit entity components before adding the
+    // offspring (`SpawnEggItem.java:169-171`).
+    mob.get_entity()
+        .apply_components_from_item_stack(stack)
+        .await;
+
     // Broadcast the new mob to all players
     world.spawn_entity(mob).await;
 }
