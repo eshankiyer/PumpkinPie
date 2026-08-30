@@ -8,6 +8,7 @@ use std::sync::{
 use pumpkin_data::entity::{EntityPose, EntityStatus, EntityType};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::bedrock::server::actor_event::ActorEventType;
@@ -692,9 +693,16 @@ impl Mob for CatEntity {
                         && self.mob_entity.living_entity.health.load()
                             < self.mob_entity.living_entity.get_max_health()
                     {
-                        item_stack.decrement_unless_creative(player.gamemode.load(), 1);
-                        self.mob_entity.living_entity.heal(2.0);
-                        self.play_eating_sound();
+                        // TamableAnimal.feed (TamableAnimal.java:135-140) uses the food
+                        // component's nutrition, rather than a fixed two-health heal.
+                        crate::entity::passive::tamable::feed(
+                            player,
+                            item_stack,
+                            &self.mob_entity.living_entity,
+                            1.0,
+                            1.0,
+                            Some(Sound::EntityCatEat),
+                        );
                         return true;
                     }
 

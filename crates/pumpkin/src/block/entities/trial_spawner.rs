@@ -36,6 +36,8 @@ pub struct TrialSpawnerConfig {
     pub simultaneous_mobs_added_per_player: f32,
     pub ticks_between_spawn: i64,
     pub spawn_potentials: Vec<(&'static EntityType, i32, NbtCompound)>,
+    // TrialSpawnerConfig.java:47-49 stores the weighted reward-table list.
+    pub loot_tables_to_eject: Vec<(String, i32)>,
 }
 
 impl Default for TrialSpawnerConfig {
@@ -48,6 +50,8 @@ impl Default for TrialSpawnerConfig {
             simultaneous_mobs_added_per_player: 1.0,
             ticks_between_spawn: 40,
             spawn_potentials: Vec::new(),
+            // TrialSpawnerConfig.java:98-102 supplies the normal two-table default.
+            loot_tables_to_eject: default_loot_tables(),
         }
     }
 }
@@ -109,6 +113,21 @@ impl TrialSpawnerConfig {
                 }
             }
         }
+        // TrialSpawnerConfig.java:30-56 decodes lootTablesToEject as weighted data/table pairs.
+        if let Some(list) = nbt.get_list("loot_tables_to_eject") {
+            config.loot_tables_to_eject = list
+                .iter()
+                .filter_map(|entry| {
+                    let NbtTag::Compound(entry) = entry else {
+                        return None;
+                    };
+                    Some((
+                        entry.get_string("data")?.to_owned(),
+                        entry.get_int("weight").unwrap_or(1),
+                    ))
+                })
+                .collect();
+        }
         config
     }
 
@@ -142,6 +161,38 @@ impl TrialSpawnerConfig {
         }
         None
     }
+
+    // TrialSpawnerConfig.java:47-49 and TrialSpawnerState.java:132-137: select one configured
+    // reward table using its weighted-list entry before the ejection cycle begins.
+    fn pick_random_loot_table(&self) -> Option<String> {
+        let total_weight: i32 = self
+            .loot_tables_to_eject
+            .iter()
+            .map(|(_, weight)| *weight)
+            .sum();
+        if total_weight <= 0 {
+            return self
+                .loot_tables_to_eject
+                .first()
+                .map(|(table, _)| table.clone());
+        }
+        let mut roll = rand::random_range(0..total_weight);
+        for (table, weight) in &self.loot_tables_to_eject {
+            if roll < *weight {
+                return Some(table.clone());
+            }
+            roll -= weight;
+        }
+        None
+    }
+}
+
+fn default_loot_tables() -> Vec<(String, i32)> {
+    // TrialSpawnerConfig.java:98-102: normal rewards use equal consumables/key weights.
+    vec![
+        ("minecraft:spawners/trial_chamber/consumables".to_owned(), 1),
+        ("minecraft:spawners/trial_chamber/key".to_owned(), 1),
+    ]
 }
 
 // TrialSpawnerConfigs.java:22-269 (bootstrap registry). The entity compound is
@@ -264,6 +315,18 @@ fn built_in_config(key: &str) -> Option<TrialSpawnerConfig> {
         simultaneous_mobs_added_per_player: sim_add,
         ticks_between_spawn: ticks,
         spawn_potentials: potentials,
+        // TrialSpawnerConfigs.java:39-317: ominous rewards weight the key 3 and consumables 7.
+        loot_tables_to_eject: if is_ominous {
+            vec![
+                ("minecraft:spawners/ominous/trial_chamber/key".to_owned(), 3),
+                (
+                    "minecraft:spawners/ominous/trial_chamber/consumables".to_owned(),
+                    7,
+                ),
+            ]
+        } else {
+            default_loot_tables()
+        },
     })
 }
 
@@ -625,21 +688,9 @@ impl TrialSpawnerBlockEntity {
                 let cooldown_started_at =
                     self.cooldown_ends_at.load(Ordering::Relaxed) - self.target_cooldown_length;
                 if game_time >= cooldown_started_at + DELAY_BEFORE_EJECT_AFTER_KILLING_LAST_MOB {
-                    // TrialSpawnerConfig.java:99-102: lootTablesToEject is a
-                    // 1:1-weighted choice between the consumables and key tables,
-                    // picked once per reward cycle.
-                    let table = if is_ominous {
-                        if rand::random_range(0..10) < 3 {
-                            "minecraft:spawners/ominous/trial_chamber/key"
-                        } else {
-                            "minecraft:spawners/ominous/trial_chamber/consumables"
-                        }
-                    } else if rand::random_range(0..2) == 0 {
-                        "minecraft:spawners/trial_chamber/consumables"
-                    } else {
-                        "minecraft:spawners/trial_chamber/key"
-                    };
-                    *self.ejecting_loot_table.lock().unwrap() = Some(table.to_string());
+                    // TrialSpawnerState.java:132-137 selects the configured weighted table
+                    // once per reward cycle; TrialSpawnerConfig.java:47-49 supplies that list.
+                    *self.ejecting_loot_table.lock().unwrap() = config.pick_random_loot_table();
                     world.play_block_sound(
                         Sound::BlockTrialSpawnerOpenShutter,
                         SoundCategory::Blocks,
@@ -1071,6 +1122,13 @@ mod tests {
         assert!((c.total_mobs - 6.0).abs() < f32::EPSILON);
         assert!((c.simultaneous_mobs - 2.0).abs() < f32::EPSILON);
         assert_eq!(c.ticks_between_spawn, 40);
+        // TrialSpawnerConfig.java:98-102 supplies the two default reward tables with weight 1.
+        assert_eq!(c.loot_tables_to_eject.len(), 2);
+        assert!(
+            c.loot_tables_to_eject
+                .iter()
+                .all(|(_, weight)| *weight == 1)
+        );
     }
 
     #[test]

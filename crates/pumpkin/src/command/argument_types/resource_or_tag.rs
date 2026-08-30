@@ -13,7 +13,8 @@ use crate::command::argument_types::argument_type::{ArgumentType, JavaClientArgu
 use crate::command::argument_types::resource_key::BIOME_REGISTRY;
 use crate::command::context::command_context::CommandContext;
 use crate::command::errors::command_syntax_error::CommandSyntaxError;
-use crate::command::errors::error_types::CommandErrorType;
+use crate::command::errors::error_types::{CommandErrorType, DISPATCHER_PARSE_EXCEPTION};
+use crate::command::node::attached::AttachedNode;
 use crate::command::string_reader::StringReader;
 use crate::command::suggestion::suggestions::{Suggestions, SuggestionsBuilder};
 
@@ -28,6 +29,11 @@ pub static ERROR_UNKNOWN_RESOURCE: CommandErrorType<2> = CommandErrorType::new(
 pub static ERROR_UNKNOWN_TAG: CommandErrorType<2> = CommandErrorType::new(
     translation::java::ARGUMENT_RESOURCE_TAG_NOT_FOUND,
     translation::java::ARGUMENT_RESOURCE_TAG_NOT_FOUND,
+);
+
+static ERROR_INVALID_RESOURCE_TYPE: CommandErrorType<3> = CommandErrorType::new(
+    translation::java::ARGUMENT_RESOURCE_INVALID_TYPE,
+    translation::java::ARGUMENT_RESOURCE_INVALID_TYPE,
 );
 
 /// A parsed reference to either a single registry entry or a `#`-prefixed tag
@@ -167,6 +173,55 @@ impl ArgumentType for ResourceOrTagKeyArgument {
 /// generated entry data (such as POI types) are accepted as-is.
 pub struct ResourceOrTagArgument(pub Identifier);
 
+impl ResourceOrTagArgument {
+    /// `ResourceOrTagArgument.getResourceOrTag` (`ResourceOrTagArgument.java:52-64`).
+    /// Validate the registry carried by the command node before returning its parsed value.
+    pub fn get_resource_or_tag<'a>(
+        context: &'a CommandContext,
+        name: &str,
+        registry: &Identifier,
+    ) -> Result<&'a ResourceOrTag, CommandSyntaxError> {
+        let value = context.get_argument::<ResourceOrTag>(name)?;
+        let argument = context
+            .tree
+            .iter()
+            .find_map(|node| {
+                if let AttachedNode::Argument(argument) = node
+                    && argument.meta.name == name
+                {
+                    Some(argument)
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| {
+                DISPATCHER_PARSE_EXCEPTION.create_without_context(TextComponent::text(format!(
+                    "Could not find argument with name '{name}'"
+                )))
+            })?;
+        let argument_type = argument
+            .meta
+            .argument_type
+            .as_any()
+            .downcast_ref::<Self>()
+            .ok_or_else(|| {
+                DISPATCHER_PARSE_EXCEPTION.create_without_context(TextComponent::text(format!(
+                    "argument with name '{name}' isn't a ResourceOrTagArgument"
+                )))
+            })?;
+
+        if argument_type.0 == *registry {
+            Ok(value)
+        } else {
+            Err(ERROR_INVALID_RESOURCE_TYPE.create_without_context(
+                TextComponent::text(value.printable()),
+                TextComponent::text(argument_type.0.to_string()),
+                TextComponent::text(registry.to_string()),
+            ))
+        }
+    }
+}
+
 impl ArgumentType for ResourceOrTagArgument {
     type Item = ResourceOrTag;
 
@@ -285,6 +340,35 @@ mod tests {
         assert_eq!(
             ResourceOrTag::Tag(Identifier::vanilla_static("skeletons")).printable(),
             "#minecraft:skeletons"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn printable_preserves_resource_and_tag_prefixes() {
+        // Vanilla `ResourceOrTagArgument` prints these forms (`ResourceOrTagArgument.java:148-155, 177-184`).
+        let argument = ResourceOrTagKeyArgument(BIOME_REGISTRY.clone());
+
+        let mut resource_reader = StringReader::new("minecraft:plains");
+        assert_eq!(
+            argument
+                .parse(&mut resource_reader)
+                .expect("resource should parse")
+                .printable(),
+            "minecraft:plains"
+        );
+
+        let mut tag_reader = StringReader::new("#minecraft:is_overworld");
+        assert_eq!(
+            argument
+                .parse(&mut tag_reader)
+                .expect("tag should parse")
+                .printable(),
+            "#minecraft:is_overworld"
         );
     }
 }

@@ -239,6 +239,26 @@ pub struct ChunkHeightmaps {
 }
 
 impl ChunkHeightmaps {
+    /// Accepts the packed heightmap storage used by chunk NBT.
+    // Vanilla `Heightmap.setRawData` (`Heightmap.java:126-133`) only copies data when its
+    // length matches `SimpleBitStorage`'s required length (`SimpleBitStorage.java:244-263`).
+    pub(crate) fn set_raw_data(&mut self, heightmap: ChunkHeightmapType, raw_data: &[i64]) -> bool {
+        let data = match heightmap {
+            ChunkHeightmapType::WorldSurface => &mut self.world_surface,
+            ChunkHeightmapType::MotionBlocking => &mut self.motion_blocking,
+            ChunkHeightmapType::MotionBlockingNoLeaves => &mut self.motion_blocking_no_leaves,
+            ChunkHeightmapType::OceanFloor => &mut self.ocean_floor,
+        };
+
+        let expected_len = CHUNK_AREA.div_ceil(7);
+        if raw_data.len() != expected_len {
+            return false;
+        }
+
+        *data = Some(raw_data.to_vec().into_boxed_slice());
+        true
+    }
+
     pub fn set(&mut self, heightmap: ChunkHeightmapType, x: i32, z: i32, height: i32, min_y: i32) {
         let data = match heightmap {
             ChunkHeightmapType::WorldSurface => &mut self.world_surface,
@@ -247,7 +267,9 @@ impl ChunkHeightmaps {
             ChunkHeightmapType::OceanFloor => &mut self.ocean_floor,
         };
 
-        let data = data.get_or_insert_with(|| vec![0; 37].into_boxed_slice());
+        // `SimpleBitStorage` uses `(size + valuesPerLong - 1) / valuesPerLong`
+        // (`SimpleBitStorage.java:249-255`), which is 37 words for 256 entries at 9 bits.
+        let data = data.get_or_insert_with(|| vec![0; CHUNK_AREA.div_ceil(7)].into_boxed_slice());
 
         let local_x = (x & 15) as usize;
         let local_z = (z & 15) as usize;
