@@ -90,7 +90,12 @@ impl RangedBowAttackGoal {
     }
 
     async fn is_holding_bow(mob: &dyn Mob) -> bool {
-        Self::held_bow(mob).await.is_some()
+        // `RangedBowAttackGoal#isHoldingBow` delegates to `LivingEntity.isHolding`
+        // (`RangedBowAttackGoal.java:41`, `LivingEntity.java:2243-2249`).
+        mob.get_mob_entity()
+            .living_entity
+            .is_holding(mob, &Item::BOW)
+            .await
     }
 
     async fn item_use_ticks(mob: &dyn Mob) -> Option<i32> {

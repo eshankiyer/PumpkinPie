@@ -340,6 +340,36 @@ fn read_root_vehicle(nbt: &NbtCompound) -> Option<Uuid> {
     ))
 }
 
+fn write_last_death_location(nbt: &mut NbtCompound, location: &(ResourceLocation, BlockPos)) {
+    // `GlobalPos.CODEC` stores `dimension` and a three-integer `pos` list
+    // (`GlobalPos.java:12-17`; `BlockPos.java:33-37`).
+    let mut location_nbt = NbtCompound::new();
+    location_nbt.put_string("dimension", location.0.clone());
+    location_nbt.put(
+        "pos",
+        NbtTag::List(vec![
+            NbtTag::Int(location.1.0.x),
+            NbtTag::Int(location.1.0.y),
+            NbtTag::Int(location.1.0.z),
+        ]),
+    );
+    nbt.put_compound("LastDeathLocation", location_nbt);
+}
+
+fn read_last_death_location(nbt: &NbtCompound) -> Option<(ResourceLocation, BlockPos)> {
+    // `Player.readAdditionalSaveData` reads `LastDeathLocation` with
+    // `GlobalPos.CODEC` (`Player.java:627-643`).
+    let location = nbt.get_compound("LastDeathLocation")?;
+    let dimension = location.get_string("dimension")?.to_owned();
+    let [x, y, z] = location.get_list("pos")? else {
+        return None;
+    };
+    Some((
+        dimension,
+        BlockPos::new(x.extract_int()?, y.extract_int()?, z.extract_int()?),
+    ))
+}
+
 pub const DATA_VERSION: i32 = 4903; // 26.2
 
 /// Food exhaustion applied for every block a player mines.
@@ -836,6 +866,9 @@ pub struct Player {
     pub camera_target_id: AtomicCell<Option<i32>>,
     /// The player's spawnpoint
     pub respawn_point: Mutex<Option<RespawnPoint>>,
+    /// `Player.lastDeathLocation`, retained for the next player spawn packet and save
+    /// (`Player.java:167,171`).
+    last_death_location: Mutex<Option<(ResourceLocation, BlockPos)>>,
     /// The player's sleep status
     pub sleeping_since: AtomicCell<Option<u8>>,
     /// The bed currently occupied by the player. This is distinct from the respawn point:
@@ -1186,6 +1219,7 @@ impl Player {
             raid_omen_position: AtomicCell::new(None),
             // TODO: Send the CPlayerSpawnPosition packet when the client connects with proper values
             respawn_point: Mutex::new(None),
+            last_death_location: Mutex::new(None),
             sleeping_since: AtomicCell::new(None),
             sleeping_pos: AtomicCell::new(None),
             // We want this to be an impossible watched section so that `chunker::update_position`
@@ -2113,6 +2147,7 @@ impl Player {
         };
 
         let mut stack = self.inventory().get_stack(slot_index).await;
+        let broken_item = stack.clone();
         let result = stack.damage_item(amount);
         let updated = (result != pumpkin_data::item_stack::DamageResult::Untouched)
             .then_some((result, stack.clone()));
@@ -2146,11 +2181,11 @@ impl Player {
                     1,
                 )
                 .await;
-                self.world().send_entity_status(
-                    &self.living_entity.entity,
-                    super::equipment_break_status(slot),
-                    None,
-                );
+                // Vanilla `LivingEntity.onEquippedItemBroken` runs before the slot is cleared
+                // (`LivingEntity.java:3845-3848`), so remove the old item's effects at this point.
+                self.living_entity
+                    .on_equipped_item_broken(&broken_item, slot)
+                    .await;
             }
 
             self.enqueue_slot_set_packet(&CSetPlayerInventory::new(
@@ -4290,6 +4325,26 @@ impl Player {
         self.respawn_location.load()
     }
 
+    /// Returns the player's effective luck attribute.
+    /// `Player.getLuck` delegates to the `LUCK` attribute (`Player.java:1858-1861`).
+    #[must_use]
+    pub fn get_luck(&self) -> f32 {
+        self.living_entity.get_attribute_value(&Attributes::LUCK) as f32
+    }
+
+    /// Returns the most recent death dimension and block position.
+    /// `Player.getLastDeathLocation` returns the stored optional global position
+    /// (`Player.java:1945-1951`).
+    pub async fn get_last_death_location(&self) -> Option<(ResourceLocation, BlockPos)> {
+        self.last_death_location.lock().await.clone()
+    }
+
+    // `Player.setLastDeathLocation` updates the stored optional global position
+    // (`Player.java:1949-1951`).
+    async fn set_last_death_location(&self, location: Option<(ResourceLocation, BlockPos)>) {
+        *self.last_death_location.lock().await = location;
+    }
+
     pub async fn hide_player(&self, other_id: uuid::Uuid) {
         self.hidden_players.lock().await.insert(other_id);
     }
@@ -4427,7 +4482,6 @@ impl Player {
     }
 
     /// Teleports the player to a different world or dimension with an optional position, yaw, and pitch.
-    #[expect(clippy::too_many_lines)]
     pub async fn teleport_world(
         self: &Arc<Self>,
         new_world: Arc<World>,
@@ -4486,13 +4540,9 @@ impl Player {
                     }).await;
                 }
 
-                let last_pos = self.living_entity.entity.last_pos.load();
-                let death_dimension = ResourceLocation::from(self.world().dimension.minecraft_name);
-                let death_location = BlockPos(Vector3::new(
-                    last_pos.x.round() as i32,
-                    last_pos.y.round() as i32,
-                    last_pos.z.round() as i32,
-                ));
+                // `ServerPlayer.createCommonSpawnInfo` forwards the stored last-death location
+                // (`ServerPlayer.java:2168-2180`).
+                let last_death_location = self.get_last_death_location().await;
                 match self.client.as_ref() {
                     ClientPlatform::Java(java) => {
                         let packet = CRespawn::new(
@@ -4503,7 +4553,7 @@ impl Player {
                                 self.previous_gamemode.load().unwrap_or(self.gamemode.load()) as i8,
                                 false,
                                 false,
-                                Some((death_dimension, death_location)),
+                                last_death_location,
                                 VarInt(self.get_entity().portal_cooldown.load(Ordering::Relaxed) as i32),
                                 new_world.sea_level.into(),
                             ),
@@ -5225,6 +5275,13 @@ impl Player {
         )
         .await;
         let block_pos = self.position().to_block_pos();
+        // `Player.die` records the current dimension and block position before the death
+        // response is sent (`Player.java:526-549`).
+        self.set_last_death_location(Some((
+            ResourceLocation::from(self.world().dimension.minecraft_name),
+            block_pos,
+        )))
+        .await;
 
         let keep_inventory = { self.world().level_info.load().game_rules.keep_inventory };
 
@@ -7160,6 +7217,12 @@ impl NBTStorage for Player {
             nbt.put_float("XpP", self.experience_progress.load());
             nbt.put_int("XpLevel", self.experience_level.load(Ordering::Relaxed));
             nbt.put_int("XpTotal", total_exp);
+            let last_death_location = self.last_death_location.lock().await.clone();
+            if let Some(location) = last_death_location {
+                // `Player.addAdditionalSaveData` stores the optional global position
+                // (`Player.java:646-660`).
+                write_last_death_location(nbt, &location);
+            }
             // `Player.java:651`.
             nbt.put_short("SleepTimer", self.sleeping_since.load().unwrap_or(0) as i16);
             // `Player.java:656`.
@@ -7274,6 +7337,9 @@ impl NBTStorage for Player {
                 nbt.get_byte("previousPlayerGameType")
                     .and_then(|byte| GameMode::try_from(byte).ok()),
             );
+            // `Player.readAdditionalSaveData` restores the optional global position
+            // (`Player.java:627-643`).
+            *self.last_death_location.lock().await = read_last_death_location(nbt);
 
             self.has_played_before.store(
                 nbt.get_bool("HasPlayedBefore").unwrap_or(false),
@@ -8671,11 +8737,13 @@ mod tests {
         Player, ability_invulnerability_blocks, attack_charge_ready, bedrock_inventory_slot,
         can_harm_player_teams, damage_dealt_stat_points, is_crossbow_held_projectile,
         is_crossbow_inventory_projectile, is_valid_for_forced_respawn, is_vanishing_cursed,
-        player_death_experience_reward, read_root_vehicle, write_root_vehicle,
+        player_death_experience_reward, read_last_death_location, read_root_vehicle,
+        write_last_death_location, write_root_vehicle,
     };
     use pumpkin_data::Block;
     use pumpkin_data::damage::DamageType;
     use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
+    use pumpkin_util::math::position::BlockPos;
     use uuid::Uuid;
 
     /// `Player.getProjectile` uses `ARROW_OR_FIREWORK` in hand and `ARROW_ONLY` in the
@@ -8797,6 +8865,24 @@ mod tests {
             nbt.get_compound("RootVehicle")
                 .and_then(|root| root.get_int_array("Attach"))
                 .is_some()
+        );
+    }
+
+    /// `GlobalPos.CODEC` uses `dimension` plus a three-integer `pos` list
+    /// (`GlobalPos.java:12-17`; `BlockPos.java:33-37`), which `Player` saves as
+    /// `LastDeathLocation` (`Player.java:642,660`).
+    #[test]
+    fn last_death_location_round_trips_with_vanilla_shape() {
+        let expected = ("minecraft:the_nether".to_owned(), BlockPos::new(12, 67, -4));
+        let mut nbt = NbtCompound::new();
+
+        write_last_death_location(&mut nbt, &expected);
+
+        assert_eq!(read_last_death_location(&nbt), Some(expected));
+        assert_eq!(
+            nbt.get_compound("LastDeathLocation")
+                .and_then(|location| location.get_string("dimension")),
+            Some("minecraft:the_nether")
         );
     }
 

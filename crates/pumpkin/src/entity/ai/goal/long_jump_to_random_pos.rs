@@ -349,6 +349,11 @@ impl Goal for LongJumpToRandomPosGoal {
                     // `body.setYRot(body.yBodyRot)` then the launch itself.
                     entity.yaw.store(entity.head_yaw.load());
                     entity.velocity.store(velocity);
+                    // `LongJumpToRandomPos` enables friction discard for the launched arc
+                    // (`LongJumpToRandomPos.java:137-146`).
+                    mob.get_mob_entity()
+                        .living_entity
+                        .set_discard_friction(true);
                     entity.set_pose(EntityPose::LongJumping);
                     entity.world.load().play_sound(
                         (self.jump_sound)(mob),
@@ -383,6 +388,11 @@ impl Goal for LongJumpToRandomPosGoal {
                     );
                 }
                 self.cooldown = self.sample_time_between(mob);
+                // `LongJumpMidJump.stop` clears friction discard after landing
+                // (`LongJumpMidJump.java:33-40`).
+                mob.get_mob_entity()
+                    .living_entity
+                    .set_discard_friction(false);
             } else {
                 self.cooldown = self.sample_time_between(mob) / 2;
             }

@@ -124,6 +124,12 @@ pub mod predicate;
 /// The maximum number of scoreboard tags an entity can carry, matching Vanilla.
 pub const MAX_SCOREBOARD_TAGS: usize = 1024;
 
+/// Vanilla `Entity.setGlowingTag` combines the persisted tag and effect state
+/// (`Entity.java:2729-2732`).
+const fn effective_glowing(glowing_tag: bool, glowing_effect: bool) -> bool {
+    glowing_tag || glowing_effect
+}
+
 /// Returns the [`EntityStatus`] that should be broadcast when the given
 /// equipment slot breaks.
 #[must_use]
@@ -529,6 +535,18 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
 
     fn is_flutterer(&self) -> bool {
         false
+    }
+
+    /// Vanilla `Entity.notifyLeashHolder` (`Entity.java:3836`) is a holder-side leash callback.
+    fn notify_leash_holder(&self, _entity: &dyn EntityBase) {}
+
+    /// Vanilla `Entity.notifyLeasheeRemoved` (`Entity.java:3839`) is a holder-side unlink
+    /// callback.
+    fn notify_leashee_removed<'a>(
+        &'a self,
+        _entity: &'a dyn EntityBase,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async {})
     }
 
     /// Custom Y-axis velocity drag multiplier applied during `travel_in_air`.
@@ -1251,6 +1269,40 @@ const fn delta_needs_position_sync(encoded: Vector3<i64>) -> bool {
 const fn can_start_riding_state(sneaking: bool, riding_cooldown: i32, has_vehicle: bool) -> bool {
     !sneaking && riding_cooldown <= 0 && !has_vehicle
 }
+
+/// Vanilla `Entity.canSpawnSprintParticle` (`Entity.java:1706-1708`).
+#[expect(clippy::fn_params_excessive_bools)]
+const fn can_spawn_sprint_particle_state(
+    sprinting: bool,
+    touching_water: bool,
+    spectator: bool,
+    sneaking: bool,
+    touching_lava: bool,
+    alive: bool,
+) -> bool {
+    sprinting && !touching_water && !spectator && !sneaking && !touching_lava && alive
+}
+
+/// Vanilla `Entity.waterSwimSound` (`Entity.java:1428-1437`) scales movement speed by its
+/// 0.35/0.4 modifier and caps the resulting sound volume at 1.0.
+fn water_swim_volume(velocity: Vector3<f64>, volume_modifier: f32) -> f32 {
+    (velocity
+        .y
+        .mul_add(
+            velocity.y,
+            (velocity.x.mul_add(velocity.x, velocity.z * velocity.z)) * 0.2,
+        )
+        .sqrt() as f32
+        * volume_modifier)
+        .min(1.0)
+}
+
+/// Vanilla `Entity.applyPistonMovementRestriction` (`Entity.java:1112-1119`).
+fn piston_axis_movement(previous: f64, requested: f64) -> (f64, f64) {
+    let total = (requested + previous).clamp(-0.51, 0.51);
+    (total - previous, total)
+}
+
 pub struct Entity {
     /// A unique identifier for the entity
     pub entity_id: i32,
@@ -1267,6 +1319,10 @@ pub struct Entity {
     pub last_pos: AtomicCell<Vector3<f64>>,
     /// The last movement vector
     pub movement: AtomicCell<Vector3<f64>>,
+    /// Vanilla `Entity.moveDist`/`nextStep` for non-living entities that use the shared movement
+    /// emission path (`Entity.java:238,241,867-901`).
+    movement_sound_distance: AtomicCell<f32>,
+    movement_sound_next_step: AtomicCell<f32>,
     /// The entity's position rounded to the nearest block coordinates
     pub block_pos: AtomicCell<BlockPos>,
     /// The block supporting the entity
@@ -1292,6 +1348,12 @@ pub struct Entity {
     pub persistent_invisible: AtomicBool,
     /// Indicates whether the entity is glowing
     pub glowing: AtomicBool,
+    /// Vanilla stores this separately from status-effect visibility in `hasGlowingTag`
+    /// (`Entity.java:2729-2732`).
+    glowing_tag: AtomicBool,
+    /// Vanilla's effect-derived glow is combined with `hasGlowingTag`
+    /// (`Entity.java:2729-2732`).
+    glowing_effect: AtomicBool,
     /// Indicates whether the entity is flying due to a fall
     pub fall_flying: AtomicBool,
     /// The entity's current velocity vector, aka knockback
@@ -1403,6 +1465,13 @@ pub struct Entity {
     pub no_clip: AtomicBool,
     /// Multiplies movement for one tick before being reset
     pub movement_multiplier: AtomicCell<Vector3<f64>>,
+    /// Vanilla `Entity.pistonDeltas`/`pistonDeltasGameTime` (`Entity.java:1103-1119`).
+    /// The mutex keeps the per-tick cap atomic when multiple piston block entities push the
+    /// same entity during one world tick.
+    piston_movement: std::sync::Mutex<(i64, Vector3<f64>)>,
+    /// Set by `Entity.markHurt` (`Entity.java:1912-1914`) and consumed by the living tick's
+    /// motion sync.
+    pub hurt_marked: AtomicBool,
     /// Determines whether the entity's velocity needs to be sent
     pub velocity_dirty: AtomicBool,
     /// Set when an Entity is to be removed but could still be referenced
@@ -1595,6 +1664,7 @@ impl Entity {
         )
     }
 
+    #[expect(clippy::too_many_lines)]
     pub fn from_uuid_with_id(
         entity_id: i32,
         entity_uuid: uuid::Uuid,
@@ -1630,6 +1700,8 @@ impl Entity {
             pos: AtomicCell::new(position),
             last_pos: AtomicCell::new(position),
             movement: AtomicCell::new(Vector3::default()),
+            movement_sound_distance: AtomicCell::new(0.0),
+            movement_sound_next_step: AtomicCell::new(1.0),
             block_pos: AtomicCell::new(BlockPos(Vector3::new(floor_x, floor_y, floor_z))),
             supporting_block_pos: AtomicCell::new(None),
             chunk_pos: AtomicCell::new(Vector2::new(
@@ -1642,6 +1714,8 @@ impl Entity {
             invisible: AtomicBool::new(false),
             persistent_invisible: AtomicBool::new(false),
             glowing: AtomicBool::new(false),
+            glowing_tag: AtomicBool::new(false),
+            glowing_effect: AtomicBool::new(false),
             world: ArcSwap::new(world),
             sprinting: AtomicBool::new(false),
             fall_flying: AtomicBool::new(false),
@@ -1693,6 +1767,8 @@ impl Entity {
             scoreboard_tags: Mutex::new(HashSet::new()),
             no_clip: AtomicBool::new(false),
             movement_multiplier: AtomicCell::new(Vector3::default()),
+            piston_movement: std::sync::Mutex::new((i64::MIN, Vector3::default())),
+            hurt_marked: AtomicBool::new(false),
             velocity_dirty: AtomicBool::new(true),
             removed: AtomicBool::new(false),
             last_sent_yaw: AtomicU8::new(0),
@@ -1714,6 +1790,13 @@ impl Entity {
     pub fn set_velocity(&self, velocity: Vector3<f64>) {
         self.velocity.store(velocity);
         self.send_velocity();
+    }
+
+    /// Vanilla `Entity.markHurt` (`Entity.java:1912-1914`) marks the entity so the server sends
+    /// its current motion to tracking players at the end of the tick.
+    pub fn mark_hurt(&self) {
+        self.hurt_marked.store(true, Relaxed);
+        self.velocity_dirty.store(true, Ordering::SeqCst);
     }
 
     /// Updates the world reference for this entity.
@@ -3122,6 +3205,56 @@ impl Entity {
         self.set_pos(self.pos.load() + delta);
     }
 
+    /// Vanilla `Entity.limitPistonMovement` (`Entity.java:1098-1121`) limits cumulative piston
+    /// movement to 0.51 blocks per axis per game tick.
+    pub fn limit_piston_movement(
+        &self,
+        movement: Vector3<f64>,
+        current_game_time: i64,
+    ) -> Vector3<f64> {
+        if movement.length_squared() <= 1.0e-7 {
+            return movement;
+        }
+
+        let mut piston_movement = self
+            .piston_movement
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if piston_movement.0 != current_game_time {
+            piston_movement.0 = current_game_time;
+            piston_movement.1 = Vector3::default();
+        }
+
+        if movement.x != 0.0 {
+            let (x, total) = piston_axis_movement(piston_movement.1.x, movement.x);
+            piston_movement.1.x = total;
+            return if x.abs() <= 1.0e-5 {
+                Vector3::default()
+            } else {
+                Vector3::new(x, 0.0, 0.0)
+            };
+        }
+        if movement.y != 0.0 {
+            let (y, total) = piston_axis_movement(piston_movement.1.y, movement.y);
+            piston_movement.1.y = total;
+            return if y.abs() <= 1.0e-5 {
+                Vector3::default()
+            } else {
+                Vector3::new(0.0, y, 0.0)
+            };
+        }
+        if movement.z != 0.0 {
+            let (z, total) = piston_axis_movement(piston_movement.1.z, movement.z);
+            piston_movement.1.z = total;
+            return if z.abs() <= 1.0e-5 {
+                Vector3::default()
+            } else {
+                Vector3::new(0.0, 0.0, z)
+            };
+        }
+        Vector3::default()
+    }
+
     /// Applies a small self movement through the normal block collision solver.
     /// Player movement is handled by the player packet path, so `move_entity`
     /// deliberately skips players; vanilla uses this path for Riptide's lift.
@@ -3726,13 +3859,28 @@ impl Entity {
         }
     }
 
-    /// Sets whether the entity is glowing and sends updated metadata.
+    /// Sets effect-derived glow while preserving the persisted tag's effective glow
+    /// (`Entity.java:2729-2734`).
     #[expect(clippy::unused_async)]
     #[allow(clippy::unused_async_trait_impl)]
     pub async fn set_glowing(&self, glowing: bool) {
-        if self.glowing.load(Ordering::Relaxed) != glowing {
-            self.glowing.store(glowing, Ordering::Relaxed);
-            self.set_flag(Flag::Glowing, glowing);
+        self.glowing_effect.store(glowing, Ordering::Relaxed);
+        let new_glowing = effective_glowing(glowing, self.glowing_tag.load(Ordering::Relaxed));
+        if self.glowing.swap(new_glowing, Ordering::Relaxed) != new_glowing {
+            self.set_flag(Flag::Glowing, new_glowing);
+        }
+    }
+
+    /// Restores the persisted entity glow independently of status-effect visibility.
+    /// Vanilla reads `Glowing` through `setGlowingTag` during entity loading
+    /// (`Entity.java:2175-2175`) and combines it with the effective glowing flag
+    /// (`Entity.java:2729-2732`).
+    #[expect(clippy::unused_async)]
+    pub async fn set_glowing_tag(&self, glowing: bool) {
+        self.glowing_tag.store(glowing, Ordering::Relaxed);
+        let new_glowing = effective_glowing(glowing, self.glowing_effect.load(Ordering::Relaxed));
+        if self.glowing.swap(new_glowing, Ordering::Relaxed) != new_glowing {
+            self.set_flag(Flag::Glowing, new_glowing);
         }
     }
 
@@ -3861,6 +4009,20 @@ impl Entity {
     pub fn is_sprinting(&self) -> bool {
         self.sprinting.load(Ordering::Relaxed)
     }
+
+    /// Vanilla `Entity.canSpawnSprintParticle` is evaluated from `baseTick`
+    /// (`Entity.java:511-526`).
+    fn can_spawn_sprint_particle(&self, caller: &dyn EntityBase) -> bool {
+        can_spawn_sprint_particle_state(
+            self.is_sprinting(),
+            self.touching_water.load(Ordering::Relaxed),
+            caller.is_spectator(),
+            self.is_sneaking(),
+            self.touching_lava.load(Ordering::Relaxed),
+            self.is_alive(),
+        )
+    }
+
     pub fn check_fall_flying(&self) -> bool {
         !self.on_ground.load(Relaxed)
     }
@@ -3956,6 +4118,54 @@ impl Entity {
         self.world
             .load()
             .play_sound(sound, SoundCategory::Neutral, &self.pos.load());
+    }
+
+    /// Vanilla `Entity.waterSwimSound` (`Entity.java:1428-1437`) uses the controlling passenger's
+    /// velocity and a 0.4 modifier, or the vehicle's velocity and a 0.35 modifier, before
+    /// dispatching to `playSwimSound`.
+    pub(crate) async fn water_swim_sound(&self, caller: &dyn EntityBase, sound: Sound) {
+        let controlling_passenger = if let Some(mob) = caller.get_mob() {
+            if mob::Mob::has_controlling_passenger(mob).await {
+                caller.get_entity().passengers.lock().await.first().cloned()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let (velocity, volume_modifier) = controlling_passenger.map_or_else(
+            || (self.velocity.load(), 0.35),
+            |passenger| (passenger.get_entity().velocity.load(), 0.4),
+        );
+        let volume = water_swim_volume(velocity, volume_modifier);
+        let pitch = (rand::random::<f32>() - rand::random::<f32>()).mul_add(0.4, 1.0);
+        self.world.load().play_sound_fine(
+            sound,
+            SoundCategory::Neutral,
+            &self.pos.load(),
+            volume,
+            pitch,
+        );
+    }
+
+    /// Vanilla `Entity.applyMovementEmissionAndPlaySound` (`Entity.java:867-901`) advances the
+    /// movement threshold before emitting a swim sound. Item entities use this shared path after
+    /// their movement because they do not have the living-entity movement tick.
+    pub(crate) async fn tick_movement_emission(&self, caller: &dyn EntityBase) {
+        let moved = self.pos.load() - self.last_pos.load();
+        let horizontal = moved.x.hypot(moved.z) as f32 * 0.6;
+        let movement_distance = self.movement_sound_distance.load() + horizontal;
+        self.movement_sound_distance.store(movement_distance);
+        if movement_distance <= self.movement_sound_next_step.load()
+            || self.is_silent()
+            || !self.touching_water.load(Relaxed)
+        {
+            return;
+        }
+        self.movement_sound_next_step
+            .store(movement_distance.floor() + 1.0);
+        self.water_swim_sound(caller, Sound::EntityGenericSwim)
+            .await;
     }
 
     /// Stores the given tracked-data values so they can be replayed to a player
@@ -4370,7 +4580,7 @@ impl Entity {
 
     pub async fn leash_to(&self, holder: Arc<dyn EntityBase>) {
         let holder_entity = holder.get_entity();
-        *self.leashed_to.lock().await = Some(holder.clone());
+        let old_holder = self.leashed_to.lock().await.replace(holder.clone());
         self.leash_persistence_required.store(true, Relaxed);
 
         let je_packet = pumpkin_protocol::java::client::play::CSetEntityLink::new(
@@ -4396,13 +4606,21 @@ impl Entity {
             &je_packet,
             &be_packet,
         );
+
+        if let Some(old_holder) = old_holder
+            && old_holder.get_entity().entity_id != holder_entity.entity_id
+        {
+            // `Leashable.setLeashedTo` notifies a replaced holder after link synchronization
+            // (`Leashable.java:315-317`).
+            old_holder.notify_leashee_removed(self).await;
+        }
     }
 
     pub async fn unleash(&self) {
         let old_holder = self.leashed_to.lock().await.take();
-        if old_holder.is_none() {
+        let Some(old_holder) = old_holder else {
             return;
-        }
+        };
         self.leash_persistence_required.store(false, Relaxed);
 
         let je_packet =
@@ -4423,9 +4641,13 @@ impl Entity {
             &je_packet,
             &be_packet,
         );
+
+        // `Leashable.dropLeash` notifies the old holder after unlinking the entity
+        // (`Leashable.java:120-136`).
+        old_holder.notify_leashee_removed(self).await;
     }
 
-    pub async fn tick_leash(&self) -> Option<(Vector3<f64>, f64)> {
+    pub async fn tick_leash(&self, leashee: &dyn EntityBase) -> Option<(Vector3<f64>, f64)> {
         let holder = {
             let guard = self.leashed_to.lock().await;
             guard.clone()
@@ -4460,6 +4682,10 @@ impl Entity {
             let holder_pos = holder_entity.pos.load();
             let diff = self_pos - holder_pos;
             let distance = diff.length();
+
+            // `Leashable.whenLeashedTo` notifies the holder before leash-distance behavior
+            // (`Leashable.java:155-160,198`).
+            holder.notify_leash_holder(leashee);
 
             if distance > self.leash_snap_distance() {
                 // Too far: snap/break leash and drop lead item. Vanilla plays the break
@@ -5168,6 +5394,11 @@ impl NBTStorage for Entity {
             nbt.put_bool("OnGround", self.on_ground.load(Relaxed));
             nbt.put_bool("Invulnerable", self.invulnerable.load(Relaxed));
             nbt.put_int("PortalCooldown", self.portal_cooldown.load(Relaxed) as i32);
+            // Vanilla persists the tag, rather than the effect-derived glow
+            // (`Entity.java:2094-2096`).
+            if self.glowing_tag.load(Relaxed) {
+                nbt.put_bool("Glowing", true);
+            }
             if self.has_visual_fire.load(Relaxed) {
                 nbt.put_bool("HasVisualFire", true);
             }
@@ -5257,6 +5488,8 @@ impl NBTStorage for Entity {
                 .store(nbt.get_bool("HasVisualFire").unwrap_or(false), Relaxed);
             self.frozen_ticks
                 .store(nbt.get_int("TicksFrozen").unwrap_or(0), Relaxed);
+            self.set_glowing_tag(nbt.get_bool("Glowing").unwrap_or(false))
+                .await;
             if let Some(name_json) = nbt.get_string("CustomName")
                 && let Ok(component) = pumpkin_util::serde_json::from_str(name_json)
             {
@@ -5342,6 +5575,46 @@ impl EntityBase for Entity {
             }
 
             self.tick_portal(caller).await;
+            let world = self.world.load();
+
+            // Vanilla `Entity.baseTick` emits a block particle immediately after portal
+            // handling when `canSpawnSprintParticle` is true (`Entity.java:511-526`).
+            if self.can_spawn_sprint_particle(caller.as_ref()) {
+                let (particle_pos, _, particle_state) = self.get_block_with_y_offset(0.2);
+                if !particle_state.is_air() {
+                    let position = self.pos.load();
+                    let width = f64::from(self.width());
+                    let entity_block_pos = self.block_pos.load();
+                    let mut x = position.x + (rand::random::<f64>() - 0.5) * width;
+                    let mut z = position.z + (rand::random::<f64>() - 0.5) * width;
+                    if entity_block_pos.0.x != particle_pos.0.x {
+                        x = x.clamp(
+                            f64::from(particle_pos.0.x),
+                            f64::from(particle_pos.0.x) + 1.0,
+                        );
+                    }
+                    if entity_block_pos.0.z != particle_pos.0.z {
+                        z = z.clamp(
+                            f64::from(particle_pos.0.z),
+                            f64::from(particle_pos.0.z) + 1.0,
+                        );
+                    }
+
+                    let movement = self.velocity.load();
+                    let mut particle_data = Vec::new();
+                    let _ =
+                        VarInt(i32::from(particle_state.id.as_u16())).encode(&mut particle_data);
+                    world.spawn_particle_with_data(
+                        Vector3::new(x, position.y + 0.1, z),
+                        Vector3::new((movement.x * -4.0) as f32, 1.5, (movement.z * -4.0) as f32),
+                        0.0,
+                        1,
+                        pumpkin_data::particle::Particle::BlockCrumble,
+                        &particle_data,
+                    );
+                }
+            }
+
             self.was_eye_in_water
                 .store(self.eye_in_water.load(Relaxed), Relaxed);
             self.update_fluid_state(caller).await;
@@ -5537,6 +5810,56 @@ mod position_sync_tests {
 }
 
 #[cfg(test)]
+mod water_swim_sound_tests {
+    use super::water_swim_volume;
+    use pumpkin_util::math::vector3::Vector3;
+
+    #[test]
+    fn water_swim_volume_matches_vanilla_speed_scaling_and_cap() {
+        // `Entity.waterSwimSound` uses the movement norm, a 0.35 modifier and a 1.0 cap
+        // (`Entity.java:1428-1437`).
+        assert_eq!(water_swim_volume(Vector3::default(), 0.35), 0.0);
+        assert_eq!(water_swim_volume(Vector3::new(10.0, 0.0, 0.0), 0.35), 1.0);
+        let expected = (0.2f64.sqrt() as f32) * 0.35;
+        assert_eq!(
+            water_swim_volume(Vector3::new(1.0, 0.0, 0.0), 0.35),
+            expected
+        );
+        assert_eq!(
+            water_swim_volume(Vector3::new(1.0, 0.0, 0.0), 0.4),
+            (0.2f64.sqrt() as f32) * 0.4
+        );
+    }
+}
+
+#[cfg(test)]
+mod piston_movement_tests {
+    use super::piston_axis_movement;
+
+    #[test]
+    fn cumulative_piston_movement_is_capped_per_tick() {
+        // `Entity.applyPistonMovementRestriction` clamps the accumulated axis movement to
+        // -0.51..0.51 (`Entity.java:1112-1119`).
+        let (first, total) = piston_axis_movement(0.0, 0.4);
+        assert_eq!(first, 0.4);
+        assert_eq!(total, 0.4);
+
+        let (second, total) = piston_axis_movement(total, 0.4);
+        assert!((second - 0.11).abs() < 1e-9);
+        assert_eq!(total, 0.51);
+    }
+
+    #[test]
+    fn piston_movement_resets_when_the_axis_changes_direction() {
+        // `Entity.applyPistonMovementRestriction` permits movement in either signed direction
+        // while retaining the per-tick accumulated total (`Entity.java:1112-1119`).
+        let (movement, total) = piston_axis_movement(0.51, -0.51);
+        assert_eq!(movement, -0.51);
+        assert_eq!(total, 0.0);
+    }
+}
+
+#[cfg(test)]
 mod velocity_resend_tests {
     use super::velocity_needs_resend;
     use pumpkin_util::math::vector3::Vector3;
@@ -5575,8 +5898,46 @@ mod velocity_resend_tests {
 }
 
 #[cfg(test)]
+mod sprint_particle_tests {
+    use super::can_spawn_sprint_particle_state;
+
+    #[test]
+    fn sprint_particles_require_clear_alive_sprinting_state() {
+        // Vanilla's six gates are in `Entity.canSpawnSprintParticle` (`Entity.java:1706-1708`).
+        assert!(can_spawn_sprint_particle_state(
+            true, false, false, false, false, true
+        ));
+        assert!(!can_spawn_sprint_particle_state(
+            true, true, false, false, false, true
+        ));
+        assert!(!can_spawn_sprint_particle_state(
+            true, false, true, false, false, true
+        ));
+        assert!(!can_spawn_sprint_particle_state(
+            true, false, false, true, false, true
+        ));
+        assert!(!can_spawn_sprint_particle_state(
+            true, false, false, false, true, true
+        ));
+        assert!(!can_spawn_sprint_particle_state(
+            true, false, false, false, false, false
+        ));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn persisted_glow_survives_effect_removal() {
+        // Vanilla combines the saved tag with the effect-derived glow
+        // (`Entity.java:2729-2732`).
+        assert!(effective_glowing(true, false));
+        assert!(effective_glowing(true, true));
+        assert!(effective_glowing(false, true));
+        assert!(!effective_glowing(false, false));
+    }
 
     #[test]
     fn equipment_break_status_maps_all_slots() {

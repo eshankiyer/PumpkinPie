@@ -218,6 +218,11 @@ impl Mob for ZombieHorseEntity {
         &self.mob_entity
     }
 
+    /// Vanilla `ZombieHorse.chargeSpeedModifier` (`ZombieHorse.java:200-203`).
+    fn charge_speed_modifier(&self) -> f32 {
+        1.4
+    }
+
     // `AbstractHorse` rider, breeding, and leash hooks (`AbstractHorse.java:189-205,878-905`).
     fn can_jump(&self) -> EntityBaseFuture<'_, bool> {
         AbstractHorse::can_jump_now(self)

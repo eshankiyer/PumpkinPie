@@ -4,8 +4,8 @@ use crate::data_component::DataComponent;
 use crate::data_component::DataComponent::Enchantments;
 use crate::data_component_impl::{
     BlocksAttacksImpl, ConsumableImpl, CustomDataImpl, DamageImpl, DamageResistantImpl,
-    DamageResistantType, DataComponentImpl, EnchantmentsImpl, IDSet, MaxDamageImpl,
-    MaxStackSizeImpl, PotionContentsImpl, RepairableImpl, ToolImpl, UnbreakableImpl,
+    DamageResistantType, DataComponentImpl, EnchantableImpl, EnchantmentsImpl, IDSet,
+    MaxDamageImpl, MaxStackSizeImpl, PotionContentsImpl, RepairableImpl, ToolImpl, UnbreakableImpl,
     UseCooldownImpl, get, get_mut, read_data,
 };
 use crate::item::Item;
@@ -209,6 +209,16 @@ impl ItemStack {
     pub fn has_enchantments(&self) -> bool {
         self.get_data_component::<EnchantmentsImpl>()
             .is_some_and(|e| !e.enchantment.is_empty())
+    }
+
+    /// Vanilla `ItemStack.isEnchantable` (`ItemStack.java:986-993`) requires both the
+    /// `enchantable` component and an explicitly present, empty `enchantments` component.
+    #[must_use]
+    pub fn is_enchantable(&self) -> bool {
+        self.get_data_component::<EnchantableImpl>().is_some()
+            && self
+                .get_data_component::<EnchantmentsImpl>()
+                .is_some_and(|enchantments| enchantments.enchantment.is_empty())
     }
 
     pub fn add_enchantment(&mut self, enchantment: &'static Enchantment, level: u16) {
@@ -858,8 +868,8 @@ mod tests {
     use super::*;
     use crate::data_component::DataComponent;
     use crate::data_component_impl::{
-        CustomDataImpl, CustomNameImpl, DataComponentImpl, EnchantmentsImpl, ItemNameImpl,
-        LoreImpl, UnbreakableImpl,
+        CustomDataImpl, CustomNameImpl, DataComponentImpl, EnchantableImpl, EnchantmentsImpl,
+        ItemNameImpl, LoreImpl, UnbreakableImpl,
     };
 
     /// Helper: creates a fresh Iron Sword (max_damage 250, damage 0).
@@ -877,6 +887,31 @@ mod tests {
         assert_eq!(copy.item_count, 3);
         assert_eq!(copy.item.id, Item::COAL.id);
         assert!(stack.is_empty());
+    }
+
+    #[test]
+    fn enchantable_requires_present_empty_enchantments() {
+        // Vanilla `ItemStack.isEnchantable` (`ItemStack.java:986-993`) rejects a missing
+        // enchantments component and accepts one that is present but empty.
+        let mut stack = ItemStack::new(1, &Item::BOOK);
+        stack.patch.push((
+            DataComponent::Enchantable,
+            Some(EnchantableImpl { value: 1 }.to_dyn()),
+        ));
+        stack.patch.push((DataComponent::Enchantments, None));
+        assert!(!stack.is_enchantable());
+
+        stack.patch.pop();
+        stack.patch.push((
+            DataComponent::Enchantments,
+            Some(
+                EnchantmentsImpl {
+                    enchantment: Cow::Borrowed(&[]),
+                }
+                .to_dyn(),
+            ),
+        ));
+        assert!(stack.is_enchantable());
     }
 
     #[cfg(feature = "damage")]

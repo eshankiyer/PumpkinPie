@@ -276,13 +276,13 @@ impl Mob for DrownedEntity {
                 .await
                 .put(&EquipmentSlot::OFF_HAND, shell.clone());
             // `this.setGuaranteedDrop(EquipmentSlot.OFFHAND)` (`Drowned.java:113`): a drop
-            // chance of 1.0, the same representation
-            // `Mob::set_item_slot_and_drop_when_killed` uses for guaranteed drops.
+            // chance of 2.0, the preserved-equipment representation used by
+            // `Mob.setGuaranteedDrop` (`Drowned.java:113`, `DropChances.java:28-29`).
             living
                 .equipment_drop_chances
                 .lock()
                 .await
-                .insert(EquipmentSlot::OFF_HAND.clone(), 1.0);
+                .insert(EquipmentSlot::OFF_HAND.clone(), 2.0);
             living.send_equipment_changes(&[(EquipmentSlot::OFF_HAND, shell)]);
         })
     }

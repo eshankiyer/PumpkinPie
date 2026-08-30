@@ -2,7 +2,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use crate::block::entities::BlockEntity;
 use dashmap::DashMap;
-use pumpkin_data::attributes::Attributes;
 use pumpkin_data::chunk::Biome;
 use pumpkin_data::item::{BedrockItem, BedrockItemVersion};
 use pumpkin_protocol::bedrock::client::item_registry::{CItemRegistry, ItemDefinition};
@@ -3623,6 +3622,9 @@ impl World {
         let entity_id = player.entity_id();
         let gamemode = player.gamemode.load();
         let level_info = self.level_info.load();
+        // `ServerPlayer.createCommonSpawnInfo` includes the persisted last-death location in
+        // the login spawn data (`ServerPlayer.java:2168-2180`).
+        let last_death_location = player.get_last_death_location().await;
         debug!(
             "spawning player {}, entity id {}",
             player.gameprofile.name, entity_id
@@ -3671,7 +3673,7 @@ impl World {
                         .map_or(-1, |gamemode| gamemode as i8),
                     false,
                     false,
-                    None,
+                    last_death_location,
                     VarInt(player.get_entity().portal_cooldown.load(Ordering::Relaxed) as i32),
                     self.sea_level.into(),
                 ),
@@ -4591,13 +4593,9 @@ impl World {
 
     #[allow(clippy::too_many_lines)]
     pub async fn respawn_player(self: &Arc<Self>, player: &Arc<Player>, alive: bool) {
-        let last_pos = player.get_entity().last_pos.load();
-        let death_dimension = ResourceLocation::from(player.world().dimension.minecraft_name);
-        let death_location = BlockPos(Vector3::new(
-            last_pos.x.round() as i32,
-            last_pos.y.round() as i32,
-            last_pos.z.round() as i32,
-        ));
+        // `ServerPlayer.createCommonSpawnInfo` forwards `getLastDeathLocation`
+        // (`ServerPlayer.java:2168-2180`).
+        let last_death_location = player.get_last_death_location().await;
 
         let data_kept = u8::from(alive);
 
@@ -4776,7 +4774,7 @@ impl World {
                     player.gamemode.load() as i8,
                     false,
                     false,
-                    Some((death_dimension, death_location)),
+                    last_death_location,
                     VarInt(player.get_entity().portal_cooldown.load(Ordering::Relaxed) as i32),
                     target_world.sea_level.into(),
                 ),
@@ -6453,9 +6451,9 @@ impl World {
             // Close container screens for any players viewing this block
             self.close_container_screens_at(position).await;
 
-            let luck = cause.as_ref().map_or(0.0, |player| {
-                player.living_entity.get_attribute_value(&Attributes::LUCK) as f32
-            });
+            // `Player.getLuck` supplies the breaker luck used by block loot
+            // (`Player.java:1858-1861`; `BlockBehaviour.java:560-703`).
+            let luck = cause.as_ref().map_or(0.0, |player| player.get_luck());
 
             if Block::from_state_id(broken_state_id) != &Block::FIRE {
                 let je_particles_packet = CWorldEvent::new(
@@ -7442,9 +7440,8 @@ impl World {
             return (false, None);
         };
 
-        // `BlockGetter.getBlockHitResult` (`BlockGetter.java:84-90`) replaces the outline hit
-        // direction only when the block's interaction shape is hit closer. Hopper is the only
-        // worklist block with a server-side interaction-shape override.
+        // `BlockGetter.clipWithInteractionOverride` (`BlockGetter.java:82-90`) replaces the outline hit
+        // direction only when the block's interaction shape is hit closer.
         if Block::from_state_id(state.id) == &Block::HOPPER {
             let mut interaction_hit = None;
             for shape in crate::block::blocks::hopper::interaction_shapes_at(state.id, block_pos) {
@@ -7463,6 +7460,20 @@ impl World {
             }
         }
 
+        // `ScaffoldingBlock.getInteractionShape` (`ScaffoldingBlock.java:67-69`) returns a full
+        // cube even when its context-dependent collision shape is not selectable by the outline.
+        if Block::from_state_id(state.id) == &Block::SCAFFOLDING {
+            let shape = crate::block::blocks::scaffolding::ScaffoldingBlock::interaction_shape_at(
+                block_pos,
+            );
+            if let Some((direction, distance)) =
+                Self::intersects_aabb_with_direction(from, to, shape.min, shape.max)
+                && distance < outline_distance
+            {
+                return (true, Some(direction));
+            }
+        }
+
         // `ComposterBlock.getInteractionShape` (`ComposterBlock.java:230-233`)
         // overrides the outline hit direction with a full-cube hit when that
         // interaction shape is closer. The outline is still required to select the
@@ -7472,6 +7483,24 @@ impl World {
             let block_max = block_min.add(&Vector3::new(1.0, 1.0, 1.0));
             if let Some((interaction_direction, interaction_distance)) =
                 Self::intersects_aabb_with_direction(from, to, block_min, block_max)
+                && interaction_distance < outline_distance
+            {
+                return (true, Some(interaction_direction));
+            }
+        }
+
+        // `AbstractCauldronBlock.getInteractionShape` (`AbstractCauldronBlock.java:75-77`) uses
+        // the same interior column for plain, water, lava, and powder-snow cauldrons.
+        if matches!(
+            Block::from_state_id(state.id).id,
+            pumpkin_data::BlockId::CAULDRON
+                | pumpkin_data::BlockId::WATER_CAULDRON
+                | pumpkin_data::BlockId::LAVA_CAULDRON
+                | pumpkin_data::BlockId::POWDER_SNOW_CAULDRON
+        ) {
+            let shape = crate::block::blocks::cauldron::interaction_shape_at(block_pos);
+            if let Some((interaction_direction, interaction_distance)) =
+                Self::intersects_aabb_with_direction(from, to, shape.min, shape.max)
                 && interaction_distance < outline_distance
             {
                 return (true, Some(interaction_direction));

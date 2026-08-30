@@ -24,6 +24,12 @@ pub struct ScaffoldingBlock;
 const MAX_DISTANCE: u8 = 7;
 
 impl ScaffoldingBlock {
+    /// `ScaffoldingBlock.getInteractionShape` (`ScaffoldingBlock.java:67-69`) always returns the
+    /// full block, even when the context-dependent collision shape is empty.
+    pub(crate) fn interaction_shape_at(position: &BlockPos) -> BoundingBox {
+        BoundingBox::full_block().shift(position.0.to_f64())
+    }
+
     /// Returns the context-dependent collision pieces from
     /// `ScaffoldingBlock.getCollisionShape` (`ScaffoldingBlock.java:137-145`). The generated
     /// stable pieces already contain `SHAPE_STABLE`; the lower slab is the additional piece in
@@ -316,6 +322,19 @@ mod tests {
         let pos = BlockPos::new(0, 1, 0);
         let accessor = accessor_with(&[(pos.down(), &Block::AIR, Block::AIR.default_state.id)]);
         assert!(!ScaffoldingBlock::is_bottom(&accessor, &pos, 0));
+    }
+
+    #[test]
+    fn interaction_shape_is_the_full_block() {
+        // `ScaffoldingBlock.getInteractionShape` (`ScaffoldingBlock.java:67-69`) returns
+        // `Shapes.block()` for every scaffolding state.
+        let shape = ScaffoldingBlock::interaction_shape_at(&BlockPos::new(3, 64, -2));
+        assert_eq!(shape.min.x, 3.0);
+        assert_eq!(shape.min.y, 64.0);
+        assert_eq!(shape.min.z, -2.0);
+        assert_eq!(shape.max.x, 4.0);
+        assert_eq!(shape.max.y, 65.0);
+        assert_eq!(shape.max.z, -1.0);
     }
 
     #[test]

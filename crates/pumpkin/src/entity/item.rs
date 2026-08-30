@@ -690,6 +690,9 @@ impl EntityBase for ItemEntity {
                 self.move_and_apply_friction(caller, server, move_velo)
                     .await;
             }
+            // Vanilla `ItemEntity.tick` reaches `Entity.applyMovementEmissionAndPlaySound` from
+            // its post-movement base entity path (`Entity.java:867-901`).
+            entity.tick_movement_emission(caller.as_ref()).await;
 
             if self.process_age_and_merge().await {
                 self.sync_motion_if_dirty(caller, original_velo).await;
@@ -733,6 +736,9 @@ impl EntityBase for ItemEntity {
                 return false;
             }
 
+            // `ItemEntity.hurtServer` marks the item before subtracting health
+            // (`ItemEntity.java:288-303`). The existing dirty-motion sync consumes this mark.
+            self.entity.mark_hurt();
             loop {
                 let current = self.health.load(Relaxed);
                 let new = current - amount;

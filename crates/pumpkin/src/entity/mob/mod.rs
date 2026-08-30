@@ -3,7 +3,6 @@
 use super::{
     Entity, EntityBase, NBTStorage,
     ai::pathfinder::{NavigationKind, Navigator, NavigatorGoal},
-    equipment_break_status,
     living::LivingEntity,
 };
 use crate::entity::EntityBaseFuture;
@@ -1040,6 +1039,7 @@ impl MobEntity {
         let Some(stack) = equipment.equipment.get_mut(&slot) else {
             return;
         };
+        let broken_item = stack.clone();
         let cost = mob_weapon_durability_cost(stack);
         let result = stack.damage_item(cost);
         if result == DamageResult::Untouched {
@@ -1049,11 +1049,9 @@ impl MobEntity {
         drop(equipment);
 
         if result == DamageResult::Broken {
-            living.entity.world.load().send_entity_status(
-                &living.entity,
-                equipment_break_status(&slot),
-                None,
-            );
+            // Vanilla `ItemStack.hurtEnemy` reaches `onEquippedItemBroken` before the broken
+            // weapon is sent to tracking clients (`LivingEntity.java:3845-3848`).
+            living.on_equipped_item_broken(&broken_item, &slot).await;
         }
         living.send_equipment_changes(&[(slot, updated_stack)]);
     }
@@ -1268,6 +1266,10 @@ pub trait Mob: EntityBase + Send + Sync {
     /// Called when the shared leash solver applies an elastic pull. Most mobs have no
     /// pull-specific state to clear.
     fn on_elastic_leash_pull(&self) {}
+
+    /// Forwards the holder-side leash callback to entity-specific mob behavior
+    /// (`Entity.java:3836`; `Leashable.java:198`).
+    fn notify_leash_holder(&self, _entity: &dyn EntityBase) {}
 
     /// The `Mob`-level behaviour, callable from an override without recursing.
     ///
@@ -1552,6 +1554,7 @@ pub trait Mob: EntityBase + Send + Sync {
                 return;
             }
             if !stack.is_empty() {
+                let broken_item = stack.clone();
                 if stack.is_damageable() && !stack.is_unbreakable() && rand::random_range(0..2) != 0
                 {
                     let new_damage = stack.get_damage() + 1;
@@ -1564,14 +1567,12 @@ pub trait Mob: EntityBase + Send + Sync {
                         stack.set_damage(new_damage);
                     }
                     let updated_stack = stack.clone();
-                    living.entity_equipment.lock().await.put(&slot, stack);
                     if broken {
-                        entity.world.load().send_entity_status(
-                            entity,
-                            equipment_break_status(&slot),
-                            None,
-                        );
+                        // Vanilla `Mob.burnUndead` invokes `LivingEntity.onEquippedItemBroken`
+                        // before clearing the slot (`Mob.java:485-496`; `LivingEntity.java:3845-3848`).
+                        living.on_equipped_item_broken(&broken_item, &slot).await;
                     }
+                    living.entity_equipment.lock().await.put(&slot, stack);
                     living.send_equipment_changes(&[(slot, updated_stack)]);
                 }
                 return;
@@ -1793,6 +1794,12 @@ pub trait Mob: EntityBase + Send + Sync {
     /// `CROSSBOW_CHARGE` state client-side). Default no-op; crossbow-wielding mobs (Pillager)
     /// override this to store and broadcast the flag.
     fn set_charging_crossbow(&self, _charging: bool) {}
+
+    /// Vanilla `Mob.chargeSpeedModifier` (`Mob.java:1480`) scales the mounted spear
+    /// approach/reposition speeds; the base mob has no modifier.
+    fn charge_speed_modifier(&self) -> f32 {
+        1.0
+    }
 
     fn try_attack<'a>(&'a self, target: &'a dyn EntityBase) -> EntityBaseFuture<'a, bool> {
         Box::pin(async move {
@@ -2386,8 +2393,9 @@ pub trait Mob: EntityBase + Send + Sync {
                 && can_replace_equal_item(new_stack, current_stack))
     }
 
-    /// Vanilla `Mob.setItemSlotAndDropWhenKilled`: update persistent equipment, mark the slot
-    /// as a guaranteed drop, and publish the change before the ground item is decremented.
+    /// `Mob.setItemSlotAndDropWhenKilled` (`Mob.java:563-566`): update persistent equipment,
+    /// mark the slot with `DropChances.withGuaranteedDrop` (`DropChances.java:28-29`), and
+    /// publish the change before the ground item is decremented.
     fn set_item_slot_and_drop_when_killed(
         &self,
         slot: EquipmentSlot,
@@ -2404,7 +2412,7 @@ pub trait Mob: EntityBase + Send + Sync {
                 .equipment_drop_chances
                 .lock()
                 .await
-                .insert(slot.clone(), 1.0);
+                .insert(slot.clone(), 2.0);
             living.send_equipment_changes(&[(slot, stack)]);
         })
     }
@@ -2791,6 +2799,10 @@ pub(crate) fn tick_mob_ai<'a>(
 }
 
 impl<T: Mob + Send + 'static> EntityBase for T {
+    fn notify_leash_holder(&self, entity: &dyn EntityBase) {
+        Mob::notify_leash_holder(self, entity);
+    }
+
     fn get_vehicle_attachment_point(&self, vehicle: &Entity) -> Option<Vector3<f64>> {
         Mob::get_vehicle_attachment_point(self, vehicle)
     }
@@ -2908,7 +2920,7 @@ impl<T: Mob + Send + 'static> EntityBase for T {
                 }
             }
             let entity = &mob_entity.living_entity.entity;
-            if let Some((holder_pos, distance)) = entity.tick_leash().await {
+            if let Some((holder_pos, distance)) = entity.tick_leash(self).await {
                 // `Leashable.tickLeash` (`Leashable.java:155-160`) re-runs
                 // `whenLeashedTo` on every leashed tick before the snap/elastic/close-range
                 // dispatch; `PathfinderMob.whenLeashedTo` retargets the home to the holder.

@@ -16,11 +16,22 @@ use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::BlockFlags;
 use rand::{RngExt, rng};
 
 pub struct CauldronBlock;
+
+/// `AbstractCauldronBlock.getInteractionShape` (`AbstractCauldronBlock.java:28,75-77`) returns
+/// the twelve-by-four-by-twelve interior column for every cauldron variant.
+pub(crate) fn interaction_shape_at(position: &BlockPos) -> BoundingBox {
+    BoundingBox::new_array(
+        [2.0 / 16.0, 0.0, 2.0 / 16.0],
+        [14.0 / 16.0, 4.0 / 16.0, 14.0 / 16.0],
+    )
+    .shift(position.0.to_f64())
+}
 
 impl BlockMetadata for CauldronBlock {
     fn ids() -> Box<[BlockId]> {
@@ -352,4 +363,22 @@ async fn lower_fill_level(world: &Arc<World>, position: &BlockPos, block: &Block
         GameEventContext::none(),
     )
     .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::interaction_shape_at;
+    use pumpkin_util::math::position::BlockPos;
+
+    #[test]
+    fn cauldron_interaction_shape_is_the_four_pixel_interior() {
+        // `AbstractCauldronBlock.java:28,75-77` selects SHAPE_INSIDE for interaction.
+        let shape = interaction_shape_at(&BlockPos::new(3, 64, -2));
+        assert_eq!(shape.min.x, 3.125);
+        assert_eq!(shape.min.y, 64.0);
+        assert_eq!(shape.min.z, -1.875);
+        assert_eq!(shape.max.x, 3.875);
+        assert_eq!(shape.max.y, 64.25);
+        assert_eq!(shape.max.z, -1.125);
+    }
 }

@@ -103,7 +103,9 @@ pub(crate) async fn equip_saddle_item(
         .equipment_drop_chances
         .lock()
         .await
-        .insert(EquipmentSlot::SADDLE, 1.0);
+        // `Mob.setGuaranteedDrop` stores the preserved `2.0F` marker
+        // (`Mob.java:601-603`, `DropChances.java:28-29`).
+        .insert(EquipmentSlot::SADDLE, 2.0);
     mob_entity
         .living_entity
         .send_equipment_changes(&[(EquipmentSlot::SADDLE, new_stack)]);
@@ -132,7 +134,9 @@ pub(crate) async fn equip_body_armor_item(
         .equipment_drop_chances
         .lock()
         .await
-        .insert(EquipmentSlot::BODY, 1.0);
+        // `Mob.setGuaranteedDrop` stores the preserved `2.0F` marker
+        // (`Mob.java:601-603`, `DropChances.java:28-29`).
+        .insert(EquipmentSlot::BODY, 2.0);
     mob_entity
         .living_entity
         .send_equipment_changes(&[(EquipmentSlot::BODY, new_stack)]);

@@ -155,6 +155,23 @@ impl SpearUseGoal {
         mob.get_mob_entity().navigator.lock().unwrap().is_idle()
     }
 
+    async fn charge_speed_modifier(mob: &dyn Mob) -> f64 {
+        // Vanilla `SpearUseGoal` reads the root vehicle's `Mob.chargeSpeedModifier`
+        // (`SpearUseGoal.java:84-98`). Follow the existing vehicle links to preserve that
+        // lookup for mounted spear users.
+        let mut vehicle = mob.get_entity().vehicle.lock().await.clone();
+        while let Some(current) = vehicle {
+            let next = current.get_entity().vehicle.lock().await.clone();
+            if next.is_none() {
+                return current.get_mob().map_or(1.0, |vehicle_mob| {
+                    f64::from(vehicle_mob.charge_speed_modifier())
+                });
+            }
+            vehicle = next;
+        }
+        1.0
+    }
+
     /// Simplified port of `LandRandomPos.getPosAway`: samples a point within a +/-90 degree
     /// cone of the direction away from `avoid_pos`, at a distance in `[min_dist, max_dist]`,
     /// and rejects candidates that aren't standable ground. Vanilla additionally validates
@@ -266,6 +283,7 @@ impl Goal for SpearUseGoal {
             let mob_pos = mob.get_entity().pos.load();
             let target_pos = target.get_entity().pos.load();
             let target_dist_sq = mob_pos.squared_distance_to_vec(&target_pos);
+            let charge_speed_modifier = Self::charge_speed_modifier(mob).await;
             let mount_distance = if mob.get_entity().has_vehicle().await {
                 2.0
             } else {
@@ -280,7 +298,11 @@ impl Goal for SpearUseGoal {
 
             if state.not_engaged_yet() {
                 if target_dist_sq > self.approach_distance_sq {
-                    Self::move_to(mob, target_pos, self.repositioning_speed);
+                    Self::move_to(
+                        mob,
+                        target_pos,
+                        charge_speed_modifier * self.repositioning_speed,
+                    );
                     return;
                 }
                 state.start_engagement(ENGAGE_TICKS);
@@ -308,7 +330,11 @@ impl Goal for SpearUseGoal {
 
             if !state.tick_and_check_fleeing() {
                 if let Some(away_pos) = state.away_pos {
-                    Self::move_to(mob, away_pos, self.repositioning_speed);
+                    Self::move_to(
+                        mob,
+                        away_pos,
+                        charge_speed_modifier * self.repositioning_speed,
+                    );
                     if Self::navigator_idle(mob) {
                         if state.fleeing_time > 0 {
                             state.done = true;
@@ -317,7 +343,7 @@ impl Goal for SpearUseGoal {
                         state.away_pos = None;
                     }
                 } else {
-                    Self::move_to(mob, target_pos, self.charging_speed);
+                    Self::move_to(mob, target_pos, charge_speed_modifier * self.charging_speed);
                     if target_dist_sq < self.target_in_range_radius_sq || Self::navigator_idle(mob)
                     {
                         let distance = target_dist_sq.sqrt();

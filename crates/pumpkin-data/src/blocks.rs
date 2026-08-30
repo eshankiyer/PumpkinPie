@@ -123,6 +123,14 @@ impl FromResourceLocation for &'static Block {
 }
 
 impl Block {
+    /// Returns the vanilla `shouldSpawnTerrainParticles` property for this block.
+    /// The only 26.2 registrations using `noTerrainParticles` are barrier and
+    /// structure void (`BlockBehaviour.java:1265-1267`, `Blocks.java:2936,3776`).
+    #[must_use]
+    pub const fn should_spawn_terrain_particles(&self) -> bool {
+        !matches!(self.id, BlockId::BARRIER | BlockId::STRUCTURE_VOID)
+    }
+
     pub(crate) fn shape_offset_delta(&self, pos: &BlockPos) -> Vector3<f64> {
         let Some(shape_offset) = self.shape_offset() else {
             return Vector3::new(0.0, 0.0, 0.0);
@@ -437,6 +445,13 @@ mod tests {
 
         assert_eq!(xz, 34);
         assert_eq!(xyz, 5);
+    }
+
+    #[test]
+    fn terrain_particle_property_matches_vanilla_registrations() {
+        assert!(Block::STONE.should_spawn_terrain_particles());
+        assert!(!Block::BARRIER.should_spawn_terrain_particles());
+        assert!(!Block::STRUCTURE_VOID.should_spawn_terrain_particles());
     }
 
     #[test]

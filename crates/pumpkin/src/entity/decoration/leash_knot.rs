@@ -100,6 +100,42 @@ impl EntityBase for LeashKnotEntity {
         true
     }
 
+    /// `LeashFenceKnotEntity.notifyLeasheeRemoved` discards an unused knot
+    /// (`LeashFenceKnotEntity.java:116-119`).
+    fn notify_leashee_removed<'a>(
+        &'a self,
+        _entity: &'a dyn EntityBase,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            let world = self.entity.world.load();
+            let pos = self.entity.pos.load();
+            let search_box = BoundingBox {
+                min: Vector3::new(pos.x - 16.0, pos.y - 16.0, pos.z - 16.0),
+                max: Vector3::new(pos.x + 16.0, pos.y + 16.0, pos.z + 16.0),
+            };
+            let knot_id = self.entity.entity_id;
+            let has_leashees = world
+                .get_entities_at_box(&search_box)
+                .into_iter()
+                .any(|entity| {
+                    entity
+                        .get_entity()
+                        .leashed_to
+                        .try_lock()
+                        .ok()
+                        .and_then(|guard| {
+                            guard
+                                .as_ref()
+                                .map(|holder| holder.get_entity().entity_id == knot_id)
+                        })
+                        .unwrap_or(false)
+                });
+            if !has_leashees {
+                self.entity.remove().await;
+            }
+        })
+    }
+
     fn tick<'a>(
         &'a self,
         _caller: &'a Arc<dyn EntityBase>,

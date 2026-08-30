@@ -420,7 +420,9 @@ impl DispenserBlock {
             .equipment_drop_chances
             .lock()
             .await
-            .insert(slot.clone(), 1.0);
+            // `EquipmentDispenseItemBehavior` calls `Mob.setGuaranteedDrop`
+            // (`EquipmentDispenseItemBehavior.java:29-33`, `DropChances.java:28-29`).
+            .insert(slot.clone(), 2.0);
         if let Some(mob) = entity.get_mob() {
             mob.get_mob_entity().set_persistence_required();
         }
