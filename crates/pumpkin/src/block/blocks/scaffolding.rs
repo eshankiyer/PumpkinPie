@@ -4,6 +4,7 @@ use pumpkin_data::{
     block_properties::{BlockProperties, ScaffoldingLikeProperties},
 };
 use pumpkin_macros::pumpkin_block;
+use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockAccessor;
@@ -23,6 +24,30 @@ pub struct ScaffoldingBlock;
 const MAX_DISTANCE: u8 = 7;
 
 impl ScaffoldingBlock {
+    /// Returns the context-dependent collision pieces from
+    /// `ScaffoldingBlock.getCollisionShape` (`ScaffoldingBlock.java:137-145`). The generated
+    /// stable pieces already contain `SHAPE_STABLE`; the lower slab is the additional piece in
+    /// `SHAPE_UNSTABLE_BOTTOM`.
+    pub(crate) fn collision_shapes_for_context(
+        state_id: BlockStateId,
+        above_block: bool,
+        above_below_block: bool,
+        descending: bool,
+    ) -> Vec<BoundingBox> {
+        let state = pumpkin_data::BlockState::from_id(state_id);
+        let props = ScaffoldingLikeProperties::from_state_id(state_id, &Block::SCAFFOLDING);
+
+        if above_block && !descending {
+            return state.get_block_collision_shapes().collect();
+        }
+
+        if props.r#distance != 0 && props.r#bottom && above_below_block {
+            return vec![BoundingBox::new_array([0.0, 0.0, 0.0], [1.0, 0.125, 1.0])];
+        }
+
+        Vec::new()
+    }
+
     /// `ScaffoldingBlock.getDistance` (`ScaffoldingBlock.java:158-179`).
     ///
     /// Faithful to a vanilla mutable-cursor quirk: the vertical check reads `pos.below()`, but
@@ -291,5 +316,19 @@ mod tests {
         let pos = BlockPos::new(0, 1, 0);
         let accessor = accessor_with(&[(pos.down(), &Block::AIR, Block::AIR.default_state.id)]);
         assert!(!ScaffoldingBlock::is_bottom(&accessor, &pos, 0));
+    }
+
+    #[test]
+    fn collision_shape_uses_the_unstable_bottom_for_descending_entities() {
+        // `ScaffoldingBlock.getCollisionShape` (`ScaffoldingBlock.java:137-145`) returns the
+        // lower two-pixel slab for a bottom scaffold when the entity is descending.
+        let mut props = ScaffoldingLikeProperties::default(&Block::SCAFFOLDING);
+        props.r#distance = 3;
+        props.r#bottom = true;
+        let state_id = props.to_state_id(&Block::SCAFFOLDING);
+
+        let shapes = ScaffoldingBlock::collision_shapes_for_context(state_id, false, true, true);
+        assert_eq!(shapes.len(), 1);
+        assert_eq!(shapes[0].max.y, 0.125);
     }
 }

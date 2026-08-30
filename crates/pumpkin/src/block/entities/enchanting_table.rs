@@ -1,4 +1,6 @@
 use super::BlockEntity;
+use pumpkin_data::data_component_impl::CustomNameImpl;
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 use std::pin::Pin;
@@ -62,6 +64,17 @@ impl EnchantingTableBlockEntity {
         Self {
             position,
             custom_name: Mutex::const_new(None),
+        }
+    }
+
+    /// Applies `EnchantingTableBlockEntity.applyImplicitComponents`
+    /// (`EnchantingTableBlockEntity.java:123-126`) during item placement.
+    pub fn apply_implicit_components(&self, stack: &ItemStack) {
+        let custom_name = stack
+            .get_data_component::<CustomNameImpl>()
+            .and_then(|component| pumpkin_util::serde_json::to_string(&component.name).ok());
+        if let Ok(mut name) = self.custom_name.try_lock() {
+            *name = custom_name;
         }
     }
 }

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use pumpkin_data::block_rotation::Rotation;
+use pumpkin_data::{Block, block_rotation::Rotation};
 use pumpkin_util::{
     math::{block_box::BlockBox, position::BlockPos},
     random::{RandomGenerator, RandomImpl},
@@ -88,6 +88,40 @@ pub struct RuinedPortalPiece {
     variant: pumpkin_data::structures::StructureKeys,
 }
 
+impl RuinedPortalPiece {
+    /// `RuinedPortalPiece.postProcess`'s unconditional drip-column phase
+    /// (`RuinedPortalPiece.java:159-187,216-237`). Template placement is the live structure-piece
+    /// hook in Pumpkin, so this phase runs immediately after the portal template is placed.
+    fn post_process(
+        &self,
+        chunk: &mut ProtoChunk,
+        random: &mut RandomGenerator,
+        chunk_box: &BlockBox,
+    ) {
+        let bounding_box = self.piece.bounding_box;
+        for x in (bounding_box.min.x + 1)..bounding_box.max.x {
+            for z in (bounding_box.min.z + 1)..bounding_box.max.z {
+                let pos = BlockPos::new(x, bounding_box.min.y, z);
+                if !chunk_box.contains_pos(&pos.0) {
+                    continue;
+                }
+                if Block::from_state_id(chunk.get_block_state(&pos.0)) != &Block::NETHERRACK {
+                    continue;
+                }
+
+                let mut y = bounding_box.min.y - 1;
+                for _ in 0..=8 {
+                    chunk.set_block_state(x, y, z, Block::NETHERRACK.default_state);
+                    if random.next_f32() >= 0.5 {
+                        break;
+                    }
+                    y -= 1;
+                }
+            }
+        }
+    }
+}
+
 impl StructurePieceBase for RuinedPortalPiece {
     fn as_any(&self) -> &dyn std::any::Any {
         self
@@ -102,7 +136,7 @@ impl StructurePieceBase for RuinedPortalPiece {
         &mut self,
         chunk: &mut ProtoChunk,
         _block_registry: &dyn WorldPortalExt,
-        _random: &mut RandomGenerator,
+        random: &mut RandomGenerator,
         _seed: i64,
         chunk_box: &BlockBox,
     ) {
@@ -142,5 +176,6 @@ impl StructurePieceBase for RuinedPortalPiece {
             &[],
             Some(chunk_box),
         );
+        self.post_process(chunk, random, chunk_box);
     }
 }

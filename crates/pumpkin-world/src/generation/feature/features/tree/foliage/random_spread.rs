@@ -43,3 +43,26 @@ impl RandomSpreadFoliagePlacer {
         self.foliage_height.get(random)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use pumpkin_util::{
+        math::int_provider::IntProvider,
+        random::{RandomGenerator, legacy_rand::LegacyRand},
+    };
+
+    use super::RandomSpreadFoliagePlacer;
+
+    #[test]
+    fn foliage_height_uses_the_configured_provider() {
+        // `RandomSpreadFoliagePlacer.foliageHeight` (`RandomSpreadFoliagePlacer.java:64-67`)
+        // samples the placer field and does not use the tree height.
+        let placer = RandomSpreadFoliagePlacer {
+            foliage_height: IntProvider::Constant(7),
+            leaf_placement_attempts: 0,
+        };
+        let mut random = RandomGenerator::Legacy(LegacyRand::from_seed(1));
+
+        assert_eq!(placer.get_random_height(&mut random, 32), 7);
+    }
+}

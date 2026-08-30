@@ -361,6 +361,14 @@ pub fn apply_components_from_item_stack(
         // `BlockItem.updateBlockEntityComponents` after the typed payload is loaded
         // (`CommandBlockEntity.java:160-164`; `BlockItem.java:101-106`).
         command_block.apply_implicit_components(stack);
+    } else if let Some(enchanting_table) = rebuilt
+        .as_any()
+        .downcast_ref::<enchanting_table::EnchantingTableBlockEntity>(
+    ) {
+        // `EnchantingTableBlockEntity.applyImplicitComponents` copies CUSTOM_NAME
+        // (`EnchantingTableBlockEntity.java:123-126`) during `BlockItem.updateBlockEntityComponents`
+        // (`BlockItem.java:101-106`).
+        enchanting_table.apply_implicit_components(stack);
     }
     Some(rebuilt)
 }
@@ -373,6 +381,24 @@ pub(crate) async fn collect_components_from_block_entity(
     pumpkin_data::data_component::DataComponent,
     Option<Box<dyn DataComponentImpl>>,
 )> {
+    if let Some(enchanting_table) = entity
+        .as_any()
+        .downcast_ref::<enchanting_table::EnchantingTableBlockEntity>()
+    {
+        // `EnchantingTableBlockEntity.collectImplicitComponents` exports CUSTOM_NAME
+        // (`EnchantingTableBlockEntity.java:128-132`); the live caller is the creative
+        // include-data pick-item path (`ServerGamePacketListenerImpl.java:715-723`).
+        let Some(name) = enchanting_table.custom_name.lock().await.clone() else {
+            return Vec::new();
+        };
+        let name = serde_json::from_str::<pumpkin_util::text::TextComponent>(&name)
+            .unwrap_or_else(|_| pumpkin_util::text::TextComponent::text(name));
+        return vec![(
+            pumpkin_data::data_component::DataComponent::CustomName,
+            Some(Box::new(CustomNameImpl { name }).to_dyn()),
+        )];
+    }
+
     if let Some(skull) = entity.as_any().downcast_ref::<skull::SkullBlockEntity>() {
         // `SkullBlockEntity.collectImplicitComponents` exports PROFILE, NOTE_BLOCK_SOUND, and
         // CUSTOM_NAME (`SkullBlockEntity.java:90-95`); the pick-block path consumes these
@@ -710,10 +736,13 @@ mod test {
         block_entity_from_nbt, chest::ChestBlockEntity, collect_components_from_block_entity,
         furnace::FurnaceBlockEntity, skull::SkullBlockEntity,
     };
-    use pumpkin_data::data_component_impl::{BlockEntityDataImpl, ContainerLootImpl, ProfileImpl};
+    use pumpkin_data::data_component_impl::{
+        BlockEntityDataImpl, ContainerLootImpl, CustomNameImpl, ProfileImpl,
+    };
     use pumpkin_data::{item::Item, item_stack::ItemStack};
     use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
     use pumpkin_util::math::position::BlockPos;
+    use pumpkin_util::text::TextComponent;
     use pumpkin_world::inventory::Inventory;
     use std::sync::Arc;
 
@@ -890,6 +919,43 @@ mod test {
             components
                 .iter()
                 .any(|(id, _)| { *id == pumpkin_data::data_component::DataComponent::CustomName })
+        );
+    }
+
+    #[tokio::test]
+    async fn enchanting_table_custom_name_components_round_trip() {
+        // EnchantingTableBlockEntity.collectImplicitComponents and applyImplicitComponents carry
+        // CUSTOM_NAME (EnchantingTableBlockEntity.java:123-132).
+        let position = BlockPos::new(3, 64, -2);
+        let entity = super::enchanting_table::EnchantingTableBlockEntity::new(position);
+        *entity.custom_name.lock().await = Some("Arcane".to_string());
+
+        let components = collect_components_from_block_entity(&entity).await;
+        assert!(
+            components
+                .iter()
+                .any(|(id, _)| { *id == pumpkin_data::data_component::DataComponent::CustomName })
+        );
+
+        let stack = ItemStack::new_with_component(
+            1,
+            &Item::ENCHANTING_TABLE,
+            vec![(
+                pumpkin_data::data_component::DataComponent::CustomName,
+                Some(Box::new(CustomNameImpl {
+                    name: TextComponent::text("Placed"),
+                })),
+            )],
+        );
+        let applied = apply_components_from_item_stack(&entity, &stack)
+            .expect("custom name should rebuild the enchanting table entity");
+        let applied = applied
+            .as_any()
+            .downcast_ref::<super::enchanting_table::EnchantingTableBlockEntity>()
+            .expect("component application should preserve the enchanting table type");
+        assert_eq!(
+            applied.custom_name.lock().await.as_deref(),
+            Some("{\"text\":\"Placed\"}")
         );
     }
 

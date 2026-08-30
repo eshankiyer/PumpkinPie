@@ -1,6 +1,7 @@
 use crate::entity::player::Player;
 use dashmap::DashMap;
 use pumpkin_data::dimension::Dimension;
+use pumpkin_data::map_decoration::MapDecorationType;
 use pumpkin_util::math::{position::BlockPos, vector2::Vector2};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -81,6 +82,62 @@ impl MapData {
         }
     }
 
+    /// `MapItemSavedData.toggleBanner` (`MapItemSavedData.java:392-419`) stores or removes a
+    /// banner marker only while the banner lies inside the map's 63-block half-size.
+    pub fn toggle_banner(
+        &mut self,
+        position: BlockPos,
+        decoration_type: &MapDecorationType,
+        display_name: Option<String>,
+    ) -> bool {
+        let scale = 1i32 << self.scale;
+        let x_pos = f64::from(position.0.x) + 0.5;
+        let z_pos = f64::from(position.0.z) + 0.5;
+        let x_delta = (x_pos - f64::from(self.center_x)) / f64::from(scale);
+        let z_delta = (z_pos - f64::from(self.center_z)) / f64::from(scale);
+        if !(-63.0..=63.0).contains(&x_delta) || !(-63.0..=63.0).contains(&z_delta) {
+            return false;
+        }
+
+        let key = format!("banner-{},{},{}", position.0.x, position.0.y, position.0.z);
+        if let Some(index) = self
+            .decorations
+            .iter()
+            .position(|decoration| decoration.key == key)
+        {
+            if self.decorations[index].icon_type == decoration_type.id as i32
+                && self.decorations[index].display_name.as_ref() == display_name.as_ref()
+            {
+                self.decorations.remove(index);
+            } else {
+                self.decorations[index] = MapDecoration {
+                    key,
+                    icon_type: decoration_type.id as i32,
+                    x: clamp_map_coordinate(x_delta),
+                    z: clamp_map_coordinate(z_delta),
+                    direction: 8,
+                    display_name,
+                };
+            }
+            self.dirty = true;
+            return true;
+        }
+        if self.decorations.len() >= 256 {
+            return false;
+        }
+
+        self.decorations.push(MapDecoration {
+            key,
+            icon_type: decoration_type.id as i32,
+            x: clamp_map_coordinate(x_delta),
+            z: clamp_map_coordinate(z_delta),
+            direction: 8,
+            display_name,
+        });
+        self.dirty = true;
+        true
+    }
+
     pub fn update(&mut self, player: &Player) {
         let world = player.world();
         let scale = 1 << self.scale;
@@ -133,10 +190,67 @@ impl MapData {
     }
 }
 
+/// `MapItemSavedData.clampMapCoordinate` (`MapItemSavedData.java:355-362`) preserves the
+/// protocol's asymmetric `-128..127` map-coordinate range.
+fn clamp_map_coordinate(delta: f64) -> i8 {
+    if delta <= -63.0 {
+        -128
+    } else if delta >= 63.0 {
+        127
+    } else {
+        (delta * 2.0 + 0.5) as i8
+    }
+}
+
 pub struct MapDecoration {
+    /// `MapItemSavedData` keys banner decorations by its block position (`MapItemSavedData.java:405-413`).
+    pub key: String,
     pub icon_type: i32,
     pub x: i8,
     pub z: i8,
     pub direction: i8,
     pub display_name: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MapData;
+    use pumpkin_data::dimension::Dimension;
+    use pumpkin_data::map_decoration::MapDecorationType;
+    use pumpkin_util::math::position::BlockPos;
+
+    #[test]
+    fn toggle_banner_adds_then_removes_marker() {
+        let mut map = MapData::new(Dimension::OVERWORLD, 0, 0, 0);
+        let position = BlockPos::new(4, 70, -3);
+
+        assert!(map.toggle_banner(position, &MapDecorationType::BANNER_WHITE, None));
+        assert_eq!(map.decorations.len(), 1);
+        assert_eq!(
+            map.decorations[0].icon_type,
+            MapDecorationType::BANNER_WHITE.id as i32
+        );
+
+        assert!(map.toggle_banner(position, &MapDecorationType::BANNER_RED, None));
+        assert_eq!(map.decorations.len(), 1);
+        assert_eq!(
+            map.decorations[0].icon_type,
+            MapDecorationType::BANNER_RED.id as i32
+        );
+
+        assert!(map.toggle_banner(position, &MapDecorationType::BANNER_RED, None));
+        assert!(map.decorations.is_empty());
+    }
+
+    #[test]
+    fn toggle_banner_rejects_positions_outside_map() {
+        let mut map = MapData::new(Dimension::OVERWORLD, 0, 0, 0);
+
+        assert!(!map.toggle_banner(
+            BlockPos::new(64, 70, 0),
+            &MapDecorationType::BANNER_WHITE,
+            None
+        ));
+        assert!(map.decorations.is_empty());
+    }
 }

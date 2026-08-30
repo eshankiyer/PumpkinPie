@@ -1,10 +1,11 @@
+use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::item::Item;
 use std::sync::Arc;
 
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BrokenArgs, ExplodeArgs, OnNeighborUpdateArgs, PlacedArgs,
-    UseWithItemArgs,
+    BlockBehaviour, BlockFuture, ExplodeArgs, OnNeighborUpdateArgs, PlacedArgs,
+    PlayerWillDestroyArgs, UseWithItemArgs,
 };
 use crate::entity::Entity;
 use crate::entity::tnt::TNTEntity;
@@ -16,9 +17,9 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::sound::SoundCategory;
 use pumpkin_macros::pumpkin_block;
-use pumpkin_util::GameMode;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
+use pumpkin_util::{GameMode, Hand};
 use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
 
@@ -28,7 +29,12 @@ use super::redstone::block_receives_redstone_power;
 pub struct TNTBlock;
 
 impl TNTBlock {
-    pub async fn prime(world: &Arc<World>, location: &BlockPos) {
+    pub async fn prime(world: &Arc<World>, location: &BlockPos) -> bool {
+        // TntBlock.java:87-96: prime refuses to create PrimedTnt when TNT_EXPLODES is false.
+        if !world.level_info.load().game_rules.tnt_explodes {
+            return false;
+        }
+
         let mut event = crate::plugin::api::events::block::tnt_prime::TNTPrimeEvent::new(
             *location,
             "REDSTONE".to_string(),
@@ -37,7 +43,7 @@ impl TNTBlock {
             server.plugin_manager.fire(&server, &mut event).await;
         }
         if event.cancelled {
-            return;
+            return false;
         }
 
         let entity = Entity::new(world.clone(), location.to_f64(), &EntityType::TNT);
@@ -51,7 +57,7 @@ impl TNTBlock {
             server.plugin_manager.fire(&server, &mut prime_event).await;
         }
         if prime_event.cancelled {
-            return;
+            return false;
         }
 
         let pos = entity.pos.load();
@@ -67,9 +73,7 @@ impl TNTBlock {
         // initial redstone power, post-place redstone power, and fire spreading onto the
         // block in fire.rs).
         emit_game_event(world, GameEvent::PrimeFuse, pos, GameEventContext::none()).await;
-        world
-            .set_block_state(location, BlockStateId::AIR, BlockFlags::NOTIFY_ALL)
-            .await;
+        true
     }
 }
 
@@ -87,32 +91,76 @@ impl BlockBehaviour for TNTBlock {
                 return BlockActionResult::Pass;
             }
             let world = args.player.world();
-            Self::prime(&world, args.position).await;
+            // TntBlock.java:100-128: consume the flint-and-steel durability or fire charge
+            // only after prime succeeds; a disabled TNT gamerule leaves the action unhandled.
+            if !Self::prime(&world, args.position).await {
+                return BlockActionResult::Pass;
+            }
+            // TntBlock.java:113-120: useItemOn removes the block after prime succeeds.
+            world
+                .set_block_state(args.position, BlockStateId::AIR, BlockFlags::NOTIFY_ALL)
+                .await;
 
-            BlockActionResult::Consume
+            if item == &Item::FLINT_AND_STEEL {
+                args.player
+                    .damage_item_in_slot(args.equipment_slot, 1)
+                    .await;
+            } else {
+                args.item_stack
+                    .decrement_unless_creative(args.player.gamemode.load(), 1);
+                let hand = if args.equipment_slot == &EquipmentSlot::MAIN_HAND {
+                    Hand::Right
+                } else {
+                    Hand::Left
+                };
+                let slot = if hand == Hand::Right {
+                    args.player.inventory().get_selected_slot() as usize
+                } else {
+                    pumpkin_inventory::player::player_inventory::PlayerInventory::OFF_HAND_SLOT
+                };
+                args.player
+                    .inventory()
+                    .set_stack_in_hand(hand, args.item_stack.clone())
+                    .await;
+                args.player
+                    .sync_hand_slot(slot, args.item_stack.clone())
+                    .await;
+            }
+
+            BlockActionResult::Success
         })
     }
 
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            if block_receives_redstone_power(args.world, args.position).await {
-                Self::prime(args.world, args.position).await;
+            if block_receives_redstone_power(args.world, args.position).await
+                && Self::prime(args.world, args.position).await
+            {
+                // TntBlock.java:48-52: onPlace removes the TNT after a successful prime.
+                args.world
+                    .set_block_state(args.position, BlockStateId::AIR, BlockFlags::NOTIFY_ALL)
+                    .await;
             }
         })
     }
 
     fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            if block_receives_redstone_power(args.world, args.position).await {
-                Self::prime(args.world, args.position).await;
+            if block_receives_redstone_power(args.world, args.position).await
+                && Self::prime(args.world, args.position).await
+            {
+                // TntBlock.java:57-63: neighborChanged removes the TNT after a successful prime.
+                args.world
+                    .set_block_state(args.position, BlockStateId::AIR, BlockFlags::NOTIFY_ALL)
+                    .await;
             }
         })
     }
 
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+    fn player_will_destroy<'a>(&'a self, args: PlayerWillDestroyArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            // TntBlock.java:66-72 (`playerWillDestroy`): breaking an `unstable=true` TNT
-            // block by hand (not in creative/instabuild) primes it.
+            // TntBlock.java:65-72: playerWillDestroy runs before removal, so unstable TNT can
+            // still be primed from the original block state.
             let props = TntLikeProperties::from_state_id(args.state.id, args.block);
             if props.r#unstable && args.player.gamemode.load() != GameMode::Creative {
                 Self::prime(args.world, args.position).await;

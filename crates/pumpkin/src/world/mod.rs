@@ -2516,6 +2516,27 @@ impl World {
                         collisions.push(shape);
                     }
                 }
+            } else if block == &Block::SCAFFOLDING {
+                // `ScaffoldingBlock.getCollisionShape` (`ScaffoldingBlock.java:137-145`) depends
+                // on whether the entity is above the block and whether it is descending; the
+                // generated state table alone cannot represent that collision context.
+                let entity_box = entity.get_entity().bounding_box.load();
+                let descending = entity.get_entity().velocity.load().y < 0.0;
+                let block_y = f64::from(pos.0.y);
+                let above_block = entity_box.min.y >= block_y + 1.0;
+                let above_below_block = entity_box.min.y >= block_y;
+                for shape in crate::block::blocks::scaffolding::ScaffoldingBlock::collision_shapes_for_context(
+                    state.id,
+                    above_block,
+                    above_below_block,
+                    descending,
+                ) {
+                    let shape = shape.at_pos(pos);
+                    if shape.intersects(&bounding_box) {
+                        collided = true;
+                        collisions.push(shape);
+                    }
+                }
             } else {
                 for shape in state.get_block_collision_shapes_at(&pos) {
                     let shape = shape.at_pos(pos);
