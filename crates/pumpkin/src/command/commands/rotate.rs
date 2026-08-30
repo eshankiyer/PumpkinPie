@@ -52,37 +52,18 @@ fn get_anchor_position(entity: &crate::entity::Entity, anchor: EntityAnchor) -> 
 /// Rotates an entity using vanilla-style rotation logic.
 /// If relative flags are true, the values are added to current rotation.
 /// If relative flags are false, the values are absolute.
-async fn rotate_entity(
-    target: std::sync::Arc<dyn crate::entity::EntityBase>,
+fn rotate_entity(
+    target: &std::sync::Arc<dyn crate::entity::EntityBase>,
     yaw: f32,
     is_yaw_relative: bool,
     pitch: f32,
     is_pitch_relative: bool,
 ) {
     let entity = target.get_entity();
-
-    // Calculate final rotation values like vanilla's Entity.rotate()
-    // If relative, add to current rotation; if absolute, use directly
-    let final_yaw = if is_yaw_relative {
-        entity.yaw.load() + yaw
-    } else {
-        yaw
-    };
-
-    let final_pitch = if is_pitch_relative {
-        // Clamp pitch to valid range [-90, 90]
-        (entity.pitch.load() + pitch).clamp(-90.0, 90.0)
-    } else {
-        pitch.clamp(-90.0, 90.0)
-    };
-
-    // Use teleport with same position to update rotation
-    // This properly handles both players (sends CPlayerPosition) and other entities
-    let pos = entity.pos.load();
-    let world = entity.world.load_full();
-    target
-        .teleport(pos, Some(final_yaw), Some(final_pitch), world)
-        .await;
+    // `RotateCommand` delegates to `Entity.forceSetRotation` (`RotateCommand.java:66-70`),
+    // which changes only rotation and lets the normal entity update broadcast it.
+    entity.force_set_rotation(yaw, is_yaw_relative, pitch, is_pitch_relative);
+    entity.send_rotation();
 }
 
 /// Sends success message for the rotate command.
@@ -112,7 +93,7 @@ impl CommandExecutor for RotateToRotationExecutor {
             let (yaw, yaw_rel, pitch, pitch_rel) =
                 RotationArgumentConsumer::find_arg(args, ARG_ROTATION)?;
 
-            rotate_entity(target.clone(), yaw, yaw_rel, pitch, pitch_rel).await;
+            rotate_entity(&target, yaw, yaw_rel, pitch, pitch_rel);
             send_success_message(sender, target.as_ref()).await;
 
             Ok(1)
@@ -142,7 +123,7 @@ impl CommandExecutor for RotateFacingLocationExecutor {
             let (yaw, pitch) = yaw_pitch_facing_position(&looking_from, &facing_pos);
 
             // Facing uses absolute rotation
-            rotate_entity(target.clone(), yaw, false, pitch, false).await;
+            rotate_entity(&target, yaw, false, pitch, false);
             send_success_message(sender, target.as_ref()).await;
 
             Ok(1)
@@ -174,7 +155,7 @@ impl CommandExecutor for RotateFacingEntityExecutor {
             let (yaw, pitch) = yaw_pitch_facing_position(&looking_from, &looking_towards);
 
             // Facing uses absolute rotation
-            rotate_entity(target.clone(), yaw, false, pitch, false).await;
+            rotate_entity(&target, yaw, false, pitch, false);
             send_success_message(sender, target.as_ref()).await;
 
             Ok(1)
@@ -208,7 +189,7 @@ impl CommandExecutor for RotateFacingEntityNoAnchorExecutor {
             let (yaw, pitch) = yaw_pitch_facing_position(&looking_from, &looking_towards);
 
             // Facing uses absolute rotation
-            rotate_entity(target.clone(), yaw, false, pitch, false).await;
+            rotate_entity(&target, yaw, false, pitch, false);
             send_success_message(sender, target.as_ref()).await;
 
             Ok(1)

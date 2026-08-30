@@ -3,6 +3,7 @@
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::living::LivingEntity;
+use crate::entity::mob::Mob;
 
 use crate::entity::ai::pathfinder::binary_heap::BinaryHeap;
 use crate::entity::ai::pathfinder::node::Coordinate;
@@ -471,9 +472,9 @@ impl Navigator {
         }
     }
 
-    pub(crate) async fn can_reach_entity(
+    pub(crate) async fn can_reach_entity_for_mob(
         &mut self,
-        mob: &LivingEntity,
+        mob: &dyn Mob,
         target: &LivingEntity,
     ) -> bool {
         let target_pos = target.entity.block_pos.load();
@@ -482,7 +483,10 @@ impl Navigator {
             f64::from(target_pos.0.y),
             f64::from(target_pos.0.z),
         );
-        let Some(path) = self.compute_path(mob, destination).await else {
+        let Some(path) = self
+            .compute_path_with_reach_for_mob(mob, destination, 0)
+            .await
+        else {
             return false;
         };
         let Some(last) = path.get_end_node() else {
@@ -501,6 +505,17 @@ impl Navigator {
         distance: f32,
     ) -> bool {
         self.compute_path(entity, destination)
+            .await
+            .is_some_and(|path| path.can_reach() || path.get_dist_to_target() <= distance)
+    }
+
+    pub(crate) async fn can_reach_within_for_mob(
+        &mut self,
+        mob: &dyn Mob,
+        destination: Vector3<f64>,
+        distance: f32,
+    ) -> bool {
+        self.compute_path_with_reach_for_mob(mob, destination, 0)
             .await
             .is_some_and(|path| path.can_reach() || path.get_dist_to_target() <= distance)
     }
@@ -747,6 +762,27 @@ impl Navigator {
         None
     }
 
+    /// Runs the evaluator lifecycle callbacks around a mob-owned path search. Vanilla invokes
+    /// these from `WalkNodeEvaluator.prepare/done` (`WalkNodeEvaluator.java:39-49`), including
+    /// searches made by temporary navigation probes.
+    pub(crate) async fn compute_path_with_reach_for_mob(
+        &mut self,
+        mob: &dyn Mob,
+        destination: Vector3<f64>,
+        reach_range: i32,
+    ) -> Option<Path> {
+        mob.on_pathfinding_start(self);
+        let path = self
+            .compute_path_with_reach(
+                &mob.get_mob_entity().living_entity,
+                destination,
+                reach_range,
+            )
+            .await;
+        mob.on_pathfinding_done(self);
+        path
+    }
+
     fn needs_new_path(&self, goal: &NavigatorGoal) -> bool {
         if self.current_path.is_none() {
             return true;
@@ -769,7 +805,7 @@ impl Navigator {
     }
 
     #[allow(clippy::too_many_lines)]
-    pub async fn tick(&mut self, entity: &LivingEntity) {
+    pub async fn tick(&mut self, entity: &LivingEntity, mob: &dyn Mob) {
         let Some(goal) = self.current_goal.take() else {
             // Idle: stop the mob
             self.is_idle.store(true, Ordering::Relaxed);
@@ -811,7 +847,9 @@ impl Navigator {
         }
 
         if !self.wall_climber_direct && self.needs_new_path(&goal) {
-            self.current_path = self.compute_path(entity, goal.destination).await;
+            self.current_path = self
+                .compute_path_with_reach_for_mob(mob, goal.destination, 0)
+                .await;
             self.ticks_on_current_node = 0;
             self.last_node_index = 0;
             self.path_start_pos = Some(entity.entity.pos.load());

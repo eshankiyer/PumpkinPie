@@ -22,6 +22,7 @@ use crate::entity::{
         look_at_entity::LookAtEntityGoal, sniffer_dig::SnifferDigGoal, swim::SwimGoal,
         tempt::TemptGoal, wander_around::WanderAroundGoal,
     },
+    ai::pathfinder::{Navigator, node::PathType},
     item::ItemEntity,
     mob::{Mob, MobEntity},
 };
@@ -32,6 +33,12 @@ const TEMPT_ITEMS: &[&Item] = &[&Item::TORCHFLOWER_SEEDS];
 /// Vanilla `Sniffer.SNIFFER_BABY_START_AGE`: twice the default baby age, sniffers take twice as
 /// long to grow up.
 pub const SNIFFER_BABY_START_AGE: i32 = -48000;
+
+const fn sniffer_ignores_water_malus(fire_ticks: i32, touching_water: bool) -> bool {
+    // `Sniffer.onPathfindingStart` allows water while on fire or in water
+    // (`Sniffer.java:104-110`).
+    fire_ticks > 0 || touching_water
+}
 
 /// Vanilla `Sniffer.State`.
 ///
@@ -94,6 +101,16 @@ pub struct SnifferEntity {
 impl SnifferEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
+        // `Sniffer` enables floating and sets its base path maluses in the constructor
+        // (`Sniffer.java:89-95`).
+        #[allow(clippy::semicolon_if_nothing_returned)]
+        {
+            let mut navigator = mob_entity.navigator.lock().unwrap();
+            navigator.set_can_float(true);
+            navigator.set_pathfinding_malus(PathType::Water, -1.0);
+            navigator.set_pathfinding_malus(PathType::PowderSnow, -1.0);
+            navigator.set_pathfinding_malus(PathType::DamageCautious, -1.0)
+        };
         let sniffer = Self {
             mob_entity,
             ageable_data: AgeableData::default(),
@@ -333,6 +350,24 @@ impl Mob for SnifferEntity {
         &self.mob_entity
     }
 
+    fn on_pathfinding_start(&self, navigator: &mut Navigator) {
+        // Vanilla temporarily makes water traversable for a burning or submerged sniffer
+        // during evaluator preparation (`Sniffer.java:104-110`).
+        let entity = &self.mob_entity.living_entity.entity;
+        if sniffer_ignores_water_malus(
+            entity.fire_ticks.load(Ordering::Relaxed),
+            entity.touching_water.load(Ordering::Relaxed),
+        ) {
+            navigator.set_pathfinding_malus(PathType::Water, 0.0);
+        }
+    }
+
+    fn on_pathfinding_done(&self, navigator: &mut Navigator) {
+        // Vanilla restores the sniffer's water malus when evaluator state is released
+        // (`Sniffer.java:112-115`).
+        navigator.set_pathfinding_malus(PathType::Water, -1.0);
+    }
+
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             let entity = &self.mob_entity.living_entity.entity;
@@ -420,7 +455,17 @@ impl Mob for SnifferEntity {
 
 #[cfg(test)]
 mod tests {
-    use super::{SnifferState, sniffer_state_can_mate};
+    use super::{SnifferState, sniffer_ignores_water_malus, sniffer_state_can_mate};
+
+    #[test]
+    fn sniffer_ignores_water_malus_only_when_burning_or_submerged() {
+        // `Sniffer.onPathfindingStart` checks fire and water state
+        // (`Sniffer.java:104-110`).
+        assert!(sniffer_ignores_water_malus(1, false));
+        assert!(sniffer_ignores_water_malus(0, true));
+        assert!(sniffer_ignores_water_malus(1, true));
+        assert!(!sniffer_ignores_water_malus(0, false));
+    }
 
     #[test]
     fn sniffer_can_mate_matches_vanilla_state_allowlist() {

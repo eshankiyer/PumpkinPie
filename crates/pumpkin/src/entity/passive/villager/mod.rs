@@ -1340,12 +1340,10 @@ impl VillagerEntity {
             let mut navigator = Navigator::default();
             let mut claimed = None;
             for (_, position, block, _) in candidates.into_iter().take(5) {
+                // `Mob.onPathfindingStart/Done` wrap evaluator preparation and cleanup
+                // (`Mob.java:194-198`, `WalkNodeEvaluator.java:39-49`).
                 if !navigator
-                    .can_reach_within(
-                        &self.mob_entity.living_entity,
-                        position.to_centered_f64(),
-                        1.73,
-                    )
+                    .can_reach_within_for_mob(self, position.to_centered_f64(), 1.73)
                     .await
                 {
                     continue;

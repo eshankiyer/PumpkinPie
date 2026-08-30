@@ -123,6 +123,111 @@ impl FromResourceLocation for &'static Block {
 }
 
 impl Block {
+    /// Returns vanilla's separate lava-ignition property for this block.
+    /// `BlockStateBase.ignitedByLava` reads the property captured from
+    /// `BlockBehaviour.Properties.ignitedByLava` (`BlockBehaviour.java:432-466, 588-590`);
+    /// the registrations are preserved here from `Blocks.java:98-173, 2399-2434,
+    /// 3528-3559, 4239-4265, 4489-4511`.
+    #[must_use]
+    pub fn ignited_by_lava(&self) -> bool {
+        let name = self.name;
+        let wooden_family = name.starts_with("oak_")
+            || name.starts_with("spruce_")
+            || name.starts_with("birch_")
+            || name.starts_with("jungle_")
+            || name.starts_with("acacia_")
+            || name.starts_with("cherry_")
+            || name.starts_with("dark_oak_")
+            || name.starts_with("pale_oak_")
+            || name.starts_with("mangrove_")
+            || name.starts_with("bamboo_");
+        let wooden_shape = name.ends_with("_door")
+            || name.ends_with("_fence")
+            || name.ends_with("_fence_gate")
+            || name.ends_with("_hanging_sign")
+            || name.ends_with("_planks")
+            || name.ends_with("_pressure_plate")
+            || name.ends_with("_shelf")
+            || name.ends_with("_sign")
+            || name.ends_with("_slab")
+            || name.ends_with("_trapdoor")
+            || name.ends_with("_wall_hanging_sign")
+            || name.ends_with("_wall_sign")
+            || (name.ends_with("_wood") && !name.starts_with("bamboo_"));
+
+        (wooden_family && wooden_shape)
+            || matches!(
+                name,
+                "bamboo"
+                    | "bamboo_mosaic"
+                    | "bamboo_mosaic_slab"
+                    | "bamboo_sapling"
+                    | "barrel"
+                    | "beehive"
+                    | "bee_nest"
+                    | "bookshelf"
+                    | "brown_mushroom_block"
+                    | "bush"
+                    | "cactus_flower"
+                    | "campfire"
+                    | "cartography_table"
+                    | "cherry_leaves"
+                    | "chiseled_bookshelf"
+                    | "composter"
+                    | "crafting_table"
+                    | "crimson_shelf"
+                    | "daylight_detector"
+                    | "dead_bush"
+                    | "fern"
+                    | "firefly_bush"
+                    | "fletching_table"
+                    | "glow_lichen"
+                    | "hanging_roots"
+                    | "hay_block"
+                    | "jukebox"
+                    | "large_fern"
+                    | "lectern"
+                    | "lilac"
+                    | "loom"
+                    | "mangrove_roots"
+                    | "mushroom_stem"
+                    | "note_block"
+                    | "pale_hanging_moss"
+                    | "pale_moss_block"
+                    | "pale_moss_carpet"
+                    | "pale_oak_leaves"
+                    | "peony"
+                    | "piston_head"
+                    | "pitcher_plant"
+                    | "red_mushroom_block"
+                    | "resin_clump"
+                    | "rose_bush"
+                    | "short_dry_grass"
+                    | "short_grass"
+                    | "smithing_table"
+                    | "soul_campfire"
+                    | "sunflower"
+                    | "tall_dry_grass"
+                    | "tall_grass"
+                    | "tnt"
+                    | "trapped_chest"
+                    | "vine"
+                    | "warped_shelf"
+                    | "chest"
+            )
+            || matches!(
+                name,
+                "stripped_oak_wood"
+                    | "stripped_spruce_wood"
+                    | "stripped_birch_wood"
+                    | "stripped_jungle_wood"
+                    | "stripped_acacia_wood"
+                    | "stripped_cherry_wood"
+                    | "stripped_dark_oak_wood"
+                    | "stripped_pale_oak_wood"
+            )
+    }
+
     /// Returns the vanilla `shouldSpawnTerrainParticles` property for this block.
     /// The only 26.2 registrations using `noTerrainParticles` are barrier and
     /// structure void (`BlockBehaviour.java:1265-1267`, `Blocks.java:2936,3776`).
@@ -452,6 +557,19 @@ mod tests {
         assert!(Block::STONE.should_spawn_terrain_particles());
         assert!(!Block::BARRIER.should_spawn_terrain_particles());
         assert!(!Block::STRUCTURE_VOID.should_spawn_terrain_particles());
+    }
+
+    /// The lava property is explicit on each registration (`Blocks.java:98-173, 2399-2434,
+    /// 3528-3559, 4239-4265, 4489-4511`), and is not equivalent to the log/flame spread table.
+    #[test]
+    fn lava_ignition_property_matches_vanilla_registrations() {
+        assert!(Block::OAK_PLANKS.ignited_by_lava());
+        assert!(Block::OAK_DOOR.ignited_by_lava());
+        assert!(Block::BAMBOO_SAPLING.ignited_by_lava());
+        assert!(Block::CAMPFIRE.ignited_by_lava());
+        assert!(!Block::OAK_LOG.ignited_by_lava());
+        assert!(!Block::WHITE_WOOL.ignited_by_lava());
+        assert!(!Block::STONE.ignited_by_lava());
     }
 
     #[test]
