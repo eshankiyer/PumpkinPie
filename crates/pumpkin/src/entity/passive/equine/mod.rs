@@ -4,9 +4,7 @@
 //! `ZombieHorse`, `SkeletonHorse`. See `designs/equine-framework.md` for the design rationale.
 //!
 //! Phase 1 scope: taming, feeding, chest inventory, breeding attribute inheritance,
-//! `randomizeAttributes`, sounds. Rider-controlled movement (`PlayerRideableJumping`,
-//! mounted-input routing) is out of scope -- a horse can be saddled and mounted, but does
-//! not yet respond to WASD/jump while ridden.
+//! `randomizeAttributes`, sounds, and server-side rider movement/jumping.
 //!
 //! Deliberate simplifications versus vanilla, noted here once rather than at every call site:
 //! - Saddle/body-armor equipping is done directly in `abstract_horse_mob_interact` (mirroring
@@ -23,7 +21,7 @@
 //!   species-specific hooks call it before their own extra per-tick behavior.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI32, AtomicU8, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, Ordering::Relaxed};
 
 use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, IDSet, IdOr};
 use pumpkin_data::item::Item;
@@ -206,6 +204,8 @@ pub struct AbstractHorseData {
     pub temper: AtomicI32,
     pub eating_counter: AtomicI32,
     pub stand_counter: AtomicI32,
+    pub jump_pending_scale: AtomicI32,
+    pub allow_stand_sliding: AtomicBool,
 }
 
 impl Default for AbstractHorseData {
@@ -215,6 +215,8 @@ impl Default for AbstractHorseData {
             temper: AtomicI32::new(0),
             eating_counter: AtomicI32::new(0),
             stand_counter: AtomicI32::new(0),
+            jump_pending_scale: AtomicI32::new(0),
+            allow_stand_sliding: AtomicBool::new(false),
         }
     }
 }
@@ -324,6 +326,16 @@ pub fn create_offspring_attribute(
     }
 }
 
+/// `PlayerRideableJumping.getPlayerJumpPendingScale` (`PlayerRideableJumping.java:12-16`).
+#[must_use]
+fn player_jump_pending_scale(jump_amount: i32) -> i32 {
+    if jump_amount >= 90 {
+        1000
+    } else {
+        400 + (400 * jump_amount.max(0) / 90)
+    }
+}
+
 struct HorseChestScreenFactory(Arc<dyn Inventory>);
 
 impl ScreenHandlerFactory for HorseChestScreenFactory {
@@ -352,6 +364,11 @@ impl ScreenHandlerFactory for HorseChestScreenFactory {
 /// generic baby-growth path doubles as the horse-specific food-tag check here.
 pub trait AbstractHorse: Animal {
     fn horse_data(&self) -> &AbstractHorseData;
+
+    /// `AbstractHorse.isBred` (`AbstractHorse.java:215-220`).
+    fn is_bred(&self) -> bool {
+        self.horse_data().get_flag(FLAG_BRED)
+    }
 
     fn max_temper(&self) -> i32 {
         100
@@ -445,10 +462,7 @@ pub trait AbstractHorse: Animal {
     /// Plays the mount jump sound from `AbstractHorse.handleStartJump`.
     ///
     /// Vanilla: `AbstractHorse.java:897-901` calls `playJumpSound`; the base implementation is
-    /// `AbstractHorse.java:783-785`. Not yet wired up: `handleStartJump` itself - the
-    /// player-controlled charge-and-release mounted jump - has no equivalent here (only
-    /// `generate_jump_strength`, an unrelated attribute roll, exists), so nothing calls this
-    /// yet.
+    /// `AbstractHorse.java:783-785`. The server command path calls this from `handle_start_jump`.
     fn play_jump_sound(&self) {
         let entity = self.get_entity();
         let world = entity.world.load();
@@ -560,6 +574,180 @@ pub trait AbstractHorse: Animal {
     fn clear_standing(&self) {
         self.horse_data().set_flag(FLAG_STANDING, false);
         self.horse_data().stand_counter.store(0, Relaxed);
+    }
+
+    /// `AbstractHorse.onElasticLeashPull` (`AbstractHorse.java:189-195`) stops grazing when
+    /// the shared leash solver applies an elastic pull.
+    fn on_elastic_leash_pull(&self) {
+        self.horse_data().set_flag(FLAG_EATING, false);
+    }
+
+    /// `AbstractHorse.supportQuadLeash`/`getQuadLeashOffsets` (`AbstractHorse.java:197-205`).
+    /// The offsets are retained in the horse abstraction for the leash packet path to consume
+    /// when quad-leash rendering is exposed.
+    fn support_quad_leash(&self) -> bool {
+        true
+    }
+
+    fn get_quad_leash_offsets(&self) -> [Vector3<f64>; 4] {
+        let width = f64::from(self.get_entity().width());
+        let height = f64::from(self.get_entity().height());
+        let front_offset = 0.04 * width;
+        let front_back = 0.52 * width;
+        let left_right = 0.23 * width;
+        let y = 0.87 * height;
+        [
+            Vector3::new(-left_right, y, front_back + front_offset),
+            Vector3::new(-left_right, y, -front_back + front_offset),
+            Vector3::new(left_right, y, -front_back + front_offset),
+            Vector3::new(left_right, y, front_back + front_offset),
+        ]
+    }
+
+    /// `AbstractHorse.getRiddenInput` (`AbstractHorse.java:751-764`) translated from the
+    /// server's `SPlayerInput` flags. The horse's standing gate is kept before movement input is
+    /// applied, matching vanilla's zero input while rearing.
+    fn get_ridden_input(&self, input: i8) -> Vector3<f64> {
+        let data = self.horse_data();
+        if self.get_entity().on_ground.load(Relaxed)
+            && data.jump_pending_scale.load(Relaxed) == 0
+            && data.get_flag(FLAG_STANDING)
+            && !data.allow_stand_sliding.load(Relaxed)
+        {
+            return Vector3::default();
+        }
+
+        let sideways = if input & pumpkin_protocol::java::server::play::SPlayerInput::LEFT != 0 {
+            0.5
+        } else if input & pumpkin_protocol::java::server::play::SPlayerInput::RIGHT != 0 {
+            -0.5
+        } else {
+            0.0
+        };
+        let mut forward =
+            if input & pumpkin_protocol::java::server::play::SPlayerInput::FORWARD != 0 {
+                1.0
+            } else if input & pumpkin_protocol::java::server::play::SPlayerInput::BACKWARD != 0 {
+                -1.0
+            } else {
+                0.0
+            };
+        if forward <= 0.0 {
+            forward *= 0.25;
+        }
+        Vector3::new(sideways, 0.0, forward)
+    }
+
+    /// `AbstractHorse.getRiddenRotation`/`getRiddenSpeed` (`AbstractHorse.java:741-743,766-769`).
+    fn get_ridden_rotation(&self, rider: &Player) -> (f32, f32) {
+        (
+            rider.get_entity().yaw.load(),
+            rider.get_entity().pitch.load() * 0.5,
+        )
+    }
+
+    fn get_ridden_speed(&self) -> f64 {
+        self.get_mob_entity()
+            .living_entity
+            .get_attribute_value(&pumpkin_data::attributes::Attributes::MOVEMENT_SPEED)
+    }
+
+    /// `PlayerRideableJumping.getPlayerJumpPendingScale` and
+    /// `AbstractHorse.onPlayerJump` (`PlayerRideableJumping.java:12-16`; `AbstractHorse.java:878-895`).
+    fn on_player_jump(&self, jump_amount: i32) {
+        let pending = player_jump_pending_scale(jump_amount);
+        self.horse_data().allow_stand_sliding.store(true, Relaxed);
+        self.stand_if_possible();
+        self.horse_data().jump_pending_scale.store(pending, Relaxed);
+    }
+
+    fn can_jump_now<'a>(&'a self) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async move { AbstractHorse::is_saddled(self).await })
+    }
+
+    /// `AbstractHorse.handleStartJump` (`AbstractHorse.java:897-901`) starts the rearing
+    /// animation and emits the jump sound; movement consumes the stored scale in
+    /// `tick_ridden` below.
+    fn handle_start_jump(&self, _jump_scale: i32) {
+        self.horse_data().allow_stand_sliding.store(true, Relaxed);
+        self.stand_if_possible();
+        self.play_jump_sound();
+    }
+
+    /// `AbstractHorse.handleStopJump` (`AbstractHorse.java:904-905`) has no server-side action.
+    fn handle_stop_jump(&self) {}
+
+    /// `AbstractHorse.executeRidersJump` (`AbstractHorse.java:771-780`).
+    fn execute_riders_jump(&self, scale_thousandths: i32, input: Vector3<f64>) {
+        let amount = f64::from(scale_thousandths) / 1000.0;
+        let impulse = self
+            .get_mob_entity()
+            .living_entity
+            .get_attribute_value(&pumpkin_data::attributes::Attributes::JUMP_STRENGTH)
+            * amount;
+        let entity = self.get_entity();
+        let mut velocity = entity.velocity.load();
+        velocity.y = impulse;
+        if input.z > 0.0 {
+            let yaw = f64::from(entity.yaw.load()).to_radians();
+            velocity.x += -0.4 * yaw.sin() * amount;
+            velocity.z += 0.4 * yaw.cos() * amount;
+        }
+        entity.set_velocity(velocity);
+    }
+
+    /// `AbstractHorse.tickRidden` (`AbstractHorse.java:720-738`) and the existing
+    /// `Mob::custom_travel` hook provide the server-side ridden travel path for all horse types.
+    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async move {
+            let entity = self.get_entity();
+            let first_passenger = {
+                let passengers = entity.passengers.lock().await;
+                passengers.first().cloned()
+            };
+            let Some(passenger) = first_passenger else {
+                return false;
+            };
+            let Some(player) = passenger.get_player() else {
+                return false;
+            };
+            if !AbstractHorse::is_saddled(self).await {
+                return false;
+            }
+
+            let (yaw, pitch) = self.get_ridden_rotation(&player);
+            entity.set_rotation(yaw, pitch);
+            entity.head_yaw.store(yaw);
+            entity.body_yaw.store(yaw);
+
+            let input_flags = player.last_input.load(Relaxed);
+            let input = self.get_ridden_input(input_flags);
+            let pending = self.horse_data().jump_pending_scale.swap(0, Relaxed);
+            if entity.on_ground.load(Relaxed)
+                && pending > 0
+                && !self.get_mob_entity().living_entity.jumping.load(Relaxed)
+            {
+                self.execute_riders_jump(pending, input);
+            }
+
+            entity.update_velocity_from_input(input, self.get_ridden_speed());
+            let mut velocity = entity.velocity.load();
+            if !entity.on_ground.load(Relaxed) {
+                velocity.y -= self.get_mob_gravity();
+            }
+            entity.move_entity(caller, velocity).await;
+            let friction = if entity.on_ground.load(Relaxed) {
+                f64::from(entity.get_block_with_y_offset(0.500_001).1.slipperiness) * 0.91
+            } else {
+                0.91
+            };
+            velocity = entity.velocity.load();
+            velocity.x *= friction;
+            velocity.z *= friction;
+            velocity.y *= 0.98;
+            entity.velocity.store(velocity);
+            true
+        })
     }
 
     /// `AbstractHorse.doPlayerRide`, using `Entity::add_passenger` the same way
@@ -872,6 +1060,23 @@ pub trait AbstractChestedHorse: AbstractHorse {
         self.chested_data().has_chest.load(Relaxed)
     }
 
+    /// `AbstractChestedHorse.getQuadLeashOffsets` (`AbstractChestedHorse.java:176-179`) uses
+    /// the shorter chested-horse body dimensions instead of `AbstractHorse`'s offsets.
+    fn get_quad_leash_offsets(&self) -> [Vector3<f64>; 4] {
+        let width = f64::from(self.get_entity().width());
+        let height = f64::from(self.get_entity().height());
+        let front_offset = 0.04 * width;
+        let front_back = 0.41 * width;
+        let left_right = 0.18 * width;
+        let y = 0.73 * height;
+        [
+            Vector3::new(-left_right, y, front_back + front_offset),
+            Vector3::new(-left_right, y, -front_back + front_offset),
+            Vector3::new(left_right, y, -front_back + front_offset),
+            Vector3::new(left_right, y, front_back + front_offset),
+        ]
+    }
+
     fn get_inventory_columns(&self) -> u8 {
         if self.has_chest() { 5 } else { 0 }
     }
@@ -990,6 +1195,7 @@ mod tests {
     use super::{
         create_offspring_attribute, generate_jump_strength, generate_max_health, generate_speed,
         generate_zombie_horse_jump_strength, generate_zombie_horse_speed,
+        player_jump_pending_scale,
     };
     use rand::rng;
 
@@ -1002,6 +1208,15 @@ mod tests {
             let health = generate_max_health(&mut random);
             assert!((15.0..=30.0).contains(&health), "{health} out of range");
         }
+    }
+
+    /// `PlayerRideableJumping.getPlayerJumpPendingScale` (`PlayerRideableJumping.java:12-16`).
+    #[test]
+    fn jump_charge_maps_to_vanilla_scale() {
+        assert_eq!(player_jump_pending_scale(-1), 400);
+        assert_eq!(player_jump_pending_scale(0), 400);
+        assert_eq!(player_jump_pending_scale(90), 1000);
+        assert_eq!(player_jump_pending_scale(120), 1000);
     }
 
     #[test]

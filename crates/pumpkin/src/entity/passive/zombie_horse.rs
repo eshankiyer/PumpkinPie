@@ -9,6 +9,7 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::Sound;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_inventory::screen_handler::BoxFuture;
+use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
 use crate::entity::{
@@ -92,7 +93,9 @@ impl ZombieHorseEntity {
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, RunAroundLikeCrazyGoal::new(horse_weak.clone(), 1.2));
             goal_selector.add_goal(3, Box::new(TemptGoal::new(1.25, TEMPT_ITEMS, false)));
-            goal_selector.add_goal(4, Box::new(FollowParentGoal::new(1.0)));
+            // `AbstractHorse.followMommy` (`AbstractHorse.java:561-568`) accepts any bred adult
+            // horse-family parent within 16 blocks.
+            goal_selector.add_goal(4, Box::new(FollowParentGoal::new_horse(1.0)));
             goal_selector.add_goal(6, Box::new(WanderAroundGoal::new_water_avoiding(0.7)));
             goal_selector.add_goal(
                 7,
@@ -148,6 +151,23 @@ impl AbstractHorse for ZombieHorseEntity {
         &self.horse_data
     }
 
+    /// `ZombieHorse.getQuadLeashOffsets` (`ZombieHorse.java:190-193`) uses the shorter
+    /// horse-body offsets.
+    fn get_quad_leash_offsets(&self) -> [Vector3<f64>; 4] {
+        let width = f64::from(self.get_entity().width());
+        let height = f64::from(self.get_entity().height());
+        let front_offset = 0.04 * width;
+        let front_back = 0.41 * width;
+        let left_right = 0.18 * width;
+        let y = 0.73 * height;
+        [
+            Vector3::new(-left_right, y, front_back + front_offset),
+            Vector3::new(-left_right, y, -front_back + front_offset),
+            Vector3::new(left_right, y, -front_back + front_offset),
+            Vector3::new(left_right, y, front_back + front_offset),
+        ]
+    }
+
     fn angry_sound(&self) -> Option<Sound> {
         Some(Sound::EntityZombieHorseAngry)
     }
@@ -196,6 +216,35 @@ impl AbstractHorse for ZombieHorseEntity {
 impl Mob for ZombieHorseEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    // `AbstractHorse` rider, breeding, and leash hooks (`AbstractHorse.java:189-205,878-905`).
+    fn can_jump(&self) -> EntityBaseFuture<'_, bool> {
+        AbstractHorse::can_jump_now(self)
+    }
+
+    fn on_player_jump(&self, jump_amount: i32) {
+        AbstractHorse::on_player_jump(self, jump_amount);
+    }
+
+    fn handle_start_jump(&self, jump_scale: i32) {
+        AbstractHorse::handle_start_jump(self, jump_scale);
+    }
+
+    fn handle_stop_jump(&self) {
+        AbstractHorse::handle_stop_jump(self);
+    }
+
+    fn is_bred(&self) -> bool {
+        AbstractHorse::is_bred(self)
+    }
+
+    fn on_elastic_leash_pull(&self) {
+        AbstractHorse::on_elastic_leash_pull(self);
+    }
+
+    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
+        AbstractHorse::custom_travel(self, caller)
     }
 
     fn mob_tick<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, ()> {

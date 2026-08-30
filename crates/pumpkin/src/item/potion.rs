@@ -8,6 +8,10 @@ use pumpkin_data::item_stack::ItemStack;
 /// Utilities for reading potion contents from an `ItemStack` and applying effects.
 pub struct PotionContents;
 
+// PotionContents.java:83-103 carries effect type, duration, amplifier, ambient, and visibility
+// fields; this tuple is the server-side representation used by the existing effect pipeline.
+pub type PotionEffect = (&'static StatusEffect, i32, u8, bool, bool, bool);
+
 /// Source context for applying potion effects (affects scaling rules).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PotionApplicationSource {
@@ -41,9 +45,7 @@ impl PotionApplicationSource {
 impl PotionContents {
     /// Read effects from an `ItemStack`'s `PotionContents` data component.
     #[must_use]
-    pub fn read_potion_effects(
-        stack: &ItemStack,
-    ) -> Vec<(&'static StatusEffect, i32, u8, bool, bool, bool)> {
+    pub fn read_potion_effects(stack: &ItemStack) -> Vec<PotionEffect> {
         // Prefer generated potion id if present, otherwise use custom_effects
         if let Some(pc) =
             stack.get_data_component::<pumpkin_data::data_component_impl::PotionContentsImpl>()
@@ -136,10 +138,46 @@ impl PotionContents {
         Vec::new()
     }
 
+    // PotionContents.java:126-144 averages visible effect colors with amplifier + 1 weight
+    // and returns an opaque ARGB color; hidden-particle effects do not contribute.
+    #[must_use]
+    pub fn get_color_optional(effects: &[PotionEffect]) -> Option<i32> {
+        let mut red = 0i64;
+        let mut green = 0i64;
+        let mut blue = 0i64;
+        let mut total_weight = 0i64;
+
+        for &(effect, _, amplifier, _, show_particles, _) in effects {
+            if !show_particles {
+                continue;
+            }
+
+            let weight = i64::from(amplifier) + 1;
+            red += i64::from((effect.color >> 16) & 0xff) * weight;
+            green += i64::from((effect.color >> 8) & 0xff) * weight;
+            blue += i64::from(effect.color & 0xff) * weight;
+            total_weight += weight;
+        }
+
+        (total_weight > 0).then(|| {
+            (0xff00_0000u32
+                | ((red / total_weight) as u32) << 16
+                | ((green / total_weight) as u32) << 8
+                | (blue / total_weight) as u32) as i32
+        })
+    }
+
+    // PotionContents.java:113-119 uses the supplied default when no custom or visible effect
+    // color exists; callers supply the component's custom color before invoking this helper.
+    #[must_use]
+    pub fn get_color_or(effects: &[PotionEffect], default_color: i32) -> i32 {
+        Self::get_color_optional(effects).unwrap_or(default_color)
+    }
+
     /// Apply instant or duration effects to a target living entity.
     pub async fn apply_effects_to(
         target: &LivingEntity,
-        effects: Vec<(&'static StatusEffect, i32, u8, bool, bool, bool)>,
+        effects: Vec<PotionEffect>,
         scale: f32,
         source: PotionApplicationSource,
     ) {
@@ -221,8 +259,9 @@ impl PotionContents {
 
 #[cfg(test)]
 mod tests {
-    use super::PotionApplicationSource;
+    use super::{PotionApplicationSource, PotionContents};
     use pumpkin_data::data_component_impl::PotionDurationScaleImpl;
+    use pumpkin_data::effect::StatusEffect;
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
 
@@ -240,5 +279,34 @@ mod tests {
             20
         );
         assert_eq!(PotionApplicationSource::Arrow.instant_scale(scale), 1.0);
+    }
+
+    // PotionContents.java:132-143 includes only visible effects and weights each color by
+    // amplifier + 1; this is testable without a live entity or world.
+    #[test]
+    fn potion_color_uses_visible_amplifier_weighted_effects() {
+        let effects = vec![
+            (&StatusEffect::INSTANT_HEALTH, 1, 0, false, true, true),
+            (&StatusEffect::INSTANT_DAMAGE, 1, 1, false, true, true),
+            (&StatusEffect::POISON, 1, 7, false, false, true),
+        ];
+
+        let color = PotionContents::get_color_optional(&effects).expect("visible effects color");
+        let red = (((StatusEffect::INSTANT_HEALTH.color >> 16) & 0xff)
+            + 2 * ((StatusEffect::INSTANT_DAMAGE.color >> 16) & 0xff))
+            / 3;
+        let green = (((StatusEffect::INSTANT_HEALTH.color >> 8) & 0xff)
+            + 2 * ((StatusEffect::INSTANT_DAMAGE.color >> 8) & 0xff))
+            / 3;
+        let blue = ((StatusEffect::INSTANT_HEALTH.color & 0xff)
+            + 2 * (StatusEffect::INSTANT_DAMAGE.color & 0xff))
+            / 3;
+        let expected = (0xff00_0000u32
+            | ((red & 0xff) as u32) << 16
+            | ((green & 0xff) as u32) << 8
+            | (blue & 0xff) as u32) as i32;
+
+        assert_eq!(color, expected);
+        assert_eq!(PotionContents::get_color_or(&[], -7), -7);
     }
 }

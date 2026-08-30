@@ -53,6 +53,11 @@ impl HopperMinecart {
                 let stack = source.get_stack(slot).await;
                 if stack.is_empty()
                     || !source.can_transfer_to(self.inventory.as_ref(), slot, &stack)
+                    // Vanilla `Container.canTakeItem` is a source-to-destination gate
+                    // (`JukeboxBlockEntity.java:147-150`).
+                    || !source
+                        .can_take_item(self.inventory.as_ref(), slot, &stack)
+                        .await
                 {
                     continue;
                 }

@@ -63,6 +63,19 @@ use tracing::warn;
 /// Slot index indicating a click outside the inventory.
 const SLOT_INDEX_OUTSIDE: i32 = -999;
 
+fn bundle_secondary_click_applies(cursor_stack: &ItemStack, slot_stack: &ItemStack) -> bool {
+    // `BundleItem` only overrides secondary clicks when the other stack is empty
+    // (`BundleItem.java:59-136`).
+    (cursor_stack.is_empty()
+        && slot_stack
+            .get_data_component::<pumpkin_data::data_component_impl::BundleContentsImpl>()
+            .is_some())
+        || (slot_stack.is_empty()
+            && cursor_stack
+                .get_data_component::<pumpkin_data::data_component_impl::BundleContentsImpl>()
+                .is_some())
+}
+
 /// A tracked property for container UI elements.
 ///
 /// Properties are used to synchronize UI state like furnace progress bars,
@@ -1258,32 +1271,13 @@ pub trait ScreenHandler: Send + Sync {
                         }
                     }
 
-                    // Vanilla's right-click paths only fire when the *other* side is empty
-                    // (`clickAction == SECONDARY && other.isEmpty()`) and always move exactly
-                    // one item (`removeOne`), unlike the left-click full-transfer paths above.
-                    if click_type == MouseClick::Right {
+                    // Vanilla's secondary bundle overrides only run when the other side is
+                    // empty (`BundleItem.java:59-136`); a non-empty opposite stack falls
+                    // through to normal slot handling.
+                    if click_type == MouseClick::Right
+                        && bundle_secondary_click_applies(&cursor_stack, &slot_stack)
+                    {
                         let mut intercepted = false;
-
-                        if !cursor_stack.is_empty() {
-                            let mut inner_slot_stack = slot.get_stack().await;
-                            if let Some(bundle) = inner_slot_stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
-                                && bundle.try_insert(&mut cursor_stack) {
-                                    slot.set_stack(inner_slot_stack).await;
-                                    intercepted = true;
-                                }
-                        }
-
-                        if !intercepted && !slot_stack.is_empty()
-                            && let Some(bundle) = cursor_stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>() {
-                                let mut inner_slot_stack = slot.get_stack().await;
-                                if bundle.try_insert(&mut inner_slot_stack) {
-                                    if inner_slot_stack.item_count == 0 {
-                                        inner_slot_stack = ItemStack::EMPTY.clone();
-                                    }
-                                    slot.set_stack(inner_slot_stack).await;
-                                    intercepted = true;
-                                }
-                            }
 
                         if !intercepted && cursor_stack.is_empty() {
                             let mut inner_slot_stack = slot.get_stack().await;
@@ -1584,6 +1578,8 @@ impl ScreenHandlerBehaviour {
 mod container_access_tests {
     use super::ContainerAccess;
     use pumpkin_data::Block;
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
     use pumpkin_data::tag::Taggable;
 
     #[test]
@@ -1620,5 +1616,19 @@ mod container_access_tests {
         assert!(access.accepts_block(&Block::CHIPPED_ANVIL));
         assert!(access.accepts_block(&Block::DAMAGED_ANVIL));
         assert!(!access.accepts_block(&Block::STONE));
+    }
+
+    /// `BundleItem.overrideStackedOnOther` and `overrideOtherStackedOnMe`
+    /// (`BundleItem.java:59-136`) only handle a secondary click when the opposite stack is empty.
+    #[test]
+    fn bundle_secondary_override_requires_empty_other_stack() {
+        let empty = ItemStack::EMPTY.clone();
+        let bundle = ItemStack::new(1, &Item::BUNDLE);
+        let item = ItemStack::new(1, &Item::STONE);
+
+        assert!(super::bundle_secondary_click_applies(&empty, &bundle));
+        assert!(super::bundle_secondary_click_applies(&bundle, &empty));
+        assert!(!super::bundle_secondary_click_applies(&bundle, &item));
+        assert!(!super::bundle_secondary_click_applies(&item, &bundle));
     }
 }

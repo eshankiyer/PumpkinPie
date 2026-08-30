@@ -6806,41 +6806,30 @@ impl Player {
         None
     }
 
-    /// Find arrow or firework rocket ammo in inventory (main hand, offhand, or inventory
-    /// slots). Vanilla `CrossbowItem#getSupportedHeldProjectiles` (`ARROW_OR_FIREWORK`) is
-    /// the loading-time predicate; unlike `find_arrow` (bow ammo, arrows only), a crossbow
-    /// can also be loaded with a firework rocket.
+    /// Find crossbow ammo in the held hands or inventory. Vanilla uses
+    /// `ARROW_OR_FIREWORK` for the held hands and `ARROW_ONLY` for inventory
+    /// (`Player.java:1877-1897`; `CrossbowItem.java:54-62`).
     pub async fn find_crossbow_projectile(&self) -> Option<usize> {
-        use pumpkin_data::item::Item;
         let inventory = self.inventory();
 
-        // Check offhand first
-        let stack = inventory.get_stack(PlayerInventory::OFF_HAND_SLOT).await;
-        let item = stack;
-        if matches!(
-            item.item.id,
-            id if id == Item::ARROW.id
-                || id == Item::TIPPED_ARROW.id
-                || id == Item::SPECTRAL_ARROW.id
-                || id == Item::FIREWORK_ROCKET.id
-        ) && item.item_count > 0
-        {
+        // Vanilla `Player.getProjectile` checks the held projectile predicate in offhand,
+        // then main hand, before using the all-supported predicate for inventory slots
+        // (`Player.java:1877-1897`; `CrossbowItem.java:54-62`).
+        let offhand = inventory.get_stack(PlayerInventory::OFF_HAND_SLOT).await;
+        if is_crossbow_held_projectile(offhand.get_item()) && offhand.item_count > 0 {
             return Some(PlayerInventory::OFF_HAND_SLOT);
         }
-        drop(item);
 
-        // Check hotbar and main inventory
+        let selected_slot = inventory.get_selected_slot() as usize;
+        let main_hand = inventory.get_stack(selected_slot).await;
+        if is_crossbow_held_projectile(main_hand.get_item()) && main_hand.item_count > 0 {
+            return Some(selected_slot);
+        }
+
+        // Vanilla's `getAllSupportedProjectiles` is ARROW_ONLY for the inventory fallback.
         for slot in 0..PlayerInventory::MAIN_SIZE {
             let stack = inventory.get_stack(slot).await;
-            let item = stack;
-            if matches!(
-                item.item.id,
-                id if id == Item::ARROW.id
-                    || id == Item::TIPPED_ARROW.id
-                    || id == Item::SPECTRAL_ARROW.id
-                    || id == Item::FIREWORK_ROCKET.id
-            ) && item.item_count > 0
-            {
+            if is_crossbow_inventory_projectile(stack.get_item()) && stack.item_count > 0 {
                 return Some(slot);
             }
         }
@@ -7064,6 +7053,28 @@ impl Player {
                 .await;
         }
     }
+}
+
+// Vanilla's `getSupportedHeldProjectiles` is `ARROW_OR_FIREWORK`
+// (`CrossbowItem.java:54-62`).
+fn is_crossbow_held_projectile(item: &'static pumpkin_data::item::Item) -> bool {
+    matches!(
+        item.id,
+        id if id == pumpkin_data::item::Item::ARROW.id
+            || id == pumpkin_data::item::Item::TIPPED_ARROW.id
+            || id == pumpkin_data::item::Item::SPECTRAL_ARROW.id
+            || id == pumpkin_data::item::Item::FIREWORK_ROCKET.id
+    )
+}
+
+// Vanilla's `getAllSupportedProjectiles` is `ARROW_ONLY` (`CrossbowItem.java:59-62`).
+fn is_crossbow_inventory_projectile(item: &'static pumpkin_data::item::Item) -> bool {
+    matches!(
+        item.id,
+        id if id == pumpkin_data::item::Item::ARROW.id
+            || id == pumpkin_data::item::Item::TIPPED_ARROW.id
+            || id == pumpkin_data::item::Item::SPECTRAL_ARROW.id
+    )
 }
 
 impl PartialEq for Player {
@@ -8553,13 +8564,26 @@ fn is_valid_for_forced_respawn(state: &BlockState) -> bool {
 mod tests {
     use super::{
         Player, ability_invulnerability_blocks, bedrock_inventory_slot, damage_dealt_stat_points,
-        is_valid_for_forced_respawn, is_vanishing_cursed, player_death_experience_reward,
-        read_root_vehicle, write_root_vehicle,
+        is_crossbow_held_projectile, is_crossbow_inventory_projectile, is_valid_for_forced_respawn,
+        is_vanishing_cursed, player_death_experience_reward, read_root_vehicle, write_root_vehicle,
     };
     use pumpkin_data::Block;
     use pumpkin_data::damage::DamageType;
     use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
     use uuid::Uuid;
+
+    /// `Player.getProjectile` uses `ARROW_OR_FIREWORK` in hand and `ARROW_ONLY` in the
+    /// inventory fallback (`Player.java:1877-1897`; `CrossbowItem.java:54-62`).
+    #[test]
+    fn crossbow_inventory_fallback_excludes_fireworks() {
+        use pumpkin_data::item::Item;
+
+        assert!(is_crossbow_held_projectile(&Item::FIREWORK_ROCKET));
+        assert!(!is_crossbow_inventory_projectile(&Item::FIREWORK_ROCKET));
+        assert!(is_crossbow_inventory_projectile(&Item::ARROW));
+        assert!(is_crossbow_inventory_projectile(&Item::TIPPED_ARROW));
+        assert!(is_crossbow_inventory_projectile(&Item::SPECTRAL_ARROW));
+    }
 
     fn stack_with_enchantment(
         item: &'static pumpkin_data::item::Item,

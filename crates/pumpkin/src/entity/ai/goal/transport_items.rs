@@ -5,12 +5,14 @@ use std::sync::Arc;
 use super::{Controls, Goal, GoalFuture};
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::mob::Mob;
+use crate::entity::passive::copper_golem::{CopperGolemEntity, CopperGolemState};
 use crate::world::World;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{Block, item_stack::ItemStack};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector2::Vector2;
 use pumpkin_util::math::vector3::Vector3;
+use pumpkin_world::inventory::Inventory;
 use rand::RngExt;
 
 /// Ports the item-fetching half of vanilla's `TransportItemsBetweenContainers` behavior
@@ -143,9 +145,9 @@ impl TransportItemsGoal {
         best.map(|(pos, _)| pos)
     }
 
-    async fn take_one_item(world: &World, pos: BlockPos) -> Option<ItemStack> {
-        let block_entity = world.get_block_entity(&pos)?;
-        let inventory = block_entity.get_inventory()?;
+    /// The vanilla transport interaction keeps the selected chest active while it reads or
+    /// writes the inventory (`CopperGolem.java:413-427`); callers provide that active inventory.
+    async fn take_one_item(inventory: &dyn Inventory) -> Option<ItemStack> {
         for i in 0..inventory.size() {
             let stack = inventory.get_stack(i).await;
             if !stack.is_empty() {
@@ -155,9 +157,7 @@ impl TransportItemsGoal {
         None
     }
 
-    async fn deposit_item(world: &World, pos: BlockPos, item: ItemStack) -> Option<ItemStack> {
-        let block_entity = world.get_block_entity(&pos)?;
-        let inventory = block_entity.get_inventory()?;
+    async fn deposit_item(inventory: &dyn Inventory, item: ItemStack) -> Option<ItemStack> {
         let mut remaining = item;
         for i in 0..inventory.size() {
             let mut stack = inventory.get_stack(i).await;
@@ -179,6 +179,39 @@ impl TransportItemsGoal {
             }
         }
         Some(remaining)
+    }
+
+    fn copper_golem(mob: &dyn Mob) -> Option<&CopperGolemEntity> {
+        mob.cast_any().downcast_ref::<CopperGolemEntity>()
+    }
+
+    /// Vanilla `CopperGolem.hasContainerOpen`/`ContainerOpenersCounter` opens a container while
+    /// the transport behavior works (`CopperGolem.java:413-423`). The inventory trait already
+    /// exposes the matching viewer hooks, so retain the active chest position here as well.
+    async fn open_container(
+        mob: &dyn Mob,
+        world: &World,
+        pos: BlockPos,
+        state: CopperGolemState,
+    ) -> Option<Arc<dyn Inventory>> {
+        let block_entity = world.get_block_entity(&pos)?;
+        let inventory = block_entity.get_inventory()?;
+        if let Some(copper_golem) = Self::copper_golem(mob) {
+            copper_golem.set_opened_chest_pos(pos);
+            copper_golem.set_state(state);
+        }
+        inventory.on_open().await;
+        Some(inventory)
+    }
+
+    /// Vanilla closes the tracked container after the interaction window; the inventory viewer
+    /// hook emits the existing chest close event (`CopperGolem.java:413-423`).
+    async fn close_container(mob: &dyn Mob, inventory: &dyn Inventory) {
+        inventory.on_close().await;
+        if let Some(copper_golem) = Self::copper_golem(mob) {
+            copper_golem.clear_opened_chest_pos();
+            copper_golem.set_state(CopperGolemState::Idle);
+        }
     }
 
     fn block_pos_of(mob: &dyn Mob) -> BlockPos {
@@ -252,18 +285,51 @@ impl Goal for TransportItemsGoal {
             match self.phase {
                 Phase::ToSource(source) => {
                     let origin = Self::block_pos_of(mob);
-                    if source.squared_distance(&origin) > 9 {
+                    // Vanilla rejects arrivals outside `getContainerInteractionRange`
+                    // (`CopperGolem.java:425-428`).
+                    let interaction_range = Self::copper_golem(mob)
+                        .map_or(3.0, CopperGolemEntity::get_container_interaction_range);
+                    if f64::from(source.squared_distance(&origin))
+                        > interaction_range * interaction_range
+                    {
                         self.phase = Phase::Idle;
                         self.cooldown = mob.get_random().random_range(60..=100);
                         return;
                     }
-                    let Some(item) = Self::take_one_item(&world, source).await else {
+                    // Vanilla selects the corresponding getting animation state
+                    // (`CopperGolem.java:331-346`) while the container is queried.
+                    let Some(source_inventory) =
+                        Self::open_container(mob, &world, source, CopperGolemState::GettingItem)
+                            .await
+                    else {
+                        self.phase = Phase::Idle;
+                        self.cooldown = mob.get_random().random_range(60..=100);
+                        return;
+                    };
+                    let item = Self::take_one_item(source_inventory.as_ref()).await;
+                    if item.is_none()
+                        && let Some(copper_golem) = Self::copper_golem(mob)
+                    {
+                        copper_golem.set_state(CopperGolemState::GettingNoItem);
+                    }
+                    Self::close_container(mob, source_inventory.as_ref()).await;
+                    let Some(item) = item else {
                         self.phase = Phase::Idle;
                         self.cooldown = mob.get_random().random_range(60..=100);
                         return;
                     };
                     let Some(dest) = Self::find_dest(&world, origin).await else {
-                        Self::deposit_item(&world, source, item).await;
+                        if let Some(source_inventory) = Self::open_container(
+                            mob,
+                            &world,
+                            source,
+                            CopperGolemState::DroppingItem,
+                        )
+                        .await
+                        {
+                            let _ = Self::deposit_item(source_inventory.as_ref(), item).await;
+                            Self::close_container(mob, source_inventory.as_ref()).await;
+                        }
                         self.phase = Phase::Idle;
                         return;
                     };
@@ -272,10 +338,33 @@ impl Goal for TransportItemsGoal {
                     Self::walk_to(mob, dest, self.speed);
                 }
                 Phase::ToDest { source, dest } => {
+                    // Vanilla selects the corresponding dropping animation state
+                    // (`CopperGolem.java:347-361`) while the destination is queried.
                     if let Some(item) = self.carried.take()
-                        && let Some(leftover) = Self::deposit_item(&world, dest, item).await
+                        && let Some(destination_inventory) =
+                            Self::open_container(mob, &world, dest, CopperGolemState::DroppingItem)
+                                .await
                     {
-                        Self::deposit_item(&world, source, leftover).await;
+                        let leftover =
+                            Self::deposit_item(destination_inventory.as_ref(), item).await;
+                        if leftover.is_some()
+                            && let Some(copper_golem) = Self::copper_golem(mob)
+                        {
+                            copper_golem.set_state(CopperGolemState::DroppingNoItem);
+                        }
+                        Self::close_container(mob, destination_inventory.as_ref()).await;
+                        if let Some(leftover) = leftover
+                            && let Some(source_inventory) = Self::open_container(
+                                mob,
+                                &world,
+                                source,
+                                CopperGolemState::DroppingItem,
+                            )
+                            .await
+                        {
+                            let _ = Self::deposit_item(source_inventory.as_ref(), leftover).await;
+                            Self::close_container(mob, source_inventory.as_ref()).await;
+                        }
                     }
                     self.phase = Phase::Idle;
                     self.cooldown = mob.get_random().random_range(60..=100);

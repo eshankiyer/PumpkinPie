@@ -7177,6 +7177,29 @@ impl World {
         });
     }
 
+    /// Replaces a freshly placed block entity with the state carried by its item component.
+    /// This is the server-side `BlockItem.updateBlockEntityComponents` step
+    /// (`BlockItem.java:101-106`), which runs before the placement callbacks.
+    pub fn apply_block_entity_item_components(
+        &self,
+        block_pos: &BlockPos,
+        item_stack: &pumpkin_data::item_stack::ItemStack,
+    ) {
+        let Some(entity) = self.get_block_entity(block_pos) else {
+            return;
+        };
+        let Some(entity) =
+            crate::block::entities::apply_components_from_item_stack(entity, item_stack)
+        else {
+            return;
+        };
+        self.block_entities
+            .entry(block_pos.chunk_position())
+            .or_default()
+            .insert(*block_pos, entity.clone());
+        self.update_block_entity(&entity);
+    }
+
     pub(crate) fn add_block_entity_nbt(&self, block_pos: BlockPos, nbt: &NbtCompound) {
         self.level
             .read_chunk_sync(&block_pos.chunk_position(), |chunk| {

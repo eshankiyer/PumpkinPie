@@ -157,6 +157,18 @@ pub trait Inventory: Send + Sync + Clearable {
         true
     }
 
+    /// Vanilla `Container.canTakeItem` source-to-destination admission. The default keeps
+    /// existing inventories unrestricted; special containers can inspect the destination
+    /// asynchronously (`JukeboxBlockEntity.java:147-150`).
+    fn can_take_item<'a>(
+        &'a self,
+        _into: &'a dyn Inventory,
+        _slot: usize,
+        _stack: &'a ItemStack,
+    ) -> InventoryFuture<'a, bool> {
+        Box::pin(async { true })
+    }
+
     fn as_any(&self) -> &dyn Any;
 }
 

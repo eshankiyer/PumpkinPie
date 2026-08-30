@@ -248,7 +248,9 @@ impl EntityBase for DragonFireballEntity {
 
             let cloud_entity =
                 Entity::new(world.clone(), cloud_pos, &EntityType::AREA_EFFECT_CLOUD);
-            let cloud = AreaEffectCloudEntity::create(
+            // DragonFireball.java:40-45 uses DragonBreath with power 1 and a 0.25 potion
+            // duration scale for the spawned area-effect cloud.
+            let cloud = AreaEffectCloudEntity::create_with_options(
                 cloud_entity,
                 pumpkin_data::item_stack::ItemStack::new(
                     0,
@@ -269,6 +271,13 @@ impl EntityBase for DragonFireballEntity {
                 0.0,
                 0,
                 cloud_radius_per_tick(),
+                Some((
+                    pumpkin_protocol::codec::var_int::VarInt(
+                        pumpkin_data::particle::Particle::DragonBreath as i32,
+                    ),
+                    1.0f32.to_be_bytes().to_vec(),
+                )),
+                0.25,
             );
             world.spawn_entity(cloud).await;
         })

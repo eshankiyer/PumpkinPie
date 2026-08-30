@@ -283,6 +283,39 @@ impl Raid {
         self.omen_level
     }
 
+    /// `Raid.getMaxRaidOmenLevel` (`Raid.java:235-237`).
+    #[must_use]
+    pub const fn get_max_raid_omen_level(&self) -> i32 {
+        DEFAULT_MAX_RAID_OMEN_LEVEL
+    }
+
+    /// `Raid.setRaidOmenLevel` (`Raid.java:239-245`).
+    pub const fn set_raid_omen_level(&mut self, raid_omen_level: i32) {
+        self.omen_level = raid_omen_level;
+    }
+
+    /// `Raid.getTotalHealth` (`Raid.java:189-191`).
+    #[must_use]
+    pub const fn get_total_health(&self) -> f32 {
+        self.total_health
+    }
+
+    /// `Raid.getAllRaiders` (`Raid.java:193-201`), represented by the UUID set used by Pumpkin's
+    /// world entity index.
+    #[must_use]
+    pub fn get_all_raiders(&self) -> HashSet<Uuid> {
+        self.group_raiders
+            .values()
+            .flat_map(|raiders| raiders.iter().copied())
+            .collect()
+    }
+
+    /// `Raid.getNumGroups` (`Raid.java:786-793`).
+    #[must_use]
+    pub const fn get_num_groups(difficulty: Difficulty) -> i32 {
+        num_groups_for_difficulty(difficulty)
+    }
+
     /// Vanilla `Raid.getEnchantOdds` (`Raid.java:795-806`): the chance ceiling fed
     /// into raider weapon-enchant rolls (`Vindicator.applyRaidBuffs`,
     /// `Vindicator.java:171`), scaled by Bad Omen level above one.
@@ -443,8 +476,8 @@ impl Raid {
                 let is_leader = !leader_set && mob.can_be_raid_leader();
                 if is_leader {
                     leader_set = true;
-                    self.group_leaders.insert(group_number, uuid);
-                    equip_ominous_banner(mob.get_mob_entity()).await;
+                    self.set_leader(group_number, uuid, mob.get_mob_entity())
+                        .await;
                 }
                 self.join_raid(group_number, uuid, mob.get_mob_entity(), is_leader);
                 // Raid.java:582 passes `false` unconditionally, regardless of leader status.
@@ -492,7 +525,7 @@ impl Raid {
         }
 
         self.groups_spawned += 1;
-        self.update_bossbar_health(world).await;
+        self.update_bossbar(world).await;
     }
 
     /// `Raid.joinRaid` (`Raid.java`). `pub(crate)` so raider-side AI (`PathfindToRaidGoal`'s
@@ -504,8 +537,7 @@ impl Raid {
         mob_entity: &crate::entity::mob::MobEntity,
         is_patrol_leader: bool,
     ) {
-        self.group_raiders.entry(wave).or_default().insert(uuid);
-        self.total_health += mob_entity.living_entity.health.load();
+        self.add_wave_mob(wave, uuid, mob_entity.living_entity.health.load(), true);
         mob_entity
             .living_entity
             .can_join_raid
@@ -518,6 +550,33 @@ impl Raid {
                 wave,
                 is_patrol_leader,
             }));
+    }
+
+    /// `Raid.addWaveMob` (`Raid.java:694-723`). The entity index stores raiders by UUID, so the
+    /// replacement operation is represented by inserting the UUID into the wave set.
+    pub(crate) fn add_wave_mob(
+        &mut self,
+        wave: i32,
+        uuid: Uuid,
+        health: f32,
+        update_health: bool,
+    ) -> bool {
+        self.group_raiders.entry(wave).or_default().insert(uuid);
+        if update_health {
+            self.total_health += health;
+        }
+        true
+    }
+
+    /// `Raid.setLeader` (`Raid.java:725-729`).
+    pub(crate) async fn set_leader(
+        &mut self,
+        wave: i32,
+        uuid: Uuid,
+        mob_entity: &crate::entity::mob::MobEntity,
+    ) {
+        self.group_leaders.insert(wave, uuid);
+        equip_ominous_banner(mob_entity).await;
     }
 
     /// `Raid.getGroupsSpawned` (`Raid.java:207`).
@@ -554,6 +613,11 @@ impl Raid {
                     .await;
             }
         }
+    }
+
+    /// `Raid.updateBossbar` (`Raid.java:589-591`).
+    pub(crate) async fn update_bossbar(&self, world: &Arc<World>) {
+        self.update_bossbar_health(world).await;
     }
 
     fn make_bossbar(&self) -> Bossbar {
@@ -1281,5 +1345,28 @@ mod tests {
         for (effective, expected) in [(2.0f32, 3), (2.5f32, 4), (3.0f32, 4), (4.0f32, 5)] {
             assert_eq!(effective.ceil() as i32 + 1, expected);
         }
+    }
+
+    #[test]
+    fn raid_state_accessors_match_vanilla_fields() {
+        // `Raid.getTotalHealth`, `getAllRaiders`, `getMaxRaidOmenLevel`, and
+        // `getNumGroups` (`Raid.java:189-237,193-201,786-793`) expose these stored values.
+        let mut raid = Raid::new(1, BlockPos::new(0, 64, 0), Difficulty::Normal);
+        let first = uuid::Uuid::new_v4();
+        let second = uuid::Uuid::new_v4();
+        raid.group_raiders
+            .insert(1, [first, second].into_iter().collect());
+        raid.total_health = 20.0;
+
+        assert_eq!(raid.get_total_health(), 20.0);
+        assert_eq!(
+            raid.get_all_raiders(),
+            std::collections::HashSet::from([first, second])
+        );
+        assert_eq!(raid.get_max_raid_omen_level(), 5);
+        assert_eq!(Raid::get_num_groups(Difficulty::Normal), 5);
+
+        raid.set_raid_omen_level(3);
+        assert_eq!(raid.raid_omen_level(), 3);
     }
 }

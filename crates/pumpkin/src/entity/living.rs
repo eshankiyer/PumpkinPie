@@ -1204,7 +1204,9 @@ impl LivingEntity {
         });
 
         f(inst);
-        inst.dirty.store(true, Ordering::Relaxed);
+        // Vanilla `AttributeInstance.setDirty` (`AttributeInstance.java:112-115`) is the
+        // invalidation boundary for all mutations performed by this helper.
+        inst.set_dirty();
     }
 
     /// Returns the computed value for `attribute` using the local instance, falling back
@@ -1261,8 +1263,9 @@ impl LivingEntity {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(inst) = map.get_mut(&attribute.id) {
-            inst.base_value = new_base;
-            inst.dirty.store(true, Ordering::Relaxed);
+            // Vanilla `AttributeInstance.setBaseValue` (`AttributeInstance.java:45-49`) marks
+            // the cached effective value dirty only when the base actually changes.
+            inst.set_base_value(new_base);
         } else {
             let ai = AttributeInstance::new(new_base, attribute.min_value, attribute.max_value);
             ai.dirty.store(true, Ordering::Relaxed);
@@ -2358,7 +2361,17 @@ impl LivingEntity {
     fn check_climbing(&self) {
         // HappyGhast.onClimbable (`HappyGhast.java:171-173`) is always false. Do not let the
         // generic climbable-block check turn a happy ghast into a ladder-climbing mob.
-        if self.entity.entity_type == &EntityType::HAPPY_GHAST {
+        // AbstractHorse.onClimbable (`AbstractHorse.java:950-952`) is likewise always false.
+        if self.entity.entity_type == &EntityType::HAPPY_GHAST
+            || matches!(
+                self.entity.entity_type.id,
+                id if id == EntityType::HORSE.id
+                    || id == EntityType::DONKEY.id
+                    || id == EntityType::MULE.id
+                    || id == EntityType::SKELETON_HORSE.id
+                    || id == EntityType::ZOMBIE_HORSE.id
+            )
+        {
             self.climbing.store(false, Relaxed);
             self.climbing_pos.store(None);
             return;
@@ -4255,16 +4268,9 @@ async fn tick_equipment_items(living: &LivingEntity, owner: &dyn EntityBase, ser
 /// (`Witch.java:170`), the enderman and zombified piglin attack speed boosts
 /// (`EnderMan.java:135`, `ZombifiedPiglin.java:102`) and the killer bunny's damage bonus
 /// (`Rabbit.java:376`). Status effect modifiers are deliberately *not* in that set: vanilla adds
-/// them permanently (`MobEffect.java:172`), so they belong in the saved list. This codebase keeps
-/// permanent and transient modifiers in one `Vec`, so they are told apart by id here.
-fn is_permanent_modifier(id: &str) -> bool {
-    const TRANSIENT_PREFIXES: [&str; 1] = ["minecraft:enchantment."];
-    const TRANSIENT_IDS: [&str; 3] = ["minecraft:attacking", "witch_drinking", "evil"];
-    !TRANSIENT_PREFIXES
-        .iter()
-        .any(|prefix| id.starts_with(prefix))
-        && !TRANSIENT_IDS.contains(&id)
-}
+/// them permanently (`MobEffect.java:172`), so they belong in the saved list. Explicitly marked
+/// permanent modifiers are tracked by `AttributeInstance`; legacy IDs retain the same fallback
+/// classification for existing callers.
 
 /// `AttributeModifier.Operation.getSerializedName` (`AttributeModifier.java:38-40`).
 const fn modifier_operation_name(operation: ModifierOperation) -> &'static str {
@@ -4311,7 +4317,7 @@ fn pack_attributes(
         let modifiers: Vec<NbtTag> = instance
             .modifiers
             .iter()
-            .filter(|modifier| is_permanent_modifier(&modifier.id))
+            .filter(|modifier| instance.is_permanent_modifier(&modifier.id))
             .map(|modifier| {
                 let mut compound = NbtCompound::new();
                 compound.put_string("id", modifier.id.clone());
@@ -4400,7 +4406,9 @@ fn apply_packed_attributes(attributes: &mut HashMap<u8, AttributeInstance>, pack
                 warn!("Malformed attribute modifier in entity NBT");
                 continue;
             };
-            instance.add_or_replace_modifier(Modifier {
+            // Vanilla `AttributeInstance.apply` (`AttributeInstance.java:190-200`) restores
+            // packed modifiers into the permanent modifier set.
+            instance.add_or_replace_permanent_modifier(Modifier {
                 id: id.to_string(),
                 amount,
                 operation,

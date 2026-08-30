@@ -3,15 +3,12 @@ use std::sync::Arc;
 use crate::block::entities::jukebox::JukeboxBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BrokenArgs, EmitsRedstonePowerArgs, GetComparatorOutputArgs,
+    BlockBehaviour, BlockFuture, EmitsRedstonePowerArgs, GetComparatorOutputArgs,
     GetRedstonePowerArgs, NormalUseArgs, OnStateReplacedArgs, PlacedArgs, UseWithItemArgs,
 };
-use crate::entity::Entity;
-use crate::entity::item::ItemEntity;
 use crate::world::World;
 use crate::world::game_event::{GameEventContext, emit_game_event};
 use pumpkin_data::data_component_impl::JukeboxPlayableImpl;
-use pumpkin_data::entity::EntityType;
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::jukebox_song::JukeboxSong;
 use pumpkin_data::world::WorldEvent;
@@ -23,8 +20,6 @@ use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::world::BlockFlags;
-use rand::{RngExt, rng};
-
 use tracing::error;
 
 #[pumpkin_block("minecraft:jukebox")]
@@ -57,21 +52,9 @@ impl JukeboxBlock {
         if let Some(block_entity) = world.get_block_entity(position)
             && let Some(jukebox_entity) = block_entity.as_any().downcast_ref::<JukeboxBlockEntity>()
         {
-            let record = jukebox_entity.clear_record().await;
-            if !record.is_empty() {
-                // Vanilla: Vec3d.add(pos, 0.5, 1.01, 0.5).addHorizontalRandom(random, 0.7F)
-                // addHorizontalRandom adds random in range [-0.35, 0.35] to x and z
-                let spawn_pos = Vector3::new(
-                    f64::from(position.0.x) + 0.5 + rng().random_range(-0.35..0.35),
-                    f64::from(position.0.y) + 1.01,
-                    f64::from(position.0.z) + 0.5 + rng().random_range(-0.35..0.35),
-                );
-
-                let entity = Entity::new(world.clone(), spawn_pos, &EntityType::ITEM);
-                // Vanilla: setToDefaultPickupDelay() = 10 ticks
-                let item_entity = Arc::new(ItemEntity::new(entity, record));
-                world.spawn_entity(item_entity).await;
-            }
+            // Vanilla `popOutTheItem` removes and spawns the record at the block entity
+            // removal point (`JukeboxBlockEntity.java:48-61`).
+            jukebox_entity.pop_out_the_item(world).await;
         }
     }
 
@@ -259,44 +242,6 @@ impl BlockBehaviour for JukeboxBlock {
             .await;
 
             BlockActionResult::Success
-        })
-    }
-
-    /// Called when the jukebox is broken
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // Drop the record if there is one
-            // Vanilla: `preRemoveSideEffects` -> `popOutTheItem`
-            // (JukeboxBlockEntity.java:153-155, 48-62).
-            Self::drop_record(args.position, args.world).await;
-
-            // Vanilla `JukeboxBlockEntity#setRemoved` (JukeboxBlockEntity.java:126-130):
-            // removal unconditionally emits GAME_EVENT.JUKEBOX_STOP_PLAY (sculk-visible),
-            // regardless of whether a song was actually playing, in addition to the
-            // stop-song level event (1011).
-            if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(jukebox_entity) =
-                    block_entity.as_any().downcast_ref::<JukeboxBlockEntity>()
-            {
-                if jukebox_entity.is_playing() {
-                    jukebox_entity.stop_playing();
-                }
-                emit_game_event(
-                    args.world,
-                    GameEvent::JukeboxStopPlay,
-                    Vector3::new(
-                        f64::from(args.position.0.x) + 0.5,
-                        f64::from(args.position.0.y) + 0.5,
-                        f64::from(args.position.0.z) + 0.5,
-                    ),
-                    GameEventContext::none(),
-                )
-                .await;
-            }
-
-            // Stop the music
-            args.world
-                .sync_world_event(WorldEvent::SoundStopJukeboxSong, *args.position, 0);
         })
     }
 
