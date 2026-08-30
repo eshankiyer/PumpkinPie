@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use crate::block::{
-    BlockFuture, GetComparatorOutputArgs, OnPlaceArgs, OnSyncedBlockEventArgs, PlacedArgs,
+    BlockFuture, GetComparatorOutputArgs, OnPlaceArgs, OnStateReplacedArgs, OnSyncedBlockEventArgs,
+    PlacedArgs,
 };
 use crate::block::{
     registry::BlockActionResult,
@@ -159,6 +160,16 @@ impl BlockBehaviour for ShulkerBoxBlock {
             }
 
             BlockActionResult::Success
+        })
+    }
+
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // `ShulkerBoxBlock.affectNeighborsAfterRemoval` (`ShulkerBoxBlock.java:141-144`)
+            // refreshes comparator outputs using the removed block's state.
+            args.world
+                .update_comparators(args.position, args.block)
+                .await;
         })
     }
 

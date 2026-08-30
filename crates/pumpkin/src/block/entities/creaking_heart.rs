@@ -7,6 +7,7 @@ use pumpkin_data::Block;
 use pumpkin_data::block_properties::{
     BlockProperties, CreakingHeartLikeProperties, CreakingHeartState,
 };
+use pumpkin_data::damage::DamageType;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
@@ -51,14 +52,12 @@ impl BlockEntity for CreakingHeartBlockEntity {
     where
         Self: Sized,
     {
-        // loadAdditional: read("creaking", UUIDUtil.CODEC) -- four big-endian ints.
+        // `CreakingHeartBlockEntity.loadAdditional` (`CreakingHeartBlockEntity.java:348-352`)
+        // restores the UUID through setCreakingInfo.
         let creaking_uuid = nbt.get_int_array("creaking").and_then(uuid_from_int_array);
-        Self {
-            position,
-            creaking_uuid: AtomicCell::new(creaking_uuid),
-            ticker: AtomicI32::new(0),
-            output_signal: AtomicI32::new(0),
-        }
+        let entity = Self::new(position);
+        entity.set_creaking_uuid(creaking_uuid);
+        entity
     }
 
     fn write_nbt<'a>(
@@ -195,13 +194,25 @@ impl CreakingHeartBlockEntity {
     /// (`CreakingHeartBlockEntity.java:309-327`): removal without a damage source tears down
     /// the bound creaking and clears the persisted binding atomically.
     pub async fn remove_protector_on_removal(&self, world: &Arc<World>) {
+        self.remove_protector(world, None).await;
+    }
+
+    /// `CreakingHeartBlockEntity.removeProtector` (`CreakingHeartBlockEntity.java:314-327`):
+    /// damage removes the binding, starts the creaking death effects, and sets health to zero;
+    /// removal without damage tears the protector down immediately.
+    pub async fn remove_protector(&self, world: &Arc<World>, damage_type: Option<DamageType>) {
         let Some(uuid) = self.creaking_uuid.swap(None) else {
             return;
         };
         if let Some(entity) = world.get_entity_by_uuid(uuid)
             && let Some(creaking) = entity.cast_any().downcast_ref::<CreakingEntity>()
         {
-            creaking.tear_down().await;
+            if damage_type.is_some() {
+                creaking.creaking_death_effects();
+                creaking.mob_entity.living_entity.set_health(0.0);
+            } else {
+                creaking.tear_down().await;
+            }
         }
     }
 
@@ -237,4 +248,26 @@ fn uuid_to_int_array(u: Uuid) -> NbtTag {
         ((v >> 32) & 0xFFFF_FFFF) as i32,
         (v & 0xFFFF_FFFF) as i32,
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use pumpkin_nbt::compound::NbtCompound;
+    use pumpkin_util::math::position::BlockPos;
+    use uuid::Uuid;
+
+    use super::{BlockEntity, CreakingHeartBlockEntity, uuid_to_int_array};
+
+    #[test]
+    fn load_restores_creaking_uuid() {
+        // `CreakingHeartBlockEntity.loadAdditional`/`saveAdditional`
+        // (`CreakingHeartBlockEntity.java:348-359`) round-trip the creaking UUID.
+        let uuid = Uuid::from_u128(0x0011_2233_4455_6677_8899_aabb_ccdd_eeff);
+        let mut nbt = NbtCompound::new();
+        nbt.put("creaking", uuid_to_int_array(uuid));
+
+        let entity = CreakingHeartBlockEntity::from_nbt(&nbt, BlockPos::new(1, 2, 3));
+
+        assert_eq!(entity.creaking_uuid.load(), Some(uuid));
+    }
 }

@@ -4,7 +4,8 @@ use crate::block::entities::jukebox::JukeboxBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
     BlockBehaviour, BlockFuture, EmitsRedstonePowerArgs, GetComparatorOutputArgs,
-    GetRedstonePowerArgs, NormalUseArgs, OnStateReplacedArgs, PlacedArgs, UseWithItemArgs,
+    GetRedstonePowerArgs, NormalUseArgs, OnStateReplacedArgs, PlacedArgs, PlayerPlacedArgs,
+    UseWithItemArgs,
 };
 use crate::world::World;
 use crate::world::game_event::{GameEventContext, emit_game_event};
@@ -139,6 +140,23 @@ impl BlockBehaviour for JukeboxBlock {
         Box::pin(async move {
             let block_entity = JukeboxBlockEntity::new(*args.position);
             args.world.add_block_entity(Arc::new(block_entity));
+        })
+    }
+
+    fn player_placed<'a>(&'a self, args: PlayerPlacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            let Some(block_entity) = args.world.get_block_entity(args.position) else {
+                return;
+            };
+            let Some(jukebox) = block_entity.as_any().downcast_ref::<JukeboxBlockEntity>() else {
+                return;
+            };
+
+            // `JukeboxBlock.setPlacedBy` (`JukeboxBlock.java:45-51`) marks a placed jukebox as
+            // containing a record after BlockItem applies the item's block-entity data.
+            if !jukebox.get_record().await.is_empty() {
+                Self::set_record_state(true, args.block, args.position, args.world).await;
+            }
         })
     }
 
@@ -303,5 +321,19 @@ impl BlockBehaviour for JukeboxBlock {
             }
             Some(0)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_state_marks_a_jukebox_as_filled() {
+        // `JukeboxBlock.setPlacedBy` (`JukeboxBlock.java:45-51`) sets HAS_RECORD when the placed
+        // block entity carries RecordItem.
+        let state_id = JukeboxLikeProperties { has_record: true }.to_state_id(&Block::JUKEBOX);
+
+        assert!(JukeboxBlock::has_record_state(&Block::JUKEBOX, state_id));
     }
 }

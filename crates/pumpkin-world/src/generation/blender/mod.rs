@@ -30,6 +30,51 @@ const DENSITY_BLENDING_RANGE_CELLS: i32 = 2;
 const DENSITY_BLENDING_RANGE_CHUNKS: i32 = 5 >> 2; // QuartPos.toSection(5)
 
 impl Blender {
+    /// Installs the old-chunk carving exclusion used by vanilla's
+    /// `Blender.addAroundOldChunksCarvingMaskFilter` (`Blender.java:320-346`). The
+    /// generation cache is the Rust equivalent of the vanilla world-generation region.
+    pub fn add_around_old_chunks_carving_mask_filter<C: ProtoChunkCache>(cache: &mut C) {
+        let center = cache.get_center_chunk();
+        let center_x = center.x;
+        let center_z = center.z;
+        let mut old_chunks = Vec::new();
+
+        if let Some(data) = &center.blending_data {
+            let radius_y = (data.max_y - data.min_y) as f64 / 2.0;
+            old_chunks.push((0.0, 0.0, data.min_y as f64 + radius_y, radius_y));
+        }
+
+        for offset_x in -1..=1 {
+            for offset_z in -1..=1 {
+                if offset_x == 0 && offset_z == 0 {
+                    continue;
+                }
+
+                if let Some(data) = cache
+                    .get_chunk(center_x + offset_x, center_z + offset_z)
+                    .and_then(|chunk| chunk.blending_data.as_ref())
+                {
+                    let radius_y = (data.max_y - data.min_y) as f64 / 2.0;
+                    old_chunks.push((
+                        offset_x as f64 * 16.0,
+                        offset_z as f64 * 16.0,
+                        data.min_y as f64 + radius_y,
+                        radius_y,
+                    ));
+                }
+            }
+        }
+
+        if old_chunks.is_empty() {
+            return;
+        }
+
+        cache
+            .get_center_chunk_mut()
+            .carving_mask
+            .set_additional_mask(old_chunk_carving_mask_filter(old_chunks));
+    }
+
     #[must_use]
     pub fn empty() -> Self {
         Self {
@@ -315,6 +360,40 @@ impl Blender {
     }
 }
 
+// Matches `Blender.java:336-346`: shifted sample points are rejected when they fall within four
+// blocks of an old chunk's box.
+fn old_chunk_carving_mask_filter(
+    old_chunks: Vec<(f64, f64, f64, f64)>,
+) -> impl Fn(i32, i32, i32) -> bool + Send + Sync + 'static {
+    let mut random = Xoroshiro::from_seed(42);
+    let shift_noise = DoublePerlinNoiseSampler::from_params(
+        &mut random,
+        &DoublePerlinNoiseParameters::OFFSET,
+        false,
+    );
+
+    move |x, y, z| {
+        let x = x as f64;
+        let y = y as f64;
+        let z = z as f64;
+        let shifted_x = x + 0.5 + shift_noise.sample(x, y, z) * 4.0;
+        let shifted_y = y + 0.5 + shift_noise.sample(y, z, x) * 4.0;
+        let shifted_z = z + 0.5 + shift_noise.sample(z, x, y) * 4.0;
+
+        old_chunks
+            .iter()
+            .any(|&(offset_x, offset_z, center_y, radius_y)| {
+                let delta_x = (shifted_x - 8.0 - offset_x).abs() - 8.0;
+                let delta_y = (shifted_y - center_y).abs() - radius_y;
+                let delta_z = (shifted_z - 8.0 - offset_z).abs() - 8.0;
+                let outside_x = delta_x.max(0.0);
+                let outside_y = delta_y.max(0.0);
+                let outside_z = delta_z.max(0.0);
+                (outside_x * outside_x + outside_y * outside_y + outside_z * outside_z).sqrt() < 4.0
+            })
+    }
+}
+
 pub struct BlenderBiomeSupplier<'a> {
     base: &'a dyn BiomeSupplier,
     blender: &'a Blender,
@@ -364,5 +443,18 @@ impl BlenderImpl for Blender {
             blender: self,
             shift_noise,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::old_chunk_carving_mask_filter;
+
+    // Matches `Blender.java:337-343`: points well outside every old-chunk cube are not filtered.
+    #[test]
+    fn old_chunk_carving_filter_rejects_distant_positions() {
+        let filter = old_chunk_carving_mask_filter(vec![(0.0, 0.0, 8.0, 8.0)]);
+
+        assert!(!filter(100, 8, 8));
     }
 }

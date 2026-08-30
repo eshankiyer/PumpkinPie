@@ -17,7 +17,7 @@ impl JavaClient {
         // Vanilla `Block#getCloneItemStack`: a block may override the item a player receives when
         // middle-clicking it (e.g. attached stems give their seed). Otherwise fall back to the
         // block's registered item; an `item_id` of 0 means the block cannot be picked.
-        let Some(stack) = world
+        let Some(mut stack) = world
             .block_registry
             .get_clone_item_stack(block, &world, &pick_item.pos)
             .or_else(|| Item::from_id(block.item_id).map(|item| ItemStack::new(1, item)))
@@ -26,6 +26,20 @@ impl JavaClient {
         };
         if stack.is_empty() {
             return;
+        }
+
+        if player.gamemode.load() == GameMode::Creative && pick_item.include_data {
+            // `handlePickItemFromBlock` adds block-entity data only for creative include-data
+            // requests (`ServerGamePacketListenerImpl.java:699-709`); component-backed skull
+            // fields are exported by the existing component collector
+            // (`SkullBlockEntity.java:90-103`).
+            if let Some(block_entity) = world.get_block_entity(&pick_item.pos) {
+                let components = crate::block::entities::collect_components_from_block_entity(
+                    block_entity.as_ref(),
+                )
+                .await;
+                stack.patch.extend(components);
+            }
         }
 
         let slot_with_stack = player.inventory().get_slot_with_stack(&stack).await;

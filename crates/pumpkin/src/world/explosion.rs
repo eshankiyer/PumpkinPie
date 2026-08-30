@@ -645,6 +645,22 @@ impl Explosion {
                 let explosion_radius = decay_drops.then_some(self.power);
 
                 for (pos, (block, state)) in &blocks {
+                    // Vanilla `ServerExplosion.interactWithBlocks` invokes `onExplosionHit`
+                    // before the block is removed (`ServerExplosion.java:214-224`).
+                    if let Some(pumpkin_block) = world.block_registry.get_pumpkin_block(block.id) {
+                        pumpkin_block
+                            .explode(ExplodeArgs {
+                                world,
+                                block,
+                                position: pos,
+                                can_trigger_blocks: false,
+                            })
+                            .await;
+                    }
+
+                    // `ShulkerBoxBlock.getDrops` (`ShulkerBoxBlock.java:127-139`) reads the
+                    // block entity before an explosion removes the block.
+                    let block_entity = world.get_block_entity(pos);
                     world
                         .set_block_state(pos, BlockStateId::AIR, BlockFlags::NOTIFY_ALL)
                         .await;
@@ -666,19 +682,10 @@ impl Explosion {
                             world_time: world.level_info.load().day_time as u64,
                             is_raining: Some(is_raining),
                             is_thundering: Some(is_thundering),
+                            block_entity,
                             ..Default::default()
                         };
                         drop_loot(world, block, pos, false, params).await;
-                    }
-                    if let Some(pumpkin_block) = pumpkin_block {
-                        pumpkin_block
-                            .explode(ExplodeArgs {
-                                world,
-                                block,
-                                position: pos,
-                                can_trigger_blocks: false,
-                            })
-                            .await;
                     }
                 }
                 if self.creates_fire {

@@ -6,8 +6,8 @@ use crate::block::entities::chiseled_bookshelf::ChiseledBookshelfBlockEntity;
 use crate::{
     block::{
         BlockBehaviour, BlockFuture, BlockHitResult, GetCloneItemStackArgs,
-        GetComparatorOutputArgs, NormalUseArgs, OnPlaceArgs, PlacedArgs, UseWithItemArgs,
-        registry::BlockActionResult,
+        GetComparatorOutputArgs, NormalUseArgs, OnPlaceArgs, OnStateReplacedArgs, PlacedArgs,
+        UseWithItemArgs, registry::BlockActionResult,
     },
     entity::{EntityBase, player::Player},
     world::World,
@@ -171,6 +171,16 @@ impl BlockBehaviour for ChiseledBookshelfBlock {
                 return Some((block_entity.last_interacted_slot.load(Ordering::Relaxed) + 1) as u8);
             }
             None
+        })
+    }
+
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // Vanilla ChiseledBookShelfBlock.affectNeighborsAfterRemoval
+            // (ChiseledBookShelfBlock.java:165-168) notifies comparator outputs with the old block.
+            args.world
+                .update_comparators(args.position, args.block)
+                .await;
         })
     }
 }

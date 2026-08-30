@@ -589,6 +589,11 @@ impl Cache {
             },
             StagedChunkEnum::Carvers => match generator {
                 generator::WorldGenerator::Noise(noise_gen) => {
+                    // Vanilla `ChunkStatusTasks.generateCarvers` installs this filter before
+                    // applying carvers (`ChunkStatusTasks.java:116-128`).
+                    crate::generation::blender::Blender::add_around_old_chunks_carving_mask_filter(
+                        self,
+                    );
                     self.chunks[mid]
                         .get_proto_chunk_mut()
                         .step_to_carvers(noise_gen);

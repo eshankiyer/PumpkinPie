@@ -3,7 +3,7 @@ use std::{any::Any, sync::Arc};
 
 use pumpkin_data::data_component_impl::{
     BeesImpl, BlockEntityDataImpl, ContainerImpl, ContainerLootImpl, CustomNameImpl,
-    DataComponentImpl,
+    DataComponentImpl, NoteBlockSoundImpl, ProfileImpl,
 };
 use pumpkin_data::{Block, BlockStateId, block_properties::BLOCK_ENTITY_TYPES};
 use pumpkin_nbt::compound::NbtCompound;
@@ -199,6 +199,46 @@ pub fn apply_components_from_item_stack(
     entity: &dyn BlockEntity,
     stack: &ItemStack,
 ) -> Option<Arc<dyn BlockEntity>> {
+    if entity.as_any().is::<skull::SkullBlockEntity>() {
+        let profile = stack
+            .get_data_component::<ProfileImpl>()
+            .map(pumpkin_data::data_component_impl::DataComponentImpl::write_data);
+        let note_block_sound = stack
+            .get_data_component::<NoteBlockSoundImpl>()
+            .map(pumpkin_data::data_component_impl::DataComponentImpl::write_data);
+        let custom_name = stack
+            .get_data_component::<CustomNameImpl>()
+            .map(pumpkin_data::data_component_impl::DataComponentImpl::write_data);
+
+        if profile.is_some() || note_block_sound.is_some() || custom_name.is_some() {
+            // `SkullBlockEntity.applyImplicitComponents` copies these three components
+            // (`SkullBlockEntity.java:82-87`); `BlockItem.updateBlockEntityComponents` invokes it
+            // for the freshly placed entity (`BlockItem.java:101-106`).
+            let position = entity.get_position();
+            let block_entity_data = stack.get_data_component::<BlockEntityDataImpl>();
+            let mut nbt = block_entity_data.map_or_else(NbtCompound::new, |data| data.nbt.clone());
+            if let Some(id) = nbt.get_string("id")
+                && id != entity.resource_location()
+            {
+                return None;
+            }
+            nbt.put_string("id", entity.resource_location().to_string());
+            nbt.put_int("x", position.0.x);
+            nbt.put_int("y", position.0.y);
+            nbt.put_int("z", position.0.z);
+            if let Some(profile) = profile {
+                nbt.put("profile", profile);
+            }
+            if let Some(note_block_sound) = note_block_sound {
+                nbt.put("note_block_sound", note_block_sound);
+            }
+            if let Some(custom_name) = custom_name {
+                nbt.put("custom_name", custom_name);
+            }
+            return block_entity_from_nbt_at(&nbt, position);
+        }
+    }
+
     // `BeehiveBlockEntity.applyImplicitComponents` replaces stored occupants from the item
     // component (`BeehiveBlockEntity.java:309-315`).
     if entity.as_any().is::<beehive::BeehiveBlockEntity>() {
@@ -318,6 +358,39 @@ pub(crate) async fn collect_components_from_block_entity(
     pumpkin_data::data_component::DataComponent,
     Option<Box<dyn DataComponentImpl>>,
 )> {
+    if let Some(skull) = entity.as_any().downcast_ref::<skull::SkullBlockEntity>() {
+        // `SkullBlockEntity.collectImplicitComponents` exports PROFILE, NOTE_BLOCK_SOUND, and
+        // CUSTOM_NAME (`SkullBlockEntity.java:90-95`); the pick-block path consumes these
+        // components after `removeComponentsFromTag` removes them from the raw tag
+        // (`SkullBlockEntity.java:97-103`).
+        let mut components = Vec::new();
+        let profile_value = skull.profile.lock().await.clone();
+        if let Some(profile) = profile_value {
+            components.push((
+                pumpkin_data::data_component::DataComponent::Profile,
+                ProfileImpl::read_data(&pumpkin_nbt::tag::NbtTag::Compound(profile))
+                    .map(|profile| Box::new(profile).to_dyn()),
+            ));
+        }
+        let note_block_sound_value = skull.note_block_sound.lock().await.clone();
+        if let Some(sound) = note_block_sound_value {
+            components.push((
+                pumpkin_data::data_component::DataComponent::NoteBlockSound,
+                Some(Box::new(NoteBlockSoundImpl { sound }).to_dyn()),
+            ));
+        }
+        let custom_name_value = skull.custom_name.lock().await.clone();
+        if let Some(name) = custom_name_value {
+            let name = serde_json::from_str::<pumpkin_util::text::TextComponent>(&name)
+                .unwrap_or_else(|_| pumpkin_util::text::TextComponent::text(name));
+            components.push((
+                pumpkin_data::data_component::DataComponent::CustomName,
+                Some(Box::new(CustomNameImpl { name }).to_dyn()),
+            ));
+        }
+        return components;
+    }
+
     let Some(hive) = entity
         .as_any()
         .downcast_ref::<beehive::BeehiveBlockEntity>()
@@ -619,9 +692,10 @@ pub fn create_block_entity(
 mod test {
     use super::{
         BlockEntity, apply_components_from_item_stack, beehive::BeehiveBlockEntity,
-        block_entity_from_nbt, chest::ChestBlockEntity, furnace::FurnaceBlockEntity,
+        block_entity_from_nbt, chest::ChestBlockEntity, collect_components_from_block_entity,
+        furnace::FurnaceBlockEntity, skull::SkullBlockEntity,
     };
-    use pumpkin_data::data_component_impl::{BlockEntityDataImpl, ContainerLootImpl};
+    use pumpkin_data::data_component_impl::{BlockEntityDataImpl, ContainerLootImpl, ProfileImpl};
     use pumpkin_data::{item::Item, item_stack::ItemStack};
     use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
     use pumpkin_util::math::position::BlockPos;
@@ -771,5 +845,70 @@ mod test {
             .downcast_ref::<BeehiveBlockEntity>()
             .expect("component application should preserve the hive type");
         assert_eq!(hive.occupant_count().await, 1);
+    }
+
+    #[tokio::test]
+    async fn skull_implicit_components_are_collected() {
+        // `SkullBlockEntity.collectImplicitComponents` exports the three modeled components
+        // (`SkullBlockEntity.java:90-95`).
+        let entity = SkullBlockEntity::new(BlockPos::new(3, 64, -2));
+        let mut profile = NbtCompound::new();
+        profile.put_string("name", "Steve".to_string());
+        *entity.profile.lock().await = Some(profile);
+        *entity.note_block_sound.lock().await = Some("minecraft:block.note_block.harp".to_string());
+        *entity.custom_name.lock().await = Some("Skull".to_string());
+
+        let components = collect_components_from_block_entity(&entity).await;
+
+        assert_eq!(components.len(), 3);
+        assert!(
+            components
+                .iter()
+                .any(|(id, _)| { *id == pumpkin_data::data_component::DataComponent::Profile })
+        );
+        assert!(
+            components.iter().any(|(id, _)| {
+                *id == pumpkin_data::data_component::DataComponent::NoteBlockSound
+            })
+        );
+        assert!(
+            components
+                .iter()
+                .any(|(id, _)| { *id == pumpkin_data::data_component::DataComponent::CustomName })
+        );
+    }
+
+    #[tokio::test]
+    async fn placed_skull_profile_component_is_applied() {
+        // `SkullBlockEntity.applyImplicitComponents` loads PROFILE into the placed entity
+        // (`SkullBlockEntity.java:82-87`).
+        let position = BlockPos::new(3, 64, -2);
+        let stack = ItemStack::new_with_component(
+            1,
+            &Item::PLAYER_HEAD,
+            vec![(
+                pumpkin_data::data_component::DataComponent::Profile,
+                Some(Box::new(ProfileImpl {
+                    name: Some("Steve".to_string()),
+                    ..Default::default()
+                })),
+            )],
+        );
+        let entity: Arc<dyn BlockEntity> = Arc::new(SkullBlockEntity::new(position));
+        let applied = apply_components_from_item_stack(entity.as_ref(), &stack)
+            .expect("profile component should rebuild the placed skull");
+        let skull = applied
+            .as_any()
+            .downcast_ref::<SkullBlockEntity>()
+            .expect("component application should preserve the skull type");
+        assert_eq!(
+            skull
+                .profile
+                .lock()
+                .await
+                .as_ref()
+                .and_then(|profile| profile.get_string("name")),
+            Some("Steve")
+        );
     }
 }

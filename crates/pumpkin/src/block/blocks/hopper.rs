@@ -21,6 +21,7 @@ use pumpkin_inventory::screen_handler::{
     BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
 };
 use pumpkin_macros::pumpkin_block;
+use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::Inventory;
@@ -57,6 +58,45 @@ impl ScreenHandlerFactory for HopperBlockScreenFactory {
 pub struct HopperBlock;
 
 type HopperLikeProperties = pumpkin_data::block_properties::HopperLikeProperties;
+
+/// Returns the server-side interaction boxes used by `HopperBlock.getInteractionShape`.
+pub(crate) fn interaction_shapes_at(
+    state_id: BlockStateId,
+    position: &BlockPos,
+) -> Vec<BoundingBox> {
+    let facing = HopperLikeProperties::from_state_id(state_id, &Block::HOPPER).facing;
+    let inside = BoundingBox::new_array(
+        [2.0 / 16.0, 11.0 / 16.0, 2.0 / 16.0],
+        [14.0 / 16.0, 1.0, 14.0 / 16.0],
+    );
+    let spout = match facing {
+        FacingHopper::North => Some(BoundingBox::new_array(
+            [6.0 / 16.0, 8.0 / 16.0, 0.0],
+            [10.0 / 16.0, 10.0 / 16.0, 4.0 / 16.0],
+        )),
+        FacingHopper::East => Some(BoundingBox::new_array(
+            [12.0 / 16.0, 8.0 / 16.0, 6.0 / 16.0],
+            [1.0, 10.0 / 16.0, 10.0 / 16.0],
+        )),
+        FacingHopper::South => Some(BoundingBox::new_array(
+            [6.0 / 16.0, 8.0 / 16.0, 12.0 / 16.0],
+            [10.0 / 16.0, 10.0 / 16.0, 1.0],
+        )),
+        FacingHopper::West => Some(BoundingBox::new_array(
+            [0.0, 8.0 / 16.0, 6.0 / 16.0],
+            [4.0 / 16.0, 10.0 / 16.0, 10.0 / 16.0],
+        )),
+        FacingHopper::Down => None,
+    };
+
+    // `HopperBlock` builds `inside` and the horizontally rotated spout at
+    // (`HopperBlock.java:56-61`), then selects only `inside` for DOWN
+    // (`HopperBlock.java:79-80`).
+    std::iter::once(inside)
+        .chain(spout)
+        .map(|shape| shape.shift(position.0.to_f64()))
+        .collect()
+}
 
 impl BlockBehaviour for HopperBlock {
     /// `HopperBlock.entityInside` (`HopperBlock.java:163-169`) delegates item pickup to the
@@ -155,5 +195,33 @@ async fn check_powered_state(
         world
             .set_block_state(pos, state.to_state_id(block), BlockFlags::NOTIFY_LISTENERS)
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interaction_shape_has_only_the_inside_for_down_facing_hoppers() {
+        // `HopperBlock.java:56-61,79-80` uses the inside shape alone for DOWN and adds one
+        // horizontally rotated spout for each horizontal facing.
+        let position = BlockPos::new(3, 64, -2);
+        let down = HopperLikeProperties {
+            enabled: true,
+            facing: FacingHopper::Down,
+        }
+        .to_state_id(&Block::HOPPER);
+        let north = HopperLikeProperties {
+            enabled: true,
+            facing: FacingHopper::North,
+        }
+        .to_state_id(&Block::HOPPER);
+
+        assert_eq!(interaction_shapes_at(down, &position).len(), 1);
+        let north_shapes = interaction_shapes_at(north, &position);
+        assert_eq!(north_shapes.len(), 2);
+        assert_eq!(north_shapes[1].min.z, -2.0);
+        assert_eq!(north_shapes[1].max.z, -1.75);
     }
 }
