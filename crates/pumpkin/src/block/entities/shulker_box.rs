@@ -6,7 +6,7 @@ use pumpkin_util::math::position::BlockPos;
 use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::{array::from_fn, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -22,8 +22,22 @@ pub struct ShulkerBoxBlockEntity {
     pub items: RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
     pub dirty: AtomicBool,
 
+    /// `ShulkerBoxBlockEntity.updateAnimation` (`ShulkerBoxBlockEntity.java:66-100`) advances
+    /// the animation status over ten ticks after each viewer-count block event.
+    animation_status: AtomicU8,
+    animation_ticks: AtomicU8,
+
     // Viewer
     pub viewers: ViewerCountTracker,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AnimationStatus {
+    Closed,
+    Opening,
+    Opened,
+    Closing,
 }
 
 impl BlockEntity for ShulkerBoxBlockEntity {
@@ -43,6 +57,8 @@ impl BlockEntity for ShulkerBoxBlockEntity {
             position,
             items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             dirty: AtomicBool::new(false),
+            animation_status: AtomicU8::new(AnimationStatus::Closed as u8),
+            animation_ticks: AtomicU8::new(0),
             viewers: ViewerCountTracker::new(),
         };
 
@@ -60,6 +76,7 @@ impl BlockEntity for ShulkerBoxBlockEntity {
 
     fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
+            self.tick_animation();
             self.viewers
                 .update_viewer_count::<Self>(self, world, &self.position)
                 .await;
@@ -134,6 +151,17 @@ impl ViewerCountListener for ShulkerBoxBlockEntity {
         new: u16,
     ) -> ViewerFuture<'a, ()> {
         Box::pin(async move {
+            // `ShulkerBoxBlockEntity.triggerEvent` (`ShulkerBoxBlockEntity.java:140-151`) starts
+            // opening at one viewer and closing at zero viewers.
+            self.animation_status.store(
+                if new == 0 {
+                    AnimationStatus::Closing as u8
+                } else {
+                    AnimationStatus::Opening as u8
+                },
+                Ordering::Relaxed,
+            );
+            self.animation_ticks.store(0, Ordering::Relaxed);
             world
                 .add_synced_block_event(*position, Self::OPEN_ANIMATION_EVENT_TYPE, new as u8)
                 .await;
@@ -152,8 +180,50 @@ impl ShulkerBoxBlockEntity {
             position,
             items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             dirty: AtomicBool::new(false),
+            animation_status: AtomicU8::new(AnimationStatus::Closed as u8),
+            animation_ticks: AtomicU8::new(0),
             viewers: ViewerCountTracker::new(),
         }
+    }
+
+    /// `ShulkerBoxBlockEntity.getAnimationStatus` (`ShulkerBoxBlockEntity.java:103-105`) is
+    /// consulted by the live `ShulkerBoxBlock.normal_use` path before opening another menu.
+    #[must_use]
+    pub fn get_animation_status(&self) -> AnimationStatus {
+        let status = match self.animation_status.load(Ordering::Relaxed) {
+            value if value == AnimationStatus::Opening as u8 => AnimationStatus::Opening,
+            value if value == AnimationStatus::Opened as u8 => AnimationStatus::Opened,
+            value if value == AnimationStatus::Closing as u8 => AnimationStatus::Closing,
+            _ => AnimationStatus::Closed,
+        };
+
+        if status == AnimationStatus::Closed && self.viewers.get_viewer_count() > 0 {
+            AnimationStatus::Opening
+        } else {
+            status
+        }
+    }
+
+    fn tick_animation(&self) {
+        let status = self.animation_status.load(Ordering::Relaxed);
+        if status != AnimationStatus::Opening as u8 && status != AnimationStatus::Closing as u8 {
+            return;
+        }
+
+        let ticks = self.animation_ticks.fetch_add(1, Ordering::Relaxed) + 1;
+        if ticks < 10 {
+            return;
+        }
+
+        self.animation_status.store(
+            if status == AnimationStatus::Opening as u8 {
+                AnimationStatus::Opened as u8
+            } else {
+                AnimationStatus::Closed as u8
+            },
+            Ordering::Relaxed,
+        );
+        self.animation_ticks.store(0, Ordering::Relaxed);
     }
 
     pub fn update_viewers(&self, world: &Arc<World>) {
@@ -266,5 +336,36 @@ impl Clearable for ShulkerBoxBlockEntity {
             items.fill_with(|| ItemStack::EMPTY.clone());
             self.mark_dirty();
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AnimationStatus, ShulkerBoxBlockEntity};
+    use pumpkin_util::math::position::BlockPos;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn animation_status_reaches_open_and_closed_after_ten_ticks() {
+        // `ShulkerBoxBlockEntity.updateAnimation` (`ShulkerBoxBlockEntity.java:72-100`) advances
+        // opening and closing by 0.1 per tick until the status changes at ten ticks.
+        let entity = ShulkerBoxBlockEntity::new(BlockPos::new(0, 64, 0));
+        entity
+            .animation_status
+            .store(AnimationStatus::Opening as u8, Ordering::Relaxed);
+        for _ in 0..9 {
+            entity.tick_animation();
+        }
+        assert_eq!(entity.get_animation_status(), AnimationStatus::Opening);
+        entity.tick_animation();
+        assert_eq!(entity.get_animation_status(), AnimationStatus::Opened);
+
+        entity
+            .animation_status
+            .store(AnimationStatus::Closing as u8, Ordering::Relaxed);
+        for _ in 0..10 {
+            entity.tick_animation();
+        }
+        assert_eq!(entity.get_animation_status(), AnimationStatus::Closed);
     }
 }

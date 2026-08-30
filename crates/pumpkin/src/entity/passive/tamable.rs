@@ -1,11 +1,45 @@
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 
 use crossbeam::atomic::AtomicCell;
+use pumpkin_data::data_component_impl::FoodImpl;
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 use uuid::Uuid;
 
-use crate::entity::passive::animal::Animal;
+use crate::entity::{living::LivingEntity, passive::animal::Animal, player::Player};
+
+// TamableAnimal.java:135-140 (shared healing helper used by Wolf.java:453-459 and
+// Cat.java:423-428). The Rust interaction hooks already own the hand stack, so consuming it
+// directly is the equivalent of usePlayerItem.
+pub(crate) fn feed(
+    player: &Player,
+    item_stack: &mut ItemStack,
+    living: &LivingEntity,
+    healing_factor: f32,
+    default_heal: f32,
+    eating_sound: Option<pumpkin_data::sound::Sound>,
+) {
+    let nutrition = item_stack
+        .get_data_component::<FoodImpl>()
+        .map(|food| food.nutrition);
+    let healing = feed_healing_amount(nutrition, healing_factor, default_heal);
+    item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+    living.heal(healing);
+    if let Some(sound) = eating_sound {
+        let entity = &living.entity;
+        let world = entity.world.load();
+        world.play_sound(
+            sound,
+            pumpkin_data::sound::SoundCategory::Neutral,
+            &entity.pos.load(),
+        );
+    }
+}
+
+fn feed_healing_amount(nutrition: Option<i32>, healing_factor: f32, default_heal: f32) -> f32 {
+    nutrition.map_or(default_heal, |nutrition| healing_factor * nutrition as f32)
+}
 
 pub const SITTING_FLAG: u8 = 1;
 pub const TAME_FLAG: u8 = 4;
@@ -152,5 +186,18 @@ pub trait TamableAnimal: Animal {
             .or_else(|| nbt.get_byte("Sitting").map(|b| b != 0))
             .unwrap_or(false);
         self.set_ordered_to_sit(sitting);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::feed_healing_amount;
+
+    // TamableAnimal.java:135-140 selects food nutrition when present and otherwise uses the
+    // caller's default healing amount.
+    #[test]
+    fn feed_healing_uses_component_nutrition_or_default() {
+        assert_eq!(feed_healing_amount(Some(3), 2.0, 2.0), 6.0);
+        assert_eq!(feed_healing_amount(None, 2.0, 2.0), 2.0);
     }
 }

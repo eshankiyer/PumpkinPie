@@ -4,6 +4,8 @@ use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::ai::pathfinder::node::PathType;
 use crate::entity::mob::Mob;
 use crate::entity::player::Player;
+use pumpkin_data::entity::EntityType;
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
@@ -98,7 +100,14 @@ impl FollowOwnerGoal {
 
             let below = BlockPos(Vector3::new(target_x, target_y - 1, target_z));
             let block_below = world.get_block_state(&below);
-            if !block_below.is_solid() {
+            let below_block = pumpkin_data::Block::from_state_id(block_below.id);
+            // TamableAnimal.canTeleportTo permits leaves only for canFlyToOwner
+            // (TamableAnimal.java:276-288; Parrot.java:462-465). FollowOwnerGoal is the live
+            // teleport caller for cats, wolves, and parrots (TamableAnimal.java:303-311).
+            if !block_below.is_solid()
+                || (below_block.has_tag(&tag::Block::MINECRAFT_LEAVES)
+                    && mob.get_entity().entity_type != &EntityType::PARROT)
+            {
                 continue;
             }
 

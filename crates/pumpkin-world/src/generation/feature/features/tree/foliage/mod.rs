@@ -150,31 +150,30 @@ impl FoliagePlacer {
             return false;
         }
 
-        // Vanilla `FoliagePlacer.tryPlaceLeaf` (`FoliagePlacer.java:170-186`) preserves
-        // source-water occupancy when the foliage state supports `waterlogged`.
+        // Vanilla `FoliagePlacer.tryPlaceLeaf` (`FoliagePlacer.java:173-183`) sets
+        // `waterlogged` to whether the target contains a water source.
         let (fluid, fluid_state) = GenerationCache::get_fluid_and_fluid_state(chunk, &pos.0);
-        let foliage_state = if fluid_state.is_source
-            && fluid.matches_type(&Fluid::WATER)
-            && let Some(properties) =
-                Block::from_state_id(block_state.id).properties(block_state.id)
-        {
-            let mut properties = properties.to_props();
-            properties
-                .iter()
-                .position(|(key, _)| *key == "waterlogged")
-                .map_or(block_state, |index| {
-                    properties[index] = ("waterlogged", "true");
-                    BlockState::from_id(
-                        Block::from_state_id(block_state.id)
-                            .from_properties(&properties)
-                            .to_state_id(Block::from_state_id(block_state.id)),
-                    )
-                })
-        } else {
-            block_state
-        };
+        let foliage_state = Self::set_waterlogged(
+            block_state,
+            fluid_state.is_source && fluid.matches_type(&Fluid::WATER),
+        );
         chunk.set_block_state(&pos.0, foliage_state);
         true
+    }
+
+    // Mirrors `FoliagePlacer.tryPlaceLeaf` (`FoliagePlacer.java:175-179`), including
+    // clearing a provider state that was already waterlogged outside a water source.
+    fn set_waterlogged(block_state: &BlockState, waterlogged: bool) -> &BlockState {
+        let block = Block::from_state_id(block_state.id);
+        let Some(properties) = block.properties(block_state.id) else {
+            return block_state;
+        };
+        let mut properties = properties.to_props();
+        let Some(index) = properties.iter().position(|(key, _)| *key == "waterlogged") else {
+            return block_state;
+        };
+        properties[index] = ("waterlogged", if waterlogged { "true" } else { "false" });
+        BlockState::from_id(block.from_properties(&properties).to_state_id(block))
     }
 
     pub fn is_set<T: GenerationCache>(
@@ -430,5 +429,22 @@ impl FoliageType {
             }
             Self::Cherry(cherry) => cherry.get_random_height(random),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pumpkin_data::Block;
+
+    use super::FoliagePlacer;
+
+    #[test]
+    fn try_place_leaf_matches_vanilla_waterlogged_selection() {
+        // Vanilla `FoliagePlacer.tryPlaceLeaf` (`FoliagePlacer.java:175-179`) writes both
+        // outcomes of the water-source predicate to a waterloggable foliage state.
+        let wet = FoliagePlacer::set_waterlogged(Block::OAK_LEAVES.default_state, true);
+        let dry = FoliagePlacer::set_waterlogged(wet, false);
+        assert!(!dry.is_waterlogged());
+        assert!(wet.is_waterlogged());
     }
 }

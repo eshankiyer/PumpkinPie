@@ -1,16 +1,18 @@
 use std::any::Any;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use crate::player::player_inventory::PlayerInventory;
 use crate::screen_handler::{
     InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, ScreenHandlerFuture,
 };
-use crate::slot::PredicateSlot;
+use crate::slot::{BoxFuture, PredicateSlot, Slot};
 
 use pumpkin_data::data_component_impl::MapIdImpl;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::screen::WindowType;
+use pumpkin_data::sound::Sound;
 use pumpkin_protocol::java::server::play::SlotActionType;
 use pumpkin_world::inventory::Inventory;
 use pumpkin_world::inventory::SimpleInventory;
@@ -34,11 +36,6 @@ fn may_place_map(stack: &ItemStack) -> bool {
 /// map (copy), or a glass pane (lock).
 fn may_place_additional(stack: &ItemStack) -> bool {
     stack.item == &Item::PAPER || stack.item == &Item::MAP || stack.item == &Item::GLASS_PANE
-}
-
-/// `CartographyTableMenu.java:61-65`: the result slot never accepts a placed item.
-const fn may_place_result(_stack: &ItemStack) -> bool {
-    false
 }
 
 pub struct CartographyTableScreenHandler {
@@ -65,20 +62,96 @@ impl CartographyTableScreenHandler {
             may_place_map,
         )));
         handler.add_slot(Arc::new(PredicateSlot::new(
-            input_inventory as Arc<dyn Inventory>,
+            input_inventory.clone() as Arc<dyn Inventory>,
             1,
             may_place_additional,
         )));
-        handler.add_slot(Arc::new(PredicateSlot::new(
+        handler.add_slot(Arc::new(CartographyResultSlot::new(
             output_inventory as Arc<dyn Inventory>,
-            0,
-            may_place_result,
+            input_inventory,
         )));
 
         let player_inventory: Arc<dyn Inventory> = player_inventory.clone();
         handler.add_player_slots(&player_inventory);
 
         handler
+    }
+
+    /// `CartographyTableMenu.slotsChanged`/`setupResultSlot` (`CartographyTableMenu.java:97-141`)
+    /// puts two copies in the result when the map and additional item are both present. The
+    /// map-copy branch only needs the `MAP_ID` component; scale/lock post-processing is not
+    /// represented by the current zero-field `MapPostProcessingImpl`.
+    async fn update_result(&self) {
+        let map = self.input_inventory.get_stack(0).await;
+        let additional = self.input_inventory.get_stack(1).await;
+        let result =
+            if map.get_data_component::<MapIdImpl>().is_some() && additional.item == &Item::MAP {
+                // `CartographyTableMenu.setupResultSlot` (`CartographyTableMenu.java:125-133`)
+                // copies the map with a count of two.
+                map.copy_with_count(2)
+            } else {
+                ItemStack::EMPTY.clone()
+            };
+        self.output_inventory.set_stack(0, result).await;
+    }
+}
+
+/// Result slot for `CartographyTableMenu`. It mirrors the vanilla result-slot `onTake` callback
+/// (`CartographyTableMenu.java:61-80`) so normal clicks and shift-clicks consume both inputs.
+struct CartographyResultSlot {
+    output_inventory: Arc<dyn Inventory>,
+    input_inventory: Arc<SimpleInventory>,
+    id: AtomicU8,
+}
+
+impl CartographyResultSlot {
+    fn new(output_inventory: Arc<dyn Inventory>, input_inventory: Arc<SimpleInventory>) -> Self {
+        Self {
+            output_inventory,
+            input_inventory,
+            id: AtomicU8::new(0),
+        }
+    }
+}
+
+impl Slot for CartographyResultSlot {
+    fn get_inventory(&self) -> Arc<dyn Inventory> {
+        self.output_inventory.clone()
+    }
+
+    fn get_index(&self) -> usize {
+        0
+    }
+
+    fn set_id(&self, id: usize) {
+        self.id.store(id as u8, Ordering::Relaxed);
+    }
+
+    fn can_insert<'a>(&'a self, _stack: &'a ItemStack) -> BoxFuture<'a, bool> {
+        // `CartographyTableMenu`'s result slot rejects every placed stack
+        // (`CartographyTableMenu.java:61-65`).
+        Box::pin(async { false })
+    }
+
+    fn mark_dirty(&self) -> BoxFuture<'_, ()> {
+        Box::pin(async move {
+            self.output_inventory.mark_dirty();
+        })
+    }
+
+    fn on_take_item<'a>(
+        &'a self,
+        player: &'a dyn InventoryPlayer,
+        _stack: &'a ItemStack,
+    ) -> BoxFuture<'a, ()> {
+        Box::pin(async move {
+            // `CartographyTableMenu` removes one stack from both inputs before playing the
+            // take-result sound (`CartographyTableMenu.java:67-79`).
+            self.input_inventory.remove_stack_specific(0, 1).await;
+            self.input_inventory.remove_stack_specific(1, 1).await;
+            player.play_sound(Sound::UiCartographyTableTakeResult).await;
+            self.mark_dirty().await;
+        })
     }
 }
 
@@ -116,8 +189,22 @@ impl ScreenHandler for CartographyTableScreenHandler {
         player: &'a dyn InventoryPlayer,
     ) -> ScreenHandlerFuture<'a, ()> {
         Box::pin(async move {
+            if action_type == SlotActionType::PickupAll && button == 0 {
+                // `canTakeItemForPickAll` excludes slots backed by the result container
+                // (`CartographyTableMenu.java:143-146`). The shared handler has no per-slot
+                // pickup-all predicate, so exclude this result while it performs the scan.
+                self.output_inventory.remove_stack(0).await;
+                self.internal_on_slot_click(slot_index, button, action_type, player)
+                    .await;
+                self.update_result().await;
+                return;
+            }
             self.internal_on_slot_click(slot_index, button, action_type, player)
                 .await;
+            // Vanilla invokes `slotsChanged` from both input containers' `setChanged`
+            // callbacks (`CartographyTableMenu.java:27-39, 97-109`). The existing screen
+            // handler has no inventory listener, so refresh after every live click instead.
+            self.update_result().await;
         })
     }
 
@@ -135,16 +222,13 @@ impl ScreenHandler for CartographyTableScreenHandler {
 
     /// `CartographyTableMenu.quickMoveStack` (`CartographyTableMenu.java:149-196`).
     ///
-    /// `slotsChanged`/`setupResultSlot` (`CartographyTableMenu.java:97-141`) -- the crafting
-    /// logic that actually populates the result slot from the map + paper/glass-pane/map
-    /// combination -- is not implemented: it needs `MapPostProcessing` to carry a real
-    /// Scale/Lock payload (`MapPostProcessingImpl` here is a zero-field marker,
-    /// `pumpkin-data/src/data_component_impl/utility.rs:64-68`) and a consumer that applies it
-    /// when the map item is next held (no such consumer exists). So the result slot is always
-    /// empty in practice; the routing below still matches vanilla for the two input slots.
+    /// The result branch invokes the result-slot callback after moving the stack, matching
+    /// `CartographyTableMenu.java:155-162` and its input consumption at `:67-80`. The scale and
+    /// lock branches remain unavailable because `MapPostProcessingImpl` is a zero-field marker
+    /// (`pumpkin-data/src/data_component_impl/utility.rs:64-68`) with no live consumer.
     fn quick_move<'a>(
         &'a mut self,
-        _player: &'a dyn InventoryPlayer,
+        player: &'a dyn InventoryPlayer,
         slot_index: i32,
     ) -> ScreenHandlerFuture<'a, ItemStack> {
         Box::pin(async move {
@@ -165,6 +249,9 @@ impl ScreenHandler for CartographyTableScreenHandler {
                         {
                             return ItemStack::EMPTY.clone();
                         }
+                        // `CartographyTableMenu`'s result-slot `onTake` consumes one item from
+                        // each input (`CartographyTableMenu.java:67-80`).
+                        slot.on_take_item(player, &stack).await;
                     } else if slot_index != 0 && slot_index != 1 {
                         if slot_stack.get_data_component::<MapIdImpl>().is_some() {
                             if !self.insert_item(&mut slot_stack, 0, 1, false).await {
@@ -212,7 +299,55 @@ impl ScreenHandler for CartographyTableScreenHandler {
                     }
                 }
             }
+            self.update_result().await;
             stack
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CartographyTableScreenHandler;
+    use crate::entity_equipment::EntityEquipment;
+    use crate::player::player_inventory::PlayerInventory;
+    use pumpkin_data::data_component::DataComponent;
+    use pumpkin_data::data_component_impl::{DataComponentImpl, MapIdImpl};
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
+    use pumpkin_world::inventory::Inventory;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    fn handler() -> CartographyTableScreenHandler {
+        let player_inventory = Arc::new(PlayerInventory::new(
+            Arc::new(Mutex::new(EntityEquipment::new())),
+            Arc::new(crate::build_equipment_slots()),
+        ));
+        CartographyTableScreenHandler::new(0, &player_inventory)
+    }
+
+    /// `CartographyTableMenu.setupResultSlot` copies a map with count two when the second input
+    /// is another map (`CartographyTableMenu.java:125-133`).
+    #[tokio::test]
+    async fn map_copy_refreshes_the_result() {
+        let handler = handler();
+        let mut map = ItemStack::new(1, &Item::FILLED_MAP);
+        map.patch
+            .push((DataComponent::MapId, Some(MapIdImpl { id: 7 }.to_dyn())));
+        handler.input_inventory.set_stack(0, map).await;
+        handler
+            .input_inventory
+            .set_stack(1, ItemStack::new(1, &Item::MAP))
+            .await;
+
+        handler.update_result().await;
+
+        let result = handler.output_inventory.get_stack(0).await;
+        assert_eq!(result.item.id, Item::FILLED_MAP.id);
+        assert_eq!(result.item_count, 2);
+        assert_eq!(
+            result.get_data_component::<MapIdImpl>().map(|id| id.id),
+            Some(7)
+        );
     }
 }

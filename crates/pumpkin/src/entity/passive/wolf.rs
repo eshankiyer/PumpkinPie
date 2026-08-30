@@ -427,6 +427,23 @@ impl Mob for WolfEntity {
             // Vanilla Wolf.java#mobInteract: a tamed wolf, held item in the collar-dye tag,
             // and owned by the interacting player recolors the collar instead of anything else.
             if self.mob_entity.is_tamed() {
+                if self.is_food(item_stack)
+                    && self.mob_entity.living_entity.health.load()
+                        < self.mob_entity.living_entity.get_max_health()
+                {
+                    // TamableAnimal.feed (TamableAnimal.java:135-140) is the first tamed-wolf
+                    // interaction branch (Wolf.java:453-459), before collar or sitting logic.
+                    crate::entity::passive::tamable::feed(
+                        player,
+                        item_stack,
+                        &self.mob_entity.living_entity,
+                        2.0,
+                        2.0,
+                        None,
+                    );
+                    return true;
+                }
+
                 if tag::Item::MINECRAFT_WOLF_COLLAR_DYES
                     .1
                     .contains(&item_stack.item.id)
@@ -455,6 +472,10 @@ impl Mob for WolfEntity {
 
             if self.get_random().random_range(0..3) == 0 {
                 self.mob_entity.set_owner(player.gameprofile.id);
+                // TamableAnimal.setTame invokes Wolf.applyTamingSideEffects
+                // (TamableAnimal.java:119-133; Wolf.java:432-440): a tamed wolf has a
+                // 40-health maximum and is healed to that value.
+                self.mob_entity.living_entity.set_max_health(40.0).await;
                 self.mob_entity
                     .living_entity
                     .set_health(self.mob_entity.living_entity.get_max_health());

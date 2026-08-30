@@ -249,7 +249,11 @@ struct LocateBiomeExecutor;
 impl CommandExecutor for LocateBiomeExecutor {
     fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
         Box::pin(async move {
-            let searched = context.get_argument::<ResourceOrTag>(ARG_BIOME)?.clone();
+            // Vanilla obtains this through `ResourceOrTagArgument.getResourceOrTag`
+            // (`ResourceOrTagArgument.java:52-64`) before resolving the biome.
+            let searched =
+                ResourceOrTagArgument::get_resource_or_tag(context, ARG_BIOME, BIOME_REGISTRY)?
+                    .clone();
 
             let targets: FxHashSet<u8> = match &searched {
                 ResourceOrTag::Resource(id) => Biome::from_name(id.path())
@@ -320,7 +324,10 @@ struct LocatePoiExecutor;
 impl CommandExecutor for LocatePoiExecutor {
     fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
         Box::pin(async move {
-            let searched = context.get_argument::<ResourceOrTag>(ARG_POI)?;
+            // Vanilla obtains this through `ResourceOrTagArgument.getResourceOrTag`
+            // (`ResourceOrTagArgument.java:52-64`) before resolving the POI type.
+            let searched =
+                ResourceOrTagArgument::get_resource_or_tag(context, ARG_POI, &POI_REGISTRY)?;
 
             // POI entries store namespaced type ids, tag data uses bare
             // vanilla names; normalize everything to `namespace:path`.

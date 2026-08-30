@@ -29,7 +29,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector2::Vector2;
 
 use super::{
-    ChunkData, ChunkHeightmaps, ChunkLight, ChunkParsingError, ChunkSections,
+    ChunkData, ChunkHeightmapType, ChunkHeightmaps, ChunkLight, ChunkParsingError, ChunkSections,
     palette::{BiomePalette, BlockPalette},
 };
 pub mod anvil;
@@ -418,32 +418,25 @@ impl ChunkData {
             min_y,
         };
 
-        let heightmaps = root_tag.get_compound("Heightmaps").map_or(
-            ChunkHeightmaps {
-                world_surface: None,
-                motion_blocking: None,
-                motion_blocking_no_leaves: None,
-                ocean_floor: None,
-            },
-            |h_compound| ChunkHeightmaps {
-                world_surface: h_compound
-                    .get_long_array("WORLD_SURFACE")
-                    .map(|a| a.to_vec().into_boxed_slice()),
-                motion_blocking: h_compound
-                    .get_long_array("MOTION_BLOCKING")
-                    .map(|a| a.to_vec().into_boxed_slice()),
-                motion_blocking_no_leaves: h_compound
-                    .get_long_array("MOTION_BLOCKING_NO_LEAVES")
-                    .map(|a| a.to_vec().into_boxed_slice()),
-                // Any of these can be absent: vanilla only serializes the
-                // heightmap types listed for the chunk's status. Absence is
-                // resolved by `prime_missing_heightmaps` below, before anything
-                // can mistake it for an empty column.
-                ocean_floor: h_compound
-                    .get_long_array("OCEAN_FLOOR")
-                    .map(|a| a.to_vec().into_boxed_slice()),
-            },
-        );
+        let mut heightmaps = ChunkHeightmaps::default();
+        if let Some(h_compound) = root_tag.get_compound("Heightmaps") {
+            // Vanilla `Heightmap.setRawData` (`Heightmap.java:126-133`) ignores malformed
+            // arrays and primes the affected map from blocks; the load boundary keeps that
+            // malformed data distinguishable from a valid empty heightmap.
+            for (heightmap_type, key) in [
+                (ChunkHeightmapType::WorldSurface, "WORLD_SURFACE"),
+                (ChunkHeightmapType::MotionBlocking, "MOTION_BLOCKING"),
+                (
+                    ChunkHeightmapType::MotionBlockingNoLeaves,
+                    "MOTION_BLOCKING_NO_LEAVES",
+                ),
+                (ChunkHeightmapType::OceanFloor, "OCEAN_FLOOR"),
+            ] {
+                if let Some(raw_data) = h_compound.get_long_array(key) {
+                    heightmaps.set_raw_data(heightmap_type, raw_data);
+                }
+            }
+        }
         let mut block_ticks = Vec::new();
         if let Some(list) = root_tag.get_list("block_ticks") {
             for tag in list {
@@ -1077,6 +1070,14 @@ pub(crate) mod chunk_codec_tests {
     /// `WORLD_SURFACE` entry - the shape vanilla writes for any chunk saved
     /// below `minecraft:full` that already contains terrain.
     pub fn encode_terrain_chunk_without_world_surface(chunk_x: i32, chunk_z: i32) -> Vec<u8> {
+        encode_terrain_chunk_with_world_surface(chunk_x, chunk_z, None)
+    }
+
+    fn encode_terrain_chunk_with_world_surface(
+        chunk_x: i32,
+        chunk_z: i32,
+        world_surface: Option<Vec<i64>>,
+    ) -> Vec<u8> {
         const MIN_SECTION: i8 = -4;
         const MAX_SECTION: i8 = 19;
         const TOP_STONE_SECTION: i8 = 3;
@@ -1102,9 +1103,15 @@ pub(crate) mod chunk_codec_tests {
         root.put_int("yPos", i32::from(MIN_SECTION));
         root.put_list("sections", sections);
         root.put_string("Status", "minecraft:carvers".to_string());
+        let mut heightmaps = NbtCompound::new();
+        if let Some(world_surface) = world_surface {
+            // `Heightmap.setRawData` receives the serialized long array
+            // (`Heightmap.java:126-133`).
+            heightmaps.put("WORLD_SURFACE", NbtTag::LongArray(world_surface));
+        }
         // Present but empty, exactly as a pre-`full` vanilla chunk with no
         // status-eligible heightmap types is written.
-        root.put_compound("Heightmaps", NbtCompound::new());
+        root.put_compound("Heightmaps", heightmaps);
 
         pumpkin_nbt::Nbt::from(root).write().to_vec()
     }
@@ -1127,6 +1134,21 @@ pub(crate) mod chunk_codec_tests {
                 "column ({x}, {z}) must report its real surface, not the empty-column sentinel"
             );
         }
+    }
+
+    #[test]
+    fn malformed_world_surface_heightmap_is_recomputed_from_blocks() {
+        let bytes = encode_terrain_chunk_with_world_surface(0, 0, Some(vec![0]));
+        let chunk = ChunkData::internal_from_bytes(&bytes, Vector2::new(0, 0)).unwrap();
+        let min_y = chunk.section.min_y;
+        let heightmap = chunk.heightmap.lock().unwrap();
+
+        // Vanilla `Heightmap.setRawData` (`Heightmap.java:126-133`) rejects the one-word array
+        // before it can be read as heightmap storage.
+        assert_eq!(
+            heightmap.get(ChunkHeightmapType::WorldSurface, 0, 0, min_y),
+            63
+        );
     }
 
     fn encode_chunk(min_y_section: i32, sections: Vec<NbtTag>) -> Vec<u8> {
