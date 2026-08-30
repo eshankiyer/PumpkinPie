@@ -5824,13 +5824,18 @@ impl World {
             .update_block(*position, new_block);
 
         let block_moved = flags.contains(BlockFlags::MOVED);
-
         let is_new_block = old_block != new_block;
         // CopperChestBlock::shouldChangedStateKeepBlockEntity retains the
         // chest entity across copper oxidation and waxing transitions.
         let keeps_copper_chest_entity = old_block
             .has_tag(&pumpkin_data::tag::Block::MINECRAFT_COPPER_CHESTS)
             && new_block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_COPPER_CHESTS);
+        // `CopperGolemStatueBlock.shouldChangedStateKeepBlockEntity` retains the statue entity
+        // across oxidation and waxing transitions (`CopperGolemStatueBlock.java:135-138`).
+        let keeps_copper_golem_statue_entity =
+            crate::block::blocks::copper_golem_statue::should_keep_block_entity(
+                old_block, new_block,
+            );
 
         // PoiManager reacting to onBlockStateChange: keep the village POI
         // registry (village_poi.rs) in sync with bed/job-site/bell blocks.
@@ -5856,6 +5861,7 @@ impl World {
         if is_new_block
             && old_block.default_state.block_entity_type != u16::MAX
             && !keeps_copper_chest_entity
+            && !keeps_copper_golem_statue_entity
             && let Some(entity) = self.get_block_entity(position)
         {
             if !is_current_mutation() {
@@ -6401,6 +6407,11 @@ impl World {
             )
             .await;
 
+            // `ShulkerBoxBlock.getDrops` (`ShulkerBoxBlock.java:127-139`) reads the block
+            // entity while building the dropped item's copied container component, so it must
+            // be captured before the screens close and the entity is torn down.
+            let block_entity = self.get_block_entity(position);
+
             // Close container screens for any players viewing this block
             self.close_container_screens_at(position).await;
 
@@ -6471,6 +6482,7 @@ impl World {
                     tool,
                     is_raining: Some(is_raining),
                     is_thundering: Some(is_thundering),
+                    block_entity,
                     ..Default::default()
                 };
                 block::drop_loot(self, broken_block, position, true, params).await;
@@ -7305,7 +7317,7 @@ impl World {
         to: Vector3<f64>,
         min: Vector3<f64>,
         max: Vector3<f64>,
-    ) -> Option<BlockDirection> {
+    ) -> Option<(BlockDirection, f64)> {
         let dir = to.sub(&from);
         let mut tmin: f64 = 0.0;
         let mut tmax: f64 = 1.0;
@@ -7349,12 +7361,12 @@ impl World {
         check_axis!(z, z, z, z, BlockDirection::North, BlockDirection::South);
 
         match (hit_axis, hit_is_min) {
-            (Some("x"), true) => Some(BlockDirection::West),
-            (Some("x"), false) => Some(BlockDirection::East),
-            (Some("y"), true) => Some(BlockDirection::Down),
-            (Some("y"), false) => Some(BlockDirection::Up),
-            (Some("z"), true) => Some(BlockDirection::North),
-            (Some("z"), false) => Some(BlockDirection::South),
+            (Some("x"), true) => Some((BlockDirection::West, tmin)),
+            (Some("x"), false) => Some((BlockDirection::East, tmin)),
+            (Some("y"), true) => Some((BlockDirection::Down, tmin)),
+            (Some("y"), false) => Some((BlockDirection::Up, tmin)),
+            (Some("z"), true) => Some((BlockDirection::North, tmin)),
+            (Some("z"), false) => Some((BlockDirection::South, tmin)),
             _ => None,
         }
     }
@@ -7373,30 +7385,62 @@ impl World {
 
         let bounding_boxes = state.get_block_outline_shapes_at(block_pos);
 
+        let mut outline_hit = None;
         for shape in bounding_boxes {
             let world_min = shape.min.add(&block_pos.0.to_f64());
             let world_max = shape.max.add(&block_pos.0.to_f64());
 
-            let direction = Self::intersects_aabb_with_direction(from, to, world_min, world_max);
-            if direction.is_some() {
-                // `ComposterBlock.getInteractionShape` (`ComposterBlock.java:230-233`)
-                // overrides the outline hit direction with a full-cube hit when that
-                // interaction shape is closer. The outline is still required to select the
-                // block, so preserve the loop's collision test and only replace its direction.
-                if Block::from_state_id(state.id) == &Block::COMPOSTER {
-                    let block_min = block_pos.0.to_f64();
-                    let block_max = block_min.add(&Vector3::new(1.0, 1.0, 1.0));
-                    if let Some(interaction_direction) =
-                        Self::intersects_aabb_with_direction(from, to, block_min, block_max)
-                    {
-                        return (true, Some(interaction_direction));
-                    }
-                }
-                return (true, direction);
+            let Some((direction, distance)) =
+                Self::intersects_aabb_with_direction(from, to, world_min, world_max)
+            else {
+                continue;
+            };
+            if outline_hit.is_none_or(|(_, closest_distance)| distance < closest_distance) {
+                outline_hit = Some((direction, distance));
             }
         }
 
-        (false, None)
+        let Some((outline_direction, outline_distance)) = outline_hit else {
+            return (false, None);
+        };
+
+        // `BlockGetter.getBlockHitResult` (`BlockGetter.java:84-90`) replaces the outline hit
+        // direction only when the block's interaction shape is hit closer. Hopper is the only
+        // worklist block with a server-side interaction-shape override.
+        if Block::from_state_id(state.id) == &Block::HOPPER {
+            let mut interaction_hit = None;
+            for shape in crate::block::blocks::hopper::interaction_shapes_at(state.id, block_pos) {
+                if let Some((direction, distance)) =
+                    Self::intersects_aabb_with_direction(from, to, shape.min, shape.max)
+                    && interaction_hit
+                        .is_none_or(|(_, closest_distance)| distance < closest_distance)
+                {
+                    interaction_hit = Some((direction, distance));
+                }
+            }
+            if let Some((direction, distance)) = interaction_hit
+                && distance < outline_distance
+            {
+                return (true, Some(direction));
+            }
+        }
+
+        // `ComposterBlock.getInteractionShape` (`ComposterBlock.java:230-233`)
+        // overrides the outline hit direction with a full-cube hit when that
+        // interaction shape is closer. The outline is still required to select the
+        // block, so preserve the loop's collision test and only replace its direction.
+        if Block::from_state_id(state.id) == &Block::COMPOSTER {
+            let block_min = block_pos.0.to_f64();
+            let block_max = block_min.add(&Vector3::new(1.0, 1.0, 1.0));
+            if let Some((interaction_direction, interaction_distance)) =
+                Self::intersects_aabb_with_direction(from, to, block_min, block_max)
+                && interaction_distance < outline_distance
+            {
+                return (true, Some(interaction_direction));
+            }
+        }
+
+        (true, Some(outline_direction))
     }
 
     fn ray_collision_check(
@@ -7410,9 +7454,10 @@ impl World {
             let world_min = shape.min.add(&block_pos.0.to_f64());
             let world_max = shape.max.add(&block_pos.0.to_f64());
 
-            let direction = Self::intersects_aabb_with_direction(from, to, world_min, world_max);
-            if direction.is_some() {
-                return (true, direction);
+            if let Some((direction, _)) =
+                Self::intersects_aabb_with_direction(from, to, world_min, world_max)
+            {
+                return (true, Some(direction));
             }
         }
 

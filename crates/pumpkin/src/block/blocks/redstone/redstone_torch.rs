@@ -293,9 +293,16 @@ impl BlockBehaviour for RedstoneTorchBlock {
 
     fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            update_neighbors(args.world, args.position).await;
+            if should_notify_after_removal(args.moved) {
+                update_neighbors(args.world, args.position).await;
+            }
         })
     }
+}
+
+// RedstoneTorchBlock.java:57-60 only notifies neighbors when a piston did not move the torch.
+const fn should_notify_after_removal(moved: bool) -> bool {
+    !moved
 }
 
 pub async fn should_be_lit(world: &World, pos: &BlockPos, face: BlockDirection) -> bool {
@@ -393,7 +400,14 @@ impl RecentToggles {
 mod tests {
     use pumpkin_util::math::position::BlockPos;
 
-    use super::RecentToggles;
+    use super::{RecentToggles, should_notify_after_removal};
+
+    // RedstoneTorchBlock.java:57-60 suppresses removal notifications for piston movement.
+    #[test]
+    fn piston_movement_skips_removal_notification() {
+        assert!(should_notify_after_removal(false));
+        assert!(!should_notify_after_removal(true));
+    }
 
     #[test]
     fn eighth_toggle_within_window_triggers_burnout() {

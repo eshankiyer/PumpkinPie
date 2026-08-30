@@ -11,7 +11,7 @@ use pumpkin_util::version::JavaMinecraftVersion;
 #[java_packet(MOVE_PLAYER_POS)]
 pub struct SPlayerPosition {
     pub position: Vector3<f64>,
-    /// bit 0: [`FLAG_ON_GROUND`], bit 1: [`FLAG_IN_WALL`]
+    /// bit 0: [`FLAG_ON_GROUND`], bit 1: [`FLAG_HORIZONTAL_COLLISION`]
     pub collision: u8,
 }
 
@@ -23,6 +23,7 @@ impl<'a> ServerPacket<'a> for SPlayerPosition {
             let _stance = bytebuf.get_f64_be()?;
         }
         let z = bytebuf.get_f64_be()?;
+        // `Pos.read` decodes the packed movement status bits (`ServerboundMovePlayerPacket.java:121-128`).
         let collision = bytebuf.get_u8()?;
         Ok(Self {
             position: Vector3::new(x, y, z),
@@ -44,6 +45,7 @@ impl crate::ClientPacket for SPlayerPosition {
             write.write_f64_be(self.position.y + 1.62)?;
         }
         write.write_f64_be(self.position.z)?;
+        // `Pos.write` writes the packed movement status bits (`ServerboundMovePlayerPacket.java:131-135`).
         write.write_u8(self.collision)?;
         Ok(())
     }

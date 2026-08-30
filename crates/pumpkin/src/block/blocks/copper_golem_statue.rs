@@ -20,7 +20,7 @@ use crate::block::entities::copper_golem_statue::CopperGolemStatueBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
     BlockBehaviour, BlockFuture, BlockIsReplacing, BlockMetadata, GetComparatorOutputArgs,
-    NormalUseArgs, OnPlaceArgs, RandomTickArgs, UseWithItemArgs,
+    NormalUseArgs, OnPlaceArgs, OnStateReplacedArgs, RandomTickArgs, UseWithItemArgs,
 };
 use crate::entity::EntityBase;
 use crate::world::World;
@@ -38,6 +38,13 @@ const OXIDATION_FAMILY: [&Block; 4] = [
     &Block::WEATHERED_COPPER_GOLEM_STATUE,
     &Block::OXIDIZED_COPPER_GOLEM_STATUE,
 ];
+
+/// `CopperGolemStatueBlock.shouldChangedStateKeepBlockEntity` retains the statue entity when
+/// the old and new blocks are both in `BlockTags.COPPER_GOLEM_STATUES` (`CopperGolemStatueBlock.java:135-138`).
+pub(crate) fn should_keep_block_entity(old_block: &Block, new_block: &Block) -> bool {
+    old_block.has_tag(&tag::Block::MINECRAFT_COPPER_GOLEM_STATUES)
+        && new_block.has_tag(&tag::Block::MINECRAFT_COPPER_GOLEM_STATUES)
+}
 
 impl BlockMetadata for CopperGolemStatueBlock {
     fn ids() -> Box<[BlockId]> {
@@ -195,6 +202,16 @@ impl BlockBehaviour for CopperGolemStatueBlock {
         })
     }
 
+    /// `CopperGolemStatueBlock.affectNeighborsAfterRemoval` notifies comparator outputs after
+    /// the statue is removed (`CopperGolemStatueBlock.java:157-160`).
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            args.world
+                .update_comparators(args.position, args.block)
+                .await;
+        })
+    }
+
     /// `getAnalogOutputSignal`: `POSE.ordinal() + 1`, i.e. 1..=4.
     fn get_comparator_output<'a>(
         &'a self,
@@ -260,10 +277,10 @@ impl BlockBehaviour for CopperGolemStatueBlock {
 
 #[cfg(test)]
 mod tests {
-    use super::{CopperGolemStatueBlock, OXIDATION_FAMILY, next_pose};
+    use super::{CopperGolemStatueBlock, OXIDATION_FAMILY, next_pose, should_keep_block_entity};
     use crate::block::BlockMetadata;
-    use pumpkin_data::BlockId;
     use pumpkin_data::block_properties::CopperGolemPose;
+    use pumpkin_data::{Block, BlockId};
 
     /// `CopperGolemStatueBlock.Pose.getNextPose` wraps via `OutOfBoundsStrategy.ZERO`, so four
     /// right-clicks return the statue to the pose it started in.
@@ -298,5 +315,23 @@ mod tests {
                 .any(|id| *id == BlockId::WAXED_COPPER_GOLEM_STATUE && *id == release_stage),
             "the waxed statue is a plain CopperGolemStatueBlock in vanilla and de-waxes instead"
         );
+    }
+
+    /// `CopperGolemStatueBlock.shouldChangedStateKeepBlockEntity` (`CopperGolemStatueBlock.java:135-138`)
+    /// applies across the oxidation and waxing block variants, but not when the statue is removed.
+    #[test]
+    fn statue_family_transitions_keep_the_block_entity() {
+        assert!(should_keep_block_entity(
+            &Block::COPPER_GOLEM_STATUE,
+            &Block::EXPOSED_COPPER_GOLEM_STATUE
+        ));
+        assert!(should_keep_block_entity(
+            &Block::OXIDIZED_COPPER_GOLEM_STATUE,
+            &Block::WAXED_OXIDIZED_COPPER_GOLEM_STATUE
+        ));
+        assert!(!should_keep_block_entity(
+            &Block::COPPER_GOLEM_STATUE,
+            &Block::AIR
+        ));
     }
 }

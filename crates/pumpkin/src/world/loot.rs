@@ -1,3 +1,4 @@
+use crate::block::entities::BlockEntity;
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::data_component::DataComponent;
 use pumpkin_data::data_component_impl::{
@@ -19,6 +20,7 @@ use pumpkin_util::{
     text::TextComponent,
 };
 use rand::RngExt;
+use std::sync::Arc;
 
 #[derive(Default, Clone)]
 pub struct LootContextParameters {
@@ -35,9 +37,28 @@ pub struct LootContextParameters {
     pub tool: Option<ItemStack>,
     pub is_raining: Option<bool>,
     pub is_thundering: Option<bool>,
+    /// `ShulkerBoxBlock.getDrops` (`ShulkerBoxBlock.java:127-139`) reads the block entity
+    /// before replacement so its container component can be copied into the dropped item.
+    pub block_entity: Option<Arc<dyn BlockEntity>>,
     /// Whether the killed entity was on fire at death time.
     /// Computed from `Entity.fire_ticks > 0`.
     pub is_on_fire: Option<bool>,
+}
+
+fn container_from_block_entity(entity: &dyn BlockEntity) -> Option<ContainerImpl> {
+    // `ShulkerBoxBlock.getDrops` (`ShulkerBoxBlock.java:129-135`) copies the block entity's
+    // dynamic contents into the replacement shulker box item.
+    let nbt = entity.chunk_data_nbt()?;
+    let items = nbt
+        .get_list("Items")?
+        .iter()
+        .filter_map(|tag| {
+            let item = tag.extract_compound()?;
+            let slot = item.get_byte("Slot")? as u8;
+            Some((slot, ItemStack::read_item_stack(item)?))
+        })
+        .collect();
+    Some(ContainerImpl { items })
 }
 
 /// Vanilla `LootTable.createStackSplitter` (`LootTable.java:66-82`): a roll whose count is at
@@ -602,11 +623,31 @@ impl LootFunctionExt for LootFunction {
                 }
             }
             LootFunctionTypes::CopyComponents { source, include } => {
-                tracing::warn!(
-                    "CopyComponents not supported from source: {} for {:?}",
-                    source,
-                    include
-                );
+                if *source != "block_entity" {
+                    tracing::warn!(
+                        "CopyComponents not supported from source: {} for {:?}",
+                        source,
+                        include
+                    );
+                } else if include.contains(&"minecraft:container") {
+                    // `ShulkerBoxBlock.getDrops` (`ShulkerBoxBlock.java:127-139`) preserves
+                    // the stored inventory in the dropped shulker box.
+                    if let Some(block_entity) = params.block_entity.as_deref()
+                        && let Some(container) = container_from_block_entity(block_entity)
+                    {
+                        for stack in stacks {
+                            if let Some(existing) = stack.get_data_component_mut::<ContainerImpl>()
+                            {
+                                existing.items.clone_from(&container.items);
+                            } else {
+                                stack.patch.push((
+                                    DataComponent::Container,
+                                    Some(Box::new(container.clone()).to_dyn()),
+                                ));
+                            }
+                        }
+                    }
+                }
             }
             LootFunctionTypes::CopyState {
                 block: _,
@@ -1797,6 +1838,44 @@ mod tests {
             damage_type: Some(DamageType::GENERIC),
             ..Default::default()
         }
+    }
+
+    #[tokio::test]
+    async fn copy_components_preserves_shulker_contents() {
+        // `ShulkerBoxBlock.getDrops` (`ShulkerBoxBlock.java:127-139`) copies the container
+        // component into the dropped shulker box instead of scattering its contents.
+        let entity: Arc<dyn BlockEntity> = Arc::new(
+            crate::block::entities::shulker_box::ShulkerBoxBlockEntity::new(
+                pumpkin_util::math::position::BlockPos::new(0, 64, 0),
+            ),
+        );
+        let inventory = entity.clone().get_inventory().expect("shulker inventory");
+        inventory
+            .set_stack(3, ItemStack::new(5, &Item::DIAMOND))
+            .await;
+
+        let mut stacks = vec![ItemStack::new(1, &Item::SHULKER_BOX)];
+        let params = LootContextParameters {
+            block_entity: Some(entity),
+            ..Default::default()
+        };
+        let function = LootFunction {
+            content: LootFunctionTypes::CopyComponents {
+                source: "block_entity",
+                include: &["minecraft:container"],
+            },
+            conditions: None,
+        };
+
+        function.apply(&mut stacks, &params);
+
+        let container = stacks[0]
+            .get_data_component::<ContainerImpl>()
+            .expect("container component");
+        assert_eq!(container.items.len(), 1);
+        assert_eq!(container.items[0].0, 3);
+        assert_eq!(container.items[0].1.get_item().id, Item::DIAMOND.id);
+        assert_eq!(container.items[0].1.item_count, 5);
     }
 
     fn fire_aspect_sword(level: i32) -> ItemStack {

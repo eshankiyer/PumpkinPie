@@ -131,6 +131,12 @@ impl JavaClient {
 
                 let new_on_ground = packet.collision & FLAG_ON_GROUND != 0;
                 entity.on_ground.store(new_on_ground, Ordering::Relaxed);
+                // `handleMovePlayer` applies the packet's horizontal-collision bit with the
+                // client movement (`ServerGamePacketListenerImpl.java:1165-1167`).
+                entity.horizontal_collision.store(
+                    packet.collision & FLAG_HORIZONTAL_COLLISION != 0,
+                    Ordering::Relaxed,
+                );
                 if new_on_ground && entity.is_fall_flying() {
                     entity.set_fall_flying(false).await;
                 }
@@ -291,6 +297,12 @@ impl JavaClient {
                 entity
                     .on_ground
                     .store((packet.collision & FLAG_ON_GROUND) != 0, Ordering::Relaxed);
+                // `handleMovePlayer` applies the packet's horizontal-collision bit with the
+                // client movement (`ServerGamePacketListenerImpl.java:1165-1167`).
+                entity.horizontal_collision.store(
+                    packet.collision & FLAG_HORIZONTAL_COLLISION != 0,
+                    Ordering::Relaxed,
+                );
 
                 entity.set_rotation(wrap_degrees(packet.yaw) % 360.0, wrap_degrees(packet.pitch));
 

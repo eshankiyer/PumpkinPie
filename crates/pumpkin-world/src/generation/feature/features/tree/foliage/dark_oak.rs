@@ -139,3 +139,22 @@ impl LeaveValidator for DarkOakFoliagePlacer {
         false
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use pumpkin_util::random::{RandomGenerator, legacy_rand::LegacyRand};
+
+    use super::{DarkOakFoliagePlacer, LeaveValidator};
+
+    #[test]
+    fn skip_location_matches_vanilla_dark_oak_edges() {
+        // `DarkOakFoliagePlacer.shouldSkipLocation*` (`DarkOakFoliagePlacer.java:55-70`)
+        // removes the signed double-trunk corner and the single-trunk bottom corner.
+        let placer = DarkOakFoliagePlacer;
+        let mut random = RandomGenerator::Legacy(LegacyRand::from_seed(1));
+
+        assert!(placer.is_position_invalid(&mut random, -2, 0, -2, 2, true));
+        assert!(!placer.is_position_invalid(&mut random, 1, 1, 1, 2, false));
+        assert!(placer.is_position_invalid(&mut random, 2, -1, 2, 2, false));
+    }
+}

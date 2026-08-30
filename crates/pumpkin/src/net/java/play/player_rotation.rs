@@ -17,6 +17,11 @@ impl JavaClient {
         }
         let entity = &player.get_entity();
         entity.on_ground.store(rotation.ground, Ordering::Relaxed);
+        // `handleMovePlayer` applies the packet's horizontal-collision bit with the client
+        // movement (`ServerGamePacketListenerImpl.java:1165-1167`).
+        entity
+            .horizontal_collision
+            .store(rotation.horizontal_collision, Ordering::Relaxed);
         entity.set_rotation(
             wrap_degrees(rotation.yaw) % 360.0,
             wrap_degrees(rotation.pitch),

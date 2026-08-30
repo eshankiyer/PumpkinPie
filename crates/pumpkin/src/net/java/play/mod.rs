@@ -61,8 +61,8 @@ use pumpkin_protocol::java::client::play::{
     PlayerAction, PlayerInfoFlags,
 };
 use pumpkin_protocol::java::server::play::{
-    Action, ActionType, CommandBlockMode, FLAG_ON_GROUND, SAttack, SBundleItemSelected,
-    SChangeGameMode, SChatCommand, SChatMessage, SChunkBatch, SClientCommand,
+    Action, ActionType, CommandBlockMode, FLAG_HORIZONTAL_COLLISION, FLAG_ON_GROUND, SAttack,
+    SBundleItemSelected, SChangeGameMode, SChatCommand, SChatMessage, SChunkBatch, SClientCommand,
     SClientInformationPlay, SCloseContainer, SCommandSuggestion, SConfirmTeleport,
     SCookieResponse as SPCookieResponse, SEditBook, SInteract, SJigsawGenerate, SKeepAlive,
     SMoveVehicle, SPaddleBoat, SPickItemFromBlock, SPickItemFromEntity, SPlaceRecipe,

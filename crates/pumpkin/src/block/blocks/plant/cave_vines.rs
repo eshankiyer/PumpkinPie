@@ -43,9 +43,16 @@ impl BlockMetadata for CaveVinesBlock {
 }
 
 impl BlockBehaviour for CaveVinesBlock {
-    /// `CaveVinesBlock.isValidBonemealTarget` and `CaveVinesPlantBlock.isValidBonemealTarget`
-    /// (`CaveVinesBlock.java:77-79`, `CaveVinesPlantBlock.java:59-62`).
+    /// `CaveVinesBlock.isValidBonemealTarget` uses the inherited head-growth target check
+    /// (`GrowingPlantHeadBlock.java:113-117`), while the body only checks BERRIES
+    /// (`CaveVinesPlantBlock.java:59-62`).
     fn is_valid_bonemeal_target(&self, args: BonemealArgs<'_>) -> bool {
+        if args.block == &Block::CAVE_VINES {
+            let grow_pos = args.position.down();
+            return args.world.is_in_height_limit(grow_pos.0.y)
+                && args.world.get_block_state(&grow_pos).is_air();
+        }
+
         has_berries(args.block, args.state_id).is_some_and(|berries| !berries)
     }
 
@@ -55,11 +62,48 @@ impl BlockBehaviour for CaveVinesBlock {
         true
     }
 
-    /// `CaveVinesBlock.performBonemeal` and `CaveVinesPlantBlock.performBonemeal`
-    /// (`CaveVinesBlock.java:86-89`, `CaveVinesPlantBlock.java:69-72`) set BERRIES directly;
-    /// this is deliberately not the inherited stem-growth operation.
+    /// `GrowingPlantHeadBlock.performBonemeal` grows one segment for the cave-vine head
+    /// (`GrowingPlantHeadBlock.java:124-135`, `CaveVinesBlock.java:33-36`); the body override
+    /// sets BERRIES directly (`CaveVinesPlantBlock.java:69-72`).
     fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
+            if args.block == &Block::CAVE_VINES {
+                let grow_pos = args.position.down();
+                if !args.world.is_in_height_limit(grow_pos.0.y)
+                    || !args.world.get_block_state(&grow_pos).is_air()
+                {
+                    return;
+                }
+
+                let props = CaveVinesLikeProperties::from_state_id(args.state_id, args.block);
+                let new_head = CaveVinesLikeProperties {
+                    age: bonemeal_age(props.age),
+                    berries: props.berries,
+                };
+                args.world
+                    .set_block_state(
+                        &grow_pos,
+                        new_head.to_state_id(&Block::CAVE_VINES),
+                        BlockFlags::NOTIFY_ALL,
+                    )
+                    .await;
+
+                // `GrowingPlantHeadBlock.updateShape` converts the old head to its body
+                // (`GrowingPlantHeadBlock.java:86-95`); apply that conversion explicitly because
+                // the cave-vine growth path owns both writes in Pumpkin.
+                let new_body = CaveVinesPlantLikeProperties {
+                    berries: props.berries,
+                };
+                args.world
+                    .set_block_state(
+                        args.position,
+                        new_body.to_state_id(&Block::CAVE_VINES_PLANT),
+                        BlockFlags::NOTIFY_ALL,
+                    )
+                    .await;
+                return;
+            }
+
             let Some(false) = has_berries(args.block, args.state_id) else {
                 return;
             };
@@ -217,6 +261,13 @@ const fn next_age(age: u8) -> u8 {
     if age >= MAX_AGE { 0 } else { age + 1 }
 }
 
+/// `GrowingPlantHeadBlock.performBonemeal` clamps its next age at `MAX_AGE`
+/// (`GrowingPlantHeadBlock.java:126-134`), unlike random-tick state cycling.
+const fn bonemeal_age(age: u8) -> u8 {
+    let next = age.saturating_add(1);
+    if next > MAX_AGE { MAX_AGE } else { next }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,5 +293,12 @@ mod tests {
         assert_eq!(next_age(0), 1);
         assert_eq!(next_age(24), 25);
         assert_eq!(next_age(25), 0);
+    }
+
+    #[test]
+    fn bonemeal_age_clamps_at_max_age() {
+        assert_eq!(bonemeal_age(0), 1);
+        assert_eq!(bonemeal_age(24), 25);
+        assert_eq!(bonemeal_age(25), 25);
     }
 }

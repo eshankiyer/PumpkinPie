@@ -2,6 +2,7 @@ use pumpkin_data::block_properties::{
     Axis, BlockProperties, CreakingHeartLikeProperties, CreakingHeartState,
     PaleOakWoodLikeProperties,
 };
+use pumpkin_data::damage::DamageType;
 use pumpkin_data::tag;
 use pumpkin_data::tag::Taggable;
 use pumpkin_data::{BlockDirection, BlockId, BlockStateId};
@@ -14,7 +15,7 @@ use rand::RngExt;
 use crate::block::entities::creaking_heart::CreakingHeartBlockEntity;
 use crate::block::{
     BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, ExplodeArgs, GetComparatorOutputArgs,
-    GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs,
+    GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs, PlayerWillDestroyArgs,
 };
 use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::world::World;
@@ -87,10 +88,20 @@ async fn update_state(
 }
 
 impl BlockBehaviour for CreakingHeartBlock {
-    /// `CreakingHeartBlock.playerWillDestroy` (`CreakingHeartBlock.java:175-187`): a natural
-    /// heart broken by a non-creative/non-spectator player awards 20 through 24 experience.
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+    /// `CreakingHeartBlock.playerWillDestroy` (`CreakingHeartBlock.java:174-181`) runs before
+    /// the block is removed, removes a player-damaged protector, and awards natural-heart XP.
+    fn player_will_destroy<'a>(&'a self, args: PlayerWillDestroyArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
+            if let Some(block_entity) = args.world.get_block_entity(args.position)
+                && let Some(heart) = block_entity
+                    .as_any()
+                    .downcast_ref::<CreakingHeartBlockEntity>()
+            {
+                heart
+                    .remove_protector(args.world, Some(DamageType::PLAYER_ATTACK))
+                    .await;
+            }
+
             let properties = CreakingHeartLikeProperties::from_state_id(args.state.id, args.block);
             if properties.r#natural
                 && !matches!(
@@ -105,8 +116,14 @@ impl BlockBehaviour for CreakingHeartBlock {
         })
     }
 
-    /// `CreakingHeartBlock.onExplosionHit` (`CreakingHeartBlock.java:159-172`): a
-    /// trigger-block explosion removes the protector before the block remains in place.
+    // Vanilla `CreakingHeartBlock.playerWillDestroy` (`CreakingHeartBlock.java:174-181`) performs
+    // the heart's player-break side effects before removal; no side effect remains for `broken`.
+    fn broken<'a>(&'a self, _args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async {})
+    }
+
+    /// `CreakingHeartBlock.onExplosionHit` (`CreakingHeartBlock.java:159-172`): an explosion
+    /// removes the protector before block removal.
     fn explode<'a>(&'a self, args: ExplodeArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             if let Some(block_entity) = args.world.get_block_entity(args.position)
@@ -114,7 +131,9 @@ impl BlockBehaviour for CreakingHeartBlock {
                     .as_any()
                     .downcast_ref::<CreakingHeartBlockEntity>()
             {
-                heart.remove_protector_on_removal(args.world).await;
+                heart
+                    .remove_protector(args.world, Some(DamageType::EXPLOSION))
+                    .await;
             }
         })
     }

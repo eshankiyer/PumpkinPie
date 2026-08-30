@@ -8,5 +8,12 @@ impl JavaClient {
             .entity
             .on_ground
             .store(ground.on_ground, Ordering::Relaxed);
+        // `handleMovePlayer` applies the packet's horizontal-collision bit with the client
+        // movement (`ServerGamePacketListenerImpl.java:1165-1167`).
+        player
+            .living_entity
+            .entity
+            .horizontal_collision
+            .store(ground.horizontal_collision, Ordering::Relaxed);
     }
 }
