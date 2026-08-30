@@ -661,6 +661,13 @@ pub async fn drop_loot(
     }
 }
 
+/// Keeps the pre-removal state used by `BlockBehaviour.getDrops` when the world has already
+/// replaced the block (`BlockBehaviour.java:272-280`; `ServerPlayerGameMode.java:279-298`).
+#[must_use]
+pub(crate) const fn block_drop_state(state_id: BlockStateId) -> &'static BlockState {
+    BlockState::from_id(state_id)
+}
+
 pub async fn calc_block_breaking(
     player: &Player,
     state: &BlockState,
@@ -837,5 +844,15 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn block_drops_keep_the_pre_removal_state() {
+        let original = Block::CANDLE.default_state;
+
+        // Vanilla passes the adjusted pre-removal state to `getDrops`, not the air state written
+        // by block removal (`BlockBehaviour.java:272-280`; `ServerPlayerGameMode.java:279-298`).
+        assert_eq!(block_drop_state(original.id), original);
+        assert_ne!(block_drop_state(original.id), Block::AIR.default_state);
     }
 }

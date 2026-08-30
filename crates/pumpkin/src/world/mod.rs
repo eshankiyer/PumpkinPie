@@ -6530,7 +6530,10 @@ impl World {
                 let is_thundering = self.is_thundering().await;
 
                 let params = LootContextParameters {
-                    block_state: Some(BlockState::from_id(broken_state_id)),
+                    // `getDrops` receives the adjusted state captured before removal; the
+                    // replacement state is only the world's new block (`BlockBehaviour.java:272-280`;
+                    // `ServerPlayerGameMode.java:279-298`).
+                    block_state: Some(crate::block::block_drop_state(broken_block_state)),
                     luck,
                     position: Some(pumpkin_util::math::vector3::Vector3::new(
                         position.0.x as f64,

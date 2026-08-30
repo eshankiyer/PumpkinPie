@@ -961,6 +961,16 @@ struct SkinMetadata {
 }
 
 impl Player {
+    /// Vanilla `Player.getMaxHeadRotationRelativeToBody` narrows the shared living limit while
+    /// the player is blocking (`Player.java:288-290`; base limit `LivingEntity.java:3028-3030`).
+    pub(crate) async fn get_max_head_rotation_relative_to_body(&self) -> f32 {
+        if self.living_entity.is_blocking().await {
+            15.0
+        } else {
+            50.0
+        }
+    }
+
     /// Returns the attributes installed by `Player.createAttributes` on top of
     /// `LivingEntity.createLivingAttributes` (`Player.java:206-220`,
     /// `LivingEntity.java:332-359`).

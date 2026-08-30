@@ -65,6 +65,8 @@ pub struct Navigator {
     path_type_overrides: FxHashMap<PathType, f32>,
     mob_width: f32,
     mob_height: f32,
+    /// Current `Mob.getMaxFallDistance` value (`Mob.java:834-846`) used by walk-node evaluation.
+    max_fall_distance: f32,
     // Smart re-pathing cooldown
     repath_cooldown: u32,
     // Reusable allocations to avoid per-pathfind heap allocations
@@ -106,6 +108,7 @@ impl Default for Navigator {
             path_type_overrides: FxHashMap::default(),
             mob_width: 0.6,
             mob_height: 1.95,
+            max_fall_distance: 3.0,
             repath_cooldown: 0,
             open_set: BinaryHeap::new(),
             neighbors_buf: Vec::new(),
@@ -162,6 +165,12 @@ fn find_surface_position(world: &crate::world::World, mut pos: BlockPos) -> Bloc
 impl Navigator {
     pub(crate) const fn navigation_kind(&self) -> NavigationKind {
         self.navigation_kind
+    }
+
+    /// `WalkNodeEvaluator` consumes the mob's current safe fall distance while accepting a
+    /// neighbor (`Mob.java:834-846`; `WalkNodeEvaluator.java:352`).
+    pub(crate) const fn set_max_fall_distance(&mut self, distance: f32) {
+        self.max_fall_distance = distance;
     }
 
     /// Vanilla `PathNavigation.canFloat` (`PathNavigation.java:401-403`).
@@ -448,6 +457,7 @@ impl Navigator {
             path_type_overrides: self.path_type_overrides.clone(),
             mob_width: self.mob_width,
             mob_height: self.mob_height,
+            max_fall_distance: self.max_fall_distance,
             repath_cooldown: 0,
             open_set: BinaryHeap::new(),
             neighbors_buf: Vec::new(),
@@ -556,6 +566,9 @@ impl Navigator {
             root_vehicle_id,
         );
         let mut mob_data = MobData::new(start_pos_f, self.mob_width, self.mob_height, 1.0);
+        // `WalkNodeEvaluator` compares downward steps with `Mob.getMaxFallDistance`
+        // (`Mob.java:834-846`; `WalkNodeEvaluator.java:352`).
+        mob_data.max_fall_distance = self.max_fall_distance;
         mob_data.bounding_box = entity.entity.bounding_box.load();
         mob_data.fall_distance = entity.fall_distance.load();
         mob_data.is_descending = entity.entity.sneaking.load(Ordering::Relaxed);
