@@ -246,7 +246,7 @@ impl StructureBlockBlockEntity {
             None,
             Self::create_random(seed),
         );
-        placer.finalize();
+        placer.finalize().await;
         world.queue_block_updates(&placer.changed_positions).await;
         world.flush_block_updates().await;
         true

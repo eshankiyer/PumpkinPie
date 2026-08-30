@@ -1,4 +1,6 @@
-use pumpkin_data::{BlockDirection, BlockState, block_properties::HorizontalFacing, fluid::Fluid};
+use pumpkin_data::{
+    Block, BlockDirection, BlockState, block_properties::HorizontalFacing, fluid::Fluid,
+};
 use pumpkin_util::{
     math::{int_provider::IntProvider, position::BlockPos},
     random::{RandomGenerator, RandomImpl},
@@ -193,13 +195,39 @@ impl MangroveRootPlacer {
         pos: BlockPos,
         state: &'static BlockState,
     ) -> &'static BlockState {
-        if state.is_waterlogged() {
-            return state;
-        }
         let (fluid, _) = GenerationCache::get_fluid_and_fluid_state(chunk, &pos.0);
-        if fluid != Fluid::WATER {
+        Self::set_waterlogged(state, fluid == Fluid::WATER)
+    }
+
+    // Vanilla `RootPlacer.getPotentiallyWaterloggedState` (`RootPlacer.java:78-85`) writes both
+    // true and false outcomes when the provider state exposes the waterlogged property.
+    fn set_waterlogged(state: &'static BlockState, waterlogged: bool) -> &'static BlockState {
+        let block = Block::from_state_id(state.id);
+        let Some(properties) = block.properties(state.id) else {
             return state;
-        }
-        state.with_waterlogged().unwrap_or(state)
+        };
+        let mut properties = properties.to_props();
+        let Some(index) = properties.iter().position(|(key, _)| *key == "waterlogged") else {
+            return state;
+        };
+        properties[index] = ("waterlogged", if waterlogged { "true" } else { "false" });
+        BlockState::from_id(block.from_properties(&properties).to_state_id(block))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pumpkin_data::Block;
+
+    use super::MangroveRootPlacer;
+
+    #[test]
+    fn potentially_waterlogged_state_matches_vanilla_both_ways() {
+        // Vanilla `RootPlacer.getPotentiallyWaterloggedState` (`RootPlacer.java:78-85`) clears a
+        // true provider state in a dry position as well as setting a false state in water.
+        let wet = MangroveRootPlacer::set_waterlogged(Block::OAK_LEAVES.default_state, true);
+        let dry = MangroveRootPlacer::set_waterlogged(wet, false);
+        assert!(wet.is_waterlogged());
+        assert!(!dry.is_waterlogged());
     }
 }

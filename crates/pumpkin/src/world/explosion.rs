@@ -658,8 +658,9 @@ impl Explosion {
                             .await;
                     }
 
-                    // `ShulkerBoxBlock.getDrops` (`ShulkerBoxBlock.java:127-139`) reads the
-                    // block entity before an explosion removes the block.
+                    // `ShulkerBoxBlock.getDrops` (`ShulkerBoxBlock.java:127-139`) and
+                    // `DecoratedPotBlock.getDrops` (`DecoratedPotBlock.java:181-191`) both
+                    // read the block entity, so capture it before the explosion removes it.
                     let block_entity = world.get_block_entity(pos);
                     world
                         .set_block_state(pos, BlockStateId::AIR, BlockFlags::NOTIFY_ALL)

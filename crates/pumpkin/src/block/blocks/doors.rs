@@ -157,6 +157,13 @@ fn can_open_door(block: &Block) -> bool {
     true
 }
 
+/// Vanilla `DoorBlock.isWoodenDoor` (`DoorBlock.java:271-277`) checks the door's
+/// `BlockSetType.canOpenByHand` value (`BlockSetType.java:29-64,119-216`).
+/// The generated door tag and the iron-door discriminator model those values here.
+pub(crate) fn is_wooden_door(block: &Block) -> bool {
+    block.has_tag(&tag::Block::MINECRAFT_DOORS) && can_open_door(block)
+}
+
 // Todo: The sounds should be from BlockSetType
 fn get_sound(block: &Block, open: bool) -> Sound {
     if open {
@@ -520,4 +527,19 @@ fn has_support(world: &dyn BlockAccessor, block_pos: &BlockPos) -> bool {
     world
         .get_block_state(&block_pos.down())
         .is_side_solid(BlockDirection::Up)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_wooden_door;
+    use pumpkin_data::Block;
+
+    #[test]
+    fn hand_openable_doors_are_wooden_for_ai() {
+        // DoorBlock.isWoodenDoor (`DoorBlock.java:271-277`) follows the door type,
+        // so copper remains interactable even though it uses a metal sound set.
+        assert!(is_wooden_door(&Block::OAK_DOOR));
+        assert!(is_wooden_door(&Block::COPPER_DOOR));
+        assert!(!is_wooden_door(&Block::IRON_DOOR));
+    }
 }

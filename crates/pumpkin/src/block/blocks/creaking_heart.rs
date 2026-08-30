@@ -103,6 +103,13 @@ impl BlockBehaviour for CreakingHeartBlock {
             }
 
             let properties = CreakingHeartLikeProperties::from_state_id(args.state.id, args.block);
+            if let Some(block_entity) = args.world.get_block_entity(args.position)
+                && let Some(heart) = block_entity
+                    .as_any()
+                    .downcast_ref::<CreakingHeartBlockEntity>()
+            {
+                heart.remove_protector_after_player_attack(args.world);
+            }
             if properties.r#natural
                 && !matches!(
                     args.player.gamemode.load(),

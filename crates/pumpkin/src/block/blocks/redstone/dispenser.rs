@@ -24,6 +24,7 @@ use crate::entity::projectile::lingering_potion::LingeringPotionEntity;
 use crate::entity::projectile::small_fireball::SmallFireballEntity;
 use crate::entity::projectile::snowball::SnowballEntity;
 use crate::entity::projectile::splash_potion::SplashPotionEntity;
+use crate::entity::projectile::trident::TridentEntity;
 use crate::entity::tnt::TNTEntity;
 use crate::entity::r#type::from_type;
 use crate::entity::{Entity, EntityBase};
@@ -314,6 +315,11 @@ impl DispenserBlock {
         if arrows.contains(&item.item.id) {
             // Arrows
             Self::fire_arrow(ctx, item).await;
+        } else if item.item.id == Item::TRIDENT.id {
+            // `ProjectileItem.asProjectile` (`ProjectileItem.java:12-20`) is used by the
+            // projectile dispenser behavior; `TridentItem.asProjectile`
+            // (`TridentItem.java:138-141`) creates an allowed-pickup trident.
+            Self::fire_trident(ctx, item).await;
         } else if boats.contains(&item.item.id) {
             // Boats
             if !Self::dispense_boat(ctx, item).await {
@@ -440,6 +446,36 @@ impl DispenserBlock {
         Self::finish_projectile_launch(
             ctx,
             Arc::new(arrow),
+            WorldEvent::SoundDispenserProjectileLaunch,
+        )
+        .await;
+    }
+
+    async fn fire_trident(ctx: &DispenseContext<'_>, item: &mut ItemStack) {
+        let projectile = item.split(1);
+        let entity = Entity::new(
+            ctx.world.clone(),
+            Self::projectile_spawn_position(ctx),
+            &EntityType::TRIDENT,
+        );
+        let trident = TridentEntity::new(entity, None);
+        *trident.item_stack.lock().await = projectile;
+        trident.pickup.store(ArrowPickup::Allowed);
+
+        // `ProjectileItem.DispenseConfig` (`ProjectileItem.java:30-36`) supplies these
+        // defaults before `ProjectileItem.shoot` (`ProjectileItem.java:19-20`) launches it.
+        let facing = to_normal(ctx.facing);
+        trident.set_velocity(
+            facing.x,
+            facing.y,
+            facing.z,
+            Self::DEFAULT_PROJECTILE_POWER,
+            Self::DEFAULT_PROJECTILE_UNCERTAINTY,
+        );
+
+        Self::finish_projectile_launch(
+            ctx,
+            Arc::new(trident),
             WorldEvent::SoundDispenserProjectileLaunch,
         )
         .await;

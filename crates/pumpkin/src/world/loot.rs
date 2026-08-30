@@ -10,6 +10,9 @@ use pumpkin_data::entity::EntityType;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::tag;
 use pumpkin_data::{Block, BlockState, item::Item};
+use std::sync::Arc;
+
+use crate::block::entities::decorated_pot::DecoratedPotBlockEntity;
 use pumpkin_util::{
     loot_table::{
         LootCondition, LootFireworkExplosionOperation, LootFunction, LootFunctionBonusParameter,
@@ -20,7 +23,6 @@ use pumpkin_util::{
     text::TextComponent,
 };
 use rand::RngExt;
-use std::sync::Arc;
 
 #[derive(Default, Clone)]
 pub struct LootContextParameters {
@@ -37,12 +39,13 @@ pub struct LootContextParameters {
     pub tool: Option<ItemStack>,
     pub is_raining: Option<bool>,
     pub is_thundering: Option<bool>,
-    /// `ShulkerBoxBlock.getDrops` (`ShulkerBoxBlock.java:127-139`) reads the block entity
-    /// before replacement so its container component can be copied into the dropped item.
-    pub block_entity: Option<Arc<dyn BlockEntity>>,
     /// Whether the killed entity was on fire at death time.
     /// Computed from `Entity.fire_ticks > 0`.
     pub is_on_fire: Option<bool>,
+    /// Block entity captured before removal, read by block loot functions such as
+    /// `ShulkerBoxBlock.getDrops` (`ShulkerBoxBlock.java:127-139`) and
+    /// `DecoratedPotBlock.getDrops` (`DecoratedPotBlock.java:181-191`).
+    pub block_entity: Option<Arc<dyn BlockEntity>>,
 }
 
 fn container_from_block_entity(entity: &dyn BlockEntity) -> Option<ContainerImpl> {
@@ -175,7 +178,14 @@ impl LootTableExt for LootTable {
                                     Some(item_stacks)
                                 },
                             );
-                            if let Some(loot) = loot {
+                            if let Some(mut loot) = loot {
+                                // Vanilla decorates each selected entry with the pool's functions
+                                // before the result consumer receives it (`LootPool.java:97-103`).
+                                if let Some(functions) = pool.functions {
+                                    for function in functions {
+                                        function.apply(&mut loot, &params);
+                                    }
+                                }
                                 for stack in loot {
                                     if stack.item_count > 0 {
                                         push_split_stack(&mut stacks, stack);
@@ -647,6 +657,29 @@ impl LootFunctionExt for LootFunction {
                             }
                         }
                     }
+                } else if include.contains(&"minecraft:pot_decorations") {
+                    // `DecoratedPotBlock.getDrops` (`DecoratedPotBlock.java:181-191`) copies
+                    // `pot_decorations` from the block entity into the uncracked pot item.
+                    if let Some(block_entity) = params.block_entity.as_ref()
+                        && let Some(pot) = block_entity
+                            .as_any()
+                            .downcast_ref::<DecoratedPotBlockEntity>()
+                        && let Some(decorations) = pot.decorations()
+                    {
+                        for stack in stacks {
+                            stack.patch.push((
+                                DataComponent::PotDecorations,
+                                Some(
+                                    Box::new(
+                                        pumpkin_data::data_component_impl::PotDecorationsImpl {
+                                            decorations: decorations.clone(),
+                                        },
+                                    )
+                                    .to_dyn(),
+                                ),
+                            ));
+                        }
+                    }
                 }
             }
             LootFunctionTypes::CopyState {
@@ -863,6 +896,29 @@ trait LootPoolEntryTypesExt {
 impl LootPoolEntryTypesExt for LootPoolEntryTypes {
     fn get_stacks(&self, params: &LootContextParameters) -> Vec<ItemStack> {
         match self {
+            // `DecoratedPotBlock.getDrops` (`DecoratedPotBlock.java:181-188`) supplies
+            // the four stored decorations for the cracked-pot `sherds` dynamic drop.
+            Self::Dynamic(entry) if entry.name == "minecraft:sherds" => params
+                .block_entity
+                .as_ref()
+                .and_then(|block_entity| {
+                    block_entity
+                        .as_any()
+                        .downcast_ref::<DecoratedPotBlockEntity>()
+                })
+                .and_then(DecoratedPotBlockEntity::decorations)
+                .map_or_else(Vec::new, |decorations| {
+                    decorations
+                        .iter()
+                        .filter_map(|decoration| {
+                            Item::from_registry_key(
+                                decoration.strip_prefix("minecraft:").unwrap_or(decoration),
+                            )
+                        })
+                        .map(|item| ItemStack::new(1, item))
+                        .collect()
+                }),
+            // An empty pool and an unhandled dynamic drop both yield nothing.
             Self::Empty | Self::Dynamic(_) => Vec::new(),
             Self::LootTable(entry) => {
                 let key = entry
@@ -1440,6 +1496,7 @@ mod tests {
         data_component_impl::FireworksImpl, data_component_impl::ItemNameImpl,
         data_component_impl::StoredEnchantmentsImpl,
     };
+    use pumpkin_nbt::tag::NbtTag;
     use pumpkin_util::loot_table::{LootFireworkExplosion, LootListOperation};
 
     #[test]
@@ -1717,6 +1774,83 @@ mod tests {
         assert_eq!(out[2].item_count, 8);
     }
 
+    /// `DecoratedPotBlock.getDrops` (`DecoratedPotBlock.java:181-191`) chooses the dynamic
+    /// sherd entry from the cracked state and reads all four decorations from the block entity.
+    #[test]
+    fn decorated_pot_dynamic_drops_use_block_entity_decorations() {
+        use crate::block::entities::decorated_pot::DecoratedPotBlockEntity;
+        use pumpkin_util::math::position::BlockPos;
+        use std::sync::Arc;
+
+        let pot = Arc::new(DecoratedPotBlockEntity::new(BlockPos::new(0, 0, 0)));
+        futures::executor::block_on(async {
+            *pot.sherds.lock().await = Some(vec![
+                NbtTag::String("minecraft:brick".into()),
+                NbtTag::String("minecraft:brick".into()),
+                NbtTag::String("minecraft:brick".into()),
+                NbtTag::String("minecraft:brick".into()),
+            ]);
+        });
+
+        let entry = LootPoolEntryTypes::Dynamic(pumpkin_util::loot_table::DynamicEntry {
+            name: "minecraft:sherds",
+        });
+        let stacks = entry.get_stacks(&LootContextParameters {
+            block_entity: Some(pot),
+            ..Default::default()
+        });
+
+        assert_eq!(stacks.len(), 4);
+        assert!(stacks.iter().all(|stack| stack.item == &Item::BRICK));
+    }
+
+    /// `DecoratedPotBlock.getDrops` (`DecoratedPotBlock.java:181-191`) copies the
+    /// `pot_decorations` component for the uncracked pot-item branch.
+    #[test]
+    fn decorated_pot_copy_components_preserves_decorations() {
+        use crate::block::entities::decorated_pot::DecoratedPotBlockEntity;
+        use pumpkin_data::data_component_impl::PotDecorationsImpl;
+        use pumpkin_util::math::position::BlockPos;
+        use std::sync::Arc;
+
+        let pot = Arc::new(DecoratedPotBlockEntity::new(BlockPos::new(0, 0, 0)));
+        futures::executor::block_on(async {
+            *pot.sherds.lock().await = Some(vec![
+                NbtTag::String("minecraft:brick".into()),
+                NbtTag::String("minecraft:brick".into()),
+                NbtTag::String("minecraft:brick".into()),
+                NbtTag::String("minecraft:brick".into()),
+            ]);
+        });
+
+        let function = LootFunction {
+            content: LootFunctionTypes::CopyComponents {
+                source: "block_entity",
+                include: &["minecraft:pot_decorations"],
+            },
+            conditions: None,
+        };
+        let mut stacks = vec![ItemStack::new(1, &Item::DECORATED_POT)];
+        function.apply(
+            &mut stacks,
+            &LootContextParameters {
+                block_entity: Some(pot),
+                ..Default::default()
+            },
+        );
+
+        let decorations = stacks[0]
+            .get_data_component::<PotDecorationsImpl>()
+            .expect("pot decoration component should be copied");
+        assert_eq!(decorations.decorations.len(), 4);
+        assert!(
+            decorations
+                .decorations
+                .iter()
+                .all(|item| item == "minecraft:brick")
+        );
+    }
+
     #[test]
     fn set_book_cover_updates_only_requested_fields() {
         let function = LootFunction {
@@ -1827,6 +1961,47 @@ mod tests {
             wool_fraction > 0.85,
             "expected the 16-item expand tag to dominate the roll (~0.94), got {wool_fraction}"
         );
+    }
+
+    /// Pool functions decorate the selected entry's output before it is emitted, as in
+    /// `LootPool.addRandomItems` (`LootPool.java:97-103`).
+    #[test]
+    fn pool_functions_are_applied_to_selected_loot() {
+        let entry = LootPoolEntry {
+            content: LootPoolEntryTypes::Item(pumpkin_util::loot_table::ItemEntry {
+                name: "minecraft:stone",
+            }),
+            weight: 1,
+            quality: 0,
+            conditions: None,
+            functions: None,
+        };
+        let entries: &'static [LootPoolEntry] = Box::leak(vec![entry].into_boxed_slice());
+        let pool = pumpkin_util::loot_table::LootPool {
+            entries,
+            rolls: pumpkin_util::loot_table::LootNumberProviderTypes::Constant(1.0),
+            bonus_rolls: pumpkin_util::loot_table::LootNumberProviderTypes::Constant(0.0),
+            conditions: None,
+            functions: Some(&[LootFunction {
+                content: LootFunctionTypes::SetCount {
+                    count: LootFunctionNumberProvider::Constant { value: 7.0 },
+                    add: false,
+                },
+                conditions: None,
+            }]),
+        };
+        let pools: &'static [pumpkin_util::loot_table::LootPool] =
+            Box::leak(vec![pool].into_boxed_slice());
+        let table = LootTable {
+            r#type: pumpkin_util::loot_table::LootTableType::Chest,
+            random_sequence: None,
+            pools: Some(pools),
+        };
+
+        let loot = table.get_loot(LootContextParameters::default());
+        assert_eq!(loot.len(), 1);
+        assert_eq!(loot[0].item.id, Item::STONE.id);
+        assert_eq!(loot[0].item_count, 7);
     }
 
     fn base_params() -> LootContextParameters {

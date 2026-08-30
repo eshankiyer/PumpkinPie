@@ -1,4 +1,4 @@
-use pumpkin_data::{BlockState, BlockStateId};
+use pumpkin_data::{BlockDirection, BlockState, BlockStateId};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::HeightMap;
 use pumpkin_util::math::position::BlockPos;
@@ -6,12 +6,13 @@ use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::chunk::ChunkHeightmapType;
 use pumpkin_world::generation::structure::template::BlockPlacer;
 use pumpkin_world::level::Level;
+use pumpkin_world::world::BlockFlags;
 use std::collections::HashMap;
 
 use crate::world::World;
 
 pub struct WorldBlockPlacer<'a> {
-    world: &'a World,
+    world: &'a std::sync::Arc<World>,
     pub block_entity_nbts: Vec<NbtCompound>,
     pub changed_positions: Vec<(BlockPos, BlockStateId)>,
     lighting_changes: Vec<(BlockPos, BlockStateId, BlockStateId)>,
@@ -19,7 +20,7 @@ pub struct WorldBlockPlacer<'a> {
 
 impl<'a> WorldBlockPlacer<'a> {
     #[must_use]
-    pub const fn new(world: &'a World) -> Self {
+    pub const fn new(world: &'a std::sync::Arc<World>) -> Self {
         Self {
             world,
             block_entity_nbts: Vec::new(),
@@ -28,8 +29,7 @@ impl<'a> WorldBlockPlacer<'a> {
         }
     }
 
-    #[allow(clippy::unused_async)]
-    pub fn finalize(&self) {
+    pub async fn finalize(&mut self) {
         // BlockPlacer writes the live chunk directly so a structure can be applied
         // as one batch. Vanilla still runs the light engine after those block-state
         // changes; update each final position once, in a stable order, before the
@@ -51,6 +51,37 @@ impl<'a> WorldBlockPlacer<'a> {
             .level
             .light_engine
             .update_lighting_batch_with_states(&self.world.level, &lighting_positions);
+
+        // Vanilla updates the placed shape boundary, then refreshes each placed state and its
+        // neighbors (`StructureTemplate.java:356-380`). Apply the existing world hooks after the
+        // batch write and before block entities are installed.
+        for (position, state_id) in self.changed_positions.clone() {
+            let new_state_id = self
+                .world
+                .update_from_neighbor_shapes(state_id, &position)
+                .await;
+            if new_state_id != state_id {
+                self.world
+                    .set_block_state(&position, new_state_id, BlockFlags::NOTIFY_LISTENERS)
+                    .await;
+                for (changed_position, changed_state_id) in &mut self.changed_positions {
+                    if *changed_position == position {
+                        *changed_state_id = new_state_id;
+                    }
+                }
+            }
+            for direction in BlockDirection::all() {
+                let neighbor_position = position.offset(direction.to_offset());
+                self.world
+                    .replace_with_state_for_neighbor_update(
+                        &neighbor_position,
+                        direction.opposite(),
+                        BlockFlags::NOTIFY_LISTENERS,
+                    )
+                    .await;
+            }
+            self.world.update_neighbors(&position, None).await;
+        }
 
         for nbt in &self.block_entity_nbts {
             if let Some(block_entity) = crate::block::entities::block_entity_from_nbt(nbt) {

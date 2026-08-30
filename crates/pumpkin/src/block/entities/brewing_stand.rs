@@ -113,6 +113,33 @@ impl BrewingStandBlockEntity {
         false
     }
 
+    // Vanilla `BrewingStandBlockEntity.doBrew` (`BrewingStandBlockEntity.java:173-193`)
+    // returns an ingredient remainder when the consumed stack is exhausted and drops it when
+    // another ingredient item remains.
+    fn apply_ingredient_remainder(ingredient: &mut ItemStack) -> Option<ItemStack> {
+        let remainder =
+            pumpkin_data::recipe_remainder::get_recipe_remainder_id(ingredient.get_item().id)
+                .and_then(Item::from_id)
+                .map(|item| ItemStack::new(1, item));
+
+        ingredient.decrement(1);
+
+        let remainder = remainder?;
+
+        if ingredient.is_empty() {
+            *ingredient = remainder;
+            None
+        } else {
+            Some(remainder)
+        }
+    }
+
+    // Vanilla `BrewingStandBlockEntity.getPotionBits` (`BrewingStandBlockEntity.java:141-150`)
+    // exposes presence, not potion-component validity, for the three bottle properties.
+    fn potion_bits(items: &[ItemStack]) -> [bool; 3] {
+        std::array::from_fn(|index| !items[index].is_empty())
+    }
+
     /// Perform brewing on all valid potion slots
     async fn do_brew(&self, world: &Arc<crate::world::World>, ingredient: &ItemStack) {
         let ingredient_id = ingredient.get_item().id;
@@ -201,11 +228,15 @@ impl BrewingStandBlockEntity {
             return;
         }
 
-        // Consume ingredient
+        // Consume ingredient and preserve the vanilla crafting remainder behavior.
         let mut items = self.items.write().await;
-        items[3].decrement(1);
+        let remainder = Self::apply_ingredient_remainder(&mut items[3]);
         self.mark_dirty();
         drop(items);
+
+        if let Some(remainder) = remainder {
+            world.drop_stack(&self.position, remainder).await;
+        }
 
         // Play sound at the center of the block
         let pos = Vector3::new(
@@ -562,12 +593,8 @@ impl crate::block::entities::BlockEntity for BrewingStandBlockEntity {
 
             // Ensure clients are notified when potion slot contents (and their data) change.
             // Compute current presence bits for the three bottle slots
-            let mut current: [bool; 3] = [false; 3];
             let items_guard = self.items.read().await;
-            for (i, slot) in items_guard.iter().take(3).enumerate() {
-                // Consider a potion slot "present" when it has an item and a PotionContents component or is a glass bottle
-                current[i] = !slot.is_empty() && (slot.get_data_component::<pumpkin_data::data_component_impl::PotionContentsImpl>().is_some() || slot.get_item().id == Item::GLASS_BOTTLE.id);
-            }
+            let current = Self::potion_bits(items_guard.as_slice());
             drop(items_guard);
 
             // If potion presence changed, update last_potion_count and update block state so clients
@@ -660,5 +687,39 @@ mod tests {
                 &ItemStack::new(1, item)
             ));
         }
+    }
+
+    #[test]
+    fn ingredient_remainder_replaces_exhausted_stack() {
+        let mut ingredient = ItemStack::new(1, &Item::MUSHROOM_STEW);
+
+        assert!(BrewingStandBlockEntity::apply_ingredient_remainder(&mut ingredient).is_none());
+        assert_eq!(ingredient.get_item().id, Item::BOWL.id);
+        assert_eq!(ingredient.item_count, 1);
+    }
+
+    #[test]
+    fn ingredient_remainder_is_dropped_when_stack_survives() {
+        let mut ingredient = ItemStack::new(2, &Item::MUSHROOM_STEW);
+
+        let remainder = BrewingStandBlockEntity::apply_ingredient_remainder(&mut ingredient)
+            .expect("a surviving ingredient stack drops its remainder");
+        assert_eq!(remainder.get_item().id, Item::BOWL.id);
+        assert_eq!(ingredient.get_item().id, Item::MUSHROOM_STEW.id);
+        assert_eq!(ingredient.item_count, 1);
+    }
+
+    #[test]
+    fn potion_bits_track_any_non_empty_slot() {
+        let items = [
+            ItemStack::new(1, &Item::POTION),
+            ItemStack::new(1, &Item::GLASS_BOTTLE),
+            ItemStack::EMPTY.clone(),
+        ];
+
+        assert_eq!(
+            BrewingStandBlockEntity::potion_bits(&items),
+            [true, true, false]
+        );
     }
 }

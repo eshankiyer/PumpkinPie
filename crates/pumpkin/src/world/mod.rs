@@ -6340,6 +6340,10 @@ impl World {
         flags: BlockFlags,
     ) -> Option<BlockStateId> {
         let (broken_block, broken_block_state) = self.get_block_and_state_id(position);
+        // `DecoratedPotBlock.getDrops` receives the block entity while the old state still
+        // exists (`DecoratedPotBlock.java:181-191`); retain it across state replacement for
+        // the loot-table dynamic and component-copy functions.
+        let block_entity = self.get_block_entity(position);
         if is_air(broken_block_state) {
             return None;
         }

@@ -4,7 +4,6 @@ use super::{Controls, Goal, GoalFuture};
 use crate::entity::mob::Mob;
 use crate::world::World;
 use pumpkin_data::block_properties::{BlockProperties, OakDoorLikeProperties};
-use pumpkin_data::tag::Taggable;
 use pumpkin_util::math::position::BlockPos;
 
 /// Enables mobs to interact with doors (open and close) while navigating.
@@ -46,7 +45,9 @@ impl InteractWithDoorGoal {
     /// Checks if a block is a mob-interactable door
     pub(crate) fn is_mob_interactable_door(world: &World, pos: &BlockPos) -> bool {
         let block = world.get_block(pos);
-        block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_MOB_INTERACTABLE_DOORS)
+        // DoorInteractGoal.canUse (`DoorInteractGoal.java:59-74`) delegates this
+        // decision to DoorBlock.isWoodenDoor (`DoorBlock.java:271-277`).
+        crate::block::blocks::doors::is_wooden_door(block)
     }
 
     /// Checks if the door at the given position is currently open
