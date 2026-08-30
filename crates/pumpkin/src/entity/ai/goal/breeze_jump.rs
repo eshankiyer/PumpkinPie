@@ -312,6 +312,11 @@ impl Goal for BreezeJumpGoal {
             {
                 entity.set_pose(EntityPose::Standing);
             }
+            // `LongJump.stop` clears `discardFriction` when the behavior is interrupted
+            // (`LongJump.java:158-164`).
+            mob.get_mob_entity()
+                .living_entity
+                .set_discard_friction(false);
             self.phase = Phase::Idle;
             self.jump_target = None;
         })
@@ -378,10 +383,7 @@ impl Goal for BreezeJumpGoal {
                     entity.set_pose(EntityPose::LongJumping);
                     entity.yaw.store(entity.head_yaw.load());
                     entity.velocity.store(velocity);
-                    // Vanilla also calls `setDiscardFriction(true)` here to skip normal
-                    // ground/air drag mid-arc; Pumpkin's movement pipeline has no
-                    // equivalent hook, so the jump loses a little more speed to drag
-                    // than vanilla's.
+                    breeze.mob_entity.living_entity.set_discard_friction(true);
                     self.phase = Phase::Jumping;
                 }
                 Phase::Jumping => {
@@ -395,6 +397,7 @@ impl Goal for BreezeJumpGoal {
                             &breeze_pos,
                         );
                         entity.set_pose(EntityPose::Standing);
+                        breeze.mob_entity.living_entity.set_discard_friction(false);
 
                         let living = &breeze.mob_entity.living_entity;
                         let recently_hurt = living.entity.age.load(Relaxed)

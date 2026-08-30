@@ -277,4 +277,16 @@ impl EntityBase for ChestBoatEntity {
             height / 3.0
         }
     }
+
+    /// Chest boats inherit `AbstractBoat.onPassengerTurned`'s 105-degree clamp
+    /// (`AbstractBoat.java:666-678`).
+    fn on_passenger_turned(&self, passenger: &Entity) {
+        let boat_yaw = self.vehicle.entity.yaw.load();
+        passenger.body_yaw.store(boat_yaw);
+        passenger.yaw.store(super::boat::clamp_passenger_yaw(
+            boat_yaw,
+            passenger.yaw.load(),
+        ));
+        passenger.head_yaw.store(passenger.yaw.load());
+    }
 }

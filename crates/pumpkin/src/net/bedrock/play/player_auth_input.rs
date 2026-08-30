@@ -48,6 +48,9 @@ impl BedrockClient {
             if rot_changed {
                 entity.pitch.store(new_pitch);
                 entity.yaw.store(new_yaw);
+                // `Entity.turn` notifies the vehicle after passenger rotation changes
+                // (`Entity.java:490-501`).
+                entity.notify_vehicle_of_turn().await;
             }
 
             let je_yaw = (new_yaw * 256.0 / 360.0).rem_euclid(256.0);

@@ -712,6 +712,34 @@ mod tests {
         assert_eq!(block_bounce_restitution(&Block::STONE), 0.0);
     }
 
+    /// `BlockBehaviour` stores the shared material values in its properties
+    /// (`BlockBehaviour.java:86-97`) and exposes the state collision shape and
+    /// side-solid checks (`BlockBehaviour.java:327-329,681-709`). Pumpkin's
+    /// generated block and block-state tables are the runtime representation.
+    #[test]
+    fn block_behaviour_material_properties_are_data_modeled() {
+        assert_eq!(Block::STONE.hardness, 1.5);
+        assert_eq!(Block::STONE.blast_resistance, 6.0);
+        assert_eq!(Block::STONE.map_color, 11);
+        assert_eq!(Block::ICE.slipperiness, 0.98);
+        assert_eq!(Block::STONE.default_state.hardness, Block::STONE.hardness);
+        assert!(Block::STONE.default_state.is_side_solid(BlockDirection::Up));
+        assert!(
+            Block::STONE
+                .default_state
+                .get_block_collision_shapes()
+                .next()
+                .is_some()
+        );
+        assert!(
+            Block::AIR
+                .default_state
+                .get_block_collision_shapes()
+                .next()
+                .is_none()
+        );
+    }
+
     /// Ore experience is data-driven through `Block.experience` and `block::drop_loot`, not a
     /// per-block behaviour: `DropExperienceBlock.spawnAfterBreak` (DropExperienceBlock.java:30-35)
     /// samples the registered range, which `Blocks.java:367-369` gives as `UniformInt.of(0, 2)`

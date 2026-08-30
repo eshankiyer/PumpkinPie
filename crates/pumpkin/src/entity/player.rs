@@ -237,6 +237,7 @@ use pumpkin_protocol::SoundEvent;
 use pumpkin_protocol::bedrock::client::container_open::CContainerOpen;
 use pumpkin_protocol::bedrock::client::update_block::CUpdateBlock;
 use pumpkin_protocol::bedrock::server::actor_event::{ActorEventType, SActorEvent};
+use pumpkin_protocol::codec::optional_int::OptionalInt;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::codec::var_long::VarLong;
 use pumpkin_protocol::codec::var_ulong::VarULong;
@@ -1294,7 +1295,9 @@ impl Player {
 
         let mut left = self.shoulder_entity_left.lock().await;
         if left.is_none() {
+            let variant = extract_parrot_variant(&entity_tag);
             *left = Some(entity_tag);
+            self.set_shoulder_parrot_variant(true, variant);
             drop(left);
             let now = self.world().get_world_age().await;
             self.time_entity_sat_on_shoulder
@@ -1305,7 +1308,9 @@ impl Player {
 
         let mut right = self.shoulder_entity_right.lock().await;
         if right.is_none() {
+            let variant = extract_parrot_variant(&entity_tag);
             *right = Some(entity_tag);
+            self.set_shoulder_parrot_variant(false, variant);
             drop(right);
             let now = self.world().get_world_age().await;
             self.time_entity_sat_on_shoulder
@@ -1352,12 +1357,26 @@ impl Player {
 
         let left = self.shoulder_entity_left.lock().await.take();
         if let Some(tag) = left {
+            self.set_shoulder_parrot_variant(true, None);
             self.respawn_entity_on_shoulder(tag).await;
         }
         let right = self.shoulder_entity_right.lock().await.take();
         if let Some(tag) = right {
+            self.set_shoulder_parrot_variant(false, None);
             self.respawn_entity_on_shoulder(tag).await;
         }
+    }
+
+    /// `ServerPlayer.setShoulderParrotLeft/Right` stores the extracted parrot variant in the
+    /// player data tracker (`ServerPlayer.java:2252-2263`).
+    fn set_shoulder_parrot_variant(&self, left: bool, variant: Option<i32>) {
+        let tracked_data = if left {
+            pumpkin_data::tracked_data::player::DATA_SHOULDER_PARROT_LEFT
+        } else {
+            pumpkin_data::tracked_data::player::DATA_SHOULDER_PARROT_RIGHT
+        };
+        self.get_entity()
+            .send_meta_data(&[Metadata::new(tracked_data, OptionalInt(variant))], None);
     }
 
     /// `ServerPlayer.respawnEntityOnShoulder` (`ServerPlayer.java:821-839`): deserializes the
@@ -1570,8 +1589,24 @@ impl Player {
 
         let vehicle = self.living_entity.entity.vehicle.lock().await.clone();
         if let Some(vehicle) = vehicle {
-            self.root_vehicle_uuid
-                .store(Some(vehicle.get_entity().entity_uuid));
+            let mut root_vehicle = vehicle.clone();
+            loop {
+                let next_vehicle = root_vehicle.get_entity().vehicle.lock().await.clone();
+                let Some(next_vehicle) = next_vehicle else {
+                    break;
+                };
+                root_vehicle = next_vehicle;
+            }
+            // Vanilla `ServerPlayer.saveParentVehicle` persists the attachment only when the
+            // root vehicle has exactly one player passenger (`ServerPlayer.java:436-443`).
+            if root_vehicle
+                .get_entity()
+                .has_exactly_one_player_passenger()
+                .await
+            {
+                self.root_vehicle_uuid
+                    .store(Some(vehicle.get_entity().entity_uuid));
+            }
             vehicle
                 .get_entity()
                 .remove_passenger_on_disconnect(self.entity_id())
@@ -1825,6 +1860,21 @@ impl Player {
             );
             self.living_entity.post_piercing_attack(self).await;
             return;
+        }
+
+        // `Player.attack` applies visual effects only after `hurtOrSimulate` succeeds
+        // (`Player.java:984-995`); its critical branch calls `crit` (`Player.java:1063-1066`),
+        // which `ServerPlayer` broadcasts as animation id 4 (`ServerPlayer.java:1730-1732`).
+        if matches!(attack_type, AttackType::Critical) {
+            let je_packet =
+                CEntityAnimation::new(victim_entity.entity_id.into(), Animation::CriticalEffect);
+            let be_packet = pumpkin_protocol::bedrock::server::animate::SAnimate {
+                action: pumpkin_protocol::bedrock::server::animate::AnimateAction::CriticalHit,
+                runtime_entity_id: VarULong(victim_entity.entity_id as u64),
+                data: 0.0,
+                swing_source: None,
+            };
+            world.broadcast_editioned(&je_packet, &be_packet).await;
         }
 
         if let Some(health_before) = victim_health_before
@@ -2113,6 +2163,7 @@ impl Player {
         };
 
         let mut stack = self.inventory().get_stack(slot_index).await;
+        let broken_item = stack.clone();
         let result = stack.damage_item(amount);
         let updated = (result != pumpkin_data::item_stack::DamageResult::Untouched)
             .then_some((result, stack.clone()));
@@ -2151,6 +2202,9 @@ impl Player {
                     super::equipment_break_status(slot),
                     None,
                 );
+                // `LivingEntity.breakItem` invokes `spawnItemParticles` before the broken stack
+                // is cleared (`LivingEntity.java:1439-1448`).
+                self.living_entity.spawn_item_particles(&broken_item, 5);
             }
 
             self.enqueue_slot_set_packet(&CSetPlayerInventory::new(
@@ -2172,6 +2226,27 @@ impl Player {
     pub async fn damage_held_item(&self, amount: i32) -> bool {
         self.damage_item_in_slot(&EquipmentSlot::MAIN_HAND, amount)
             .await
+    }
+
+    /// Mirrors `ItemStack.hurtAndConvertOnBreak` (`ItemStack.java:498-509`) for the main hand.
+    pub async fn damage_held_item_and_convert_on_break(
+        &self,
+        amount: i32,
+        replacement: &'static Item,
+    ) {
+        if !self.damage_held_item(amount).await {
+            return;
+        }
+
+        let held = self.inventory().held_item().await;
+        if held.is_empty() {
+            let replacement = ItemStack::new(1, replacement);
+            self.inventory().set_held_item(replacement.clone()).await;
+            // `FoodOnAStickItem.use` returns the transformed stack after the broken stack is
+            // replaced (`FoodOnAStickItem.java:24-37`).
+            self.sync_hand_slot(self.inventory().get_selected_slot() as usize, replacement)
+                .await;
+        }
     }
 
     /// Mirrors `Player.blockActionRestricted` for the start of a block break.
@@ -5321,6 +5396,18 @@ impl Player {
                     let mut abilities = self.abilities.lock().await;
                     abilities.set_for_gamemode(gamemode);
                 };
+
+                // Vanilla `ServerPlayerGameMode.changeGameModeForPlayer` checks
+                // `isInRangeOfGround` (`ServerPlayerGameMode.java:49-64,82-89`) and
+                // disables flight after changing the abilities for a non-spectator mode.
+                let is_flying = self.abilities.lock().await.flying;
+                if gamemode != GameMode::Spectator
+                    && is_flying
+                    && self.world().is_space_empty(self.get_entity().bounding_box.load())
+                    && self.get_entity().get_available_space_below(1.0).await < 1.0
+                {
+                    self.abilities.lock().await.flying = false;
+                }
                 self.send_abilities_update().await;
 
                 if gamemode == GameMode::Creative {
@@ -7202,15 +7289,26 @@ impl NBTStorage for Player {
                 nbt.put_bool("SpawnForced", respawn.force);
             }
             nbt.put_int("XpSeed", self.enchantment_seed.load(Ordering::Relaxed));
-            let vehicle_uuid = self
-                .living_entity
-                .entity
-                .vehicle
-                .lock()
-                .await
-                .as_ref()
-                .map(|vehicle| vehicle.get_entity().entity_uuid)
-                .or_else(|| self.root_vehicle_uuid.load());
+            let vehicle = self.living_entity.entity.vehicle.lock().await.clone();
+            let vehicle_uuid = if let Some(vehicle) = vehicle {
+                let mut root_vehicle = vehicle.clone();
+                loop {
+                    let next_vehicle = root_vehicle.get_entity().vehicle.lock().await.clone();
+                    let Some(next_vehicle) = next_vehicle else {
+                        break;
+                    };
+                    root_vehicle = next_vehicle;
+                }
+                // Vanilla `ServerPlayer.saveParentVehicle` uses the root vehicle's recursive
+                // player count (`ServerPlayer.java:436-443`; `Entity.java:3525-3553`).
+                root_vehicle
+                    .get_entity()
+                    .has_exactly_one_player_passenger()
+                    .await
+                    .then_some(vehicle.get_entity().entity_uuid)
+            } else {
+                self.root_vehicle_uuid.load()
+            };
             if let Some(vehicle_uuid) = vehicle_uuid {
                 write_root_vehicle(nbt, vehicle_uuid);
             }
@@ -7326,10 +7424,18 @@ impl NBTStorage for Player {
             self.stats.lock().await.read_nbt(nbt);
             self.recipe_book.lock().await.read_nbt(nbt);
 
-            *self.shoulder_entity_left.lock().await =
-                nbt.get_compound("ShoulderEntityLeft").cloned();
-            *self.shoulder_entity_right.lock().await =
-                nbt.get_compound("ShoulderEntityRight").cloned();
+            // `ServerPlayer.readAdditionalSaveData` restores both shoulder tags and the
+            // shoulder setters update their tracked parrot variants (`ServerPlayer.java:408-409`,
+            // `ServerPlayer.java:2252-2263`).
+            let left = nbt.get_compound("ShoulderEntityLeft").cloned();
+            let right = nbt.get_compound("ShoulderEntityRight").cloned();
+            self.set_shoulder_parrot_variant(true, left.as_ref().and_then(extract_parrot_variant));
+            self.set_shoulder_parrot_variant(
+                false,
+                right.as_ref().and_then(extract_parrot_variant),
+            );
+            *self.shoulder_entity_left.lock().await = left;
+            *self.shoulder_entity_right.lock().await = right;
         })
     }
 }
@@ -7557,6 +7663,16 @@ fn attack_charge_ready(
             >= required_strength
 }
 
+/// `Player.extractParrotVariant` accepts only a parrot entity tag and clamps the variant through
+/// `Parrot.VARIANTS.byId` (`Player.java:1781-1789`; `Parrot.java:517-546`).
+fn extract_parrot_variant(tag: &NbtCompound) -> Option<i32> {
+    let id = tag.get_string("id")?;
+    if id.strip_prefix("minecraft:").unwrap_or(id) != "parrot" {
+        return None;
+    }
+    tag.get_int("Variant").map(|variant| variant.clamp(0, 4))
+}
+
 impl EntityBase for Player {
     /// Vanilla `Player.getFallSounds` (`Player.java:1504-1506`).
     fn get_fall_sound(&self, fall_distance: i32) -> Sound {
@@ -7565,6 +7681,21 @@ impl EntityBase for Player {
         } else {
             Sound::EntityPlayerSmallFall
         }
+    }
+
+    /// Vanilla players use a 20-tick fire immunity cooldown (`Player.java:408`).
+    fn get_fire_immune_ticks(&self) -> i32 {
+        20
+    }
+
+    /// `ServerPlayer.onExplosionHit` records the impulse position and only ignores
+    /// fall damage for a wind-charge source (`ServerPlayer.java:1304-1308`).
+    fn on_explosion_hit(&self, source_type: Option<&'static EntityType>) {
+        self.living_entity
+            .set_ignore_fall_damage_from_current_impulse(
+                super::is_wind_charge_source(source_type),
+                self.living_entity.entity.pos.load(),
+            );
     }
 
     fn damage_with_context<'a>(
@@ -8558,6 +8689,32 @@ impl InventoryPlayer for Player {
                     &self.position(),
                 );
             }
+
+            // `LivingEntity.collectEquipmentChanges` emits Equip/Unequip only when
+            // `doesEmitEquipEvent` is true (`LivingEntity.java:685-708`); Player enables it for
+            // humanoid armor slots (`Player.java:1664`).
+            if matches!(
+                slot,
+                EquipmentSlot::Feet(_)
+                    | EquipmentSlot::Legs(_)
+                    | EquipmentSlot::Chest(_)
+                    | EquipmentSlot::Head(_)
+            ) && let Some(player_arc) = self.world().get_player_by_uuid(self.gameprofile.id)
+            {
+                crate::world::game_event::emit_game_event(
+                    &self.world(),
+                    if stack.get_data_component::<EquippableImpl>().is_some() {
+                        pumpkin_data::game_event::GameEvent::Equip
+                    } else {
+                        pumpkin_data::game_event::GameEvent::Unequip
+                    },
+                    self.position(),
+                    crate::world::game_event::GameEventContext::of_entity(
+                        player_arc as Arc<dyn EntityBase>,
+                    ),
+                )
+                .await;
+            }
         })
     }
 
@@ -8669,14 +8826,30 @@ fn is_valid_for_forced_respawn(state: &BlockState) -> bool {
 mod tests {
     use super::{
         Player, ability_invulnerability_blocks, attack_charge_ready, bedrock_inventory_slot,
-        can_harm_player_teams, damage_dealt_stat_points, is_crossbow_held_projectile,
-        is_crossbow_inventory_projectile, is_valid_for_forced_respawn, is_vanishing_cursed,
-        player_death_experience_reward, read_root_vehicle, write_root_vehicle,
+        can_harm_player_teams, damage_dealt_stat_points, extract_parrot_variant,
+        is_crossbow_held_projectile, is_crossbow_inventory_projectile, is_valid_for_forced_respawn,
+        is_vanishing_cursed, player_death_experience_reward, read_root_vehicle, write_root_vehicle,
     };
     use pumpkin_data::Block;
     use pumpkin_data::damage::DamageType;
     use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
     use uuid::Uuid;
+
+    /// `Player.extractParrotVariant` accepts namespaced and legacy ids, and `Parrot.byId` clamps
+    /// invalid variants to the registered palette (`Player.java:1781-1789`; `Parrot.java:517-546`).
+    #[test]
+    fn parrot_variant_extraction_matches_vanilla_palette() {
+        let mut tag = NbtCompound::new();
+        tag.put_string("id", "minecraft:parrot".to_owned());
+        tag.put_int("Variant", 4);
+        assert_eq!(extract_parrot_variant(&tag), Some(4));
+
+        tag.put_int("Variant", 99);
+        assert_eq!(extract_parrot_variant(&tag), Some(4));
+
+        tag.put_string("id", "minecraft:cat".to_owned());
+        assert_eq!(extract_parrot_variant(&tag), None);
+    }
 
     /// `Player.getProjectile` uses `ARROW_OR_FIREWORK` in hand and `ARROW_ONLY` in the
     /// inventory fallback (`Player.java:1877-1897`; `CrossbowItem.java:54-62`).

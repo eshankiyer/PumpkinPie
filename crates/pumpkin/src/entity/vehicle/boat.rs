@@ -13,7 +13,7 @@ use pumpkin_data::item_stack::ItemStack;
 
 use pumpkin_protocol::java::client::play::Metadata;
 
-use pumpkin_util::math::vector3::Vector3;
+use pumpkin_util::math::{vector3::Vector3, wrap_degrees};
 
 use crate::entity::vehicle::vehicle::VehicleEntity;
 
@@ -22,6 +22,14 @@ pub struct BoatEntity {
     ticks_underwater: AtomicCell<f32>,
     left_paddle_moving: AtomicBool,
     right_paddle_moving: AtomicBool,
+}
+
+/// `AbstractBoat.clampRotation` limits the rider's yaw relative to the boat
+/// (`AbstractBoat.java:666-673`).
+pub(crate) fn clamp_passenger_yaw(boat_yaw: f32, passenger_yaw: f32) -> f32 {
+    let delta = wrap_degrees(passenger_yaw - boat_yaw);
+    let target_delta = delta.clamp(-105.0, 105.0);
+    passenger_yaw + target_delta - delta
 }
 
 impl BoatEntity {
@@ -182,5 +190,30 @@ impl EntityBase for BoatEntity {
         } else {
             height / 3.0
         }
+    }
+
+    /// `AbstractBoat.onPassengerTurned` clamps a rider to 105 degrees from the boat
+    /// (`AbstractBoat.java:666-678`).
+    fn on_passenger_turned(&self, passenger: &Entity) {
+        let boat_yaw = self.vehicle.entity.yaw.load();
+        passenger.body_yaw.store(boat_yaw);
+        passenger
+            .yaw
+            .store(clamp_passenger_yaw(boat_yaw, passenger.yaw.load()));
+        passenger.head_yaw.store(passenger.yaw.load());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clamp_passenger_yaw;
+
+    #[test]
+    fn passenger_yaw_is_clamped_to_boat() {
+        // Vanilla does not renormalize the result to +-180, so 200 clamped to the 105-degree
+        // limit stays on the unwrapped side (255, equivalent to -105) rather than snapping to 105.
+        assert_eq!(clamp_passenger_yaw(0.0, 200.0), 255.0);
+        assert_eq!(clamp_passenger_yaw(0.0, -200.0), -255.0);
+        assert_eq!(clamp_passenger_yaw(15.0, 60.0), 60.0);
     }
 }

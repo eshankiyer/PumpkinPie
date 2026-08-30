@@ -350,6 +350,9 @@ impl Goal for LongJumpToRandomPosGoal {
                     entity.yaw.store(entity.head_yaw.load());
                     entity.velocity.store(velocity);
                     entity.set_pose(EntityPose::LongJumping);
+                    mob.get_mob_entity()
+                        .living_entity
+                        .set_discard_friction(true);
                     entity.world.load().play_sound(
                         (self.jump_sound)(mob),
                         SoundCategory::Neutral,
@@ -382,6 +385,9 @@ impl Goal for LongJumpToRandomPosGoal {
                         &entity.pos.load(),
                     );
                 }
+                mob.get_mob_entity()
+                    .living_entity
+                    .set_discard_friction(false);
                 self.cooldown = self.sample_time_between(mob);
             } else {
                 self.cooldown = self.sample_time_between(mob) / 2;
@@ -390,6 +396,9 @@ impl Goal for LongJumpToRandomPosGoal {
             if entity.pose.load() == EntityPose::LongJumping {
                 entity.set_pose(EntityPose::Standing);
             }
+            mob.get_mob_entity()
+                .living_entity
+                .set_discard_friction(false);
 
             self.phase = Phase::Searching;
             self.candidates.clear();

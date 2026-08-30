@@ -26,6 +26,9 @@ impl JavaClient {
             wrap_degrees(rotation.yaw) % 360.0,
             wrap_degrees(rotation.pitch),
         );
+        // `Entity.turn` notifies the vehicle after passenger rotation changes
+        // (`Entity.java:490-501`).
+        entity.notify_vehicle_of_turn().await;
         // Send the new position to all other players.
         let entity_id = entity.entity_id;
         let yaw = (entity.yaw.load() * 256.0 / 360.0).rem_euclid(256.0);

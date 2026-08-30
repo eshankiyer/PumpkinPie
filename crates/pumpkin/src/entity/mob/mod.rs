@@ -202,6 +202,9 @@ pub struct MobEntity {
     pub move_control: std::sync::Mutex<Box<dyn MoveControlTrait>>,
     pub position_target: AtomicCell<BlockPos>,
     pub position_target_range: AtomicI32,
+    /// Whether the shared home restriction currently comes from a leash. Vanilla clears that
+    /// restriction from `Mob.onLeashRemoved` (`Mob.java:1279-1284`).
+    leash_home_active: AtomicBool,
     pub love_ticks: AtomicI32,
     pub breeding_cooldown: AtomicI32,
     /// Vanilla `AbstractSchoolingFish.leader` reference.
@@ -306,6 +309,7 @@ impl MobEntity {
             move_control: std::sync::Mutex::new(Box::new(MoveControl::default())),
             position_target: AtomicCell::new(BlockPos::ZERO),
             position_target_range: AtomicI32::new(-1),
+            leash_home_active: AtomicBool::new(false),
             love_ticks: AtomicI32::new(0),
             breeding_cooldown: AtomicI32::new(0),
             schooling_leader: std::sync::Mutex::new(None),
@@ -1040,6 +1044,7 @@ impl MobEntity {
         let Some(stack) = equipment.equipment.get_mut(&slot) else {
             return;
         };
+        let broken_item = stack.clone();
         let cost = mob_weapon_durability_cost(stack);
         let result = stack.damage_item(cost);
         if result == DamageResult::Untouched {
@@ -1054,6 +1059,9 @@ impl MobEntity {
                 equipment_break_status(&slot),
                 None,
             );
+            // `LivingEntity.breakItem` invokes `spawnItemParticles` for a broken held item
+            // (`LivingEntity.java:1439-1448`).
+            living.spawn_item_particles(&broken_item, 5);
         }
         living.send_equipment_changes(&[(slot, updated_stack)]);
     }
@@ -1892,6 +1900,18 @@ pub trait Mob: EntityBase + Send + Sync {
             self.get_entity().leash_elastic_distance() as i32 - 1,
             Relaxed,
         );
+        mob_entity.leash_home_active.store(true, Relaxed);
+    }
+
+    /// Vanilla `Mob.onLeashRemoved` clears the home radius when no leash data remains
+    /// (`Mob.java:1279-1284`). The flag preserves unrelated home restrictions represented by the
+    /// same shared fields until the leash is actually removed.
+    fn on_leash_removed(&self) {
+        let mob_entity = self.get_mob_entity();
+        if mob_entity.leash_home_active.swap(false, Relaxed) {
+            mob_entity.position_target.store(BlockPos::ZERO);
+            mob_entity.position_target_range.store(-1, Relaxed);
+        }
     }
 
     /// Vanilla `PathfinderMob.closeRangeLeashBehaviour`: keep a non-panicking mob
@@ -1919,6 +1939,29 @@ pub trait Mob: EntityBase + Send + Sync {
                 target,
                 f64::from(self.get_follow_leash_speed()),
             ));
+    }
+
+    /// Vanilla `Mob.leashTooFarBehaviour` drops the leash and disables MOVE goals
+    /// (`Mob.java:1287-1290`). The shared entity leash tick has already played the break sound
+    /// at the holder, matching `Leashable.tickLeash` (`Leashable.java:160-163`).
+    fn leash_too_far_behavior(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let entity = self.get_entity();
+            entity.unleash().await;
+            entity
+                .world
+                .load()
+                .drop_stack(
+                    &entity.block_pos.load(),
+                    ItemStack::new(1, &pumpkin_data::item::Item::LEAD),
+                )
+                .await;
+            self.get_mob_entity()
+                .goals_selector
+                .lock()
+                .unwrap()
+                .disable_control(Controls::MOVE);
+        })
     }
 
     /// Vanilla `PathfinderMob.shouldStayCloseToLeashHolder`.
@@ -2908,13 +2951,23 @@ impl<T: Mob + Send + 'static> EntityBase for T {
                 }
             }
             let entity = &mob_entity.living_entity.entity;
+            if mob_entity.leash_home_active.load(Relaxed)
+                && entity.leashed_to.lock().await.is_none()
+            {
+                self.on_leash_removed();
+            }
             if let Some((holder_pos, distance)) = entity.tick_leash().await {
                 // `Leashable.tickLeash` (`Leashable.java:155-160`) re-runs
                 // `whenLeashedTo` on every leashed tick before the snap/elastic/close-range
                 // dispatch; `PathfinderMob.whenLeashedTo` retargets the home to the holder.
                 self.when_leashed_to(BlockPos::floored_v(holder_pos));
-                self.close_range_leash_behavior(holder_pos, distance);
-                self.on_elastic_leash_pull();
+                if distance > entity.leash_snap_distance() {
+                    self.leash_too_far_behavior().await;
+                    self.on_leash_removed();
+                } else {
+                    self.close_range_leash_behavior(holder_pos, distance);
+                    self.on_elastic_leash_pull();
+                }
             }
 
             if mob_entity.breeding_cooldown.load(Relaxed) > 0 {

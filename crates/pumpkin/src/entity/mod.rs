@@ -32,7 +32,7 @@ use pumpkin_data::{Block, BlockDirection};
 use pumpkin_data::{
     block_properties::{Facing, HorizontalFacing},
     damage::DamageType,
-    entity::{EntityPose, EntityType},
+    entity::{EntityPose, EntityType, MobCategory},
     sound::{Sound, SoundCategory},
 };
 use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
@@ -63,6 +63,7 @@ use pumpkin_protocol::{
         CSpawnEntity, CSpawnLivingEntity, CUpdateAttributes, CUpdateEntityRot, Metadata,
         MetadataSerializer, Property as JavaAttributeProperty, RawMetadataValue,
     },
+    ser::NetworkWriteExt,
 };
 use pumpkin_util::math::vector3::Axis;
 use pumpkin_util::math::{
@@ -360,6 +361,12 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         }
     }
 
+    /// Vanilla `Entity.getFireImmuneTicks` supplies the negative cooldown after block effects
+    /// finish (`Entity.java:3624`).
+    fn get_fire_immune_ticks(&self) -> i32 {
+        0
+    }
+
     /// Per-entity opt-out from explosions, independent of the vanilla
     /// `Entity.ignoreExplosion` rules below (kept because several entity types
     /// override only this one).
@@ -406,6 +413,27 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         }
 
         false
+    }
+
+    /// Vanilla `Entity.onExplosionHit` is called after explosion knockback
+    /// (`Entity.java:3911-3912`; `ServerExplosion.java:182-208`).
+    fn on_explosion_hit(&self, _source_type: Option<&'static EntityType>) {}
+
+    /// Vanilla `Entity.turn` notifies the vehicle after changing a passenger's rotation
+    /// (`Entity.java:490-501`). Vehicle subclasses may clamp that rotation.
+    fn on_passenger_turned(&self, _passenger: &Entity) {}
+
+    /// Vanilla plays the extinguish sound after block effects clear fire
+    /// (`Entity.java:964-973`; `Entity.java:1013-1019`).
+    fn play_entity_on_fire_extinguished_sound(&self) {
+        let entity = self.get_entity();
+        entity.world.load().play_sound_fine(
+            Sound::EntityGenericExtinguishFire,
+            SoundCategory::Neutral,
+            &entity.pos.load(),
+            0.7,
+            1.6 + (rand::random::<f32>() - rand::random::<f32>()) * 0.4,
+        );
     }
 
     fn get_gravity(&self) -> f64 {
@@ -1245,11 +1273,66 @@ const fn delta_needs_position_sync(encoded: Vector3<i64>) -> bool {
         || encoded.z > i16::MAX as i64
 }
 
+/// Applies `Entity.applyEffectsFromBlocks`' fire-immunity transition
+/// (`Entity.java:964-973`).
+const fn fire_ticks_after_block_effects(
+    previous_remaining_fire_ticks: i32,
+    remaining_fire_ticks: i32,
+    fire_immune_ticks: i32,
+) -> i32 {
+    if remaining_fire_ticks <= 0 && remaining_fire_ticks <= previous_remaining_fire_ticks {
+        -fire_immune_ticks
+    } else {
+        remaining_fire_ticks
+    }
+}
+
+/// Selects the splash sound used by `Entity.doWaterSplashEffect`. Vanilla's base, monster,
+/// dolphin, axolotl, and player overrides are `Entity.java:1263-1272`, `Monster.java:60-63`,
+/// `Dolphin.java:343-346`, `Axolotl.java:518-520`, and `Player.java:383-390`.
+fn water_splash_sound(entity_type: &'static EntityType, high_speed: bool) -> Sound {
+    if entity_type == &EntityType::PLAYER {
+        return if high_speed {
+            Sound::EntityPlayerSplashHighSpeed
+        } else {
+            Sound::EntityPlayerSplash
+        };
+    }
+
+    if entity_type == &EntityType::DOLPHIN {
+        return Sound::EntityDolphinSplash;
+    }
+
+    if entity_type == &EntityType::AXOLOTL {
+        return Sound::EntityAxolotlSplash;
+    }
+
+    if entity_type.category == &MobCategory::MONSTER {
+        return Sound::EntityHostileSplash;
+    }
+
+    Sound::EntityGenericSplash
+}
+
+/// `ServerPlayer.onExplosionHit` treats the player-thrown wind-charge entity as the
+/// impulse source (`ServerPlayer.java:1304-1308`; `WindCharge.java:23-27`).
+pub(crate) const fn is_wind_charge_source(source_type: Option<&'static EntityType>) -> bool {
+    match source_type {
+        Some(source) => source.id == EntityType::WIND_CHARGE.id,
+        None => false,
+    }
+}
+
 /// Shared ordinary-interaction mount admission. The first two conditions are vanilla
 /// `Entity.canRide`; retaining an existing vehicle prevents the invalid double attachment that
 /// Pumpkin's current low-level mount primitive cannot safely transfer.
 const fn can_start_riding_state(sneaking: bool, riding_cooldown: i32, has_vehicle: bool) -> bool {
     !sneaking && riding_cooldown <= 0 && !has_vehicle
+}
+
+/// Vanilla compares `countPlayerPassengers()` with one (`Entity.java:3535-3553`).
+const fn exactly_one_player_passenger(player_count: usize) -> bool {
+    player_count == 1
 }
 pub struct Entity {
     /// A unique identifier for the entity
@@ -1418,6 +1501,9 @@ pub struct Entity {
     pub last_sent_velocity: AtomicCell<Vector3<f64>>,
     /// Vanilla `ServerEntity.teleportDelay`: ticks since the last absolute position sync.
     pub teleport_delay: AtomicI32,
+    /// Vanilla `Entity.requiresPrecisePosition` (`Entity.java:372-378`), used by stationary
+    /// Happy Ghasts to force an absolute position packet instead of a relative delta.
+    pub requires_precise_position: AtomicBool,
     /// Vanilla `ServerEntity.wasOnGround`: the ground flag the client was last told about.
     pub last_sent_on_ground: AtomicBool,
     /// Cache for the last sent head yaw byte
@@ -1580,6 +1666,13 @@ impl Entity {
         self.touching_water.load(Ordering::SeqCst) || self.is_in_rain().await
     }
 
+    /// Vanilla `Entity.isInLiquid` (`Entity.java:1604-1605`) combines the entity's current
+    /// water and lava interaction state.
+    #[must_use]
+    pub fn is_in_liquid(&self) -> bool {
+        self.touching_water.load(Ordering::SeqCst) || self.touching_lava.load(Ordering::SeqCst)
+    }
+
     pub fn from_uuid(
         entity_uuid: uuid::Uuid,
         world: Arc<World>,
@@ -1595,6 +1688,7 @@ impl Entity {
         )
     }
 
+    #[expect(clippy::too_many_lines)]
     pub fn from_uuid_with_id(
         entity_id: i32,
         entity_uuid: uuid::Uuid,
@@ -1701,6 +1795,7 @@ impl Entity {
             last_sent_pos: AtomicCell::new(position),
             last_sent_velocity: AtomicCell::new(Vector3::new(0.0, 0.0, 0.0)),
             teleport_delay: AtomicI32::new(0),
+            requires_precise_position: AtomicBool::new(false),
             last_sent_on_ground: AtomicBool::new(false),
             tracked_data_snapshot: std::sync::Mutex::new(Vec::new()),
             custom_data: Mutex::new(NbtCompound::new()),
@@ -2066,6 +2161,16 @@ impl Entity {
         Vector3::new(sin_yaw * cos_pitch, -sin_pitch, cos_yaw * cos_pitch)
     }
 
+    /// Vanilla `Entity.getUpVector(1.0F)` delegates to `calculateUpVector`, which calculates
+    /// the view vector at pitch minus 90 degrees (`Entity.java:1958-1973`).
+    #[must_use]
+    pub fn get_up_vector(&self) -> Vector3<f64> {
+        Vector3::rotation_vector(
+            f64::from(self.pitch.load()) - 90.0,
+            f64::from(self.yaw.load()),
+        )
+    }
+
     /// Vanilla `Entity.getHandHoldingItemAngle` (`Entity.java:2575-2583`): the horizontal
     /// direction from the selected arm, scaled to the hand attachment distance. The caller
     /// resolves which arm holds the item because inventory state is player-specific.
@@ -2386,6 +2491,10 @@ impl Entity {
     }
 
     async fn tick_block_collisions(&self, caller: &Arc<dyn EntityBase>, server: &Server) -> bool {
+        // `Entity.applyEffectsFromBlocks` compares fire state before and after block effects
+        // (`Entity.java:964-973`).
+        let was_on_fire = self.fire_ticks.load(Relaxed) > 0;
+        let previous_remaining_fire_ticks = self.fire_ticks.load(Relaxed);
         let bounding_box = self.bounding_box.load();
         let aabb = bounding_box.expand(-1.0e-7, -1.0e-7, -1.0e-7);
 
@@ -2447,6 +2556,24 @@ impl Entity {
             }
         }
 
+        // The sound is emitted only after all inside-block effects have run
+        // (`Entity.java:968-973`).
+        if was_on_fire && self.fire_ticks.load(Relaxed) <= 0 {
+            caller.play_entity_on_fire_extinguished_sound();
+        }
+
+        // Vanilla arms fire immunity when block effects did not ignite the entity
+        // (`Entity.java:964-973`, `Player.java:408`).
+        let remaining_fire_ticks = self.fire_ticks.load(Relaxed);
+        let next_fire_ticks = fire_ticks_after_block_effects(
+            previous_remaining_fire_ticks,
+            remaining_fire_ticks,
+            caller.get_fire_immune_ticks(),
+        );
+        if next_fire_ticks != remaining_fire_ticks {
+            self.fire_ticks.store(next_fire_ticks, Ordering::Relaxed);
+        }
+
         suffocating
     }
 
@@ -2468,7 +2595,11 @@ impl Entity {
         // the ground flag flips, not only when the delta overflows.
         let teleport_delay = self.teleport_delay.fetch_add(1, Relaxed) + 1;
         let on_ground = self.on_ground.load(Relaxed);
-        if delta_needs_position_sync(encoded)
+        // `ServerEntity.sendChanges` checks `Entity.getRequiresPrecisePosition` before the
+        // overflow, timeout, and ground-state fallbacks (`ServerEntity.java:142-160`; the
+        // getter/setter are `Entity.java:372-378`).
+        if self.get_requires_precise_position()
+            || delta_needs_position_sync(encoded)
             || teleport_delay > MAX_TICKS_BEFORE_POSITION_SYNC
             || on_ground != self.last_sent_on_ground.load(Relaxed)
         {
@@ -2720,7 +2851,10 @@ impl Entity {
         // the ground flag flips, not only when the delta overflows.
         let teleport_delay = self.teleport_delay.fetch_add(1, Relaxed) + 1;
         let on_ground = self.on_ground.load(Relaxed);
-        if delta_needs_position_sync(encoded)
+        // Keep the same precise-position branch for callers that send position without rotation
+        // (`ServerEntity.java:142-160`; `Entity.java:372-378`).
+        if self.get_requires_precise_position()
+            || delta_needs_position_sync(encoded)
             || teleport_delay > MAX_TICKS_BEFORE_POSITION_SYNC
             || on_ground != self.last_sent_on_ground.load(Relaxed)
         {
@@ -2892,7 +3026,7 @@ impl Entity {
             }
 
             if !self.touching_water.load(Ordering::SeqCst) {
-                self.do_water_splash_effect().await;
+                self.do_water_splash_effect(caller.as_ref()).await;
             }
         }
 
@@ -2930,11 +3064,23 @@ impl Entity {
 
     /// Port of vanilla's `Entity::doWaterSplashEffect`. Simplified: no controlling-passenger
     /// volume modifier, no firstTick guard, and `play_sound` has no volume/pitch parameters.
-    async fn do_water_splash_effect(&self) {
+    async fn do_water_splash_effect(&self, caller: &dyn EntityBase) {
         let pos = self.pos.load();
         let width = self.entity_dimension.load().width;
+        let velocity = self.velocity.load();
+        let speed = (velocity.x * velocity.x * 0.2
+            + velocity.y * velocity.y
+            + velocity.z * velocity.z * 0.2)
+            .sqrt()
+            .min(1.0);
 
-        self.play_sound(Sound::EntityGenericSplash);
+        // `Entity.doWaterSplashEffect` selects normal/high-speed sounds at speed 0.25
+        // (`Entity.java:1666-1675`), while the sound overrides are defined at
+        // `Entity.java:1263-1272` and the subclass files cited by `water_splash_sound`.
+        self.play_sound(water_splash_sound(
+            caller.get_entity().entity_type,
+            speed >= 0.25,
+        ));
 
         let particle_count = (1.0f32 + width * 20.0) as i32;
         let splash_origin = Vector3::new(pos.x, pos.y.floor() + 1.0, pos.z);
@@ -3120,6 +3266,32 @@ impl Entity {
 
     pub fn move_pos(&self, delta: Vector3<f64>) {
         self.set_pos(self.pos.load() + delta);
+    }
+
+    /// Vanilla `Entity.isFree` (`Entity.java:659-663`) tests both block collision and liquid
+    /// occupancy for the entity bounding box after applying the requested movement.
+    #[must_use]
+    pub fn is_free(&self, xa: f64, ya: f64, za: f64) -> bool {
+        let bounding_box = self.bounding_box.load().shift(Vector3::new(xa, ya, za));
+        let world = self.world.load();
+        !world.check_fluid_collision(bounding_box) && world.is_space_empty(bounding_box)
+    }
+
+    /// Vanilla `Entity.getAvailableSpaceBelow` (`Entity.java:1131-1135`) measures the
+    /// downward clearance used by `ServerPlayerGameMode.isInRangeOfGround`.
+    pub async fn get_available_space_below(&self, max_distance: f64) -> f64 {
+        let bounding_box = self.bounding_box.load();
+        let below = BoundingBox {
+            min: Vector3::new(
+                bounding_box.min.x,
+                bounding_box.min.y - max_distance,
+                bounding_box.min.z,
+            ),
+            max: Vector3::new(bounding_box.max.x, bounding_box.min.y, bounding_box.max.z),
+        };
+        let world = self.world.load_full();
+        let (colliders, _) = world.get_block_collisions(below, self).await;
+        available_space_below(bounding_box, &colliders, max_distance)
     }
 
     /// Applies a small self movement through the normal block collision solver.
@@ -3861,6 +4033,59 @@ impl Entity {
     pub fn is_sprinting(&self) -> bool {
         self.sprinting.load(Ordering::Relaxed)
     }
+
+    /// Emits the server-side sprint particle from the block under the entity.
+    /// Vanilla runs this from `Entity.baseTick` (`Entity.java:517-526`) and samples the
+    /// block/scatter values in `Entity.spawnSprintParticle` (`Entity.java:1707-1728`).
+    fn spawn_sprint_particle(&self) {
+        let (block_pos, _, block_state) = self.get_block_with_y_offset(0.2);
+        if block_state.is_air() {
+            return;
+        }
+
+        let position = self.pos.load();
+        let width = f64::from(self.entity_dimension.load().width);
+        let mut x = position.x + (rand::random::<f64>() - 0.5) * width;
+        let mut z = position.z + (rand::random::<f64>() - 0.5) * width;
+        let entity_block_pos = self.block_pos.load();
+        if entity_block_pos.0.x != block_pos.0.x {
+            x = x.clamp(f64::from(block_pos.0.x), f64::from(block_pos.0.x) + 1.0);
+        }
+        if entity_block_pos.0.z != block_pos.0.z {
+            z = z.clamp(f64::from(block_pos.0.z), f64::from(block_pos.0.z) + 1.0);
+        }
+
+        let mut particle_data = Vec::new();
+        if particle_data
+            .write_var_int(&VarInt(i32::from(block_state.id.as_u16())))
+            .is_err()
+        {
+            return;
+        }
+        let movement = self.velocity.load();
+        self.world.load().spawn_particle_with_data(
+            Vector3::new(x, position.y + 0.1, z),
+            Vector3::new((movement.x * -4.0) as f32, 1.5, (movement.z * -4.0) as f32),
+            1.0,
+            1,
+            pumpkin_data::particle::Particle::Block,
+            &particle_data,
+        );
+    }
+
+    /// Vanilla `Entity.getRequiresPrecisePosition`/`setRequiresPrecisePosition`
+    /// (`Entity.java:372-378`) controls the absolute-position branch in
+    /// `ServerEntity.sendChanges` (`ServerEntity.java:142-160`).
+    #[must_use]
+    pub fn get_requires_precise_position(&self) -> bool {
+        self.requires_precise_position.load(Ordering::Relaxed)
+    }
+
+    pub fn set_requires_precise_position(&self, requires_precise_position: bool) {
+        self.requires_precise_position
+            .store(requires_precise_position, Ordering::Relaxed);
+    }
+
     pub fn check_fall_flying(&self) -> bool {
         !self.on_ground.load(Relaxed)
     }
@@ -4462,22 +4687,14 @@ impl Entity {
             let distance = diff.length();
 
             if distance > self.leash_snap_distance() {
-                // Too far: snap/break leash and drop lead item. Vanilla plays the break
-                // sound at the HOLDER's position before dropping the leash
-                // (`Leashable.tickLeash`, `Leashable.java:161`).
+                // Vanilla lets the entity's `leashTooFarBehaviour` finish the break after
+                // playing the holder-position sound (`Leashable.java:160-163`).
                 self.world.load().play_sound(
                     pumpkin_data::sound::Sound::ItemLeadBreak,
                     pumpkin_data::sound::SoundCategory::Neutral,
                     &holder_pos,
                 );
-                self.unleash().await;
-                let lead_item =
-                    pumpkin_data::item_stack::ItemStack::new(1, &pumpkin_data::item::Item::LEAD);
-                self.world
-                    .load()
-                    .drop_stack(&self.block_pos.load(), lead_item)
-                    .await;
-                None
+                Some((holder_pos, distance))
             } else if distance
                 > self.leash_elastic_distance()
                     - f64::from(holder_entity.width())
@@ -4531,6 +4748,54 @@ impl Entity {
 
     pub async fn has_passengers(&self) -> bool {
         !self.passengers.lock().await.is_empty()
+    }
+
+    /// Detaches this entity from its vehicle and all of its passengers.
+    /// Vanilla `Entity.unRide` performs both operations (`Entity.java:345-352`).
+    pub(crate) async fn un_ride(&self) {
+        let passengers = self.passengers.lock().await.clone();
+        for passenger in passengers.into_iter().rev() {
+            self.remove_passenger_on_disconnect(passenger.get_entity().entity_id)
+                .await;
+            passenger
+                .get_entity()
+                .vehicle_persistence_required
+                .store(false, Relaxed);
+        }
+
+        let vehicle = self.vehicle.lock().await.take();
+        if let Some(vehicle) = vehicle {
+            vehicle
+                .get_entity()
+                .remove_passenger_on_disconnect(self.entity_id)
+                .await;
+            self.vehicle_persistence_required.store(false, Relaxed);
+        }
+    }
+
+    /// Vanilla `Entity.hasExactlyOnePlayerPassenger` counts all indirect passengers
+    /// (`Entity.java:3525-3553`), not only the direct passenger list.
+    pub async fn has_exactly_one_player_passenger(&self) -> bool {
+        let mut pending = self.passengers.lock().await.clone();
+        let mut player_count = 0;
+        while let Some(passenger) = pending.pop() {
+            if passenger.get_player().is_some() {
+                player_count += 1;
+                if player_count > 1 {
+                    return false;
+                }
+            }
+            pending.extend(
+                passenger
+                    .get_entity()
+                    .passengers
+                    .lock()
+                    .await
+                    .iter()
+                    .cloned(),
+            );
+        }
+        exactly_one_player_passenger(player_count)
     }
 
     pub async fn has_vehicle(&self) -> bool {
@@ -4602,6 +4867,15 @@ impl Entity {
     pub async fn is_leashed(&self) -> bool {
         let leashed_to = self.leashed_to.lock().await;
         leashed_to.is_some()
+    }
+
+    /// Notifies the current vehicle after a live player rotation update, matching
+    /// `Entity.turn`'s `vehicle.onPassengerTurned(this)` call (`Entity.java:490-501`).
+    pub async fn notify_vehicle_of_turn(&self) {
+        let vehicle = self.vehicle.lock().await.clone();
+        if let Some(vehicle) = vehicle {
+            vehicle.on_passenger_turned(self);
+        }
     }
 
     /// Returns the root vehicle id used by vanilla's `isPassengerOfSameVehicle`.
@@ -5134,6 +5408,28 @@ impl Entity {
     }
 }
 
+fn available_space_below(
+    bounding_box: BoundingBox,
+    colliders: &[BoundingBox],
+    max_distance: f64,
+) -> f64 {
+    colliders
+        .iter()
+        .filter_map(|collider| {
+            let overlaps_horizontally = bounding_box.min.x < collider.max.x
+                && bounding_box.max.x > collider.min.x
+                && bounding_box.min.z < collider.max.z
+                && bounding_box.max.z > collider.min.z;
+            if !overlaps_horizontally || collider.max.y > bounding_box.min.y {
+                return None;
+            }
+
+            let distance = bounding_box.min.y - collider.max.y;
+            (distance >= 0.0 && distance <= max_distance).then_some(distance)
+        })
+        .fold(max_distance, f64::min)
+}
+
 impl NBTStorage for Entity {
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async move {
@@ -5342,6 +5638,14 @@ impl EntityBase for Entity {
             }
 
             self.tick_portal(caller).await;
+            if self.is_sprinting()
+                && !self.touching_water.load(Ordering::Relaxed)
+                && !self.touching_lava.load(Ordering::Relaxed)
+                && !caller.is_spectator()
+                && self.is_alive()
+            {
+                self.spawn_sprint_particle();
+            }
             self.was_eye_in_water
                 .store(self.eye_in_water.load(Relaxed), Relaxed);
             self.update_fluid_state(caller).await;
@@ -5575,8 +5879,90 @@ mod velocity_resend_tests {
 }
 
 #[cfg(test)]
+mod passenger_count_tests {
+    use super::exactly_one_player_passenger;
+
+    #[test]
+    fn only_one_player_passenger_qualifies_for_parent_vehicle_save() {
+        // Vanilla `Entity.countPlayerPassengers` feeds `hasExactlyOnePlayerPassenger`
+        // (`Entity.java:3535-3553`).
+        assert!(!exactly_one_player_passenger(0));
+        assert!(exactly_one_player_passenger(1));
+        assert!(!exactly_one_player_passenger(2));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use pumpkin_util::math::boundingbox::BoundingBox;
+    use pumpkin_util::math::vector3::Vector3;
+
+    #[test]
+    fn wind_charge_source_matches_server_player_explosion_rule() {
+        // `ServerPlayer.onExplosionHit` checks the explosion source type
+        // (`ServerPlayer.java:1304-1308`).
+        assert!(is_wind_charge_source(Some(&EntityType::WIND_CHARGE)));
+        assert!(!is_wind_charge_source(Some(
+            &EntityType::BREEZE_WIND_CHARGE
+        )));
+        assert!(!is_wind_charge_source(Some(&EntityType::TNT)));
+        assert!(!is_wind_charge_source(None));
+    }
+
+    #[test]
+    fn available_space_below_uses_nearest_horizontal_collider() {
+        // Vanilla `Entity.getAvailableSpaceBelow` clips the downward box against colliders
+        // (`Entity.java:1131-1135`).
+        let entity = BoundingBox {
+            min: Vector3::new(0.0, 10.0, 0.0),
+            max: Vector3::new(1.0, 12.0, 1.0),
+        };
+        let colliders = [
+            BoundingBox {
+                min: Vector3::new(0.0, 8.0, 0.0),
+                max: Vector3::new(1.0, 9.0, 1.0),
+            },
+            BoundingBox {
+                min: Vector3::new(2.0, 9.0, 0.0),
+                max: Vector3::new(3.0, 10.0, 1.0),
+            },
+        ];
+
+        assert_eq!(available_space_below(entity, &colliders, 3.0), 1.0);
+        assert_eq!(available_space_below(entity, &[], 3.0), 3.0);
+    }
+
+    #[test]
+    fn water_splash_sound_matches_vanilla_overrides() {
+        // Vanilla `Entity.doWaterSplashEffect` chooses the speed branch at 0.25
+        // (`Entity.java:1666-1675`), and the overrides are `Player.java:383-390`,
+        // `Monster.java:60-63`, `Dolphin.java:343-346`, and `Axolotl.java:518-520`.
+        assert_eq!(
+            water_splash_sound(&EntityType::PLAYER, false),
+            Sound::EntityPlayerSplash
+        );
+        assert_eq!(
+            water_splash_sound(&EntityType::PLAYER, true),
+            Sound::EntityPlayerSplashHighSpeed
+        );
+        assert_eq!(
+            water_splash_sound(&EntityType::ZOMBIE, true),
+            Sound::EntityHostileSplash
+        );
+        assert_eq!(
+            water_splash_sound(&EntityType::DOLPHIN, false),
+            Sound::EntityDolphinSplash
+        );
+        assert_eq!(
+            water_splash_sound(&EntityType::AXOLOTL, false),
+            Sound::EntityAxolotlSplash
+        );
+        assert_eq!(
+            water_splash_sound(&EntityType::COD, true),
+            Sound::EntityGenericSplash
+        );
+    }
 
     #[test]
     fn equipment_break_status_maps_all_slots() {
@@ -5981,6 +6367,19 @@ mod metadata_type_resolves_on_target_version_tests {
             "tracked data sent under another entity's id ({checked} cross-module references checked):\n{}",
             wrong.join("\n")
         );
+    }
+}
+
+#[cfg(test)]
+mod fire_immunity_tests {
+    use super::fire_ticks_after_block_effects;
+
+    /// `Entity.applyEffectsFromBlocks` does not arm immunity when a block ignites the entity
+    /// during the same pass (`Entity.java:964-973`).
+    #[test]
+    fn ignition_wins_over_fire_immunity_reset() {
+        assert_eq!(fire_ticks_after_block_effects(0, 40, 20), 40);
+        assert_eq!(fire_ticks_after_block_effects(0, 0, 20), -20);
     }
 }
 

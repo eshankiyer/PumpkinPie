@@ -305,6 +305,9 @@ impl JavaClient {
                 );
 
                 entity.set_rotation(wrap_degrees(packet.yaw) % 360.0, wrap_degrees(packet.pitch));
+                // `Entity.turn` notifies the vehicle after passenger rotation changes
+                // (`Entity.java:490-501`).
+                entity.notify_vehicle_of_turn().await;
 
                 let entity_id = entity.entity_id;
 
