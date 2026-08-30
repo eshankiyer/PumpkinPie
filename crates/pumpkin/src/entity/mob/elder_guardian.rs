@@ -168,7 +168,7 @@ impl ElderGuardianEntity {
             player
                 .send_client_packet(&CGameEvent::new(
                     GameEvent::PlayElderGuardianMobAppearance,
-                    1.0,
+                    if entity.is_silent() { 0.0 } else { 1.0 },
                 ))
                 .await;
         }
@@ -196,6 +196,15 @@ impl Mob for ElderGuardianEntity {
             let entity = &self.mob_entity.living_entity.entity;
             if !entity.is_alive() {
                 return;
+            }
+
+            // `ElderGuardian.customServerAiStep` (`ElderGuardian.java:65-78`) creates a
+            // 16-block home restriction once; the existing move-towards-restriction goal consumes it.
+            if self.mob_entity.position_target_range.load(Relaxed) == -1 {
+                self.mob_entity
+                    .position_target
+                    .store(entity.block_pos.load());
+                self.mob_entity.position_target_range.store(16, Relaxed);
             }
 
             // Vanilla staggers the aura per entity so guardians in one monument do not

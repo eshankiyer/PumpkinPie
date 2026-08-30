@@ -102,13 +102,16 @@ impl FancyTrunkPlacer {
             }
         }
 
-        Self::make_or_check_branch(
+        // `FancyTrunkPlacer.placeTrunk` (`FancyTrunkPlacer.java:80-81`) places the main limb
+        // before making branches; retain its log positions for tree decorators.
+        let (_, main_logs) = Self::make_or_check_branch(
             chunk,
             start_pos.0,
             start_pos.up_height(k).0,
             trunk_block,
             true,
         );
+        logs.extend_from_slice(&main_logs);
         Self::make_branches(chunk, j, start_pos.0, trunk_block, &list);
 
         let mut list_2: Vec<TreeNode> = Vec::new();
@@ -271,5 +274,96 @@ impl BranchPosition {
 
     pub const fn get_end_y(&self) -> i32 {
         self.end_y
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{TrunkPlacer, TrunkType};
+    use super::FancyTrunkPlacer;
+    use crate::generation::block_state_provider::{BlockStateProvider, SimpleStateProvider};
+    use crate::generation::proto_chunk::{GenerationCache, test_cache::FlatWorld};
+    use crate::world::{BlockAccessor, WorldPortalExt};
+    use pumpkin_data::chunk::Biome;
+    use pumpkin_data::{Block, BlockState, BlockStateId, Mirror, Rotation};
+    use pumpkin_util::math::position::BlockPos;
+    use pumpkin_util::random::{RandomGenerator, legacy_rand::LegacyRand};
+
+    struct TestWorldPortal;
+
+    impl WorldPortalExt for TestWorldPortal {
+        fn can_place_at(
+            &self,
+            _block: &Block,
+            _state: &BlockState,
+            _block_accessor: &dyn BlockAccessor,
+            _block_pos: &BlockPos,
+        ) -> bool {
+            true
+        }
+
+        fn mirror(
+            &self,
+            block: &Block,
+            state_id: BlockStateId,
+            mirror: Mirror,
+        ) -> &'static BlockState {
+            block.mirror(state_id, mirror)
+        }
+
+        fn rotate(
+            &self,
+            block: &Block,
+            state_id: BlockStateId,
+            rotation: Rotation,
+        ) -> &'static BlockState {
+            block.rotate(state_id, rotation)
+        }
+
+        fn spawn_mobs_for_chunk_generation(
+            &self,
+            _cache: &mut dyn GenerationCache,
+            _biome: &'static Biome,
+            _chunk_x: i32,
+            _chunk_z: i32,
+        ) {
+        }
+    }
+
+    #[test]
+    fn main_limb_logs_are_returned_to_tree_decorators() {
+        // `FancyTrunkPlacer.placeTrunk` (`FancyTrunkPlacer.java:80-81`) places the main limb
+        // before making branches; the main-limb positions must remain in the decorator list.
+        let registry = TestWorldPortal;
+        let placer = TrunkPlacer {
+            base_height: 8,
+            height_rand_a: 0,
+            height_rand_b: 0,
+            r#type: TrunkType::Fancy(FancyTrunkPlacer),
+        };
+        let below_trunk_provider = BlockStateProvider::Simple(SimpleStateProvider {
+            state: Block::DIRT.default_state,
+        });
+        let start = BlockPos::new(0, 64, 0);
+        let mut chunk = FlatWorld::default();
+        let mut random = RandomGenerator::Legacy(LegacyRand::from_seed(1));
+
+        let (_, logs) = FancyTrunkPlacer::generate(
+            &registry,
+            &placer,
+            8,
+            start,
+            &mut chunk,
+            &mut random,
+            &below_trunk_provider,
+            Block::OAK_LOG.default_state,
+        );
+
+        for y in 64..=70 {
+            assert!(
+                logs.contains(&BlockPos::new(0, y, 0)),
+                "missing main log at y={y}"
+            );
+        }
     }
 }

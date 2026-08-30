@@ -1,4 +1,3 @@
-use pumpkin_data::item::Item;
 use pumpkin_data::{
     BlockDirection, BlockStateId,
     block_properties::{BlockProperties, CandleLikeProperties},
@@ -105,43 +104,14 @@ impl BlockBehaviour for CandleBlock {
 
     fn use_with_item<'a>(
         &'a self,
-        args: UseWithItemArgs<'a>,
+        _args: UseWithItemArgs<'a>,
     ) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
-            let state = args.world.get_block_state(args.position);
-            let mut properties = CandleLikeProperties::from_state_id(state.id, args.block);
-
-            let item = args.item_stack.item;
-
-            match item.id {
-                id if (Item::CANDLE.id..=Item::BLACK_CANDLE.id).contains(&id)
-                    && item.id == args.block.item_id =>
-                {
-                    let was_lit = properties.lit;
-
-                    if properties.candles < 4 {
-                        properties.candles += 1;
-                    }
-
-                    properties.lit = was_lit;
-
-                    args.world
-                        .set_block_state(
-                            args.position,
-                            properties.to_state_id(args.block),
-                            BlockFlags::NOTIFY_ALL,
-                        )
-                        .await;
-
-                    BlockActionResult::Consume
-                }
-                _ => {
-                    // Vanilla `CandleBlock.useItemOn` delegates non-empty-hand uses to
-                    // `BlockBehaviour.useItemOn`, which requests the empty-hand fallback.
-                    // The caller then invokes `normal_use` for the main hand.
-                    BlockActionResult::PassToDefaultBlockAction
-                }
-            }
+            // Vanilla `CandleBlock.useItemOn` handles only an empty hand on a lit candle and
+            // delegates every item use to the default placement path (`CandleBlock.java:80-94`).
+            // That path owns item decrement, placement events, and `on_place`, which adds the
+            // fourth-or-fewer candle state (`CandleBlock.java:98-101`).
+            BlockActionResult::PassToDefaultBlockAction
         })
     }
 

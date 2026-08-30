@@ -441,3 +441,20 @@ pub trait CommandExecutor: Sync + Send {
         args: &'a ConsumedArgs<'a>,
     ) -> CommandResult<'a>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::CommandSender;
+
+    // CommandSource.java:12-33; MinecraftServer.java:1722-1732 define these output policies.
+    #[test]
+    fn command_sender_output_policies_match_vanilla_null_and_server_defaults() {
+        assert!(!CommandSender::Dummy.should_receive_feedback());
+        assert!(!CommandSender::Dummy.should_broadcast_console_to_ops());
+        assert!(!CommandSender::Dummy.should_track_output());
+
+        assert!(CommandSender::Console.should_receive_feedback());
+        assert!(CommandSender::Console.should_broadcast_console_to_ops());
+        assert!(CommandSender::Console.should_track_output());
+    }
+}

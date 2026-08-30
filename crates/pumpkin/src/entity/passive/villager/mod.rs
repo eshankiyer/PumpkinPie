@@ -711,6 +711,9 @@ impl VillagerEntity {
             .await
             .decorations
             .push(crate::world::map::MapDecoration {
+                // MapItemSavedData uses a stable marker key when replacing decorations
+                // (`MapItemSavedData.java:266-297`).
+                key: format!("structure-{},{}", target.0.x, target.0.z),
                 icon_type,
                 x: 0,
                 z: 0,

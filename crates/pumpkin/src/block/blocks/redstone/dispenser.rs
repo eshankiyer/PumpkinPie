@@ -903,8 +903,15 @@ impl DispenserBlock {
         let front_block = ctx.world.get_block(&front);
 
         let ignited = if front_block == &Block::TNT {
-            TNTBlock::prime(ctx.world, &front).await;
-            true
+            // TntBlock.java:83-96: prime only spawns the entity; the dispenser removes the
+            // successfully primed block from its target position.
+            let primed = TNTBlock::prime(ctx.world, &front).await;
+            if primed {
+                ctx.world
+                    .set_block_state(&front, Block::AIR.default_state.id, BlockFlags::NOTIFY_ALL)
+                    .await;
+            }
+            primed
         } else {
             Ignition::ignite_block(
                 |world: Arc<World>, pos: BlockPos, new_state_id: BlockStateId| async move {

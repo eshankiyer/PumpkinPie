@@ -8,6 +8,7 @@ use crate::entity::projectile::experience_bottle::ExperienceBottleEntity;
 use crate::item::{ItemBehaviour, ItemMetadata};
 use pumpkin_data::item::Item;
 use pumpkin_data::sound::Sound;
+use pumpkin_data::statistic::StatisticCategory;
 
 pub struct ExperienceBottleItem;
 
@@ -28,7 +29,7 @@ const DIVERGENCE: f32 = 1.0;
 impl ItemBehaviour for ExperienceBottleItem {
     fn normal_use<'a>(
         &'a self,
-        _item: &'a Item,
+        item: &'a Item,
         player: &'a Player,
     ) -> Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
@@ -58,7 +59,12 @@ impl ItemBehaviour for ExperienceBottleItem {
             );
             world.spawn_entity(Arc::new(bottle)).await;
 
-            // Consume item
+            // `ExperienceBottleItem.use` awards ITEM_USED before consuming the stack
+            // (`ExperienceBottleItem.java:22-40`).
+            player
+                .increment_stat(StatisticCategory::Used, item.id as i32, 1)
+                .await;
+
             let mut main_hand = player.inventory.held_item().await;
             let consumed =
                 if !main_hand.is_empty() && main_hand.item.id == Item::EXPERIENCE_BOTTLE.id {

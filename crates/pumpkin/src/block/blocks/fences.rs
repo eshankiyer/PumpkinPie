@@ -16,12 +16,26 @@ type FenceGateProperties = pumpkin_data::block_properties::OakFenceGateLikePrope
 type FenceProperties = pumpkin_data::block_properties::OakFenceLikeProperties;
 
 use crate::block::BlockBehaviour;
+use crate::block::NormalUseArgs;
+use crate::block::registry::BlockActionResult;
 use crate::world::World;
 
 #[pumpkin_block_from_tag("minecraft:fences")]
 pub struct FenceBlock;
 
 impl BlockBehaviour for FenceBlock {
+    // Vanilla `FenceBlock.useWithoutItem` (`FenceBlock.java:70-75`) binds the
+    // player's nearby leashed mobs to this fence when the empty-hand path reaches the block.
+    fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
+        Box::pin(async move {
+            if crate::item::items::lead::bind_player_mobs(args.player, *args.position).await {
+                BlockActionResult::Success
+            } else {
+                BlockActionResult::Pass
+            }
+        })
+    }
+
     fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
         Box::pin(async move {
             let mut fence_props = FenceProperties::default(args.block);
