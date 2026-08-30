@@ -4261,16 +4261,16 @@ async fn tick_equipment_items(living: &LivingEntity, owner: &dyn EntityBase, ser
     }
 }
 
-/// Vanilla persists only an attribute instance's *permanent* modifiers
-/// (`AttributeInstance.java:186-188`, which packs `permanentModifiers`). Everything applied
-/// through `addTransientModifier` is rebuilt from its source after load instead: equipment and
-/// enchantments (`LivingEntity.java:2972-2976`), the witch's drinking slowdown
-/// (`Witch.java:170`), the enderman and zombified piglin attack speed boosts
-/// (`EnderMan.java:135`, `ZombifiedPiglin.java:102`) and the killer bunny's damage bonus
-/// (`Rabbit.java:376`). Status effect modifiers are deliberately *not* in that set: vanilla adds
-/// them permanently (`MobEffect.java:172`), so they belong in the saved list. Explicitly marked
-/// permanent modifiers are tracked by `AttributeInstance`; legacy IDs retain the same fallback
-/// classification for existing callers.
+// Vanilla persists only an attribute instance's *permanent* modifiers
+// (`AttributeInstance.java:186-188`, which packs `permanentModifiers`). Everything applied
+// through `addTransientModifier` is rebuilt from its source after load instead: equipment and
+// enchantments (`LivingEntity.java:2972-2976`), the witch's drinking slowdown
+// (`Witch.java:170`), the enderman and zombified piglin attack speed boosts
+// (`EnderMan.java:135`, `ZombifiedPiglin.java:102`) and the killer bunny's damage bonus
+// (`Rabbit.java:376`). Status effect modifiers are deliberately *not* in that set: vanilla adds
+// them permanently (`MobEffect.java:172`), so they belong in the saved list. Explicitly marked
+// permanent modifiers are tracked by `AttributeInstance`; legacy IDs retain the same fallback
+// classification for existing callers.
 
 /// `AttributeModifier.Operation.getSerializedName` (`AttributeModifier.java:38-40`).
 const fn modifier_operation_name(operation: ModifierOperation) -> &'static str {

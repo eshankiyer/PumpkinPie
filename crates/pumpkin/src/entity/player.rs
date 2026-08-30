@@ -7057,7 +7057,7 @@ impl Player {
 
 // Vanilla's `getSupportedHeldProjectiles` is `ARROW_OR_FIREWORK`
 // (`CrossbowItem.java:54-62`).
-fn is_crossbow_held_projectile(item: &'static pumpkin_data::item::Item) -> bool {
+const fn is_crossbow_held_projectile(item: &'static pumpkin_data::item::Item) -> bool {
     matches!(
         item.id,
         id if id == pumpkin_data::item::Item::ARROW.id
@@ -7068,7 +7068,7 @@ fn is_crossbow_held_projectile(item: &'static pumpkin_data::item::Item) -> bool 
 }
 
 // Vanilla's `getAllSupportedProjectiles` is `ARROW_ONLY` (`CrossbowItem.java:59-62`).
-fn is_crossbow_inventory_projectile(item: &'static pumpkin_data::item::Item) -> bool {
+const fn is_crossbow_inventory_projectile(item: &'static pumpkin_data::item::Item) -> bool {
     matches!(
         item.id,
         id if id == pumpkin_data::item::Item::ARROW.id

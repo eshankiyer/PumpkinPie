@@ -7205,7 +7205,7 @@ impl World {
             return;
         };
         let Some(entity) =
-            crate::block::entities::apply_components_from_item_stack(entity, item_stack)
+            crate::block::entities::apply_components_from_item_stack(entity.as_ref(), item_stack)
         else {
             return;
         };

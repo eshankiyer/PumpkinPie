@@ -82,7 +82,7 @@ pub struct AreaEffectCloudEntity {
     pub duration_on_use: Mutex<i32>,
     /// ticks to wait before the cloud becomes active and applies effects (grace period)
     pub wait_time: Mutex<i32>,
-    /// AreaEffectCloud.java:38,106-108 — PotionContents duration multiplier applied while
+    /// AreaEffectCloud.java:38,106-108 — `PotionContents` duration multiplier applied while
     /// copying effects to victims.
     pub potion_duration_scale: Mutex<f32>,
     /// AreaEffectCloud.java:32,101-115 — optional particle option replacing the default colored
@@ -224,13 +224,14 @@ impl AreaEffectCloudEntity {
         let custom_particle = self.custom_particle.lock().await.clone();
         let stack = self.item_stack.lock().await.clone();
         let effects = self.effects.lock().await.clone();
-        let mut color = crate::item::potion::PotionContents::get_color_or(&effects, -13_083_194);
-        if let Some(pc) =
-            stack.get_data_component::<pumpkin_data::data_component_impl::PotionContentsImpl>()
-            && let Some(custom_color) = pc.custom_color
-        {
-            color = custom_color | (0xFFi32 << 24);
-        }
+        // `AreaEffectCloud.java:114` wraps the potion colour in `ARGB.opaque`.
+        let color = stack
+            .get_data_component::<pumpkin_data::data_component_impl::PotionContentsImpl>()
+            .and_then(|pc| pc.custom_color)
+            .map_or_else(
+                || crate::item::potion::PotionContents::get_color_or(&effects, -13_083_194),
+                |custom_color| custom_color | (0xFFi32 << 24),
+            );
         let color_bytes = color.to_be_bytes();
         let (particle_id, particle_data) = custom_particle.as_ref().map_or_else(
             || {

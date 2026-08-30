@@ -415,7 +415,7 @@ mod tests {
             song_length_ticks(&stack),
             JukeboxSong::Cat.length_in_ticks()
         );
-        assert_eq!(song_length_ticks(&ItemStack::EMPTY), 0);
+        assert_eq!(song_length_ticks(ItemStack::EMPTY), 0);
     }
 
     /// `canTakeItem` requires an empty destination slot (`JukeboxBlockEntity.java:147-150`).

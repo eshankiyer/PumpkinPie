@@ -184,6 +184,7 @@ pub trait BlockEntity: Any + Send + Sync {
 }
 
 /// Applies the modeled implicit block-entity component from a placed item.
+///
 /// `BlockItem.updateBlockEntityComponents` calls
 /// `BlockEntity.applyComponentsFromItemStack` before `setPlacedBy` and the block-place game
 /// event; randomizable containers apply their `ContainerLoot` component as the vanilla
@@ -191,7 +192,7 @@ pub trait BlockEntity: Any + Send + Sync {
 /// `RandomizableContainerBlockEntity.java:98-112`).
 #[must_use]
 pub fn apply_components_from_item_stack(
-    entity: Arc<dyn BlockEntity>,
+    entity: &dyn BlockEntity,
     stack: &ItemStack,
 ) -> Option<Arc<dyn BlockEntity>> {
     let data = stack.get_data_component::<ContainerLootImpl>()?;
@@ -550,7 +551,7 @@ mod test {
             )],
         );
         let entity: Arc<dyn BlockEntity> = Arc::new(ChestBlockEntity::new(position));
-        let applied = apply_components_from_item_stack(entity, &stack)
+        let applied = apply_components_from_item_stack(entity.as_ref(), &stack)
             .expect("container loot should rebuild the placed entity");
         assert!(applied.has_loot_table());
         assert_eq!(

@@ -95,9 +95,9 @@ impl ResourceArgument {
     #[must_use]
     pub const fn resource(
         registry_key: &'static Identifier,
-        resolver: &'static (dyn Fn(Identifier) -> Option<&'static (dyn Any + Send + Sync)>
-                     + Send
-                     + Sync),
+        resolver: &'static (
+                     dyn Fn(Identifier) -> Option<&'static (dyn Any + Send + Sync)> + Send + Sync
+                 ),
     ) -> Self {
         Self(registry_key, resolver)
     }

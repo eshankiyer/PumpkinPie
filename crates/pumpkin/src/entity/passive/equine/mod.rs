@@ -661,7 +661,7 @@ pub trait AbstractHorse: Animal {
         self.horse_data().jump_pending_scale.store(pending, Relaxed);
     }
 
-    fn can_jump_now<'a>(&'a self) -> EntityBaseFuture<'a, bool> {
+    fn can_jump_now(&self) -> EntityBaseFuture<'_, bool> {
         Box::pin(async move { AbstractHorse::is_saddled(self).await })
     }
 
@@ -715,7 +715,7 @@ pub trait AbstractHorse: Animal {
                 return false;
             }
 
-            let (yaw, pitch) = self.get_ridden_rotation(&player);
+            let (yaw, pitch) = self.get_ridden_rotation(player);
             entity.set_rotation(yaw, pitch);
             entity.head_yaw.store(yaw);
             entity.body_yaw.store(yaw);

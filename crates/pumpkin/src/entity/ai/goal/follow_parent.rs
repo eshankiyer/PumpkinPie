@@ -69,13 +69,13 @@ impl FollowParentGoal {
             if horse_family {
                 if !same_horse_family
                     || c_entity.age.load(Relaxed) < 0
-                    || !candidate.get_mob().is_some_and(|mob| mob.is_bred())
+                    || !candidate
+                        .get_mob()
+                        .is_some_and(crate::entity::mob::Mob::is_bred)
                 {
                     continue;
                 }
-            } else if c_entity.entity_type != my_type {
-                continue;
-            } else if c_entity.age.load(Relaxed) < 0 {
+            } else if c_entity.entity_type != my_type || c_entity.age.load(Relaxed) < 0 {
                 continue;
             }
             let c_pos = c_entity.pos.load();
@@ -93,24 +93,6 @@ impl FollowParentGoal {
             return None;
         }
         Some(closest_entity)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::is_horse_family;
-    use pumpkin_data::entity::EntityType;
-
-    /// `AbstractHorse.followMommy` targets `AbstractHorse.class`, not the baby's exact class
-    /// (`AbstractHorse.java:561-568`).
-    #[test]
-    fn horse_parent_search_accepts_every_horse_family_type() {
-        assert!(is_horse_family(&EntityType::HORSE));
-        assert!(is_horse_family(&EntityType::DONKEY));
-        assert!(is_horse_family(&EntityType::MULE));
-        assert!(is_horse_family(&EntityType::SKELETON_HORSE));
-        assert!(is_horse_family(&EntityType::ZOMBIE_HORSE));
-        assert!(!is_horse_family(&EntityType::PIG));
     }
 }
 
@@ -183,5 +165,23 @@ impl Goal for FollowParentGoal {
 
     fn controls(&self) -> Controls {
         Controls::MOVE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_horse_family;
+    use pumpkin_data::entity::EntityType;
+
+    /// `AbstractHorse.followMommy` targets `AbstractHorse.class`, not the baby's exact class
+    /// (`AbstractHorse.java:561-568`).
+    #[test]
+    fn horse_parent_search_accepts_every_horse_family_type() {
+        assert!(is_horse_family(&EntityType::HORSE));
+        assert!(is_horse_family(&EntityType::DONKEY));
+        assert!(is_horse_family(&EntityType::MULE));
+        assert!(is_horse_family(&EntityType::SKELETON_HORSE));
+        assert!(is_horse_family(&EntityType::ZOMBIE_HORSE));
+        assert!(!is_horse_family(&EntityType::PIG));
     }
 }

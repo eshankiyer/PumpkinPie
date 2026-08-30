@@ -139,15 +139,12 @@ impl EntityBase for LingeringPotionEntity {
             // the effect branch, so a plain water bottle still splashes.
             // PotionContents.java:113-119 and 126-144 define custom-color precedence and the
             // weighted opaque fallback used by AbstractThrownPotion.java:81-82.
-            let mut color =
-                crate::item::potion::PotionContents::get_color_or(&effects, -13_083_194);
-            if let Some(pc) =
-                stack.get_data_component::<pumpkin_data::data_component_impl::PotionContentsImpl>()
-            {
-                if let Some(c) = pc.custom_color {
-                    color = c;
-                }
-            }
+            let color = stack
+                .get_data_component::<pumpkin_data::data_component_impl::PotionContentsImpl>()
+                .and_then(|pc| pc.custom_color)
+                .unwrap_or_else(|| {
+                    crate::item::potion::PotionContents::get_color_or(&effects, -13_083_194)
+                });
 
             let has_instant = effects.iter().any(|(e, _, _, _, _, _)| {
                 e.id == pumpkin_data::effect::StatusEffect::INSTANT_DAMAGE.id

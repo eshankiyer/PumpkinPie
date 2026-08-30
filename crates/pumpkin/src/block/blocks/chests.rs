@@ -440,7 +440,7 @@ fn get_state_for_neighbor_update_chest_impl(
             combined_props.r#type = r#type;
             return combined_props.to_state_id(args.block);
         }
-    } else if connected_direction(props) == Some(args.direction) {
+    } else if connected_direction(props) == args.direction {
         let mut split_props = props;
         split_props.r#type = ChestType::Single;
         return split_props.to_state_id(args.block);
@@ -451,11 +451,11 @@ fn get_state_for_neighbor_update_chest_impl(
 
 // ChestBlock.getConnectedDirection (ChestBlock.java:200-203) maps LEFT clockwise and all other
 // chest types counter-clockwise from the facing direction.
-fn connected_direction(props: ChestLikeProperties) -> Option<BlockDirection> {
+fn connected_direction(props: ChestLikeProperties) -> BlockDirection {
     match props.r#type {
-        ChestType::Left => Some(props.facing.rotate_clockwise().to_block_direction()),
+        ChestType::Left => props.facing.rotate_clockwise().to_block_direction(),
         ChestType::Right | ChestType::Single => {
-            Some(props.facing.rotate_counter_clockwise().to_block_direction())
+            props.facing.rotate_counter_clockwise().to_block_direction()
         }
     }
 }
@@ -470,7 +470,7 @@ fn combined_chest_type(
     (props.r#type == ChestType::Single
         && neighbor_props.r#type != ChestType::Single
         && props.facing == neighbor_props.facing
-        && connected_direction(neighbor_props) == Some(direction.opposite()))
+        && connected_direction(neighbor_props) == direction.opposite())
     .then_some(neighbor_props.r#type.opposite())
 }
 
@@ -979,7 +979,7 @@ mod tests {
             waterlogged: false,
         };
 
-        assert_eq!(connected_direction(props), Some(BlockDirection::West));
+        assert_eq!(connected_direction(props), BlockDirection::West);
     }
 
     #[test]
