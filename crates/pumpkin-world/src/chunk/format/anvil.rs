@@ -1332,7 +1332,7 @@ mod tests {
 }
  */
 #[cfg(test)]
-mod tests {
+mod world_data_version_tests {
     use crate::world_info::MAXIMUM_SUPPORTED_WORLD_DATA_VERSION;
 
     use super::{Compression, CompressionError, WORLD_DATA_VERSION};
