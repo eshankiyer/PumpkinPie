@@ -195,48 +195,63 @@ pub trait BlockEntity: Any + Send + Sync {
 /// `LootTable` fields (`BlockItem.java:101-106`; `BlockEntity.java:276-300`;
 /// `RandomizableContainerBlockEntity.java:98-112`).
 #[must_use]
+/// `SkullBlockEntity.applyImplicitComponents` restores the profile, note block sound and
+/// custom name from the placed item (`SkullBlockEntity.java:97-103`).
+fn apply_skull_components(
+    entity: &dyn BlockEntity,
+    stack: &ItemStack,
+) -> Option<Arc<dyn BlockEntity>> {
+    let profile = stack
+        .get_data_component::<ProfileImpl>()
+        .map(pumpkin_data::data_component_impl::DataComponentImpl::write_data);
+    let note_block_sound = stack
+        .get_data_component::<NoteBlockSoundImpl>()
+        .map(pumpkin_data::data_component_impl::DataComponentImpl::write_data);
+    let custom_name = stack
+        .get_data_component::<CustomNameImpl>()
+        .map(pumpkin_data::data_component_impl::DataComponentImpl::write_data);
+
+    if profile.is_some() || note_block_sound.is_some() || custom_name.is_some() {
+        // `SkullBlockEntity.applyImplicitComponents` copies these three components
+        // (`SkullBlockEntity.java:82-87`); `BlockItem.updateBlockEntityComponents` invokes it
+        // for the freshly placed entity (`BlockItem.java:101-106`).
+        let position = entity.get_position();
+        let block_entity_data = stack.get_data_component::<BlockEntityDataImpl>();
+        let mut nbt = block_entity_data.map_or_else(NbtCompound::new, |data| data.nbt.clone());
+        if let Some(id) = nbt.get_string("id")
+            && id != entity.resource_location()
+        {
+            return None;
+        }
+        nbt.put_string("id", entity.resource_location().to_string());
+        nbt.put_int("x", position.0.x);
+        nbt.put_int("y", position.0.y);
+        nbt.put_int("z", position.0.z);
+        if let Some(profile) = profile {
+            nbt.put("profile", profile);
+        }
+        if let Some(note_block_sound) = note_block_sound {
+            nbt.put("note_block_sound", note_block_sound);
+        }
+        if let Some(custom_name) = custom_name {
+            nbt.put("custom_name", custom_name);
+        }
+        return block_entity_from_nbt_at(&nbt, position);
+    }
+
+    None
+}
+
 pub fn apply_components_from_item_stack(
     entity: &dyn BlockEntity,
     stack: &ItemStack,
 ) -> Option<Arc<dyn BlockEntity>> {
-    if entity.as_any().is::<skull::SkullBlockEntity>() {
-        let profile = stack
-            .get_data_component::<ProfileImpl>()
-            .map(pumpkin_data::data_component_impl::DataComponentImpl::write_data);
-        let note_block_sound = stack
-            .get_data_component::<NoteBlockSoundImpl>()
-            .map(pumpkin_data::data_component_impl::DataComponentImpl::write_data);
-        let custom_name = stack
-            .get_data_component::<CustomNameImpl>()
-            .map(pumpkin_data::data_component_impl::DataComponentImpl::write_data);
-
-        if profile.is_some() || note_block_sound.is_some() || custom_name.is_some() {
-            // `SkullBlockEntity.applyImplicitComponents` copies these three components
-            // (`SkullBlockEntity.java:82-87`); `BlockItem.updateBlockEntityComponents` invokes it
-            // for the freshly placed entity (`BlockItem.java:101-106`).
-            let position = entity.get_position();
-            let block_entity_data = stack.get_data_component::<BlockEntityDataImpl>();
-            let mut nbt = block_entity_data.map_or_else(NbtCompound::new, |data| data.nbt.clone());
-            if let Some(id) = nbt.get_string("id")
-                && id != entity.resource_location()
-            {
-                return None;
-            }
-            nbt.put_string("id", entity.resource_location().to_string());
-            nbt.put_int("x", position.0.x);
-            nbt.put_int("y", position.0.y);
-            nbt.put_int("z", position.0.z);
-            if let Some(profile) = profile {
-                nbt.put("profile", profile);
-            }
-            if let Some(note_block_sound) = note_block_sound {
-                nbt.put("note_block_sound", note_block_sound);
-            }
-            if let Some(custom_name) = custom_name {
-                nbt.put("custom_name", custom_name);
-            }
-            return block_entity_from_nbt_at(&nbt, position);
-        }
+    // Falls through to the generic component path when the skull carries none of its three
+    // implicit components, matching the original single-function control flow.
+    if entity.as_any().is::<skull::SkullBlockEntity>()
+        && let Some(applied) = apply_skull_components(entity, stack)
+    {
+        return Some(applied);
     }
 
     // `BeehiveBlockEntity.applyImplicitComponents` replaces stored occupants from the item
