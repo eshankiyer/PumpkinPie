@@ -72,7 +72,7 @@ impl ItemBehaviour for TridentItem {
             }
 
             let world = player.world();
-            let stack_guard = player.inventory().held_item().await;
+            let mut stack_guard = player.inventory().held_item().await;
 
             // Check Riptide level
             let mut riptide_level = 0u32;
@@ -164,12 +164,19 @@ impl ItemBehaviour for TridentItem {
             }
 
             // Normal throw - spawn thrown trident
+            // `TridentItem.releaseUsing` damages the stack without breaking it before
+            // `consumeAndReturn(1, player)` creates the projectile stack
+            // (`TridentItem.java:69-82`).
+            if player.gamemode.load() != GameMode::Creative {
+                stack_guard.hurt_without_breaking(1);
+            }
+            let thrown_item_stack = stack_guard.split_unless_creative(player.gamemode.load(), 1);
             let (yaw, pitch) = player.rotation();
             let entity = Entity::new(world.clone(), player.position(), &EntityType::TRIDENT);
             let trident = TridentEntity::new_shot(
                 entity,
                 player.get_entity(),
-                stack_guard.clone(),
+                thrown_item_stack,
                 ArrowPickup::Allowed,
             );
             trident.set_velocity_from_rotation(pitch, yaw, 0.0, 2.5, 1.0);
@@ -188,10 +195,10 @@ impl ItemBehaviour for TridentItem {
                 let main_hand_item = inventory.get_stack(selected_slot).await;
                 if main_hand_item.item.id == Item::TRIDENT.id {
                     inventory
-                        .set_stack(selected_slot, ItemStack::EMPTY.clone())
+                        .set_stack(selected_slot, stack_guard.clone())
                         .await;
                     player
-                        .sync_hand_slot(selected_slot, ItemStack::EMPTY.clone())
+                        .sync_hand_slot(selected_slot, stack_guard.clone())
                         .await;
                 } else {
                     let off_hand_slot =

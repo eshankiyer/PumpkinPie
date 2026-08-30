@@ -17,6 +17,7 @@ use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_util::GameMode;
+use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::inventory::Inventory;
 
 /// Vanilla `CrossbowItem#getShootingPower`: `1.6F` if the charged ammo is a firework
@@ -33,6 +34,26 @@ fn projectile_power(item: &'static Item) -> f32 {
 /// arrows cost 1.
 fn durability_use(item: &'static Item) -> i32 {
     if item == &Item::FIREWORK_ROCKET { 3 } else { 1 }
+}
+
+/// Converts `CrossbowItem`'s view-vector rotation around the shooter's up vector back to the
+/// rotation arguments used by Pumpkin's projectile setters. Vanilla performs this around the
+/// living entity's up vector for each spread angle (`CrossbowItem.java:107-130`).
+fn rotate_shot_vector(view: Vector3<f64>, up: Vector3<f64>, angle: f32) -> Vector3<f64> {
+    let angle = f64::from(angle).to_radians();
+    view * angle.cos() + up.cross(&view) * angle.sin() + up * (up.dot(&view) * (1.0 - angle.cos()))
+}
+
+/// Converts the rotated shot vector to the rotation arguments accepted by the live projectile
+/// setters (`CrossbowItem.java:107-130`).
+fn shot_rotation(player: &Entity, angle: f32) -> (f32, f32) {
+    let view = Vector3::from_yaw_pitch(player.yaw.load(), player.pitch.load());
+    let rotated = rotate_shot_vector(view, player.get_up_vector(), angle);
+    let horizontal = rotated.x.hypot(rotated.z);
+    (
+        (-rotated.y).atan2(horizontal).to_degrees() as f32,
+        (-rotated.x).atan2(rotated.z).to_degrees() as f32,
+    )
 }
 
 pub struct CrossbowItem;
@@ -312,7 +333,6 @@ impl CrossbowItem {
 
         if let Some(charged) = projectiles {
             let world = player.world();
-            let (yaw, pitch) = player.rotation();
             let mut shot_index = 0u32;
             // Vanilla `ProjectileWeaponItem#shoot`: `weapon.hurtAndBreak(getDurabilityUse(
             // projectile), ...)` fires once per projectile *entry* in the charged list, not
@@ -329,13 +349,14 @@ impl CrossbowItem {
                 let power = projectile_power(projectile.item);
                 total_durability_use += durability_use(projectile.item);
 
-                let yaws = if has_multishot {
-                    vec![yaw - 10.0, yaw, yaw + 10.0]
+                let angles = if has_multishot {
+                    vec![-10.0, 0.0, 10.0]
                 } else {
-                    vec![yaw]
+                    vec![0.0]
                 };
 
-                for t_yaw in yaws {
+                for angle in angles {
+                    let (shot_pitch, shot_yaw) = shot_rotation(player.get_entity(), angle);
                     if is_firework {
                         let rocket_entity = Entity::new(
                             world.clone(),
@@ -349,8 +370,8 @@ impl CrossbowItem {
                         );
                         rocket.set_shot_velocity(
                             player.get_entity(),
-                            pitch,
-                            t_yaw,
+                            shot_pitch,
+                            shot_yaw,
                             0.0,
                             power,
                             1.0,
@@ -375,7 +396,7 @@ impl CrossbowItem {
                             &projectile,
                             pickup,
                         );
-                        arrow.set_velocity_from_rotation(pitch, t_yaw, 0.0, power, 1.0);
+                        arrow.set_velocity_from_rotation(shot_pitch, shot_yaw, 0.0, power, 1.0);
                         if pierce_level > 0 {
                             arrow.set_pierce_level(pierce_level);
                         }
@@ -406,7 +427,8 @@ impl CrossbowItem {
 
 #[cfg(test)]
 mod tests {
-    use super::{crossbow_shot_pitch, piercing_count};
+    use super::{crossbow_shot_pitch, piercing_count, rotate_shot_vector};
+    use pumpkin_util::math::vector3::Vector3;
 
     #[test]
     fn piercing_count_is_one_per_level() {
@@ -423,5 +445,17 @@ mod tests {
         assert!((crossbow_shot_pitch(0, 0.5) - 1.0).abs() < 1e-6);
         assert!((crossbow_shot_pitch(1, 0.0) - (1.0 / 1.8 + 0.63)).abs() < 1e-6);
         assert!((crossbow_shot_pitch(2, 0.0) - (1.0 / 1.8 + 0.43)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn crossbow_spread_rotates_around_up_vector() {
+        // Vanilla `CrossbowItem#shootProjectile` rotates the view vector around the up vector
+        // (`CrossbowItem.java:107-130`).
+        let view = Vector3::new(0.0, 0.0, 1.0);
+        let up = Vector3::new(0.0, 1.0, 0.0);
+        let rotated = rotate_shot_vector(view, up, 90.0);
+        assert!((rotated.x - 1.0).abs() < 1e-12);
+        assert!(rotated.y.abs() < 1e-12);
+        assert!(rotated.z.abs() < 1e-12);
     }
 }

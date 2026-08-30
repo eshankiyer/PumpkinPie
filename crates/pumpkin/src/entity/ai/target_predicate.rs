@@ -138,9 +138,11 @@ impl TargetPredicate {
             return false;
         }
 
+        // Vanilla `TargetingConditions.test` delegates combat eligibility to
+        // `LivingEntity.canBeSeenAsEnemy` (`TargetingConditions.java:72-78`,
+        // `LivingEntity.java:952-958`) before applying the peaceful-difficulty gate.
         if self.attackable
-            && (!target.can_take_damage()
-                || target.not_targetable_as_enemy.load(Relaxed)
+            && (!target.can_be_seen_as_enemy()
                 || world.level_info.load().difficulty == Difficulty::Peaceful)
         {
             return false;

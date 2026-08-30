@@ -343,6 +343,37 @@ impl ItemStack {
                 .is_some_and(|max_damage| self.get_damage() >= max_damage)
     }
 
+    /// Apply durability damage while preserving at least one point of durability.
+    /// Vanilla `ItemStack.hurtWithoutBreaking` clamps the result before applying it
+    /// (`ItemStack.java:474-483`).
+    pub fn hurt_without_breaking(&mut self, amount: i32) {
+        if amount <= 0 || !self.is_damageable() {
+            return;
+        }
+
+        let max_damage = self.get_max_damage().unwrap_or(0);
+        if max_damage <= 0 {
+            return;
+        }
+
+        let is_armor = self.is_armor();
+        let unbreaking_level = self.get_enchantment_level(&Enchantment::UNBREAKING);
+        let mut applied = 0;
+        for _ in 0..amount {
+            if Self::should_apply_durability_damage_with(is_armor, unbreaking_level) {
+                applied += 1;
+            }
+        }
+
+        if applied > 0 {
+            let new_damage = self
+                .get_damage()
+                .saturating_add(applied)
+                .min(max_damage - 1);
+            self.set_damage(new_damage);
+        }
+    }
+
     /// Vanilla `ItemStack.isValidRepairItem` (`ItemStack.java:1117-1120`) delegates to the
     /// input stack's `Repairable` component and tests the added stack's item against its set.
     #[must_use]
@@ -1169,6 +1200,19 @@ mod tests {
         // AIR has no MaxDamage component.
         let mut stack = ItemStack::new(1, &Item::AIR);
         assert_eq!(stack.damage_item(1), DamageResult::Untouched);
+    }
+
+    #[test]
+    fn hurt_without_breaking_clamps_before_break() {
+        // Vanilla `ItemStack.hurtWithoutBreaking` never lets this operation destroy the stack
+        // (`ItemStack.java:474-483`).
+        let mut stack = iron_sword();
+        stack.set_damage(249);
+
+        stack.hurt_without_breaking(1);
+
+        assert_eq!(stack.get_damage(), 249);
+        assert!(!stack.is_empty());
     }
 
     #[test]

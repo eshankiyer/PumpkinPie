@@ -65,6 +65,7 @@ use pumpkin_data::{damage::DamageType, sound::Sound};
 use pumpkin_inventory::entity_equipment::EntityEquipment;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
+use pumpkin_protocol::codec::item_stack_seralizer::ItemStackTemplateSerializer;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::{
     CEntityStatus, CHurtAnimation, CSetPlayerInventory, CTakeItemEntity, CUpdateMobEffect,
@@ -110,6 +111,28 @@ fn fall_one_cm_stat_amount(fall_distance: f32) -> Option<i32> {
 /// to the vertical distance below the most recent impulse impact position.
 fn impulse_limited_fall_distance(fall_distance: f32, entity_y: f64, impact_y: f64) -> f32 {
     fall_distance.min((impact_y - entity_y) as f32)
+}
+
+/// Vanilla `LivingEntity.canBeSeenAsEnemy` (`LivingEntity.java:952-958`) combines the base
+/// invulnerability/visibility checks with the entity-specific targetability override.
+const fn can_be_seen_as_enemy_state(
+    invulnerable: bool,
+    can_be_seen_by_anyone: bool,
+    not_targetable_as_enemy: bool,
+) -> bool {
+    !invulnerable && can_be_seen_by_anyone && !not_targetable_as_enemy
+}
+
+/// Vanilla `Entity.isInLiquid` (`Entity.java:1604-1605`) supplies the fluid-state gate used by
+/// `LivingEntity.shouldTravelInFluid` (`LivingEntity.java:2421-2437`); the Strider override from
+/// `Strider.canStandOnFluid` (`Strider.java:180-182`) makes lava standable while water is not.
+const fn should_travel_in_fluid(
+    entity_type: &'static EntityType,
+    in_liquid: bool,
+    touching_water: bool,
+    touching_lava: bool,
+) -> bool {
+    in_liquid && (touching_water || (touching_lava && entity_type.id != EntityType::STRIDER.id))
 }
 
 fn armor_resists_damage(stack: &ItemStack, damage_type: &DamageType) -> bool {
@@ -201,6 +224,9 @@ pub struct LivingEntity {
     pub auto_spin_attack_damage: AtomicCell<f32>,
     pub auto_spin_attack_item_stack: Mutex<Option<ItemStack>>,
     pub death_time: AtomicU8,
+    /// Vanilla `LivingEntity.discardFriction` (`LivingEntity.java:225`), used by long-jump
+    /// entities to preserve their launch velocity through the movement tick.
+    discard_friction: AtomicBool,
     /// Vanilla `Entity.moveDist` (Entity.java:238): the scaled distance walked, accumulated by
     /// `Entity.applyMovementEmissionAndPlaySound` (Entity.java:867-901).
     move_dist: AtomicCell<f32>,
@@ -425,6 +451,7 @@ impl LivingEntity {
             auto_spin_attack_state: Mutex::new(()),
             auto_spin_attack_damage: AtomicCell::new(0.0),
             auto_spin_attack_item_stack: Mutex::new(None),
+            discard_friction: AtomicBool::new(false),
             livings_flags: AtomicU8::new(0),
             active_effects: Mutex::new(HashMap::new()),
             hidden_effects: Mutex::new(HashMap::new()),
@@ -789,6 +816,67 @@ impl LivingEntity {
                 .world
                 .load()
                 .broadcast_packet_except(&[self.entity.entity_uuid], &je_packet);
+        }
+    }
+
+    /// Vanilla `LivingEntity.spawnItemParticles` (`LivingEntity.java:3546-3563`): sends the
+    /// broken stack as item particles around the entity's eye position before the equipment is
+    /// cleared. The item template is serialized per Java protocol version, as required by the
+    /// particle packet's item-payload codec.
+    pub fn spawn_item_particles(&self, item_stack: &ItemStack, count: usize) {
+        if item_stack.is_empty() {
+            return;
+        }
+
+        let item = ItemStackTemplateSerializer::from(item_stack.clone());
+        let position = self.entity.pos.load();
+        let eye_y = self.entity.get_eye_y();
+        let pitch = f64::from(self.entity.pitch.load()).to_radians();
+        let yaw = f64::from(self.entity.yaw.load()).to_radians();
+        let players = self.entity.world.load().players.load();
+
+        for player in players.iter() {
+            let Ok(data) = ({
+                let mut data = Vec::new();
+                item.write_with_version(&mut data, &player.client.java_version())
+                    .map(|()| data)
+            }) else {
+                continue;
+            };
+
+            for _ in 0..count {
+                let mut velocity = Vector3::new(
+                    (f64::from(rand::random::<f32>()) - 0.5) * 0.1,
+                    f64::from(rand::random::<f32>()) * 0.1 + 0.1,
+                    0.0,
+                );
+                velocity = rotate_particle_vector(velocity, pitch, yaw);
+
+                let mut offset = Vector3::new(
+                    (f64::from(rand::random::<f32>()) - 0.5) * 0.3,
+                    -f64::from(rand::random::<f32>()) * 0.6 - 0.3,
+                    0.6,
+                );
+                offset = rotate_particle_vector(offset, pitch, yaw);
+                let particle_position = Vector3::new(
+                    position.x + offset.x,
+                    eye_y + offset.y,
+                    position.z + offset.z,
+                );
+                let particle_velocity = Vector3::new(
+                    velocity.x as f32,
+                    (velocity.y + 0.05) as f32,
+                    velocity.z as f32,
+                );
+                player.spawn_particle_with_data(
+                    particle_position,
+                    particle_velocity,
+                    0.0,
+                    1,
+                    Particle::Item,
+                    &data,
+                );
+            }
         }
     }
 
@@ -1820,6 +1908,20 @@ impl LivingEntity {
         world.broadcast_editioned(&je_packet, &be_packet).await;
     }
 
+    /// Vanilla `LivingEntity.setDiscardFriction` (`LivingEntity.java:681-683`) is toggled by
+    /// the live Breeze and goat long-jump callers so `travelInAir` can preserve their launch
+    /// velocity for the arc.
+    pub fn set_discard_friction(&self, discard: bool) {
+        self.discard_friction.store(discard, Relaxed);
+    }
+
+    /// Vanilla `LivingEntity.shouldDiscardFriction` (`LivingEntity.java:677-679`) gates the
+    /// friction branch in `travelInAir` (`LivingEntity.java:2477-2485`).
+    #[must_use]
+    pub fn should_discard_friction(&self) -> bool {
+        self.discard_friction.load(Relaxed)
+    }
+
     #[allow(clippy::too_many_lines)]
     async fn tick_movement<'a>(&'a self, server: &'a Server, caller: &'a Arc<dyn EntityBase>) {
         // `LivingEntity.aiStep` does not call travel when `Mob.isEffectiveAi()` is false.
@@ -1947,11 +2049,16 @@ impl LivingEntity {
         if !no_ai && effective_ai && !custom_travel {
             let touching_water = self.entity.touching_water.load(SeqCst);
 
-            // Strider is the only entity that has canWalkOnFluid = false
+            // `LivingEntity.shouldTravelInFluid` and `Strider.canStandOnFluid`
+            // (`LivingEntity.java:2421-2437`, `Strider.java:180-182`) leave striders in water
+            // movement while allowing them to stand on lava.
 
-            if (touching_water || self.entity.touching_lava.load(SeqCst))
-                && should_swim_in_fluids
-                && self.entity.entity_type != &EntityType::STRIDER
+            if should_travel_in_fluid(
+                self.entity.entity_type,
+                self.entity.is_in_liquid(),
+                touching_water,
+                self.entity.touching_lava.load(SeqCst),
+            ) && should_swim_in_fluids
             {
                 self.travel_in_fluid(caller, touching_water).await;
             } else if self.entity.is_fall_flying() {
@@ -2049,11 +2156,7 @@ impl LivingEntity {
 
         // If entity has no drag: store velo and return
 
-        velo.x *= friction;
-
-        velo.z *= friction;
-
-        velo.y *= caller.get_y_velocity_drag().unwrap_or_else(|| {
+        let vertical_friction = caller.get_y_velocity_drag().unwrap_or_else(|| {
             if caller.is_flutterer() {
                 friction
             } else {
@@ -2063,6 +2166,12 @@ impl LivingEntity {
                 )
             }
         });
+        velo = apply_air_friction(
+            velo,
+            friction,
+            vertical_friction,
+            self.should_discard_friction(),
+        );
 
         self.entity.velocity.store(velo);
     }
@@ -2233,17 +2342,21 @@ impl LivingEntity {
         let damaged = {
             let mut equipment = self.entity_equipment.lock().await;
             let mut stack = equipment.get(&slot);
+            let broken_item = stack.clone();
             let result = stack.damage_item(1);
             (result != DamageResult::Untouched).then(|| {
                 equipment.put(&slot, stack.clone());
-                (result, stack)
+                (result, stack, broken_item)
             })
         };
 
-        if let Some((result, stack)) = damaged {
+        if let Some((result, stack, broken_item)) = damaged {
             if result == DamageResult::Broken {
                 let world = self.entity.world.load();
                 world.send_entity_status(&self.entity, super::equipment_break_status(&slot), None);
+                // `LivingEntity.breakItem` invokes `spawnItemParticles` for a broken glider
+                // (`LivingEntity.java:1439-1448`).
+                self.spawn_item_particles(&broken_item, 5);
             }
             self.send_equipment_changes(&[(slot, stack)]);
         }
@@ -2338,16 +2451,11 @@ impl LivingEntity {
         // movement collision actually consumed this tick. `getY() - oldY` is the actual
         // net Y movement already applied by `make_move` above; the `+ 0.6` alone is used
         // when movement wasn't vertically obstructed.
-        let world = self.entity.world.load();
         let actual_dy = self.entity.pos.load().y - old_y;
-        let probe_box = self.entity.bounding_box.load().shift(Vector3::new(
-            velo.x,
-            velo.y + 0.6 - actual_dy,
-            velo.z,
-        ));
         if self.entity.horizontal_collision.load(SeqCst)
-            && !world.check_fluid_collision(probe_box)
-            && world.is_space_empty(probe_box)
+            && self
+                .entity
+                .is_free(velo.x, velo.y + 0.6 - actual_dy, velo.z)
         {
             velo.y = 0.3;
 
@@ -3707,6 +3815,7 @@ impl LivingEntity {
                 .is_none_or(|equippable| equippable.damage_on_hurt);
 
             if takes_damage {
+                let broken_item = stack.clone();
                 let slot_result = stack.damage_item(armor_damage);
                 if slot_result != pumpkin_data::item_stack::DamageResult::Untouched {
                     if slot_result == pumpkin_data::item_stack::DamageResult::Broken {
@@ -3716,6 +3825,9 @@ impl LivingEntity {
                             super::equipment_break_status(&slot),
                             None,
                         );
+                        // `LivingEntity.breakItem` invokes `spawnItemParticles` before the armor
+                        // stack is cleared (`LivingEntity.java:1439-1448`).
+                        self.spawn_item_particles(&broken_item, 5);
                     }
                     equipment_updates.push((slot.clone(), stack.clone()));
                     if let Some(player) = caller.get_player() {
@@ -3829,6 +3941,17 @@ impl LivingEntity {
     /// Vindicator's may ever pick this entity as a target.
     pub fn is_valid_ai_target(&self) -> bool {
         self.entity.entity_type != &EntityType::ARMOR_STAND
+    }
+
+    /// Vanilla `LivingEntity.canBeSeenAsEnemy` (`LivingEntity.java:952-958`): combat targeting
+    /// must honor both the entity's invulnerability and its living-entity visibility hook.
+    #[must_use]
+    pub fn can_be_seen_as_enemy(&self) -> bool {
+        can_be_seen_as_enemy_state(
+            self.entity.invulnerable.load(Relaxed),
+            self.can_be_seen_by_anyone(),
+            self.not_targetable_as_enemy.load(Relaxed),
+        )
     }
 
     pub async fn reset_state(&self) {
@@ -5637,6 +5760,7 @@ impl EntityBase for LivingEntity {
                             continue;
                         }
                         let thorns_damage = 1.0 + rand::random::<f32>() * 4.0;
+                        let broken_item = stack.clone();
                         if stack.damage_item(2) == DamageResult::Broken {
                             if let Some(player) = self.get_player() {
                                 player
@@ -5652,6 +5776,9 @@ impl EntityBase for LivingEntity {
                                 crate::entity::equipment_break_status(&slot),
                                 None,
                             );
+                            // `LivingEntity.breakItem` invokes `spawnItemParticles` for broken
+                            // armor (`LivingEntity.java:1439-1448`).
+                            self.spawn_item_particles(&broken_item, 5);
                             stack = ItemStack::EMPTY.clone();
                             let broken_stack = stack.clone();
                             equipment_lock.put(&slot, stack);
@@ -6940,6 +7067,42 @@ pub(crate) const fn bypasses_shield(damage_type: &DamageType) -> bool {
     )
 }
 
+/// Applies the final air-movement drag. Vanilla skips this entire block when
+/// `LivingEntity.shouldDiscardFriction()` is true (`LivingEntity.java:2477-2485`).
+fn apply_air_friction(
+    velocity: Vector3<f64>,
+    horizontal_friction: f64,
+    vertical_friction: f64,
+    discard_friction: bool,
+) -> Vector3<f64> {
+    if discard_friction {
+        velocity
+    } else {
+        Vector3::new(
+            velocity.x * horizontal_friction,
+            velocity.y * vertical_friction,
+            velocity.z * horizontal_friction,
+        )
+    }
+}
+
+/// Vanilla `Vec3.xRot` followed by `Vec3.yRot` in `spawnItemParticles`
+/// (`LivingEntity.java:3550-3560`).
+fn rotate_particle_vector(vector: Vector3<f64>, pitch: f64, yaw: f64) -> Vector3<f64> {
+    let (pitch_sin, pitch_cos) = (-pitch).sin_cos();
+    let x_rotated = Vector3::new(
+        vector.x,
+        vector.y * pitch_cos - vector.z * pitch_sin,
+        vector.y * pitch_sin + vector.z * pitch_cos,
+    );
+    let (yaw_sin, yaw_cos) = (-yaw).sin_cos();
+    Vector3::new(
+        x_rotated.x * yaw_cos + x_rotated.z * yaw_sin,
+        x_rotated.y,
+        x_rotated.z * yaw_cos - x_rotated.x * yaw_sin,
+    )
+}
+
 /// `LivingEntity.getFrictionInfluencedSpeed`: the grounded per-tick factor
 /// `moveRelative` is called with.
 fn friction_influenced_speed(speed: f64, slipperiness: f64) -> f64 {
@@ -7102,6 +7265,16 @@ mod tests {
     }
 
     #[test]
+    fn discard_friction_preserves_all_velocity_components() {
+        let velocity = Vector3::new(1.0, -2.0, 3.0);
+        assert_eq!(apply_air_friction(velocity, 0.5, 0.25, true), velocity);
+        assert_eq!(
+            apply_air_friction(velocity, 0.5, 0.25, false),
+            Vector3::new(0.5, -0.5, 1.5)
+        );
+    }
+
+    #[test]
     fn shield_durability_uses_the_vanilla_damage_threshold() {
         assert_eq!(shield_block_durability_damage(2.999), None);
         assert_eq!(shield_block_durability_damage(3.0), Some(4));
@@ -7201,6 +7374,47 @@ mod tests {
     fn active_hand_maps_to_the_matching_equipment_slot() {
         assert!(equipment_slot_for_hand(Hand::Left) == EquipmentSlot::OFF_HAND);
         assert!(equipment_slot_for_hand(Hand::Right) == EquipmentSlot::MAIN_HAND);
+    }
+
+    #[test]
+    fn enemy_visibility_requires_vanilla_targetability_state() {
+        // `LivingEntity.canBeSeenAsEnemy` (`LivingEntity.java:952-958`) rejects an
+        // invulnerable, invisible-to-anyone, or explicitly non-targetable living entity.
+        assert!(can_be_seen_as_enemy_state(false, true, false));
+        assert!(!can_be_seen_as_enemy_state(true, true, false));
+        assert!(!can_be_seen_as_enemy_state(false, false, false));
+        assert!(!can_be_seen_as_enemy_state(false, true, true));
+    }
+
+    #[test]
+    fn striders_stand_on_lava_but_travel_through_water() {
+        // `Strider.canStandOnFluid` (`Strider.java:180-182`) returns true only for lava;
+        // `LivingEntity.shouldTravelInFluid` (`LivingEntity.java:2421-2437`) therefore still
+        // sends a strider through water movement.
+        assert!(!should_travel_in_fluid(
+            &EntityType::STRIDER,
+            true,
+            false,
+            true
+        ));
+        assert!(should_travel_in_fluid(
+            &EntityType::STRIDER,
+            true,
+            true,
+            false
+        ));
+        assert!(should_travel_in_fluid(
+            &EntityType::ZOMBIE,
+            true,
+            false,
+            true
+        ));
+        assert!(!should_travel_in_fluid(
+            &EntityType::ZOMBIE,
+            false,
+            false,
+            false
+        ));
     }
 
     #[test]

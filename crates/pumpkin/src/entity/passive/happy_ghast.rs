@@ -628,6 +628,11 @@ impl Mob for HappyGhastEntity {
                 return;
             }
 
+            // Vanilla `HappyGhast.aiStep` updates `requiresPrecisePosition` from
+            // `isOnStillTimeout` before the base movement tick (`HappyGhast.java:439-445`).
+            self.get_entity()
+                .set_requires_precise_position(self.is_on_still_timeout());
+
             self.ageable_ai_step();
 
             if self.is_baby() {

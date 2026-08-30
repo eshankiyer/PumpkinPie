@@ -209,6 +209,9 @@ pub struct Explosion {
     /// Overrides the power-derived `power * 2` entity radius. Vanilla `ExplodeEffect` drives
     /// `Level.explode` with an explicit radius instead of a TNT-style power.
     fixed_radius: Option<f64>,
+    /// The source passed to `Entity.onExplosionHit` (`ServerExplosion.java:201-208`); only
+    /// projectile explosions set it.
+    source_type: Option<&'static EntityType>,
 }
 
 impl Explosion {
@@ -222,6 +225,7 @@ impl Explosion {
             preserve_rails: false,
             creates_fire: false,
             fixed_radius: None,
+            source_type: None,
         }
     }
 
@@ -245,6 +249,7 @@ impl Explosion {
             preserve_rails: false,
             creates_fire: false,
             fixed_radius: Some(radius),
+            source_type: None,
         }
     }
 
@@ -254,6 +259,14 @@ impl Explosion {
         calculator: Arc<dyn ExplosionDamageCalculator>,
     ) -> Self {
         self.damage_calculator = Some(calculator);
+        self
+    }
+
+    /// Carries the source type needed by `Entity.onExplosionHit` after knockback
+    /// (`ServerExplosion.java:201-208`).
+    #[must_use]
+    pub const fn with_source_type(mut self, source_type: &'static EntityType) -> Self {
+        self.source_type = Some(source_type);
         self
     }
 
@@ -525,6 +538,7 @@ impl Explosion {
                 (1.0 - distance) * exposure * knockback_multiplier * (1.0 - knockback_resistance);
             let knockback = direction * knockback_power;
             entity.add_velocity(knockback);
+            entity_base.on_explosion_hit(self.source_type);
         }
     }
 

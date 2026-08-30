@@ -113,10 +113,13 @@ impl WindChargeEntity {
         self.get_entity()
             .world
             .load()
-            .explode_with_calculator(
+            // `AbstractWindCharge.explode` passes the wind charge as the explosion source
+            // (`AbstractWindCharge.java:92-109`; `WindCharge.java:23-27`).
+            .explode_with_calculator_from(
                 position,
                 power,
                 crate::world::ExplosionInteraction::Trigger,
+                Some(self.get_entity().entity_type),
                 Some(calculator),
             )
             .await;

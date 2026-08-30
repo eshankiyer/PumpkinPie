@@ -4413,8 +4413,25 @@ impl World {
         interaction: ExplosionInteraction,
         damage_calculator: Option<Arc<dyn ExplosionDamageCalculator>>,
     ) {
+        self.explode_with_calculator_from(position, power, interaction, None, damage_calculator)
+            .await;
+    }
+
+    /// Runs an explosion while preserving the source type needed by the vanilla
+    /// `Entity.onExplosionHit` callback (`ServerExplosion.java:201-208`).
+    pub async fn explode_with_calculator_from(
+        self: &Arc<Self>,
+        position: Vector3<f64>,
+        power: f32,
+        interaction: ExplosionInteraction,
+        source_type: Option<&'static pumpkin_data::entity::EntityType>,
+        damage_calculator: Option<Arc<dyn ExplosionDamageCalculator>>,
+    ) {
         let block_interaction = self.get_block_interaction(interaction);
         let mut explosion = Explosion::new(power, position, block_interaction);
+        if let Some(source_type) = source_type {
+            explosion = explosion.with_source_type(source_type);
+        }
         if let Some(calc) = damage_calculator {
             explosion = explosion.with_damage_calculator(calc);
         }
@@ -5601,6 +5618,9 @@ impl World {
     #[allow(clippy::unused_async)]
     pub async fn remove_entity(&self, entity: &dyn EntityBase) {
         let base_entity = entity.get_entity();
+        // Vanilla removal ejects passengers and detaches the vehicle before the entity leaves the
+        // level (`Entity.java:3930-3933`); this also covers direct remove_entity callers.
+        base_entity.un_ride().await;
         self.unregister_game_event_listener_for_entity(base_entity.entity_uuid)
             .await;
         if base_entity

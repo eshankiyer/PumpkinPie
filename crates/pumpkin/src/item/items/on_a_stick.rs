@@ -28,7 +28,11 @@ impl ItemBehaviour for CarrotOnAStickItem {
                 && let Some(steerable) = vehicle.get_item_steerable()
                 && steerable.boost()
             {
-                player.damage_held_item(7).await;
+                // `FoodOnAStickItem.use` converts a broken stick to a fishing rod
+                // (`FoodOnAStickItem.java:24-37`).
+                player
+                    .damage_held_item_and_convert_on_break(7, &Item::FISHING_ROD)
+                    .await;
             }
         })
     }
@@ -56,7 +60,11 @@ impl ItemBehaviour for WarpedFungusOnAStickItem {
                 && let Some(steerable) = vehicle.get_item_steerable()
                 && steerable.boost()
             {
-                player.damage_held_item(7).await;
+                // `FoodOnAStickItem.use` converts a broken stick to a fishing rod
+                // (`FoodOnAStickItem.java:24-37`).
+                player
+                    .damage_held_item_and_convert_on_break(7, &Item::FISHING_ROD)
+                    .await;
             }
         })
     }
