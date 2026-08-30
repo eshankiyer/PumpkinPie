@@ -106,6 +106,34 @@ impl SkeletonHorseEntity {
     pub fn set_trap(&self, trap: bool) {
         self.is_trap.store(trap, Ordering::Relaxed);
     }
+
+    // Vanilla `SkeletonHorse.getSwimSound` (`SkeletonHorse.java:83-100`) selects water step,
+    // water gallop, or swim sounds from ground state, vehicle state, and the shared counter.
+    pub fn get_swim_sound(&self) -> Sound {
+        let entity = &self.mob_entity.living_entity.entity;
+        if entity.on_ground.load(Ordering::Relaxed) {
+            let is_vehicle = entity
+                .passengers
+                .try_lock()
+                .is_ok_and(|passengers| !passengers.is_empty());
+            if !is_vehicle {
+                return Sound::EntitySkeletonHorseStepWater;
+            }
+
+            let counter = self
+                .horse_data
+                .gallop_sound_counter
+                .fetch_add(1, Ordering::Relaxed)
+                + 1;
+            if counter > 5 && counter % 3 == 0 {
+                return Sound::EntitySkeletonHorseGallopWater;
+            }
+            if counter <= 5 {
+                return Sound::EntitySkeletonHorseStepWater;
+            }
+        }
+        Sound::EntitySkeletonHorseSwim
+    }
 }
 
 impl NBTStorage for SkeletonHorseEntity {

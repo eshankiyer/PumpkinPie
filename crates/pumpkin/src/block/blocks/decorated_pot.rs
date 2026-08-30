@@ -126,35 +126,14 @@ impl BlockBehaviour for DecoratedPotBlock {
 
     fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(pot_entity) = block_entity
-                    .as_any()
-                    .downcast_ref::<DecoratedPotBlockEntity>()
-            {
-                if let Some(contained) = pot_entity.take_item().await {
-                    args.world.drop_stack(args.position, contained).await;
-                }
-                if let Some(decorations) = pot_entity.decorations() {
-                    for decoration in decorations {
-                        if let Some(item) = Item::from_registry_key(
-                            decoration.strip_prefix("minecraft:").unwrap_or(&decoration),
-                        ) {
-                            args.world
-                                .drop_stack(args.position, ItemStack::new(1, item))
-                                .await;
-                        }
-                    }
-                }
-            }
-
+            // `DecoratedPotBlock.getDrops` (`DecoratedPotBlock.java:181-191`) is dispatched
+            // by `World::break_block` while its captured block entity is available; this
+            // post-break hook only retains the shatter sound.
             args.world.play_sound(
                 Sound::BlockDecoratedPotShatter,
                 SoundCategory::Blocks,
                 &args.position.to_f64(),
             );
-            args.world
-                .drop_stack(args.position, ItemStack::new(4, &Item::BRICK))
-                .await;
         })
     }
 

@@ -155,7 +155,7 @@ impl CommandExecutor for PlaceTemplateExecutor {
                 None,
             );
 
-            placer.finalize();
+            placer.finalize().await;
             context
                 .world()
                 .queue_block_updates(&placer.changed_positions)
@@ -197,7 +197,7 @@ impl CommandExecutor for PlaceJigsawExecutor {
                     BlockPos::new(p.x as i32, p.y as i32, p.z as i32)
                 });
 
-            let (_piece_count, placer) = {
+            let (_piece_count, mut placer) = {
                 let seed = hash_block_pos(block_pos.0.x, block_pos.0.y, block_pos.0.z) as u64;
                 let random = RandomGenerator::Legacy(LegacyRand::from_seed(seed));
                 let world_gen = context.world().level.world_gen();
@@ -248,7 +248,7 @@ impl CommandExecutor for PlaceJigsawExecutor {
                 (piece_count, placer)
             };
 
-            placer.finalize();
+            placer.finalize().await;
             context
                 .world()
                 .queue_block_updates(&placer.changed_positions)
@@ -298,7 +298,7 @@ impl CommandExecutor for PlaceStructureExecutor {
 
             let seed = hash_block_pos(block_pos.0.x, block_pos.0.y, block_pos.0.z) as u64;
 
-            let (_piece_count, placer) = {
+            let (_piece_count, mut placer) = {
                 let world_gen = context.world().level.world_gen();
                 let settings = GenerationSettings::from_dimension(world_gen.dimension());
 
@@ -514,7 +514,7 @@ impl CommandExecutor for PlaceStructureExecutor {
                 }
             };
 
-            placer.finalize();
+            placer.finalize().await;
             context
                 .world()
                 .queue_block_updates(&placer.changed_positions)
@@ -630,7 +630,7 @@ impl CommandExecutor for PlaceFeatureExecutor {
                 placer.block_entity_nbts.push(nbt);
             }
 
-            placer.finalize();
+            placer.finalize().await;
             context
                 .world()
                 .queue_block_updates(&placer.changed_positions)

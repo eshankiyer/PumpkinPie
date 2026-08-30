@@ -8,6 +8,7 @@ use crate::entity::projectile::arrow::ArrowPickup;
 use crate::entity::projectile::trident::TridentEntity;
 use crate::entity::{Entity, EntityBase};
 use crate::item::{ItemBehaviour, ItemMetadata};
+use pumpkin_data::Enchantment;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
@@ -34,6 +35,17 @@ impl ItemBehaviour for TridentItem {
         Box::pin(async move {
             let inventory = player.inventory();
             let stack = inventory.held_item().await;
+
+            // Vanilla `TridentItem.use` (`TridentItem.java:122-135`) refuses a trident that
+            // would break and refuses Riptide outside water or rain before starting use.
+            let in_water_or_rain = player.living_entity.entity.is_in_water_or_rain().await;
+            if !can_start_use(
+                &stack,
+                stack.get_enchantment_level(&Enchantment::RIPTIDE),
+                in_water_or_rain,
+            ) {
+                return;
+            }
 
             player
                 .living_entity
@@ -210,5 +222,35 @@ impl ItemBehaviour for TridentItem {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+// Vanilla `TridentItem.use` (`TridentItem.java:125-130`) applies both checks before
+// `startUsingItem`.
+fn can_start_use(stack: &ItemStack, riptide_level: i32, in_water_or_rain: bool) -> bool {
+    if stack.is_damageable()
+        && stack
+            .get_max_damage()
+            .is_some_and(|max| stack.get_damage() + 1 >= max)
+    {
+        return false;
+    }
+
+    riptide_level <= 0 || in_water_or_rain
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trident_use_rejects_breaking_and_dry_riptide() {
+        let mut trident = ItemStack::new(1, &Item::TRIDENT);
+        trident.set_damage(249);
+
+        assert!(!can_start_use(&trident, 0, false));
+        assert!(!can_start_use(&ItemStack::new(1, &Item::TRIDENT), 1, false));
+        assert!(can_start_use(&ItemStack::new(1, &Item::TRIDENT), 1, true));
+        assert!(can_start_use(&ItemStack::new(1, &Item::TRIDENT), 0, false));
     }
 }

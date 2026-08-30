@@ -645,6 +645,10 @@ impl Explosion {
                 let explosion_radius = decay_drops.then_some(self.power);
 
                 for (pos, (block, state)) in &blocks {
+                    // `DecoratedPotBlock.getDrops` (`DecoratedPotBlock.java:181-191`) needs
+                    // the block entity for its dynamic sherd and copied-decoration branches;
+                    // capture it before the explosion removes the block.
+                    let block_entity = world.get_block_entity(pos);
                     world
                         .set_block_state(pos, BlockStateId::AIR, BlockFlags::NOTIFY_ALL)
                         .await;
@@ -656,6 +660,7 @@ impl Explosion {
                         let is_raining = world.is_raining().await;
                         let is_thundering = world.is_thundering().await;
                         let params = LootContextParameters {
+                            block_entity,
                             block_state: Some(state),
                             explosion_radius,
                             position: Some(pumpkin_util::math::vector3::Vector3::new(

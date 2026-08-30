@@ -6334,6 +6334,10 @@ impl World {
         flags: BlockFlags,
     ) -> Option<BlockStateId> {
         let (broken_block, broken_block_state) = self.get_block_and_state_id(position);
+        // `DecoratedPotBlock.getDrops` receives the block entity while the old state still
+        // exists (`DecoratedPotBlock.java:181-191`); retain it across state replacement for
+        // the loot-table dynamic and component-copy functions.
+        let block_entity = self.get_block_entity(position);
         if is_air(broken_block_state) {
             return None;
         }
@@ -6460,6 +6464,7 @@ impl World {
                 let is_thundering = self.is_thundering().await;
 
                 let params = LootContextParameters {
+                    block_entity,
                     block_state: Some(BlockState::from_id(broken_state_id)),
                     luck,
                     position: Some(pumpkin_util::math::vector3::Vector3::new(

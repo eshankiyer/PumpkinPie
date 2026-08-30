@@ -13,8 +13,8 @@ use rand::RngExt;
 
 use crate::block::entities::creaking_heart::CreakingHeartBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, ExplodeArgs, GetComparatorOutputArgs,
-    GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs,
+    BlockBehaviour, BlockFuture, BlockMetadata, ExplodeArgs, GetComparatorOutputArgs,
+    GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs, PlayerWillDestroyArgs,
 };
 use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::world::World;
@@ -87,11 +87,18 @@ async fn update_state(
 }
 
 impl BlockBehaviour for CreakingHeartBlock {
-    /// `CreakingHeartBlock.playerWillDestroy` (`CreakingHeartBlock.java:175-187`): a natural
-    /// heart broken by a non-creative/non-spectator player awards 20 through 24 experience.
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
+    /// `CreakingHeartBlock.playerWillDestroy` (`CreakingHeartBlock.java:175-181`) runs before
+    /// block removal: damage the bound protector and award natural-heart experience here.
+    fn player_will_destroy<'a>(&'a self, args: PlayerWillDestroyArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             let properties = CreakingHeartLikeProperties::from_state_id(args.state.id, args.block);
+            if let Some(block_entity) = args.world.get_block_entity(args.position)
+                && let Some(heart) = block_entity
+                    .as_any()
+                    .downcast_ref::<CreakingHeartBlockEntity>()
+            {
+                heart.remove_protector_after_player_attack(args.world);
+            }
             if properties.r#natural
                 && !matches!(
                     args.player.gamemode.load(),

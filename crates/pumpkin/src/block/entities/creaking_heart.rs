@@ -205,6 +205,21 @@ impl CreakingHeartBlockEntity {
         }
     }
 
+    /// `CreakingHeartBlockEntity.removeProtector(damageSource)`
+    /// (`CreakingHeartBlockEntity.java:314-327`): a player break uses the death
+    /// effects path before the heart block is removed.
+    pub fn remove_protector_after_player_attack(&self, world: &Arc<World>) {
+        let Some(uuid) = self.creaking_uuid.swap(None) else {
+            return;
+        };
+        if let Some(entity) = world.get_entity_by_uuid(uuid)
+            && let Some(creaking) = entity.cast_any().downcast_ref::<CreakingEntity>()
+        {
+            creaking.creaking_death_effects();
+            creaking.mob_entity.living_entity.health.store(0.0);
+        }
+    }
+
     /// `CreakingHeartBlockEntity.creakingHurt`. The particle/resin-spread effects this drives
     /// in vanilla are deliberately not ported here (same scope cut as this file's existing
     /// doc comment already calls out for `spawnProtector`/`removeProtector`/`spreadResin`);

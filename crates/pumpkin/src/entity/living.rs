@@ -4116,6 +4116,12 @@ impl LivingEntity {
     /// `Entity.getSwimSound` (Entity.java:1263-1265) returns `entity.generic.swim` for every
     /// entity; the two nautilus species override it.
     fn swim_sound(caller: &Arc<dyn EntityBase>) -> Sound {
+        if let Some(skeleton_horse) = caller
+            .cast_any()
+            .downcast_ref::<crate::entity::passive::skeleton_horse::SkeletonHorseEntity>(
+        ) {
+            return skeleton_horse.get_swim_sound();
+        }
         if let Some(nautilus) = caller
             .cast_any()
             .downcast_ref::<crate::entity::passive::nautilus::NautilusEntity>()
@@ -4157,9 +4163,11 @@ impl LivingEntity {
         if self.entity.is_silent() || !Self::movement_emits_sounds(self.entity.entity_type) {
             return;
         }
-        if self.entity.touching_water.load(Relaxed) && !self.entity.on_ground.load(Relaxed) {
+        let on_ground = self.entity.on_ground.load(Relaxed);
+        let skeleton_horse_in_water = self.entity.entity_type == &EntityType::SKELETON_HORSE;
+        if self.entity.touching_water.load(Relaxed) && (!on_ground || skeleton_horse_in_water) {
             let velocity = self.entity.velocity.load();
-            let volume = ((velocity.x * velocity.x)
+            let water_volume = ((velocity.x * velocity.x)
                 .mul_add(
                     0.2,
                     velocity
@@ -4169,6 +4177,11 @@ impl LivingEntity {
                 .sqrt() as f32
                 * 0.35)
                 .min(1.0);
+            let volume = if skeleton_horse_in_water {
+                skeleton_swim_sound_volume(on_ground, water_volume)
+            } else {
+                water_volume
+            };
             let mut rng = rand::rng();
             let pitch = (rng.random::<f32>() - rng.random::<f32>()).mul_add(0.4, 1.0);
             self.entity.world.load().play_sound_fine(
@@ -6881,6 +6894,16 @@ fn damage_causes_panic(damage_type: DamageType) -> bool {
     damage_type.has_tag(&tag::DamageType::MINECRAFT_PANIC_CAUSES)
 }
 
+// Vanilla `SkeletonHorse.playSwimSound` (`SkeletonHorse.java:103-109`) uses a fixed ground
+// volume and caps airborne volume after scaling the water speed.
+fn skeleton_swim_sound_volume(on_ground: bool, water_volume: f32) -> f32 {
+    if on_ground {
+        0.3
+    } else {
+        (water_volume * 25.0).min(0.1)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6891,6 +6914,13 @@ mod tests {
         assert_eq!(damage_stat_amount(0.04), 0);
         assert_eq!(damage_stat_amount(0.05), 1);
         assert_eq!(damage_stat_amount(1.25), 13);
+    }
+
+    #[test]
+    fn skeleton_horse_swim_volume_matches_vanilla() {
+        assert_eq!(skeleton_swim_sound_volume(true, 0.01), 0.3);
+        assert_eq!(skeleton_swim_sound_volume(false, 0.002), 0.05);
+        assert_eq!(skeleton_swim_sound_volume(false, 0.1), 0.1);
     }
 
     #[test]

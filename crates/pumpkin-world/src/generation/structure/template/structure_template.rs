@@ -256,9 +256,10 @@ impl PaletteEntry {
                 let properties = props_str
                     .split(',')
                     .filter_map(|p| {
-                        let mut parts = p.split('=');
-                        let key = parts.next()?.trim().to_string();
-                        let value = parts.next()?.trim().to_string();
+                        // Preserve final-state properties consumed by the placement transform (StructureTemplate.java:283-287).
+                        let (key, value) = p.split_once('=')?;
+                        let key = key.trim().to_string();
+                        let value = value.trim().to_string();
                         Some((key, value))
                     })
                     .collect();
@@ -1421,5 +1422,20 @@ mod tests {
             ],
         );
         assert_eq!(entry_with_props.properties.len(), 2);
+    }
+
+    #[test]
+    fn palette_entry_parses_state_properties() {
+        // These properties are retained for the vanilla placement path (StructureTemplate.java:283-287).
+        let entry = PaletteEntry::from_string("minecraft:oak_log[axis=x,waterlogged=false]");
+
+        assert_eq!(entry.name, "minecraft:oak_log");
+        assert_eq!(
+            entry.properties,
+            vec![
+                ("axis".to_string(), "x".to_string()),
+                ("waterlogged".to_string(), "false".to_string()),
+            ]
+        );
     }
 }

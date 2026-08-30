@@ -204,6 +204,8 @@ pub struct AbstractHorseData {
     pub temper: AtomicI32,
     pub eating_counter: AtomicI32,
     pub stand_counter: AtomicI32,
+    /// Vanilla `AbstractHorse.gallopSoundCounter` (`AbstractHorse.java:123-124`).
+    pub gallop_sound_counter: AtomicI32,
     pub jump_pending_scale: AtomicI32,
     pub allow_stand_sliding: AtomicBool,
 }
@@ -215,6 +217,7 @@ impl Default for AbstractHorseData {
             temper: AtomicI32::new(0),
             eating_counter: AtomicI32::new(0),
             stand_counter: AtomicI32::new(0),
+            gallop_sound_counter: AtomicI32::new(0),
             jump_pending_scale: AtomicI32::new(0),
             allow_stand_sliding: AtomicBool::new(false),
         }
@@ -722,6 +725,11 @@ pub trait AbstractHorse: Animal {
 
             let input_flags = player.last_input.load(Relaxed);
             let input = self.get_ridden_input(input_flags);
+            // Vanilla `AbstractHorse.tickRidden` (`AbstractHorse.java:726-729`) resets the
+            // gallop counter whenever the rider is not moving forward.
+            if input.z <= 0.0 {
+                self.horse_data().gallop_sound_counter.store(0, Relaxed);
+            }
             let pending = self.horse_data().jump_pending_scale.swap(0, Relaxed);
             if entity.on_ground.load(Relaxed)
                 && pending > 0
