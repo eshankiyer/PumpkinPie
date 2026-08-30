@@ -1,10 +1,13 @@
 use std::pin::Pin;
 use std::{any::Any, sync::Arc};
 
-use pumpkin_data::data_component_impl::ContainerLootImpl;
+use pumpkin_data::data_component_impl::{
+    BeesImpl, ContainerImpl, ContainerLootImpl, DataComponentImpl,
+};
 use pumpkin_data::{Block, BlockStateId, block_properties::BLOCK_ENTITY_TYPES};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
+use std::array::from_fn;
 
 use crate::world::World;
 use pumpkin_data::item_stack::ItemStack;
@@ -195,6 +198,46 @@ pub fn apply_components_from_item_stack(
     entity: &dyn BlockEntity,
     stack: &ItemStack,
 ) -> Option<Arc<dyn BlockEntity>> {
+    // `BeehiveBlockEntity.applyImplicitComponents` replaces stored occupants from the item
+    // component (`BeehiveBlockEntity.java:309-315`).
+    if entity.as_any().is::<beehive::BeehiveBlockEntity>() {
+        let data = stack.get_data_component::<BeesImpl>()?;
+        let position = entity.get_position();
+        let mut nbt = NbtCompound::new();
+        nbt.put_string("id", entity.resource_location().to_string());
+        nbt.put_int("x", position.0.x);
+        nbt.put_int("y", position.0.y);
+        nbt.put_int("z", position.0.z);
+        nbt.put("bees", data.write_data());
+        return block_entity_from_nbt_at(&nbt, position);
+    }
+
+    // `ShelfBlockEntity.applyImplicitComponents` copies the item container into its three slots
+    // (`ShelfBlockEntity.java:104-107`), and BlockItem invokes that hook before `setChanged`
+    // (`BlockItem.java:101-106`).
+    if entity.as_any().is::<shelf::ShelfBlockEntity>() {
+        let position = entity.get_position();
+        let mut nbt = NbtCompound::new();
+        nbt.put_string("id", entity.resource_location().to_string());
+        nbt.put_int("x", position.0.x);
+        nbt.put_int("y", position.0.y);
+        nbt.put_int("z", position.0.z);
+        let container = stack.get_data_component::<ContainerImpl>();
+        let items: [ItemStack; shelf::ShelfBlockEntity::INVENTORY_SIZE] = from_fn(|slot| {
+            container
+                .and_then(|container| {
+                    container
+                        .items
+                        .iter()
+                        .find(|(item_slot, _)| usize::from(*item_slot) == slot)
+                        .map(|(_, item)| item.clone())
+                })
+                .unwrap_or_else(|| ItemStack::EMPTY.clone())
+        });
+        pumpkin_world::inventory::sync_write_items_to_nbt(&items, &mut nbt);
+        return block_entity_from_nbt_at(&nbt, position);
+    }
+
     let data = stack.get_data_component::<ContainerLootImpl>()?;
     let position = entity.get_position();
     let mut nbt = NbtCompound::new();
@@ -207,6 +250,26 @@ pub fn apply_components_from_item_stack(
         nbt.put_long("LootTableSeed", data.seed);
     }
     block_entity_from_nbt_at(&nbt, position)
+}
+
+/// Collects the component used by the beehive creative-break item round trip. This is the live
+/// `collectImplicitComponents` path (`BeehiveBlockEntity.java:317-321`).
+pub(crate) async fn collect_components_from_block_entity(
+    entity: &dyn BlockEntity,
+) -> Vec<(
+    pumpkin_data::data_component::DataComponent,
+    Option<Box<dyn DataComponentImpl>>,
+)> {
+    let Some(hive) = entity
+        .as_any()
+        .downcast_ref::<beehive::BeehiveBlockEntity>()
+    else {
+        return Vec::new();
+    };
+    vec![(
+        pumpkin_data::data_component::DataComponent::Bees,
+        Some(Box::new(hive.bees_component().await).to_dyn()),
+    )]
 }
 
 #[must_use]
@@ -497,8 +560,8 @@ pub fn create_block_entity(
 #[cfg(test)]
 mod test {
     use super::{
-        BlockEntity, apply_components_from_item_stack, block_entity_from_nbt,
-        chest::ChestBlockEntity, furnace::FurnaceBlockEntity,
+        BlockEntity, apply_components_from_item_stack, beehive::BeehiveBlockEntity,
+        block_entity_from_nbt, chest::ChestBlockEntity, furnace::FurnaceBlockEntity,
     };
     use pumpkin_data::data_component_impl::ContainerLootImpl;
     use pumpkin_data::{item::Item, item_stack::ItemStack};
@@ -559,5 +622,64 @@ mod test {
             Some(("minecraft:chests/simple_dungeon".to_string(), 7))
         );
         assert_eq!(applied.get_position(), position);
+    }
+
+    #[tokio::test]
+    async fn placed_shelf_container_component_is_applied() {
+        // `ShelfBlockEntity.applyImplicitComponents` copies `DataComponents.CONTAINER` into the
+        // shelf slots (`ShelfBlockEntity.java:104-107`).
+        let position = BlockPos::new(3, 64, -2);
+        let stack = ItemStack::new_with_component(
+            1,
+            &Item::ACACIA_SHELF,
+            vec![(
+                pumpkin_data::data_component::DataComponent::Container,
+                Some(Box::new(pumpkin_data::data_component_impl::ContainerImpl {
+                    items: vec![(1, ItemStack::new(3, &Item::DIAMOND))],
+                })),
+            )],
+        );
+        let entity: Arc<dyn BlockEntity> = Arc::new(super::shelf::ShelfBlockEntity::new(position));
+        let applied = apply_components_from_item_stack(entity.as_ref(), &stack)
+            .expect("shelf container should rebuild the placed entity");
+        let inventory = applied
+            .get_inventory()
+            .expect("shelf should expose its inventory");
+        assert!(inventory.get_stack(0).await.is_empty());
+        let slot = inventory.get_stack(1).await;
+        assert_eq!(slot.get_item().id, Item::DIAMOND.id);
+        assert_eq!(slot.item_count, 3);
+        assert!(inventory.get_stack(2).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn placed_beehive_bees_component_is_applied() {
+        // `BeehiveBlockEntity.applyImplicitComponents` reads `DataComponents.BEES`
+        // (`BeehiveBlockEntity.java:309-315`).
+        let position = BlockPos::new(3, 64, -2);
+        let mut entity_data = NbtCompound::new();
+        entity_data.put_string("id", "minecraft:bee".to_string());
+        let mut occupant = NbtCompound::new();
+        occupant.put_compound("entity_data", entity_data);
+        occupant.put_int("ticks_in_hive", 12);
+        occupant.put_int("min_ticks_in_hive", 600);
+        let stack = ItemStack::new_with_component(
+            1,
+            &Item::BEEHIVE,
+            vec![(
+                pumpkin_data::data_component::DataComponent::Bees,
+                Some(Box::new(pumpkin_data::data_component_impl::BeesImpl {
+                    bees: std::borrow::Cow::Owned(vec![occupant]),
+                })),
+            )],
+        );
+        let entity: Arc<dyn BlockEntity> = Arc::new(BeehiveBlockEntity::new(position));
+        let applied = apply_components_from_item_stack(entity.as_ref(), &stack)
+            .expect("bees component should rebuild the hive entity");
+        let hive = applied
+            .as_any()
+            .downcast_ref::<BeehiveBlockEntity>()
+            .expect("component application should preserve the hive type");
+        assert_eq!(hive.occupant_count().await, 1);
     }
 }

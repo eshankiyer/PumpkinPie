@@ -9,9 +9,8 @@
 //   registered/unregistered explicitly.
 // - Vanilla's VibrationSystem.Ticker simulates a per-listener travel time before a
 //   selected vibration is actually delivered, and streams a travelling particle to
-//   clients. This resolves synchronously in the same tick the event is emitted; the
-//   VibrationSelector in vibration.rs is ported and unit-tested but not yet wired into
-//   this path (needs a per-tick driver, deferred to a future phase).
+//   clients. The shrieker block entity now drives its VibrationSelector from its own tick
+//   (`VibrationSystem.java:278-361`); other listeners still resolve synchronously here.
 // - Vanilla's occlusion check (VibrationSystem.Listener.isOccluded) nudges the ray in
 //   all 6 directions before a ClipBlockStateContext raycast. This does a straight-line
 //   block-center sampling approximation against the same

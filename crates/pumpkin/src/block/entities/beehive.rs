@@ -17,8 +17,8 @@
 //! - `EnvironmentAttributes.BEES_STAY_IN_HIVE` (`EnvironmentAttributes.java:150`, raised by
 //!   `WeatherAttributes.java:22` and the night keyframes in `Timelines.java:157`) has no
 //!   registry here; `bees_stay_in_hive` reproduces it as "night or raining".
-//! - `DataComponents.BEES` (`applyImplicitComponents` / `collectImplicitComponents`) needs the
-//!   item-component pipeline, so a broken hive does not carry its bees into the dropped item.
+//! - `DataComponents.BEES` (`applyImplicitComponents` / `collectImplicitComponents`) uses the
+//!   item-component pipeline, matching `BeehiveBlockEntity.java:309-321`.
 
 use super::BlockEntity;
 use crate::entity::mob::Mob;
@@ -342,6 +342,24 @@ impl BeehiveBlockEntity {
         self.bees.lock().await.len()
     }
 
+    /// Serializes occupants for `DataComponents.BEES`, matching the record fields used by
+    /// `collectImplicitComponents` (`BeehiveBlockEntity.java:317-321`, `:366-375`).
+    pub(crate) async fn bees_component(&self) -> pumpkin_data::data_component_impl::BeesImpl {
+        pumpkin_data::data_component_impl::BeesImpl {
+            bees: std::borrow::Cow::Owned(
+                self.bees
+                    .lock()
+                    .await
+                    .iter()
+                    .filter_map(|occupant| match occupant.to_nbt() {
+                        NbtTag::Compound(compound) => Some(compound),
+                        _ => None,
+                    })
+                    .collect(),
+            ),
+        }
+    }
+
     /// `BeehiveBlockEntity.isSedated`.
     #[must_use]
     pub fn is_sedated(&self, world: &World) -> bool {
@@ -422,8 +440,24 @@ impl BeehiveBlockEntity {
         player: Option<&Arc<Player>>,
         release_status: BeeReleaseStatus,
     ) -> Vec<Arc<dyn EntityBase>> {
+        self.empty_all_living_from_hive_with_state(world, player, release_status, None)
+            .await
+    }
+
+    /// `BeehiveBlock.playerDestroy` supplies the pre-break state after removal
+    /// (`BeehiveBlock.java:91-108`), because the world now contains air.
+    pub(crate) async fn empty_all_living_from_hive_with_state(
+        &self,
+        world: &Arc<World>,
+        player: Option<&Arc<Player>>,
+        release_status: BeeReleaseStatus,
+        // `playerDestroy` retains the old block state across removal (`BeehiveBlock.java:91-108`).
+        release_state: Option<(pumpkin_data::BlockId, BlockStateId)>,
+    ) -> Vec<Arc<dyn EntityBase>> {
         let sedated = self.is_sedated(world);
-        let released = self.release_all_occupants(world, release_status).await;
+        let released = self
+            .release_all_occupants(world, release_status, release_state)
+            .await;
 
         if let Some(player) = player {
             let player_pos = player.get_entity().pos.load();
@@ -479,6 +513,8 @@ impl BeehiveBlockEntity {
         &self,
         world: &Arc<World>,
         release_status: BeeReleaseStatus,
+        // `playerDestroy` releases against its pre-break state (`BeehiveBlock.java:91-108`).
+        release_state: Option<(pumpkin_data::BlockId, BlockStateId)>,
     ) -> Vec<Arc<dyn EntityBase>> {
         let saved_flower_pos = *self.flower_pos.lock().await;
         let occupants: Vec<Occupant> = self.bees.lock().await.clone();
@@ -487,7 +523,13 @@ impl BeehiveBlockEntity {
         let mut released = Vec::new();
         for (index, occupant) in occupants.iter().enumerate() {
             if let Some(entity) = self
-                .release_occupant(world, occupant, release_status, saved_flower_pos)
+                .release_occupant(
+                    world,
+                    occupant,
+                    release_status,
+                    saved_flower_pos,
+                    release_state,
+                )
                 .await
             {
                 spawned.push(entity);
@@ -527,7 +569,7 @@ impl BeehiveBlockEntity {
                 BeeReleaseStatus::BeeReleased
             };
             if self
-                .release_occupant(world, occupant, release_status, saved_flower_pos)
+                .release_occupant(world, occupant, release_status, saved_flower_pos, None)
                 .await
                 .is_some()
             {
@@ -548,17 +590,23 @@ impl BeehiveBlockEntity {
         occupant: &Occupant,
         release_status: BeeReleaseStatus,
         saved_flower_pos: Option<BlockPos>,
+        // The post-break playerDestroy callback supplies the old hive state
+        // (`BeehiveBlock.java:91-108`).
+        release_state: Option<(pumpkin_data::BlockId, BlockStateId)>,
     ) -> Option<Arc<dyn EntityBase>> {
         let emergency = release_status == BeeReleaseStatus::Emergency;
         if !emergency && bees_stay_in_hive(world).await {
             return None;
         }
 
-        let (block, state) = world.get_block_and_state(&self.position);
+        let (block, state_id) = release_state.map_or_else(
+            || world.get_block_and_state_id(&self.position),
+            |(block_id, state_id)| (block_id.to_block(), state_id),
+        );
         if !is_beehive(block) {
             return None;
         }
-        let props = BeeNestLikeProperties::from_state_id(state.id, block);
+        let props = BeeNestLikeProperties::from_state_id(state_id, block);
         let facing = props.facing.to_offset();
         let facing_pos = BlockPos::new(
             self.position.0.x + facing.x,
@@ -610,7 +658,7 @@ impl BeehiveBlockEntity {
 
             if release_status == BeeReleaseStatus::HoneyDelivered {
                 bee.drop_off_nectar();
-                self.grow_honey(world, block, state.id).await;
+                self.grow_honey(world, block, state_id).await;
             }
         }
 

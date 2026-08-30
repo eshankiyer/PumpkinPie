@@ -19,6 +19,7 @@ pub mod registry;
 pub mod sculk_behaviour;
 pub mod viewer;
 
+use crate::block::entities::BlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::entity::EntityBase;
 use crate::server::Server;
@@ -446,6 +447,9 @@ pub struct BrokenArgs<'a> {
     pub server: &'a Server,
     pub world: &'a Arc<World>,
     pub state: &'a BlockState,
+    /// Captured before block removal for post-removal callbacks such as
+    /// `BeehiveBlock.playerDestroy` (`BeehiveBlock.java:91-108`).
+    pub block_entity: Option<&'a dyn BlockEntity>,
 }
 
 pub struct PlayerWillDestroyArgs<'a> {

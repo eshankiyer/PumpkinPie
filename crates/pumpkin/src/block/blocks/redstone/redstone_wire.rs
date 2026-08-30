@@ -798,4 +798,23 @@ mod rotate_mirror_tests {
             w
         );
     }
+
+    // RedStoneWireBlock.createBlockStateDefinition (vanilla: RedStoneWireBlock.java:486-487)
+    // stores the four connection properties and power in one block-state definition.
+    #[test]
+    fn generated_state_model_round_trips_vanilla_wire_properties() {
+        let properties = RedstoneWireProperties {
+            north: NorthRedstone::Up,
+            south: SouthRedstone::Side,
+            east: EastRedstone::None,
+            west: WestRedstone::Side,
+            power: 11,
+        };
+        let state_id = properties.to_state_id(&Block::REDSTONE_WIRE);
+
+        assert_eq!(
+            RedstoneWireProperties::from_state_id(state_id, &Block::REDSTONE_WIRE),
+            properties
+        );
+    }
 }

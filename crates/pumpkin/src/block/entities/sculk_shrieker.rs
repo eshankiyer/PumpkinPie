@@ -3,11 +3,9 @@
 //! The warning-level escalation, `canRespond` gating and warden summon are ported here;
 //! the per-player half lives in `crate::entity::mob::warden::warden_spawn_tracker`.
 //!
-//! Not ported: vanilla's `VibrationSystem` delay/selection machinery (`vibrationData` /
-//! `VibrationSystem.Ticker`, lines 56-58, 141). This codebase's game-event engine delivers
-//! vibrations synchronously, the way `SculkSensorBlock`'s listener already consumes them, so
-//! the shrieker's listener does the same - the observable difference is that a vibration
-//! arrives on the emitting tick instead of after a travel delay of one tick per block.
+//! The shrieker's `VibrationSystem.Data` and ticker are modeled locally because this codebase's
+//! flat game-event registry still dispatches listeners synchronously; the shrieker queues its
+//! candidate and delivers it from the block-entity tick (`VibrationSystem.java:123-180,278-361`).
 
 use super::BlockEntity;
 use pumpkin_data::block_properties::{BlockProperties, SculkShriekerLikeProperties};
@@ -30,6 +28,7 @@ use crate::block::blocks::sculk::sculk_shrieker::ShriekerListener;
 use crate::entity::mob::warden::{WardenEntity, apply_darkness_around};
 use crate::entity::player::Player;
 use crate::world::World;
+use crate::world::game_event::vibration::{VibrationInfo, VibrationSelector};
 
 /// `SculkShriekerBlockEntity.WARNING_SOUND_RADIUS` (line 42).
 const WARNING_SOUND_RADIUS: i32 = 10;
@@ -55,6 +54,27 @@ const fn sound_by_level(warning_level: i32) -> Option<Sound> {
     }
 }
 
+/// Mirrors `VibrationSystem.Data` and `VibrationSystem.Ticker`: candidates are selected by the
+/// current tick, then travel for `floor(distance)` ticks before delivery
+/// (`VibrationSystem.java:123-180,278-361`).
+struct VibrationData {
+    selector: VibrationSelector,
+    current_vibration: Option<VibrationInfo>,
+    travel_time: u32,
+    tick: u64,
+}
+
+impl Default for VibrationData {
+    fn default() -> Self {
+        Self {
+            selector: VibrationSelector::new(),
+            current_vibration: None,
+            travel_time: 0,
+            tick: 0,
+        }
+    }
+}
+
 pub struct SculkShriekerBlockEntity {
     pub position: BlockPos,
     pub warning_level: Mutex<i32>,
@@ -70,6 +90,9 @@ pub struct SculkShriekerBlockEntity {
     /// and `canRespond` need.
     shrieking_flag: AtomicBool,
     can_summon_flag: AtomicBool,
+    /// Vanilla stores this as the block entity's `VibrationSystem.Data`
+    /// (`SculkShriekerBlockEntity.java:56-58`).
+    vibration_data: Mutex<VibrationData>,
 }
 
 impl BlockEntity for SculkShriekerBlockEntity {
@@ -93,6 +116,7 @@ impl BlockEntity for SculkShriekerBlockEntity {
             listener_registered: AtomicBool::new(false),
             shrieking_flag: AtomicBool::new(false),
             can_summon_flag: AtomicBool::new(false),
+            vibration_data: Mutex::new(VibrationData::default()),
         }
     }
 
@@ -115,6 +139,7 @@ impl BlockEntity for SculkShriekerBlockEntity {
     fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
             self.ensure_listener_registered(world).await;
+            self.tick_vibration(world).await;
         })
     }
 
@@ -151,6 +176,75 @@ impl SculkShriekerBlockEntity {
             listener_registered: AtomicBool::new(false),
             shrieking_flag: AtomicBool::new(false),
             can_summon_flag: AtomicBool::new(false),
+            vibration_data: Mutex::new(VibrationData::default()),
+        }
+    }
+
+    /// Queues a vibration for the block entity's tick, matching `VibrationSystem.Listener`
+    /// delivery through `VibrationSystem.Ticker` (`VibrationSystem.java:300-315,342-361`).
+    pub(crate) async fn queue_vibration(
+        &self,
+        source_position: Vector3<f64>,
+        source_entity: uuid::Uuid,
+        event: &GameEvent,
+    ) {
+        let listener_position = self.position.to_centered_f64();
+        let distance = (source_position - listener_position).length() as f32;
+        let mut data = self.vibration_data.lock().await;
+        let tick = data.tick;
+        data.selector.add_candidate(
+            VibrationInfo {
+                frequency: crate::world::game_event::vibration_frequency(event),
+                distance,
+                pos: source_position,
+                source_entity: Some(source_entity),
+                projectile_owner: None,
+            },
+            tick,
+        );
+    }
+
+    async fn tick_vibration(&self, world: &Arc<World>) {
+        let due_source = {
+            let mut data = self.vibration_data.lock().await;
+            data.tick = data.tick.saturating_add(1);
+            if data.current_vibration.is_none()
+                && let Some(vibration) = data.selector.chosen_candidate(data.tick)
+            {
+                data.travel_time = vibration_travel_time(vibration.distance);
+                data.current_vibration = Some(vibration);
+                data.selector.start_over();
+            }
+            if data.current_vibration.is_some() {
+                data.travel_time = data.travel_time.saturating_sub(1);
+            }
+            (data.travel_time == 0)
+                .then(|| {
+                    data.current_vibration
+                        .as_ref()
+                        .and_then(|v| v.source_entity)
+                })
+                .flatten()
+        };
+
+        let Some(source_entity) = due_source else {
+            return;
+        };
+        if !adjacent_chunks_are_ticking(world, self.position) {
+            return;
+        }
+        let source = {
+            let mut data = self.vibration_data.lock().await;
+            data.current_vibration.take().and_then(|vibration| {
+                (vibration.source_entity == Some(source_entity)).then_some(vibration)
+            })
+        };
+        if source.is_some()
+            && let Some(player) = world.get_player_by_uuid(source_entity)
+        {
+            // `onReceiveVibration` resolves the source entity before calling `tryShriek`
+            // (`SculkShriekerBlockEntity.java:204-213`).
+            self.try_shriek(world, &player).await;
         }
     }
 
@@ -322,6 +416,23 @@ impl SculkShriekerBlockEntity {
     }
 }
 
+/// `VibrationSystem.Ticker.areAdjacentChunksTicking` (`VibrationSystem.java:363-374`).
+fn adjacent_chunks_are_ticking(world: &World, position: BlockPos) -> bool {
+    let center = position.chunk_position();
+    (-1..=1).all(|dx| {
+        (-1..=1).all(|dz| {
+            let chunk = pumpkin_util::math::vector2::Vector2::new(center.x + dx, center.y + dz);
+            world.active_chunks.load().contains(&chunk) && world.level.is_chunk_loaded(&chunk)
+        })
+    })
+}
+
+/// `VibrationSystem.User.calculateTravelTimeInTicks` (`VibrationSystem.java:401-403`).
+#[must_use]
+const fn vibration_travel_time(distance: f32) -> u32 {
+    distance.floor().max(0.0) as u32
+}
+
 /// `SpawnUtil.trySpawnMob` + `moveToPossibleSpawnPosition` with `Strategy.ON_TOP_OF_COLLIDER`
 /// (`util/SpawnUtil.java:19-101`), specialised to the shrieker's arguments.
 ///
@@ -373,4 +484,16 @@ fn warden_fits(world: &Arc<World>, pos: BlockPos) -> bool {
             .next()
             .is_none()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::vibration_travel_time;
+
+    #[test]
+    fn vibration_travel_time_uses_vanilla_flooring() {
+        // `calculateTravelTimeInTicks` uses `Mth.floor` (`VibrationSystem.java:401-403`).
+        assert_eq!(vibration_travel_time(3.9), 3);
+        assert_eq!(vibration_travel_time(0.9), 0);
+    }
 }

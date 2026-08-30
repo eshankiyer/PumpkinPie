@@ -2269,6 +2269,9 @@ impl Player {
             return false;
         }
 
+        // `BeehiveBlock.playerDestroy` receives the old block entity after destruction, so retain
+        // the Arc across `break_block` (`BeehiveBlock.java:91-108`).
+        let block_entity = world.get_block_entity(&position);
         let block_drop =
             self.gamemode.load() != GameMode::Creative && self.can_harvest(state, block).await;
         let held = self.inventory().held_item().await;
@@ -2301,7 +2304,15 @@ impl Player {
 
         server
             .block_registry
-            .broken(world, block, self, &position, server, state)
+            .broken(
+                world,
+                block,
+                self,
+                &position,
+                server,
+                state,
+                block_entity.as_ref().map(Arc::as_ref),
+            )
             .await;
         self.apply_tool_damage_for_block_break(state).await;
         if block_drop {

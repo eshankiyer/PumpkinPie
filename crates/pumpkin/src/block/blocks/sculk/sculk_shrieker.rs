@@ -64,7 +64,7 @@ impl GameEventListener for ShriekerListener {
         world: &'a Arc<World>,
         event: &'a GameEvent,
         context: &'a GameEventContext,
-        _source_position: Vector3<f64>,
+        source_position: Vector3<f64>,
     ) -> GameEventFuture<'a> {
         Box::pin(async move {
             if !shrieker_can_listen(event) {
@@ -94,7 +94,15 @@ impl GameEventListener for ShriekerListener {
             else {
                 return false;
             };
-            shrieker.try_shriek(world, &player).await;
+            // `onReceiveVibration` is invoked by the block entity's vibration ticker after travel
+            // time, rather than directly from event dispatch (`VibrationSystem.java:342-361`).
+            shrieker
+                .queue_vibration(
+                    source_position,
+                    player.living_entity.entity.entity_uuid,
+                    event,
+                )
+                .await;
             true
         })
     }

@@ -3,6 +3,7 @@ use crc_fast::CrcAlgorithm::Crc32Iscsi;
 use crc_fast::Digest;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
+use std::borrow::Cow;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BlockEntityDataImpl {
@@ -85,8 +86,6 @@ impl DataComponentImpl for ContainerImpl {
     default_impl!(Container);
 }
 
-use std::borrow::Cow;
-
 #[derive(Clone, Debug)]
 pub struct BlockStateImpl {
     pub properties: Cow<'static, [(Cow<'static, str>, Cow<'static, str>)]>,
@@ -146,10 +145,37 @@ impl DataComponentImpl for BlockStateImpl {
     default_impl!(BlockState);
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct BeesImpl;
+/// `Bees` stores the serialized `BeehiveBlockEntity.Occupant` records carried by a hive item
+/// (`Bees.java:16-21`; `BeehiveBlockEntity.java:366-375`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct BeesImpl {
+    pub bees: Cow<'static, [NbtCompound]>,
+}
 impl DataComponentImpl for BeesImpl {
+    fn write_data(&self) -> NbtTag {
+        NbtTag::List(self.bees.iter().cloned().map(NbtTag::Compound).collect())
+    }
+
     default_impl!(Bees);
+}
+
+impl BeesImpl {
+    pub fn read_data(data: &NbtTag) -> Option<Self> {
+        let NbtTag::List(entries) = data else {
+            return None;
+        };
+        Some(Self {
+            bees: Cow::Owned(
+                entries
+                    .iter()
+                    .filter_map(|entry| match entry {
+                        NbtTag::Compound(compound) => Some(compound.clone()),
+                        _ => None,
+                    })
+                    .collect(),
+            ),
+        })
+    }
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
