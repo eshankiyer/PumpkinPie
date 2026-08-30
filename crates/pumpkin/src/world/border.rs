@@ -208,6 +208,16 @@ impl Worldborder {
         world.broadcast_packet_all(&CSetBorderWarningDistance::new(self.warning_blocks.into()));
     }
 
+    /// Vanilla `WorldBorder.setDamagePerBlock` (`WorldBorder.java:238-248`).
+    pub const fn set_damage_per_block(&mut self, damage_per_block: f32) {
+        self.damage_per_block = damage_per_block;
+    }
+
+    /// Vanilla `WorldBorder.setSafeZone` (`WorldBorder.java:225-236`).
+    pub const fn set_safe_zone(&mut self, safe_zone: f32) {
+        self.buffer = safe_zone;
+    }
+
     /// `(min_x, max_x, min_z, max_z)`, matching vanilla's `BorderExtent` getters:
     /// the half-diameter offsets from the center, each clamped to
     /// `±absoluteMaxSize` (`WorldBorder.StaticBorderExtent.updateBox`).
@@ -464,6 +474,17 @@ mod tests {
             1.0,
         );
         assert!(collision_time.is_some_and(|time| (time - 0.2).abs() < 1.0e-12));
+    }
+
+    #[test]
+    fn damage_settings_use_vanilla_setters() {
+        // Vanilla setters update the persisted border settings (`WorldBorder.java:225-248`).
+        let mut border = border(0.0, 16.0);
+        border.set_damage_per_block(0.75);
+        border.set_safe_zone(12.0);
+
+        assert_eq!(border.damage_per_block, 0.75);
+        assert_eq!(border.buffer, 12.0);
     }
 
     /// `WorldBorder.applyInitialSettings` (`WorldBorder.java:285-299`) resumes an

@@ -9,10 +9,12 @@ use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::potion::Effect;
 use pumpkin_data::sound::Sound;
+use pumpkin_data::tracked_data;
 use pumpkin_data::world::WorldEvent;
 use pumpkin_data::{Block, effect::StatusEffect, tag::Taggable};
 use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
 use pumpkin_protocol::codec::var_int::VarInt;
+use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::position::BlockPos;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -55,9 +57,18 @@ fn conversion_strength_amplifier(difficulty_id: i32) -> u8 {
     if capped < 0 { 0 } else { capped as u8 }
 }
 
+fn zombie_villager_voice_pitch(is_baby: bool, first: f32, second: f32) -> f32 {
+    let base = if is_baby { 2.0 } else { 1.0 };
+    (first - second).mul_add(0.2, base)
+}
+
 pub struct ZombieVillagerEntity {
     pub mob_entity: Arc<ZombieEntityBase>,
     villager_data: Mutex<VillagerData>,
+    /// Vanilla `VillagerDataFinalized` (`ZombieVillager.java:97-105`).
+    villager_data_finalized: AtomicBool,
+    /// Vanilla `villagerXp` (`ZombieVillager.java:101-105, 364-370`).
+    villager_xp: AtomicI32,
     converting: AtomicBool,
     /// Ticks remaining until `finish_conversion`; meaningful only while `converting`.
     conversion_time: AtomicI32,
@@ -75,11 +86,72 @@ impl ZombieVillagerEntity {
         let zombie = Self {
             mob_entity,
             villager_data: Mutex::new(villager_data),
+            villager_data_finalized: AtomicBool::new(false),
+            villager_xp: AtomicI32::new(0),
             converting: AtomicBool::new(false),
             conversion_time: AtomicI32::new(-1),
             conversion_starter: Mutex::new(None),
         };
-        Arc::new(zombie)
+        let zombie = Arc::new(zombie);
+        // `ZombieVillager.defineSynchedData` (`ZombieVillager.java:88-94`) publishes the
+        // initial villager data tracker value to clients.
+        zombie.get_entity().send_meta_data(
+            &[Metadata::new(
+                tracked_data::zombie_villager::VILLAGER_DATA,
+                villager_data,
+            )],
+            None,
+        );
+        zombie
+    }
+
+    /// `ZombieVillager.getVillagerData`/`setVillagerData` (`ZombieVillager.java:340-347, 360-362`).
+    pub async fn get_villager_data(&self) -> VillagerData {
+        *self.villager_data.lock().await
+    }
+
+    pub async fn set_villager_data(&self, data: VillagerData) {
+        *self.villager_data.lock().await = data;
+        // `ZombieVillager.setVillagerData` updates `DATA_VILLAGER_DATA` immediately
+        // (`ZombieVillager.java:340-347`).
+        self.get_entity().send_meta_data(
+            &[Metadata::new(
+                tracked_data::zombie_villager::VILLAGER_DATA,
+                data,
+            )],
+            None,
+        );
+    }
+
+    /// `ZombieVillager.getVillagerDataFinalized`/`setVillagerDataFinalized`
+    /// (`ZombieVillager.java:349-357`).
+    pub fn get_villager_data_finalized(&self) -> bool {
+        self.villager_data_finalized.load(Ordering::Relaxed)
+    }
+
+    pub fn set_villager_data_finalized(&self, finalized: bool) {
+        // `ZombieVillager.setVillagerDataFinalized` stores the tracker value
+        // (`ZombieVillager.java:354-357`).
+        self.villager_data_finalized
+            .store(finalized, Ordering::Relaxed);
+    }
+
+    /// `ZombieVillager.getVillagerXp`/`setVillagerXp` (`ZombieVillager.java:364-370`).
+    pub fn get_villager_xp(&self) -> i32 {
+        self.villager_xp.load(Ordering::Relaxed)
+    }
+
+    pub fn set_villager_xp(&self, xp: i32) {
+        // `ZombieVillager.setVillagerXp` replaces the persisted XP value
+        // (`ZombieVillager.java:368-370`).
+        self.villager_xp.store(xp, Ordering::Relaxed);
+    }
+
+    /// `ZombieVillager.setVillagerConversionTime` (`ZombieVillager.java:274-277`) is a
+    /// test-facing direct setter in vanilla.
+    pub fn set_villager_conversion_time(&self, conversion_time: i32) {
+        self.conversion_time
+            .store(conversion_time, Ordering::Relaxed);
     }
 
     async fn start_converting(&self, starter: Option<Uuid>, ticks: i32) {
@@ -165,8 +237,9 @@ impl ZombieVillagerEntity {
         let new_entity = Entity::new(world.clone(), pos, &EntityType::VILLAGER);
         let villager = VillagerEntity::new(new_entity);
 
-        let data = *self.villager_data.lock().await;
-        *villager.villager_data.lock().await = data;
+        let data = self.get_villager_data().await;
+        villager.set_villager_data(data).await;
+        villager.xp.store(self.get_villager_xp(), Ordering::Relaxed);
 
         let new_entity = villager.get_entity();
         new_entity.velocity.store(old_entity.velocity.load());
@@ -257,6 +330,10 @@ impl NBTStorage for ZombieVillagerEntity {
             villager_data_nbt.put_int("Profession", data.profession.0);
             villager_data_nbt.put_int("Level", data.level.0);
             nbt.put_compound("VillagerData", villager_data_nbt);
+            // `ZombieVillager.addAdditionalSaveData` (`ZombieVillager.java:97-105`) persists
+            // the finalized flag and current villager XP alongside the villager data.
+            nbt.put_bool("VillagerDataFinalized", self.get_villager_data_finalized());
+            nbt.put_int("Xp", self.get_villager_xp());
 
             nbt.put_int(
                 "ConversionTime",
@@ -297,7 +374,12 @@ impl NBTStorage for ZombieVillagerEntity {
                 if let Some(l) = villager_data_nbt.get_int("Level") {
                     data.level = VarInt(l);
                 }
+                self.villager_data_finalized.store(true, Ordering::Relaxed);
             }
+            if nbt.get_bool("VillagerDataFinalized").unwrap_or(false) {
+                self.villager_data_finalized.store(true, Ordering::Relaxed);
+            }
+            self.set_villager_xp(nbt.get_int("Xp").unwrap_or(0));
 
             let conversion_time = nbt.get_int("ConversionTime").unwrap_or(-1);
             if conversion_time != -1 {
@@ -332,6 +414,16 @@ impl Mob for ZombieVillagerEntity {
     /// `ZombieVillager.getStepSound` (`ZombieVillager.java:326-329`).
     fn get_step_sound(&self) -> Option<Sound> {
         Some(Sound::EntityZombieVillagerStep)
+    }
+
+    /// `ZombieVillager.getVoicePitch` (`ZombieVillager.java:304-309`), used by the shared
+    /// ambient and hurt sound emitters.
+    fn get_sound_pitch(&self) -> f32 {
+        zombie_villager_voice_pitch(
+            self.get_entity().age.load(Ordering::Relaxed) < 0,
+            rand::random::<f32>(),
+            rand::random::<f32>(),
+        )
     }
 
     /// Delegates to `ZombieEntityBase`, which carries `Zombie::finalizeSpawn`'s
@@ -413,7 +505,7 @@ impl Mob for ZombieVillagerEntity {
 
 #[cfg(test)]
 mod tests {
-    use super::{PROFESSIONS, conversion_strength_amplifier};
+    use super::{PROFESSIONS, conversion_strength_amplifier, zombie_villager_voice_pitch};
 
     #[test]
     fn conversion_timer_stays_in_vanilla_range() {
@@ -444,5 +536,13 @@ mod tests {
         assert_eq!(amount_for(&[]), 1);
         assert_eq!(amount_for(&[true; 14]), 15);
         assert_eq!(amount_for(&[false, true, false, true]), 3);
+    }
+
+    #[test]
+    fn voice_pitch_matches_baby_and_adult_ranges() {
+        assert_eq!(zombie_villager_voice_pitch(false, 1.0, 0.0), 1.2);
+        assert_eq!(zombie_villager_voice_pitch(true, 1.0, 0.0), 2.2);
+        assert!((0.8..=1.2).contains(&zombie_villager_voice_pitch(false, 0.0, 1.0)));
+        assert!((1.8..=2.2).contains(&zombie_villager_voice_pitch(true, 0.0, 1.0)));
     }
 }

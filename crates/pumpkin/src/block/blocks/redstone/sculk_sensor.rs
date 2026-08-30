@@ -41,6 +41,37 @@ struct SculkSensorListener {
     radius: i32,
 }
 
+/// Re-registers a sensor loaded from disk in the world's flat game-event registry.
+///
+/// Vanilla constructs the vibration user/data/listener together in the block entity
+/// constructor (`SculkSensorBlockEntity.java:25-30`), and its listener exposes the block
+/// position and radius (`SculkSensorBlockEntity.java:72-94`).
+pub async fn ensure_listener_registered(world: &Arc<World>, pos: &BlockPos) {
+    let (block, _) = world.get_block_and_state(pos);
+    let radius = match block.id {
+        BlockId::SCULK_SENSOR => LISTENER_RANGE,
+        BlockId::CALIBRATED_SCULK_SENSOR => CalibratedSculkSensorBlockEntity::LISTENER_RADIUS,
+        _ => return,
+    };
+
+    let already_registered = world
+        .game_event_listeners
+        .lock()
+        .await
+        .iter()
+        .any(|listener| {
+            matches!(
+                listener.listener_source(),
+                PositionSource::Block(listener_pos) if listener_pos == *pos
+            )
+        });
+    if !already_registered {
+        world
+            .register_game_event_listener(Arc::new(SculkSensorListener { pos: *pos, radius }))
+            .await;
+    }
+}
+
 impl GameEventListener for SculkSensorListener {
     fn listener_source(&self) -> PositionSource {
         PositionSource::Block(self.pos)
@@ -284,16 +315,7 @@ impl BlockBehaviour for SculkSensorBlock {
                 let entity = SculkSensorBlockEntity::new(*args.position);
                 args.world.add_block_entity(Arc::new(entity));
             }
-            args.world
-                .register_game_event_listener(Arc::new(SculkSensorListener {
-                    pos: *args.position,
-                    radius: if args.block.id == BlockId::CALIBRATED_SCULK_SENSOR {
-                        CalibratedSculkSensorBlockEntity::LISTENER_RADIUS
-                    } else {
-                        LISTENER_RANGE
-                    },
-                }))
-                .await;
+            ensure_listener_registered(args.world, args.position).await;
         })
     }
 

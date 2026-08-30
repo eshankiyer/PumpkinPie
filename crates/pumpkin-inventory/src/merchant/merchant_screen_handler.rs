@@ -29,6 +29,8 @@ pub struct MerchantScreenHandler {
     behaviour: ScreenHandlerBehaviour,
     selected_offer: usize,
     active_offer: Option<usize>,
+    // Vanilla MerchantContainer stores the active offer XP as futureXp (MerchantContainer.java:100-123), exposed by MerchantMenu.getFutureTraderXp (MerchantMenu.java:71-73).
+    future_trader_xp: i32,
     pub offers: Vec<pumpkin_protocol::java::client::play::MerchantOffer>,
     pub on_trade: Option<Box<dyn Fn(usize) -> ScreenHandlerFuture<'static, ()> + Send + Sync>>,
     /// Vanilla `MerchantMenu.playTradeSound`, used only by quick-move trades.
@@ -54,6 +56,7 @@ impl MerchantScreenHandler {
             behaviour,
             selected_offer: 0,
             active_offer: None,
+            future_trader_xp: 0,
             offers,
             on_trade: None,
             on_quick_move_trade: None,
@@ -313,12 +316,19 @@ impl MerchantScreenHandler {
         self.active_offer = self.find_active_offer(&input_a, &input_b);
 
         if let Some(index) = self.active_offer {
+            // Vanilla sets futureXp from the valid offer and resets it for an invalid offer (MerchantContainer.java:112-119).
+            self.future_trader_xp = self.offers[index].xp;
             self.inventory
                 .set_stack(2, (*self.offers[index].output.0).clone())
                 .await;
         } else {
+            self.future_trader_xp = 0;
             self.inventory.set_stack(2, ItemStack::EMPTY.clone()).await;
         }
+    }
+
+    pub const fn get_future_trader_xp(&self) -> i32 {
+        self.future_trader_xp
     }
 
     async fn notify_trade_updated(&self) {
@@ -758,6 +768,31 @@ mod tests {
         let result = merchant_inventory.get_stack(2).await;
         assert_eq!(result.item.id, Item::BOOKSHELF.id);
         assert!(player_inventory.get_stack(0).await.is_empty());
+    }
+
+    // Vanilla clears futureXp when no valid, in-stock offer is selected (MerchantContainer.java:100-123).
+    #[tokio::test]
+    async fn future_trader_xp_tracks_the_active_offer() {
+        let (player_inventory, merchant_inventory) = inventories();
+        merchant_inventory
+            .set_stack(0, ItemStack::new(12, &Item::EMERALD))
+            .await;
+        let mut handler = MerchantScreenHandler::new(
+            1,
+            &player_inventory,
+            merchant_inventory.clone(),
+            vec![bookshelf_offer()],
+        )
+        .await;
+
+        handler.update_result_slot().await;
+        assert_eq!(handler.get_future_trader_xp(), 2);
+
+        merchant_inventory
+            .set_stack(0, ItemStack::new(8, &Item::EMERALD))
+            .await;
+        handler.update_result_slot().await;
+        assert_eq!(handler.get_future_trader_xp(), 0);
     }
 
     #[tokio::test]

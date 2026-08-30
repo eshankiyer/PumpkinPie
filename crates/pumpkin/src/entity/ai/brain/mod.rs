@@ -262,9 +262,23 @@ impl Brain {
         self.memory.lock().unwrap().erase::<K>();
     }
 
+    /// `Brain.clearMemories` (`Brain.java:154-156`).
+    pub fn clear_memories(&self) {
+        self.memory.lock().unwrap().clear();
+    }
+
     #[must_use]
     pub fn has_value<K: MemoryKey>(&self) -> bool {
         self.memory.lock().unwrap().has_value::<K>()
+    }
+
+    /// `Brain.isMemoryValue` (`Brain.java:237-240`).
+    #[must_use]
+    pub fn is_memory_value<K: MemoryKey>(&self, value: &K::Value) -> bool
+    where
+        K::Value: PartialEq,
+    {
+        self.memory.lock().unwrap().get::<K>() == Some(value)
     }
 
     /// `Brain.getTimeUntilExpiry` (`Brain.java:225-227`).
@@ -281,6 +295,12 @@ impl Brain {
         conditions
             .iter()
             .all(|(id, status)| store.check(*id, *status))
+    }
+
+    /// `Brain.checkMemory` (`Brain.java:242-249`).
+    #[must_use]
+    pub fn check_memory(&self, id: MemoryKeyId, status: MemoryStatus) -> bool {
+        self.memory.lock().unwrap().check(id, status)
     }
 
     // --- activities -------------------------------------------------------------------
@@ -305,6 +325,27 @@ impl Brain {
             .unwrap()
             .active_activities
             .contains(&activity)
+    }
+
+    /// `Brain.getActiveActivities` (`Brain.java:259-263`), copied because the Rust runtime keeps
+    /// the active set behind its mutex.
+    #[must_use]
+    pub fn get_active_activities(&self) -> Vec<Activity> {
+        self.runtime.lock().unwrap().active_activities.clone()
+    }
+
+    /// `Brain.getRunningBehaviors` (`Brain.java:265-280`). Debug names are the stable Rust
+    /// representation because behavior objects remain owned by the brain runtime.
+    #[must_use]
+    pub fn get_running_behaviors(&self) -> Vec<&'static str> {
+        let runtime = self.runtime.lock().unwrap();
+        runtime
+            .behaviors_by_priority
+            .values()
+            .flat_map(|behaviors| behaviors.iter())
+            .filter(|(_, behavior)| behavior.status() == BehaviorStatus::Running)
+            .map(|(_, behavior)| behavior.debug_name())
+            .collect()
     }
 
     /// `Brain.getActiveNonCoreActivity` (`Brain.java:287-296`): the one non-core activity
@@ -385,6 +426,65 @@ impl Brain {
         }
     }
 
+    /// `Brain.setCoreActivities` (`Brain.java:255-257`). Core activities are configured before
+    /// the brain is shared with its mob, matching the constructor-time vanilla use.
+    pub fn set_core_activities(&mut self, activities: Vec<Activity>) {
+        self.core_activities = activities;
+    }
+
+    /// `Brain.setDefaultActivity` (`Brain.java:346-348`).
+    pub const fn set_default_activity(&mut self, activity: Activity) {
+        self.default_activity = activity;
+    }
+
+    /// `Brain.addActivity` (`Brain.java:350-373`). This supports construction-time extension of
+    /// the existing priority/activity tables without introducing another behavior subsystem.
+    pub fn add_activity(
+        &mut self,
+        activity: Activity,
+        behavior_priority_pairs: Vec<(u32, Box<dyn Behavior>)>,
+        conditions: Vec<(MemoryKeyId, MemoryStatus)>,
+        memories_to_erase_when_stopped: Vec<MemoryKeyId>,
+    ) {
+        {
+            let mut memory = self.memory.lock().unwrap();
+            for (id, _) in &conditions {
+                memory.register(*id);
+            }
+            for (_, behavior) in &behavior_priority_pairs {
+                for (id, _) in behavior.required_memories() {
+                    memory.register(*id);
+                }
+            }
+        }
+        self.activity_requirements.push((activity, conditions));
+        if !memories_to_erase_when_stopped.is_empty() {
+            self.activity_memories_to_erase
+                .push((activity, memories_to_erase_when_stopped));
+        }
+        let mut runtime = self.runtime.lock().unwrap();
+        for (priority, behavior) in behavior_priority_pairs {
+            runtime
+                .behaviors_by_priority
+                .entry(priority)
+                .or_default()
+                .push((activity, behavior));
+        }
+    }
+
+    /// `Brain.removeAllBehaviors` (`Brain.java:375-378`).
+    pub fn remove_all_behaviors(&self) {
+        self.runtime.lock().unwrap().behaviors_by_priority.clear();
+    }
+
+    /// `Brain.isBrainDead` (`Brain.java:454-455`).
+    #[must_use]
+    pub fn is_brain_dead(&self) -> bool {
+        let memory_empty = self.memory.lock().unwrap().is_empty();
+        let runtime = self.runtime.lock().unwrap();
+        memory_empty && runtime.sensors.is_empty() && runtime.behaviors_by_priority.is_empty()
+    }
+
     // --- tick -------------------------------------------------------------------------
 
     /// `Brain.tick` (`Brain.java:384-389`): expire memories, tick sensors, start every
@@ -449,5 +549,35 @@ impl BrainRuntime {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use uuid::Uuid;
+
+    use super::memory::{LikedPlayerMemory, MemoryKeyId};
+    use super::{Activity, Brain};
+
+    #[test]
+    fn brain_memory_management_matches_vanilla_slots() {
+        // Vanilla memory management is defined by `Brain.java:150-249`.
+        let brain = Brain::new(Vec::new(), Vec::new());
+        brain.register::<LikedPlayerMemory>();
+        brain.set::<LikedPlayerMemory>(Uuid::nil());
+
+        assert!(brain.is_memory_value::<LikedPlayerMemory>(&Uuid::nil()));
+        assert!(!brain.is_brain_dead());
+        assert_eq!(
+            brain.get_active_activities(),
+            vec![Activity::Core, Activity::Idle]
+        );
+
+        brain.clear_memories();
+        assert!(!brain.has_value::<LikedPlayerMemory>());
+        assert!(!brain.check_memory(
+            MemoryKeyId::LikedPlayer,
+            super::memory::MemoryStatus::ValuePresent
+        ));
     }
 }

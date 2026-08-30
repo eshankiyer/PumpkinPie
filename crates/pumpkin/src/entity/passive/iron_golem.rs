@@ -32,6 +32,9 @@ use crate::world::World;
 
 /// `IronGolem.IRON_INGOT_HEAL_AMOUNT` (`IronGolem.java:54`).
 const IRON_INGOT_HEAL_AMOUNT: f32 = 25.0;
+/// Vanilla `IronGolem.doHurtTarget` initializes `attackAnimationTick` to 10
+/// (`IronGolem.java:188-190`).
+const ATTACK_ANIMATION_TICKS: i32 = 10;
 
 /// `Crackiness.Level` (`Crackiness.java:36-40`), as produced by `Crackiness.GOLEM`
 /// (`Crackiness.java:6`, thresholds `0.75 / 0.5 / 0.25`) in `Crackiness.byFraction`
@@ -68,6 +71,12 @@ fn attack_damage_roll(base_attack_damage: f32, rand_int: i32) -> f32 {
     } else {
         base_attack_damage
     }
+}
+
+/// Vanilla `IronGolem.playStepSound` (`IronGolem.java:279-281`).
+#[must_use]
+const fn iron_golem_step_sound() -> Sound {
+    Sound::EntityIronGolemStep
 }
 
 /// Represents an Iron Golem, a powerful neutral mob that protects villagers and players.
@@ -254,6 +263,12 @@ impl Mob for IronGolemEntity {
         Some(&self.persistent_anger)
     }
 
+    /// Vanilla `IronGolem.playStepSound` (`IronGolem.java:279-281`) through Pumpkin's
+    /// shared grounded movement sound hook.
+    fn get_step_sound(&self) -> Option<Sound> {
+        Some(iron_golem_step_sound())
+    }
+
     /// Vanilla `IronGolem.doHurtTarget` (`IronGolem.java:187-204`): a randomized damage roll
     /// plus a straight-up fling scaled by the target's knockback resistance, and the attack
     /// sound/animation event, replacing the generic flat-damage melee path.
@@ -266,6 +281,8 @@ impl Mob for IronGolemEntity {
 
             let entity = &living.entity;
             let world = entity.world.load();
+            self.attack_animation_tick
+                .store(ATTACK_ANIMATION_TICKS, Ordering::Relaxed);
             world.send_entity_status(entity, EntityStatus::StartAttacking, None);
 
             let base_attack_damage = living.get_attribute_value(&Attributes::ATTACK_DAMAGE) as f32;
@@ -429,7 +446,11 @@ impl Mob for IronGolemEntity {
 
 #[cfg(test)]
 mod tests {
-    use super::{Crackiness, attack_damage_roll, golem_crackiness};
+    use super::{
+        ATTACK_ANIMATION_TICKS, Crackiness, attack_damage_roll, golem_crackiness,
+        iron_golem_step_sound,
+    };
+    use pumpkin_data::sound::Sound;
 
     #[test]
     fn crackiness_tiers_match_golem_thresholds() {
@@ -452,5 +473,12 @@ mod tests {
     fn non_positive_base_damage_is_flat() {
         assert_eq!(attack_damage_roll(0.0, 0), 0.0);
         assert_eq!(attack_damage_roll(0.5, 3), 0.5);
+    }
+
+    /// `IronGolem.doHurtTarget`/`playStepSound` (`IronGolem.java:188-190,279-281`).
+    #[test]
+    fn attack_animation_and_step_sound_match_vanilla() {
+        assert_eq!(ATTACK_ANIMATION_TICKS, 10);
+        assert_eq!(iron_golem_step_sound(), Sound::EntityIronGolemStep);
     }
 }

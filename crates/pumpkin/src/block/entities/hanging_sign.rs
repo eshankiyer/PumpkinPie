@@ -7,7 +7,9 @@ use std::{
 };
 
 use super::BlockEntity;
+use super::sign::tick_editor;
 use crate::block::entities::sign::Text;
+use crate::world::World;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 use tokio::sync::Mutex;
@@ -27,6 +29,14 @@ impl BlockEntity for HangingSignBlockEntity {
 
     fn get_position(&self) -> BlockPos {
         self.position
+    }
+
+    // Hanging signs inherit SignBlockEntity.tick, including its editor timeout
+    // (`SignBlockEntity.java:265-275`).
+    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            tick_editor(world, self.position, &self.currently_editing_player).await;
+        })
     }
 
     fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound, position: BlockPos) -> Self

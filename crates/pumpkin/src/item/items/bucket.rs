@@ -5,6 +5,7 @@ use crate::{
     block::blocks::candles::CandleBlock,
     block::entities::sign::DyeColor,
     entity::EntityBase,
+    entity::mob::sulfur_cube::SulfurCubeEntity,
     entity::passive::tropical_fish::{Pattern, TropicalFishEntity},
     entity::player::Player,
     entity::r#type::from_type,
@@ -592,6 +593,13 @@ async fn spawn_mob_bucket_entity(
     {
         fish.set_variant(pattern, base_color, pattern_color);
     }
+    if entity_type.id == EntityType::SULFUR_CUBE.id
+        && let Some(cube) = entity.cast_any().downcast_ref::<SulfurCubeEntity>()
+    {
+        // SulfurCube.java:159-161 (`setFromBucket`): entities released from a mob bucket retain
+        // the from-bucket marker.
+        cube.set_from_bucket(true);
+    }
     world.spawn_entity(entity).await;
     // Vanilla `MobBucketItem#playEmptySound`: `level.playSound(user, pos, emptySound, NEUTRAL,
     // 1.0F, 1.0F)`. `emptyContents` returns from the evaporation branch before reaching it, while
@@ -723,6 +731,15 @@ impl ItemBehaviour for EmptyBucketItem {
                 .get_living_entity()
                 .is_some_and(|living| living.health.load() > 0.0);
             if !is_alive {
+                return;
+            }
+
+            if entity_type.id == EntityType::SULFUR_CUBE.id
+                && let Some(cube) = entity.cast_any().downcast_ref::<SulfurCubeEntity>()
+                && !cube.can_be_picked_from_inside().await
+            {
+                // SulfurCube.java:928-930 (`canBePickedFromInside`): carrying an item blocks
+                // empty-bucket capture.
                 return;
             }
 

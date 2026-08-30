@@ -2,11 +2,16 @@ use super::BlockEntity;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
+
+use crate::world::World;
 
 pub struct CalibratedSculkSensorBlockEntity {
     pub position: BlockPos,
     pub last_vibration_frequency: Mutex<i32>,
+    dirty: AtomicBool,
 }
 
 impl BlockEntity for CalibratedSculkSensorBlockEntity {
@@ -18,6 +23,30 @@ impl BlockEntity for CalibratedSculkSensorBlockEntity {
         self.position
     }
 
+    /// Vanilla inherits the sensor block entity's listener construction for calibrated
+    /// sensors (`CalibratedSculkSensorBlockEntity.java:14-21`). Re-register the listener
+    /// after loading because Pumpkin stores listeners separately from block entities.
+    fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            crate::block::blocks::redstone::sculk_sensor::ensure_listener_registered(
+                world,
+                &self.position,
+            )
+            .await;
+        })
+    }
+
+    /// Vanilla inherits the sensor's `setChanged` callback for vibration updates
+    /// (`SculkSensorBlockEntity.java:111-133`) and keeps the calibrated listener's
+    /// frequency behavior (`CalibratedSculkSensorBlockEntity.java:14-40`).
+    fn is_dirty(&self) -> bool {
+        self.dirty.load(Ordering::Acquire)
+    }
+
+    fn clear_dirty(&self) {
+        self.dirty.store(false, Ordering::Release);
+    }
+
     fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound, position: BlockPos) -> Self
     where
         Self: Sized,
@@ -26,6 +55,7 @@ impl BlockEntity for CalibratedSculkSensorBlockEntity {
         Self {
             position,
             last_vibration_frequency: Mutex::new(last_vibration_frequency),
+            dirty: AtomicBool::new(false),
         }
     }
 
@@ -66,10 +96,12 @@ impl CalibratedSculkSensorBlockEntity {
         Self {
             position,
             last_vibration_frequency: Mutex::new(0),
+            dirty: AtomicBool::new(false),
         }
     }
 
     pub async fn set_last_vibration_frequency(&self, frequency: i32) {
         *self.last_vibration_frequency.lock().await = frequency;
+        self.dirty.store(true, Ordering::Release);
     }
 }

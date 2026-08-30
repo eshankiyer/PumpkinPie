@@ -5323,7 +5323,16 @@ impl EntityBase for LivingEntity {
                     .get_mob()
                     .and_then(Mob::get_hurt_sound)
                     .unwrap_or_else(|| self.hurt_sound());
-                world.play_sound(hurt_sound, SoundCategory::Players, &self.entity.pos.load());
+                let pitch = caller.get_mob().map_or(1.0, Mob::get_sound_pitch);
+                // `LivingEntity.makeSound` passes `getVoicePitch` to the sound packet
+                // (`LivingEntity.java:1427-1434`).
+                world.play_sound_fine(
+                    hurt_sound,
+                    SoundCategory::Players,
+                    &self.entity.pos.load(),
+                    1.0,
+                    pitch,
+                );
 
                 // `LivingEntity.hurtServer` gates the default 0.4 knockback on the
                 // `no_knockback` damage-type tag (LivingEntity.java:1247-1249) before calling

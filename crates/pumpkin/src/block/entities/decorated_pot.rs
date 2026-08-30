@@ -153,8 +153,14 @@ impl DecoratedPotBlockEntity {
     pub async fn try_insert_item(&self, stack: &mut ItemStack, count: u8) -> bool {
         let mut item_guard = self.item.lock().await;
         if let Some(existing) = item_guard.as_mut() {
-            if existing.item.id == stack.item.id {
-                let add = count.min(64 - existing.item_count);
+            // Vanilla `DecoratedPotBlock.useItemOn` (`DecoratedPotBlock.java:110-115`) only
+            // merges equal items/components and compares against that stack's max size.
+            if existing.are_items_and_components_equal(stack) {
+                let add = count.min(stack.item_count).min(
+                    existing
+                        .get_max_stack_size()
+                        .saturating_sub(existing.item_count),
+                );
                 if add > 0 {
                     existing.item_count += add;
                     stack.item_count -= add;
@@ -163,7 +169,10 @@ impl DecoratedPotBlockEntity {
             }
             false
         } else {
-            let insert_count = count.min(stack.item_count);
+            let insert_count = count.min(stack.item_count).min(stack.get_max_stack_size());
+            if insert_count == 0 {
+                return false;
+            }
             let mut inserted = stack.clone();
             inserted.item_count = insert_count;
             *item_guard = Some(inserted);
@@ -181,5 +190,40 @@ impl DecoratedPotBlockEntity {
                 1 + ((item.item_count as f32 / max_count) * 14.0).floor() as u8
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DecoratedPotBlockEntity;
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
+    use pumpkin_util::math::position::BlockPos;
+
+    /// `DecoratedPotBlock.useItemOn` (`DecoratedPotBlock.java:110-115`) rejects mismatched
+    /// item components.
+    #[tokio::test]
+    async fn insertion_requires_matching_components() {
+        let pot = DecoratedPotBlockEntity::new(BlockPos::new(0, 0, 0));
+        let mut plain = ItemStack::new(1, &Item::COBBLESTONE);
+        assert!(pot.try_insert_item(&mut plain, 1).await);
+
+        let mut named = ItemStack::new(1, &Item::COBBLESTONE);
+        named.set_custom_name("named".into());
+        assert!(!pot.try_insert_item(&mut named, 1).await);
+    }
+
+    /// `DecoratedPotBlock.useItemOn` (`DecoratedPotBlock.java:111-112`) uses the item's max
+    /// stack size when deciding whether another item fits.
+    #[tokio::test]
+    async fn insertion_uses_the_item_max_stack_size() {
+        let pot = DecoratedPotBlockEntity::new(BlockPos::new(0, 0, 0));
+        let mut pearls = ItemStack::new(16, &Item::ENDER_PEARL);
+        assert!(pot.try_insert_item(&mut pearls, 16).await);
+        assert_eq!(pearls.item_count, 0);
+
+        let mut extra = ItemStack::new(1, &Item::ENDER_PEARL);
+        assert!(!pot.try_insert_item(&mut extra, 1).await);
+        assert_eq!(extra.item_count, 1);
     }
 }

@@ -41,9 +41,9 @@ use crate::world::World;
 /// engine, none of which this codebase's movement code consumes yet. Wiring that up is a
 /// physics-engine change, not an entity change, so it is deferred here: `explosion_data`
 /// is always absent, `can_explode` is always `false`, and the swallowed item only changes
-/// appearance/equipment state, not movement or explosion behavior. Bucket capture
-/// (`Bucketable`) is also deferred: no `Bucketable` trait exists anywhere in this codebase
-/// yet, so `mobInteract`'s bucket-pickup fallback is skipped.
+/// appearance/equipment state, not movement or explosion behavior. Bucket capture is handled by
+/// the shared bucket item path, which maps sulfur cubes by entity type and stores only the data
+/// components currently supported by Pumpkin.
 pub struct SulfurCubeEntity {
     entity: Arc<MobEntity>,
     ageable_data: AgeableData,
@@ -176,6 +176,31 @@ impl SulfurCubeEntity {
         self.get_size() <= 1
     }
 
+    /// SulfurCube.java:133-147 (`getFuse`/`isPrimed`): expose the persisted fuse state through
+    /// the same small queries used by split and interaction logic.
+    pub fn get_fuse(&self) -> i32 {
+        self.fuse.load(Ordering::Relaxed)
+    }
+
+    pub fn is_primed(&self) -> bool {
+        self.get_fuse() >= 0
+    }
+
+    /// SulfurCube.java:159-161 (`setFromBucket`/`fromBucket`).
+    pub fn set_from_bucket(&self, from_bucket: bool) {
+        self.from_bucket.store(from_bucket, Ordering::Relaxed);
+    }
+
+    pub fn from_bucket(&self) -> bool {
+        self.from_bucket.load(Ordering::Relaxed)
+    }
+
+    /// SulfurCube.java:928-930 (`canBePickedFromInside`): a sulfur cube carrying an item
+    /// cannot be caught by an empty bucket.
+    pub async fn can_be_picked_from_inside(&self) -> bool {
+        !self.has_body_item().await
+    }
+
     /// SulfurCube.java:669-675 (`setSpawnSize`): unlike the generic cube-mob random size
     /// roll, spawn size is only ever 1 (baby) or 2 (adult).
     pub fn set_spawn_size(&self) {
@@ -277,8 +302,19 @@ impl SulfurCubeEntity {
     }
 
     fn get_squish_sound(&self) -> Sound {
-        if self.is_tiny() {
+        Self::squish_sound_for(
+            self.get_size(),
+            futures::executor::block_on(self.has_body_item()),
+        )
+    }
+
+    /// SulfurCube.java:569-576 (`getSquishSound`): tiny cubes squish, while an adult carrying
+    /// an item bounces instead of using the ordinary adult squish sound.
+    const fn squish_sound_for(size: i32, has_body_item: bool) -> Sound {
+        if size <= 1 {
             Sound::EntitySmallSulfurCubeSquish
+        } else if has_body_item {
+            Sound::EntitySulfurCubeBounce
         } else {
             Sound::EntitySulfurCubeSquish
         }
@@ -366,8 +402,8 @@ impl NBTStorage for SulfurCubeEntity {
             nbt.put_bool("wasOnGround", self.was_on_ground.load(Ordering::Relaxed));
             self.write_ageable_nbt(nbt);
             nbt.put_int("pickup_timer", self.pickup_timer.load(Ordering::Relaxed));
-            nbt.put_bool("from_bucket", self.from_bucket.load(Ordering::Relaxed));
-            nbt.put_int("fuse", self.fuse.load(Ordering::Relaxed));
+            nbt.put_bool("from_bucket", self.from_bucket());
+            nbt.put_int("fuse", self.get_fuse());
         })
     }
 
@@ -382,10 +418,7 @@ impl NBTStorage for SulfurCubeEntity {
             self.read_ageable_nbt(nbt);
             self.pickup_timer
                 .store(nbt.get_int("pickup_timer").unwrap_or(0), Ordering::Relaxed);
-            self.from_bucket.store(
-                nbt.get_bool("from_bucket").unwrap_or(false),
-                Ordering::Relaxed,
-            );
+            self.set_from_bucket(nbt.get_bool("from_bucket").unwrap_or(false));
             self.fuse
                 .store(nbt.get_int("fuse").unwrap_or(-1), Ordering::Relaxed);
         })
@@ -1006,6 +1039,22 @@ mod tests {
         assert_eq!(
             SulfurCubeEntity::hurt_sound_for_size(2),
             Sound::EntitySulfurCubeHurt
+        );
+    }
+
+    #[test]
+    fn carrying_item_uses_adult_bounce_sound() {
+        assert_eq!(
+            SulfurCubeEntity::squish_sound_for(2, true),
+            Sound::EntitySulfurCubeBounce
+        );
+        assert_eq!(
+            SulfurCubeEntity::squish_sound_for(2, false),
+            Sound::EntitySulfurCubeSquish
+        );
+        assert_eq!(
+            SulfurCubeEntity::squish_sound_for(1, true),
+            Sound::EntitySmallSulfurCubeSquish
         );
     }
 }

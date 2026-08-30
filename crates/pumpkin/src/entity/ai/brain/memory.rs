@@ -474,6 +474,13 @@ impl MemoryStore {
             *slot = MemorySlot::empty();
         }
     }
+
+    /// `Brain.memories.isEmpty()` (`Brain.java:454-455`): registration creates the slots, so
+    /// an empty memory store has no registered memory modules.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.registered.iter().all(|registered| !registered)
+    }
 }
 
 #[cfg(test)]

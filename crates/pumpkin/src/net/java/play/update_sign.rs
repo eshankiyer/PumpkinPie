@@ -52,21 +52,17 @@ impl JavaClient {
             }
         }
 
-        let text = if sign_data.is_front_text {
-            sign_entity.front_text()
-        } else {
-            sign_entity.back_text()
-        };
-
-        *text
-            .messages
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = [
-            sign_data.line_1.into(),
-            sign_data.line_2.into(),
-            sign_data.line_3.into(),
-            sign_data.line_4.into(),
-        ];
+        // Vanilla updateSignText delegates line replacement to updateText, then clears the
+        // editor and sends the block update (`SignBlockEntity.java:130-143`).
+        sign_entity.update_text(
+            sign_data.is_front_text,
+            [
+                sign_data.line_1.into(),
+                sign_data.line_2.into(),
+                sign_data.line_3.into(),
+                sign_data.line_4.into(),
+            ],
+        );
         *currently_editing = None;
         drop(currently_editing);
         world.update_block_entity(&block_entity);

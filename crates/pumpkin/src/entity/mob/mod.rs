@@ -1364,6 +1364,14 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
+    /// Vanilla `LivingEntity.getVoicePitch` is consumed by `makeSound` for mob sounds
+    /// (`LivingEntity.java:1431-1434, 2321-2325`).
+    fn get_sound_pitch(&self) -> f32 {
+        let is_baby = self.get_entity().age.load(Relaxed) < 0;
+        let base = if is_baby { 1.5 } else { 1.0 };
+        (rand::random::<f32>() - rand::random::<f32>()).mul_add(0.2, base)
+    }
+
     /// Instance-specific override of the server-played hurt sound, or `None` to keep the
     /// static `EntityType::hurt_sound` table consulted by `LivingEntity::hurt_sound`.
     /// Only mobs whose hurt sound depends on instance state override this, e.g. the copper
@@ -1404,10 +1412,13 @@ pub trait Mob: EntityBase + Send + Sync {
                 .ambient_sound_time
                 .store(-self.get_ambient_sound_interval(), Relaxed);
             if let Some(sound) = self.get_ambient_sound() {
-                entity
-                    .world
-                    .load()
-                    .play_sound(sound, self.get_sound_source(), &entity.pos.load());
+                entity.world.load().play_sound_fine(
+                    sound,
+                    self.get_sound_source(),
+                    &entity.pos.load(),
+                    1.0,
+                    self.get_sound_pitch(),
+                );
             }
         }
     }
@@ -1889,6 +1900,13 @@ pub trait Mob: EntityBase + Send + Sync {
     /// Returning `true` means the hook has already moved the entity for this tick.
     fn custom_travel<'a>(&'a self, _caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
         Box::pin(async { false })
+    }
+
+    /// Whether this mob's `customServerAiStep` should tick its Brain this tick. Goal-driven mobs
+    /// have no Brain and retain the default; Happy Ghast overrides this for babies
+    /// (`HappyGhast.java:400-409`).
+    fn should_tick_brain(&self) -> bool {
+        true
     }
 
     /// Vanilla custom-travel goals can publish a movement vector without taking over the
@@ -2677,7 +2695,9 @@ pub(crate) fn tick_mob_ai<'a>(
                 .set_wanted_position(target.x, target.y, target.z, speed);
         }
 
-        if let Some(brain) = &mob_entity.brain {
+        if mob.should_tick_brain()
+            && let Some(brain) = &mob_entity.brain
+        {
             let game_time = mob_entity
                 .living_entity
                 .entity

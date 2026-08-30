@@ -20,6 +20,13 @@ use pumpkin_util::math::vector3::Vector3;
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ageable::{AgeableData, AgeableMob},
+    ai::brain::behavior::gate::GateBehavior,
+    ai::brain::behavior::look_at_target_sink::LookAtTargetSink,
+    ai::brain::behavior::move_to_target_sink::MoveToTargetSink,
+    ai::brain::behavior::random_stroll::RandomStrollFly,
+    ai::brain::behavior::set_walk_target_from_look_target::SetWalkTargetFromLookTarget,
+    ai::brain::behavior::{animal_panic::AnimalPanic, swim::Swim},
+    ai::brain::{Activity, ActivityData, Brain},
     ai::control::{flying_move_control::FlyingMoveControl, ghast_move_control::GhastMoveControl},
     ai::goal::{ghast_random_float::GhastRandomFloatAroundGoal, swim::SwimGoal, tempt::TemptGoal},
     mob::{Mob, MobEntity},
@@ -36,6 +43,17 @@ use crate::entity::{
 pub const HAPPY_GHAST_FOOD: &[&Item] = &[&Item::SNOWBALL];
 
 const HEAL_INTERVAL_TICKS: i32 = 600;
+
+/// `HappyGhast.checkFallDamage` (`HappyGhast.java:167-168`) is an empty override, so a
+/// happy ghast never converts a fall into damage.
+const fn happy_ghast_fall_damage(_fall_distance: f64, _damage_modifier: f32) -> i32 {
+    0
+}
+
+/// `HappyGhast.getVoicePitch` (`HappyGhast.java:205-207`) always returns the neutral pitch.
+const fn happy_ghast_voice_pitch() -> f32 {
+    1.0
+}
 
 /// `HappyGhast.java:448-450`.
 #[must_use]
@@ -63,7 +81,11 @@ impl HappyGhastEntity {
         self.is_baby()
     }
     pub fn new(entity: Entity) -> Arc<Self> {
-        let mob_entity = MobEntity::new(entity);
+        let mut mob_entity = MobEntity::new(entity);
+        // `HappyGhast.BRAIN_PROVIDER` and `HappyGhastAi.getActivities`
+        // (`HappyGhast.java:400-409`, `HappyGhastAi.java:23-66`) give babies the shared
+        // passive-flying Brain activity ladder after the adult goals are removed.
+        mob_entity.brain = Some(Self::make_brain());
         let happy_ghast = Self {
             mob_entity,
             ageable_data: AgeableData::default(),
@@ -131,6 +153,45 @@ impl HappyGhastEntity {
             Box::new(GhastMoveControl::default());
 
         mob_arc
+    }
+
+    /// `HappyGhastAi.initCoreActivity` / `initIdleActivity` (`HappyGhastAi.java:23-66`).
+    /// The adult-only goal selector remains separate; the Brain is used after baby setup clears
+    /// those goals, matching the two vanilla age-specific AI paths.
+    fn make_brain() -> Brain {
+        Brain::new(
+            Vec::new(),
+            vec![
+                ActivityData::create(
+                    Activity::Core,
+                    0,
+                    vec![
+                        Swim::new(0.8),
+                        AnimalPanic::new(2.0),
+                        LookAtTargetSink::new(45, 90),
+                        MoveToTargetSink::new(),
+                    ],
+                ),
+                ActivityData::create(
+                    Activity::Idle,
+                    0,
+                    vec![GateBehavior::run_one(vec![
+                        (RandomStrollFly::new(1.0), 2),
+                        (SetWalkTargetFromLookTarget::new(1.0, 3), 2),
+                    ])],
+                ),
+            ],
+        )
+    }
+
+    /// `HappyGhast.customServerAiStep` (`HappyGhast.java:400-409`) ticks the Brain only while
+    /// the ghast is a baby; adults use the goal selector registered by `registerGoals`.
+    const fn should_tick_brain_for_age(age: i32) -> bool {
+        age < 0
+    }
+
+    fn should_tick_brain_now(&self) -> bool {
+        Self::should_tick_brain_for_age(self.mob_entity.living_entity.entity.age.load(Relaxed))
     }
 
     async fn body_armor_stack(&self) -> ItemStack {
@@ -372,6 +433,12 @@ impl Mob for HappyGhastEntity {
         &self.mob_entity
     }
 
+    /// `HappyGhast.customServerAiStep` (`HappyGhast.java:400-409`) runs the Brain for babies;
+    /// adults use the goal selector registered by `registerGoals`.
+    fn should_tick_brain(&self) -> bool {
+        self.should_tick_brain_now()
+    }
+
     fn should_follow_leash(&self) -> bool {
         false
     }
@@ -384,6 +451,13 @@ impl Mob for HappyGhastEntity {
 
     fn get_mob_gravity(&self) -> f64 {
         0.0
+    }
+
+    /// `HappyGhast.checkFallDamage` (`HappyGhast.java:167-168`) is an empty override. The
+    /// shared movement path already skips fall-distance accumulation, and this hook also keeps
+    /// direct `causeFallDamage` calls from producing damage.
+    fn mob_calculate_fall_damage(&self, fall_distance: f64, damage_modifier: f32) -> i32 {
+        happy_ghast_fall_damage(fall_distance, damage_modifier)
     }
 
     fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
@@ -485,6 +559,12 @@ impl Mob for HappyGhastEntity {
         })
     }
 
+    /// `HappyGhast.getVoicePitch` (`HappyGhast.java:205-207`) overrides the normal random
+    /// baby/adult mob pitch with a constant value.
+    fn get_sound_pitch(&self) -> f32 {
+        happy_ghast_voice_pitch()
+    }
+
     fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             let entity = self.get_entity();
@@ -558,6 +638,16 @@ impl Mob for HappyGhastEntity {
                 self.setup_adult().await;
             }
 
+            // `HappyGhastAi.updateActivity` (`HappyGhast.java:400-409`) selects the first valid
+            // non-core activity after the baby Brain tick.
+            if self.is_baby() {
+                self.mob_entity
+                    .brain
+                    .as_ref()
+                    .expect("HappyGhastEntity is always constructed with a brain")
+                    .set_active_activity_to_first_valid(&[Activity::Idle]);
+            }
+
             let leash_time = self.leash_holder_time.load(Relaxed);
             if leash_time > 0 {
                 self.leash_holder_time.fetch_sub(1, Relaxed);
@@ -590,7 +680,9 @@ impl Mob for HappyGhastEntity {
 
 #[cfg(test)]
 mod test {
-    use super::restriction_radius;
+    use super::{
+        HappyGhastEntity, happy_ghast_fall_damage, happy_ghast_voice_pitch, restriction_radius,
+    };
 
     #[test]
     fn restriction_radius_matches_vanilla() {
@@ -598,5 +690,18 @@ mod test {
         assert_eq!(restriction_radius(false, true), 32);
         assert_eq!(restriction_radius(true, false), 32);
         assert_eq!(restriction_radius(true, true), 32);
+    }
+
+    #[test]
+    fn fall_damage_and_voice_pitch_match_vanilla() {
+        assert_eq!(happy_ghast_fall_damage(100.0, 10.0), 0);
+        assert_eq!(happy_ghast_voice_pitch(), 1.0);
+    }
+
+    // `HappyGhast.customServerAiStep` (`HappyGhast.java:400-409`) gates Brain ticking on age.
+    #[test]
+    fn brain_ticks_only_for_babies() {
+        assert!(HappyGhastEntity::should_tick_brain_for_age(-1));
+        assert!(!HappyGhastEntity::should_tick_brain_for_age(0));
     }
 }

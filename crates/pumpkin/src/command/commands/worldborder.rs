@@ -406,7 +406,9 @@ impl CommandExecutor for DamageAmountExecutor {
                     TextComponent::text(old_damage)
                 ))
                 .await;
-            border.damage_per_block = damage_per_block;
+            // Vanilla `WorldBorderCommand.damageAmount` delegates to
+            // `WorldBorder.setDamagePerBlock` (`WorldBorder.java:238-248`).
+            border.set_damage_per_block(damage_per_block);
             Ok(damage_per_block as i32)
         })
     }
@@ -446,7 +448,9 @@ impl CommandExecutor for DamageBufferExecutor {
                     TextComponent::text(old_buf)
                 ))
                 .await;
-            border.buffer = buffer;
+            // Vanilla `WorldBorderCommand.damageBuffer` delegates to
+            // `WorldBorder.setSafeZone` (`WorldBorder.java:225-236`).
+            border.set_safe_zone(buffer);
             Ok(buffer as i32)
         })
     }

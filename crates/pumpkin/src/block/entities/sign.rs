@@ -7,9 +7,11 @@ use std::{
 };
 
 use super::BlockEntity;
+use crate::world::World;
 use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
 use pumpkin_util::math::position::BlockPos;
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 pub use pumpkin_data::dye_color::DyeColor;
 
@@ -154,6 +156,35 @@ impl Text {
     pub fn set_color(&self, color: DyeColor) {
         self.color.store(color.id() as i8, Ordering::Relaxed);
     }
+
+    /// Vanilla `SignBlockEntity.setMessages` replaces the selected side's four lines before
+    /// `setText` marks the block entity updated (`SignBlockEntity.java:145-183`).
+    pub fn set_messages(&self, messages: [Box<str>; 4]) {
+        *self
+            .messages
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = messages;
+    }
+}
+
+/// Vanilla clears `playerWhoMayEdit` when the player disappears or leaves the four-block
+/// interaction range (`SignBlockEntity.java:260-275`).
+pub(crate) async fn tick_editor(
+    world: &std::sync::Arc<World>,
+    position: BlockPos,
+    editor: &Mutex<Option<Uuid>>,
+) {
+    let mut editor = editor.lock().await;
+    let Some(player_id) = *editor else {
+        return;
+    };
+    let Some(player) = world.get_player_by_uuid(player_id) else {
+        *editor = None;
+        return;
+    };
+    if !player.can_interact_with_block_at(&position, 4.0) {
+        *editor = None;
+    }
 }
 
 impl BlockEntity for SignBlockEntity {
@@ -163,6 +194,15 @@ impl BlockEntity for SignBlockEntity {
 
     fn get_position(&self) -> BlockPos {
         self.position
+    }
+
+    fn tick<'a>(
+        &'a self,
+        world: &'a std::sync::Arc<World>,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            tick_editor(world, self.position, &self.currently_editing_player).await;
+        })
     }
 
     fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound, position: BlockPos) -> Self
@@ -243,12 +283,52 @@ impl SignBlockEntity {
             currently_editing_player: Arc::new(Mutex::new(None)),
         }
     }
+
+    /// Applies the server's four submitted lines to one side of the sign. This is the
+    /// server-side equivalent of vanilla `updateText`/`setText` (`SignBlockEntity.java:130-143,
+    /// 161-183`).
+    pub fn update_text(&self, is_front_text: bool, messages: [Box<str>; 4]) {
+        if is_front_text {
+            self.front_text.set_messages(messages);
+        } else {
+            self.back_text.set_messages(messages);
+        }
+    }
 }
 
 #[cfg(test)]
 mod dye_color_tests {
-    use super::{DyeColor, DyeColorExt};
+    use super::{DyeColor, DyeColorExt, SignBlockEntity};
+    use pumpkin_util::math::position::BlockPos;
     use rand::rng;
+
+    #[test]
+    fn update_text_replaces_only_selected_side() {
+        let sign = SignBlockEntity::empty(BlockPos::ZERO);
+        sign.update_text(
+            true,
+            [
+                "front 1".into(),
+                "front 2".into(),
+                "front 3".into(),
+                "front 4".into(),
+            ],
+        );
+
+        let front = sign
+            .front_text
+            .messages
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert_eq!(&*front[0], "front 1");
+        drop(front);
+        let back = sign
+            .back_text
+            .messages
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        assert!(back.iter().all(|line| line.is_empty()));
+    }
 
     #[test]
     fn mixed_color_known_pairs() {

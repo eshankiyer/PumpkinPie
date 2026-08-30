@@ -88,12 +88,15 @@ impl BlockBehaviour for CampfireBlock {
             let Some(block_entity) = args.world.get_block_entity(args.position) else {
                 return BlockActionResult::Pass;
             };
-            let Some(inventory) = block_entity.get_inventory() else {
+            let Some(inventory) = block_entity.clone().get_inventory() else {
                 return BlockActionResult::Pass;
             };
             for slot in 0..inventory.size() {
                 let item = inventory.remove_stack(slot).await;
                 if !item.is_empty() {
+                    // `CampfireBlockEntity.getUpdateTag` (`CampfireBlockEntity.java:159-177`)
+                    // is sent after the slot is removed so viewers see the empty slot now.
+                    args.world.update_block_entity(&block_entity);
                     args.player
                         .inventory
                         .offer_or_drop_stack(item, args.player.as_ref())
@@ -128,6 +131,9 @@ impl BlockBehaviour for CampfireBlock {
                 // Vanilla `CampfireBlockEntity.placeFood` (`CampfireBlockEntity.java:179-198`)
                 // emits BLOCK_CHANGE after accepting a recipe item; this is observable by
                 // game-event listeners (including sculk sensors), not just by the client.
+                // `placeFood` also calls `markUpdated`, whose payload is `getUpdateTag`
+                // (`CampfireBlockEntity.java:159-177`).
+                args.world.update_block_entity(&block_entity);
                 emit_game_event(
                     args.world,
                     GameEvent::BlockChange,

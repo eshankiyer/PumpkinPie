@@ -58,6 +58,7 @@ pub(crate) trait SignTextAccess: Send + Sync {
     fn back_text(&self) -> &crate::block::entities::sign::Text;
     fn editing_player(&self) -> &Arc<tokio::sync::Mutex<Option<Uuid>>>;
     fn waxed_interact_fail_sound(&self) -> pumpkin_data::sound::Sound;
+    fn update_text(&self, is_front_text: bool, messages: [Box<str>; 4]);
 }
 
 impl SignTextAccess for SignBlockEntity {
@@ -84,6 +85,11 @@ impl SignTextAccess for SignBlockEntity {
     fn waxed_interact_fail_sound(&self) -> pumpkin_data::sound::Sound {
         pumpkin_data::sound::Sound::BlockSignWaxedInteractFail
     }
+
+    // Mirrors SignBlockEntity.updateText and setText (`SignBlockEntity.java:140-183`).
+    fn update_text(&self, is_front_text: bool, messages: [Box<str>; 4]) {
+        Self::update_text(self, is_front_text, messages);
+    }
 }
 
 impl SignTextAccess for HangingSignBlockEntity {
@@ -109,6 +115,16 @@ impl SignTextAccess for HangingSignBlockEntity {
 
     fn waxed_interact_fail_sound(&self) -> pumpkin_data::sound::Sound {
         pumpkin_data::sound::Sound::BlockHangingSignWaxedInteractFail
+    }
+
+    // Hanging signs inherit SignBlockEntity.updateText (`SignBlockEntity.java:140-183`).
+    fn update_text(&self, is_front_text: bool, messages: [Box<str>; 4]) {
+        let text = if is_front_text {
+            &self.front_text
+        } else {
+            &self.back_text
+        };
+        text.set_messages(messages);
     }
 }
 
