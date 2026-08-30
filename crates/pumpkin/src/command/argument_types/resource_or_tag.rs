@@ -294,6 +294,7 @@ impl ArgumentType for ResourceOrTagArgument {
 mod tests {
     use super::{ResourceOrTag, ResourceOrTagKeyArgument};
     use crate::command::argument_types::argument_type::ArgumentType;
+    use crate::command::argument_types::resource_key::BIOME_REGISTRY;
     use crate::command::string_reader::StringReader;
     use pumpkin_util::identifier::Identifier;
 
@@ -342,11 +343,6 @@ mod tests {
             "#minecraft:skeletons"
         );
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
 
     #[test]
     fn printable_preserves_resource_and_tag_prefixes() {
