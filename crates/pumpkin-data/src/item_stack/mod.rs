@@ -634,6 +634,18 @@ impl ItemStack {
         stack
     }
 
+    /// Vanilla `ItemStack.consumeAndReturn` (`ItemStack.java:1088-1092`) copies the
+    /// requested count before consuming from the source, including when the source
+    /// contains fewer items than requested.
+    #[must_use]
+    pub fn consume_and_return(&mut self, amount: u8, has_infinite_materials: bool) -> Self {
+        let split = self.copy_with_count(amount);
+        if !has_infinite_materials {
+            self.decrement(amount);
+        }
+        split
+    }
+
     #[must_use]
     pub fn copy_with_count(&self, count: u8) -> Self {
         let mut stack = self.clone();
@@ -1047,6 +1059,21 @@ mod tests {
         assert_eq!(copy.item_count, 3);
         assert_eq!(copy.item.id, Item::COAL.id);
         assert!(stack.is_empty());
+    }
+
+    #[test]
+    fn consume_and_return_copies_requested_count_and_respects_infinite_materials() {
+        // Vanilla `ItemStack.consumeAndReturn` (`ItemStack.java:1088-1092`) copies before
+        // shrinking and leaves the source unchanged for an owner with infinite materials.
+        let mut stack = ItemStack::new(1, &Item::ARROW);
+        let copied = stack.consume_and_return(3, false);
+        assert_eq!(copied.item_count, 3);
+        assert!(stack.is_empty());
+
+        let mut creative_stack = ItemStack::new(1, &Item::ARROW);
+        let copied = creative_stack.consume_and_return(1, true);
+        assert_eq!(copied.item_count, 1);
+        assert_eq!(creative_stack.item_count, 1);
     }
 
     #[test]

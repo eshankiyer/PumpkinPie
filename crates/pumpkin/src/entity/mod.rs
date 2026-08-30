@@ -545,6 +545,31 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         self.get_entity().is_alive() && !self.is_spectator()
     }
 
+    /// Vanilla `Entity.canControlVehicle` (`Entity.java:2669-2670`) is consumed by
+    /// `Mob.getControllingPassenger` (`Mob.java:221-223`).
+    fn can_control_vehicle(&self) -> bool {
+        can_control_vehicle_state(
+            self.get_entity()
+                .entity_type
+                .has_tag(&tag::EntityType::MINECRAFT_NON_CONTROLLING_RIDER),
+        )
+    }
+
+    /// Vanilla `ServerPlayer.broadcastToPlayer` (`ServerPlayer.java:1175-1181`) is evaluated
+    /// when a tracking player receives an entity pairing.
+    fn broadcast_to_player(&self, player: &Player) -> bool {
+        let camera_entity_id = player
+            .camera_target_id
+            .load()
+            .unwrap_or_else(|| player.entity_id());
+        broadcast_to_player_state(
+            self.get_entity().entity_id,
+            camera_entity_id,
+            player.is_spectator(),
+            self.is_spectator(),
+        )
+    }
+
     fn is_collidable(&self, _entity: Option<Box<dyn EntityBase>>) -> bool {
         false
     }
@@ -1420,6 +1445,37 @@ const fn should_send_position_sync(
 /// Pumpkin's current low-level mount primitive cannot safely transfer.
 const fn can_start_riding_state(sneaking: bool, riding_cooldown: i32, has_vehicle: bool) -> bool {
     !sneaking && riding_cooldown <= 0 && !has_vehicle
+}
+
+/// Vanilla `Entity.canControlVehicle` (`Entity.java:2669-2670`) rejects riders in
+/// `minecraft:non_controlling_rider`.
+const fn can_control_vehicle_state(non_controlling_rider: bool) -> bool {
+    !non_controlling_rider
+}
+
+/// Vanilla `Entity.canTeleport` (`Entity.java:3197-3206`) blocks an End exit while a
+/// direct player passenger has not seen the credits.
+const fn can_teleport_state(
+    from_end: bool,
+    to_overworld: bool,
+    has_unseen_credits_passenger: bool,
+) -> bool {
+    !(from_end && to_overworld && has_unseen_credits_passenger)
+}
+
+/// Vanilla `ServerPlayer.broadcastToPlayer` (`ServerPlayer.java:1175-1181`) shows a
+/// spectator only its camera entity, while ordinary players do not receive spectator entities.
+const fn broadcast_to_player_state(
+    entity_id: i32,
+    camera_entity_id: i32,
+    viewer_is_spectator: bool,
+    entity_is_spectator: bool,
+) -> bool {
+    if viewer_is_spectator {
+        entity_id == camera_entity_id
+    } else {
+        !entity_is_spectator
+    }
 }
 
 /// Vanilla compares `countPlayerPassengers()` with one (`Entity.java:3535-3553`).
@@ -3767,16 +3823,25 @@ impl Entity {
                     let pitch = transition.pitch;
                     let teleport_pos = transition.position;
 
-                    // Teleport the main entity
-                    caller
-                        .clone()
-                        .teleport(teleport_pos, yaw, pitch, dest_world.clone())
-                        .await;
+                    // `Entity.handlePortal` checks `canTeleport` before changing dimensions
+                    // (`Entity.java:2617-2620`).
+                    let from_world = self.world.load();
+                    if self.can_teleport(&from_world, &dest_world).await {
+                        caller
+                            .clone()
+                            .teleport(teleport_pos, yaw, pitch, dest_world.clone())
+                            .await;
 
-                    // Teleport all passengers recursively along with the vehicle
-                    let yaw_delta = yaw.map(|y| y - self.yaw.load());
-                    Self::teleport_passengers_recursive(self, teleport_pos, yaw_delta, &dest_world)
+                        // Teleport all passengers recursively along with the vehicle
+                        let yaw_delta = yaw.map(|y| y - self.yaw.load());
+                        Self::teleport_passengers_recursive(
+                            self,
+                            teleport_pos,
+                            yaw_delta,
+                            &dest_world,
+                        )
                         .await;
+                    }
                 }
             } else if portal_processor.portal_time == 0 {
                 should_remove = true;
@@ -3785,6 +3850,27 @@ impl Entity {
         if should_remove {
             *manager_guard = None;
         }
+    }
+
+    /// Vanilla `Entity.canTeleport` (`Entity.java:3197-3206`) prevents a vehicle from
+    /// carrying a player out of the End before that player has seen the credits.
+    async fn can_teleport(&self, from: &World, to: &World) -> bool {
+        let has_unseen_credits_passenger =
+            if from.dimension == Dimension::THE_END && to.dimension == Dimension::OVERWORLD {
+                self.passengers.lock().await.iter().any(|passenger| {
+                    passenger
+                        .get_player()
+                        .is_some_and(|player| !player.seen_credits.load(Ordering::Relaxed))
+                })
+            } else {
+                false
+            };
+
+        can_teleport_state(
+            from.dimension == Dimension::THE_END,
+            to.dimension == Dimension::OVERWORLD,
+            has_unseen_credits_passenger,
+        )
     }
 
     /// Recursively teleports all passengers (and their passengers) to the destination
@@ -6283,6 +6369,38 @@ mod velocity_resend_tests {
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(1.0e-5, 0.0, 0.0)
         ));
+    }
+}
+
+#[cfg(test)]
+mod entity_hook_tests {
+    use super::{broadcast_to_player_state, can_control_vehicle_state, can_teleport_state};
+
+    #[test]
+    fn non_controlling_riders_cannot_control_vehicles() {
+        // `Entity.canControlVehicle` is the tag gate used by `Mob.getControllingPassenger`
+        // (`Entity.java:2669-2670`; `Mob.java:221-223`).
+        assert!(can_control_vehicle_state(false));
+        assert!(!can_control_vehicle_state(true));
+    }
+
+    #[test]
+    fn end_exit_is_blocked_for_uncredited_passengers() {
+        // `Entity.canTeleport` blocks End-to-Overworld travel for an unseen-credit passenger
+        // (`Entity.java:3197-3206`).
+        assert!(!can_teleport_state(true, true, true));
+        assert!(can_teleport_state(true, true, false));
+        assert!(can_teleport_state(false, true, true));
+    }
+
+    #[test]
+    fn entity_pairing_visibility_matches_server_player_filter() {
+        // `ServerPlayer.broadcastToPlayer` keeps a spectator's camera entity visible and hides
+        // spectator entities from ordinary players (`ServerPlayer.java:1175-1181`).
+        assert!(broadcast_to_player_state(7, 7, true, false));
+        assert!(!broadcast_to_player_state(8, 7, true, false));
+        assert!(broadcast_to_player_state(8, 7, false, false));
+        assert!(!broadcast_to_player_state(8, 7, false, true));
     }
 }
 

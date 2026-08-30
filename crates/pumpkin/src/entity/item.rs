@@ -689,6 +689,11 @@ impl EntityBase for ItemEntity {
             if self.should_tick_move(move_velo) {
                 self.move_and_apply_friction(caller, server, move_velo)
                     .await;
+            } else {
+                // Vanilla `ItemEntity.tick` applies the previous movement path when an item
+                // idles on the ground (`ItemEntity.java:149-152`) through
+                // `Entity.applyEffectsFromBlocksForLastMovements` (`Entity.java:917-918`).
+                entity.tick_block_collisions(caller, server).await;
             }
             // Vanilla `ItemEntity.tick` reaches `Entity.applyMovementEmissionAndPlaySound` from
             // its post-movement base entity path (`Entity.java:867-901`).

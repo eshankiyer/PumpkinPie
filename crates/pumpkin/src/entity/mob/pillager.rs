@@ -174,6 +174,12 @@ impl Mob for PillagerEntity {
         &self.mob_entity
     }
 
+    /// Vanilla `Pillager.canUseNonMeleeWeapon` (`Pillager.java:97-101`) permits its crossbow
+    /// attack behavior to select a crossbow as a non-melee weapon.
+    fn can_use_non_melee_weapon(&self, item: &ItemStack) -> bool {
+        item.item.id == Item::CROSSBOW.id
+    }
+
     /// Vanilla: `Pillager.enchantSpawnedWeapon` (`Pillager.java:172-181`). After the generic
     /// `MOB_SPAWN_EQUIPMENT` weapon roll has run on the freshly equipped crossbow,
     /// `this.random.nextInt(300) == 0` enchants it through the `pillager_spawn_crossbow`

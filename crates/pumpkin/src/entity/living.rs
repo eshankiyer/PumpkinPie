@@ -49,7 +49,7 @@ use pumpkin_data::attributes::Attributes;
 use pumpkin_data::damage::DeathMessageType;
 use pumpkin_data::data_component_impl::Operation;
 use pumpkin_data::data_component_impl::food::{
-    ConsumableImpl, ConsumeAnimation, ConsumeEffect, UseRemainderImpl,
+    ConsumableImpl, ConsumeAnimation, ConsumeEffect, UseEffectsImpl, UseRemainderImpl,
 };
 use pumpkin_data::data_component_impl::{
     AttributeModifiersImpl, BlocksAttacksImpl, DamageResistantImpl, DamageResistantType,
@@ -1066,11 +1066,31 @@ impl LivingEntity {
 
     /// Sends the Hand animation to all others, used when Eating for example
     pub async fn set_active_hand(&self, hand: Hand, stack: ItemStack, duration: i32) {
+        let emits_use_vibration = stack.get_data_component::<UseEffectsImpl>().is_some();
         self.item_use_time.store(duration, Ordering::Relaxed);
         *self.item_in_use.lock().await = Some(stack);
         *self.active_hand.lock().await = Some(hand);
         self.set_living_flag(Self::USING_ITEM_FLAG, true);
         self.set_living_flag(Self::OFF_HAND_ACTIVE_FLAG, hand == Hand::Left);
+
+        // Vanilla `LivingEntity.startUsingItem` calls `ItemStack.causeUseVibration`
+        // (`LivingEntity.java:3497-3505`; `ItemStack.java:749-754`).
+        if emits_use_vibration {
+            let world = self.entity.world.load();
+            let context = world
+                .get_entity_by_uuid(self.entity.entity_uuid)
+                .map_or_else(
+                    crate::world::game_event::GameEventContext::none,
+                    crate::world::game_event::GameEventContext::of_entity,
+                );
+            crate::world::game_event::emit_game_event(
+                &world,
+                pumpkin_data::game_event::GameEvent::ItemInteractStart,
+                self.entity.pos.load(),
+                context,
+            )
+            .await;
+        }
     }
 
     fn set_living_flag(&self, flag: u8, value: bool) {
@@ -1121,6 +1141,30 @@ impl LivingEntity {
     }
 
     pub async fn clear_active_hand(&self) {
+        let emits_use_vibration = self
+            .item_in_use
+            .lock()
+            .await
+            .as_ref()
+            .is_some_and(|stack| stack.get_data_component::<UseEffectsImpl>().is_some());
+        // Vanilla `LivingEntity.stopUsingItem` calls `ItemStack.causeUseVibration` for an
+        // active item (`LivingEntity.java:3614-3621`; `ItemStack.java:749-754`).
+        if emits_use_vibration {
+            let world = self.entity.world.load();
+            let context = world
+                .get_entity_by_uuid(self.entity.entity_uuid)
+                .map_or_else(
+                    crate::world::game_event::GameEventContext::none,
+                    crate::world::game_event::GameEventContext::of_entity,
+                );
+            crate::world::game_event::emit_game_event(
+                &world,
+                pumpkin_data::game_event::GameEvent::ItemInteractFinish,
+                self.entity.pos.load(),
+                context,
+            )
+            .await;
+        }
         *self.item_in_use.lock().await = None;
         *self.active_hand.lock().await = None;
         self.item_use_time.store(0, Ordering::Relaxed);

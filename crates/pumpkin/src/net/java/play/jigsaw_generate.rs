@@ -3,10 +3,9 @@ use super::*;
 
 impl JavaClient {
     pub async fn handle_jigsaw_generate(&self, player: &Arc<Player>, generate: SJigsawGenerate) {
-        if !player.is_creative() {
-            return;
-        }
-        if player.permission_lvl.load() < PermissionLvl::Two {
+        // `ServerGamePacketListenerImpl.handleJigsawGenerate` gates the packet with
+        // `Player.canUseGameMasterBlocks` (`ServerGamePacketListenerImpl.java:968-972`).
+        if !player.can_use_game_master_blocks() {
             return;
         }
         let pos = generate.pos;

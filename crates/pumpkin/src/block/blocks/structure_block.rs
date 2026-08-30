@@ -3,7 +3,6 @@ use std::sync::Arc;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BlockProperties, StructureBlockLikeProperties};
 use pumpkin_macros::pumpkin_block;
-use pumpkin_util::{GameMode, PermissionLvl};
 
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::entities::structure_block::StructureBlockBlockEntity;
@@ -34,8 +33,7 @@ impl BlockBehaviour for StructureBlock {
         let Some(player) = args.player else {
             return true;
         };
-        player.gamemode.load() == GameMode::Creative
-            && player.permission_lvl.load() >= PermissionLvl::Two
+        player.can_use_game_master_blocks()
     }
 
     fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
@@ -74,7 +72,9 @@ impl BlockBehaviour for StructureBlock {
     /// check has no vanilla citation and is deliberately not copied here, per the design doc).
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
-            if args.player.permission_lvl.load() < PermissionLvl::Two {
+            // `StructureBlockEntity.usedBy` requires `Player.canUseGameMasterBlocks`
+            // (`StructureBlockEntity.java:149-151`; `Player.java:1863-1865`).
+            if !args.player.can_use_game_master_blocks() {
                 return BlockActionResult::Pass;
             }
             let Some(block_entity) = args.world.get_block_entity(args.position) else {

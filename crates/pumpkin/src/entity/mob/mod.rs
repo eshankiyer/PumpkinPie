@@ -95,6 +95,13 @@ async fn apply_post_hit_mob_effects(
     }
 }
 
+/// Vanilla `Mob.dropPreservedEquipment` uses `DropChances.isPreserved`, which is true only
+/// above a chance of `1.0` (`Mob.java:923-950`).
+#[must_use]
+const fn is_preserved_equipment_drop_chance(chance: f32) -> bool {
+    chance > 1.0
+}
+
 pub mod bat;
 pub mod blaze;
 pub mod breeze;
@@ -1232,6 +1239,73 @@ const fn spawns_offspring_from_egg(entity_type: &EntityType) -> bool {
 }
 
 pub trait Mob: EntityBase + Send + Sync {
+    /// Vanilla `Mob.canUseNonMeleeWeapon` (`Mob.java:260-262`) is the base capability
+    /// predicate consulted by projectile attack behavior. Ordinary mobs cannot select a
+    /// non-melee weapon.
+    fn can_use_non_melee_weapon(&self, _item: &ItemStack) -> bool {
+        false
+    }
+
+    /// Vanilla `Mob.dropPreservedEquipment` (`Mob.java:923-950`) removes preserved equipment
+    /// before a mob is discarded or converted and spawns the removed stacks at the mob's
+    /// position. The Copper Golem statue transition is the live caller in this workspace.
+    fn drop_preserved_equipment(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let living = &self.get_mob_entity().living_entity;
+            let slots = [
+                EquipmentSlot::MAIN_HAND,
+                EquipmentSlot::OFF_HAND,
+                EquipmentSlot::FEET,
+                EquipmentSlot::LEGS,
+                EquipmentSlot::CHEST,
+                EquipmentSlot::HEAD,
+                EquipmentSlot::BODY,
+                EquipmentSlot::SADDLE,
+            ];
+            let preserved_slots = {
+                let drop_chances = living.equipment_drop_chances.lock().await;
+                slots
+                    .iter()
+                    .filter_map(|slot| {
+                        let chance = drop_chances.get(slot).copied().unwrap_or(
+                            crate::entity::mob::equipment::DEFAULT_EQUIPMENT_DROP_CHANCE,
+                        );
+                        is_preserved_equipment_drop_chance(chance).then_some(slot.clone())
+                    })
+                    .collect::<Vec<_>>()
+            };
+
+            let mut dropped = Vec::new();
+            {
+                let mut equipment = living.entity_equipment.lock().await;
+                for slot in preserved_slots {
+                    let item = equipment.get(&slot);
+                    if item.is_empty() {
+                        continue;
+                    }
+                    equipment.put(&slot, ItemStack::EMPTY.clone());
+                    dropped.push((slot, item));
+                }
+            }
+
+            if dropped.is_empty() {
+                return;
+            }
+
+            let changes = dropped
+                .iter()
+                .map(|(slot, _)| (slot.clone(), ItemStack::EMPTY.clone()))
+                .collect::<Vec<_>>();
+            living.send_equipment_changes(&changes);
+
+            let world = living.entity.world.load();
+            let block_pos = living.entity.block_pos.load();
+            for (_, item) in dropped {
+                world.drop_stack(&block_pos, item).await;
+            }
+        })
+    }
+
     /// Vanilla `HasCustomInventoryScreen.openCustomInventoryScreen` is dispatched by the
     /// ridden-vehicle inventory command (`ServerGamePacketListenerImpl.java:1734-1737`).
     fn open_custom_inventory_screen<'a>(
@@ -1314,9 +1388,9 @@ pub trait Mob: EntityBase + Send + Sync {
             let Some(mob) = passenger.get_mob() else {
                 return false;
             };
-            !mob.get_entity()
-                .entity_type
-                .has_tag(&tag::EntityType::MINECRAFT_NON_CONTROLLING_RIDER)
+            // `Mob.getControllingPassenger` delegates this tag check to `Entity.canControlVehicle`
+            // (`Mob.java:221-223`; `Entity.java:2669-2670`).
+            mob.can_control_vehicle()
         })
     }
 
@@ -3408,8 +3482,8 @@ pub trait PathAwareEntity: Mob + Send + Sync {
 mod tests {
     use super::{
         DEFAULT_ITEM_PICKUP_REACH, EntityType, attack_knockback_strength, can_replace_equal_item,
-        fire_aspect_ticks, knockback_enchantment_strength, mob_weapon_durability_cost,
-        uses_monster_no_action_time,
+        fire_aspect_ticks, is_preserved_equipment_drop_chance, knockback_enchantment_strength,
+        mob_weapon_durability_cost, uses_monster_no_action_time,
     };
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
@@ -3418,6 +3492,14 @@ mod tests {
     fn fire_aspect_uses_eighty_ticks_per_level() {
         assert_eq!(fire_aspect_ticks(1), 80);
         assert_eq!(fire_aspect_ticks(2), 160);
+    }
+
+    /// `Mob.dropPreservedEquipment` uses `DropChances.isPreserved` (`Mob.java:923-950`).
+    #[test]
+    fn preserved_equipment_requires_a_drop_chance_above_one() {
+        assert!(!is_preserved_equipment_drop_chance(1.0));
+        assert!(!is_preserved_equipment_drop_chance(0.085));
+        assert!(is_preserved_equipment_drop_chance(1.01));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
 
+use pumpkin_data::BlockDirection;
 use pumpkin_util::math::position::BlockPos;
 
 use super::drowned_util::is_bright_outside;
@@ -75,9 +76,10 @@ impl Goal for DrownedGoToBeachGoal {
 }
 
 impl MoveToTargetPos for DrownedGoToBeachGoal {
-    /// `isValidTarget`: both blocks above must be empty and the candidate itself must be
-    /// something the drowned can stand on. `entityCanStandOn` is approximated with
-    /// `is_solid`, since there is no generic per-entity "can stand on" hook here.
+    /// `isValidTarget` checks the two empty blocks above and then
+    /// `BlockState.entityCanStandOn` (`Drowned.java:364-367`). The generated upward
+    /// side-support flag is the existing collision-face equivalent of
+    /// `BlockBehaviour.entityCanStandOn` (`BlockBehaviour.java:705-710`).
     fn is_target_pos<'a>(
         &'a self,
         world: Arc<World>,
@@ -89,7 +91,27 @@ impl MoveToTargetPos for DrownedGoToBeachGoal {
             if !world.get_block_state(&above).is_air() || !world.get_block_state(&above2).is_air() {
                 return false;
             }
-            world.get_block_state(&block_pos).is_solid()
+            can_stand_on(world.get_block_state(&block_pos))
         })
+    }
+}
+
+// `BlockState.entityCanStandOn` checks a full upward collision face
+// (`BlockBehaviour.java:705-710`); `is_side_solid(Up)` is the generated equivalent used here.
+const fn can_stand_on(state: &pumpkin_data::BlockState) -> bool {
+    state.is_side_solid(BlockDirection::Up)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::can_stand_on;
+    use pumpkin_data::Block;
+
+    // `Drowned.isValidTarget` delegates standability to the candidate state
+    // (`Drowned.java:364-367`).
+    #[test]
+    fn standability_uses_the_upward_collision_face() {
+        assert!(can_stand_on(Block::GLASS.default_state));
+        assert!(!can_stand_on(Block::AIR.default_state));
     }
 }

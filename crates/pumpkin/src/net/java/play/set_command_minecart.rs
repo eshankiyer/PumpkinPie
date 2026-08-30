@@ -4,7 +4,9 @@ use pumpkin_protocol::java::server::play::SSetCommandMinecart;
 
 impl JavaClient {
     pub fn handle_set_command_minecart(&self, player: &Player, packet: &SSetCommandMinecart<'_>) {
-        if player.permission_lvl.load() < PermissionLvl::Two {
+        // `ServerGamePacketListenerImpl.handleSetCommandMinecart` gates the packet with
+        // `Player.canUseGameMasterBlocks` (`ServerGamePacketListenerImpl.java:667-670`).
+        if !player.can_use_game_master_blocks() {
             return;
         }
 

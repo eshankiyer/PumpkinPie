@@ -166,11 +166,11 @@ impl ItemBehaviour for TridentItem {
             // Normal throw - spawn thrown trident
             // `TridentItem.releaseUsing` damages the stack without breaking it before
             // `consumeAndReturn(1, player)` creates the projectile stack
-            // (`TridentItem.java:69-82`).
+            // (`TridentItem.java:69-82`; `ItemStack.java:1088-1092`).
             if player.gamemode.load() != GameMode::Creative {
                 stack_guard.hurt_without_breaking(1);
             }
-            let thrown_item_stack = stack_guard.split_unless_creative(player.gamemode.load(), 1);
+            let thrown_item_stack = stack_guard.consume_and_return(1, player.is_creative());
             let (yaw, pitch) = player.rotation();
             let entity = Entity::new(world.clone(), player.position(), &EntityType::TRIDENT);
             let trident = TridentEntity::new_shot(

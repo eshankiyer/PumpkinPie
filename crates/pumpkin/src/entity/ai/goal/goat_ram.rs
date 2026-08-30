@@ -30,6 +30,16 @@ const TIME_BETWEEN_RAMS: std::ops::Range<i32> = 600..6000;
 /// bounding box every tick; we approximate that with a fixed short-range check.
 const RAM_HIT_RANGE_SQ: f64 = 2.25; // 1.5 * 1.5
 
+/// `RamTarget` halves its impact force when `applyItemBlocking` reports blocked damage
+/// (`RamTarget.java:78-93`; `LivingEntity.java:1308-1345`).
+const fn ram_blocking_factor(damage_accepted: bool, target_blocking: bool) -> f64 {
+    if !damage_accepted && target_blocking {
+        0.5
+    } else {
+        1.0
+    }
+}
+
 enum RamPhase {
     /// Vanilla: `PrepareRamNearestTarget` -- the goat walks up to a ram-off position and stares
     /// at its target for `RAM_PREPARE_TIME` ticks before actually charging.
@@ -209,13 +219,27 @@ impl GoatRamGoal {
         let dist_sq = mob_pos.squared_distance_to_vec(&target_pos);
 
         if dist_sq <= RAM_HIT_RANGE_SQ {
-            mob.try_attack(target.as_ref()).await;
+            let damage_accepted = mob.try_attack(target.as_ref()).await;
+            // The ordinary damage path already performs `applyItemBlocking`; its false result
+            // identifies a fully blocked ram hit, which `RamTarget` uses to halve knockback.
+            // (`RamTarget.java:78-93`; `LivingEntity.java:1200-1202`, `1308-1345`.)
+            let target_blocking = match target.get_living_entity() {
+                Some(living) => living.is_blocking().await,
+                None => false,
+            };
+            let blocking_factor = ram_blocking_factor(damage_accepted, target_blocking);
             if let Some(living) = target.get_living_entity() {
-                living.knockback_with_resistance(RAM_KNOCKBACK_FORCE, direction.0, direction.1);
+                living.knockback_with_resistance(
+                    blocking_factor * RAM_KNOCKBACK_FORCE,
+                    direction.0,
+                    direction.1,
+                );
             } else {
-                target
-                    .get_entity()
-                    .knockback(RAM_KNOCKBACK_FORCE, direction.0, direction.1);
+                target.get_entity().knockback(
+                    blocking_factor * RAM_KNOCKBACK_FORCE,
+                    direction.0,
+                    direction.1,
+                );
             }
 
             let world = mob.get_entity().world.load();
@@ -324,5 +348,18 @@ impl Goal for GoatRamGoal {
 
     fn controls(&self) -> Controls {
         self.goal_control
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ram_blocking_factor;
+
+    #[test]
+    fn blocked_ram_hits_have_half_impact_force() {
+        // `RamTarget.java:89-93` halves the force only when `applyItemBlocking` reports damage.
+        assert_eq!(ram_blocking_factor(false, true), 0.5);
+        assert_eq!(ram_blocking_factor(true, true), 1.0);
+        assert_eq!(ram_blocking_factor(false, false), 1.0);
     }
 }

@@ -43,10 +43,9 @@ impl JavaClient {
         player: &Arc<Player>,
         command: SSetCommandBlock<'_>,
     ) {
-        if !player.is_creative() {
-            return;
-        }
-        if player.permission_lvl.load() < PermissionLvl::Two {
+        // `ServerGamePacketListenerImpl.handleSetCommandBlock` gates the packet with
+        // `Player.canUseGameMasterBlocks` (`ServerGamePacketListenerImpl.java:608-612`).
+        if !player.can_use_game_master_blocks() {
             return;
         }
         let pos = command.pos;
