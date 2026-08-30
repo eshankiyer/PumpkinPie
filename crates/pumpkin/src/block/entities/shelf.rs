@@ -144,9 +144,20 @@ impl ShelfBlockEntity {
             )
             .await;
         }
-        world
-            .set_block_state(&self.position, state_id, BlockFlags::NOTIFY_ALL)
-            .await;
+        // Vanilla `ShelfBlockEntity.setChanged(GameEvent)` sends the block update immediately
+        // (`ShelfBlockEntity.java:87-95`), including when the block state itself is unchanged.
+        if let Some(block_entity) = world.get_block_entity(&self.position) {
+            world.update_block_entity(&block_entity);
+            let changed_block = world.get_block(&self.position);
+            world
+                .update_comparators(&self.position, changed_block)
+                .await;
+            self.clear_dirty();
+        } else {
+            world
+                .set_block_state(&self.position, state_id, BlockFlags::NOTIFY_ALL)
+                .await;
+        }
     }
 }
 

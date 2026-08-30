@@ -175,7 +175,21 @@ pub trait FlowingFluid: Send + Sync {
             let below_pos = block_pos.down();
             let below_state = world.get_block_state(&below_pos);
             let below_block = Block::from_state_id(below_state.id);
-            let is_hole = physics::can_be_replaced(below_state, below_block, fluid);
+            let (below_fluid, below_fluid_state) = world.get_fluid_and_fluid_state(&below_pos);
+            // `FlowingFluid.spread` (`FlowingFluid.java:123-128`) first asks the target fluid
+            // state whether this downward fluid may replace it.
+            let is_hole = if below_block.is_waterlogged(below_state.id) {
+                false
+            } else if below_fluid != &Fluid::EMPTY {
+                physics::can_be_replaced_with(
+                    below_fluid,
+                    below_fluid_state,
+                    fluid,
+                    BlockDirection::Down,
+                )
+            } else {
+                physics::can_be_replaced(below_state, below_block, fluid)
+            };
 
             // Try to flow down first
             if is_hole {

@@ -47,6 +47,23 @@ impl ExperienceOrbEntity {
                     .multiply(size * 0.5, size * 0.5, size * 0.5),
         );
         entity.velocity.store(random_movement);
+        // Vanilla `ExperienceOrb.unstuckIfPossible` (`ExperienceOrb.java:63-68,78-84`) nudges
+        // an orb spawned inside a collision toward the nearest free side before it is added.
+        if !entity
+            .world
+            .load()
+            .is_space_empty(entity.bounding_box.load())
+        {
+            let position = entity.pos.load();
+            entity.push_out_of_blocks(Vector3::new(
+                position.x,
+                f64::midpoint(
+                    entity.bounding_box.load().min.y,
+                    entity.bounding_box.load().max.y,
+                ),
+                position.z,
+            ));
+        }
         Self {
             entity,
             amount: AtomicU32::new(amount),
@@ -320,5 +337,28 @@ impl EntityBase for ExperienceOrbEntity {
 
     fn cast_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ExperienceOrbEntity;
+
+    #[test]
+    fn experience_value_uses_vanilla_thresholds() {
+        // Vanilla `ExperienceOrb.getExperienceValue` (`ExperienceOrb.java:351-373`) selects the
+        // largest orb value that does not exceed the remaining experience.
+        for (remaining, expected) in [
+            (1, 1),
+            (3, 3),
+            (6, 3),
+            (7, 7),
+            (148, 73),
+            (149, 149),
+            (2476, 1237),
+            (2477, 2477),
+        ] {
+            assert_eq!(ExperienceOrbEntity::round_to_orb_size(remaining), expected);
+        }
     }
 }

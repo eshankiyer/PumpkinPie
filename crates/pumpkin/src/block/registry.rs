@@ -1352,6 +1352,7 @@ impl BlockRegistry {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     pub async fn broken(
         &self,
         world: &Arc<World>,
@@ -1360,6 +1361,7 @@ impl BlockRegistry {
         position: &BlockPos,
         server: &Server,
         state: &BlockState,
+        block_entity: Option<&dyn crate::block::entities::BlockEntity>,
     ) {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
@@ -1371,6 +1373,7 @@ impl BlockRegistry {
                     server,
                     world,
                     state,
+                    block_entity,
                 })
                 .await;
         }

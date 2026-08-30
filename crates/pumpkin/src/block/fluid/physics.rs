@@ -2,7 +2,33 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use pumpkin_data::BlockState;
 use pumpkin_data::tag::Taggable;
-use pumpkin_data::{Block, BlockStateId, fluid::Fluid, tag};
+use pumpkin_data::{
+    Block, BlockDirection, BlockStateId,
+    fluid::{Fluid, FluidState},
+    tag,
+};
+
+/// `FluidState.canBeReplacedWith` (`FluidState.java:116-118`) delegates to the owning fluid;
+/// water and lava provide the live rules in `WaterFluid.java:117-119` and `LavaFluid.java:170-172`.
+#[must_use]
+pub fn can_be_replaced_with(
+    fluid: &Fluid,
+    state: &FluidState,
+    other: &Fluid,
+    direction: BlockDirection,
+) -> bool {
+    if fluid == &Fluid::EMPTY {
+        return true;
+    }
+
+    if fluid.matches_type(&Fluid::WATER) {
+        return direction == BlockDirection::Down && !other.matches_type(&Fluid::WATER);
+    }
+
+    fluid.matches_type(&Fluid::LAVA)
+        && state.height >= 0.444_444_45
+        && other.matches_type(&Fluid::WATER)
+}
 
 /// Check if a specific block can be replaced by fluid (based on block properties)
 #[must_use]
@@ -114,7 +140,43 @@ pub fn waterlogged_replacement_state(
 mod tests {
     use pumpkin_data::{Block, fluid::Fluid};
 
-    use super::{can_be_replaced, waterlogged_replacement_state};
+    use super::{can_be_replaced, can_be_replaced_with, waterlogged_replacement_state};
+
+    // Covers `FluidState.canBeReplacedWith` and the water/lava overrides read at
+    // `FluidState.java:116-118`, `WaterFluid.java:117-119`, and `LavaFluid.java:170-172`.
+    #[test]
+    fn fluid_state_replacement_matches_water_and_lava_rules() {
+        assert!(can_be_replaced_with(
+            &Fluid::EMPTY,
+            &Fluid::EMPTY.states[0],
+            &Fluid::LAVA,
+            pumpkin_data::BlockDirection::North,
+        ));
+        assert!(can_be_replaced_with(
+            &Fluid::WATER,
+            &Fluid::WATER.states[0],
+            &Fluid::LAVA,
+            pumpkin_data::BlockDirection::Down,
+        ));
+        assert!(!can_be_replaced_with(
+            &Fluid::WATER,
+            &Fluid::WATER.states[0],
+            &Fluid::LAVA,
+            pumpkin_data::BlockDirection::North,
+        ));
+        assert!(!can_be_replaced_with(
+            &Fluid::FLOWING_LAVA,
+            &Fluid::FLOWING_LAVA.states[2],
+            &Fluid::WATER,
+            pumpkin_data::BlockDirection::North,
+        ));
+        assert!(can_be_replaced_with(
+            &Fluid::FLOWING_LAVA,
+            &Fluid::FLOWING_LAVA.states[3],
+            &Fluid::WATER,
+            pumpkin_data::BlockDirection::North,
+        ));
+    }
 
     #[test]
     fn water_flows_into_dry_waterloggable_blocks_without_replacing_them() {

@@ -626,6 +626,8 @@ pub fn read_data(id: DataComponent, data: &NbtTag) -> Option<Box<dyn DataCompone
             Some(OminousBottleAmplifierImpl::read_data(data)?.to_dyn())
         }
         DataComponent::BlockState => Some(BlockStateImpl::read_data(data)?.to_dyn()),
+        // `Bees` is the hive-item occupant list (`Bees.java:16-21`).
+        DataComponent::Bees => Some(BeesImpl::read_data(data)?.to_dyn()),
         DataComponent::Recipes => Some(RecipesImpl::read_data(data)?.to_dyn()),
         DataComponent::PotDecorations => Some(PotDecorationsImpl::read_data(data)?.to_dyn()),
         DataComponent::Profile => Some(ProfileImpl::read_data(data)?.to_dyn()),

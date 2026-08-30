@@ -22,7 +22,16 @@ fn is_hole(world: &Arc<World>, fluid: &Fluid, pos: &BlockPos) -> bool {
     let below_pos = pos.down();
     let below_state = world.get_block_state(&below_pos);
     let below_block = Block::from_state_id(below_state.id);
-    physics::can_be_replaced(below_state, below_block, fluid)
+    let (below_fluid, below_fluid_state) = world.get_fluid_and_fluid_state(&below_pos);
+    // `FlowingFluid.getSlopeDistance` (`FlowingFluid.java:292-296`) asks the target fluid
+    // state whether the incoming fluid may replace it before checking the block container.
+    if below_block.is_waterlogged(below_state.id) {
+        false
+    } else if below_fluid != &Fluid::EMPTY {
+        physics::can_be_replaced_with(below_fluid, below_fluid_state, fluid, BlockDirection::Down)
+    } else {
+        physics::can_be_replaced(below_state, below_block, fluid)
+    }
 }
 
 /// Determines valid spread directions for fluid flow using hole-first priority.
@@ -54,7 +63,17 @@ pub async fn get_spread<T: FlowingFluid + Sync + ?Sized>(
         let side_fluid_props = fluid_impl.get_effective_props(fluid, side_state_id);
 
         // Check if we can pass through (not a solid source block or waterlogged)
-        if !physics::can_be_replaced(side_state, side_block, fluid)
+        let (side_fluid, side_fluid_state) = world.get_fluid_and_fluid_state(&side_pos);
+        // `FlowingFluid.getSlopeDistance` (`FlowingFluid.java:292-296`) uses the horizontal
+        // direction when testing a fluid state for replacement.
+        let can_replace = if side_block.is_waterlogged(side_state.id) {
+            false
+        } else if side_fluid != &Fluid::EMPTY {
+            physics::can_be_replaced_with(side_fluid, side_fluid_state, fluid, direction)
+        } else {
+            physics::can_be_replaced(side_state, side_block, fluid)
+        };
+        if !can_replace
             || side_fluid_props
                 .as_ref()
                 .is_some_and(|p| p.level == Level::L8 && p.falling != Falling::True)
@@ -190,7 +209,17 @@ pub fn get_in_flow_down_distance_iterative<T: FlowingFluid + Sync + ?Sized>(
 
             let next_state = world.get_block_state(&next_pos);
             let next_block = Block::from_state_id(next_state.id);
-            if !physics::can_be_replaced(next_state, next_block, fluid) {
+            let (next_fluid, next_fluid_state) = world.get_fluid_and_fluid_state(&next_pos);
+            // `FlowingFluid.getSlopeDistance` (`FlowingFluid.java:292-296`) applies the
+            // replacement rule before extending the search through a neighboring block.
+            let can_replace = if next_block.is_waterlogged(next_state.id) {
+                false
+            } else if next_fluid != &Fluid::EMPTY {
+                physics::can_be_replaced_with(next_fluid, next_fluid_state, fluid, direction)
+            } else {
+                physics::can_be_replaced(next_state, next_block, fluid)
+            };
+            if !can_replace {
                 continue;
             }
 
