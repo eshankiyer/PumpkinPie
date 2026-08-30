@@ -9,6 +9,7 @@ use crate::entity::EntityBase;
 use crate::world::game_event::{GameEventContext, emit_game_event};
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{Axis, NoteblockInstrument};
+use pumpkin_data::data_component_impl::{IdOr, SoundEvent};
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::{
@@ -22,6 +23,7 @@ use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::world::BlockFlags;
 
 use crate::{
+    block::entities::skull::SkullBlockEntity,
     block::{BlockBehaviour, OnSyncedBlockEventArgs},
     world::World,
 };
@@ -70,6 +72,20 @@ impl NoteBlock {
     }
     fn get_note_pitch(note: u16) -> f32 {
         ((f32::from(note) - 12.0) / 12.0).exp2()
+    }
+
+    /// Vanilla `NoteBlock.triggerEvent` and `NoteBlockInstrument` (`NoteBlock.java:159-169`,
+    /// `NoteBlockInstrument.java:52-65`) use the skull's custom sound for `CUSTOM_HEAD` and the
+    /// generated instrument sound for every other instrument.
+    fn sound_event_for_instrument(
+        instrument: NoteblockInstrument,
+        custom_sound: Option<String>,
+    ) -> Option<IdOr<SoundEvent>> {
+        if instrument == NoteblockInstrument::CustomHead {
+            return custom_sound.map(|sound_name| IdOr::Value(SoundEvent::new(sound_name, None)));
+        }
+
+        Some(IdOr::Id(convert_instrument_to_sound(instrument)))
     }
 
     fn get_state_with_instrument(
@@ -212,9 +228,24 @@ impl BlockBehaviour for NoteBlock {
             } else {
                 1.0 // default pitch
             };
-            // check hasCustomSound
-            args.world.play_sound_raw(
-                convert_instrument_to_sound(instrument) as u16,
+            let custom_sound = if instrument == NoteblockInstrument::CustomHead {
+                let above = args.position.up();
+                let Some(block_entity) = args.world.get_block_entity(&above) else {
+                    return false;
+                };
+                let Some(skull) = block_entity.as_any().downcast_ref::<SkullBlockEntity>() else {
+                    return false;
+                };
+                skull.note_block_sound.lock().await.clone()
+            } else {
+                None
+            };
+            let Some(sound_event) = Self::sound_event_for_instrument(instrument, custom_sound)
+            else {
+                return false;
+            };
+            args.world.play_sound_event_fine(
+                &sound_event,
                 SoundCategory::Records,
                 &args.position.to_f64(),
                 3.0,
@@ -309,4 +340,31 @@ const fn is_base_block(instrument: NoteblockInstrument) -> bool {
             | NoteblockInstrument::TrumpetWeathered
             | NoteblockInstrument::TrumpetOxidized
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NoteBlock, NoteblockInstrument};
+    use pumpkin_data::data_component_impl::{IdOr, SoundEvent};
+
+    #[test]
+    fn custom_head_requires_and_preserves_custom_sound() {
+        // Vanilla `NoteBlock.triggerEvent` (`NoteBlock.java:159-169`) returns false without the
+        // skull sound and sends the custom event when it is present.
+        let sound = NoteBlock::sound_event_for_instrument(
+            NoteblockInstrument::CustomHead,
+            Some("minecraft:block.note_block.custom".to_string()),
+        );
+        assert_eq!(
+            sound,
+            Some(IdOr::Value(SoundEvent::new(
+                "minecraft:block.note_block.custom".to_string(),
+                None,
+            )))
+        );
+        assert_eq!(
+            NoteBlock::sound_event_for_instrument(NoteblockInstrument::CustomHead, None),
+            None
+        );
+    }
 }

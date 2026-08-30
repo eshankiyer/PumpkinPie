@@ -8,6 +8,7 @@ use crate::block::{
 
 use crate::block::entities::barrel::BarrelBlockEntity;
 use crate::entity::EntityBase;
+use crate::entity::mob::piglin_shared;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BarrelLikeProperties, BlockProperties};
 use pumpkin_data::translation;
@@ -73,6 +74,9 @@ impl BlockBehaviour for BarrelBlock {
                 args.player
                     .open_handled_screen(&BarrelScreenFactory(inventory), Some(*args.position))
                     .await;
+                // Vanilla `BarrelBlock.useWithoutItem` (`BarrelBlock.java:43-52`) angers
+                // nearby piglins after opening the barrel.
+                piglin_shared::anger_nearby_piglins(args.world, args.player).await;
             }
 
             BlockActionResult::Success
@@ -83,6 +87,19 @@ impl BlockBehaviour for BarrelBlock {
         Box::pin(async move {
             let barrel_block_entity = BarrelBlockEntity::new(*args.position);
             args.world.add_block_entity(Arc::new(barrel_block_entity));
+        })
+    }
+
+    fn on_state_replaced<'a>(
+        &'a self,
+        args: crate::block::OnStateReplacedArgs<'a>,
+    ) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // Vanilla `BarrelBlock.affectNeighborsAfterRemoval` (`BarrelBlock.java:55-58`)
+            // refreshes adjacent comparator inputs using the removed barrel state.
+            args.world
+                .update_comparators(args.position, args.block)
+                .await;
         })
     }
 

@@ -128,6 +128,37 @@ impl MinecartEntity {
             _ => None,
         }
     }
+
+    /// `DetectorRailBlock.getAnalogOutputSignal` (DetectorRailBlock.java:145-159) reads the
+    /// command minecart's success count before checking container minecarts.
+    pub async fn comparator_output(&self) -> u8 {
+        match &self.kind {
+            MinecartKind::CommandBlock(minecart) => comparator_signal_from_success_count(
+                minecart.command_block.success_count.load(Ordering::Relaxed),
+            ),
+            MinecartKind::Chest(minecart) => {
+                crate::block::calculate_comparator_output(minecart.inventory().as_ref()).await
+            }
+            MinecartKind::Hopper(minecart) => {
+                crate::block::calculate_comparator_output(minecart.inventory().as_ref()).await
+            }
+            MinecartKind::Rideable(_)
+            | MinecartKind::Furnace(_)
+            | MinecartKind::Tnt(_)
+            | MinecartKind::Spawner(_)
+            | MinecartKind::Other => 0,
+        }
+    }
+}
+
+/// `DetectorRailBlock.getAnalogOutputSignal` (DetectorRailBlock.java:145-159) is exposed through
+/// the redstone signal's 0-15 range even though a command block stores an integer success count.
+const fn comparator_signal_from_success_count(success_count: u32) -> u8 {
+    if success_count > 15 {
+        15
+    } else {
+        success_count as u8
+    }
 }
 
 impl NBTStorage for MinecartEntity {
@@ -924,5 +955,17 @@ impl EntityBase for MinecartEntity {
 
     fn cast_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod comparator_tests {
+    use super::comparator_signal_from_success_count;
+
+    #[test]
+    fn command_minecart_comparator_output_stays_in_redstone_range() {
+        assert_eq!(comparator_signal_from_success_count(0), 0);
+        assert_eq!(comparator_signal_from_success_count(7), 7);
+        assert_eq!(comparator_signal_from_success_count(42), 15);
     }
 }

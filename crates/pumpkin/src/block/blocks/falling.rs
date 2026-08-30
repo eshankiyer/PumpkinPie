@@ -16,6 +16,11 @@ use pumpkin_world::world::BlockAccessor;
 pub struct FallingBlock;
 
 impl FallingBlock {
+    /// Vanilla `FallingBlock.getDelayAfterPlace` (`FallingBlock.java:29-31,43-45,59-61`).
+    const fn delay_after_place() -> u8 {
+        2
+    }
+
     #[must_use]
     pub fn can_fall_through(state: &BlockState, block: &Block) -> bool {
         state.is_air()
@@ -34,9 +39,12 @@ impl BlockMetadata for FallingBlock {
 impl BlockBehaviour for FallingBlock {
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            // TODO: make delay configurable
-            args.world
-                .schedule_block_tick(args.block, *args.position, 2, TickPriority::Normal);
+            args.world.schedule_block_tick(
+                args.block,
+                *args.position,
+                Self::delay_after_place(),
+                TickPriority::Normal,
+            );
         })
     }
     fn get_state_for_neighbor_update<'a>(
@@ -44,9 +52,12 @@ impl BlockBehaviour for FallingBlock {
         args: GetStateForNeighborUpdateArgs<'a>,
     ) -> BlockFuture<'a, BlockStateId> {
         Box::pin(async move {
-            // TODO: make delay configurable
-            args.world
-                .schedule_block_tick(args.block, *args.position, 2, TickPriority::Normal);
+            args.world.schedule_block_tick(
+                args.block,
+                *args.position,
+                Self::delay_after_place(),
+                TickPriority::Normal,
+            );
             args.state_id
         })
     }
@@ -319,5 +330,11 @@ mod tests {
             Some(&Block::DAMAGED_ANVIL)
         );
         assert_eq!(anvil_damage_tier(&Block::DAMAGED_ANVIL), None);
+    }
+
+    #[test]
+    fn falling_blocks_use_vanillas_two_tick_delay() {
+        // FallingBlock.java:29-31 and 43-45 schedule `getDelayAfterPlace()`.
+        assert_eq!(FallingBlock::delay_after_place(), 2);
     }
 }

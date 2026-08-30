@@ -16,6 +16,7 @@ use pumpkin_data::screen::WindowType;
 use pumpkin_data::smithing;
 use pumpkin_data::statistic::StatisticCategory;
 use pumpkin_protocol::java::server::play::SlotActionType;
+use pumpkin_world::block::entities::PropertyDelegate;
 use pumpkin_world::inventory::Inventory;
 use pumpkin_world::inventory::SimpleInventory;
 
@@ -27,6 +28,39 @@ pub struct SmithingScreenHandler {
     behaviour: ScreenHandlerBehaviour,
     pub input_inventory: Arc<SimpleInventory>,
     pub output_inventory: Arc<SimpleInventory>,
+    recipe_error: Arc<SmithingRecipeError>,
+}
+
+struct SmithingRecipeError(AtomicU8);
+
+impl SmithingRecipeError {
+    const fn new() -> Self {
+        Self(AtomicU8::new(0))
+    }
+
+    /// `SmithingMenu.hasRecipeError` (`SmithingMenu.java:142-144`) reads the standalone
+    /// property as a boolean for the smithing screen.
+    fn has_recipe_error(&self) -> bool {
+        self.0.load(Ordering::Relaxed) != 0
+    }
+
+    fn set(&self, value: bool) {
+        self.0.store(u8::from(value), Ordering::Relaxed);
+    }
+}
+
+impl PropertyDelegate for SmithingRecipeError {
+    fn get_property(&self, _index: i32) -> i32 {
+        i32::from(self.has_recipe_error())
+    }
+
+    fn set_property(&self, _index: i32, value: i32) {
+        self.0.store(u8::from(value != 0), Ordering::Relaxed);
+    }
+
+    fn get_properties_size(&self) -> i32 {
+        1
+    }
 }
 
 impl SmithingScreenHandler {
@@ -34,11 +68,13 @@ impl SmithingScreenHandler {
         let behaviour = ScreenHandlerBehaviour::new(sync_id, Some(WindowType::Smithing));
         let input_inventory = Arc::new(SimpleInventory::new(3));
         let output_inventory = Arc::new(SimpleInventory::new(1));
+        let recipe_error = Arc::new(SmithingRecipeError::new());
 
         let mut handler = Self {
             behaviour,
             input_inventory: input_inventory.clone(),
             output_inventory: output_inventory.clone(),
+            recipe_error: recipe_error.clone(),
         };
 
         handler.add_slot(Arc::new(SmithingInputSlot::new(
@@ -64,6 +100,9 @@ impl SmithingScreenHandler {
 
         let player_inventory: Arc<dyn Inventory> = player_inventory.clone();
         handler.add_player_slots(&player_inventory);
+        // `SmithingMenu` registers `hasRecipeError` as a standalone data slot
+        // (`SmithingMenu.java:34,50`) so the client can render the invalid recipe state.
+        handler.add_property(crate::screen_handler::ScreenProperty::new(recipe_error, 0));
 
         handler
     }
@@ -117,6 +156,11 @@ impl SmithingScreenHandler {
         let addition = self.input_inventory.get_stack(ADDITION_SLOT).await;
 
         let result = Self::compute_result(&template, &base, &addition);
+        // `SmithingMenu.slotsChanged` (`SmithingMenu.java:96-105`) sets the error flag only
+        // when all three inputs are occupied and the recipe result is empty.
+        self.recipe_error.set(
+            !template.is_empty() && !base.is_empty() && !addition.is_empty() && result.is_empty(),
+        );
         self.output_inventory.set_stack(0, result).await;
     }
 
@@ -193,6 +237,15 @@ impl ScreenHandler for SmithingScreenHandler {
         player: &'a dyn InventoryPlayer,
     ) -> ScreenHandlerFuture<'a, ()> {
         Box::pin(async move {
+            if action_type == SlotActionType::PickupAll && button == 0 {
+                // `SmithingMenu.canTakeItemForPickAll` (`SmithingMenu.java:128-130`) excludes
+                // the result container from the shared pickup-all scan.
+                self.output_inventory.remove_stack(0).await;
+                self.internal_on_slot_click(slot_index, button, action_type, player)
+                    .await;
+                self.update_output().await;
+                return;
+            }
             self.internal_on_slot_click(slot_index, button, action_type, player)
                 .await;
             if (0..4).contains(&slot_index) {
@@ -528,6 +581,31 @@ mod tests {
 
         let output = handler.output_inventory.get_stack(0).await;
         assert!(output.is_empty());
+    }
+
+    #[tokio::test]
+    async fn complete_invalid_inputs_set_recipe_error_property() {
+        let handler = handler();
+        handler
+            .input_inventory
+            .set_stack(
+                TEMPLATE_SLOT,
+                ItemStack::new(1, &Item::SENTRY_ARMOR_TRIM_SMITHING_TEMPLATE),
+            )
+            .await;
+        handler
+            .input_inventory
+            .set_stack(BASE_SLOT, ItemStack::new(1, &Item::DIAMOND_SWORD))
+            .await;
+        handler
+            .input_inventory
+            .set_stack(ADDITION_SLOT, ItemStack::new(1, &Item::QUARTZ))
+            .await;
+        handler.update_output().await;
+
+        // `SmithingMenu.slotsChanged` (`SmithingMenu.java:96-105`) marks a complete input set
+        // with no result as a recipe error for the client.
+        assert_eq!(handler.get_behaviour().properties[0].get(), 1);
     }
 
     #[tokio::test]

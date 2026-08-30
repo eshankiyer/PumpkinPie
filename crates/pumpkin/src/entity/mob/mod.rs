@@ -1504,6 +1504,12 @@ pub trait Mob: EntityBase + Send + Sync {
 
     fn get_mob_entity(&self) -> &MobEntity;
 
+    /// Passenger-specific attachment overrides are dispatched by the existing rider position
+    /// update, matching `Entity.positionRider` (`Entity.java:2387-2394`).
+    fn get_vehicle_attachment_point(&self, _vehicle: &Entity) -> Option<Vector3<f64>> {
+        None
+    }
+
     /// Vanilla `Mob.sunProtectionSlot`; zombie horses use their body slot.
     fn sun_protection_slot(&self) -> EquipmentSlot {
         EquipmentSlot::HEAD
@@ -2776,6 +2782,10 @@ pub(crate) fn tick_mob_ai<'a>(
 }
 
 impl<T: Mob + Send + 'static> EntityBase for T {
+    fn get_vehicle_attachment_point(&self, vehicle: &Entity) -> Option<Vector3<f64>> {
+        Mob::get_vehicle_attachment_point(self, vehicle)
+    }
+
     fn get_mob(&self) -> Option<&dyn Mob> {
         Some(self)
     }

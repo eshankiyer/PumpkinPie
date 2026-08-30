@@ -86,14 +86,12 @@ impl BlockBehaviour for PistonHeadBlock {
             let pos = args
                 .position
                 .offset(props.facing.opposite().to_block_direction().to_offset());
-            let (new_block, new_state) = args.world.get_block_and_state_id(&pos);
-            if &Block::PISTON == new_block || &Block::STICKY_PISTON == new_block {
-                let props = PistonProps::from_state_id(new_state, new_block);
-                if props.extended {
-                    args.world
-                        .break_block(&pos, None, BlockFlags::empty())
-                        .await;
-                }
+            // `PistonHeadBlock.affectNeighborsAfterRemoval` (`PistonHeadBlock.java:81-87`)
+            // destroys only the extended base matching this head's type and facing.
+            if Self::fitting_base(args.world, args.position, props) {
+                args.world
+                    .break_block(&pos, None, BlockFlags::empty())
+                    .await;
             }
         })
     }

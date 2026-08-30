@@ -1,6 +1,9 @@
 use crate::block::blocks::falling::FallingBlock;
 use crate::block::registry::BlockActionResult;
-use crate::block::{AttackArgs, BlockBehaviour, BlockFuture, NormalUseArgs, PlacedArgs};
+use crate::block::{
+    AttackArgs, BlockBehaviour, BlockFuture, GetStateForNeighborUpdateArgs, NormalUseArgs,
+    PlacedArgs,
+};
 use crate::world::World;
 use pumpkin_data::BlockStateId;
 use pumpkin_macros::pumpkin_block;
@@ -13,6 +16,10 @@ use std::sync::Arc;
 pub struct DragonEggBlock;
 
 impl DragonEggBlock {
+    /// `DragonEggBlock.getDelayAfterPlace` (`DragonEggBlock.java:82-85`) is used by both
+    /// `FallingBlock.onPlace` and `FallingBlock.updateShape` (`FallingBlock.java:29-45`).
+    const DELAY_AFTER_PLACE: u8 = 5;
+
     async fn teleport(&self, world: &Arc<World>, pos: &BlockPos, state_id: BlockStateId) {
         let min_y = world.dimension.min_y;
         let max_y = min_y + world.dimension.height;
@@ -72,8 +79,29 @@ impl BlockBehaviour for DragonEggBlock {
 
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            args.world
-                .schedule_block_tick(args.block, *args.position, 5, TickPriority::Normal);
+            args.world.schedule_block_tick(
+                args.block,
+                *args.position,
+                Self::DELAY_AFTER_PLACE,
+                TickPriority::Normal,
+            );
+        })
+    }
+
+    fn get_state_for_neighbor_update<'a>(
+        &'a self,
+        args: GetStateForNeighborUpdateArgs<'a>,
+    ) -> BlockFuture<'a, BlockStateId> {
+        Box::pin(async move {
+            // `DragonEggBlock` inherits `FallingBlock.updateShape`, which schedules the same
+            // override delay when support changes (`FallingBlock.java:34-45`).
+            args.world.schedule_block_tick(
+                args.block,
+                *args.position,
+                Self::DELAY_AFTER_PLACE,
+                TickPriority::Normal,
+            );
+            args.state_id
         })
     }
 
@@ -92,5 +120,16 @@ impl BlockBehaviour for DragonEggBlock {
         Box::pin(async move {
             FallingBlock::on_scheduled_tick(&FallingBlock, args).await;
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DragonEggBlock;
+
+    #[test]
+    fn dragon_egg_uses_vanilla_five_tick_falling_delay() {
+        // `DragonEggBlock.getDelayAfterPlace` (`DragonEggBlock.java:82-85`) returns five.
+        assert_eq!(DragonEggBlock::DELAY_AFTER_PLACE, 5);
     }
 }

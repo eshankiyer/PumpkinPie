@@ -1288,13 +1288,30 @@ impl World {
         category: SoundCategory,
         position: &Vector3<f64>,
     ) {
+        // Existing event callers use the default volume and pitch; NoteBlock uses the fine
+        // variant for `NoteBlock.triggerEvent` (`NoteBlock.java:171-173`).
+        self.play_sound_event_fine(sound, category, position, 1.0, 1.0);
+    }
+
+    /// Vanilla `NoteBlock.triggerEvent` (`NoteBlock.java:159-173`) sends the selected sound
+    /// event with the note block's volume and pitch.
+    pub fn play_sound_event_fine(
+        &self,
+        sound: &pumpkin_data::data_component_impl::IdOr<
+            pumpkin_data::data_component_impl::SoundEvent,
+        >,
+        category: SoundCategory,
+        position: &Vector3<f64>,
+        volume: f32,
+        pitch: f32,
+    ) {
         let seed = rng().random::<f64>();
         let packet = CSoundEffect::new(
             data_to_proto_sound(sound),
             category,
             position,
-            1.0,
-            1.0,
+            volume,
+            pitch,
             seed,
         );
         self.broadcast_packet_all(&packet);

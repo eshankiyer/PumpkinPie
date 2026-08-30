@@ -1,3 +1,5 @@
+use pumpkin_data::BlockState;
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::translation;
 use pumpkin_util::PermissionLvl;
 use pumpkin_util::math::vector3::Vector3;
@@ -47,6 +49,13 @@ struct Pile {
     z: f64,
 }
 
+// `SpreadPlayersCommand.Position.isSafe` (`SpreadPlayersCommand.java:364-368`) rejects
+// liquid ground and blocks in `BlockTags.FIRE`.
+fn is_safe_ground(state: &BlockState) -> bool {
+    !state.is_liquid()
+        && !pumpkin_data::Block::from_state_id(state.id).has_tag(&tag::Block::MINECRAFT_FIRE)
+}
+
 impl Pile {
     fn distance(&self, other: &Self) -> f64 {
         let dx = self.x - other.x;
@@ -80,7 +89,7 @@ impl Pile {
     }
 
     /// Returns the y coordinate an entity should stand at for this pile, or
-    /// `None` if the location is unsafe (on top of a liquid).
+    /// `None` if the location is unsafe.
     async fn surface_y(&self, world: &World) -> Option<i32> {
         let block_x = self.x.floor() as i32;
         let block_z = self.z.floor() as i32;
@@ -90,7 +99,9 @@ impl Pile {
 
         let ground = pumpkin_util::math::position::BlockPos(Vector3::new(block_x, top, block_z));
         let state = world.get_block_state_async(&ground).await;
-        if state.is_liquid() {
+        // `SpreadPlayersCommand.Position.isSafe` (`SpreadPlayersCommand.java:364-368`) rejects
+        // both liquid ground and blocks in `BlockTags.FIRE` before teleporting an entity.
+        if !is_safe_ground(state) {
             return None;
         }
 
@@ -343,4 +354,20 @@ pub fn register(dispatcher: &mut CommandDispatcher, registry: &PermissionRegistr
                 ),
             ),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use pumpkin_data::Block;
+
+    use super::is_safe_ground;
+
+    #[test]
+    fn unsafe_spread_ground_matches_vanilla_predicate() {
+        // `SpreadPlayersCommand.Position.isSafe` (`SpreadPlayersCommand.java:364-368`) rejects
+        // liquid and fire ground while accepting ordinary solid ground.
+        assert!(is_safe_ground(Block::STONE.default_state));
+        assert!(!is_safe_ground(Block::WATER.default_state));
+        assert!(!is_safe_ground(Block::FIRE.default_state));
+    }
 }

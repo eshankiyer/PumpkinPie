@@ -676,6 +676,14 @@ impl StructurePieceBase for PoolElementStructurePiece {
         &mut self.piece
     }
 
+    fn translate(&mut self, x: i32, y: i32, z: i32) {
+        // `PoolElementStructurePiece.move` (`PoolElementStructurePiece.java:128-132`) moves
+        // both the inherited bounding box and the element placement position. The collector's
+        // live `shift` path invokes this trait hook.
+        self.piece.translate(x, y, z);
+        self.pos = self.pos.add(x, y, z);
+    }
+
     fn place(
         &mut self,
         chunk: &mut crate::ProtoChunk,
@@ -945,6 +953,47 @@ impl StructureGenerator for JigsawGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shifting_jigsaw_piece_moves_placement_origin_with_bounds() {
+        // Covers `PoolElementStructurePiece.move` (`PoolElementStructurePiece.java:128-132`),
+        // whose live collector caller is `StructurePiecesCollector::shift`.
+        let mut piece = PoolElementStructurePiece {
+            piece: crate::generation::structure::structures::StructurePiece::new(
+                crate::generation::structure::piece::StructurePieceType::Jigsaw,
+                BlockBox::new(1, 2, 3, 4, 5, 6),
+                0,
+            ),
+            element: PoolElement {
+                weight: 1,
+                projection: JigsawProjection::Rigid,
+                kind: PoolElementKind::Empty,
+            },
+            pos: BlockPos::new(1, 2, 3),
+            rotation: BlockRotation::None,
+            mirror: BlockMirror::None,
+            jigsaw_blocks: Vec::new(),
+            junctions: Vec::new(),
+            ground_level_delta: 0,
+            liquid_settings: LiquidSettings::ApplyWaterlog,
+            projection: JigsawProjection::Rigid,
+        };
+
+        StructurePieceBase::translate(&mut piece, 3, 4, 5);
+
+        assert_eq!(piece.pos, BlockPos::new(4, 6, 8));
+        assert_eq!(
+            (
+                piece.piece.bounding_box.min.x,
+                piece.piece.bounding_box.min.y,
+                piece.piece.bounding_box.min.z,
+                piece.piece.bounding_box.max.x,
+                piece.piece.bounding_box.max.y,
+                piece.piece.bounding_box.max.z,
+            ),
+            (4, 6, 8, 7, 9, 11)
+        );
+    }
 
     #[test]
     fn ancient_city_pools_match_vanilla_weights() {

@@ -35,7 +35,7 @@ impl FireBlock {
     }
 
     fn is_flammable(block_state: &BlockState) -> bool {
-        if Block::from_state_id(block_state.id)
+        let waterlogged = Block::from_state_id(block_state.id)
             .properties(block_state.id)
             .and_then(|props| {
                 props
@@ -44,14 +44,18 @@ impl FireBlock {
                     .find(|p| p.0 == "waterlogged")
                     .map(|(_, v)| v == "true")
             })
-            .unwrap_or(false)
-        {
+            .unwrap_or(false);
+        let Some(flammable) = Block::from_state_id(block_state.id).flammable.as_ref() else {
             return false;
-        }
-        Block::from_state_id(block_state.id)
-            .flammable
-            .as_ref()
-            .is_some_and(|f| f.burn_chance > 0)
+        };
+
+        // `FireBlock.canBurn` delegates to `getIgniteOdds`, not `getBurnOdds`
+        // (`FireBlock.java:269-287`); the generated spread chance is that ignite odds table.
+        Self::has_ignite_odds(flammable.spread_chance, waterlogged)
+    }
+
+    const fn has_ignite_odds(spread_chance: u8, waterlogged: bool) -> bool {
+        !waterlogged && spread_chance > 0
     }
 
     fn are_blocks_around_flammable(block_accessor: &dyn BlockAccessor, pos: &BlockPos) -> bool {
@@ -520,5 +524,19 @@ impl BlockBehaviour for FireBlock {
         Box::pin(async move {
             FireBlockBase::broken(args.world, *args.position);
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FireBlock;
+
+    #[test]
+    fn can_burn_uses_ignite_odds_and_rejects_waterlogged_blocks() {
+        // `FireBlock.canBurn` and `getIgniteOdds` (`FireBlock.java:269-287`) use ignite odds;
+        // waterlogged states are rejected by the same fire table.
+        assert!(FireBlock::has_ignite_odds(5, false));
+        assert!(!FireBlock::has_ignite_odds(0, false));
+        assert!(!FireBlock::has_ignite_odds(5, true));
     }
 }

@@ -20,6 +20,7 @@ use crate::block::OnPlaceArgs;
 use crate::block::OnScheduledTickArgs;
 use crate::block::PlacedArgs;
 use crate::entity::EntityBase;
+use crate::entity::vehicle::minecart::MinecartEntity;
 use crate::world::World;
 use pumpkin_data::Block;
 
@@ -144,13 +145,39 @@ impl BlockBehaviour for DetectorRailBlock {
 
     fn get_comparator_output<'a>(
         &'a self,
-        _args: GetComparatorOutputArgs<'a>,
+        args: GetComparatorOutputArgs<'a>,
     ) -> BlockFuture<'a, Option<u8>> {
-        // `DetectorRailBlock.hasAnalogOutputSignal` (DetectorRailBlock.java:140-142) is true, so a
-        // comparator reads the ANALOG value and never the rail's own 15. The container and command
-        // block cart values (DetectorRailBlock.java:145-159) still need an inventory accessor on
-        // `MinecartEntity`; 0 is vanilla's answer for every other cart.
-        Box::pin(async move { Some(0) })
+        // `DetectorRailBlock.hasAnalogOutputSignal` and `getAnalogOutputSignal`
+        // (DetectorRailBlock.java:140-159) read the first command cart, then the first container
+        // cart, and return zero for every other cart.
+        Box::pin(async move {
+            let carts = args
+                .world
+                .get_entities_at_box(&SEARCH_BOX.at_pos(*args.position));
+
+            for entity in &carts {
+                if entity.get_entity().entity_type.id != EntityType::COMMAND_BLOCK_MINECART.id {
+                    continue;
+                }
+                if let Some(minecart) = entity.cast_any().downcast_ref::<MinecartEntity>() {
+                    return Some(minecart.comparator_output().await);
+                }
+            }
+
+            for entity in carts {
+                let entity_type = entity.get_entity().entity_type.id;
+                if entity_type != EntityType::CHEST_MINECART.id
+                    && entity_type != EntityType::HOPPER_MINECART.id
+                {
+                    continue;
+                }
+                if let Some(minecart) = entity.cast_any().downcast_ref::<MinecartEntity>() {
+                    return Some(minecart.comparator_output().await);
+                }
+            }
+
+            Some(0)
+        })
     }
 
     fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {

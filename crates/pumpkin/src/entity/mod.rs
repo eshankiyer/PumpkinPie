@@ -318,6 +318,12 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         f64::from(self.get_entity().entity_dimension.load().height)
     }
 
+    /// Vanilla `Entity.positionRider` asks the passenger for this override
+    /// (`Entity.java:2387-2394`). `None` keeps the existing shared attachment fallback.
+    fn get_vehicle_attachment_point(&self, _vehicle: &Entity) -> Option<Vector3<f64>> {
+        None
+    }
+
     /// Vanilla `LivingEntity.isSensitiveToWater` (`LivingEntity.java:3174-3176`). A sensitive mob
     /// takes a point of drown damage every tick it spends in water or rain
     /// (`LivingEntity.java:3163-3166`).
@@ -4491,7 +4497,11 @@ impl Entity {
         passenger_count: usize,
     ) {
         let vehicle_position = self.pos.load();
-        let vehicle_height = self.get_passengers_riding_offset();
+        let attachment = passenger.get_vehicle_attachment_point(self);
+        // `Entity.positionRider` subtracts the passenger attachment point from the vehicle
+        // riding position (`Entity.java:2385-2389`).
+        let vehicle_height =
+            self.get_passengers_riding_offset() - attachment.map_or(0.0, |offset| offset.y);
         let passenger_width = f64::from(passenger.get_entity().entity_dimension.load().width);
         let yaw = f64::from(self.yaw.load().to_radians());
         let lateral =
