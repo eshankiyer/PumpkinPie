@@ -1,4 +1,7 @@
-use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::{
+    Block,
+    sound::{Sound, SoundCategory},
+};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::random::xoroshiro128::Xoroshiro;
@@ -6,6 +9,7 @@ use pumpkin_util::random::{RandomImpl, get_seed};
 use std::any::Any;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use crate::block::viewer::{
     ViewerCountListener, ViewerCountTracker, ViewerCountTrackerExt, ViewerFuture,
@@ -115,6 +119,36 @@ impl EnderChestBlockEntity {
     #[must_use]
     pub fn get_tracker(&self) -> Arc<ViewerCountTracker> {
         self.viewers.clone()
+    }
+
+    /// Reconciles explicit inventory callbacks with the players whose menu is still tied to this
+    /// block, matching `ContainerOpenersCounter.recheckOpeners` and its five-tick reschedule
+    /// (`ContainerOpenersCounter.java:66-102`).
+    pub async fn recheck_open(&self, world: &Arc<World>) {
+        let open_count = world
+            .players
+            .load()
+            .iter()
+            .filter(|player| {
+                player.gamemode.load() != pumpkin_util::GameMode::Spectator
+                    && player.open_container_pos.load() == Some(self.position)
+                    && player.can_interact_with_block_at(&self.position, 4.0)
+            })
+            .count()
+            .min(usize::from(u16::MAX)) as u16;
+        self.viewers.current.store(open_count, Ordering::Relaxed);
+        self.viewers
+            .update_viewer_count::<Self>(self, world, &self.position)
+            .await;
+
+        if open_count > 0 {
+            world.schedule_block_tick(
+                &Block::ENDER_CHEST,
+                self.position,
+                5,
+                pumpkin_world::tick::TickPriority::Normal,
+            );
+        }
     }
 
     fn play_sound(&self, world: &Arc<World>, sound: Sound) {

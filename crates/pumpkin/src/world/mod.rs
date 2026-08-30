@@ -4962,11 +4962,9 @@ impl World {
                         base_entity.velocity.store(Vector3::default());
 
                         player.client.enqueue_spawn_packet(&entity).await;
-                        // Vanilla's ServerEntity follows the spawn packet with the
-                        // entity's tracked data as it enters this player's range;
-                        // without it the client keeps its defaults for every field.
-                        // Only this player is targeted, never the other viewers.
-                        base_entity.send_tracked_data_to(&player.client);
+                        // Vanilla `ServerEntity.sendPairingData` sends all per-entity state to
+                        // this newly tracking player (`ServerEntity.java:274-319`).
+                        entity.send_pairing_data_to(player.as_ref()).await;
                         player.try_restore_vehicle(&entity).await;
                         entities_to_add.push(entity);
                     }
@@ -4986,7 +4984,9 @@ impl World {
                         let base_entity = entity.get_entity();
                         if base_entity.chunk_pos.load() == position {
                             player.client.enqueue_spawn_packet(entity).await;
-                            base_entity.send_tracked_data_to(&player.client);
+                            // Vanilla `ServerEntity.sendPairingData` sends all per-entity state to
+                            // this newly tracking player (`ServerEntity.java:274-319`).
+                            entity.send_pairing_data_to(player.as_ref()).await;
                             player.try_restore_vehicle(entity).await;
                         }
                     }

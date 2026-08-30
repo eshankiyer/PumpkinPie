@@ -2,11 +2,12 @@ use std::sync::Arc;
 
 use crate::block::entities::ender_chest::EnderChestBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, NormalUseArgs, OnPlaceArgs, OnSyncedBlockEventArgs, PlacedArgs,
-    registry::BlockActionResult,
+    BlockBehaviour, BlockFuture, NormalUseArgs, OnPlaceArgs, OnScheduledTickArgs,
+    OnSyncedBlockEventArgs, PlacedArgs, registry::BlockActionResult,
 };
 use crate::entity::mob::piglin_shared;
 use crate::world::World;
+use pumpkin_data::Block;
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BlockProperties, LadderLikeProperties};
 use pumpkin_data::translation;
@@ -20,6 +21,7 @@ use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::block::viewer::ViewerCountTracker;
+use pumpkin_world::tick::TickPriority;
 use tokio::sync::Mutex;
 
 pub struct EnderChestScreenFactory {
@@ -82,6 +84,20 @@ impl BlockBehaviour for EnderChestBlock {
         })
     }
 
+    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if let Some(block_entity) = args.world.get_block_entity(args.position)
+                && let Some(ender_chest) = block_entity
+                    .as_any()
+                    .downcast_ref::<EnderChestBlockEntity>()
+            {
+                // `EnderChestBlock.tick` delegates scheduled server ticks to
+                // `EnderChestBlockEntity.recheckOpen` (`EnderChestBlock.java:171-176`).
+                ender_chest.recheck_open(args.world).await;
+            }
+        })
+    }
+
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
             if is_chest_blocked(args.world, args.position) {
@@ -108,7 +124,9 @@ impl BlockBehaviour for EnderChestBlock {
                         1,
                     )
                     .await;
-                args.player
+                let was_empty = block_entity.get_tracker().get_viewer_count() == 0;
+                let opened = args
+                    .player
                     .open_handled_screen(
                         &EnderChestScreenFactory {
                             inventory: inventory.clone(),
@@ -117,6 +135,16 @@ impl BlockBehaviour for EnderChestBlock {
                         Some(*args.position),
                     )
                     .await;
+                if opened.is_some() && was_empty {
+                    // `ContainerOpenersCounter.incrementOpeners` schedules the opener recheck
+                    // when the first viewer arrives (`ContainerOpenersCounter.java:28-38, 100-102`).
+                    args.world.schedule_block_tick(
+                        &Block::ENDER_CHEST,
+                        *args.position,
+                        5,
+                        TickPriority::Normal,
+                    );
+                }
                 piglin_shared::anger_nearby_piglins(args.world, args.player).await;
             }
 

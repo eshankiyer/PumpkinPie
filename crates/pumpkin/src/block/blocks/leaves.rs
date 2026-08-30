@@ -22,7 +22,9 @@ const MAX_DISTANCE: u8 = 7;
 pub struct LeavesBlock;
 
 fn distance_from_state(block: &'static Block, state_id: BlockStateId) -> Option<u8> {
-    if block.has_tag(&tag::Block::MINECRAFT_LOGS) {
+    // `LeavesBlock.getOptionalDistanceAt` (`LeavesBlock.java:126-135`) treats every block in
+    // `PREVENTS_NEARBY_LEAF_DECAY` as a distance-zero source, not only blocks in `logs`.
+    if block.has_tag(&tag::Block::MINECRAFT_PREVENTS_NEARBY_LEAF_DECAY) {
         return Some(0);
     }
     if !block.has_tag(&tag::Block::MINECRAFT_LEAVES)
@@ -148,6 +150,16 @@ mod tests {
     fn distance_sources_match_vanilla_leaf_rules() {
         assert_eq!(
             distance_from_state(&Block::OAK_LOG, Block::OAK_LOG.default_state.id),
+            Some(0)
+        );
+        // `LeavesBlock.getOptionalDistanceAt` (`LeavesBlock.java:130-135`) also covers wood
+        // blocks and stripped wood through the vanilla prevention tag.
+        assert_eq!(
+            distance_from_state(&Block::OAK_WOOD, Block::OAK_WOOD.default_state.id),
+            Some(0)
+        );
+        assert_eq!(
+            distance_from_state(&Block::CRIMSON_STEM, Block::CRIMSON_STEM.default_state.id),
             Some(0)
         );
         assert_eq!(

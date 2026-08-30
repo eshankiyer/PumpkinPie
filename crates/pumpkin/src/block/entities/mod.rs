@@ -1,7 +1,7 @@
 use std::pin::Pin;
 use std::{any::Any, sync::Arc};
 
-use pumpkin_data::data_component_impl::ContainerLootImpl;
+use pumpkin_data::data_component_impl::{BlockEntityDataImpl, ContainerLootImpl, CustomNameImpl};
 use pumpkin_data::{Block, BlockStateId, block_properties::BLOCK_ENTITY_TYPES};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
@@ -183,7 +183,7 @@ pub trait BlockEntity: Any + Send + Sync {
     }
 }
 
-/// Applies the modeled implicit block-entity component from a placed item.
+/// Applies modeled block-entity components from a placed item.
 ///
 /// `BlockItem.updateBlockEntityComponents` calls
 /// `BlockEntity.applyComponentsFromItemStack` before `setPlacedBy` and the block-place game
@@ -195,18 +195,45 @@ pub fn apply_components_from_item_stack(
     entity: &dyn BlockEntity,
     stack: &ItemStack,
 ) -> Option<Arc<dyn BlockEntity>> {
-    let data = stack.get_data_component::<ContainerLootImpl>()?;
+    let block_entity_data = stack.get_data_component::<BlockEntityDataImpl>();
+    let container_loot = stack.get_data_component::<ContainerLootImpl>();
+    let custom_name = stack.get_data_component::<CustomNameImpl>();
+    if block_entity_data.is_none() && container_loot.is_none() && custom_name.is_none() {
+        return None;
+    }
+
     let position = entity.get_position();
-    let mut nbt = NbtCompound::new();
+    // `BlockItem.updateCustomBlockEntityTag` validates and loads the typed block-entity
+    // component before `updateBlockEntityComponents` applies implicit components
+    // (`BlockItem.java:101-106, 148-170`). Rebuild the existing entity from both modeled
+    // component payloads so the live placement path preserves both kinds of data.
+    let mut nbt = block_entity_data.map_or_else(NbtCompound::new, |data| data.nbt.clone());
+    if let Some(id) = nbt.get_string("id")
+        && id != entity.resource_location()
+    {
+        return None;
+    }
     nbt.put_string("id", entity.resource_location().to_string());
     nbt.put_int("x", position.0.x);
     nbt.put_int("y", position.0.y);
     nbt.put_int("z", position.0.z);
-    nbt.put_string("LootTable", data.loot_table.clone());
-    if data.seed != 0 {
-        nbt.put_long("LootTableSeed", data.seed);
+    if let Some(data) = container_loot {
+        nbt.put_string("LootTable", data.loot_table.clone());
+        if data.seed != 0 {
+            nbt.put_long("LootTableSeed", data.seed);
+        }
     }
-    block_entity_from_nbt_at(&nbt, position)
+    let rebuilt = block_entity_from_nbt_at(&nbt, position)?;
+    if let Some(command_block) = rebuilt
+        .as_any()
+        .downcast_ref::<command_block::CommandBlockEntity>()
+    {
+        // `BlockEntity.applyImplicitComponents` is invoked by
+        // `BlockItem.updateBlockEntityComponents` after the typed payload is loaded
+        // (`CommandBlockEntity.java:160-164`; `BlockItem.java:101-106`).
+        command_block.apply_implicit_components(stack);
+    }
+    Some(rebuilt)
 }
 
 #[must_use]
@@ -500,9 +527,9 @@ mod test {
         BlockEntity, apply_components_from_item_stack, block_entity_from_nbt,
         chest::ChestBlockEntity, furnace::FurnaceBlockEntity,
     };
-    use pumpkin_data::data_component_impl::ContainerLootImpl;
+    use pumpkin_data::data_component_impl::{BlockEntityDataImpl, ContainerLootImpl};
     use pumpkin_data::{item::Item, item_stack::ItemStack};
-    use pumpkin_nbt::compound::NbtCompound;
+    use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
     use pumpkin_util::math::position::BlockPos;
     use pumpkin_world::inventory::Inventory;
     use std::sync::Arc;
@@ -559,5 +586,37 @@ mod test {
             Some(("minecraft:chests/simple_dungeon".to_string(), 7))
         );
         assert_eq!(applied.get_position(), position);
+    }
+
+    #[tokio::test]
+    async fn placed_block_entity_data_component_is_applied() {
+        // `BlockItem.updateCustomBlockEntityTag` loads the typed payload into the freshly
+        // placed entity before the remaining placement callbacks (`BlockItem.java:76-80,
+        // 148-170`).
+        let position = BlockPos::new(3, 64, -2);
+        let stored = ItemStack::new(5, &Item::DIAMOND);
+        let mut item_nbt = NbtCompound::new();
+        stored.write_item_stack(&mut item_nbt);
+        item_nbt.put_byte("Slot", 0);
+
+        let mut entity_nbt = NbtCompound::new();
+        entity_nbt.put_list("Items", vec![NbtTag::Compound(item_nbt)]);
+        let stack = ItemStack::new_with_component(
+            1,
+            &Item::CHEST,
+            vec![(
+                pumpkin_data::data_component::DataComponent::BlockEntityData,
+                Some(Box::new(BlockEntityDataImpl { nbt: entity_nbt })),
+            )],
+        );
+        let entity: Arc<dyn BlockEntity> = Arc::new(ChestBlockEntity::new(position));
+        let applied = apply_components_from_item_stack(entity.as_ref(), &stack)
+            .expect("block entity data should rebuild the placed entity");
+        let inventory = applied
+            .get_inventory()
+            .expect("chest block entity should expose its inventory");
+        let restored = inventory.get_stack(0).await;
+        assert_eq!(restored.item.id, Item::DIAMOND.id);
+        assert_eq!(restored.item_count, 5);
     }
 }

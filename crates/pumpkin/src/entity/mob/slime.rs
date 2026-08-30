@@ -4,6 +4,7 @@ use std::sync::{Arc, Weak};
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::particle::Particle;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data;
@@ -299,6 +300,23 @@ impl SlimeEntity {
         self.entity.living_entity.entity.entity_type == &EntityType::MAGMA_CUBE
     }
 
+    /// Vanilla `AbstractCubeMob.isDealsDamage` (`AbstractCubeMob.java:249-255`) rejects tiny
+    /// cubes, while `MagmaCube.isDealsDamage` (`MagmaCube.java:112-115`) deliberately keeps
+    /// damage enabled for every magma-cube size.
+    pub(crate) fn is_deals_damage(&self) -> bool {
+        deals_damage_for(self.is_magma_cube(), self.is_tiny())
+    }
+
+    /// Vanilla `AbstractCubeMob.tick` (`AbstractCubeMob.java:124-137`) asks the subclass for
+    /// the landing particle; `MagmaCube.getParticleType` (`MagmaCube.java:73-76`) supplies flame.
+    const fn particle_type_for(is_magma_cube: bool) -> Particle {
+        if is_magma_cube {
+            Particle::Flame
+        } else {
+            Particle::ItemSlime
+        }
+    }
+
     /// `MagmaCube.java` `getJumpDelay()`: `super.getJumpDelay()` * 4.
     fn get_jump_delay(&self) -> i32 {
         let base = rand::random_range(10..30);
@@ -358,6 +376,13 @@ impl SlimeEntity {
     }
 }
 
+/// Vanilla `AbstractCubeMob.isDealsDamage` (`AbstractCubeMob.java:249-255`) and
+/// `MagmaCube.isDealsDamage` (`MagmaCube.java:112-115`) reduced to the two inputs that vary
+/// between the shared slime implementation and its magma-cube specialization.
+const fn deals_damage_for(is_magma_cube: bool, is_tiny: bool) -> bool {
+    is_magma_cube || !is_tiny
+}
+
 impl NBTStorage for SlimeEntity {
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async move {
@@ -411,9 +436,34 @@ impl Mob for SlimeEntity {
             let was_on_ground = self.was_on_ground.load(Ordering::Relaxed);
 
             if on_ground && !was_on_ground {
-                // TODO: particles
-
                 let world = self.entity.living_entity.entity.world.load();
+                // `AbstractCubeMob.tick` (`AbstractCubeMob.java:124-147`) emits size-scaled
+                // landing particles before the squish sound; keep the subclass particle choice
+                // from `MagmaCube.getParticleType` (`MagmaCube.java:73-76`) on this live path.
+                let particle_size = self
+                    .entity
+                    .living_entity
+                    .entity
+                    .entity_dimension
+                    .load()
+                    .width
+                    * 2.0;
+                let radius = particle_size / 2.0;
+                let position = self.entity.living_entity.entity.pos.load();
+                let mut rng = rand::rng();
+                for _ in 0..(particle_size * 16.0) as usize {
+                    let direction = rng.random_range(0.0..(std::f32::consts::PI * 2.0));
+                    let distance = rng.random_range(0.5..1.0);
+                    let offset_x = direction.sin() * radius * distance;
+                    let offset_z = direction.cos() * radius * distance;
+                    world.spawn_particle(
+                        position.add_raw(f64::from(offset_x), 0.0, f64::from(offset_z)),
+                        Vector3::new(0.0, 0.0, 0.0),
+                        0.0,
+                        1,
+                        Self::particle_type_for(self.is_magma_cube()),
+                    );
+                }
                 world.play_sound_fine(
                     self.get_squish_sound(),
                     SoundCategory::Hostile,
@@ -442,7 +492,7 @@ impl Mob for SlimeEntity {
         player: &'a Arc<crate::entity::player::Player>,
     ) -> crate::entity::EntityBaseFuture<'a, ()> {
         Box::pin(async move {
-            if !self.is_tiny() {
+            if self.is_deals_damage() {
                 // dealDamage
                 self.entity.try_attack(&**player).await;
             }
@@ -827,5 +877,19 @@ mod tests {
             SlimeEntity::magma_cube_hurt_sound_for_size(2),
             SlimeEntity::hurt_sound_for_size(2)
         );
+    }
+
+    #[test]
+    fn magma_cubes_deal_damage_even_when_tiny() {
+        assert!(deals_damage_for(true, true));
+        assert!(deals_damage_for(true, false));
+        assert!(!deals_damage_for(false, true));
+        assert!(deals_damage_for(false, false));
+    }
+
+    #[test]
+    fn magma_cube_landing_uses_flame_particles() {
+        assert_eq!(SlimeEntity::particle_type_for(true), Particle::Flame);
+        assert_eq!(SlimeEntity::particle_type_for(false), Particle::ItemSlime);
     }
 }

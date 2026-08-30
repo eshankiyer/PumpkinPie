@@ -426,8 +426,10 @@ const fn bucket_fill_sound(filled: &Item) -> Option<Sound> {
     }
 }
 
-/// `TropicalFish.applyImplicitComponents`/`get`: reads back the pattern/base/pattern-color
-/// components a bucket picked up a tropical fish saved (see `saveToBucketTag` above).
+/// `TropicalFish.applyImplicitComponents`/`get`: reads back each independently present
+/// pattern/base/pattern-color component a bucket picked up a tropical fish saved
+/// (`TropicalFish.java:166-197, 200-206`). Vanilla applies every present component separately;
+/// absent components therefore remain at the freshly spawned fish's values.
 ///
 /// A bucket with no fish data (e.g. from `/give`) returns `None` here and leaves the freshly
 /// spawned fish at whatever `TropicalFishEntity::new` rolled. This matches vanilla:
@@ -436,14 +438,22 @@ const fn bucket_fill_sound(filled: &Item) -> Option<Sound> {
 /// *afterward* does `MobBucketItem.spawn`'s `postSpawnConfig` (EntityType.java:207-209)
 /// overwrite it from `BUCKET_ENTITY_DATA` if present, so a variant-less bucket also produces a
 /// random vanilla fish, not `DEFAULT_VARIANT`.
-fn read_tropical_fish_variant(stack: &ItemStack) -> Option<(Pattern, DyeColor, DyeColor)> {
-    let pattern = stack.get_data_component::<TropicalFishPatternImpl>()?;
-    let base_color = stack.get_data_component::<TropicalFishBaseColorImpl>()?;
-    let pattern_color = stack.get_data_component::<TropicalFishPatternColorImpl>()?;
-    Some((
-        Pattern::from_name(&pattern.value),
-        DyeColor::from(base_color.value.as_ref()),
-        DyeColor::from(pattern_color.value.as_ref()),
+fn read_tropical_fish_variant(
+    stack: &ItemStack,
+) -> Option<(Option<Pattern>, Option<DyeColor>, Option<DyeColor>)> {
+    let pattern = stack
+        .get_data_component::<TropicalFishPatternImpl>()
+        .map(|value| Pattern::from_name(&value.value));
+    let base_color = stack
+        .get_data_component::<TropicalFishBaseColorImpl>()
+        .map(|value| DyeColor::from(value.value.as_ref()));
+    let pattern_color = stack
+        .get_data_component::<TropicalFishPatternColorImpl>()
+        .map(|value| DyeColor::from(value.value.as_ref()));
+    (pattern.is_some() || base_color.is_some() || pattern_color.is_some()).then_some((
+        pattern,
+        base_color,
+        pattern_color,
     ))
 }
 
@@ -566,7 +576,7 @@ async fn spawn_mob_bucket_entity(
     player: Option<Arc<Player>>,
     user: &Player,
     evaporated: bool,
-    tropical_fish_variant: Option<(Pattern, DyeColor, DyeColor)>,
+    tropical_fish_variant: Option<(Option<Pattern>, Option<DyeColor>, Option<DyeColor>)>,
 ) {
     let Some(entity_type) = mob_bucket_entity_type(item) else {
         return;
@@ -591,7 +601,11 @@ async fn spawn_mob_bucket_entity(
     if let Some((pattern, base_color, pattern_color)) = tropical_fish_variant
         && let Some(fish) = entity.cast_any().downcast_ref::<TropicalFishEntity>()
     {
-        fish.set_variant(pattern, base_color, pattern_color);
+        fish.set_variant(
+            pattern.unwrap_or_else(|| fish.pattern()),
+            base_color.unwrap_or_else(|| fish.base_color()),
+            pattern_color.unwrap_or_else(|| fish.pattern_color()),
+        );
     }
     if entity_type.id == EntityType::SULFUR_CUBE.id
         && let Some(cube) = entity.cast_any().downcast_ref::<SulfurCubeEntity>()
@@ -1022,5 +1036,29 @@ mod tests {
             Some(Sound::ItemBucketEmptyFish)
         );
         assert_eq!(mob_bucket_empty_sound(&Item::WATER_BUCKET), None);
+    }
+
+    #[test]
+    fn tropical_fish_bucket_applies_components_independently() {
+        // `TropicalFish.applyImplicitComponents` applies each present component independently
+        // (`TropicalFish.java:177-181`), so a bucket carrying only a pattern must still be read.
+        let stack = ItemStack::new_with_component(
+            1,
+            &Item::TROPICAL_FISH_BUCKET,
+            vec![(
+                DataComponent::TropicalFishPattern,
+                Some(
+                    TropicalFishPatternImpl {
+                        value: "stripey".into(),
+                    }
+                    .to_dyn(),
+                ),
+            )],
+        );
+        let (pattern, base_color, pattern_color) =
+            read_tropical_fish_variant(&stack).expect("the present pattern component is read");
+        assert_eq!(pattern, Some(Pattern::Stripey));
+        assert_eq!(base_color, None);
+        assert_eq!(pattern_color, None);
     }
 }

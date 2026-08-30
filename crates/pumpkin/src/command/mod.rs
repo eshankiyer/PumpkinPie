@@ -360,8 +360,14 @@ impl CommandSender {
                     0.0
                 };
 
-                // TODO: when command blocks get custom names, add a check for it
-                let name = TextComponent::text("@");
+                // `CommandBlockEntity.createCommandSourceStack` uses the command block name
+                // (`CommandBlockEntity.java:43-55`); vanilla's default is `@` when unnamed.
+                let name = command_entity
+                    .custom_name
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone()
+                    .unwrap_or_else(|| TextComponent::text("@"));
 
                 CommandSource::new(
                     Self::CommandBlock(command_entity, world.clone()),

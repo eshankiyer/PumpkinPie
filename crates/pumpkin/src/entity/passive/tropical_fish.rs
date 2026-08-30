@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering::Relaxed};
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::sound::Sound;
 use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::var_int::VarInt;
@@ -324,6 +325,12 @@ impl NBTStorage for TropicalFishEntity {
 impl Mob for TropicalFishEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `TropicalFish.getAmbientSound` (`TropicalFish.java:213-216`) is consumed by the live
+    /// `Mob::tick_ambient_sound` path, so tropical fish must provide their species sound here.
+    fn get_ambient_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityTropicalFishAmbient)
     }
 
     fn is_max_group_size_reached(&self, _group_size: i32) -> bool {

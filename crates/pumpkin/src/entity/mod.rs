@@ -16,6 +16,7 @@ use crossbeam::atomic::AtomicCell;
 use living::LivingEntity;
 use player::Player;
 use pumpkin_data::BlockState;
+use pumpkin_data::attributes::Attributes;
 use pumpkin_data::biome::Biome;
 use pumpkin_data::block_properties::blocks_movement;
 use pumpkin_data::data_component_impl::EquipmentSlot;
@@ -36,6 +37,7 @@ use pumpkin_data::{
 };
 use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
 use pumpkin_protocol::bedrock::client::{CAddActor, CSetActorMotion};
+use pumpkin_protocol::codec::item_stack_seralizer::ItemStackSerializer;
 use pumpkin_protocol::codec::var_long::VarLong;
 use pumpkin_protocol::java::client::play::{CUpdateEntityPos, CUpdateEntityPosRot};
 use pumpkin_protocol::{
@@ -56,9 +58,10 @@ use pumpkin_protocol::{
     codec::var_int::VarInt,
     codec::var_ulong::VarULong,
     java::client::play::{
-        CEntityPositionSync, CEntityVelocity, CHeadRot, CPlayerPosition, CSetEntityMetadata,
-        CSetPassengers, CSpawnEntity, CSpawnLivingEntity, CUpdateEntityRot, Metadata,
-        MetadataSerializer, RawMetadataValue,
+        AttributeModifier as JavaAttributeModifier, CEntityPositionSync, CEntityVelocity, CHeadRot,
+        CPlayerPosition, CSetEntityLink, CSetEntityMetadata, CSetEquipment, CSetPassengers,
+        CSpawnEntity, CSpawnLivingEntity, CUpdateAttributes, CUpdateEntityRot, Metadata,
+        MetadataSerializer, Property as JavaAttributeProperty, RawMetadataValue,
     },
 };
 use pumpkin_util::math::vector3::Axis;
@@ -601,6 +604,80 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
                     }
                 }
             }
+        })
+    }
+
+    /// Vanilla `ServerEntity.sendPairingData` (`ServerEntity.java:274-319`) sends the entity's
+    /// complete state to one player immediately after that player starts tracking it.
+    fn send_pairing_data_to<'a>(&'a self, player: &'a Player) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            let entity = self.get_entity();
+            entity.send_tracked_data_to(&player.client);
+
+            if let Some(living) = self.get_living_entity() {
+                let properties = {
+                    let attributes = living
+                        .attributes
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    attributes
+                        .iter()
+                        .filter_map(|(id, instance)| {
+                            Attributes::ALL
+                                .iter()
+                                .find(|attribute| attribute.id == *id)
+                                .map(|attribute| {
+                                    let modifiers = instance
+                                        .modifiers
+                                        .iter()
+                                        .map(|modifier| {
+                                            JavaAttributeModifier::new(
+                                                modifier.id.clone(),
+                                                modifier.amount,
+                                                modifier.operation as i8,
+                                            )
+                                        })
+                                        .collect();
+                                    JavaAttributeProperty::new(
+                                        VarInt(i32::from(attribute.id)),
+                                        instance.value(),
+                                        modifiers,
+                                    )
+                                })
+                        })
+                        .collect::<Vec<_>>()
+                };
+                if !properties.is_empty() {
+                    player
+                        .send_client_packet(&CUpdateAttributes::new(
+                            entity.entity_id.into(),
+                            properties,
+                        ))
+                        .await;
+                }
+
+                let equipment = {
+                    let equipment = living.entity_equipment.lock().await;
+                    equipment
+                        .equipment
+                        .iter()
+                        .filter(|(_, stack)| !stack.is_empty())
+                        .map(|(slot, stack)| {
+                            (
+                                slot.discriminant(),
+                                ItemStackSerializer::from(stack.clone()),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                };
+                if !equipment.is_empty() {
+                    player
+                        .send_client_packet(&CSetEquipment::new(entity.entity_id.into(), equipment))
+                        .await;
+                }
+            }
+
+            send_pairing_ride_and_leash_data(entity, player).await;
         })
     }
 
@@ -1410,6 +1487,51 @@ pub struct TrackedDataEntry {
     /// The value as produced by `MetadataSerializer::write_metadata` at the
     /// server's native version.
     pub value: Box<[u8]>,
+}
+
+/// The passenger, vehicle and leash portion of `ServerEntity.sendPairingData`
+/// (`ServerEntity.java:296-319`), split out so the caller stays readable.
+async fn send_pairing_ride_and_leash_data(entity: &Entity, player: &Player) {
+    let passengers = entity.passengers.lock().await.clone();
+    if !passengers.is_empty() {
+        let passenger_ids = passengers
+            .iter()
+            .map(|passenger| VarInt(passenger.get_entity().entity_id))
+            .collect::<Vec<_>>();
+        player
+            .send_client_packet(&CSetPassengers::new(
+                VarInt(entity.entity_id),
+                &passenger_ids,
+            ))
+            .await;
+    }
+
+    let vehicle = entity.vehicle.lock().await.clone();
+    if let Some(vehicle) = vehicle {
+        let vehicle_entity = vehicle.get_entity();
+        let vehicle_passengers = vehicle_entity.passengers.lock().await.clone();
+        let passenger_ids = vehicle_passengers
+            .iter()
+            .map(|passenger| VarInt(passenger.get_entity().entity_id))
+            .collect::<Vec<_>>();
+        player
+            .send_client_packet(&CSetPassengers::new(
+                VarInt(vehicle_entity.entity_id),
+                &passenger_ids,
+            ))
+            .await;
+    }
+
+    let leash_holder = entity.leashed_to.lock().await.clone();
+    if let Some(leash_holder) = leash_holder {
+        player
+            .send_client_packet(&CSetEntityLink::new(
+                entity.entity_id,
+                leash_holder.get_entity().entity_id,
+                true,
+            ))
+            .await;
+    }
 }
 
 impl Entity {

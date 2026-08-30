@@ -7,16 +7,20 @@ use crossbeam::atomic::AtomicCell;
 use pumpkin_data::{
     Block, FacingExt,
     block_properties::{BlockProperties, CommandBlockLikeProperties},
+    data_component_impl::CustomNameImpl,
+    item_stack::ItemStack,
 };
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
+use pumpkin_util::text::TextComponent;
 
+use std::sync::Mutex as StdMutex;
 use tokio::sync::Mutex;
 
 use super::BlockEntity;
 use crate::world::World;
 
-// todo: CustomName, LastExecution, UpdateLastExecution
+// todo: LastExecution, UpdateLastExecution
 pub struct CommandBlockEntity {
     pub position: AtomicCell<BlockPos>,
     pub powered: AtomicBool,
@@ -27,6 +31,9 @@ pub struct CommandBlockEntity {
     pub last_output: Mutex<String>,
     pub track_output: AtomicBool,
     pub success_count: AtomicU32,
+    /// Mirrors `BaseCommandBlock.customName`, applied by the live item-component placement path.
+    /// (`CommandBlockEntity.java:29-62, 160-164`.)
+    pub custom_name: StdMutex<Option<TextComponent>>,
 }
 
 impl CommandBlockEntity {
@@ -43,7 +50,20 @@ impl CommandBlockEntity {
             last_output: Mutex::new(String::new()),
             track_output: AtomicBool::new(track_output),
             success_count: AtomicU32::new(0),
+            custom_name: StdMutex::new(None),
         }
+    }
+
+    /// Applies the command block's implicit custom-name component.
+    /// (`CommandBlockEntity.java:160-164`.)
+    pub fn apply_implicit_components(&self, stack: &ItemStack) {
+        let custom_name = stack
+            .get_data_component::<CustomNameImpl>()
+            .map(|component| component.name.clone());
+        *self
+            .custom_name
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = custom_name;
     }
 
     /// Port of `CommandBlockEntity.markConditionMet` (`CommandBlockEntity.java:129-141`).
@@ -107,6 +127,11 @@ impl BlockEntity for CommandBlockEntity {
         let track_output = AtomicBool::new(nbt.get_bool("TrackOutput").unwrap_or(false));
         let success_count =
             AtomicU32::new(nbt.get_int("SuccessCount").unwrap_or(0).cast_unsigned());
+        // `CommandBlockEntity.saveAdditional` delegates command state persistence to
+        // `BaseCommandBlock.save` (`CommandBlockEntity.java:69-84`).
+        let custom_name = nbt
+            .get_string("CustomName")
+            .and_then(|name| pumpkin_util::serde_json::from_str(name).ok());
 
         Self {
             position: AtomicCell::new(position),
@@ -118,6 +143,7 @@ impl BlockEntity for CommandBlockEntity {
             track_output,
             success_count,
             dirty: AtomicBool::new(false),
+            custom_name: StdMutex::new(custom_name),
         }
     }
 
@@ -137,6 +163,15 @@ impl BlockEntity for CommandBlockEntity {
                 "SuccessCount",
                 self.success_count.load(Ordering::SeqCst).cast_signed(),
             );
+            if let Some(name) = self
+                .custom_name
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+                && let Ok(name_json) = pumpkin_util::serde_json::to_string(name)
+            {
+                nbt.put_string("CustomName", name_json);
+            }
         })
     }
 
@@ -154,5 +189,40 @@ impl BlockEntity for CommandBlockEntity {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CommandBlockEntity;
+    use pumpkin_data::data_component::DataComponent;
+    use pumpkin_data::data_component_impl::CustomNameImpl;
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
+    use pumpkin_util::math::position::BlockPos;
+    use pumpkin_util::text::TextComponent;
+
+    #[test]
+    fn custom_name_component_is_applied() {
+        // `applyImplicitComponents` copies `DataComponents.CUSTOM_NAME` to the command block
+        // (`CommandBlockEntity.java:160-164`).
+        let stack = ItemStack::new_with_component(
+            1,
+            &Item::COMMAND_BLOCK,
+            vec![(
+                DataComponent::CustomName,
+                Some(Box::new(CustomNameImpl {
+                    name: TextComponent::text("named"),
+                })),
+            )],
+        );
+        let entity = CommandBlockEntity::new(BlockPos::new(0, 64, 0), true, false);
+
+        entity.apply_implicit_components(&stack);
+
+        assert_eq!(
+            entity.custom_name.lock().unwrap().as_ref(),
+            Some(&TextComponent::text("named"))
+        );
     }
 }

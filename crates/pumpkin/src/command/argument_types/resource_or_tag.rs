@@ -52,8 +52,18 @@ impl ResourceOrTag {
 
     fn from_string_reader(reader: &mut StringReader) -> Result<Self, CommandSyntaxError> {
         if reader.peek() == Some('#') {
+            // Vanilla restores the cursor when tag parsing fails
+            // (ResourceOrTagKeyArgument.java:51-66), so a caller can report the
+            // syntax error against the complete argument rather than after '#'.
+            let cursor = reader.cursor();
             reader.skip();
-            Ok(Self::Tag(Identifier::from_reader(reader)?))
+            match Identifier::from_reader(reader) {
+                Ok(identifier) => Ok(Self::Tag(identifier)),
+                Err(error) => {
+                    reader.set_cursor(cursor);
+                    Err(error)
+                }
+            }
         } else {
             Ok(Self::Resource(Identifier::from_reader(reader)?))
         }
@@ -136,7 +146,15 @@ impl ArgumentType for ResourceOrTagKeyArgument {
     }
 
     fn examples(&self) -> Vec<String> {
-        examples!("foo", "foo:bar", "#foo")
+        // Vanilla exposes these five examples for both resource/tag argument
+        // types (ResourceOrTagKeyArgument.java:28-29).
+        examples!(
+            "foo",
+            "foo:bar",
+            "012",
+            "#skeletons",
+            "#minecraft:skeletons"
+        )
     }
 }
 
@@ -205,6 +223,68 @@ impl ArgumentType for ResourceOrTagArgument {
     }
 
     fn examples(&self) -> Vec<String> {
-        examples!("foo", "foo:bar", "#foo")
+        // Vanilla exposes these five examples for both resource/tag argument
+        // types (ResourceOrTagArgument.java:32-33).
+        examples!(
+            "foo",
+            "foo:bar",
+            "012",
+            "#skeletons",
+            "#minecraft:skeletons"
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ResourceOrTag, ResourceOrTagKeyArgument};
+    use crate::command::argument_types::argument_type::ArgumentType;
+    use crate::command::string_reader::StringReader;
+    use pumpkin_util::identifier::Identifier;
+
+    #[test]
+    fn invalid_tag_resets_reader_cursor() {
+        // The cursor reset is required by ResourceOrTagKeyArgument.parse
+        // (ResourceOrTagKeyArgument.java:51-66).
+        // A bare `#` is NOT an error: `Identifier.parse("")` succeeds because
+        // `isValidPath("")` is a zero-length loop (`Identifier.java:230-238`). A second
+        // colon puts an invalid character in the path, which is what actually throws.
+        let argument = ResourceOrTagKeyArgument(Identifier::vanilla_static("test"));
+        let mut reader = StringReader::new("#foo:bar:baz");
+
+        assert!(argument.parse(&mut reader).is_err());
+        assert_eq!(reader.cursor(), 0);
+    }
+
+    #[test]
+    fn examples_match_vanilla() {
+        // ResourceOrTagKeyArgument.getExamples returns the five entries below
+        // (ResourceOrTagKeyArgument.java:28-29, 74-76).
+        let argument = ResourceOrTagKeyArgument(Identifier::vanilla_static("test"));
+
+        assert_eq!(
+            argument.examples(),
+            vec![
+                "foo".to_string(),
+                "foo:bar".to_string(),
+                "012".to_string(),
+                "#skeletons".to_string(),
+                "#minecraft:skeletons".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn printable_resource_and_tag_forms_match_vanilla() {
+        // Result.asPrintable uses the identifier and '#'+identifier forms
+        // (ResourceOrTagKeyArgument.java:114-161).
+        assert_eq!(
+            ResourceOrTag::Resource(Identifier::vanilla_static("stone")).printable(),
+            "minecraft:stone"
+        );
+        assert_eq!(
+            ResourceOrTag::Tag(Identifier::vanilla_static("skeletons")).printable(),
+            "#minecraft:skeletons"
+        );
     }
 }

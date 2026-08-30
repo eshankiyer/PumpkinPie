@@ -26,11 +26,30 @@ impl ViewerCountTracker {
     }
 
     pub fn close_container(&self) {
-        self.current.fetch_sub(1, Ordering::Relaxed);
+        // `ContainerOpenersCounter.decrementOpeners` cannot produce a negative count
+        // (`ContainerOpenersCounter.java:40-48`); preserve that invariant if a scheduled
+        // recheck has already removed a stale viewer.
+        let _ = self
+            .current
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+                count.checked_sub(1)
+            });
     }
 
     /// Returns the current number of players viewing this container
     pub fn get_viewer_count(&self) -> u16 {
         self.current.load(Ordering::Relaxed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ViewerCountTracker;
+
+    #[test]
+    fn closing_without_viewers_does_not_wrap() {
+        let tracker = ViewerCountTracker::new();
+        tracker.close_container();
+        assert_eq!(tracker.get_viewer_count(), 0);
     }
 }
