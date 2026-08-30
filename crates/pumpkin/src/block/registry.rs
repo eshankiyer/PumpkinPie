@@ -1361,6 +1361,9 @@ impl BlockRegistry {
         position: &BlockPos,
         server: &Server,
         state: &BlockState,
+        // Forward vanilla's `dropExperience` argument to block-specific post-break hooks
+        // (`BlockBehaviour.java:779-780`, `SculkShriekerBlock.java:128-132`).
+        drop_experience: bool,
         block_entity: Option<&dyn crate::block::entities::BlockEntity>,
     ) {
         let pumpkin_block = self.get_pumpkin_block(block.id);
@@ -1373,6 +1376,7 @@ impl BlockRegistry {
                     server,
                     world,
                     state,
+                    drop_experience,
                     block_entity,
                 })
                 .await;

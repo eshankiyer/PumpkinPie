@@ -11,6 +11,7 @@ use crate::item::{ItemBehaviour, ItemMetadata};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::statistic::StatisticCategory;
 use pumpkin_util::GameMode;
 use pumpkin_world::inventory::Inventory;
 
@@ -219,5 +220,12 @@ impl BowItem {
             1.0,
             sound_pitch,
         );
+
+        // Vanilla `BowItem.releaseUsing` awards ITEM_USED after firing and playing the shot
+        // sound (`BowItem.java:44-55`). This is the live release path reached by
+        // `on_stopped_using` above.
+        player
+            .increment_stat(StatisticCategory::Used, Item::BOW.id as i32, 1)
+            .await;
     }
 }

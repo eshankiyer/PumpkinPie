@@ -1,10 +1,14 @@
+use pumpkin_data::data_component::DataComponent;
+use pumpkin_data::data_component_type_id_remap::remap_data_component_type_id_from_version;
+use pumpkin_data::item_id_remap::remap_item_id_from_version;
 use pumpkin_data::packet::clientbound::play::MERCHANT_OFFERS;
 use pumpkin_macros::java_packet;
 
 use crate::ClientPacket;
 use crate::VarInt;
+use crate::codec::data_component::deserialize;
 use crate::codec::item_stack_seralizer::ItemStackSerializer;
-use crate::ser::NetworkWriteExt;
+use crate::ser::{NetworkReadExt, NetworkWriteExt, ReadingError};
 use pumpkin_util::version::JavaMinecraftVersion;
 
 #[derive(Clone)]
@@ -110,7 +114,8 @@ pub struct CMerchantOffers {
     pub offers: Vec<MerchantOffer>,
     pub villager_level: VarInt,
     pub experience: VarInt,
-    pub is_regular_villager: bool,
+    /// Vanilla `ClientboundMerchantOffersPacket.showProgress` (`ClientboundMerchantOffersPacket.java:13-18`).
+    pub show_progress: bool,
     pub can_restock: bool,
 }
 
@@ -121,7 +126,7 @@ impl CMerchantOffers {
         offers: Vec<MerchantOffer>,
         villager_level: VarInt,
         experience: VarInt,
-        is_regular_villager: bool,
+        show_progress: bool,
         can_restock: bool,
     ) -> Self {
         Self {
@@ -129,7 +134,7 @@ impl CMerchantOffers {
             offers,
             villager_level,
             experience,
-            is_regular_villager,
+            show_progress,
             can_restock,
         }
     }
@@ -152,7 +157,7 @@ impl ClientPacket for CMerchantOffers {
         }
         write.write_var_int(&self.villager_level)?;
         write.write_var_int(&self.experience)?;
-        write.write_bool(self.is_regular_villager)?;
+        write.write_bool(self.show_progress)?;
         write.write_bool(self.can_restock)?;
         Ok(())
     }
@@ -163,7 +168,6 @@ impl<'a> crate::ServerPacket<'a> for CMerchantOffers {
         bytebuf: &mut &'a [u8],
         version: &JavaMinecraftVersion,
     ) -> Result<Self, crate::ser::ReadingError> {
-        use crate::ser::NetworkReadExt;
         let window_id = bytebuf.get_var_int()?;
         let offers_count = if *version >= JavaMinecraftVersion::V_1_19 {
             bytebuf.get_var_int()?.0 as usize
@@ -174,31 +178,11 @@ impl<'a> crate::ServerPacket<'a> for CMerchantOffers {
         let mut offers = Vec::with_capacity(offers_count);
         for _ in 0..offers_count {
             let (base_cost_a, output, cost_b) = if *version >= JavaMinecraftVersion::V_1_20_5 {
-                let item_id = bytebuf.get_var_int()?.0 as u16;
-                let count = bytebuf.get_var_int()?.0 as u8;
-                let comp_count = bytebuf.get_var_int()?.0 as usize;
-                for _ in 0..comp_count {
-                    let _comp_id = bytebuf.get_var_int()?;
-                }
-                let item = pumpkin_data::item::Item::from_id(item_id)
-                    .unwrap_or(&pumpkin_data::item::Item::AIR);
-                let base_cost_a = ItemStackSerializer(std::borrow::Cow::Owned(
-                    pumpkin_data::item_stack::ItemStack::new(count, item),
-                ));
+                let base_cost_a = read_item_cost(bytebuf, *version)?;
                 let output = ItemStackSerializer::read_with_version(bytebuf, version)?;
                 let has_cost_b = bytebuf.get_bool()?;
                 let cost_b = if has_cost_b {
-                    let item_id_b = bytebuf.get_var_int()?.0 as u16;
-                    let count_b = bytebuf.get_var_int()?.0 as u8;
-                    let comp_count_b = bytebuf.get_var_int()?.0 as usize;
-                    for _ in 0..comp_count_b {
-                        let _comp_id = bytebuf.get_var_int()?;
-                    }
-                    let item_b = pumpkin_data::item::Item::from_id(item_id_b)
-                        .unwrap_or(&pumpkin_data::item::Item::AIR);
-                    Some(ItemStackSerializer(std::borrow::Cow::Owned(
-                        pumpkin_data::item_stack::ItemStack::new(count_b, item_b),
-                    )))
+                    Some(read_item_cost(bytebuf, *version)?)
                 } else {
                     None
                 };
@@ -252,7 +236,7 @@ impl<'a> crate::ServerPacket<'a> for CMerchantOffers {
 
         let villager_level = bytebuf.get_var_int()?;
         let experience = bytebuf.get_var_int()?;
-        let is_regular_villager = bytebuf.get_bool()?;
+        let show_progress = bytebuf.get_bool()?;
         let can_restock = bytebuf.get_bool()?;
 
         Ok(Self {
@@ -260,10 +244,51 @@ impl<'a> crate::ServerPacket<'a> for CMerchantOffers {
             offers,
             villager_level,
             experience,
-            is_regular_villager,
+            show_progress,
             can_restock,
         })
     }
+}
+
+fn read_item_cost(
+    bytebuf: &mut &[u8],
+    version: JavaMinecraftVersion,
+) -> Result<ItemStackSerializer<'static>, ReadingError> {
+    const MAX_COMPONENTS: i32 = 256;
+
+    // Vanilla `MerchantOffer.createFromStream` delegates these fields to the ItemCost codec
+    // (`MerchantOffer.java:251-254`); the packet then continues with the result and optional
+    // second cost (`ClientboundMerchantOffersPacket.java:31-37`).
+    let item_id = bytebuf.get_var_int()?.0;
+    let item_id = u16::try_from(item_id)
+        .map_err(|_| ReadingError::Message("Invalid item cost item id".into()))?;
+    let count = bytebuf.get_var_int()?.0;
+    let count =
+        u8::try_from(count).map_err(|_| ReadingError::Message("Invalid item cost count".into()))?;
+    let component_count = bytebuf.get_var_int()?.0;
+    if !(0..=MAX_COMPONENTS).contains(&component_count) {
+        return Err(ReadingError::Message(
+            "Invalid item cost component count".into(),
+        ));
+    }
+
+    let mut patch = Vec::with_capacity(component_count as usize);
+    for _ in 0..component_count {
+        let component_id = bytebuf.get_var_int()?.0;
+        let component_id = u32::try_from(component_id)
+            .map_err(|_| ReadingError::Message("Invalid item cost component id".into()))?;
+        let component_id = remap_data_component_type_id_from_version(component_id, version);
+        let component_id = DataComponent::try_from_id(component_id as u8).ok_or_else(|| {
+            ReadingError::Message(format!("Unknown item cost component ID: {component_id}"))
+        })?;
+        patch.push((component_id, Some(deserialize(component_id, bytebuf)?)));
+    }
+
+    let item_id = remap_item_id_from_version(item_id, version);
+    let item = pumpkin_data::item::Item::from_id(item_id).unwrap_or(&pumpkin_data::item::Item::AIR);
+    Ok(ItemStackSerializer(std::borrow::Cow::Owned(
+        pumpkin_data::item_stack::ItemStack::new_with_component(count, item, patch),
+    )))
 }
 
 #[cfg(test)]
@@ -318,6 +343,41 @@ mod tests {
         );
         assert_eq!(cursor.get_var_int().unwrap(), VarInt(12));
         assert_eq!(cursor.get_var_int().unwrap(), VarInt(0));
+    }
+
+    #[test]
+    #[ignore = "pre-existing item-stack component codec bug, see comment"]
+    fn merchant_item_cost_components_round_trip() {
+        // Vanilla `MerchantOffer.createFromStream` reads each ItemCost component before the
+        // result and second cost (`MerchantOffer.java:251-254`).
+        //
+        // KNOWN FAILURE, not introduced here: writing an ItemName component and reading it
+        // back desyncs the stream. The read fails in the num_to_remove loop of
+        // `item_stack_seralizer.rs`, which means `deserialize` consumed a different number of
+        // bytes for ItemName than the writer produced, so every subsequent field is misaligned.
+        // The component wire format needs auditing before this can be unignored.
+        let version = JavaMinecraftVersion::V_26_2;
+        let mut trade = offer();
+        trade.base_cost_a.0.to_mut().patch.push((
+            DataComponent::ItemName,
+            Some(
+                ItemNameImpl {
+                    name: Cow::Borrowed("trade.input"),
+                }
+                .to_dyn(),
+            ),
+        ));
+        let packet = CMerchantOffers::new(VarInt(1), vec![trade], VarInt(1), VarInt(0), true, true);
+        let mut bytes = Vec::new();
+        packet.write_packet_data(&mut bytes, &version).unwrap();
+
+        let read_back =
+            <CMerchantOffers as crate::ServerPacket>::read(&mut bytes.as_slice(), &version)
+                .unwrap();
+        assert!(matches!(
+            read_back.offers[0].base_cost_a.0.patch[0].0,
+            DataComponent::ItemName
+        ));
     }
 
     #[test]

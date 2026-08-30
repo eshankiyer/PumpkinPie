@@ -2311,6 +2311,9 @@ impl Player {
                 &position,
                 server,
                 state,
+                // `dropExperience` is the same `hasCorrectToolForDrops` gate used by
+                // `ServerPlayerGameMode.destroyBlock` (`ServerPlayerGameMode.java:293-299`).
+                block_drop,
                 block_entity.as_ref().map(Arc::as_ref),
             )
             .await;

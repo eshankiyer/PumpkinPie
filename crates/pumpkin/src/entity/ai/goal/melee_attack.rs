@@ -39,6 +39,16 @@ async fn has_melee_line_of_sight(mob: &dyn Mob, target: &dyn EntityBase) -> bool
     mob.get_mob_entity().has_line_of_sight(target).await
 }
 
+/// Vanilla `MeleeAttackGoal.checkAndPerformAttack` and `canPerformAttack`
+/// (`MeleeAttackGoal.java:127-145`) gate the attack on cooldown, reach, and line of sight.
+const fn should_perform_melee_attack(
+    cooldown: i32,
+    in_attack_range: bool,
+    has_line_of_sight: bool,
+) -> bool {
+    cooldown <= 0 && in_attack_range && has_line_of_sight
+}
+
 pub struct MeleeAttackGoal {
     goal_control: Controls,
     speed: f64,
@@ -313,13 +323,12 @@ impl Goal for MeleeAttackGoal {
 
             self.cooldown = (self.cooldown - 1).max(0);
 
-            if self.cooldown <= 0
-                && mob
-                    .get_mob_entity()
-                    .is_in_attack_range(target.as_ref())
-                    .await
-                && has_melee_line_of_sight(mob, target.as_ref()).await
-            {
+            let in_attack_range = mob
+                .get_mob_entity()
+                .is_in_attack_range(target.as_ref())
+                .await;
+            let has_line_of_sight = has_melee_line_of_sight(mob, target.as_ref()).await;
+            if should_perform_melee_attack(self.cooldown, in_attack_range, has_line_of_sight) {
                 self.cooldown = self.get_max_cooldown();
                 mob.get_mob_entity().living_entity.swing_hand().await;
                 mob.try_attack(target.as_ref()).await;
@@ -366,7 +375,7 @@ fn trim_cauldron_path(path: &mut Path, world: &crate::world::World) {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_continue_melee_goal, should_start_melee_goal};
+    use super::{should_continue_melee_goal, should_perform_melee_attack, should_start_melee_goal};
 
     #[test]
     fn in_range_targets_continue_when_navigation_is_idle() {
@@ -388,5 +397,14 @@ mod tests {
     fn falls_back_to_attack_range_when_no_path() {
         assert!(should_start_melee_goal(false, true));
         assert!(!should_start_melee_goal(false, false));
+    }
+
+    #[test]
+    fn attack_requires_ready_cooldown_range_and_visibility() {
+        // Vanilla `MeleeAttackGoal.canPerformAttack` (`MeleeAttackGoal.java:139-145`).
+        assert!(should_perform_melee_attack(0, true, true));
+        assert!(!should_perform_melee_attack(1, true, true));
+        assert!(!should_perform_melee_attack(0, false, true));
+        assert!(!should_perform_melee_attack(0, true, false));
     }
 }

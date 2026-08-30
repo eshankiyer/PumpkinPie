@@ -1,8 +1,15 @@
 use std::sync::Arc;
 
-use pumpkin_data::{Block, BlockStateId, item::Item, item_stack::ItemStack};
+use pumpkin_data::{
+    Block, BlockStateId,
+    block_properties::{BlockProperties, RedstoneOreLikeProperties},
+    game_event::GameEvent,
+    item::Item,
+    item_stack::ItemStack,
+    sound::{Sound, SoundCategory},
+};
 use pumpkin_macros::pumpkin_block_from_tag;
-use pumpkin_util::{GameMode, math::position::BlockPos};
+use pumpkin_util::{GameMode, math::position::BlockPos, math::vector3::Vector3};
 use pumpkin_world::{
     tick::TickPriority,
     world::{BlockAccessor, BlockFlags},
@@ -10,9 +17,9 @@ use pumpkin_world::{
 
 use crate::{
     block::{
-        BlockBehaviour, BlockFuture, GetCloneItemStackArgs, GetStateForNeighborUpdateArgs,
-        NormalUseArgs, OnScheduledTickArgs, UseWithItemArgs, blocks::cake::CakeBlock,
-        registry::BlockActionResult,
+        BlockBehaviour, BlockFuture, GetCloneItemStackArgs, GetComparatorOutputArgs,
+        GetStateForNeighborUpdateArgs, NormalUseArgs, OnScheduledTickArgs, UseWithItemArgs,
+        blocks::cake::CakeBlock, registry::BlockActionResult,
     },
     entity::player::Player,
     world::World,
@@ -109,8 +116,56 @@ impl BlockBehaviour for CandleCakeBlock {
                 id if id == Item::FIRE_CHARGE.id || id == Item::FLINT_AND_STEEL.id => {
                     BlockActionResult::Pass
                 } // Item::FIRE_CHARGE | Item::FLINT_AND_STEEL
+                _ if args.item_stack.is_empty()
+                    && candle_hit(args.hit.cursor_pos)
+                    && RedstoneOreLikeProperties::from_state_id(
+                        args.world.get_block_state_id(args.position),
+                        args.block,
+                    )
+                    .lit =>
+                {
+                    // `CandleCakeBlock.useItemOn` (`CandleCakeBlock.java:79-86`) extinguishes a
+                    // lit cake only when an empty-hand hit is above the cake midpoint.
+                    let mut properties = RedstoneOreLikeProperties::from_state_id(
+                        args.world.get_block_state_id(args.position),
+                        args.block,
+                    );
+                    properties.lit = false;
+                    args.world
+                        .set_block_state(
+                            args.position,
+                            properties.to_state_id(args.block),
+                            BlockFlags::NOTIFY_ALL,
+                        )
+                        .await;
+                    args.world.play_sound(
+                        Sound::BlockCandleExtinguish,
+                        SoundCategory::Blocks,
+                        &args.position.to_centered_f64(),
+                    );
+                    crate::world::game_event::emit_game_event(
+                        args.world,
+                        GameEvent::BlockChange,
+                        args.position.to_centered_f64(),
+                        crate::world::game_event::GameEventContext::of_entity(args.player.clone()),
+                    )
+                    .await;
+                    BlockActionResult::Success
+                }
                 _ => BlockActionResult::PassToDefaultBlockAction,
             }
+        })
+    }
+
+    fn get_comparator_output<'a>(
+        &'a self,
+        _args: GetComparatorOutputArgs<'a>,
+    ) -> BlockFuture<'a, Option<u8>> {
+        Box::pin(async move {
+            // `CandleCakeBlock.getAnalogOutputSignal` and `hasAnalogOutputSignal`
+            // (`CandleCakeBlock.java:137-144`) expose the full-cake signal, which is
+            // `CakeBlock.FULL_CAKE_SIGNAL` (`CakeBlock.java:36`, `CakeBlock.java:144-145`).
+            Some(14)
         })
     }
 
@@ -147,4 +202,21 @@ impl BlockBehaviour for CandleCakeBlock {
 fn can_place_at(world: &dyn BlockAccessor, position: &BlockPos) -> bool {
     let state = world.get_block_state(&position.down());
     state.is_solid()
+}
+
+// `CandleCakeBlock.candleHit` (`CandleCakeBlock.java:101-103`) uses the block midpoint.
+fn candle_hit(cursor_pos: &Vector3<f32>) -> bool {
+    cursor_pos.y > 0.5
+}
+
+#[cfg(test)]
+mod tests {
+    use super::candle_hit;
+    use pumpkin_util::math::vector3::Vector3;
+
+    #[test]
+    fn candle_hit_requires_the_upper_half() {
+        assert!(!candle_hit(&Vector3::new(0.5, 0.5, 0.5)));
+        assert!(candle_hit(&Vector3::new(0.5, 0.5001, 0.5)));
+    }
 }

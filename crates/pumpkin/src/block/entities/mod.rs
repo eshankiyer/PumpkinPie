@@ -239,6 +239,36 @@ pub fn apply_components_from_item_stack(
         return block_entity_from_nbt_at(&nbt, position);
     }
 
+    // `ChiseledBookShelfBlockEntity.applyImplicitComponents` copies the container component into
+    // its six slots (`ChiseledBookShelfBlockEntity.java:122-126`), before the placed block is
+    // finalized by the live `BlockItem` placement path.
+    if entity
+        .as_any()
+        .is::<chiseled_bookshelf::ChiseledBookshelfBlockEntity>()
+    {
+        let position = entity.get_position();
+        let mut nbt = NbtCompound::new();
+        nbt.put_string("id", entity.resource_location().to_string());
+        nbt.put_int("x", position.0.x);
+        nbt.put_int("y", position.0.y);
+        nbt.put_int("z", position.0.z);
+        let container = stack.get_data_component::<ContainerImpl>();
+        let items: [ItemStack; chiseled_bookshelf::ChiseledBookshelfBlockEntity::INVENTORY_SIZE] =
+            from_fn(|slot| {
+                container
+                    .and_then(|container| {
+                        container
+                            .items
+                            .iter()
+                            .find(|(item_slot, _)| usize::from(*item_slot) == slot)
+                            .map(|(_, item)| item.clone())
+                    })
+                    .unwrap_or_else(|| ItemStack::EMPTY.clone())
+            });
+        pumpkin_world::inventory::sync_write_items_to_nbt(&items, &mut nbt);
+        return block_entity_from_nbt_at(&nbt, position);
+    }
+
     let block_entity_data = stack.get_data_component::<BlockEntityDataImpl>();
     let container_loot = stack.get_data_component::<ContainerLootImpl>();
     let custom_name = stack.get_data_component::<CustomNameImpl>();

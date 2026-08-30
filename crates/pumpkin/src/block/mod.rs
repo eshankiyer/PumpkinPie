@@ -447,6 +447,10 @@ pub struct BrokenArgs<'a> {
     pub server: &'a Server,
     pub world: &'a Arc<World>,
     pub state: &'a BlockState,
+    /// Vanilla passes this from `ServerPlayerGameMode.destroyBlock`'s
+    /// `hasCorrectToolForDrops` result to `Block.spawnAfterBreak`
+    /// (`ServerPlayerGameMode.java:293-299`, `SculkShriekerBlock.java:128-132`).
+    pub drop_experience: bool,
     /// Captured before block removal for post-removal callbacks such as
     /// `BeehiveBlock.playerDestroy` (`BeehiveBlock.java:91-108`).
     pub block_entity: Option<&'a dyn BlockEntity>,

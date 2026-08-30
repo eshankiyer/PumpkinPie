@@ -1,11 +1,15 @@
 use crate::block::{
-    BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetStateForNeighborUpdateArgs, OnPlaceArgs,
-    OnScheduledTickArgs, PlacedArgs,
+    BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetCloneItemStackArgs,
+    GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
 };
 use crate::entity::EntityBase;
 use pumpkin_data::block_properties::{
     BlockProperties, WallTorchLikeProperties, WhiteBannerLikeProperties,
 };
+use pumpkin_data::data_component::DataComponent;
+use pumpkin_data::data_component_impl::{BlockEntityDataImpl, DataComponentImpl};
+use pumpkin_data::item::Item;
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::{Block, BlockDirection, BlockStateId, HorizontalFacingExt};
 use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_util::math::position::BlockPos;
@@ -49,6 +53,36 @@ fn wall_support_direction(block: &Block, state_id: BlockStateId) -> BlockDirecti
 }
 
 impl BlockBehaviour for BannerBlock {
+    /// Vanilla `AbstractBannerBlock.getCloneItemStack` (`AbstractBannerBlock.java:34-37`) calls
+    /// `BannerBlockEntity.getItem` (`BannerBlockEntity.java:74-81`) retains the banner's
+    /// patterns and custom name (`BannerBlockEntity.java:49-56, 96-105`) in the returned item.
+    fn get_clone_item_stack(&self, args: GetCloneItemStackArgs<'_>) -> Option<ItemStack> {
+        let item = Item::from_id(args.block.item_id)?;
+        let entity = args.world.get_block_entity(args.position)?;
+        let banner = entity.as_any().downcast_ref::<BannerBlockEntity>()?;
+        let mut nbt = pumpkin_nbt::compound::NbtCompound::new();
+        if let Some(patterns) = banner.get_patterns() {
+            nbt.put_list("patterns", patterns);
+        }
+        if let Ok(name) = banner.custom_name.try_lock()
+            && let Some(name) = name.as_ref()
+        {
+            nbt.put_string("CustomName", name.clone());
+        }
+        if nbt.is_empty() {
+            Some(ItemStack::new(1, item))
+        } else {
+            Some(ItemStack::new_with_component(
+                1,
+                item,
+                vec![(
+                    DataComponent::BlockEntityData,
+                    Some(Box::new(BlockEntityDataImpl { nbt }).to_dyn()),
+                )],
+            ))
+        }
+    }
+
     fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             let entity = BannerBlockEntity::new(*args.position);

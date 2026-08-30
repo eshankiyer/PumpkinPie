@@ -5,8 +5,9 @@ use pumpkin_macros::pumpkin_block;
 use crate::block::entities::chiseled_bookshelf::ChiseledBookshelfBlockEntity;
 use crate::{
     block::{
-        BlockBehaviour, BlockFuture, BlockHitResult, GetComparatorOutputArgs, NormalUseArgs,
-        OnPlaceArgs, PlacedArgs, UseWithItemArgs, registry::BlockActionResult,
+        BlockBehaviour, BlockFuture, BlockHitResult, GetCloneItemStackArgs,
+        GetComparatorOutputArgs, NormalUseArgs, OnPlaceArgs, PlacedArgs, UseWithItemArgs,
+        registry::BlockActionResult,
     },
     entity::{EntityBase, player::Player},
     world::World,
@@ -14,6 +15,8 @@ use crate::{
 use pumpkin_data::{
     BlockStateId,
     block_properties::{BlockProperties, ChiseledBookshelfLikeProperties, HorizontalFacing},
+    data_component::DataComponent,
+    data_component_impl::{ContainerImpl, DataComponentImpl},
     item::Item,
     item_stack::ItemStack,
     sound::{Sound, SoundCategory},
@@ -27,7 +30,44 @@ use pumpkin_world::inventory::Inventory;
 #[pumpkin_block("minecraft:chiseled_bookshelf")]
 pub struct ChiseledBookshelfBlock;
 
+// Vanilla `ItemContainerContents.fromItems` retains each occupied slot
+// (`ChiseledBookShelfBlockEntity.java:129-132`).
+fn occupied_items(items: &[ItemStack]) -> Vec<(u8, ItemStack)> {
+    items
+        .iter()
+        .enumerate()
+        .filter(|(_, stack)| !stack.is_empty())
+        .map(|(slot, stack)| (slot as u8, stack.clone()))
+        .collect()
+}
+
 impl BlockBehaviour for ChiseledBookshelfBlock {
+    /// Vanilla `ChiseledBookShelfBlockEntity.collectImplicitComponents` stores the occupied
+    /// slots in the picked item (`ChiseledBookShelfBlockEntity.java:122-132`); the live pick-item
+    /// caller is `JavaClient::handle_pick_item_from_block` through `BlockRegistry::get_clone_item_stack`.
+    fn get_clone_item_stack(&self, args: GetCloneItemStackArgs<'_>) -> Option<ItemStack> {
+        let item = Item::from_id(args.block.item_id)?;
+        let block_entity = args.world.get_block_entity(args.position)?;
+        let bookshelf = block_entity
+            .as_any()
+            .downcast_ref::<ChiseledBookshelfBlockEntity>()?;
+        let items = futures::executor::block_on(bookshelf.items.read());
+        let items = occupied_items(items.as_slice());
+
+        Some(if items.is_empty() {
+            ItemStack::new(1, item)
+        } else {
+            ItemStack::new_with_component(
+                1,
+                item,
+                vec![(
+                    DataComponent::Container,
+                    Some(Box::new(ContainerImpl { items }).to_dyn()),
+                )],
+            )
+        })
+    }
+
     fn on_place<'a>(&'a self, args: OnPlaceArgs<'a>) -> BlockFuture<'a, BlockStateId> {
         Box::pin(async move {
             let mut properties = ChiseledBookshelfLikeProperties::default(args.block);
@@ -252,5 +292,23 @@ impl ChiseledBookshelfBlock {
             5 => properties.slot_5_occupied,
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn occupied_items_preserves_bookshelf_slots() {
+        let mut items: [ItemStack; ChiseledBookshelfBlockEntity::INVENTORY_SIZE] =
+            std::array::from_fn(|_| ItemStack::EMPTY.clone());
+        items[4] = ItemStack::new(1, &Item::BOOK);
+
+        let occupied = occupied_items(&items);
+
+        assert_eq!(occupied.len(), 1);
+        assert_eq!(occupied[0].0, 4);
+        assert_eq!(occupied[0].1.get_item().id, Item::BOOK.id);
     }
 }

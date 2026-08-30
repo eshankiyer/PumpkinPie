@@ -54,10 +54,8 @@ impl BlockEntity for BannerBlockEntity {
         {
             nbt.put_string("CustomName", name.clone());
         }
-        if let Ok(patterns) = self.patterns.try_lock()
-            && let Some(ref pats) = *patterns
-        {
-            nbt.put_list("patterns", pats.clone());
+        if let Some(pats) = self.get_patterns() {
+            nbt.put_list("patterns", pats);
         }
         Some(nbt)
     }
@@ -69,6 +67,17 @@ impl BlockEntity for BannerBlockEntity {
 
 impl BannerBlockEntity {
     pub const ID: &'static str = "minecraft:banner";
+
+    /// Vanilla `BannerBlockEntity.getPatterns` (`BannerBlockEntity.java:74-76`): expose the
+    /// stored layers to the live pick-block and client-update paths.
+    #[must_use]
+    pub fn get_patterns(&self) -> Option<Vec<NbtTag>> {
+        self.patterns
+            .try_lock()
+            .ok()
+            .and_then(|patterns| patterns.clone())
+    }
+
     #[must_use]
     pub const fn new(position: BlockPos) -> Self {
         Self {
@@ -76,5 +85,27 @@ impl BannerBlockEntity {
             custom_name: Mutex::const_new(None),
             patterns: Mutex::const_new(None),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::BlockEntity;
+    use super::BannerBlockEntity;
+    use pumpkin_nbt::compound::NbtCompound;
+    use pumpkin_nbt::tag::NbtTag;
+    use pumpkin_util::math::position::BlockPos;
+
+    // `BannerBlockEntity.loadAdditional` restores the layers (`BannerBlockEntity.java:59-63`).
+    #[test]
+    fn patterns_accessor_reads_persisted_layers() {
+        let mut nbt = NbtCompound::new();
+        nbt.put_list("patterns", vec![NbtTag::String("base".into())]);
+        let banner = <BannerBlockEntity as BlockEntity>::from_nbt(&nbt, BlockPos::new(0, 64, 0));
+
+        assert_eq!(
+            banner.get_patterns(),
+            Some(vec![NbtTag::String("base".into())])
+        );
     }
 }

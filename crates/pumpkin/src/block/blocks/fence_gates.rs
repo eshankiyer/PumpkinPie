@@ -99,18 +99,26 @@ pub struct FenceGateBlock;
 
 impl BlockBehaviour for FenceGateBlock {
     /// `FenceGateBlock.onExplosionHit` (`FenceGateBlock.java:166-179`): trigger-block
-    /// explosions open an unpowered gate and emit the corresponding block event. Destroying
-    /// explosions have already replaced the state with air before this hook is called, so the
-    /// state guard naturally limits this translation to the vanilla trigger path.
+    /// explosions toggle an unpowered gate and emit the corresponding block event. The live
+    /// explosion dispatcher invokes this hook after a destroying explosion has replaced the
+    /// state with air, so only trigger-block explosions reach the toggle below.
     fn explode<'a>(&'a self, args: ExplodeArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            let state = args.world.get_block_state(args.position);
-            let mut properties = FenceGateProperties::from_state_id(state.id, args.block);
-            if properties.powered || state.is_air() {
+            if !args.can_trigger_blocks {
                 return;
             }
 
-            properties.open = true;
+            let state = args.world.get_block_state(args.position);
+            if state.is_air() {
+                return;
+            }
+
+            let mut properties = FenceGateProperties::from_state_id(state.id, args.block);
+            let Some(open) = explosion_open_value(properties.open, properties.powered, true) else {
+                return;
+            };
+
+            properties.open = open;
             args.world
                 .set_block_state(
                     args.position,
@@ -119,15 +127,22 @@ impl BlockBehaviour for FenceGateBlock {
                 )
                 .await;
             args.world.play_block_sound(
-                get_sound(args.block, true),
+                get_sound(args.block, open),
                 SoundCategory::Blocks,
                 *args.position,
             );
             emit_game_event(
                 args.world,
-                GameEvent::BlockOpen,
+                if open {
+                    GameEvent::BlockOpen
+                } else {
+                    GameEvent::BlockClose
+                },
                 args.position.to_centered_f64(),
-                GameEventContext::none(),
+                GameEventContext {
+                    source_entity: None,
+                    affected_block_state: Some(state.id),
+                },
             )
             .await;
         })
@@ -228,6 +243,16 @@ impl BlockBehaviour for FenceGateBlock {
     }
 }
 
+/// `FenceGateBlock.onExplosionHit` (`FenceGateBlock.java:169-175`) only toggles an unpowered
+/// gate for an explosion that can trigger blocks; return `None` for every other dispatch.
+const fn explosion_open_value(open: bool, powered: bool, eligible: bool) -> Option<bool> {
+    if eligible && !powered {
+        Some(!open)
+    } else {
+        None
+    }
+}
+
 fn is_in_wall(args: &GetStateForNeighborUpdateArgs<'_>) -> FenceGateProperties {
     let mut fence_props = FenceGateProperties::from_state_id(args.state_id, args.block);
 
@@ -251,4 +276,19 @@ fn is_in_wall(args: &GetStateForNeighborUpdateArgs<'_>) -> FenceGateProperties {
     }
 
     fence_props
+}
+
+#[cfg(test)]
+mod tests {
+    use super::explosion_open_value;
+
+    #[test]
+    fn trigger_explosion_toggles_only_unpowered_present_gates() {
+        // `FenceGateBlock.onExplosionHit` (`FenceGateBlock.java:169-175`) toggles only when
+        // `canTriggerBlocks()` is true and the gate is not powered.
+        assert_eq!(explosion_open_value(false, false, true), Some(true));
+        assert_eq!(explosion_open_value(true, false, true), Some(false));
+        assert_eq!(explosion_open_value(false, true, true), None);
+        assert_eq!(explosion_open_value(false, false, false), None);
+    }
 }

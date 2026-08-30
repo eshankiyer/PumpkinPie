@@ -232,6 +232,12 @@ fn experience_amount(input: &ItemStack, additional: &ItemStack) -> i32 {
     }
 }
 
+/// Vanilla `GrindstoneMenu` refreshes after repair-slot changes and after result `onTake`
+/// clears those slots (`GrindstoneMenu.java:66-77, 110-120, 242-252`).
+fn refreshes_result_for_slot(slot_index: i32) -> bool {
+    (0..=2).contains(&slot_index)
+}
+
 pub struct GrindstoneScreenHandler {
     behaviour: ScreenHandlerBehaviour,
     pub repair_inventory: Arc<SimpleInventory>,
@@ -328,7 +334,7 @@ impl ScreenHandler for GrindstoneScreenHandler {
         Box::pin(async move {
             self.internal_on_slot_click(slot_index, button, action_type, player)
                 .await;
-            if slot_index == 0 || slot_index == 1 {
+            if refreshes_result_for_slot(slot_index) {
                 self.update_result().await;
             }
         })
@@ -391,7 +397,7 @@ impl ScreenHandler for GrindstoneScreenHandler {
             }
 
             slot.on_take_item(player, &item).await;
-            if slot_index == 0 || slot_index == 1 {
+            if refreshes_result_for_slot(slot_index) {
                 self.update_result().await;
             }
             stack_left
@@ -634,6 +640,16 @@ mod tests {
 
         let expected = Enchantment::EFFICIENCY.min_cost.calculate(1);
         assert_eq!(experience_from_item(&item), expected);
+    }
+
+    #[test]
+    fn taking_result_refreshes_the_output_after_inputs_are_cleared() {
+        // `GrindstoneMenu.onTake` clears both inputs and `slotsChanged` recreates the result
+        // (`GrindstoneMenu.java:66-77, 110-120`).
+        assert!(refreshes_result_for_slot(0));
+        assert!(refreshes_result_for_slot(1));
+        assert!(refreshes_result_for_slot(2));
+        assert!(!refreshes_result_for_slot(3));
     }
 
     #[tokio::test]
