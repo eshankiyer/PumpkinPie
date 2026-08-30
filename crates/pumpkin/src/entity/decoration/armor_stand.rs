@@ -228,8 +228,9 @@ impl ArmorStandEntity {
             if stack.is_empty() {
                 continue;
             }
-            let dropped = stack.clone();
-            stack.clear();
+            // Vanilla `ArmorStand.breakAndDropItem`: use `ItemStack.copyAndClear`
+            // (`ItemStack.java:334-342`) before handing the emptied stack to the drop path.
+            let dropped = stack.copy_and_clear();
             drop(stack);
             entity
                 .world

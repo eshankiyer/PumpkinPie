@@ -382,6 +382,52 @@ impl DispenserBlock {
         }
     }
 
+    /// Vanilla `EquipmentDispenseItemBehavior.dispenseEquipment`
+    /// (`EquipmentDispenseItemBehavior.java:20-34`) equips the first eligible living entity in
+    /// the block directly in front of the dispenser and marks mob equipment as persistent.
+    async fn dispense_equipment(ctx: &DispenseContext<'_>, item: &mut ItemStack) -> bool {
+        let target = Self::target_position(ctx);
+        let min = target.to_f64();
+        let aabb = BoundingBox::new(min, min.add_raw(1.0, 1.0, 1.0));
+
+        let mut selected = None;
+        for entity in ctx.world.get_entities_at_box(&aabb) {
+            if let Some(living) = entity.get_living_entity()
+                && living.can_equip_with_dispenser(item).await
+                // `Mob.canDispenserEquipIntoSlot` is the mob-specific gate (`Mob.java:1117-1118`).
+                && entity.get_mob().is_none_or(|mob| {
+                    mob.can_dispenser_equip_into_slot(&living.equipment_slot_for_item(item))
+                })
+            {
+                selected = Some(entity);
+                break;
+            }
+        }
+        let Some(entity) = selected else {
+            return false;
+        };
+        // The selection predicate above only admits living entities.
+        let Some(living) = entity.get_living_entity() else {
+            return false;
+        };
+        let slot = living.equipment_slot_for_item(item);
+        let equipped = item.split(1);
+        {
+            let mut equipment = living.entity_equipment.lock().await;
+            equipment.put(&slot, equipped.clone());
+        };
+        living
+            .equipment_drop_chances
+            .lock()
+            .await
+            .insert(slot.clone(), 1.0);
+        if let Some(mob) = entity.get_mob() {
+            mob.get_mob_entity().set_persistence_required();
+        }
+        living.send_equipment_changes(&[(slot, equipped)]);
+        true
+    }
+
     fn projectile_spawn_position(ctx: &DispenseContext<'_>) -> Vector3<f64> {
         ctx.position
             .to_centered_f64()
@@ -935,8 +981,8 @@ impl DispenserBlock {
     /// CarvedPumpkinBlock.java:59-63), place the default state with update flag 3, fire
     /// `BLOCK_PLACE` and consume the stack - the resulting `onPlace` spawns the golem. On
     /// failure vanilla falls back to equipping the pumpkin as head armor
-    /// (`EquipmentDispenseItemBehavior.dispenseEquipment`), which is not ported here, so
-    /// the stack stays in the dispenser with the fail animation instead.
+    /// (`EquipmentDispenseItemBehavior.dispenseEquipment`); the shared equipment behavior
+    /// handles that fallback (`EquipmentDispenseItemBehavior.java:17-34`).
     async fn dispense_carved_pumpkin(ctx: &DispenseContext<'_>, item: &mut ItemStack) {
         let target = Self::target_position(ctx);
         if ctx.world.get_block_state(&target).is_air()
@@ -957,6 +1003,8 @@ impl DispenserBlock {
                 GameEventContext::none(),
             )
             .await;
+            Self::play_dispense_effects(ctx, WorldEvent::SoundDispenserDispense);
+        } else if Self::dispense_equipment(ctx, item).await {
             Self::play_dispense_effects(ctx, WorldEvent::SoundDispenserDispense);
         } else {
             Self::play_dispense_effects(ctx, WorldEvent::SoundDispenserFail);
@@ -989,6 +1037,8 @@ impl DispenserBlock {
                 GameEventContext::none(),
             )
             .await;
+            Self::play_dispense_effects(ctx, WorldEvent::SoundDispenserDispense);
+        } else if Self::dispense_equipment(ctx, item).await {
             Self::play_dispense_effects(ctx, WorldEvent::SoundDispenserDispense);
         } else {
             Self::play_dispense_effects(ctx, WorldEvent::SoundDispenserFail);

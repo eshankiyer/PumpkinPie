@@ -106,6 +106,12 @@ fn fall_one_cm_stat_amount(fall_distance: f32) -> Option<i32> {
     (fall_distance >= 2.0).then_some((fall_distance * 100.0).round() as i32)
 }
 
+/// Vanilla `LivingEntity.causeFallDamage` (`LivingEntity.java:1788-1797`) limits fall distance
+/// to the vertical distance below the most recent impulse impact position.
+fn impulse_limited_fall_distance(fall_distance: f32, entity_y: f64, impact_y: f64) -> f32 {
+    fall_distance.min((impact_y - entity_y) as f32)
+}
+
 fn armor_resists_damage(stack: &ItemStack, damage_type: &DamageType) -> bool {
     let Some(resistant) = stack.get_data_component::<DamageResistantImpl>() else {
         return false;
@@ -205,6 +211,10 @@ pub struct LivingEntity {
     pub dead: AtomicBool,
     /// The distance the entity has been falling.
     pub fall_distance: AtomicCell<f32>,
+    /// Vanilla `LivingEntity.currentImpulseContextResetGraceTime` and
+    /// `currentImpulseImpactPos` (`LivingEntity.java:211, 284`).
+    post_impulse_context_reset_grace_time: AtomicI32,
+    current_impulse_impact_pos: AtomicCell<Option<Vector3<f64>>>,
     pub active_effects: Mutex<HashMap<&'static StatusEffect, Effect>>,
     /// Vanilla `MobEffectInstance.hiddenEffect`: instances of an active effect that were taken
     /// over by a stronger or longer one and are restored when it runs out. Nearest first.
@@ -402,6 +412,8 @@ impl LivingEntity {
             last_damage_taken: AtomicCell::new(0.0),
             absorption: AtomicCell::new(0.0),
             fall_distance: AtomicCell::new(0.0),
+            post_impulse_context_reset_grace_time: AtomicI32::new(0),
+            current_impulse_impact_pos: AtomicCell::new(None),
             death_time: AtomicU8::new(0),
             move_dist: AtomicCell::new(0.0),
             next_step: AtomicCell::new(1.0),
@@ -1143,6 +1155,9 @@ impl LivingEntity {
         let look = Vector3::from_yaw_pitch(self.entity.yaw.load(), self.entity.pitch.load());
         self.entity
             .add_velocity(look.multiply(f64::from(magnitude), 0.0, f64::from(magnitude)));
+        // `ApplyEntityImpulse.apply` (`ApplyEntityImpulse.java:24-32`) grants living entities
+        // ten ticks before an impulse context may be reset.
+        self.apply_post_impulse_grace_time(10);
 
         if let Some(player) = caller.get_player() {
             player.add_exhaustion(exhaustion).await;
@@ -2516,6 +2531,41 @@ impl LivingEntity {
         self.entity.velocity_dirty.store(true, SeqCst);
     }
 
+    /// Vanilla `LivingEntity.applyPostImpulseGraceTime` (`LivingEntity.java:1813-1824`)
+    /// retains an impulse context for at least the requested number of ticks. This is used by
+    /// lunge's `ApplyEntityImpulse` effect and by the mace impact path below.
+    pub fn apply_post_impulse_grace_time(&self, ticks: i32) {
+        self.post_impulse_context_reset_grace_time
+            .fetch_max(ticks, Relaxed);
+    }
+
+    /// Vanilla `LivingEntity.setIgnoreFallDamageFromCurrentImpulse` (`LivingEntity.java:1813-1819`)
+    /// records the impact position used to limit the next fall's damage calculation.
+    pub fn set_ignore_fall_damage_from_current_impulse(
+        &self,
+        ignore_fall_damage: bool,
+        new_impulse_impact_pos: Vector3<f64>,
+    ) {
+        if ignore_fall_damage {
+            self.apply_post_impulse_grace_time(40);
+            self.current_impulse_impact_pos
+                .store(Some(new_impulse_impact_pos));
+        } else {
+            self.post_impulse_context_reset_grace_time.store(0, Relaxed);
+        }
+    }
+
+    fn try_reset_current_impulse_context(&self) {
+        if self.post_impulse_context_reset_grace_time.load(Relaxed) == 0 {
+            self.reset_current_impulse_context();
+        }
+    }
+
+    fn reset_current_impulse_context(&self) {
+        self.post_impulse_context_reset_grace_time.store(0, Relaxed);
+        self.current_impulse_impact_pos.store(None);
+    }
+
     async fn get_jump_velocity(&self, mut strength: f64) -> f64 {
         strength *= self.get_attribute_value(&Attributes::JUMP_STRENGTH);
         strength *= f64::from(self.entity.get_jump_velocity_multiplier());
@@ -2550,6 +2600,22 @@ impl LivingEntity {
 
         if ground {
             let fall_distance = self.fall_distance.swap(0.0);
+            let fall_distance =
+                self.current_impulse_impact_pos
+                    .load()
+                    .map_or(fall_distance, |impact_pos| {
+                        let effective = impulse_limited_fall_distance(
+                            fall_distance,
+                            self.entity.pos.load().y,
+                            impact_pos.y,
+                        );
+                        if effective <= 0.0 {
+                            self.reset_current_impulse_context();
+                        } else {
+                            self.try_reset_current_impulse_context();
+                        }
+                        effective
+                    });
             if fall_distance <= 0.0
                 || dont_damage
                 || self.should_prevent_fall_damage()
@@ -3710,6 +3776,50 @@ impl LivingEntity {
 
     pub fn is_part_of_game(&self) -> bool {
         !self.is_spectator() && self.entity.is_alive()
+    }
+
+    /// Vanilla `LivingEntity.canEquipWithDispenser` (`LivingEntity.java:3860-3874`) accepts a
+    /// dispensable equippable item only when its slot is empty and its entity restriction allows
+    /// this entity.
+    pub async fn can_equip_with_dispenser(&self, item_stack: &ItemStack) -> bool {
+        if !self.entity.is_alive() || self.is_spectator() {
+            return false;
+        }
+
+        let Some(equippable) = item_stack.get_data_component::<EquippableImpl>() else {
+            return false;
+        };
+        if !equippable.dispensable {
+            return false;
+        }
+
+        let allowed = equippable
+            .allowed_entities
+            .as_ref()
+            .is_none_or(|allowed| match allowed {
+                pumpkin_data::data_component_impl::IDSet::IDs(ids) => ids
+                    .iter()
+                    .any(|entity_type| entity_type.id == self.entity.entity_type.id),
+                pumpkin_data::data_component_impl::IDSet::Tag(tag) => {
+                    self.entity.entity_type.is_tagged_with(tag).unwrap_or(false)
+                }
+            });
+        if !allowed {
+            return false;
+        }
+
+        let equipment = self.entity_equipment.lock().await;
+        equipment.get(equippable.slot).is_empty()
+    }
+
+    /// Vanilla `LivingEntity.getEquipmentSlotForItem` (`LivingEntity.java:3880-3883`) returns the
+    /// equippable component's declared slot for dispenser equipment.
+    pub fn equipment_slot_for_item(&self, item_stack: &ItemStack) -> EquipmentSlot {
+        item_stack
+            .get_data_component::<EquippableImpl>()
+            .map_or(EquipmentSlot::MAIN_HAND, |equippable| {
+                equippable.slot.clone()
+            })
     }
 
     /// Vanilla `LivingEntity.attackable` (`LivingEntity.java:3715-3717`), overridden `false`
@@ -5450,6 +5560,23 @@ impl EntityBase for LivingEntity {
             let clamped_health = new_health.max(0.0).min(max_h);
             if remaining > 0.0 {
                 self.set_health(clamped_health);
+                // `LivingEntity.actuallyHurt` emits ENTITY_DAMAGE after health changes
+                // (`LivingEntity.java:1953-1970`). Resolve the victim from the active world so
+                // the event context carries the same source entity for players and mobs.
+                let damaged_entity = world
+                    .get_player_by_uuid(self.entity.entity_uuid)
+                    .map(|player| player as Arc<dyn EntityBase>)
+                    .or_else(|| world.get_entity_by_uuid(self.entity.entity_uuid));
+                crate::world::game_event::emit_game_event(
+                    &world,
+                    pumpkin_data::game_event::GameEvent::EntityDamage,
+                    self.entity.pos.load(),
+                    damaged_entity.map_or_else(
+                        crate::world::game_event::GameEventContext::none,
+                        crate::world::game_event::GameEventContext::of_entity,
+                    ),
+                )
+                .await;
             }
 
             // `PanicGoal.shouldPanic` checks the most recent accepted damage source against
@@ -5614,6 +5741,13 @@ impl EntityBase for LivingEntity {
     ) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             self.entity.tick(caller, server).await;
+            // Vanilla `LivingEntity.tick` decrements the post-impulse grace timer once per tick
+            // (`LivingEntity.java:2864-2868`).
+            let _ = self.post_impulse_context_reset_grace_time.fetch_update(
+                Relaxed,
+                Relaxed,
+                |ticks| (ticks > 0).then_some(ticks - 1),
+            );
             if let Some(mob) = caller.get_mob()
                 && mob.get_entity().entity_id == self.entity.entity_id
             {
@@ -6952,6 +7086,13 @@ mod tests {
         );
         assert!(diving.y < climbing.y);
         assert!(climbing.y > -0.1);
+    }
+
+    #[test]
+    fn impulse_context_limits_fall_distance_to_impact_height() {
+        assert_eq!(impulse_limited_fall_distance(8.0, 70.0, 72.5), 2.5);
+        assert_eq!(impulse_limited_fall_distance(2.0, 70.0, 72.5), 2.0);
+        assert_eq!(impulse_limited_fall_distance(2.0, 73.0, 72.5), -0.5);
     }
 
     #[test]

@@ -1225,6 +1225,12 @@ const fn spawns_offspring_from_egg(entity_type: &EntityType) -> bool {
 }
 
 pub trait Mob: EntityBase + Send + Sync {
+    /// Vanilla `Mob.canDispenserEquipIntoSlot` (`Mob.java:1117-1118`) lets a mob
+    /// accept dispenser equipment only when its loot-pickup flag is enabled.
+    fn can_dispenser_equip_into_slot(&self, _slot: &EquipmentSlot) -> bool {
+        self.get_mob_entity().can_pick_up_loot()
+    }
+
     /// `Entity.deflection` (`Entity.java:3491-3493`) for mobs. The blanket `EntityBase` impl
     /// below forwards to this so that individual mobs can override it; only the breeze does
     /// (`Breeze.java:196-202`).
@@ -2360,15 +2366,18 @@ pub trait Mob: EntityBase + Send + Sync {
     }
 
     /// Vanilla `Mob.canReplaceCurrentItem`'s safe base case. Full armor/weapon attribute
-    /// comparison needs the missing item-attribute evaluator; until it exists Pumpkin only
-    /// equips an empty slot, which can neither lose nor duplicate an existing item.
+    /// comparison needs the missing item-attribute evaluator; equal stacks still use the
+    /// source-faithful tie-breaker below.
     fn can_replace_current_item(
         &self,
-        _new_stack: &ItemStack,
+        new_stack: &ItemStack,
         current_stack: &ItemStack,
         _slot: &EquipmentSlot,
     ) -> bool {
+        // `Mob.canReplaceCurrentItem` uses this equal-item tie-breaker (`Mob.java:605-613, 654-666`).
         current_stack.is_empty()
+            || (new_stack.item.id == current_stack.item.id
+                && can_replace_equal_item(new_stack, current_stack))
     }
 
     /// Vanilla `Mob.setItemSlotAndDropWhenKilled`: update persistent equipment, mark the slot
@@ -3202,6 +3211,31 @@ fn mob_weapon_durability_cost(stack: &ItemStack) -> i32 {
         .map_or(0, |weapon| weapon.item_damage_per_attack as i32)
 }
 
+/// Vanilla `Mob.canReplaceEqualItem` (`Mob.java:654-666`): prefer the stack with
+/// more enchantments, then the stack with less damage, then a newly named stack.
+fn can_replace_equal_item(new_stack: &ItemStack, current_stack: &ItemStack) -> bool {
+    let new_enchantment_count = new_stack
+        .get_data_component::<pumpkin_data::data_component_impl::EnchantmentsImpl>()
+        .map_or(0, |enchantments| enchantments.enchantment.len());
+    let current_enchantment_count = current_stack
+        .get_data_component::<pumpkin_data::data_component_impl::EnchantmentsImpl>()
+        .map_or(0, |enchantments| enchantments.enchantment.len());
+    if new_enchantment_count != current_enchantment_count {
+        return new_enchantment_count > current_enchantment_count;
+    }
+
+    let new_damage = new_stack.get_damage();
+    let current_damage = current_stack.get_damage();
+    (new_damage != current_damage && new_damage < current_damage)
+        || (new_damage == current_damage
+            && new_stack
+                .get_data_component::<pumpkin_data::data_component_impl::CustomNameImpl>()
+                .is_some()
+            && current_stack
+                .get_data_component::<pumpkin_data::data_component_impl::CustomNameImpl>()
+                .is_none())
+}
+
 pub trait PathAwareEntity: Mob + Send + Sync {
     fn get_pathfinding_favor(&self, _block_pos: BlockPos, _world: Arc<World>) -> f32 {
         0.0
@@ -3260,8 +3294,8 @@ pub trait PathAwareEntity: Mob + Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::{
-        EntityType, attack_knockback_strength, fire_aspect_ticks, knockback_enchantment_strength,
-        mob_weapon_durability_cost, uses_monster_no_action_time,
+        EntityType, attack_knockback_strength, can_replace_equal_item, fire_aspect_ticks,
+        knockback_enchantment_strength, mob_weapon_durability_cost, uses_monster_no_action_time,
     };
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
@@ -3299,6 +3333,19 @@ mod tests {
             mob_weapon_durability_cost(&ItemStack::new(1, &Item::COAL)),
             0
         );
+    }
+
+    #[test]
+    fn equal_equipment_prefers_less_damage_and_then_a_custom_name() {
+        let mut damaged = ItemStack::new(1, &Item::IRON_SWORD);
+        damaged.set_damage(10);
+        let undamaged = ItemStack::new(1, &Item::IRON_SWORD);
+        assert!(can_replace_equal_item(&undamaged, &damaged));
+        assert!(!can_replace_equal_item(&damaged, &undamaged));
+
+        let mut named = ItemStack::new(1, &Item::IRON_SWORD);
+        named.set_custom_name("named".into());
+        assert!(can_replace_equal_item(&named, &undamaged));
     }
 
     #[test]
