@@ -194,6 +194,7 @@ use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::{Block, BlockDirection, BlockId, BlockState};
 use pumpkin_protocol::java::server::play::SUseItemOn;
+use pumpkin_util::Hand;
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::world::{BlockAccessor, BlockFlags};
@@ -796,9 +797,19 @@ impl BlockRegistry {
 
         Self::prepare_double_high_block_placement(&world, placed_block, &final_block_pos).await;
 
-        let _replaced_id = world
+        let hand = Hand::from_packet_id(use_item_on.hand.0).unwrap_or(Hand::Right);
+        let item_stack = player.inventory().get_stack_in_hand(hand).await;
+
+        world
             .set_block_state(&final_block_pos, new_state, BlockFlags::NOTIFY_ALL)
             .await;
+
+        // BlockItem.updateBlockEntityComponents applies the held item's components before
+        // setPlacedBy and the block-place event, and only when the block that actually landed
+        // is the one we meant to place (`BlockItem.java:76-79`, `:101-106`).
+        if world.get_block(&final_block_pos).id == placed_block.id {
+            world.apply_block_entity_item_components(&final_block_pos, &item_stack);
+        }
 
         // BlockItem.place, line 88: level.gameEvent(GameEvent.BLOCK_PLACE, pos,
         // GameEvent.Context.of(player, placedState)).

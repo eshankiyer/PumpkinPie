@@ -7,9 +7,11 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use pumpkin_data::Block;
 use pumpkin_data::data_component_impl::JukeboxPlayableImpl;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::jukebox_song::JukeboxSong;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
+use rand::RngExt;
 use tokio::sync::Mutex;
 
 use crate::block::entities::BlockEntity;
@@ -37,6 +39,16 @@ const TICKS_SINCE_SONG_STARTED_NBT_KEY: &str = "ticks_since_song_started";
 /// for 20 extra ticks after its nominal length before actually stopping.
 const SONG_END_PADDING_TICKS: u64 = 20;
 
+// Vanilla restores the song holder and length through `setSongWithoutPlaying`
+// (`JukeboxBlockEntity.java:72-85`; `JukeboxSongPlayer.java:38-43`).
+fn song_length_ticks(stack: &ItemStack) -> u64 {
+    stack
+        .get_data_component::<JukeboxPlayableImpl>()
+        .and_then(|playable| playable.song.split(':').nth(1))
+        .and_then(JukeboxSong::from_name)
+        .map_or(0, |song| song.length_in_ticks())
+}
+
 impl BlockEntity for JukeboxBlockEntity {
     fn resource_location(&self) -> &'static str {
         Self::ID
@@ -57,12 +69,20 @@ impl BlockEntity for JukeboxBlockEntity {
 
         let ticks_since_song_started =
             nbt.get_long(TICKS_SINCE_SONG_STARTED_NBT_KEY).unwrap_or(0) as u64;
+        let song_length = song_length_ticks(&record_stack);
 
         Self {
             position,
             record_stack: Arc::new(Mutex::new(record_stack)),
-            ticks_since_song_started: AtomicU64::new(ticks_since_song_started),
-            song_length_ticks: AtomicU64::new(0), // Will be set when playing starts
+            // Vanilla `loadAdditional` restores the song player with the saved tick count
+            // (`JukeboxBlockEntity.java:72-85`), and `setSongWithoutPlaying` retains it only
+            // while the song has not finished (`JukeboxSongPlayer.java:38-43`).
+            ticks_since_song_started: AtomicU64::new(if song_length > 0 {
+                ticks_since_song_started
+            } else {
+                0
+            }),
+            song_length_ticks: AtomicU64::new(song_length),
             dirty: AtomicBool::new(false),
         }
     }
@@ -112,6 +132,35 @@ impl BlockEntity for JukeboxBlockEntity {
                     self.emit_jukebox_event(world, GameEvent::JukeboxPlay).await;
                 }
             }
+        })
+    }
+
+    fn on_block_replaced<'a>(
+        self: Arc<Self>,
+        world: Arc<World>,
+        position: BlockPos,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
+    where
+        Self: 'a,
+    {
+        Box::pin(async move {
+            // Vanilla `preRemoveSideEffects` runs before the jukebox block entity is removed,
+            // while `setRemoved` always emits the stop event and level event
+            // (`JukeboxBlockEntity.java:126-155`). Pumpkin invokes this callback at its entity
+            // removal point, so perform both actions before the entity is discarded.
+            self.pop_out_the_item(&world).await;
+            emit_game_event(
+                &world,
+                GameEvent::JukeboxStopPlay,
+                position.to_centered_f64(),
+                GameEventContext::none(),
+            )
+            .await;
+            world.sync_world_event(
+                pumpkin_data::world::WorldEvent::SoundStopJukeboxSong,
+                position,
+                0,
+            );
         })
     }
 
@@ -178,6 +227,28 @@ impl JukeboxBlockEntity {
         *record = ItemStack::EMPTY.clone();
         self.mark_dirty();
         taken
+    }
+
+    /// Vanilla `JukeboxBlockEntity.popOutTheItem` removes the record, spawns it above the
+    /// block, and uses the normal song-change callback (`JukeboxBlockEntity.java:48-61`).
+    pub(crate) async fn pop_out_the_item(&self, world: &Arc<World>) {
+        let record = self.clear_record().await;
+        if record.is_empty() {
+            return;
+        }
+
+        let spawn_pos = Vector3::new(
+            f64::from(self.position.0.x) + 0.5 + rand::rng().random_range(-0.35..0.35),
+            f64::from(self.position.0.y) + 1.01,
+            f64::from(self.position.0.z) + 0.5 + rand::rng().random_range(-0.35..0.35),
+        );
+        let entity = crate::entity::Entity::new(
+            world.clone(),
+            spawn_pos,
+            &pumpkin_data::entity::EntityType::ITEM,
+        );
+        let item_entity = Arc::new(crate::entity::item::ItemEntity::new(entity, record));
+        world.spawn_entity(item_entity).await;
     }
 
     /// Start playing a song with the given length in ticks
@@ -275,6 +346,17 @@ impl Inventory for JukeboxBlockEntity {
         })
     }
 
+    /// Vanilla `JukeboxBlockEntity.canTakeItem` allows extraction only when the destination
+    /// contains an empty slot (`JukeboxBlockEntity.java:147-150`).
+    fn can_take_item<'a>(
+        &'a self,
+        into: &'a dyn Inventory,
+        _slot: usize,
+        _stack: &'a ItemStack,
+    ) -> InventoryFuture<'a, bool> {
+        Box::pin(async move { into.contains_any_predicate(&|stack| stack.is_empty()).await })
+    }
+
     fn mark_dirty(&self) {
         self.dirty.store(true, Ordering::Relaxed);
     }
@@ -315,5 +397,38 @@ mod tests {
             .ticks_since_song_started
             .store(song_length + SONG_END_PADDING_TICKS, Ordering::Relaxed);
         assert!(!entity.is_playing());
+    }
+
+    /// `loadAdditional` restores a saved song player only when the record resolves to a
+    /// registered song (`JukeboxBlockEntity.java:72-85`; `JukeboxSongPlayer.java:38-43`).
+    #[test]
+    fn saved_playable_record_restores_song_length() {
+        let mut stack = ItemStack::new(1, &pumpkin_data::item::Item::MUSIC_DISC_CAT);
+        stack.patch.push((
+            pumpkin_data::data_component::DataComponent::JukeboxPlayable,
+            Some(Box::new(JukeboxPlayableImpl {
+                song: "minecraft:cat",
+            })),
+        ));
+
+        assert_eq!(
+            song_length_ticks(&stack),
+            JukeboxSong::Cat.length_in_ticks()
+        );
+        assert_eq!(song_length_ticks(&ItemStack::EMPTY), 0);
+    }
+
+    /// `canTakeItem` requires an empty destination slot (`JukeboxBlockEntity.java:147-150`).
+    #[tokio::test]
+    async fn extraction_requires_an_empty_destination_slot() {
+        let jukebox = JukeboxBlockEntity::new(BlockPos(Vector3::new(0, 0, 0)));
+        let destination = pumpkin_world::inventory::SimpleInventory::new(1);
+        let record = ItemStack::new(1, &pumpkin_data::item::Item::MUSIC_DISC_CAT);
+
+        assert!(jukebox.can_take_item(&destination, 0, &record).await);
+        destination
+            .set_stack(0, ItemStack::new(1, &pumpkin_data::item::Item::STONE))
+            .await;
+        assert!(!jukebox.can_take_item(&destination, 0, &record).await);
     }
 }

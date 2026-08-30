@@ -1241,6 +1241,28 @@ pub trait Mob: EntityBase + Send + Sync {
         self.default_has_controlling_passenger()
     }
 
+    /// Server-side `PlayerRideableJumping` hooks (`PlayerRideableJumping.java:3-16`). Rideable
+    /// mobs override these; keeping the defaults inert preserves ordinary mob command handling.
+    fn can_jump(&self) -> EntityBaseFuture<'_, bool> {
+        Box::pin(async { false })
+    }
+
+    fn on_player_jump(&self, _jump_amount: i32) {}
+
+    fn handle_start_jump(&self, _jump_scale: i32) {}
+
+    fn handle_stop_jump(&self) {}
+
+    /// `AbstractHorse.isBred` is consumed by its cross-species follow-mommy goal. Other mobs do
+    /// not have that flag and therefore remain ineligible as horse parents.
+    fn is_bred(&self) -> bool {
+        false
+    }
+
+    /// Called when the shared leash solver applies an elastic pull. Most mobs have no
+    /// pull-specific state to clear.
+    fn on_elastic_leash_pull(&self) {}
+
     /// The `Mob`-level behaviour, callable from an override without recursing.
     ///
     /// `Mob::has_controlling_passenger(self)` inside an override resolves back to that same
@@ -1358,10 +1380,37 @@ pub trait Mob: EntityBase + Send + Sync {
     }
 
     /// Sound emitted by the mob's `playStepSound` hook, or `None` when the mob uses the generic
-    /// block step path. Concrete skeleton variants override this where vanilla overrides
-    /// `getStepSound`.
+    /// block step path. `AbstractHorse.playStepSound` (`AbstractHorse.java:342-360`) uses the
+    /// horse step sound for ordinary ground movement; the generic sound hook supplies that
+    /// server-visible part for horse-family entities.
     fn get_step_sound(&self) -> Option<Sound> {
-        None
+        let entity_type = self.get_entity().entity_type;
+        let is_horse = matches!(
+            entity_type.id,
+            id if id == pumpkin_data::entity::EntityType::HORSE.id
+                || id == pumpkin_data::entity::EntityType::DONKEY.id
+                || id == pumpkin_data::entity::EntityType::MULE.id
+                || id == pumpkin_data::entity::EntityType::SKELETON_HORSE.id
+                || id == pumpkin_data::entity::EntityType::ZOMBIE_HORSE.id
+        );
+        if !is_horse {
+            return None;
+        }
+        let entity = self.get_entity();
+        let ridden = entity
+            .passengers
+            .try_lock()
+            .is_ok_and(|passengers| !passengers.is_empty());
+        let tick_count = self.get_mob_entity().tick_count.load(Relaxed);
+        if ridden && tick_count > 5 && tick_count % 3 == 0 {
+            // `AbstractHorse.playGallopSound` (`AbstractHorse.java:350-375`) is selected after
+            // the initial ridden steps; `tick_swim_sound` supplies the shared step dispatch.
+            Some(Sound::EntityHorseGallop)
+        } else if entity.age.load(Relaxed) < 0 {
+            Some(Sound::EntityBabyHorseStep)
+        } else {
+            Some(Sound::EntityHorseStep)
+        }
     }
 
     /// Vanilla `LivingEntity.getVoicePitch` is consumed by `makeSound` for mob sounds
@@ -2846,6 +2895,7 @@ impl<T: Mob + Send + 'static> EntityBase for T {
                 // dispatch; `PathfinderMob.whenLeashedTo` retargets the home to the holder.
                 self.when_leashed_to(BlockPos::floored_v(holder_pos));
                 self.close_range_leash_behavior(holder_pos, distance);
+                self.on_elastic_leash_pull();
             }
 
             if mob_entity.breeding_cooldown.load(Relaxed) > 0 {

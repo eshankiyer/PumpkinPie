@@ -17,6 +17,7 @@ impl JavaClient {
         player.update_last_action_time();
 
         let entity = &player.get_entity();
+        let jump_boost = command.jump_boost.0;
         match command.action {
             Action::StartSprinting => {
                 if !entity.is_sprinting() {
@@ -42,7 +43,33 @@ impl JavaClient {
             }
             Action::LeaveBed => player.wake_up().await,
 
-            Action::StartHorseJump | Action::StopHorseJump | Action::OpenVehicleInventory => {
+            Action::StartHorseJump => {
+                // `ServerGamePacketListenerImpl.handlePlayerCommand` checks `canJump`, then
+                // calls `handleStartJump` (`ServerGamePacketListenerImpl.java:1721-1727`).
+                let vehicle = entity.vehicle.lock().await.clone();
+                if let Some(vehicle) = vehicle
+                    && let Some(mob) = vehicle.get_mob()
+                    && jump_boost > 0
+                    && mob.can_jump().await
+                {
+                    // `AbstractHorse.onPlayerJump` stores the charge for `tickRidden`
+                    // (`AbstractHorse.java:720-738,878-895`); the shared Mob hooks expose that
+                    // server-side path to the packet handler.
+                    mob.on_player_jump(jump_boost);
+                    mob.handle_start_jump(jump_boost);
+                }
+            }
+            Action::StopHorseJump => {
+                // `ServerGamePacketListenerImpl.handlePlayerCommand` forwards stop-jump to the
+                // controlled vehicle (`ServerGamePacketListenerImpl.java:1729-1732`).
+                let vehicle = entity.vehicle.lock().await.clone();
+                if let Some(vehicle) = vehicle
+                    && let Some(mob) = vehicle.get_mob()
+                {
+                    mob.handle_stop_jump();
+                }
+            }
+            Action::OpenVehicleInventory => {
                 debug!("todo");
             }
             Action::StartFlyingElytra => {

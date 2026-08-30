@@ -220,29 +220,12 @@ impl ArrowEntity {
             return color;
         }
 
-        let mut red = 0i64;
-        let mut green = 0i64;
-        let mut blue = 0i64;
-        let mut total_weight = 0i64;
-        for (effect, _, amplifier, _, show_particles, _) in
-            crate::item::potion::PotionContents::read_potion_effects(item_stack)
-        {
-            if !show_particles {
-                continue;
-            }
-            let weight = i64::from(amplifier) + 1;
-            red += i64::from((effect.color >> 16) & 0xff) * weight;
-            green += i64::from((effect.color >> 8) & 0xff) * weight;
-            blue += i64::from(effect.color & 0xff) * weight;
-            total_weight += weight;
-        }
-
-        if total_weight == 0 {
-            -13_083_194
-        } else {
-            (((red / total_weight) << 16) | ((green / total_weight) << 8) | (blue / total_weight))
-                as i32
-        }
+        // PotionContents.java:113-119 supplies BASE_POTION_COLOR when no visible effect color
+        // exists; Arrow.java:59-62 stores that PotionContents color in the tracked field.
+        crate::item::potion::PotionContents::get_color_or(
+            &crate::item::potion::PotionContents::read_potion_effects(item_stack),
+            -13_083_194,
+        )
     }
 
     /// `Arrow.setPickupItemStack` (`Arrow.java:53-57`).

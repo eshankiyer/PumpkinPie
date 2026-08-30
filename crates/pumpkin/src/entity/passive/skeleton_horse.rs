@@ -83,7 +83,9 @@ impl SkeletonHorseEntity {
             // `SkeletonHorse.java:65-66`: `addBehaviourGoals` is overridden to empty, so no
             // tempt/float/panic goal here (unlike Horse/Donkey/Mule) -- only the base
             // `AbstractHorse.registerGoals` priorities 4/6/7/8/9 apply.
-            goal_selector.add_goal(4, Box::new(FollowParentGoal::new(1.0)));
+            // `AbstractHorse.followMommy` (`AbstractHorse.java:561-568`) accepts any bred adult
+            // horse-family parent within 16 blocks.
+            goal_selector.add_goal(4, Box::new(FollowParentGoal::new_horse(1.0)));
             goal_selector.add_goal(6, Box::new(WanderAroundGoal::new_water_avoiding(0.7)));
             goal_selector.add_goal(
                 7,
@@ -168,6 +170,35 @@ impl AbstractHorse for SkeletonHorseEntity {
 impl Mob for SkeletonHorseEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    // `AbstractHorse` rider, breeding, and leash hooks (`AbstractHorse.java:189-205,878-905`).
+    fn can_jump(&self) -> EntityBaseFuture<'_, bool> {
+        AbstractHorse::can_jump_now(self)
+    }
+
+    fn on_player_jump(&self, jump_amount: i32) {
+        AbstractHorse::on_player_jump(self, jump_amount);
+    }
+
+    fn handle_start_jump(&self, jump_scale: i32) {
+        AbstractHorse::handle_start_jump(self, jump_scale);
+    }
+
+    fn handle_stop_jump(&self) {
+        AbstractHorse::handle_stop_jump(self);
+    }
+
+    fn is_bred(&self) -> bool {
+        AbstractHorse::is_bred(self)
+    }
+
+    fn on_elastic_leash_pull(&self) {
+        AbstractHorse::on_elastic_leash_pull(self);
+    }
+
+    fn custom_travel<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) -> EntityBaseFuture<'a, bool> {
+        AbstractHorse::custom_travel(self, caller)
     }
 
     /// `SkeletonHorse.getAmbientSound` (`SkeletonHorse.java:68-71`). `eye_in_water` is updated

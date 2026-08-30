@@ -1,6 +1,6 @@
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::entity::EntityType;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -27,18 +27,23 @@ pub struct AttributeInstance {
     pub min_value: f64,
     pub max_value: f64,
     pub modifiers: Vec<Modifier>,
+    /// Mirrors vanilla's permanent/transient modifier maps (`AttributeInstance.java:23-25`).
+    permanent_modifier_ids: HashSet<String>,
+    transient_modifier_ids: HashSet<String>,
     pub cached_value: AtomicU64,
     pub dirty: AtomicBool,
 }
 
 impl AttributeInstance {
     #[must_use]
-    pub const fn new(base_value: f64, min_value: f64, max_value: f64) -> Self {
+    pub fn new(base_value: f64, min_value: f64, max_value: f64) -> Self {
         Self {
             base_value,
             min_value,
             max_value,
             modifiers: Vec::new(),
+            permanent_modifier_ids: HashSet::new(),
+            transient_modifier_ids: HashSet::new(),
             cached_value: AtomicU64::new(base_value.to_bits()),
             dirty: AtomicBool::new(true),
         }
@@ -80,19 +85,137 @@ impl AttributeInstance {
         value
     }
 
+    /// Vanilla `AttributeInstance.setBaseValue` (`AttributeInstance.java:45-49`): changing the
+    /// base invalidates the cached value, while assigning the same value leaves the cache state
+    /// untouched.
+    pub fn set_base_value(&mut self, base_value: f64) {
+        if base_value != self.base_value {
+            self.base_value = base_value;
+            self.set_dirty();
+        }
+    }
+
+    /// Vanilla `AttributeInstance.setDirty` (`AttributeInstance.java:112-115`).
+    pub fn set_dirty(&self) {
+        self.dirty.store(true, Ordering::Relaxed);
+    }
+
     pub fn add_or_replace_modifier(&mut self, modifier: Modifier) {
         if let Some(pos) = self.modifiers.iter().position(|m| m.id == modifier.id) {
             self.modifiers.remove(pos);
         }
         self.modifiers.push(modifier);
-        self.dirty.store(true, Ordering::Relaxed);
+        self.set_dirty();
+    }
+
+    /// Vanilla `AttributeInstance.addOrUpdateTransientModifier` and
+    /// `addOrReplacePermanentModifier` (`AttributeInstance.java:83-99`). The Rust model keeps
+    /// modifier lifetime in explicit ID sets, while both operations share the same ID-replacing
+    /// storage primitive.
+    pub fn add_or_update_transient_modifier(&mut self, modifier: Modifier) {
+        self.permanent_modifier_ids.remove(&modifier.id);
+        self.transient_modifier_ids.insert(modifier.id.clone());
+        self.add_or_replace_modifier(modifier);
+    }
+
+    pub fn add_or_replace_permanent_modifier(&mut self, modifier: Modifier) {
+        self.transient_modifier_ids.remove(&modifier.id);
+        self.permanent_modifier_ids.insert(modifier.id.clone());
+        self.add_or_replace_modifier(modifier);
+    }
+
+    /// Vanilla `AttributeInstance.addTransientModifier` and `addPermanentModifier`
+    /// (`AttributeInstance.java:91-104`) reject a duplicate ID. Returning `false` preserves that
+    /// result without panicking a server command or plugin caller.
+    pub fn add_transient_modifier(&mut self, modifier: Modifier) -> bool {
+        if self.has_modifier(&modifier.id) {
+            return false;
+        }
+        self.permanent_modifier_ids.remove(&modifier.id);
+        self.transient_modifier_ids.insert(modifier.id.clone());
+        self.modifiers.push(modifier);
+        self.set_dirty();
+        true
+    }
+
+    pub fn add_permanent_modifier(&mut self, modifier: Modifier) -> bool {
+        if self.has_modifier(&modifier.id) {
+            return false;
+        }
+        self.transient_modifier_ids.remove(&modifier.id);
+        self.permanent_modifier_ids.insert(modifier.id.clone());
+        self.modifiers.push(modifier);
+        self.set_dirty();
+        true
+    }
+
+    /// Vanilla `AttributeInstance.addPermanentModifiers` (`AttributeInstance.java:106-110`).
+    pub fn add_permanent_modifiers<I>(&mut self, modifiers: I)
+    where
+        I: IntoIterator<Item = Modifier>,
+    {
+        for modifier in modifiers {
+            let _ = self.add_permanent_modifier(modifier);
+        }
+    }
+
+    /// Vanilla `AttributeInstance.hasModifier` (`AttributeInstance.java:65-71`).
+    #[must_use]
+    pub fn has_modifier(&self, id: &str) -> bool {
+        self.modifiers.iter().any(|modifier| modifier.id == id)
+    }
+
+    /// Vanilla `AttributeInstance.getModifiers` and `getPermanentModifiers`
+    /// (`AttributeInstance.java:57-63`), represented by the live modifier vector and its
+    /// explicit lifetime set.
+    #[must_use]
+    pub fn get_modifiers(&self) -> &[Modifier] {
+        &self.modifiers
+    }
+
+    #[must_use]
+    pub fn get_permanent_modifiers(&self) -> Vec<&Modifier> {
+        self.modifiers
+            .iter()
+            .filter(|modifier| self.is_permanent_modifier(&modifier.id))
+            .collect()
+    }
+
+    pub(crate) fn is_permanent_modifier(&self, id: &str) -> bool {
+        self.permanent_modifier_ids.contains(id)
+            || (!self.transient_modifier_ids.contains(id) && legacy_permanent_modifier(id))
     }
 
     pub fn remove_modifier(&mut self, id: &str) {
         if let Some(pos) = self.modifiers.iter().position(|m| m.id == id) {
             self.modifiers.swap_remove(pos);
         }
-        self.dirty.store(true, Ordering::Relaxed);
+        self.permanent_modifier_ids.remove(id);
+        self.transient_modifier_ids.remove(id);
+        self.set_dirty();
+    }
+
+    /// Vanilla `AttributeInstance.removeModifiers` (`AttributeInstance.java:133-136`).
+    pub fn remove_modifiers(&mut self) {
+        if !self.modifiers.is_empty() {
+            self.modifiers.clear();
+            self.permanent_modifier_ids.clear();
+            self.transient_modifier_ids.clear();
+            self.set_dirty();
+        }
+    }
+
+    /// Vanilla `AttributeInstance.replaceFrom` (`AttributeInstance.java:172-184`). The cached
+    /// value is deliberately not copied: vanilla marks the destination dirty and recalculates it
+    /// on the next read.
+    pub fn replace_from(&mut self, other: &Self) {
+        self.base_value = other.base_value;
+        self.modifiers.clone_from(&other.modifiers);
+        self.permanent_modifier_ids
+            .clone_from(&other.permanent_modifier_ids);
+        self.transient_modifier_ids
+            .clone_from(&other.transient_modifier_ids);
+        self.set_dirty();
     }
 }
 
@@ -190,15 +313,30 @@ pub async fn send_attribute_updates_for_living(
 
 impl Clone for AttributeInstance {
     fn clone(&self) -> Self {
+        // Vanilla `AttributeInstance.replaceFrom` (`AttributeInstance.java:172-184`) copies both
+        // modifier maps before invalidating the destination cache.
         Self {
             base_value: self.base_value,
             min_value: self.min_value,
             max_value: self.max_value,
             modifiers: self.modifiers.clone(),
+            permanent_modifier_ids: self.permanent_modifier_ids.clone(),
+            transient_modifier_ids: self.transient_modifier_ids.clone(),
             cached_value: AtomicU64::new(self.cached_value.load(Ordering::Relaxed)),
             dirty: AtomicBool::new(self.dirty.load(Ordering::Relaxed)),
         }
     }
+}
+
+/// Legacy callers predate the explicit lifetime sets; these IDs preserve their existing save
+/// behavior from `AttributeInstance.pack` (`AttributeInstance.java:186-188`).
+fn legacy_permanent_modifier(id: &str) -> bool {
+    const TRANSIENT_PREFIXES: [&str; 1] = ["minecraft:enchantment."];
+    const TRANSIENT_IDS: [&str; 3] = ["minecraft:attacking", "witch_drinking", "evil"];
+    !TRANSIENT_PREFIXES
+        .iter()
+        .any(|prefix| id.starts_with(prefix))
+        && !TRANSIENT_IDS.contains(&id)
 }
 
 pub(crate) const fn sanitize_value(value: f64, min_value: f64, max_value: f64) -> f64 {
@@ -240,6 +378,52 @@ mod tests {
             operation: ModifierOperation::MultiplyBase,
         });
         assert_eq!(non_finite.value(), 0.0);
+    }
+
+    #[test]
+    fn modifier_lifecycle_helpers_invalidate_and_replace() {
+        // `AttributeInstance.java:45-49,83-110,112-115,133-136,172-184` requires every
+        // successful mutation to invalidate the cached value and replacement to copy the live
+        // base/modifier state.
+        let mut instance = AttributeInstance::new(2.0, 0.0, 30.0);
+        instance.add_permanent_modifiers([
+            Modifier {
+                id: "first".to_string(),
+                amount: 3.0,
+                operation: ModifierOperation::Add,
+            },
+            Modifier {
+                id: "second".to_string(),
+                amount: 2.0,
+                operation: ModifierOperation::MultiplyTotal,
+            },
+        ]);
+        assert_eq!(instance.value(), 15.0);
+        assert_eq!(instance.get_modifiers().len(), 2);
+        assert_eq!(instance.get_permanent_modifiers().len(), 2);
+        assert!(!instance.add_transient_modifier(Modifier {
+            id: "first".to_string(),
+            amount: 9.0,
+            operation: ModifierOperation::Add,
+        }));
+
+        instance.set_base_value(4.0);
+        assert_eq!(instance.value(), 21.0);
+        assert!(instance.has_modifier("first"));
+        instance.remove_modifiers();
+        assert_eq!(instance.value(), 4.0);
+
+        let mut replacement = AttributeInstance::new(7.0, 0.0, 30.0);
+        replacement.add_or_update_transient_modifier(Modifier {
+            id: "replacement".to_string(),
+            amount: 1.0,
+            operation: ModifierOperation::MultiplyBase,
+        });
+        instance.replace_from(&replacement);
+        assert_eq!(instance.base_value, 7.0);
+        assert_eq!(instance.value(), 14.0);
+        assert!(instance.has_modifier("replacement"));
+        assert!(replacement.get_permanent_modifiers().is_empty());
     }
 }
 

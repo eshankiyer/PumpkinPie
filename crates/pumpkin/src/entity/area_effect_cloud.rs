@@ -18,6 +18,10 @@ struct ParticleMeta<'a> {
     data: &'a [u8],
 }
 
+// AreaEffectCloud.java:101-115 stores either a custom particle option or the default colored
+// entity-effect option in the tracked particle field.
+pub type CustomParticle = (pumpkin_protocol::codec::var_int::VarInt, Vec<u8>);
+
 /// `AreaEffectCloud.TIME_BETWEEN_APPLICATIONS`
 const TIME_BETWEEN_APPLICATIONS: i32 = 5;
 /// `AreaEffectCloud.MINIMAL_RADIUS`
@@ -35,6 +39,13 @@ const fn application_scale(_distance: f64, _radius: f64) -> f32 {
 
 fn can_reapply(reapplication_map: &HashMap<i32, i32>, entity_id: i32) -> bool {
     !reapplication_map.contains_key(&entity_id)
+}
+
+// AreaEffectCloud.java:375-378 applies the source stack's potion-duration-scale component.
+fn potion_duration_scale_from_stack(item_stack: &ItemStack) -> f32 {
+    item_stack
+        .get_data_component::<pumpkin_data::data_component_impl::PotionDurationScaleImpl>()
+        .map_or(1.0, |component| component.scale)
 }
 
 impl pumpkin_protocol::java::client::play::MetadataSerializer for ParticleMeta<'_> {
@@ -71,6 +82,12 @@ pub struct AreaEffectCloudEntity {
     pub duration_on_use: Mutex<i32>,
     /// ticks to wait before the cloud becomes active and applies effects (grace period)
     pub wait_time: Mutex<i32>,
+    /// AreaEffectCloud.java:38,106-108 — PotionContents duration multiplier applied while
+    /// copying effects to victims.
+    pub potion_duration_scale: Mutex<f32>,
+    /// AreaEffectCloud.java:32,101-115 — optional particle option replacing the default colored
+    /// entity-effect particle.
+    pub custom_particle: Mutex<Option<CustomParticle>>,
 }
 
 impl AreaEffectCloudEntity {
@@ -89,6 +106,8 @@ impl AreaEffectCloudEntity {
             radius_on_use: Mutex::new(0.0),
             duration_on_use: Mutex::new(0),
             wait_time: Mutex::new(20),
+            potion_duration_scale: Mutex::new(1.0),
+            custom_particle: Mutex::new(None),
         };
 
         Arc::new(cloud)
@@ -107,6 +126,42 @@ impl AreaEffectCloudEntity {
         duration_on_use_in: i32,
         radius_per_tick_in: f32,
     ) -> Arc<dyn EntityBase> {
+        // AreaEffectCloud.java:374-378 applies potion contents and potion-duration-scale
+        // components from the source item stack.
+        let potion_duration_scale = potion_duration_scale_from_stack(&item_stack);
+        Self::create_with_options(
+            entity,
+            item_stack,
+            effects_in,
+            duration_in,
+            radius_in,
+            reapplication_delay_in,
+            wait_time_in,
+            radius_on_use_in,
+            duration_on_use_in,
+            radius_per_tick_in,
+            None,
+            potion_duration_scale,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    /// AreaEffectCloud.java:101-115 and DragonFireball.java:40-45 apply a custom particle and
+    /// keep the potion duration scale as entity state when a cloud is configured.
+    pub fn create_with_options(
+        entity: Entity,
+        item_stack: ItemStack,
+        effects_in: Vec<EffectEntry>,
+        duration_in: i32,
+        radius_in: f32,
+        reapplication_delay_in: i32,
+        wait_time_in: i32,
+        radius_on_use_in: f32,
+        duration_on_use_in: i32,
+        radius_per_tick_in: f32,
+        custom_particle: Option<CustomParticle>,
+        potion_duration_scale: f32,
+    ) -> Arc<dyn EntityBase> {
         let cloud = Self {
             entity,
             item_stack: Mutex::new(item_stack),
@@ -120,6 +175,8 @@ impl AreaEffectCloudEntity {
             radius_on_use: Mutex::new(radius_on_use_in),
             duration_on_use: Mutex::new(duration_on_use_in),
             wait_time: Mutex::new(wait_time_in),
+            potion_duration_scale: Mutex::new(potion_duration_scale),
+            custom_particle: Mutex::new(custom_particle),
         };
 
         Arc::new(cloud)
@@ -139,6 +196,65 @@ impl AreaEffectCloudEntity {
         );
         clamped
     }
+
+    /// AreaEffectCloud.java:96-108 stores potion contents and refreshes the derived particle.
+    pub async fn set_potion_contents(&self, item_stack: ItemStack) {
+        let effects = crate::item::potion::PotionContents::read_potion_effects(&item_stack);
+        let duration_scale = potion_duration_scale_from_stack(&item_stack);
+        *self.item_stack.lock().await = item_stack;
+        *self.effects.lock().await = effects;
+        *self.potion_duration_scale.lock().await = duration_scale;
+        self.send_particle_metadata().await;
+    }
+
+    /// AreaEffectCloud.java:101-115 replaces the tracked particle option immediately.
+    pub async fn set_custom_particle(&self, particle: CustomParticle) {
+        *self.custom_particle.lock().await = Some(particle);
+        self.send_particle_metadata().await;
+    }
+
+    /// AreaEffectCloud.java:106-108 stores the multiplier used by `PotionContents.forEachEffect`.
+    pub async fn set_potion_duration_scale(&self, scale: f32) {
+        *self.potion_duration_scale.lock().await = scale;
+    }
+
+    /// AreaEffectCloud.java:96-115 updates the tracked particle whenever potion or custom
+    /// particle contents change.
+    async fn send_particle_metadata(&self) {
+        let custom_particle = self.custom_particle.lock().await.clone();
+        let stack = self.item_stack.lock().await.clone();
+        let effects = self.effects.lock().await.clone();
+        let mut color = crate::item::potion::PotionContents::get_color_or(&effects, -13_083_194);
+        if let Some(pc) =
+            stack.get_data_component::<pumpkin_data::data_component_impl::PotionContentsImpl>()
+            && let Some(custom_color) = pc.custom_color
+        {
+            color = custom_color | (0xFFi32 << 24);
+        }
+        let color_bytes = color.to_be_bytes();
+        let (particle_id, particle_data) = custom_particle.as_ref().map_or_else(
+            || {
+                (
+                    pumpkin_protocol::codec::var_int::VarInt(
+                        pumpkin_data::particle::Particle::EntityEffect as i32,
+                    ),
+                    color_bytes.as_slice(),
+                )
+            },
+            |(particle_id, particle_data)| (*particle_id, particle_data.as_slice()),
+        );
+        let meta = ParticleMeta {
+            particle_id,
+            data: particle_data,
+        };
+        self.entity.send_meta_data(
+            &[pumpkin_protocol::java::client::play::Metadata::new(
+                pumpkin_data::tracked_data::area_effect_cloud::PARTICLE,
+                &meta,
+            )],
+            None,
+        );
+    }
 }
 
 impl NBTStorage for AreaEffectCloudEntity {}
@@ -153,69 +269,9 @@ impl EntityBase for AreaEffectCloudEntity {
             // Send initial radius and particle (color) so clients render correctly
             let radius = *self.radius.lock().await;
 
-            // Compute particle color
-            let stack = self.item_stack.lock().await.clone();
-            let effects = self.effects.lock().await.clone();
-
-            // Use ARGB format
-            let mut color: i32 = (0xFFi32 << 24) | 0x385dc6; // default water-like color
-
-            if let Some(pc) =
-                stack.get_data_component::<pumpkin_data::data_component_impl::PotionContentsImpl>()
-            {
-                if let Some(c) = pc.custom_color {
-                    color = c | (0xFFi32 << 24);
-                } else if !effects.is_empty() {
-                    let mut r_sum = 0.0f32;
-                    let mut g_sum = 0.0f32;
-                    let mut b_sum = 0.0f32;
-                    let count = effects.len() as f32;
-                    for (eff, _, _, _, _, _) in &effects {
-                        let c = eff.color;
-                        r_sum += ((c >> 16) & 0xFF) as f32;
-                        g_sum += ((c >> 8) & 0xFF) as f32;
-                        b_sum += (c & 0xFF) as f32;
-                    }
-                    let r = (r_sum / count) as i32;
-                    let g = (g_sum / count) as i32;
-                    let b = (b_sum / count) as i32;
-                    color = (0xFFi32 << 24) | (r << 16) | (g << 8) | b;
-                }
-            } else if !effects.is_empty() {
-                let mut r_sum = 0.0f32;
-                let mut g_sum = 0.0f32;
-                let mut b_sum = 0.0f32;
-                let count = effects.len() as f32;
-                for (eff, _, _, _, _, _) in &effects {
-                    let c = eff.color;
-                    r_sum += ((c >> 16) & 0xFF) as f32;
-                    g_sum += ((c >> 8) & 0xFF) as f32;
-                    b_sum += (c & 0xFF) as f32;
-                }
-                let r = (r_sum / count) as i32;
-                let g = (g_sum / count) as i32;
-                let b = (b_sum / count) as i32;
-                color = (0xFFi32 << 24) | (r << 16) | (g << 8) | b;
-            }
-
-            // Build raw particle option bytes for ENTITY_EFFECT
-            let data_bytes = color.to_be_bytes();
-
-            let meta = ParticleMeta {
-                particle_id: pumpkin_protocol::codec::var_int::VarInt(
-                    pumpkin_data::particle::Particle::EntityEffect as i32,
-                ),
-                data: &data_bytes,
-            };
-
-            // Send initial particle and radius
-            self.entity.send_meta_data(
-                &[pumpkin_protocol::java::client::play::Metadata::new(
-                    pumpkin_data::tracked_data::area_effect_cloud::PARTICLE,
-                    &meta,
-                )],
-                None,
-            );
+            // AreaEffectCloud.java:110-116 uses the opaque PotionContents color for its default
+            // particle; custom particles take precedence as in AreaEffectCloud.java:101-103.
+            self.send_particle_metadata().await;
 
             self.entity.send_meta_data(
                 &[pumpkin_protocol::java::client::play::Metadata::new(
@@ -303,6 +359,10 @@ impl EntityBase for AreaEffectCloudEntity {
                 .retain(|_, expires_at| age < *expires_at);
 
             let effects = self.effects.lock().await.clone();
+            // AreaEffectCloud.java:217-233 scales each copied effect with the cloud's potion
+            // duration scale; the distance factor is intentionally flat for clouds.
+            let potion_duration_scale =
+                *self.potion_duration_scale.lock().await * application_scale(0.0, radius.into());
             if effects.is_empty() {
                 self.reapplication_map.lock().await.clear();
                 return;
@@ -366,8 +426,6 @@ impl EntityBase for AreaEffectCloudEntity {
                 if dist_sq > radius_f * radius_f {
                     continue;
                 }
-                let scale = application_scale(dist_sq.sqrt(), radius_f);
-
                 // Apply effects inside a spawned task
                 let cand_for_spawn = cand_clone.clone();
                 let effs_for_spawn = effects.clone();
@@ -376,7 +434,7 @@ impl EntityBase for AreaEffectCloudEntity {
                         crate::item::potion::PotionContents::apply_effects_to(
                             living,
                             effs_for_spawn,
-                            scale,
+                            potion_duration_scale,
                             crate::item::potion::PotionApplicationSource::AreaEffectCloud,
                         )
                         .await;
@@ -439,7 +497,9 @@ impl EntityBase for AreaEffectCloudEntity {
 
 #[cfg(test)]
 mod tests {
-    use super::{application_scale, can_reapply};
+    use super::{application_scale, can_reapply, potion_duration_scale_from_stack};
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
     use std::collections::HashMap;
 
     #[test]
@@ -458,5 +518,18 @@ mod tests {
 
         cooldowns.remove(&42);
         assert!(can_reapply(&cooldowns, 42));
+    }
+
+    #[test]
+    fn potion_duration_scale_reads_the_item_component() {
+        // AreaEffectCloud.java:375-378 applies the stack component instead of assuming 1.0.
+        assert_eq!(
+            potion_duration_scale_from_stack(&ItemStack::new(1, &Item::TIPPED_ARROW)),
+            0.125
+        );
+        assert_eq!(
+            potion_duration_scale_from_stack(&ItemStack::new(1, &Item::DRAGON_BREATH)),
+            1.0
+        );
     }
 }

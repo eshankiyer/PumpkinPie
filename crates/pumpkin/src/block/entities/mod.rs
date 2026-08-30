@@ -1,12 +1,13 @@
 use std::pin::Pin;
 use std::{any::Any, sync::Arc};
 
-use pumpkin_data::{Block, block_properties::BLOCK_ENTITY_TYPES};
+use pumpkin_data::data_component_impl::ContainerLootImpl;
+use pumpkin_data::{Block, BlockStateId, block_properties::BLOCK_ENTITY_TYPES};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 
 use crate::world::World;
-use pumpkin_data::BlockStateId;
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_world::inventory::Inventory;
 
 pub mod barrel;
@@ -180,6 +181,31 @@ pub trait BlockEntity: Any + Send + Sync {
     fn to_experience_container(self: Arc<Self>) -> Option<Arc<dyn ExperienceContainer>> {
         None
     }
+}
+
+/// Applies the modeled implicit block-entity component from a placed item.
+/// `BlockItem.updateBlockEntityComponents` calls
+/// `BlockEntity.applyComponentsFromItemStack` before `setPlacedBy` and the block-place game
+/// event; randomizable containers apply their `ContainerLoot` component as the vanilla
+/// `LootTable` fields (`BlockItem.java:101-106`; `BlockEntity.java:276-300`;
+/// `RandomizableContainerBlockEntity.java:98-112`).
+#[must_use]
+pub fn apply_components_from_item_stack(
+    entity: Arc<dyn BlockEntity>,
+    stack: &ItemStack,
+) -> Option<Arc<dyn BlockEntity>> {
+    let data = stack.get_data_component::<ContainerLootImpl>()?;
+    let position = entity.get_position();
+    let mut nbt = NbtCompound::new();
+    nbt.put_string("id", entity.resource_location().to_string());
+    nbt.put_int("x", position.0.x);
+    nbt.put_int("y", position.0.y);
+    nbt.put_int("z", position.0.z);
+    nbt.put_string("LootTable", data.loot_table.clone());
+    if data.seed != 0 {
+        nbt.put_long("LootTableSeed", data.seed);
+    }
+    block_entity_from_nbt_at(&nbt, position)
 }
 
 #[must_use]
@@ -469,7 +495,11 @@ pub fn create_block_entity(
 
 #[cfg(test)]
 mod test {
-    use super::{BlockEntity, block_entity_from_nbt, furnace::FurnaceBlockEntity};
+    use super::{
+        BlockEntity, apply_components_from_item_stack, block_entity_from_nbt,
+        chest::ChestBlockEntity, furnace::FurnaceBlockEntity,
+    };
+    use pumpkin_data::data_component_impl::ContainerLootImpl;
     use pumpkin_data::{item::Item, item_stack::ItemStack};
     use pumpkin_nbt::compound::NbtCompound;
     use pumpkin_util::math::position::BlockPos;
@@ -501,5 +531,32 @@ mod test {
             assert_eq!(stack.get_item().id, Item::DIAMOND.id);
             assert_eq!(stack.item_count, 5);
         }
+    }
+
+    #[test]
+    fn placed_container_loot_component_is_applied() {
+        // BlockItem.updateBlockEntityComponents applies the item component before the
+        // placement callbacks (`BlockItem.java:101-106`; RandomizableContainerBlockEntity.java:98-112).
+        let position = BlockPos::new(3, 64, -2);
+        let stack = ItemStack::new_with_component(
+            1,
+            &Item::CHEST,
+            vec![(
+                pumpkin_data::data_component::DataComponent::ContainerLoot,
+                Some(Box::new(ContainerLootImpl {
+                    loot_table: "minecraft:chests/simple_dungeon".to_string(),
+                    seed: 7,
+                })),
+            )],
+        );
+        let entity: Arc<dyn BlockEntity> = Arc::new(ChestBlockEntity::new(position));
+        let applied = apply_components_from_item_stack(entity, &stack)
+            .expect("container loot should rebuild the placed entity");
+        assert!(applied.has_loot_table());
+        assert_eq!(
+            applied.take_loot_table(),
+            Some(("minecraft:chests/simple_dungeon".to_string(), 7))
+        );
+        assert_eq!(applied.get_position(), position);
     }
 }

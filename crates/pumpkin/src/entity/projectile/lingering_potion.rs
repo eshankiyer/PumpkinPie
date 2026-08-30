@@ -137,43 +137,16 @@ impl EntityBase for LingeringPotionEntity {
             // Play splash/break particles & sound. `AbstractThrownPotion.onHit`
             // (`AbstractThrownPotion.java:81-82`) emits the level event unconditionally, before
             // the effect branch, so a plain water bottle still splashes.
-            let mut color = 0x385dc6; // default water-like color
+            // PotionContents.java:113-119 and 126-144 define custom-color precedence and the
+            // weighted opaque fallback used by AbstractThrownPotion.java:81-82.
+            let mut color =
+                crate::item::potion::PotionContents::get_color_or(&effects, -13_083_194);
             if let Some(pc) =
                 stack.get_data_component::<pumpkin_data::data_component_impl::PotionContentsImpl>()
             {
                 if let Some(c) = pc.custom_color {
                     color = c;
-                } else if !effects.is_empty() {
-                    let mut r_sum = 0.0;
-                    let mut g_sum = 0.0;
-                    let mut b_sum = 0.0;
-                    let count = effects.len() as f32;
-                    for (eff, _, _, _, _, _) in &effects {
-                        let c = eff.color;
-                        r_sum += ((c >> 16) & 0xFF) as f32;
-                        g_sum += ((c >> 8) & 0xFF) as f32;
-                        b_sum += (c & 0xFF) as f32;
-                    }
-                    let r = (r_sum / count) as i32;
-                    let g = (g_sum / count) as i32;
-                    let b = (b_sum / count) as i32;
-                    color = (r << 16) | (g << 8) | b;
                 }
-            } else if !effects.is_empty() {
-                let mut r_sum = 0.0;
-                let mut g_sum = 0.0;
-                let mut b_sum = 0.0;
-                let count = effects.len() as f32;
-                for (eff, _, _, _, _, _) in &effects {
-                    let c = eff.color;
-                    r_sum += ((c >> 16) & 0xFF) as f32;
-                    g_sum += ((c >> 8) & 0xFF) as f32;
-                    b_sum += (c & 0xFF) as f32;
-                }
-                let r = (r_sum / count) as i32;
-                let g = (g_sum / count) as i32;
-                let b = (b_sum / count) as i32;
-                color = (r << 16) | (g << 8) | b;
             }
 
             let has_instant = effects.iter().any(|(e, _, _, _, _, _)| {

@@ -5,8 +5,10 @@ use std::sync::{Arc, Weak};
 
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::Block;
+use pumpkin_data::HorizontalFacingExt;
 use pumpkin_data::block_properties::{
-    BlockProperties, CopperGolemPose, CopperGolemStatueLikeProperties,
+    BlockProperties, ChestLikeProperties, ChestType, CopperGolemPose,
+    CopperGolemStatueLikeProperties,
 };
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::entity::EntityType;
@@ -186,6 +188,8 @@ pub struct CopperGolemEntity {
     state: AtomicI32,
     next_weathering_tick: AtomicCell<i64>,
     last_lightning_bolt_uuid: AtomicCell<Option<Uuid>>,
+    /// Vanilla `CopperGolem.openedChestPos`, used by the container viewer query.
+    opened_chest_pos: AtomicCell<Option<BlockPos>>,
 }
 
 impl CopperGolemEntity {
@@ -197,6 +201,7 @@ impl CopperGolemEntity {
             state: AtomicI32::new(CopperGolemState::Idle.id()),
             next_weathering_tick: AtomicCell::new(UNSET_WEATHERING_TICK),
             last_lightning_bolt_uuid: AtomicCell::new(None),
+            opened_chest_pos: AtomicCell::new(None),
         };
         let mob_arc = Arc::new(golem);
         let mob_weak: Weak<dyn Mob> = {
@@ -264,6 +269,46 @@ impl CopperGolemEntity {
             )],
             None,
         );
+    }
+
+    /// Vanilla `CopperGolem.setOpenedChestPos`/`clearOpenedChestPos`
+    /// (`CopperGolem.java:121-127`) tracks the chest currently being handled.
+    pub fn set_opened_chest_pos(&self, opened_chest_pos: BlockPos) {
+        self.opened_chest_pos.store(Some(opened_chest_pos));
+    }
+
+    pub fn clear_opened_chest_pos(&self) {
+        self.opened_chest_pos.store(None);
+    }
+
+    /// Vanilla `CopperGolem.hasContainerOpen` (`CopperGolem.java:413-423`) also accepts the
+    /// connected half of a double chest. Pumpkin's chest viewer tracker supplies the same
+    /// inventory-open/close callbacks for the transport goal.
+    #[must_use]
+    pub fn has_container_open(&self, block_pos: &BlockPos) -> bool {
+        let Some(opened_chest_pos) = self.opened_chest_pos.load() else {
+            return false;
+        };
+        if opened_chest_pos == *block_pos {
+            return true;
+        }
+
+        let world = self.mob_entity.living_entity.entity.world.load();
+        let block = world.get_block(&opened_chest_pos);
+        let properties =
+            ChestLikeProperties::from_state_id(world.get_block_state_id(&opened_chest_pos), block);
+        let connected_direction = match properties.r#type {
+            ChestType::Single => return false,
+            ChestType::Left => properties.facing.rotate_clockwise(),
+            ChestType::Right => properties.facing.rotate_counter_clockwise(),
+        };
+        opened_chest_pos.offset(connected_direction.to_block_direction().to_offset()) == *block_pos
+    }
+
+    /// Vanilla `CopperGolem.getContainerInteractionRange` (`CopperGolem.java:425-428`).
+    #[must_use]
+    pub const fn get_container_interaction_range(&self) -> f64 {
+        3.0
     }
 
     /// `CopperGolem.updateWeathering`: advances the oxidation stage on a fixed game-time

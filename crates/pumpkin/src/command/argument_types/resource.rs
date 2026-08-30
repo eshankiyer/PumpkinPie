@@ -6,7 +6,10 @@ use crate::command::errors::error_types::{CommandErrorType, DISPATCHER_PARSE_EXC
 use crate::command::node::attached::AttachedNode;
 use crate::command::string_reader::StringReader;
 use crate::command::suggestion::suggestions::{Suggestions, SuggestionsBuilder};
+use pumpkin_data::attributes::Attributes;
+use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::structures::Structure;
 use pumpkin_data::translation;
 use pumpkin_util::identifier::Identifier;
 use pumpkin_util::text::TextComponent;
@@ -15,6 +18,11 @@ use std::iter::Iterator;
 use std::pin::Pin;
 
 pub static ENTITY_TYPE_REGISTRY: &Identifier = &Identifier::vanilla_static("entity_type");
+// `ResourceArgument` registry keys (`ResourceArgument.java:48-58,72-109`) map to generated
+// server-side resource tables where Pumpkin has them.
+pub static ATTRIBUTE_REGISTRY: &Identifier = &Identifier::vanilla_static("attribute");
+pub static MOB_EFFECT_REGISTRY: &Identifier = &Identifier::vanilla_static("mob_effect");
+pub static STRUCTURE_REGISTRY: &Identifier = &Identifier::vanilla_static("worldgen/structure");
 static ERROR_UNKNOWN_RESOURCE: CommandErrorType<2> = CommandErrorType::new(
     translation::java::ARGUMENT_RESOURCE_NOT_FOUND,
     translation::java::ARGUMENT_RESOURCE_NOT_FOUND,
@@ -82,6 +90,42 @@ impl ArgumentType for ResourceArgument {
 }
 
 impl ResourceArgument {
+    /// `ResourceArgument.resource` (`ResourceArgument.java:51-58`) using Pumpkin's static
+    /// resolver-backed resource argument representation.
+    #[must_use]
+    pub const fn resource(
+        registry_key: &'static Identifier,
+        resolver: &'static (dyn Fn(Identifier) -> Option<&'static (dyn Any + Send + Sync)>
+                     + Send
+                     + Sync),
+    ) -> Self {
+        Self(registry_key, resolver)
+    }
+
+    /// `ResourceArgument.getAttribute` (`ResourceArgument.java:72-74`).
+    pub fn get_attribute(
+        context: &CommandContext,
+        name: &str,
+    ) -> Result<&'static Attributes, CommandSyntaxError> {
+        Self::get_resource(context, name, ATTRIBUTE_REGISTRY)
+    }
+
+    /// `ResourceArgument.getMobEffect` (`ResourceArgument.java:97-99`).
+    pub fn get_mob_effect(
+        context: &CommandContext,
+        name: &str,
+    ) -> Result<&'static StatusEffect, CommandSyntaxError> {
+        Self::get_resource(context, name, MOB_EFFECT_REGISTRY)
+    }
+
+    /// `ResourceArgument.getStructure` (`ResourceArgument.java:80-82`).
+    pub fn get_structure(
+        context: &CommandContext,
+        name: &str,
+    ) -> Result<&'static Structure, CommandSyntaxError> {
+        Self::get_resource(context, name, STRUCTURE_REGISTRY)
+    }
+
     pub fn get_resource<T: 'static>(
         context: &CommandContext,
         name: &str,

@@ -319,6 +319,9 @@ impl HopperBlockEntity {
                 let mut item = container.get_stack(i).await;
                 if !item.is_empty()
                     && container.can_transfer_to(self, i, &item)
+                    // Vanilla `Container.canTakeItem` is a source-to-destination gate
+                    // (`JukeboxBlockEntity.java:147-150`).
+                    && container.can_take_item(self, i, &item).await
                     && container
                         .can_extract_through_face(i, &item, pumpkin_data::BlockDirection::Down)
                         .await

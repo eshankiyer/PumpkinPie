@@ -427,23 +427,51 @@ fn get_state_for_neighbor_update_chest_impl(
         );
     }
 
-    if copper {
-        let connected_direction = match props.r#type {
-            ChestType::Single => None,
-            ChestType::Left => Some(props.facing.rotate_clockwise()),
-            ChestType::Right => Some(props.facing.rotate_counter_clockwise()),
-        };
-        if connected_direction
-            .is_some_and(|direction| direction.to_block_direction() == args.direction)
-        {
-            let neighbor_block = args.world.get_block(args.neighbor_position);
-            if neighbor_block.has_tag(&tag::Block::MINECRAFT_COPPER_CHESTS) {
-                return props.to_state_id(neighbor_block);
-            }
+    // ChestBlock.updateShape (ChestBlock.java:169-185) combines matching single chests on a
+    // horizontal neighbor update and splits a half when its partner is no longer compatible.
+    let neighbor_block = args.world.get_block(args.neighbor_position);
+    if args.direction.to_horizontal_facing().is_some()
+        && can_connect_chests(args.block, neighbor_block, copper)
+    {
+        let neighbor_props =
+            ChestLikeProperties::from_state_id(args.neighbor_state_id, neighbor_block);
+        if let Some(r#type) = combined_chest_type(props, neighbor_props, args.direction) {
+            let mut combined_props = props;
+            combined_props.r#type = r#type;
+            return combined_props.to_state_id(args.block);
         }
+    } else if connected_direction(props) == Some(args.direction) {
+        let mut split_props = props;
+        split_props.r#type = ChestType::Single;
+        return split_props.to_state_id(args.block);
     }
 
     args.state_id
+}
+
+// ChestBlock.getConnectedDirection (ChestBlock.java:200-203) maps LEFT clockwise and all other
+// chest types counter-clockwise from the facing direction.
+fn connected_direction(props: ChestLikeProperties) -> Option<BlockDirection> {
+    match props.r#type {
+        ChestType::Left => Some(props.facing.rotate_clockwise().to_block_direction()),
+        ChestType::Right | ChestType::Single => {
+            Some(props.facing.rotate_counter_clockwise().to_block_direction())
+        }
+    }
+}
+
+// ChestBlock.updateShape (ChestBlock.java:173-180): the new half takes the opposite type of the
+// existing partner only when both chests face the same way and point at one another.
+fn combined_chest_type(
+    props: ChestLikeProperties,
+    neighbor_props: ChestLikeProperties,
+    direction: BlockDirection,
+) -> Option<ChestType> {
+    (props.r#type == ChestType::Single
+        && neighbor_props.r#type != ChestType::Single
+        && props.facing == neighbor_props.facing
+        && connected_direction(neighbor_props) == Some(direction.opposite()))
+    .then_some(neighbor_props.r#type.opposite())
 }
 
 async fn broken_chest_impl(args: BrokenArgs<'_>, copper: bool) {
@@ -941,5 +969,36 @@ mod tests {
             &Block::TRAPPED_CHEST,
             false
         ));
+    }
+
+    #[test]
+    fn connected_direction_treats_single_as_counter_clockwise() {
+        let props = ChestLikeProperties {
+            facing: HorizontalFacing::North,
+            r#type: ChestType::Single,
+            waterlogged: false,
+        };
+
+        assert_eq!(connected_direction(props), Some(BlockDirection::West));
+    }
+
+    #[test]
+    fn matching_single_and_left_chest_form_right_half() {
+        // ChestBlock.java:173-180 requires the partner to point back at the new chest.
+        let single = ChestLikeProperties {
+            facing: HorizontalFacing::North,
+            r#type: ChestType::Single,
+            waterlogged: false,
+        };
+        let left = ChestLikeProperties {
+            facing: HorizontalFacing::North,
+            r#type: ChestType::Left,
+            waterlogged: false,
+        };
+
+        assert_eq!(
+            combined_chest_type(single, left, BlockDirection::West),
+            Some(ChestType::Right)
+        );
     }
 }
