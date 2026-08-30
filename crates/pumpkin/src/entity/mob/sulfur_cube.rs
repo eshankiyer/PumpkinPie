@@ -430,6 +430,17 @@ impl Mob for SulfurCubeEntity {
         &self.entity
     }
 
+    /// Vanilla `SulfurCube.isInvulnerableToPiercingWeapon` (`SulfurCube.java:923-925`) keeps
+    /// an unprimed invulnerable cube out of piercing-weapon hits, but allows a primed cube.
+    fn mob_is_invulnerable_to_piercing_weapon(&self) -> bool {
+        self.entity
+            .living_entity
+            .entity
+            .invulnerable
+            .load(Ordering::Relaxed)
+            && !self.is_primed()
+    }
+
     fn light_level_dependent_magic_value(&self, _world: &World) -> f32 {
         1.0
     }

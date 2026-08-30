@@ -264,14 +264,13 @@ impl BlockBehaviour for BedBlock {
             if args.world.get_block_state(&bed_head_pos.up()).is_solid()
                 || args.world.get_block_state(&bed_foot_pos.up()).is_solid()
             {
+                // Vanilla uses `ServerPlayer.sendOverlayMessage` for bed failure feedback
+                // (`ServerPlayer.java:1798-1805`).
                 args.player
-                    .send_system_message_raw(
-                        &pumpkin_macros::translate_cross!(
-                            translation::java::BLOCK_MINECRAFT_BED_OBSTRUCTED,
-                            translation::bedrock::TILE_BED_OBSTRUCTED
-                        ),
-                        true,
-                    )
+                    .send_overlay_message(&pumpkin_macros::translate_cross!(
+                        translation::java::BLOCK_MINECRAFT_BED_OBSTRUCTED,
+                        translation::bedrock::TILE_BED_OBSTRUCTED
+                    ))
                     .await;
                 return BlockActionResult::SuccessServer;
             }
@@ -311,13 +310,10 @@ impl BlockBehaviour for BedBlock {
                 }
 
                 args.player
-                    .send_system_message_raw(
-                        &pumpkin_macros::translate_cross!(
-                            translation::java::BLOCK_MINECRAFT_BED_OCCUPIED,
-                            translation::bedrock::TILE_BED_OCCUPIED
-                        ),
-                        true,
-                    )
+                    .send_overlay_message(&pumpkin_macros::translate_cross!(
+                        translation::java::BLOCK_MINECRAFT_BED_OCCUPIED,
+                        translation::bedrock::TILE_BED_OCCUPIED
+                    ))
                     .await;
                 return BlockActionResult::SuccessServer;
             }
@@ -333,13 +329,10 @@ impl BlockBehaviour for BedBlock {
                     .is_within_bounds(bed_foot_pos.to_f64(), 3.0, 2.0, 3.0)
             {
                 args.player
-                    .send_system_message_raw(
-                        &pumpkin_macros::translate_cross!(
-                            translation::java::BLOCK_MINECRAFT_BED_TOO_FAR_AWAY,
-                            translation::bedrock::TILE_BED_TOOFAR
-                        ),
-                        true,
-                    )
+                    .send_overlay_message(&pumpkin_macros::translate_cross!(
+                        translation::java::BLOCK_MINECRAFT_BED_TOO_FAR_AWAY,
+                        translation::bedrock::TILE_BED_TOOFAR
+                    ))
                     .await;
                 return BlockActionResult::SuccessServer;
             }
@@ -367,13 +360,10 @@ impl BlockBehaviour for BedBlock {
             // Make sure the time and weather allows sleep
             if !can_sleep(args.world).await {
                 args.player
-                    .send_system_message_raw(
-                        &pumpkin_macros::translate_cross!(
-                            translation::java::BLOCK_MINECRAFT_BED_NO_SLEEP,
-                            translation::bedrock::TILE_BED_NOSLEEP
-                        ),
-                        true,
-                    )
+                    .send_overlay_message(&pumpkin_macros::translate_cross!(
+                        translation::java::BLOCK_MINECRAFT_BED_NO_SLEEP,
+                        translation::bedrock::TILE_BED_NOSLEEP
+                    ))
                     .await;
                 return BlockActionResult::SuccessServer;
             }
@@ -396,13 +386,10 @@ impl BlockBehaviour for BedBlock {
                     || pos.is_within_bounds(bed_foot_pos.to_f64(), 8.0, 5.0, 8.0)
                 {
                     args.player
-                        .send_system_message_raw(
-                            &pumpkin_macros::translate_cross!(
-                                translation::java::BLOCK_MINECRAFT_BED_NOT_SAFE,
-                                translation::bedrock::TILE_BED_NOTSAFE
-                            ),
-                            true,
-                        )
+                        .send_overlay_message(&pumpkin_macros::translate_cross!(
+                            translation::java::BLOCK_MINECRAFT_BED_NOT_SAFE,
+                            translation::bedrock::TILE_BED_NOTSAFE
+                        ))
                         .await;
                     return BlockActionResult::SuccessServer;
                 }

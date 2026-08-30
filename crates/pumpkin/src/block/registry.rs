@@ -637,8 +637,10 @@ impl BlockRegistry {
         }
 
         if location.0.y + face.to_offset().y > world.get_top_y() {
+            // Vanilla uses `ServerPlayer.sendOverlayMessage` for placement-limit feedback
+            // (`ServerPlayer.java:1798-1805`).
             player
-                .send_system_message_raw(
+                .send_overlay_message(
                     &pumpkin_util::text::TextComponent::translate_cross(
                         pumpkin_data::translation::java::BUILD_TOOHIGH,
                         pumpkin_data::translation::bedrock::BUILD_TOOHIGH,
@@ -647,7 +649,6 @@ impl BlockRegistry {
                         )],
                     )
                     .color_named(pumpkin_util::text::color::NamedColor::Red),
-                    true,
                 )
                 .await;
             return Err(BlockPlacingError::BlockOutOfWorld);

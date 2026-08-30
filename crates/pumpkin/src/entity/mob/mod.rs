@@ -140,6 +140,8 @@ pub mod zombified_piglin;
 pub const DEFAULT_AMBIENT_SOUND_INTERVAL: i32 = 80;
 /// Vanilla `AbstractGolem.getAmbientSoundInterval` (`AbstractGolem.java:29-31`).
 const GOLEM_AMBIENT_SOUND_INTERVAL: i32 = 120;
+/// Vanilla `Mob.ITEM_PICKUP_REACH` (`Mob.java:104-105`).
+const DEFAULT_ITEM_PICKUP_REACH: (f64, f64, f64) = (1.0, 0.0, 1.0);
 
 /// Vanilla `Animal.getAmbientSoundInterval` (`Animal.java:121-124`). The Java method is
 /// inherited by every animal, while Pumpkin dispatches the sound cadence through `Mob`; keep
@@ -1225,6 +1227,15 @@ const fn spawns_offspring_from_egg(entity_type: &EntityType) -> bool {
 }
 
 pub trait Mob: EntityBase + Send + Sync {
+    /// Vanilla `HasCustomInventoryScreen.openCustomInventoryScreen` is dispatched by the
+    /// ridden-vehicle inventory command (`ServerGamePacketListenerImpl.java:1734-1737`).
+    fn open_custom_inventory_screen<'a>(
+        &'a self,
+        _player: &'a Arc<crate::entity::player::Player>,
+    ) -> crate::entity::EntityBaseFuture<'a, ()> {
+        Box::pin(async {})
+    }
+
     /// Vanilla `Mob.canDispenserEquipIntoSlot` (`Mob.java:1117-1118`) lets a mob
     /// accept dispenser equipment only when its loot-pickup flag is enabled.
     fn can_dispenser_equip_into_slot(&self, _slot: &EquipmentSlot) -> bool {
@@ -1265,9 +1276,19 @@ pub trait Mob: EntityBase + Send + Sync {
         false
     }
 
+    /// Vanilla `Leashable.onElasticLeashPull` (`Leashable.java:176-178`) delegates to
+    /// `Entity.checkFallDistanceAccumulation` before entity-specific leash behavior.
+    fn default_on_elastic_leash_pull(&self) {
+        self.get_mob_entity()
+            .living_entity
+            .check_fall_distance_accumulation();
+    }
+
     /// Called when the shared leash solver applies an elastic pull. Most mobs have no
     /// pull-specific state to clear.
-    fn on_elastic_leash_pull(&self) {}
+    fn on_elastic_leash_pull(&self) {
+        self.default_on_elastic_leash_pull();
+    }
 
     /// The `Mob`-level behaviour, callable from an override without recursing.
     ///
@@ -2064,6 +2085,12 @@ pub trait Mob: EntityBase + Send + Sync {
         true
     }
 
+    /// Vanilla `Entity.isInvulnerableToPiercingWeapon` defaults to `isInvulnerable`; mob
+    /// families with a piercing-specific exception override this hook.
+    fn mob_is_invulnerable_to_piercing_weapon(&self) -> bool {
+        self.get_entity().invulnerable.load(Relaxed)
+    }
+
     fn as_ageable(&self) -> Option<&dyn crate::entity::ageable::AgeableMob> {
         None
     }
@@ -2313,6 +2340,12 @@ pub trait Mob: EntityBase + Send + Sync {
         true
     }
 
+    /// Vanilla `Mob.getPickupReach` returns `ITEM_PICKUP_REACH`, `(1, 0, 1)`.
+    // `Mob.java:104-105, 517-518`.
+    fn get_pickup_reach(&self) -> (f64, f64, f64) {
+        DEFAULT_ITEM_PICKUP_REACH
+    }
+
     /// `net.minecraft.world.entity.npc.InventoryCarrier.getInventory().isEmpty()`, reduced to
     /// the single question `GoAndGiveItemsToTarget` asks (`GoAndGiveItemsToTarget.java:81`).
     /// `true` for every mob that is not an `InventoryCarrier`, which is all but the Allay
@@ -2468,7 +2501,9 @@ pub trait Mob: EntityBase + Send + Sync {
                 return;
             }
 
-            let reach = entity.bounding_box.load().expand(1.0, 0.0, 1.0);
+            // `Mob.java:468-475, 517-518`.
+            let (reach_x, reach_y, reach_z) = self.get_pickup_reach();
+            let reach = entity.bounding_box.load().expand(reach_x, reach_y, reach_z);
             for candidate in world.get_entities_at_box(&reach) {
                 let Some(item_entity) = candidate.clone().get_item_entity() else {
                     continue;
@@ -3162,6 +3197,10 @@ impl<T: Mob + Send + 'static> EntityBase for T {
         self.mob_is_pushed_by_fluids()
     }
 
+    fn is_invulnerable_to_piercing_weapon(&self) -> bool {
+        self.mob_is_invulnerable_to_piercing_weapon()
+    }
+
     fn get_experience_reward(&self, _killer: Option<&dyn EntityBase>) -> u32 {
         if self
             .get_entity()
@@ -3304,8 +3343,9 @@ pub trait PathAwareEntity: Mob + Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::{
-        EntityType, attack_knockback_strength, can_replace_equal_item, fire_aspect_ticks,
-        knockback_enchantment_strength, mob_weapon_durability_cost, uses_monster_no_action_time,
+        DEFAULT_ITEM_PICKUP_REACH, EntityType, attack_knockback_strength, can_replace_equal_item,
+        fire_aspect_ticks, knockback_enchantment_strength, mob_weapon_durability_cost,
+        uses_monster_no_action_time,
     };
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
@@ -3385,5 +3425,11 @@ mod tests {
             assert!(EntityType::PIGLIN.allowed_in_peaceful);
             assert!(EntityType::SHULKER.allowed_in_peaceful);
         }
+    }
+
+    #[test]
+    // `Mob.java:104-105, 517-518`.
+    fn default_item_pickup_reach_matches_vanilla() {
+        assert_eq!(DEFAULT_ITEM_PICKUP_REACH, (1.0, 0.0, 1.0));
     }
 }

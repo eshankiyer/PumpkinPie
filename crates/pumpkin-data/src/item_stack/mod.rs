@@ -3,15 +3,15 @@ use crate::damage::DamageType;
 use crate::data_component::DataComponent;
 use crate::data_component::DataComponent::Enchantments;
 use crate::data_component_impl::{
-    BlocksAttacksImpl, ConsumableImpl, CustomDataImpl, DamageImpl, DamageResistantImpl,
-    DamageResistantType, DataComponentImpl, EnchantmentsImpl, IDSet, MaxDamageImpl,
-    MaxStackSizeImpl, PotionContentsImpl, RepairableImpl, ToolImpl, UnbreakableImpl,
+    BlocksAttacksImpl, CanBreakImpl, CanPlaceOnImpl, ConsumableImpl, CustomDataImpl, DamageImpl,
+    DamageResistantImpl, DamageResistantType, DataComponentImpl, EnchantmentsImpl, IDSet,
+    MaxDamageImpl, MaxStackSizeImpl, PotionContentsImpl, RepairableImpl, ToolImpl, UnbreakableImpl,
     UseCooldownImpl, get, get_mut, read_data,
 };
 use crate::item::Item;
 use crate::recipes::RecipeResultStruct;
 use crate::tag::Taggable;
-use crate::{Block, Enchantment};
+use crate::{Block, BlockState, Enchantment};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::GameMode;
@@ -601,6 +601,17 @@ impl ItemStack {
         stack
     }
 
+    /// Vanilla `ItemStack.transmuteCopy` (`ItemStack.java:599-608`) returns an empty stack for
+    /// empty input and otherwise copies the component patch onto the replacement item.
+    #[must_use]
+    pub fn transmute_copy(&self, new_item: &'static Item) -> Self {
+        if self.is_empty() {
+            return Self::EMPTY.clone();
+        }
+
+        Self::new_with_component(self.item_count, new_item, self.patch.clone())
+    }
+
     pub const fn set_count(&mut self, count: u8) {
         self.item_count = count;
     }
@@ -785,6 +796,35 @@ impl ItemStack {
         false
     }
 
+    /// Vanilla `ItemStack.canPlaceOnBlockInAdventureMode` and
+    /// `ItemStack.canBreakBlockInAdventureMode` (`ItemStack.java:1037-1045`) test the
+    /// corresponding adventure predicate against the clicked block and state.
+    #[must_use]
+    pub fn can_place_on_block_in_adventure_mode(
+        &self,
+        block: &'static Block,
+        state: &'static BlockState,
+    ) -> bool {
+        self.get_data_component::<CanPlaceOnImpl>()
+            .is_some_and(|predicate| {
+                adventure_predicate_matches_block(&predicate.predicate, block, state)
+            })
+    }
+
+    /// Vanilla `ItemStack.canBreakBlockInAdventureMode` (`ItemStack.java:1042-1045`) tests the
+    /// stack's `CAN_BREAK` predicate against the target block and state.
+    #[must_use]
+    pub fn can_break_block_in_adventure_mode(
+        &self,
+        block: &'static Block,
+        state: &'static BlockState,
+    ) -> bool {
+        self.get_data_component::<CanBreakImpl>()
+            .is_some_and(|predicate| {
+                adventure_predicate_matches_block(&predicate.predicate, block, state)
+            })
+    }
+
     pub fn write_item_stack(&self, compound: &mut NbtCompound) {
         // Minecraft 1.21.4 uses "id" as string with namespaced ID (minecraft:diamond_sword)
         compound.put_string("id", format!("minecraft:{}", self.item.registry_key));
@@ -840,6 +880,95 @@ impl ItemStack {
     }
 }
 
+fn block_name_matches_predicate(name: &str, block: &'static Block) -> bool {
+    if let Some(tag) = name.strip_prefix('#') {
+        return block.is_tagged_with(tag).unwrap_or(false);
+    }
+    name.strip_prefix("minecraft:").unwrap_or(name) == block.name
+}
+
+fn adventure_predicate_matches_block(
+    predicate: &NbtTag,
+    block: &'static Block,
+    state: &'static BlockState,
+) -> bool {
+    let predicates: Vec<&NbtTag> = match predicate {
+        NbtTag::Compound(_) => vec![predicate],
+        NbtTag::List(predicates) => predicates.iter().collect(),
+        NbtTag::String(name) => return block_name_matches_predicate(name, block),
+        _ => return false,
+    };
+
+    predicates.iter().any(|predicate| {
+        let Some(predicate) = predicate.extract_compound() else {
+            return false;
+        };
+        if predicate.has("nbt") || predicate.has("components") {
+            return false;
+        }
+        if predicate.has("state") && predicate.get_compound("state").is_none() {
+            return false;
+        }
+        if let Some(properties) = predicate.get_compound("state") {
+            let Some(actual_properties) = block.properties(state.id) else {
+                return false;
+            };
+            let actual_properties = actual_properties.to_props();
+            if properties.child_tags.iter().any(|(name, required)| {
+                let Some((_, actual_value)) = actual_properties
+                    .iter()
+                    .find(|(actual_name, _)| *actual_name == name.as_ref())
+                else {
+                    return true;
+                };
+                match required {
+                    NbtTag::String(required) => *actual_value != required.as_ref(),
+                    NbtTag::Compound(range) => {
+                        let min = range.get_string("min");
+                        let max = range.get_string("max");
+                        if min.is_none() && max.is_none() {
+                            return true;
+                        }
+                        let numeric_actual = actual_value.parse::<i32>().ok();
+                        let numeric_min = min.and_then(|value| value.parse::<i32>().ok());
+                        let numeric_max = max.and_then(|value| value.parse::<i32>().ok());
+                        if min.is_some() && numeric_min.is_none() && numeric_actual.is_none() {
+                            return true;
+                        }
+                        if max.is_some() && numeric_max.is_none() && numeric_actual.is_none() {
+                            return true;
+                        }
+                        numeric_actual.map_or_else(
+                            || {
+                                min.is_some_and(|min| *actual_value < min)
+                                    || max.is_some_and(|max| *actual_value > max)
+                            },
+                            |actual| {
+                                numeric_min.is_some_and(|min| actual < min)
+                                    || numeric_max.is_some_and(|max| actual > max)
+                            },
+                        )
+                    }
+                    _ => true,
+                }
+            }) {
+                return false;
+            }
+        }
+        let Some(blocks) = predicate.get("blocks") else {
+            return true;
+        };
+        match blocks {
+            NbtTag::String(name) => block_name_matches_predicate(name, block),
+            NbtTag::List(names) => names.iter().any(|name| {
+                name.extract_string()
+                    .is_some_and(|name| block_name_matches_predicate(name, block))
+            }),
+            _ => false,
+        }
+    })
+}
+
 impl From<&RecipeResultStruct> for ItemStack {
     fn from(value: &RecipeResultStruct) -> Self {
         // A recipe result can carry components of its own - a suspicious stew's effect is
@@ -877,6 +1006,34 @@ mod tests {
         assert_eq!(copy.item_count, 3);
         assert_eq!(copy.item.id, Item::COAL.id);
         assert!(stack.is_empty());
+    }
+
+    #[test]
+    fn transmute_copy_preserves_count_and_components() {
+        // Vanilla `ItemStack.transmuteCopy` (`ItemStack.java:599-608`) copies the component
+        // patch while replacing the item, and returns EMPTY for an empty input.
+        let mut stack = ItemStack::new(3, &Item::BOOK);
+        stack.set_custom_name("marked".to_owned());
+
+        let converted = stack.transmute_copy(&Item::ENCHANTED_BOOK);
+
+        assert_eq!(converted.item.id, Item::ENCHANTED_BOOK.id);
+        assert_eq!(converted.item_count, 3);
+        assert_eq!(converted.get_item().id, Item::ENCHANTED_BOOK.id);
+        assert_eq!(
+            converted
+                .get_data_component::<CustomNameImpl>()
+                .expect("custom name should be copied")
+                .name
+                .clone()
+                .get_text(),
+            "marked"
+        );
+        assert!(
+            ItemStack::EMPTY
+                .transmute_copy(&Item::ENCHANTED_BOOK)
+                .is_empty()
+        );
     }
 
     #[cfg(feature = "damage")]
@@ -1113,6 +1270,41 @@ mod tests {
                 .name,
             "filled_map.mansion"
         );
+    }
+
+    #[test]
+    fn adventure_predicates_match_only_the_named_block() {
+        // Vanilla `ItemStack.canPlaceOnBlockInAdventureMode` and
+        // `ItemStack.canBreakBlockInAdventureMode` (`ItemStack.java:1037-1045`) test the
+        // component predicate against the clicked block.
+        let mut stack = ItemStack::new(1, &Item::STONE);
+        stack.patch.push((
+            DataComponent::CanPlaceOn,
+            Some(
+                CanPlaceOnImpl {
+                    predicate: NbtTag::String("minecraft:stone".into()),
+                }
+                .to_dyn(),
+            ),
+        ));
+        stack.patch.push((
+            DataComponent::CanBreak,
+            Some(
+                CanBreakImpl {
+                    predicate: NbtTag::String("minecraft:stone".into()),
+                }
+                .to_dyn(),
+            ),
+        ));
+
+        assert!(
+            stack.can_place_on_block_in_adventure_mode(&Block::STONE, Block::STONE.default_state)
+        );
+        assert!(stack.can_break_block_in_adventure_mode(&Block::STONE, Block::STONE.default_state));
+        assert!(
+            !stack.can_place_on_block_in_adventure_mode(&Block::DIRT, Block::DIRT.default_state)
+        );
+        assert!(!stack.can_break_block_in_adventure_mode(&Block::DIRT, Block::DIRT.default_state));
     }
 
     // ── damage_item ───────────────────────────────────────────────

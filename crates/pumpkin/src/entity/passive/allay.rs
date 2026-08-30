@@ -36,8 +36,8 @@
 //   also fetch a poison potion.
 // - `CriteriaTriggers.ALLAY_DROP_ITEM_ON_BLOCK` in `AllayAi.onItemThrown` (`AllayAi.java:159`):
 //   no advancement trigger of that name is wired up here.
-// - `Allay.getPickupReach()` (`Allay.java:336-339`), a custom pickup box. The shared
-//   `Mob::mob_try_pick_up_items` pass uses its own reach and is not parameterised.
+// - `Allay.getPickupReach()` (`Allay.java:336-339`) is supplied through
+//   `Mob::get_pickup_reach` below.
 //
 // Two deviations worth naming because they are structural, not omissions:
 //
@@ -500,6 +500,12 @@ impl Mob for AllayEntity {
             && world.level_info.load().game_rules.mob_griefing
             && self.inventory_can_add(stack)
             && Self::considers_item_equal(&held, stack)
+    }
+
+    /// Vanilla `Allay.getPickupReach` includes the block above the Allay.
+    // `Allay.java:72,336-339`.
+    fn get_pickup_reach(&self) -> (f64, f64, f64) {
+        (1.0, 1.0, 1.0)
     }
 
     /// `InventoryCarrier.pickUpItem` (`Allay.java:360-362`): the stack goes into the single

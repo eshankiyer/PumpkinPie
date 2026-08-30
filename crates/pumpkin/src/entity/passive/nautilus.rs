@@ -14,9 +14,16 @@ use pumpkin_data::{
     potion::Effect,
     sound::{Sound, SoundCategory},
 };
+use pumpkin_inventory::generic_container_screen_handler::create_generic_3x3;
+use pumpkin_inventory::player::player_inventory::PlayerInventory;
+use pumpkin_inventory::screen_handler::{
+    BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
+};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::vector3::Vector3;
+use pumpkin_util::text::TextComponent;
+use pumpkin_world::inventory::{Inventory, SimpleInventory};
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -43,7 +50,33 @@ pub struct NautilusEntity {
     pub is_dashing: AtomicBool,
     pub dash_cooldown: AtomicI32,
     pub is_saddled: AtomicBool,
-    pub inventory: Mutex<Vec<ItemStack>>,
+    // Vanilla passes this mount inventory to the player screen (`AbstractNautilus.java:504-507`,
+    // `ServerPlayer.java:1385-1395`).
+    pub inventory: Arc<SimpleInventory>,
+}
+
+// The existing generic screen factory is the server-side inventory path used by this entity;
+// vanilla selects its mount packet and menu in `ServerPlayer.openNautilusInventory`
+// (`ServerPlayer.java:1385-1395`).
+struct NautilusScreenFactory(Arc<SimpleInventory>);
+
+impl ScreenHandlerFactory for NautilusScreenFactory {
+    fn create_screen_handler<'a>(
+        &'a self,
+        sync_id: u8,
+        player_inventory: &'a Arc<PlayerInventory>,
+        _player: &'a dyn InventoryPlayer,
+    ) -> BoxFuture<'a, Option<SharedScreenHandler>> {
+        Box::pin(async move {
+            let inventory: Arc<dyn Inventory> = self.0.clone();
+            let handler = create_generic_3x3(sync_id, player_inventory, inventory).await;
+            Some(Arc::new(Mutex::new(handler)) as SharedScreenHandler)
+        })
+    }
+
+    fn get_display_name(&self) -> TextComponent {
+        TextComponent::text("Nautilus")
+    }
 }
 
 impl NautilusEntity {
@@ -56,7 +89,7 @@ impl NautilusEntity {
             is_dashing: AtomicBool::new(false),
             dash_cooldown: AtomicI32::new(0),
             is_saddled: AtomicBool::new(false),
-            inventory: Mutex::new(vec![ItemStack::new(0, &pumpkin_data::item::Item::AIR); 9]),
+            inventory: Arc::new(SimpleInventory::new(9)),
         };
 
         let mob_arc = Arc::new(nautilus);
@@ -299,6 +332,32 @@ impl Animal for NautilusEntity {
 impl Mob for NautilusEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `AbstractNautilus.openCustomInventoryScreen` gates the ridden inventory on taming and
+    /// the controlling passenger (`AbstractNautilus.java:503-507`), then calls
+    /// `ServerPlayer.openNautilusInventory` (`ServerPlayer.java:1385-1395`).
+    fn open_custom_inventory_screen<'a>(
+        &'a self,
+        player: &'a Arc<Player>,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            if !self.is_tame() {
+                return;
+            }
+            let passengers = self.mob_entity.living_entity.entity.passengers.lock().await;
+            if passengers.is_empty()
+                || !passengers
+                    .iter()
+                    .any(|passenger| passenger.get_entity().entity_id == player.entity_id())
+            {
+                return;
+            }
+            drop(passengers);
+            player
+                .open_handled_screen(&NautilusScreenFactory(self.inventory.clone()), None)
+                .await;
+        })
     }
 
     /// `Nautilus.getAmbientSound` (Nautilus.java:78-84), reached through the shared

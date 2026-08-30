@@ -800,6 +800,12 @@ impl EntityBase for ArrowEntity {
                     }
 
                     if let Some(living) = target.get_living_entity() {
+                        // Vanilla `AbstractArrow.onHitEntity` increments the victim's tracked
+                        // arrow count for non-piercing hits (`AbstractArrow.java:474-477`).
+                        if self.pierce_level.load(Ordering::Relaxed) == 0 {
+                            living.add_arrow();
+                        }
+
                         // `AbstractArrow.doKnockback`: the push follows the ARROW's horizontal
                         // flight, scaled by the target's knockback resistance, and the shooter is
                         // never touched. Routing this through the melee helper aimed the knockback

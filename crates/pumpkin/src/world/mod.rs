@@ -2475,7 +2475,10 @@ impl World {
     where
         F: FnMut(&BoundingBox),
     {
-        if state.is_air() || !state.is_solid() {
+        // Vanilla's `BlockCollisions` admits non-solid legacy states when the caller is testing
+        // suffocation, then applies `isSuffocating` before its shape intersection
+        // (`BlockCollisions.java:89-101`). The live suffocation caller passes `true` here.
+        if state.is_air() || (!state.is_solid() && !use_collision_shape) {
             return false;
         }
 

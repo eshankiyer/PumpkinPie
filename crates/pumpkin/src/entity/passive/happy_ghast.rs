@@ -661,6 +661,11 @@ impl Mob for HappyGhastEntity {
                 self.sync_stay_still_flag();
             }
 
+            // Vanilla `HappyGhast.aiStep` (`HappyGhast.java:438-442`) requests precise position
+            // packets while the still-timeout is active, after its server AI step updates it.
+            self.get_entity()
+                .set_requires_precise_position(self.is_on_still_timeout());
+
             self.continuous_heal();
 
             let is_vehicle = !self

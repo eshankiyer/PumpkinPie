@@ -196,6 +196,19 @@ impl Mob for TraderLlamaEntity {
         &self.mob_entity
     }
 
+    /// `ServerPlayer.openHorseInventory` receives the chested horse container
+    /// (`ServerPlayer.java:1372-1382`) after the ridden-vehicle inventory command.
+    fn open_custom_inventory_screen<'a>(
+        &'a self,
+        player: &'a Arc<Player>,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            if self.is_tamed() {
+                AbstractChestedHorse::open_chest_inventory(self, player).await;
+            }
+        })
+    }
+
     fn get_follow_leash_speed(&self) -> f32 {
         2.0
     }

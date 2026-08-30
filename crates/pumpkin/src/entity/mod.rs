@@ -18,7 +18,6 @@ use player::Player;
 use pumpkin_data::BlockState;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::biome::Biome;
-use pumpkin_data::block_properties::blocks_movement;
 use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::dimension::Dimension;
 use pumpkin_data::entity::EntityStatus;
@@ -143,6 +142,27 @@ pub const fn equipment_break_status(slot: &EquipmentSlot) -> EntityStatus {
 pub type EntityBaseFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 pub type TeleportFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+
+/// Vanilla `Entity.calculateViewVector` for `getHeadLookAngle` uses head yaw and pitch
+/// (`Entity.java:2571-2573`).
+fn head_look_vector(head_yaw: f32, pitch: f32) -> Vector3<f64> {
+    Vector3::from_yaw_pitch(head_yaw, pitch)
+}
+
+fn collides_along_vector(
+    moving_box: BoundingBox,
+    movement: Vector3<f64>,
+    aabbs: &[BoundingBox],
+) -> bool {
+    aabbs.iter().any(|aabb| {
+        moving_box.intersects(aabb)
+            || Axis::all().into_iter().any(|axis| {
+                moving_box
+                    .calculate_collision_time(aabb, movement, axis, 1.0)
+                    .is_some()
+            })
+    })
+}
 
 /// vanilla `EntitySelector.pushableBy`.
 ///
@@ -269,6 +289,13 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         Vector3::from_yaw_pitch(entity.yaw.load(), entity.pitch.load())
     }
 
+    /// Vanilla `Entity.getHeadLookAngle` uses head yaw for entity-hit sweeps
+    /// (`Entity.java:2571-2573`; `ProjectileUtil.java:38-45`).
+    fn get_head_look_angle(&self) -> Vector3<f64> {
+        let entity = self.get_entity();
+        head_look_vector(entity.head_yaw.load(), entity.pitch.load())
+    }
+
     fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
         Box::pin(async move {
             let entity = self.get_entity();
@@ -307,6 +334,25 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
 
     fn is_pushed_by_fluids(&self) -> bool {
         true
+    }
+
+    /// Vanilla `Entity.getBlockSpeedFactor` is applied to the post-collision movement
+    /// (`Entity.java:796-797`) and selects the current/below block factor (`Entity.java:1084-1091`).
+    fn get_block_speed_factor(&self) -> f32 {
+        self.get_entity().get_velocity_multiplier()
+    }
+
+    /// Vanilla `Entity.getEntityBounciness` is the entity-side restitution used for collision
+    /// bounce (`Entity.java:803-856`); living entities source it from the bounciness attribute
+    /// (`LivingEntity.java:2192-2195`).
+    fn get_entity_bounciness(&self) -> f64 {
+        0.0
+    }
+
+    /// Vanilla `LivingEntity.getDismountPoses` supplies the pose order used by vehicle exit
+    /// searches (`LivingEntity.java:3735-3737`; `AbstractBoat.java:653-660`).
+    fn get_dismount_poses(&self) -> Vec<EntityPose> {
+        vec![EntityPose::Standing]
     }
 
     /// Vanilla `AbstractBoat.rideHeight` (`AbstractBoat.java:132`): the Y offset at which a
@@ -477,6 +523,12 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
 
     fn can_hit(&self) -> bool {
         false
+    }
+
+    /// Vanilla `Entity.isInvulnerableToPiercingWeapon` (`Entity.java:3018-3020`) uses the
+    /// entity-wide invulnerability flag for the piercing-weapon hit predicate.
+    fn is_invulnerable_to_piercing_weapon(&self) -> bool {
+        self.get_entity().invulnerable.load(Ordering::Relaxed)
     }
 
     /// Vanilla `Entity.isPickable`; entity families override this where vanilla does.
@@ -751,6 +803,12 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         entity.clear_freeze();
     }
 
+    /// Vanilla `Entity.getFireImmuneTicks` supplies the negative fire-tick state used after
+    /// block effects (`Entity.java:958-974, 3624-3625`).
+    fn get_fire_immune_ticks(&self) -> i32 {
+        0
+    }
+
     /// Called when a player collides with a entity
     fn on_player_collision<'a>(&'a self, _player: &'a Arc<Player>) -> EntityBaseFuture<'a, ()> {
         Box::pin(async {})
@@ -831,6 +889,13 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
             if self_entity.no_clip.load(Ordering::Relaxed)
                 || other_entity.no_clip.load(Ordering::Relaxed)
             {
+                return;
+            }
+
+            // Vanilla `Entity.push` (`Entity.java:1869`) excludes entities sharing a root
+            // vehicle (`Entity.isPassengerOfSameVehicle`, `Entity.java:3561-3562`), including
+            // nested passengers rather than only direct vehicle links.
+            if self_entity.root_vehicle_id().await == other_entity.root_vehicle_id().await {
                 return;
             }
 
@@ -1245,12 +1310,44 @@ const fn delta_needs_position_sync(encoded: Vector3<i64>) -> bool {
         || encoded.z > i16::MAX as i64
 }
 
+/// Vanilla `ServerEntity.sendChanges` (`ServerEntity.java:153-161`) forces an absolute position
+/// sync when the entity requires precise position updates, even when the delta fits in a short.
+const fn should_send_position_sync(
+    requires_precise_position: bool,
+    encoded: Vector3<i64>,
+    teleport_delay: i32,
+    on_ground: bool,
+    last_sent_on_ground: bool,
+) -> bool {
+    requires_precise_position
+        || delta_needs_position_sync(encoded)
+        || teleport_delay > MAX_TICKS_BEFORE_POSITION_SYNC
+        || on_ground != last_sent_on_ground
+}
+
 /// Shared ordinary-interaction mount admission. The first two conditions are vanilla
 /// `Entity.canRide`; retaining an existing vehicle prevents the invalid double attachment that
 /// Pumpkin's current low-level mount primitive cannot safely transfer.
 const fn can_start_riding_state(sneaking: bool, riding_cooldown: i32, has_vehicle: bool) -> bool {
     !sneaking && riding_cooldown <= 0 && !has_vehicle
 }
+
+/// Vanilla `Entity.restituteMovementAfterCollisions` (`Entity.java:803-818`) suppresses
+/// restitution while the entity is stepping carefully or while the block suppresses bounce.
+const fn should_restitute_after_collision(
+    restitution: f64,
+    suppressing_bounce: bool,
+    block_suppresses_bounce: bool,
+) -> bool {
+    restitution > 0.0 && !suppressing_bounce && !block_suppresses_bounce
+}
+
+/// Vanilla uses the greater of entity and block restitution when a living entity lands
+/// (`Entity.java:815-835,846-856`).
+const fn effective_bounce_restitution(entity: f64, block: f64) -> f64 {
+    if entity > block { entity } else { block }
+}
+
 pub struct Entity {
     /// A unique identifier for the entity
     pub entity_id: i32,
@@ -1418,6 +1515,9 @@ pub struct Entity {
     pub last_sent_velocity: AtomicCell<Vector3<f64>>,
     /// Vanilla `ServerEntity.teleportDelay`: ticks since the last absolute position sync.
     pub teleport_delay: AtomicI32,
+    /// Vanilla `Entity.requiresPrecisePosition`, used by `ServerEntity` when choosing a position
+    /// packet. Happy Ghasts enable it while their still-timeout is active.
+    requires_precise_position: AtomicBool,
     /// Vanilla `ServerEntity.wasOnGround`: the ground flag the client was last told about.
     pub last_sent_on_ground: AtomicBool,
     /// Cache for the last sent head yaw byte
@@ -1595,6 +1695,7 @@ impl Entity {
         )
     }
 
+    #[expect(clippy::too_many_lines)]
     pub fn from_uuid_with_id(
         entity_id: i32,
         entity_uuid: uuid::Uuid,
@@ -1701,6 +1802,7 @@ impl Entity {
             last_sent_pos: AtomicCell::new(position),
             last_sent_velocity: AtomicCell::new(Vector3::new(0.0, 0.0, 0.0)),
             teleport_delay: AtomicI32::new(0),
+            requires_precise_position: AtomicBool::new(false),
             last_sent_on_ground: AtomicBool::new(false),
             tracked_data_snapshot: std::sync::Mutex::new(Vec::new()),
             custom_data: Mutex::new(NbtCompound::new()),
@@ -2406,10 +2508,26 @@ impl Entity {
                 continue;
             }
 
-            // TODO: this is default predicate, vanilla overwrites it for some blocks,
-            // see .suffocates(...) in Blocks.java
+            // Vanilla `BlockCollisions` calls `BlockState.isSuffocating` before testing the
+            // collision shape (`BlockCollisions.java:89-101`). Its property overrides are folded
+            // into this helper; shulker animation is the only world-dependent override.
+            let shulker_closed =
+                if block.name == "shulker_box" || block.name.ends_with("_shulker_box") {
+                    world.get_block_entity(&pos).is_none_or(|block_entity| {
+                        block_entity
+                        .as_any()
+                        .downcast_ref::<crate::block::entities::shulker_box::ShulkerBoxBlockEntity>(
+                        )
+                        .is_none_or(|shulker| {
+                            shulker.get_animation_status()
+                                == crate::block::entities::shulker_box::AnimationStatus::Closed
+                        })
+                    })
+                } else {
+                    true
+                };
             let check_suffocation =
-                !suffocating && blocks_movement(state, block.id) && state.is_full_cube();
+                !suffocating && crate::block::is_suffocating(block, state, shulker_closed);
 
             World::check_collision(
                 &bounding_box,
@@ -2447,6 +2565,14 @@ impl Entity {
             }
         }
 
+        // Vanilla `Entity.applyEffectsFromBlocks` resets fire ticks after all block effects when
+        // they neither keep nor newly apply fire (`Entity.java:958-974`).
+        let remaining_fire_ticks = self.fire_ticks.load(Ordering::Relaxed);
+        if remaining_fire_ticks <= 0 {
+            self.fire_ticks
+                .store(-caller.get_fire_immune_ticks(), Ordering::Relaxed);
+        }
+
         suffocating
     }
 
@@ -2468,10 +2594,13 @@ impl Entity {
         // the ground flag flips, not only when the delta overflows.
         let teleport_delay = self.teleport_delay.fetch_add(1, Relaxed) + 1;
         let on_ground = self.on_ground.load(Relaxed);
-        if delta_needs_position_sync(encoded)
-            || teleport_delay > MAX_TICKS_BEFORE_POSITION_SYNC
-            || on_ground != self.last_sent_on_ground.load(Relaxed)
-        {
+        if should_send_position_sync(
+            self.requires_precise_position.load(Relaxed),
+            encoded,
+            teleport_delay,
+            on_ground,
+            self.last_sent_on_ground.load(Relaxed),
+        ) {
             self.send_position_sync(chunk_pos, new);
             return;
         }
@@ -2720,10 +2849,13 @@ impl Entity {
         // the ground flag flips, not only when the delta overflows.
         let teleport_delay = self.teleport_delay.fetch_add(1, Relaxed) + 1;
         let on_ground = self.on_ground.load(Relaxed);
-        if delta_needs_position_sync(encoded)
-            || teleport_delay > MAX_TICKS_BEFORE_POSITION_SYNC
-            || on_ground != self.last_sent_on_ground.load(Relaxed)
-        {
+        if should_send_position_sync(
+            self.requires_precise_position.load(Relaxed),
+            encoded,
+            teleport_delay,
+            on_ground,
+            self.last_sent_on_ground.load(Relaxed),
+        ) {
             self.send_position_sync(chunk_pos, new);
             return;
         }
@@ -2915,6 +3047,20 @@ impl Entity {
         self.lava_height.store(lava_height);
 
         self.touching_lava.store(in_lava, Ordering::SeqCst);
+    }
+
+    /// Vanilla `Entity.collidedWithShapeMovingFrom` (`Entity.java:1397-1400`) tests the entity
+    /// box at the starting point and along its movement vector against block collision boxes.
+    /// Ghast movement is the current live caller.
+    #[must_use]
+    pub fn collided_with_shape_moving_from(
+        &self,
+        from: Vector3<f64>,
+        to: Vector3<f64>,
+        aabbs: &[BoundingBox],
+    ) -> bool {
+        let moving_box = self.entity_dimension.load().make_bounding_box(from);
+        collides_along_vector(moving_box, to - from, aabbs)
     }
 
     /// `Entity.isEyeInFluid` (`Entity.java:1730-1731`).
@@ -3175,7 +3321,9 @@ impl Entity {
         self.move_pos(final_move);
         self.sync_passenger_positions().await;
 
-        let velocity_multiplier = f64::from(self.get_velocity_multiplier());
+        // Vanilla applies `getBlockSpeedFactor` after collision adjustment
+        // (`Entity.java:796-797`).
+        let velocity_multiplier = f64::from(caller.get_block_speed_factor());
 
         let mut velocity = final_move * velocity_multiplier;
         if motion.y < 0.0
@@ -3184,10 +3332,15 @@ impl Entity {
         {
             let world = self.world.load();
             let block = world.get_block(&supporting_block_pos);
-            let restitution = crate::block::block_bounce_restitution(block);
-            if restitution > 0.0
-                && !block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_SUPPRESSES_BOUNCE)
-            {
+            let restitution = effective_bounce_restitution(
+                caller.get_entity_bounciness(),
+                crate::block::block_bounce_restitution(block),
+            );
+            if should_restitute_after_collision(
+                restitution,
+                self.is_sneaking(),
+                block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_SUPPRESSES_BOUNCE),
+            ) {
                 // `Entity.restituteMovementAfterCollisions` (`Entity.java:803-843`) reflects
                 // downward velocity using the supporting block's restitution; non-living
                 // entities receive the `Entity.java:846-852` 0.8 multiplier.
@@ -3613,6 +3766,13 @@ impl Entity {
         // TODO
         self.yaw.store(yaw);
         self.set_pitch(pitch);
+    }
+
+    /// Vanilla `Entity.setRequiresPrecisePosition` (`Entity.java:372-378`) controls the
+    /// absolute-position branch in `ServerEntity.sendChanges`.
+    pub fn set_requires_precise_position(&self, requires_precise_position: bool) {
+        self.requires_precise_position
+            .store(requires_precise_position, Relaxed);
     }
 
     pub fn set_pitch(&self, pitch: f32) {
@@ -4911,17 +5071,19 @@ impl Entity {
             let dismount_pos = if self.entity_type == &EntityType::HAPPY_GHAST || is_water {
                 fallback_pos
             } else {
-                // Vanilla checks Standing, Crouching, Swimming poses and their respective height checks
-                let poses_and_heights = [
-                    (EntityPose::Standing, vec![0, 1, -1]),
-                    (EntityPose::Crouching, vec![0, 1, -1]),
-                    (EntityPose::Swimming, vec![0, 1]),
-                ];
+                // Vanilla checks the passenger's `getDismountPoses` order, with the current
+                // living-entity implementation returning standing (`LivingEntity.java:3735-3737`).
+                let poses = passenger.get_dismount_poses();
 
                 let vehicle_block_pos = self.block_pos.load();
                 let mut found = None;
 
-                'search: for (pose, y_offsets) in poses_and_heights {
+                'search: for pose in poses {
+                    let y_offsets = if pose == EntityPose::Swimming {
+                        vec![0, 1]
+                    } else {
+                        vec![0, 1, -1]
+                    };
                     let dims = passenger_entity.get_dimensions(pose);
 
                     for y_offset in y_offsets {
@@ -4966,11 +5128,7 @@ impl Entity {
                     let mut found_fallback = None;
                     let vehicle_top = vehicle_box.max.y;
 
-                    let poses = [
-                        EntityPose::Standing,
-                        EntityPose::Crouching,
-                        EntityPose::Swimming,
-                    ];
+                    let poses = passenger.get_dismount_poses();
 
                     for pose in poses {
                         let dims = passenger_entity.get_dimensions(pose);
@@ -5579,6 +5737,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn entity_bounciness_wins_over_lower_block_restitution() {
+        // Vanilla selects max(entity bounciness, block bounciness) at Entity.java:815-820.
+        assert_eq!(effective_bounce_restitution(0.8, 0.75), 0.8);
+        assert_eq!(effective_bounce_restitution(0.2, 1.0), 1.0);
+    }
+
+    #[test]
     fn equipment_break_status_maps_all_slots() {
         // Status bytes from vanilla EntityEvent: mainhand=47, offhand=48,
         // head=49, chest=50, legs=51, feet=52, body=65, saddle=68.
@@ -5607,6 +5772,15 @@ mod tests {
         assert!(!can_start_riding_state(true, 0, false));
         assert!(!can_start_riding_state(false, 1, false));
         assert!(!can_start_riding_state(false, 0, true));
+    }
+
+    #[test]
+    fn head_look_vector_uses_head_yaw_and_pitch() {
+        // Vanilla `Entity.getHeadLookAngle` derives the vector from head yaw and pitch
+        // (`Entity.java:2571-2573`).
+        assert_eq!(head_look_vector(0.0, 0.0), Vector3::new(0.0, 0.0, 1.0));
+        assert!((head_look_vector(90.0, 0.0).x + 1.0).abs() < f64::EPSILON);
+        assert!((head_look_vector(0.0, 90.0).y + 1.0).abs() < f64::EPSILON);
     }
 }
 
@@ -6123,5 +6297,68 @@ mod default_dimension_tests {
         ] {
             assert!(!type_is_avatar(entity_type));
         }
+    }
+}
+
+#[cfg(test)]
+mod collision_restitution_tests {
+    use super::{collides_along_vector, should_restitute_after_collision};
+    use pumpkin_util::math::{boundingbox::BoundingBox, vector3::Vector3};
+
+    /// `Entity.restituteMovementAfterCollisions` (`Entity.java:803-818`) does not bounce from
+    /// a collision when either sneaking or the supporting block suppresses bounce.
+    #[test]
+    fn sneaking_and_suppressing_blocks_disable_restitution() {
+        assert!(should_restitute_after_collision(0.5, false, false));
+        assert!(!should_restitute_after_collision(0.5, true, false));
+        assert!(!should_restitute_after_collision(0.5, false, true));
+        assert!(!should_restitute_after_collision(0.0, false, false));
+    }
+
+    /// `Entity.collidedWithShapeMovingFrom` (`Entity.java:1397-1400`) detects a shape entered
+    /// between the start and end boxes, not only an overlap at either endpoint.
+    #[test]
+    fn swept_collision_detects_intermediate_shape() {
+        let moving_box = BoundingBox {
+            min: Vector3::new(0.0, 0.0, 0.0),
+            max: Vector3::new(1.0, 1.0, 1.0),
+        };
+        let obstacle = BoundingBox {
+            min: Vector3::new(2.0, 0.0, 0.0),
+            max: Vector3::new(3.0, 1.0, 1.0),
+        };
+        assert!(collides_along_vector(
+            moving_box,
+            Vector3::new(3.0, 0.0, 0.0),
+            &[obstacle]
+        ));
+    }
+}
+
+#[cfg(test)]
+mod precise_position_tests {
+    use super::{delta_needs_position_sync, should_send_position_sync};
+    use pumpkin_util::math::vector3::Vector3;
+
+    /// `ServerEntity.sendChanges` (`ServerEntity.java:153-161`) sends an absolute position when
+    /// precise updates are requested, even for a delta that fits in a relative packet.
+    #[test]
+    fn precise_position_request_forces_absolute_sync() {
+        let small_delta = Vector3::new(1i64, 0, 0);
+        assert!(!delta_needs_position_sync(small_delta));
+        assert!(!should_send_position_sync(
+            false,
+            small_delta,
+            1,
+            false,
+            false
+        ));
+        assert!(should_send_position_sync(
+            true,
+            small_delta,
+            1,
+            false,
+            false
+        ));
     }
 }
