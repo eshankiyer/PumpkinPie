@@ -123,7 +123,9 @@ impl EnchantingTableScreenHandler {
     pub async fn update_enchantments(&mut self, player: &dyn InventoryPlayer) {
         let item = self.inventory.get_stack(0).await;
 
-        if item.is_empty() || item.has_enchantments() {
+        // Vanilla `ItemStack.isEnchantable` (`ItemStack.java:986-993`) requires an empty,
+        // present enchantments component in addition to the enchantable component.
+        if item.is_empty() || !item.is_enchantable() {
             for i in 0..3 {
                 self.level_requirements[i] = 0;
                 self.enchantment_id[i] = -1;

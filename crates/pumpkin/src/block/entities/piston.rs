@@ -54,12 +54,16 @@ impl PistonBlockEntity {
 
     /// Ports vanilla `PistonBlockEntity.pushEntities`: pushes entities whose
     /// bounding box intersects the moving block's swept volume during this tick.
-    fn push_entities(&self, world: &Arc<World>, new_progress: f32) {
+    async fn push_entities(&self, world: &Arc<World>, new_progress: f32) {
         let last = self.last_progress.load();
         let delta = f64::from(new_progress - last);
         if delta <= 0.0 {
             return;
         }
+
+        // `Entity.move(PISTON)` obtains the current game time before applying
+        // `Entity.limitPistonMovement` (`Entity.java:721-727,1098-1121`).
+        let current_game_time = world.get_world_age().await;
 
         let motion_dir = self.movement_direction();
         let amount = f64::from(self.amount_extended(last));
@@ -101,7 +105,7 @@ impl PistonBlockEntity {
                 continue;
             }
             let push_amount = intersection.min(delta) + 0.01;
-            Self::move_entity(e, motion_dir, push_amount);
+            Self::move_entity(e, motion_dir, push_amount, current_game_time);
 
             // For a retracting head, vanilla also shoves the entity OUT of the
             // piston body cube. Without this, entities get pulled into the
@@ -109,7 +113,13 @@ impl PistonBlockEntity {
             // For a retract-head BE, `self.position` already IS the piston
             // block position (it replaces the piston during animation).
             if !self.extending && self.source {
-                Self::push_out_of_piston_body(e, &self.position, motion_dir, delta);
+                Self::push_out_of_piston_body(
+                    e,
+                    &self.position,
+                    motion_dir,
+                    delta,
+                    current_game_time,
+                );
             }
         }
     }
@@ -131,8 +141,17 @@ impl PistonBlockEntity {
         }
     }
 
-    fn move_entity(entity: &crate::entity::Entity, dir: BlockDirection, distance: f64) {
-        let new_pos = entity.pos.load() + Self::dir_vec(dir, distance);
+    fn move_entity(
+        entity: &crate::entity::Entity,
+        dir: BlockDirection,
+        distance: f64,
+        current_game_time: i64,
+    ) {
+        // `Entity.move(PISTON)` applies the cap before changing position
+        // (`Entity.java:721-727,1098-1121`).
+        let requested = Self::dir_vec(dir, distance);
+        let movement = entity.limit_piston_movement(requested, current_game_time);
+        let new_pos = entity.pos.load() + movement;
         entity.set_pos(new_pos);
         entity.send_pos();
     }
@@ -145,6 +164,7 @@ impl PistonBlockEntity {
         piston_pos: &BlockPos,
         motion_dir: BlockDirection,
         amount: f64,
+        current_game_time: i64,
     ) {
         let body_aabb = BoundingBox::from_block(piston_pos);
         let entity_aabb = entity.bounding_box.load();
@@ -160,7 +180,7 @@ impl PistonBlockEntity {
         ) + 0.01;
         if (e - f).abs() < 0.01 {
             let distance = e.min(amount) + 0.01;
-            Self::move_entity(entity, back, distance);
+            Self::move_entity(entity, back, distance, current_game_time);
         }
     }
 
@@ -303,7 +323,7 @@ impl BlockEntity for PistonBlockEntity {
                 return;
             }
             let new_progress = (current_progress + 0.5).min(1.0);
-            self.push_entities(world, new_progress);
+            self.push_entities(world, new_progress).await;
             self.current_progress.store(new_progress);
         })
     }

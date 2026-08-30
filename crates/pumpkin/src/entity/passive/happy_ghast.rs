@@ -7,6 +7,7 @@ use std::sync::{
 
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, IDSet, IdOr};
+use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
@@ -441,6 +442,45 @@ impl Mob for HappyGhastEntity {
 
     fn should_follow_leash(&self) -> bool {
         false
+    }
+
+    /// `HappyGhast.notifyLeashHolder` refreshes the five-tick holder flag only for a
+    /// quad-leash-capable leashed entity. The concrete `supportQuadLeash` overrides are
+    /// `AbstractBoat.java:365-367`, `Sniffer.java:153-155`, `Llama.java:418-420`, and
+    /// `AbstractHorse.java:198-200` (`HappyGhast.java:494-495,525-528`).
+    fn notify_leash_holder(&self, entity: &dyn EntityBase) {
+        let entity_type = entity.get_entity().entity_type.id;
+        let supports_quad_leash = entity_type == EntityType::ACACIA_BOAT.id
+            || entity_type == EntityType::BIRCH_BOAT.id
+            || entity_type == EntityType::DARK_OAK_BOAT.id
+            || entity_type == EntityType::JUNGLE_BOAT.id
+            || entity_type == EntityType::MANGROVE_BOAT.id
+            || entity_type == EntityType::OAK_BOAT.id
+            || entity_type == EntityType::PALE_OAK_BOAT.id
+            || entity_type == EntityType::SPRUCE_BOAT.id
+            || entity_type == EntityType::BAMBOO_RAFT.id
+            || entity_type == EntityType::CHERRY_BOAT.id
+            || entity_type == EntityType::ACACIA_CHEST_BOAT.id
+            || entity_type == EntityType::BAMBOO_CHEST_RAFT.id
+            || entity_type == EntityType::BIRCH_CHEST_BOAT.id
+            || entity_type == EntityType::CHERRY_CHEST_BOAT.id
+            || entity_type == EntityType::DARK_OAK_CHEST_BOAT.id
+            || entity_type == EntityType::JUNGLE_CHEST_BOAT.id
+            || entity_type == EntityType::MANGROVE_CHEST_BOAT.id
+            || entity_type == EntityType::OAK_CHEST_BOAT.id
+            || entity_type == EntityType::PALE_OAK_CHEST_BOAT.id
+            || entity_type == EntityType::SPRUCE_CHEST_BOAT.id
+            || entity_type == EntityType::HORSE.id
+            || entity_type == EntityType::DONKEY.id
+            || entity_type == EntityType::MULE.id
+            || entity_type == EntityType::SKELETON_HORSE.id
+            || entity_type == EntityType::ZOMBIE_HORSE.id
+            || entity_type == EntityType::LLAMA.id
+            || entity_type == EntityType::TRADER_LLAMA.id
+            || entity_type == EntityType::SNIFFER.id;
+        if supports_quad_leash {
+            self.leash_holder_time.store(5, Relaxed);
+        }
     }
 
     fn can_be_collided_with(&self) -> bool {

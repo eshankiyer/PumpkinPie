@@ -53,8 +53,8 @@ use pumpkin_data::data_component_impl::food::{
 };
 use pumpkin_data::data_component_impl::{
     AttributeModifiersImpl, BlocksAttacksImpl, DamageResistantImpl, DamageResistantType,
-    DeathProtectionImpl, EnchantmentsImpl, EquipmentSlot, EquippableImpl, FoodImpl, GliderImpl,
-    OminousBottleAmplifierImpl, WeaponImpl,
+    DeathProtectionImpl, EnchantmentsImpl, EquipmentSlot, EquipmentType, EquippableImpl, FoodImpl,
+    GliderImpl, OminousBottleAmplifierImpl, WeaponImpl,
 };
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::{EntityPose, EntityStatus, EntityType, MobCategory};
@@ -100,11 +100,36 @@ fn damage_stat_amount(damage: f32) -> i32 {
     (damage * 10.0).round() as i32
 }
 
+/// Vanilla `LivingEntity.doesEmitEquipEvent` defaults true (`LivingEntity.java:685-686`);
+/// `Player` restricts it to humanoid armor (`Player.java:1664-1666`).
+fn does_emit_equip_event(is_player: bool, slot: &EquipmentSlot) -> bool {
+    !is_player || slot.slot_type() == EquipmentType::HumanoidArmor
+}
+
 /// Vanilla `Player.causeFallDamage` awards this statistic before delegating to the
 /// general fall-damage path. The threshold and rounding intentionally match
 /// `Math.round(fallDistance * 100.0)`.
 fn fall_one_cm_stat_amount(fall_distance: f32) -> Option<i32> {
     (fall_distance >= 2.0).then_some((fall_distance * 100.0).round() as i32)
+}
+
+/// Computes one server tick of vanilla `LivingEntity` arrow-count decay
+/// (`LivingEntity.java:2754-2767`).
+const fn arrow_count_tick(count: i32, remove_time: i32) -> (i32, i32) {
+    if count <= 0 {
+        return (count, remove_time);
+    }
+
+    let remove_time = if remove_time <= 0 {
+        20 * (30 - count)
+    } else {
+        remove_time
+    } - 1;
+    if remove_time <= 0 {
+        (count - 1, 0)
+    } else {
+        (count, remove_time)
+    }
 }
 
 /// Vanilla `LivingEntity.causeFallDamage` (`LivingEntity.java:1788-1797`) limits fall distance
@@ -133,6 +158,20 @@ const fn should_travel_in_fluid(
     touching_lava: bool,
 ) -> bool {
     in_liquid && (touching_water || (touching_lava && entity_type.id != EntityType::STRIDER.id))
+}
+
+/// Vanilla `LivingEntity.hasLandedInLiquid` (`LivingEntity.java:404-406`).
+const fn has_landed_in_liquid_state(
+    velocity_y: f64,
+    touching_water: bool,
+    touching_lava: bool,
+) -> bool {
+    velocity_y < 1.0E-5 && (touching_water || touching_lava)
+}
+
+/// Vanilla `LivingEntity.isDeadOrDying` (`LivingEntity.java:1171-1173`).
+const fn dead_or_dying_state(health: f32, dead: bool) -> bool {
+    health <= 0.0 || dead
 }
 
 fn armor_resists_damage(stack: &ItemStack, damage_type: &DamageType) -> bool {
@@ -207,6 +246,12 @@ pub struct LivingEntity {
     pub health: AtomicCell<f32>,
     /// The remaining air supply used by vanilla `LivingEntity.baseTick`.
     pub air_supply: AtomicI32,
+    /// Vanilla `LivingEntity.getArrowCount`/`setArrowCount` tracked state
+    /// (`LivingEntity.java:1994-2000`).
+    pub arrow_count: AtomicI32,
+    /// Vanilla `LivingEntity.removeArrowTime` (`LivingEntity.java:228`), used by the
+    /// server-side arrow-count decay in `LivingEntity.tick` (`LivingEntity.java:2754-2767`).
+    remove_arrow_time: AtomicI32,
     pub stinger_count: AtomicI32,
     /// Entity-local random stream used by vanilla's air depletion roll.
     air_random: std::sync::Mutex<StdRng>,
@@ -224,9 +269,6 @@ pub struct LivingEntity {
     pub auto_spin_attack_damage: AtomicCell<f32>,
     pub auto_spin_attack_item_stack: Mutex<Option<ItemStack>>,
     pub death_time: AtomicU8,
-    /// Vanilla `LivingEntity.discardFriction` (`LivingEntity.java:225`), used by long-jump
-    /// entities to preserve their launch velocity through the movement tick.
-    discard_friction: AtomicBool,
     /// Vanilla `Entity.moveDist` (Entity.java:238): the scaled distance walked, accumulated by
     /// `Entity.applyMovementEmissionAndPlaySound` (Entity.java:867-901).
     move_dist: AtomicCell<f32>,
@@ -262,6 +304,9 @@ pub struct LivingEntity {
     /// Vanilla `LivingEntity.fallFlyTicks`: consecutive ticks spent fall flying, driving
     /// the glide game event and glider durability schedule in `updateFallFlying`.
     pub fall_fly_ticks: AtomicU32,
+    /// Vanilla `LivingEntity.discardFriction` (`LivingEntity.java:225`), set for long-jump
+    /// arcs and consumed by `travel_in_air`.
+    discard_friction: AtomicBool,
 
     pub climbing: AtomicBool,
 
@@ -360,6 +405,41 @@ impl LivingEntity {
         );
     }
 
+    /// Vanilla `LivingEntity.isUsingItem` (`LivingEntity.java:3417-3419`).
+    #[must_use]
+    pub fn is_using_item(&self) -> bool {
+        self.livings_flags.load(Relaxed) & Self::USING_ITEM_FLAG != 0
+    }
+
+    /// Vanilla `LivingEntity.hasLandedInLiquid` (`LivingEntity.java:404-406`).
+    #[must_use]
+    pub fn has_landed_in_liquid(&self) -> bool {
+        let velocity = self.entity.velocity.load();
+        has_landed_in_liquid_state(
+            velocity.y,
+            self.entity.touching_water.load(SeqCst),
+            self.entity.touching_lava.load(SeqCst),
+        )
+    }
+
+    /// Vanilla `LivingEntity.isDeadOrDying` (`LivingEntity.java:1171-1173`).
+    #[must_use]
+    pub fn is_dead_or_dying(&self) -> bool {
+        dead_or_dying_state(self.health.load(), self.dead.load(Relaxed))
+    }
+
+    /// Vanilla `LivingEntity.isIgnoringFallDamageFromCurrentImpulse` (`LivingEntity.java:1826-1828`).
+    #[must_use]
+    pub fn is_ignoring_fall_damage_from_current_impulse(&self) -> bool {
+        self.current_impulse_impact_pos.load().is_some()
+    }
+
+    /// Vanilla `LivingEntity.isInPostImpulseGraceTime` (`LivingEntity.java:1836-1838`).
+    #[must_use]
+    pub fn is_in_post_impulse_grace_time(&self) -> bool {
+        self.post_impulse_context_reset_grace_time.load(Relaxed) > 0
+    }
+
     const USING_ITEM_FLAG: u8 = 1;
     const OFF_HAND_ACTIVE_FLAG: u8 = 2;
     const USING_RIPTIDE_FLAG: u8 = 4;
@@ -436,6 +516,8 @@ impl LivingEntity {
             skip_drop_experience: AtomicBool::new(false),
             last_hurt_by_player_time: AtomicI32::new(0),
             last_damage_taken: AtomicCell::new(0.0),
+            arrow_count: AtomicI32::new(0),
+            remove_arrow_time: AtomicI32::new(0),
             absorption: AtomicCell::new(0.0),
             fall_distance: AtomicCell::new(0.0),
             post_impulse_context_reset_grace_time: AtomicI32::new(0),
@@ -451,7 +533,6 @@ impl LivingEntity {
             auto_spin_attack_state: Mutex::new(()),
             auto_spin_attack_damage: AtomicCell::new(0.0),
             auto_spin_attack_item_stack: Mutex::new(None),
-            discard_friction: AtomicBool::new(false),
             livings_flags: AtomicU8::new(0),
             active_effects: Mutex::new(HashMap::new()),
             hidden_effects: Mutex::new(HashMap::new()),
@@ -461,6 +542,7 @@ impl LivingEntity {
             jumping: AtomicBool::new(false),
             jumping_cooldown: AtomicU8::new(0),
             fall_fly_ticks: AtomicU32::new(0),
+            discard_friction: AtomicBool::new(false),
             climbing: AtomicBool::new(false),
             climbing_pos: AtomicCell::new(None),
             last_attacker_id: AtomicI32::new(0),
@@ -555,17 +637,18 @@ impl LivingEntity {
     /// keeps `add_or_replace_modifier` from thrashing the attribute cache.
     pub async fn tick_equipment_attributes(&self, caller: &dyn EntityBase) {
         let current_items = self.items_by_equipment_slot(caller).await;
-        let mut changes: Vec<(EquipmentSlot, ItemStack, ItemStack)> = Vec::new();
+        let mut changes: Vec<(EquipmentSlot, ItemStack, ItemStack, bool)> = Vec::new();
         {
             let mut last = self.last_equipment_items.lock().await;
             for (slot, current) in current_items {
+                let first_observation = !last.contains_key(&slot);
                 let previous = last
                     .get(&slot)
                     .cloned()
                     .unwrap_or_else(|| ItemStack::EMPTY.clone());
                 if !previous.are_equal(&current) {
                     last.insert(slot.clone(), current.clone());
-                    changes.push((slot, previous, current));
+                    changes.push((slot, previous, current, first_observation));
                 }
             }
         }
@@ -575,7 +658,11 @@ impl LivingEntity {
         }
 
         let mut touched: Vec<Attributes> = Vec::new();
-        for (slot, previous, current) in changes {
+        for (slot, previous, current, first_observation) in changes {
+            // Vanilla `LivingEntity.onEquipItem` is reached by equipment changes after the
+            // initial entity tick (`LivingEntity.java:689-713`; `:2938-2982`).
+            self.on_equip_item(caller, &slot, &previous, &current, first_observation)
+                .await;
             if !previous.is_empty() {
                 let stale = crate::enchantment::attribute_modifiers_for_slot(&previous, &slot);
                 self.apply_attribute_modifiers(stale, true, &mut touched);
@@ -586,6 +673,79 @@ impl LivingEntity {
             }
         }
 
+        if !touched.is_empty() {
+            crate::entity::attributes::send_attribute_updates_for_living(self, touched).await;
+        }
+    }
+
+    /// Applies the server-visible part of vanilla `LivingEntity.onEquipItem`: an equippable item
+    /// plays its declared sound, and every changed slot emits EQUIP or UNEQUIP
+    /// (`LivingEntity.java:689-713`).
+    async fn on_equip_item(
+        &self,
+        caller: &dyn EntityBase,
+        slot: &EquipmentSlot,
+        old_stack: &ItemStack,
+        stack: &ItemStack,
+        first_observation: bool,
+    ) {
+        if first_observation || caller.is_spectator() || old_stack.are_equal(stack) {
+            return;
+        }
+
+        let world = self.entity.world.load();
+        if !self.entity.is_silent()
+            && let Some(equippable) = stack.get_data_component::<EquippableImpl>()
+            && equippable.slot == slot
+        {
+            let category = if caller.get_player().is_some() {
+                SoundCategory::Players
+            } else {
+                SoundCategory::Neutral
+            };
+            world.play_sound_event(&equippable.equip_sound, category, &self.entity.pos.load());
+        }
+
+        // `LivingEntity.doesEmitEquipEvent` (`LivingEntity.java:685-686`) is overridden by
+        // `Player` to allow only humanoid armor (`Player.java:1664-1666`).
+        if does_emit_equip_event(caller.get_player().is_some(), slot) {
+            let event = if stack.get_data_component::<EquippableImpl>().is_some() {
+                pumpkin_data::game_event::GameEvent::Equip
+            } else {
+                pumpkin_data::game_event::GameEvent::Unequip
+            };
+            let context = world
+                .get_entity_by_uuid(self.entity.entity_uuid)
+                .map_or_else(
+                    crate::world::game_event::GameEventContext::none,
+                    crate::world::game_event::GameEventContext::of_entity,
+                );
+            crate::world::game_event::emit_game_event(
+                &world,
+                event,
+                self.entity.pos.load(),
+                context,
+            )
+            .await;
+        }
+    }
+
+    /// Vanilla `LivingEntity.onEquippedItemBroken` (`LivingEntity.java:3845-3857`) sends the
+    /// slot break event and immediately removes the broken stack's attribute and location-based
+    /// effects before the equipment slot is cleared.
+    pub async fn on_equipped_item_broken(&self, broken_item: &ItemStack, slot: &EquipmentSlot) {
+        let world = self.entity.world.load();
+        world.send_entity_status(&self.entity, super::equipment_break_status(slot), None);
+
+        let mut modifiers = crate::enchantment::attribute_modifiers_for_slot(broken_item, slot);
+        if *slot == EquipmentSlot::FEET && self.soul_speed_active.swap(false, Relaxed) {
+            modifiers.extend(
+                crate::enchantment::location_based_attribute_modifiers_for_slot(broken_item, slot),
+            );
+        }
+
+        let mut touched = Vec::new();
+        self.apply_attribute_modifiers(modifiers, true, &mut touched);
         if !touched.is_empty() {
             crate::entity::attributes::send_attribute_updates_for_living(self, touched).await;
         }
@@ -1085,6 +1245,11 @@ impl LivingEntity {
     }
 
     pub async fn is_blocking(&self) -> bool {
+        // `LivingEntity.isUsingItem` gates `getItemBlockingWith` before the shield component is
+        // inspected (`LivingEntity.java:3417-3429`).
+        if !self.is_using_item() {
+            return false;
+        }
         let item_in_use = self.item_in_use.lock().await;
         if let Some(item) = item_in_use.as_ref()
             && item.get_data_component::<BlocksAttacksImpl>().is_some()
@@ -1958,7 +2123,9 @@ impl LivingEntity {
 
         // Vanilla runs Mob.serverAiStep from LivingEntity.aiStep after applyInput has damped
         // the current movement input, but before jump handling and travel.
-        let is_alive = !self.dead.load(Relaxed) && self.health.load() > 0.0;
+        // `LivingEntity.isDeadOrDying` is the health/death predicate used by `aiStep`
+        // (`LivingEntity.java:1171-1173`).
+        let is_alive = !self.is_dead_or_dying();
         if is_alive
             && !no_ai
             && let Some(mob) = caller.get_mob()
@@ -2156,6 +2323,8 @@ impl LivingEntity {
 
         // If entity has no drag: store velo and return
 
+        // Vanilla `LivingEntity.travelInAir` skips all horizontal and vertical drag while
+        // `discardFriction` is set (`LivingEntity.java:2477-2488`).
         let vertical_friction = caller.get_y_velocity_drag().unwrap_or_else(|| {
             if caller.is_flutterer() {
                 friction
@@ -2352,10 +2521,11 @@ impl LivingEntity {
 
         if let Some((result, stack, broken_item)) = damaged {
             if result == DamageResult::Broken {
-                let world = self.entity.world.load();
-                world.send_entity_status(&self.entity, super::equipment_break_status(&slot), None);
-                // `LivingEntity.breakItem` invokes `spawnItemParticles` for a broken glider
-                // (`LivingEntity.java:1439-1448`).
+                // Vanilla `updateFallFlying` delegates the break to `onEquippedItemBroken`
+                // (`LivingEntity.java:3845-3848`), which broadcasts the break status and removes
+                // the item's attribute modifiers; the client then plays `breakItem`'s sound and
+                // particles (`LivingEntity.java:1439-1448`) in response to that broadcast.
+                self.on_equipped_item_broken(&broken_item, &slot).await;
                 self.spawn_item_particles(&broken_item, 5);
             }
             self.send_equipment_changes(&[(slot, stack)]);
@@ -2663,7 +2833,9 @@ impl LivingEntity {
         }
     }
 
-    fn try_reset_current_impulse_context(&self) {
+    /// Vanilla `ServerGamePacketListenerImpl.handleMovePlayer` clears a completed impulse
+    /// context only when its grace timer has expired (`ServerGamePacketListenerImpl.java:1178-1184`).
+    pub fn try_reset_current_impulse_context(&self) {
         if self.post_impulse_context_reset_grace_time.load(Relaxed) == 0 {
             self.reset_current_impulse_context();
         }
@@ -2708,22 +2880,23 @@ impl LivingEntity {
 
         if ground {
             let fall_distance = self.fall_distance.swap(0.0);
-            let fall_distance =
-                self.current_impulse_impact_pos
-                    .load()
-                    .map_or(fall_distance, |impact_pos| {
-                        let effective = impulse_limited_fall_distance(
-                            fall_distance,
-                            self.entity.pos.load().y,
-                            impact_pos.y,
-                        );
-                        if effective <= 0.0 {
-                            self.reset_current_impulse_context();
-                        } else {
-                            self.try_reset_current_impulse_context();
-                        }
-                        effective
-                    });
+            let fall_distance = self
+                .is_ignoring_fall_damage_from_current_impulse()
+                .then(|| self.current_impulse_impact_pos.load())
+                .flatten()
+                .map_or(fall_distance, |impact_pos| {
+                    let effective = impulse_limited_fall_distance(
+                        fall_distance,
+                        self.entity.pos.load().y,
+                        impact_pos.y,
+                    );
+                    if effective <= 0.0 {
+                        self.reset_current_impulse_context();
+                    } else {
+                        self.try_reset_current_impulse_context();
+                    }
+                    effective
+                });
             if fall_distance <= 0.0
                 || dont_damage
                 || self.should_prevent_fall_damage()
@@ -3034,7 +3207,9 @@ impl LivingEntity {
             // baby (`LivingEntity.shouldDropLoot` / `Monster.shouldDropLoot`).
             let is_baby = self.entity.age.load(Relaxed) < 0;
             let is_monster = self.entity.entity_type.category == &MobCategory::MONSTER;
-            if world.level_info.load().game_rules.mob_drops && (is_monster || !is_baby) {
+            let should_drop_loot =
+                world.level_info.load().game_rules.mob_drops && (is_monster || !is_baby);
+            if should_drop_loot {
                 self.drop_loot(params.clone()).await;
             }
 
@@ -3071,7 +3246,12 @@ impl LivingEntity {
             // not also run for a player here - it would drop armour far less often than vanilla,
             // with spurious damage randomization, and ignore `keepInventory` entirely.
             if dyn_self.get_player().is_none() {
-                self.drop_equipment(looting_level).await;
+                self.drop_equipment(
+                    looting_level,
+                    params.killed_by_player.unwrap_or(false),
+                    should_drop_loot,
+                )
+                .await;
             }
 
             // Broadcast death message if it's a player and the gamerule is enabled
@@ -3082,7 +3262,12 @@ impl LivingEntity {
         }
     }
 
-    async fn drop_equipment(&self, looting_level: u32) {
+    async fn drop_equipment(
+        &self,
+        looting_level: u32,
+        killed_by_player: bool,
+        should_drop_loot: bool,
+    ) {
         let world = self.entity.world.load();
         let block_pos = self.entity.block_pos.load();
 
@@ -3099,6 +3284,24 @@ impl LivingEntity {
                 .get(slot)
                 .copied()
                 .unwrap_or(DEFAULT_EQUIPMENT_DROP_CHANCE);
+            // Vanilla `Mob.dropCustomDeathLoot` only drops a slot for a player kill or a
+            // preserved chance above 1.0, and skips `PREVENT_EQUIPMENT_DROP`
+            // (`Mob.java:895-907`).
+            let preserve = chance > 1.0;
+            if !should_drop_loot || chance == 0.0 || (!killed_by_player && !preserve) {
+                continue;
+            }
+            let item = self
+                .entity_equipment
+                .lock()
+                .await
+                .equipment
+                .get(slot)
+                .cloned()
+                .unwrap_or_else(|| ItemStack::EMPTY.clone());
+            if item.is_empty() || Self::item_prevents_equipment_drop(&item) {
+                continue;
+            }
             // Vanilla approximation: EnchantmentHelper.processEquipmentDropChance
             // adds lootingLevel * 0.01 to the per-slot equipment drop chance.
             chance += looting_level as f32 * 0.01;
@@ -3119,7 +3322,7 @@ impl LivingEntity {
             // Vanilla approximation: Mob.dropCustomDeathLoot applies random
             // damage to dropped equipment using two chained random calls:
             // setDamageValue(maxDamage - random.nextInt(1 + random.nextInt(max(maxDamage - 3, 1))))
-            if let Some(max_damage) = item.get_max_damage() {
+            if !preserve && let Some(max_damage) = item.get_max_damage() {
                 let mut rng = rand::rng();
                 let inner = rng.random_range(0..(max_damage - 3).max(1));
                 let outer = rng.random_range(0..=inner);
@@ -3127,6 +3330,27 @@ impl LivingEntity {
             }
             world.drop_stack(&block_pos, item).await;
         }
+    }
+
+    /// `EnchantmentHelper.has(itemStack, PREVENT_EQUIPMENT_DROP)` for the mob death path
+    /// (`Mob.java:904-906`). The workspace's enchantment effect table is the existing source
+    /// for the Vanishing Curse effect.
+    fn item_prevents_equipment_drop(stack: &ItemStack) -> bool {
+        stack
+            .get_data_component::<EnchantmentsImpl>()
+            .is_some_and(|enchantments| {
+                enchantments.enchantment.iter().any(|(enchantment, level)| {
+                    *level > 0
+                        && crate::enchantment::effects_for(enchantment)
+                            .iter()
+                            .any(|effect| {
+                                matches!(
+                                    effect,
+                                    crate::enchantment::EnchantmentEffect::PreventEquipmentDrop
+                                )
+                            })
+                })
+            })
     }
 
     async fn broadcast_death_message(
@@ -3819,14 +4043,11 @@ impl LivingEntity {
                 let slot_result = stack.damage_item(armor_damage);
                 if slot_result != pumpkin_data::item_stack::DamageResult::Untouched {
                     if slot_result == pumpkin_data::item_stack::DamageResult::Broken {
-                        let world = self.entity.world.load();
-                        world.send_entity_status(
-                            &self.entity,
-                            super::equipment_break_status(&slot),
-                            None,
-                        );
-                        // `LivingEntity.breakItem` invokes `spawnItemParticles` before the armor
-                        // stack is cleared (`LivingEntity.java:1439-1448`).
+                        // Vanilla armor damage calls `onEquippedItemBroken` while the broken item
+                        // is still available (`LivingEntity.java:3845-3848`), which broadcasts
+                        // the break status and removes attribute modifiers; the client then plays
+                        // `breakItem`'s particles (`LivingEntity.java:1439-1448`) in response.
+                        self.on_equipped_item_broken(&broken_item, &slot).await;
                         self.spawn_item_particles(&broken_item, 5);
                     }
                     equipment_updates.push((slot.clone(), stack.clone()));
@@ -3880,6 +4101,13 @@ impl LivingEntity {
             .get(slot)
             .cloned()
             .unwrap_or_else(|| ItemStack::EMPTY.clone())
+    }
+
+    /// Vanilla `LivingEntity.isHolding` (`LivingEntity.java:2243-2249`) checks both hand slots.
+    #[must_use]
+    pub async fn is_holding(&self, caller: &dyn EntityBase, item: &Item) -> bool {
+        self.held_item(caller).await.item.id == item.id
+            || self.off_hand_item(caller).await.item.id == item.id
     }
 
     pub fn can_take_damage(&self) -> bool {
@@ -4146,7 +4374,7 @@ impl LivingEntity {
         }
         let max_air = self.max_air_supply();
 
-        if self.dead.load(Relaxed) || self.health.load() <= 0.0 {
+        if self.is_dead_or_dying() {
             if self.air_supply.swap(max_air, Relaxed) != max_air {
                 self.send_air_supply();
             }
@@ -4204,7 +4432,7 @@ impl LivingEntity {
         eye_in_water: bool,
         in_bubble_column: bool,
     ) {
-        if self.dead.load(Relaxed) || self.health.load() <= 0.0 {
+        if self.is_dead_or_dying() {
             return;
         }
 
@@ -4214,7 +4442,7 @@ impl LivingEntity {
             let has_conduit_power = self.has_effect(&StatusEffect::CONDUIT_POWER).await;
             let has_breath_of_the_nautilus =
                 self.has_effect(&StatusEffect::BREATH_OF_THE_NAUTILUS).await;
-            if self.dead.load(Relaxed) || self.health.load() <= 0.0 || self.entity.is_removed() {
+            if self.is_dead_or_dying() || self.entity.is_removed() {
                 return;
             }
             let water_breathing =
@@ -4864,6 +5092,19 @@ impl LivingEntity {
         self.entity.send_meta_data(
             &[Metadata::new(
                 pumpkin_data::tracked_data::living_entity::DATA_STINGER_COUNT_ID,
+                count,
+            )],
+            None,
+        );
+    }
+
+    /// Vanilla `LivingEntity.setArrowCount` (`LivingEntity.java:1994-2000`) publishes the
+    /// number of ordinary arrows currently stuck in this entity.
+    pub fn set_arrow_count(&self, count: i32) {
+        self.arrow_count.store(count, Relaxed);
+        self.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::living_entity::DATA_ARROW_COUNT_ID,
                 count,
             )],
             None,
@@ -5562,6 +5803,13 @@ impl EntityBase for LivingEntity {
             self.try_spawn_infested_silverfish().await;
 
             if play_sound {
+                // `LivingEntity.hurtServer` calls `Entity.markHurt` for a full-impact hit
+                // (`LivingEntity.java:1244`). The flag is consumed after this entity tick so
+                // the current motion is sent even when knockback did not change it.
+                if !damage_type.has_tag(&tag::DamageType::MINECRAFT_NO_IMPACT) {
+                    self.entity.mark_hurt();
+                }
+
                 // `Mob.playHurtSound` (Mob.java:295-299) resets the idle-sound timer, so a mob
                 // that was just hit does not chirp immediately afterwards.
                 if let Some(mob) = caller.get_mob() {
@@ -5771,13 +6019,12 @@ impl EntityBase for LivingEntity {
                                     )
                                     .await;
                             }
-                            world.send_entity_status(
-                                &self.entity,
-                                crate::entity::equipment_break_status(&slot),
-                                None,
-                            );
-                            // `LivingEntity.breakItem` invokes `spawnItemParticles` for broken
-                            // armor (`LivingEntity.java:1439-1448`).
+                            // Vanilla `hurtArmor` routes a broken equipped item through
+                            // `onEquippedItemBroken` (`LivingEntity.java:3845-3848`), which
+                            // broadcasts the break status and removes attribute modifiers; the
+                            // client then plays `breakItem`'s particles
+                            // (`LivingEntity.java:1439-1448`) in response.
+                            self.on_equipped_item_broken(&broken_item, &slot).await;
                             self.spawn_item_particles(&broken_item, 5);
                             stack = ItemStack::EMPTY.clone();
                             let broken_stack = stack.clone();
@@ -5926,6 +6173,12 @@ impl EntityBase for LivingEntity {
                 self.entity.send_pos_rot();
             }
 
+            // Vanilla `ServerEntity` consumes `Entity.hurtMarked` after the entity tick and
+            // sends motion even when the hit did not change velocity (`ServerEntity.java:225-228`).
+            if self.entity.hurt_marked.swap(false, Relaxed) {
+                self.entity.send_velocity();
+            }
+
             // Fetch supporting blocks for players or other entities
             let supporting_pos = caller.get_player().map_or_else(
                 || self.entity.get_supporting_block_pos(),
@@ -5970,6 +6223,16 @@ impl EntityBase for LivingEntity {
             }
 
             self.tick_effects().await;
+            // Vanilla `LivingEntity.tick` decays tracked arrows on the server before
+            // ticking stingers (`LivingEntity.java:2754-2767`).
+            let arrow_count = self.arrow_count.load(Relaxed);
+            let remove_arrow_time = self.remove_arrow_time.load(Relaxed);
+            let (new_arrow_count, new_remove_arrow_time) =
+                arrow_count_tick(arrow_count, remove_arrow_time);
+            self.remove_arrow_time.store(new_remove_arrow_time, Relaxed);
+            if new_arrow_count != arrow_count {
+                self.set_arrow_count(new_arrow_count);
+            }
             self.tick_stingers();
 
             // Current active item
@@ -6218,7 +6481,7 @@ impl EntityBase for LivingEntity {
                 if self.last_hurt_by_player_time.load(Relaxed) > 0 {
                     self.last_hurt_by_player_time.fetch_sub(1, Relaxed);
                 }
-                if self.health.load() <= 0.0 {
+                if self.is_dead_or_dying() {
                     let time = self
                         .death_time
                         .fetch_update(Relaxed, Relaxed, |time| Some(time.saturating_add(1)))
@@ -7259,6 +7522,22 @@ mod tests {
     }
 
     #[test]
+    fn living_state_predicates_match_vanilla_boundaries() {
+        // `LivingEntity.hasLandedInLiquid` uses a strict downward-velocity threshold
+        // (`LivingEntity.java:404-406`).
+        assert!(has_landed_in_liquid_state(-0.01, true, false));
+        assert!(has_landed_in_liquid_state(0.0, false, true));
+        assert!(!has_landed_in_liquid_state(1.0E-5, true, false));
+        assert!(!has_landed_in_liquid_state(0.0, false, false));
+
+        // `LivingEntity.isDeadOrDying` treats either zero health or the death flag as terminal
+        // (`LivingEntity.java:1171-1173`).
+        assert!(dead_or_dying_state(0.0, false));
+        assert!(dead_or_dying_state(20.0, true));
+        assert!(!dead_or_dying_state(20.0, false));
+    }
+
+    #[test]
     fn fall_flying_collision_damage_requires_meaningful_speed_loss() {
         assert_eq!(fall_flying_collision_damage(1.0, 0.8), None);
         assert_eq!(fall_flying_collision_damage(1.0, 0.5), Some(2.0));
@@ -7415,6 +7694,16 @@ mod tests {
             false,
             false
         ));
+    }
+
+    #[test]
+    fn arrow_count_decay_uses_vanilla_timer() {
+        // `LivingEntity.tick` initializes and decrements `removeArrowTime` before
+        // calling `setArrowCount` (`LivingEntity.java:2754-2767`).
+        assert_eq!(arrow_count_tick(1, 1), (0, 0));
+        assert_eq!(arrow_count_tick(2, 2), (2, 1));
+        assert_eq!(arrow_count_tick(2, 0), (2, 559));
+        assert_eq!(arrow_count_tick(0, 7), (0, 7));
     }
 
     #[test]
@@ -7888,5 +8177,40 @@ mod attribute_nbt_tests {
         let mut loaded: HashMap<u8, AttributeInstance> = HashMap::new();
         apply_packed_attributes(&mut loaded, &[NbtTag::Compound(compound)]);
         assert!(loaded.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod equipment_drop_tests {
+    use super::LivingEntity;
+    use pumpkin_data::Enchantment;
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
+
+    #[test]
+    fn vanishing_curse_prevents_mob_equipment_drop() {
+        // `Mob.dropCustomDeathLoot` checks `PREVENT_EQUIPMENT_DROP` before dropping
+        // (`Mob.java:904-906`).
+        let plain = ItemStack::new(1, &Item::IRON_SWORD);
+        assert!(!LivingEntity::item_prevents_equipment_drop(&plain));
+
+        let mut cursed = plain;
+        cursed.add_enchantment(&Enchantment::VANISHING_CURSE, 1);
+        assert!(LivingEntity::item_prevents_equipment_drop(&cursed));
+    }
+}
+
+#[cfg(test)]
+mod equip_event_tests {
+    use super::does_emit_equip_event;
+    use pumpkin_data::data_component_impl::EquipmentSlot;
+
+    #[test]
+    fn player_equip_events_are_limited_to_humanoid_armor() {
+        // `Player.doesEmitEquipEvent` (`Player.java:1664-1666`) excludes hand equipment,
+        // while the base `LivingEntity` hook (`LivingEntity.java:685-686`) accepts it.
+        assert!(does_emit_equip_event(true, &EquipmentSlot::HEAD));
+        assert!(!does_emit_equip_event(true, &EquipmentSlot::MAIN_HAND));
+        assert!(does_emit_equip_event(false, &EquipmentSlot::MAIN_HAND));
     }
 }

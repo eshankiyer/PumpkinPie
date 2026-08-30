@@ -154,6 +154,7 @@ struct MovementCheckContext {
     player_movement_check: bool,
     elytra_movement_check: bool,
     sleeping: bool,
+    post_impulse_grace_time: bool,
 }
 
 const fn movement_requires_correction(
@@ -162,10 +163,13 @@ const fn movement_requires_correction(
     expected_velocity: Vector3<f64>,
     context: MovementCheckContext,
 ) -> bool {
+    // Vanilla skips the wrong-movement correction during `LivingEntity.isInPostImpulseGraceTime`
+    // (`ServerGamePacketListenerImpl.java:1140-1145`).
     if !context.ticks_run_normally
         || !context.player_movement_check
         || (context.fall_flying && !context.elytra_movement_check)
         || context.sleeping
+        || context.post_impulse_grace_time
     {
         return false;
     }
@@ -463,6 +467,7 @@ mod tests {
                 player_movement_check: true,
                 elytra_movement_check: true,
                 sleeping: false,
+                post_impulse_grace_time: false,
             },
         ));
         assert!(movement_requires_correction(
@@ -475,6 +480,7 @@ mod tests {
                 player_movement_check: true,
                 elytra_movement_check: true,
                 sleeping: false,
+                post_impulse_grace_time: false,
             },
         ));
         assert!(!movement_requires_correction(
@@ -487,6 +493,7 @@ mod tests {
                 player_movement_check: true,
                 elytra_movement_check: true,
                 sleeping: false,
+                post_impulse_grace_time: false,
             },
         ));
         assert!(!movement_requires_correction(
@@ -499,6 +506,7 @@ mod tests {
                 player_movement_check: true,
                 elytra_movement_check: true,
                 sleeping: false,
+                post_impulse_grace_time: false,
             },
         ));
         assert!(movement_requires_correction(
@@ -511,6 +519,22 @@ mod tests {
                 player_movement_check: true,
                 elytra_movement_check: true,
                 sleeping: false,
+                post_impulse_grace_time: false,
+            },
+        ));
+        assert!(!movement_requires_correction(
+            origin,
+            Vector3::new(301.0f64.sqrt(), 0.0, 0.0),
+            stationary,
+            MovementCheckContext {
+                fall_flying: false,
+                ticks_run_normally: true,
+                player_movement_check: true,
+                elytra_movement_check: true,
+                sleeping: false,
+                // `handleMovePlayer` skips this correction during impulse grace time
+                // (`ServerGamePacketListenerImpl.java:1140-1145`).
+                post_impulse_grace_time: true,
             },
         ));
 
@@ -530,6 +554,7 @@ mod tests {
                     player_movement_check: player_check,
                     elytra_movement_check: elytra_check,
                     sleeping,
+                    post_impulse_grace_time: false,
                 },
             ));
         }

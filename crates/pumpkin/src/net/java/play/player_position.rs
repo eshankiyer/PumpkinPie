@@ -10,6 +10,82 @@ impl JavaClient {
         pos.clamp(-2.0E7, 2.0E7)
     }
 
+    /// Vanilla `Player.maybeBackOffFromEdge` (`Player.java:880-940`) trims a sneaking player's
+    /// horizontal movement in 0.05-block increments while the inset footprint would otherwise
+    /// fall farther than `STEP_HEIGHT`.
+    fn maybe_back_off_from_edge(
+        player: &Player,
+        world: &World,
+        position: Vector3<f64>,
+        last_position: Vector3<f64>,
+        flying: bool,
+    ) -> Vector3<f64> {
+        let entity = player.get_entity();
+        let delta = position - last_position;
+        let max_down_step = player
+            .living_entity
+            .get_attribute_value(&pumpkin_data::attributes::Attributes::STEP_HEIGHT);
+        let can_fall_at_least = |delta_x: f64, delta_z: f64, min_height: f64| {
+            let bounding_box = entity.bounding_box.load();
+            world.is_space_empty(BoundingBox::new(
+                Vector3::new(
+                    bounding_box.min.x + 1.0E-7 + delta_x,
+                    bounding_box.min.y - min_height - 1.0E-7,
+                    bounding_box.min.z + 1.0E-7 + delta_z,
+                ),
+                Vector3::new(
+                    bounding_box.max.x - 1.0E-7 + delta_x,
+                    bounding_box.min.y,
+                    bounding_box.max.z - 1.0E-7 + delta_z,
+                ),
+            ))
+        };
+
+        let fall_distance = player.living_entity.fall_distance.load();
+        let above_ground = entity.on_ground.load(Ordering::Relaxed)
+            || (f64::from(fall_distance) < max_down_step
+                && !can_fall_at_least(0.0, 0.0, max_down_step - f64::from(fall_distance)));
+        if flying || delta.y > 0.0 || !entity.sneaking.load(Ordering::Relaxed) || !above_ground {
+            return position;
+        }
+
+        let can_fall =
+            |delta_x: f64, delta_z: f64| can_fall_at_least(delta_x, delta_z, max_down_step);
+        let mut delta_x = delta.x;
+        let mut delta_z = delta.z;
+        let step_x = delta_x.signum() * 0.05;
+        let step_z = delta_z.signum() * 0.05;
+
+        while delta_x != 0.0 && can_fall(delta_x, 0.0) {
+            if delta_x.abs() <= 0.05 {
+                delta_x = 0.0;
+                break;
+            }
+            delta_x -= step_x;
+        }
+        while delta_z != 0.0 && can_fall(0.0, delta_z) {
+            if delta_z.abs() <= 0.05 {
+                delta_z = 0.0;
+                break;
+            }
+            delta_z -= step_z;
+        }
+        while delta_x != 0.0 && delta_z != 0.0 && can_fall(delta_x, delta_z) {
+            if delta_x.abs() <= 0.05 {
+                delta_x = 0.0;
+            } else {
+                delta_x -= step_x;
+            }
+            if delta_z.abs() <= 0.05 {
+                delta_z = 0.0;
+            } else {
+                delta_z -= step_z;
+            }
+        }
+
+        last_position + Vector3::new(delta_x, delta.y, delta_z)
+    }
+
     /// Returns whether syncing the position was needed
     fn sync_position(
         player: &Arc<Player>,
@@ -77,6 +153,9 @@ impl JavaClient {
         );
         let entity = player.get_entity();
         let last_pos = entity.pos.load();
+        let flying = player.abilities.lock().await.flying;
+        let position =
+            Self::maybe_back_off_from_edge(player, &player.world(), position, last_pos, flying);
         let (player_movement_check, elytra_movement_check) = {
             let level_info = player.world().level_info.load();
             (
@@ -94,6 +173,9 @@ impl JavaClient {
                 player_movement_check,
                 elytra_movement_check,
                 sleeping: player.sleeping_since.load().is_some(),
+                // `handleMovePlayer` exempts impulse grace time from the moved-wrongly check
+                // (`ServerGamePacketListenerImpl.java:1140-1145`).
+                post_impulse_grace_time: player.living_entity.is_in_post_impulse_grace_time(),
             },
         ) {
             self.force_tp(player, last_pos).await;
@@ -140,6 +222,13 @@ impl JavaClient {
                 if new_on_ground && entity.is_fall_flying() {
                     entity.set_fall_flying(false).await;
                 }
+                // `handleMovePlayer` resets impulse context after a ground or liquid landing
+                // (`ServerGamePacketListenerImpl.java:1178-1184`).
+                if packet.collision & FLAG_ON_GROUND != 0
+                    || player.living_entity.has_landed_in_liquid()
+                {
+                    player.living_entity.try_reset_current_impulse_context();
+                }
                 let world = &player.world();
 
                 // TODO: Warn when player moves to quickly
@@ -174,8 +263,9 @@ impl JavaClient {
 
                 // Only process fall damage if player is alive
                 if !player.abilities.lock().await.flying
-                    && player.living_entity.health.load() > 0.0
-                    && !player.living_entity.dead.load(Ordering::Relaxed)
+                    // `LivingEntity.isDeadOrDying` gates movement-side fall handling
+                    // (`LivingEntity.java:1171-1173`).
+                    && !player.living_entity.is_dead_or_dying()
                 {
                     player.living_entity
                         .fall(
@@ -241,6 +331,9 @@ impl JavaClient {
         );
         let entity = player.get_entity();
         let last_pos = entity.pos.load();
+        let flying = player.abilities.lock().await.flying;
+        let position =
+            Self::maybe_back_off_from_edge(player, &player.world(), position, last_pos, flying);
         let (player_movement_check, elytra_movement_check) = {
             let level_info = player.world().level_info.load();
             (
@@ -258,6 +351,9 @@ impl JavaClient {
                 player_movement_check,
                 elytra_movement_check,
                 sleeping: player.sleeping_since.load().is_some(),
+                // `handleMovePlayer` exempts impulse grace time from the moved-wrongly check
+                // (`ServerGamePacketListenerImpl.java:1140-1145`).
+                post_impulse_grace_time: player.living_entity.is_in_post_impulse_grace_time(),
             },
         ) {
             self.force_tp(player, last_pos).await;
@@ -303,6 +399,14 @@ impl JavaClient {
                     packet.collision & FLAG_HORIZONTAL_COLLISION != 0,
                     Ordering::Relaxed,
                 );
+
+                // `handleMovePlayer` resets impulse context after a ground or liquid landing
+                // (`ServerGamePacketListenerImpl.java:1178-1184`).
+                if packet.collision & FLAG_ON_GROUND != 0
+                    || player.living_entity.has_landed_in_liquid()
+                {
+                    player.living_entity.try_reset_current_impulse_context();
+                }
 
                 entity.set_rotation(wrap_degrees(packet.yaw) % 360.0, wrap_degrees(packet.pitch));
                 // `Entity.turn` notifies the vehicle after passenger rotation changes
@@ -358,8 +462,9 @@ impl JavaClient {
                    ;
                 // Only process fall damage if player is alive
                 if !player.abilities.lock().await.flying
-                    && player.living_entity.health.load() > 0.0
-                    && !player.living_entity.dead.load(Ordering::Relaxed)
+                    // `LivingEntity.isDeadOrDying` gates movement-side fall handling
+                    // (`LivingEntity.java:1171-1173`).
+                    && !player.living_entity.is_dead_or_dying()
                 {
                     player.living_entity
                         .fall(

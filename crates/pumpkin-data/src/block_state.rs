@@ -93,6 +93,19 @@ impl BlockState {
         self.state_flags & TOOL_REQUIRED != 0
     }
 
+    /// Whether brushing this state should emit block dust particles.
+    /// `BlockBehaviour.Properties.noTerrainParticles` clears this value for the
+    /// barrier and structure-void registrations (`BlockBehaviour.java:1265-1267`,
+    /// `Blocks.java:2936,3776`), and `BrushItem.onUseTick` checks it before spawning
+    /// dust (`BrushItem.java:65-70`).
+    #[must_use]
+    pub const fn should_spawn_terrain_particles(&self) -> bool {
+        !matches!(
+            Block::from_state_id(self.id).id,
+            BlockId::BARRIER | BlockId::STRUCTURE_VOID
+        )
+    }
+
     #[must_use]
     pub const fn sided_transparency(&self) -> bool {
         self.state_flags & SIDED_TRANSPARENCY != 0

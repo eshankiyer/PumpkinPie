@@ -15,6 +15,7 @@ use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::{Block, BlockDirection};
+use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 
@@ -81,6 +82,42 @@ impl ItemBehaviour for BrushItem {
             }
 
             let block = world.get_block(&position);
+            let state = world.get_block_state(&position);
+            // `BrushItem.onUseTick` emits dust only when the state allows terrain particles
+            // (`BrushItem.java:65-70`); the property comes from `noTerrainParticles`
+            // (`BlockBehaviour.java:1265-1267`).
+            if state.should_spawn_terrain_particles() {
+                let mut particle_data = Vec::new();
+                let _ = VarInt(i32::from(pumpkin_data::BlockState::to_be_network_id(
+                    state.id,
+                )))
+                .encode(&mut particle_data);
+                let look = player.living_entity.get_looking_vector();
+                let dust = match face {
+                    BlockDirection::Down | BlockDirection::Up => (look.z, -look.x),
+                    BlockDirection::North => (1.0, -0.1),
+                    BlockDirection::South => (-1.0, 0.1),
+                    BlockDirection::West => (-0.1, -1.0),
+                    BlockDirection::East => (0.1, 1.0),
+                };
+                let mut particle_position = position.to_centered_f64();
+                match face {
+                    BlockDirection::Down => particle_position.y -= 0.5,
+                    BlockDirection::Up => particle_position.y += 0.5,
+                    BlockDirection::North => particle_position.z -= 0.5,
+                    BlockDirection::South => particle_position.z += 0.5,
+                    BlockDirection::West => particle_position.x -= 0.5,
+                    BlockDirection::East => particle_position.x += 0.5,
+                }
+                world.spawn_particle_with_data(
+                    particle_position,
+                    Vector3::new((dust.0 * 3.0) as f32, 0.0, (dust.1 * 3.0) as f32),
+                    0.0,
+                    rand::random_range(7..12),
+                    pumpkin_data::particle::Particle::BlockCrumble,
+                    &particle_data,
+                );
+            }
             world.play_sound(
                 brush_sound(block),
                 SoundCategory::Blocks,
