@@ -197,6 +197,22 @@ fn armor_resists_damage(stack: &ItemStack, damage_type: &DamageType) -> bool {
     }
 }
 
+/// Vanilla `LivingEntity.getActiveItem` (`LivingEntity.java:2235-2241`) selects the stored use
+/// stack while using an item and otherwise selects the main-hand stack.
+fn active_item_for_state(
+    using_item: bool,
+    item_in_use: Option<&ItemStack>,
+    main_hand: &ItemStack,
+) -> ItemStack {
+    if using_item {
+        item_in_use
+            .cloned()
+            .unwrap_or_else(|| ItemStack::EMPTY.clone())
+    } else {
+        main_hand.clone()
+    }
+}
+
 const MAX_AIR_SUPPLY: i32 = 300;
 
 /// A raider's membership in an active `Raid`.
@@ -2149,7 +2165,7 @@ impl LivingEntity {
     /// (`LivingEntity.java:2797-2816`) and then applies `tickHeadTurn`
     /// (`LivingEntity.java:3018-3027`). The mob tick already publishes `body_yaw`, so keep that
     /// existing packet path supplied for entities whose movement controller did not set it.
-    fn tick_head_turn(&self) {
+    fn tick_head_turn(&self, max_head_rotation: f32) {
         let position = self.entity.pos.load();
         let previous_position = self.entity.last_pos.load();
         let dx = position.x - previous_position.x;
@@ -2170,6 +2186,7 @@ impl LivingEntity {
             self.entity.body_yaw.load(),
             target_body_yaw,
             self.entity.yaw.load(),
+            max_head_rotation,
         );
         self.entity.body_yaw.store(body_yaw);
     }
@@ -2288,6 +2305,7 @@ impl LivingEntity {
         // normal air/fluid travel exactly like vanilla's `travel` re-check.
         self.tick_glide_state(caller).await;
 
+        let old_y = self.entity.pos.load().y;
         let effective_ai = caller.is_effective_ai();
 
         let custom_travel = if no_ai || !effective_ai {
@@ -2321,6 +2339,18 @@ impl LivingEntity {
                 self.travel_in_air(caller).await;
             }
         }
+
+        // Vanilla `Entity.move` calls `doCheckFallDamage`, which dispatches to
+        // `LivingEntity.checkFallDamage` after collision resolution (`Entity.java:1543-1550`;
+        // `LivingEntity.java:363-390`). The existing `fall` method is that dispatch's live
+        // equivalent; invoke it for every movement path, including custom travel.
+        self.fall(
+            caller.clone(),
+            self.entity.pos.load().y - old_y,
+            self.entity.on_ground.load(SeqCst),
+            false,
+        )
+        .await;
 
         // TODO: Apply Soul Speed boot durability when tick_block_underneath is implemented.
         //self.entity.tick_block_underneath(&caller);
@@ -4174,6 +4204,18 @@ impl LivingEntity {
             .unwrap_or_else(|| ItemStack::EMPTY.clone())
     }
 
+    /// Vanilla `LivingEntity.getActiveItem` (`LivingEntity.java:2235-2241`) returns the item
+    /// being used, falling back to the main-hand item when no use is active.
+    pub async fn active_item(&self, caller: &dyn EntityBase) -> ItemStack {
+        if caller.is_spectator() {
+            return ItemStack::EMPTY.clone();
+        }
+
+        let main_hand = self.held_item(caller).await;
+        let item_in_use = self.item_in_use.lock().await;
+        active_item_for_state(self.is_using_item(), item_in_use.as_ref(), &main_hand)
+    }
+
     pub async fn get_stack_in_hand(&self, caller: &dyn EntityBase, hand: Hand) -> ItemStack {
         match hand {
             Hand::Left => self.off_hand_item(caller).await,
@@ -5619,9 +5661,16 @@ impl EntityBase for LivingEntity {
                     // `BlocksAttacks.disable` (`BlocksAttacks.java:81-99`).
                     if let Some(attacker) = cause
                         && let Some(victim_player) = caller.get_player()
+                        && let Some(attacker_living) = attacker.get_living_entity()
                     {
-                        let held_item = self.held_item(attacker).await;
-                        if let Some(weapon) = held_item.get_data_component::<WeaponImpl>() {
+                        // `LivingEntity.getSecondsToDisableBlocking` compares the weapon item
+                        // with `getActiveItem` (`LivingEntity.java:3967-3971`; active selection
+                        // at `LivingEntity.java:2235-2241`) before applying its cooldown.
+                        let weapon_item = attacker_living.held_item(attacker).await;
+                        let active_item = attacker_living.active_item(attacker).await;
+                        if weapon_item.are_equal(&active_item)
+                            && let Some(weapon) = weapon_item.get_data_component::<WeaponImpl>()
+                        {
                             let cooldown_ticks =
                                 (weapon.disable_blocking_for_seconds * 20.0).round() as i32;
                             if cooldown_ticks > 0 {
@@ -6297,9 +6346,15 @@ impl EntityBase for LivingEntity {
                 self.tick_swim_sound(caller);
             }
 
-            // `LivingEntity.tick` (`LivingEntity.java:2797-2816`) performs the body-yaw update
-            // after movement and before the next entity packet is assembled by `Mob::tick`.
-            self.tick_head_turn();
+            // `LivingEntity.tickHeadTurn` queries the virtual head limit after movement
+            // (`LivingEntity.java:3018-3025`); `Player` narrows it while blocking
+            // (`Player.java:288-290`).
+            let max_head_rotation = if let Some(player) = caller.get_player() {
+                player.get_max_head_rotation_relative_to_body().await
+            } else {
+                50.0
+            };
+            self.tick_head_turn(max_head_rotation);
 
             // TODO
             let player = caller.get_player();
@@ -7527,13 +7582,18 @@ fn modified_friction(friction: f64, modifier: f64) -> f64 {
     (1.0 - (1.0 - friction) * modifier).clamp(0.0, 1.0)
 }
 
-fn head_turn_body_yaw(body_yaw: f32, target_body_yaw: f32, entity_yaw: f32) -> f32 {
+fn head_turn_body_yaw(
+    body_yaw: f32,
+    target_body_yaw: f32,
+    entity_yaw: f32,
+    max_head_rotation: f32,
+) -> f32 {
     // `LivingEntity.tickHeadTurn` (`LivingEntity.java:3018-3027`) turns the body by 30 percent,
-    // then applies the 50-degree maximum head-to-body difference.
+    // then applies the entity-specific maximum head-to-body difference.
     let body_yaw = body_yaw + wrap_degrees(target_body_yaw - body_yaw) * 0.3;
     let head_difference = wrap_degrees(entity_yaw - body_yaw);
-    if head_difference.abs() > 50.0 {
-        body_yaw + head_difference - head_difference.signum() * 50.0
+    if head_difference.abs() > max_head_rotation {
+        body_yaw + head_difference - head_difference.signum() * max_head_rotation
     } else {
         body_yaw
     }
@@ -7633,10 +7693,11 @@ mod tests {
     #[test]
     fn body_yaw_turn_wraps_and_limits_head_difference() {
         // `LivingEntity.tickHeadTurn` (`LivingEntity.java:3018-3027`) turns 30 percent toward
-        // the target and then limits the head to 50 degrees from the body.
-        assert!((head_turn_body_yaw(0.0, 90.0, 0.0) - 27.0).abs() < 1e-4);
-        assert!((head_turn_body_yaw(350.0, 10.0, 10.0) - 356.0).abs() < 1e-4);
-        assert!((head_turn_body_yaw(0.0, 0.0, 90.0) - 40.0).abs() < 1e-4);
+        // the target and then limits the head to the requested angle from the body.
+        assert!((head_turn_body_yaw(0.0, 90.0, 0.0, 50.0) - 27.0).abs() < 1e-4);
+        assert!((head_turn_body_yaw(350.0, 10.0, 10.0, 50.0) - 356.0).abs() < 1e-4);
+        assert!((head_turn_body_yaw(0.0, 0.0, 90.0, 50.0) - 40.0).abs() < 1e-4);
+        assert!((head_turn_body_yaw(0.0, 0.0, 90.0, 15.0) - 75.0).abs() < 1e-4);
     }
 
     #[test]
@@ -8227,6 +8288,25 @@ mod tests {
             .unwrap();
 
         assert_eq!(bytes, [10, 17, 1, 28, 0xff, 0xcd, 0x5c, 0xab]);
+    }
+}
+
+#[cfg(test)]
+mod active_item_tests {
+    use super::active_item_for_state;
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
+
+    #[test]
+    fn active_item_prefers_the_use_stack_and_falls_back_to_main_hand() {
+        // `LivingEntity.getActiveItem` selects `getUseItem` only while using an item
+        // (`LivingEntity.java:2235-2241`).
+        let main_hand = ItemStack::new(1, &Item::IRON_SWORD);
+        let use_item = ItemStack::new(1, &Item::SHIELD);
+
+        assert!(active_item_for_state(false, Some(&use_item), &main_hand).are_equal(&main_hand));
+        assert!(active_item_for_state(true, Some(&use_item), &main_hand).are_equal(&use_item));
+        assert!(active_item_for_state(true, None, &main_hand).is_empty());
     }
 }
 

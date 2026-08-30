@@ -904,9 +904,14 @@ pub fn spawn_category_for_position(
             group_size += 1;
             let group_ended =
                 initialize_schooling_spawn(&entity, &mut schooling_leader, group_size, false);
+            // `NaturalSpawner` stops the batch with the spawned mob's
+            // `getMaxSpawnClusterSize` (`NaturalSpawner.java:208-213`), not the per-chunk cap.
+            let max_cluster_size = entity
+                .get_mob()
+                .map_or(4, |mob| mob.get_mob_entity().max_spawn_cluster_size());
             batch_buffer.push(entity);
             spawn_state.after_spawn(entity_type, &new_pos, entity_uuid, world);
-            if spawn_cluster_size >= entity_type.limit_per_chunk {
+            if spawn_cluster_size >= max_cluster_size {
                 break 'group_loop;
             }
 

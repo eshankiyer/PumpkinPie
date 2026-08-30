@@ -791,6 +791,13 @@ impl ItemStack {
         self.item_count == other.item_count && self.are_items_and_components_equal(other)
     }
 
+    /// Vanilla `ItemStack.isSameItem` compares the effective item and ignores count and
+    /// components (`ItemStack.java:634-636`).
+    #[must_use]
+    pub const fn is_same_item(&self, other: &Self) -> bool {
+        self.get_item().id == other.get_item().id
+    }
+
     /// Determines the mining speed for a block based on tool rules.
     /// Direct matches return immediately, tagged blocks are checked separately.
     /// If no match is found, returns the tool's default mining speed or `1.0`.
@@ -1160,6 +1167,20 @@ mod tests {
         assert!(!plain.are_items_and_components_equal(&customized));
         assert!(!customized.are_items_and_components_equal(&plain));
         assert!(customized.are_items_and_components_equal(&customized.clone()));
+    }
+
+    #[test]
+    fn same_item_ignores_count_components_and_empty_stack_storage() {
+        // Vanilla `ItemStack.isSameItem` ignores count/components and resolves empty stacks to
+        // AIR (`ItemStack.java:319-321, 634-636`).
+        let plain = ItemStack::new(1, &Item::COAL);
+        let mut customized = ItemStack::new(3, &Item::COAL);
+        customized.set_custom_name("named".to_owned());
+        let zero_count_coal = ItemStack::new(0, &Item::COAL);
+
+        assert!(plain.is_same_item(&customized));
+        assert!(ItemStack::EMPTY.is_same_item(&zero_count_coal));
+        assert!(!plain.is_same_item(&ItemStack::new(1, &Item::IRON_INGOT)));
     }
 
     #[test]

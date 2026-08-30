@@ -1189,7 +1189,7 @@ pub trait ScreenHandler: Send + Sync {
                     // while `ItemStack.isSameItem`, which compares the item only
                     // (ItemStack.java:634-636) - not its components.
                     while !moved_stack.is_empty()
-                        && slot.get_cloned_stack().await.item == moved_stack.item
+                        && slot.get_cloned_stack().await.is_same_item(&moved_stack)
                     {
                         moved_stack = self.quick_move(player, slot_index).await;
                     }

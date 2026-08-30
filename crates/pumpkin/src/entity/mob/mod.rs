@@ -253,6 +253,57 @@ impl Sensing {
     }
 }
 
+/// The integer calculation used by `Mob.getMaxFallDistance` (`Mob.java:835-845`).
+const fn max_fall_distance_for_state(
+    has_target: bool,
+    health: f32,
+    max_health: f32,
+    difficulty_id: i32,
+) -> i32 {
+    if !has_target {
+        return 3;
+    }
+
+    let mut sacrifice = (health - max_health * 0.33) as i32;
+    sacrifice -= (3 - difficulty_id) * 4;
+    if sacrifice < 0 {
+        sacrifice = 0;
+    }
+    sacrifice + 3
+}
+
+/// The per-type overrides of `Mob.getMaxSpawnClusterSize` (`Mob.java:825-827`) used by the
+/// natural-spawn cluster limit.
+const fn max_spawn_cluster_size_for(entity_type_id: u16) -> i32 {
+    if entity_type_id == EntityType::GHAST.id
+        || entity_type_id == EntityType::HAPPY_GHAST.id
+        || entity_type_id == EntityType::PILLAGER.id
+    {
+        1
+    } else if entity_type_id == EntityType::WOLF.id
+        || entity_type_id == EntityType::PUFFERFISH.id
+        || entity_type_id == EntityType::COD.id
+        || entity_type_id == EntityType::TROPICAL_FISH.id
+    {
+        8
+    } else if entity_type_id == EntityType::SALMON.id {
+        5
+    } else if entity_type_id == EntityType::CAMEL.id
+        || entity_type_id == EntityType::CAMEL_HUSK.id
+        || entity_type_id == EntityType::DONKEY.id
+        || entity_type_id == EntityType::HORSE.id
+        || entity_type_id == EntityType::LLAMA.id
+        || entity_type_id == EntityType::MULE.id
+        || entity_type_id == EntityType::SKELETON_HORSE.id
+        || entity_type_id == EntityType::TRADER_LLAMA.id
+        || entity_type_id == EntityType::ZOMBIE_HORSE.id
+    {
+        6
+    } else {
+        4
+    }
+}
+
 /// Tick boundaries (both inclusive) when monsters do not burn in sunlight (26.1).
 ///
 /// Sourced from `data/minecraft/timeline/day.json` — `monsters_burn` keyframes:
@@ -412,6 +463,31 @@ impl MobEntity {
             let range_squared = position_target_range.wrapping_mul(position_target_range);
             dx.mul_add(dx, dy.mul_add(dy, dz * dz)) < f64::from(range_squared)
         }
+    }
+
+    /// Vanilla `Mob.getMaxFallDistance` (`Mob.java:834-846`) allows a mob with a target to
+    /// spend some of its health and the world's difficulty on a larger safe fall.
+    pub async fn max_fall_distance(&self) -> i32 {
+        max_fall_distance_for_state(
+            self.get_target().await.is_some(),
+            self.living_entity.health.load(),
+            self.living_entity.get_max_health(),
+            self.living_entity
+                .entity
+                .world
+                .load()
+                .level_info
+                .load()
+                .difficulty as i32,
+        )
+    }
+
+    /// Vanilla `Mob.getMaxSpawnClusterSize` (`Mob.java:825-827`) and the concrete overrides in
+    /// `AbstractFish.java:59-61`, `AbstractSchoolingFish.java:29-35`, `Wolf.java:551-553`,
+    /// `AbstractHorse.java:388-390`, `Ghast.java:156-158`, `Pillager.java:152-154`, and
+    /// `HappyGhast.java:241-243`.
+    pub const fn max_spawn_cluster_size(&self) -> i32 {
+        max_spawn_cluster_size_for(self.living_entity.entity.entity_type.id)
     }
 
     /// Vanilla `Mob.canShearEquipment` and `Mob.attemptToShearEquipment`
@@ -2880,6 +2956,16 @@ pub(crate) fn tick_mob_ai<'a>(
         }
         mob_entity.set_strafe_navigation_kind(strafe_navigation_kind);
 
+        // `Mob.getMaxFallDistance` is consumed by `WalkNodeEvaluator` while the navigation path
+        // is built (`Mob.java:834-846`; `WalkNodeEvaluator.java:352`). Refresh it before goals
+        // can request a path so target and difficulty changes affect this tick's navigation.
+        let max_fall_distance = mob_entity.max_fall_distance().await;
+        mob_entity
+            .navigator
+            .lock()
+            .unwrap()
+            .set_max_fall_distance(max_fall_distance as f32);
+
         mob.pre_ai_tick().await;
 
         mob_entity.sensing.lock().unwrap().tick();
@@ -3483,7 +3569,8 @@ mod tests {
     use super::{
         DEFAULT_ITEM_PICKUP_REACH, EntityType, attack_knockback_strength, can_replace_equal_item,
         fire_aspect_ticks, is_preserved_equipment_drop_chance, knockback_enchantment_strength,
-        mob_weapon_durability_cost, uses_monster_no_action_time,
+        max_fall_distance_for_state, max_spawn_cluster_size_for, mob_weapon_durability_cost,
+        uses_monster_no_action_time,
     };
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
@@ -3577,5 +3664,25 @@ mod tests {
     // `Mob.java:104-105, 517-518`.
     fn default_item_pickup_reach_matches_vanilla() {
         assert_eq!(DEFAULT_ITEM_PICKUP_REACH, (1.0, 0.0, 1.0));
+    }
+
+    #[test]
+    fn max_fall_distance_spends_health_only_with_a_target() {
+        // `Mob.getMaxFallDistance` (`Mob.java:834-846`) uses three blocks without a target and
+        // adds the difficulty/health-derived sacrifice only while targeting.
+        assert_eq!(max_fall_distance_for_state(false, 20.0, 20.0, 2), 3);
+        assert_eq!(max_fall_distance_for_state(true, 20.0, 20.0, 2), 12);
+        assert_eq!(max_fall_distance_for_state(true, 4.0, 20.0, 3), 3);
+    }
+
+    #[test]
+    fn max_spawn_cluster_size_uses_mob_overrides() {
+        // `Mob.getMaxSpawnClusterSize` (`Mob.java:825-827`) and its overrides select these
+        // limits before `NaturalSpawner` checks the accumulated cluster.
+        assert_eq!(max_spawn_cluster_size_for(EntityType::GHAST.id), 1);
+        assert_eq!(max_spawn_cluster_size_for(EntityType::WOLF.id), 8);
+        assert_eq!(max_spawn_cluster_size_for(EntityType::SALMON.id), 5);
+        assert_eq!(max_spawn_cluster_size_for(EntityType::HORSE.id), 6);
+        assert_eq!(max_spawn_cluster_size_for(EntityType::ZOMBIE.id), 4);
     }
 }

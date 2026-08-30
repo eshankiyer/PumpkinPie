@@ -1389,6 +1389,12 @@ const fn fire_ticks_after_block_effects(
     }
 }
 
+/// Vanilla `Entity.clearFire` keeps the negative fire-immunity cooldown
+/// (`Entity.java:651-653`) while clearing only positive fire ticks.
+const fn clear_fire_ticks(fire_ticks: i32) -> i32 {
+    if fire_ticks < 0 { fire_ticks } else { 0 }
+}
+
 /// Selects the splash sound used by `Entity.doWaterSplashEffect`. Vanilla's base, monster,
 /// dolphin, axolotl, and player overrides are `Entity.java:1263-1272`, `Monster.java:60-63`,
 /// `Dolphin.java:343-346`, `Axolotl.java:518-520`, and `Player.java:383-390`.
@@ -4015,7 +4021,11 @@ impl Entity {
 
     /// Extinguishes this entity.
     pub fn extinguish(&self) {
-        self.fire_ticks.store(0, Ordering::Relaxed);
+        self.fire_ticks
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |fire_ticks| {
+                Some(clear_fire_ticks(fire_ticks))
+            })
+            .ok();
     }
 
     /// Maximum freeze ticks (7 seconds at 20 tps)
@@ -6952,7 +6962,7 @@ mod metadata_type_resolves_on_target_version_tests {
 
 #[cfg(test)]
 mod fire_immunity_tests {
-    use super::fire_ticks_after_block_effects;
+    use super::{clear_fire_ticks, fire_ticks_after_block_effects};
 
     /// `Entity.applyEffectsFromBlocks` does not arm immunity when a block ignites the entity
     /// during the same pass (`Entity.java:964-973`).
@@ -6960,6 +6970,14 @@ mod fire_immunity_tests {
     fn ignition_wins_over_fire_immunity_reset() {
         assert_eq!(fire_ticks_after_block_effects(0, 40, 20), 40);
         assert_eq!(fire_ticks_after_block_effects(0, 0, 20), -20);
+    }
+
+    #[test]
+    fn clearing_fire_preserves_the_negative_immunity_cooldown() {
+        // Vanilla `Entity.clearFire` uses `Math.min(0, remainingFireTicks)`
+        // (`Entity.java:651-653`).
+        assert_eq!(clear_fire_ticks(40), 0);
+        assert_eq!(clear_fire_ticks(-20), -20);
     }
 }
 
