@@ -209,7 +209,7 @@ use pumpkin_data::attributes::Attributes;
 use pumpkin_data::block_properties::{BlockProperties, HorizontalFacing};
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::data_component_impl::{
-    AttributeModifiersImpl, CanBreakImpl, EnchantmentsImpl, MinimumAttackChargeImpl, Operation,
+    AttributeModifiersImpl, EnchantmentsImpl, MinimumAttackChargeImpl, Operation,
 };
 use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, ToolImpl, WeaponImpl};
 use pumpkin_data::effect::StatusEffect;
@@ -381,13 +381,6 @@ pub const DATA_VERSION: i32 = 4903; // 26.2
 /// must apply the same gating.
 pub const MINE_BLOCK_EXHAUSTION: f32 = 0.005; // Vanilla: 0.005F
 
-fn block_name_matches_predicate(name: &str, block: &'static Block) -> bool {
-    if let Some(tag) = name.strip_prefix('#') {
-        return block.is_tagged_with(tag).unwrap_or(false);
-    }
-    name.strip_prefix("minecraft:").unwrap_or(name) == block.name
-}
-
 /// Whether `stack` is destroyed rather than dropped when its owner dies - the predicate
 /// behind [`Player::destroy_vanishing_cursed_items`]. See that method for the vanilla
 /// citation and the deviation from `PREVENT_EQUIPMENT_DROP`.
@@ -400,96 +393,6 @@ pub(crate) fn is_vanishing_cursed(stack: &ItemStack) -> bool {
                     .iter()
                     .any(|(ench, level)| *level > 0 && ench.id == Enchantment::VANISHING_CURSE.id)
             })
-}
-
-pub(crate) fn adventure_predicate_matches_block(
-    predicate: &NbtTag,
-    block: &'static Block,
-    state: &'static BlockState,
-) -> bool {
-    let predicates: Vec<&NbtTag> = match predicate {
-        NbtTag::Compound(_) => vec![predicate],
-        NbtTag::List(predicates) => predicates.iter().collect(),
-        NbtTag::String(name) => return block_name_matches_predicate(name, block),
-        _ => return false,
-    };
-
-    predicates.iter().any(|predicate| {
-        let Some(predicate) = predicate.extract_compound() else {
-            return false;
-        };
-        // NBT predicates require serializing the block entity, which is not
-        // available from this state-only helper. Keep that predicate
-        // conservative until the block-entity matcher is wired in.
-        if predicate.has("nbt") {
-            return false;
-        }
-        if predicate.has("components") {
-            // Component matchers need block-entity component snapshots, just
-            // like NBT matchers. Do not treat an unknown matcher as a match.
-            return false;
-        }
-        if predicate.has("state") && predicate.get_compound("state").is_none() {
-            return false;
-        }
-        if let Some(properties) = predicate.get_compound("state") {
-            let Some(actual_properties) = block.properties(state.id) else {
-                return false;
-            };
-            let actual_properties = actual_properties.to_props();
-            if properties.child_tags.iter().any(|(name, required)| {
-                let Some((_, actual_value)) = actual_properties
-                    .iter()
-                    .find(|(actual_name, _)| *actual_name == name.as_ref())
-                else {
-                    return true;
-                };
-                match required {
-                    NbtTag::String(required) => *actual_value != required.as_ref(),
-                    NbtTag::Compound(range) => {
-                        let min = range.get_string("min");
-                        let max = range.get_string("max");
-                        if min.is_none() && max.is_none() {
-                            return true;
-                        }
-                        let numeric_actual = actual_value.parse::<i32>().ok();
-                        let numeric_min = min.and_then(|value| value.parse::<i32>().ok());
-                        let numeric_max = max.and_then(|value| value.parse::<i32>().ok());
-                        if min.is_some() && numeric_min.is_none() && numeric_actual.is_none() {
-                            return true;
-                        }
-                        if max.is_some() && numeric_max.is_none() && numeric_actual.is_none() {
-                            return true;
-                        }
-                        numeric_actual.map_or_else(
-                            || {
-                                min.is_some_and(|min| *actual_value < min)
-                                    || max.is_some_and(|max| *actual_value > max)
-                            },
-                            |actual| {
-                                numeric_min.is_some_and(|min| actual < min)
-                                    || numeric_max.is_some_and(|max| actual > max)
-                            },
-                        )
-                    }
-                    _ => true,
-                }
-            }) {
-                return false;
-            }
-        }
-        let Some(blocks) = predicate.get("blocks") else {
-            return true;
-        };
-        match blocks {
-            NbtTag::String(name) => block_name_matches_predicate(name, block),
-            NbtTag::List(names) => names.iter().any(|name| {
-                name.extract_string()
-                    .is_some_and(|name| block_name_matches_predicate(name, block))
-            }),
-            _ => false,
-        }
-    })
 }
 
 fn is_game_master_block(block: &'static Block) -> bool {
@@ -1058,6 +961,135 @@ struct SkinMetadata {
 }
 
 impl Player {
+    /// Returns the attributes installed by `Player.createAttributes` on top of
+    /// `LivingEntity.createLivingAttributes` (`Player.java:206-220`,
+    /// `LivingEntity.java:332-359`).
+    #[expect(clippy::too_many_lines)]
+    const fn create_attributes() -> &'static [(&'static Attributes, f64)] {
+        &[
+            (
+                &Attributes::MAX_HEALTH,
+                Attributes::MAX_HEALTH.default_value,
+            ),
+            (
+                &Attributes::KNOCKBACK_RESISTANCE,
+                Attributes::KNOCKBACK_RESISTANCE.default_value,
+            ),
+            (&Attributes::MOVEMENT_SPEED, 0.1),
+            (&Attributes::ARMOR, Attributes::ARMOR.default_value),
+            (
+                &Attributes::ARMOR_TOUGHNESS,
+                Attributes::ARMOR_TOUGHNESS.default_value,
+            ),
+            (
+                &Attributes::MAX_ABSORPTION,
+                Attributes::MAX_ABSORPTION.default_value,
+            ),
+            (
+                &Attributes::STEP_HEIGHT,
+                Attributes::STEP_HEIGHT.default_value,
+            ),
+            (&Attributes::SCALE, Attributes::SCALE.default_value),
+            (&Attributes::GRAVITY, Attributes::GRAVITY.default_value),
+            (
+                &Attributes::SAFE_FALL_DISTANCE,
+                Attributes::SAFE_FALL_DISTANCE.default_value,
+            ),
+            (
+                &Attributes::FALL_DAMAGE_MULTIPLIER,
+                Attributes::FALL_DAMAGE_MULTIPLIER.default_value,
+            ),
+            (
+                &Attributes::JUMP_STRENGTH,
+                Attributes::JUMP_STRENGTH.default_value,
+            ),
+            (
+                &Attributes::ENTITY_INTERACTION_RANGE,
+                Attributes::ENTITY_INTERACTION_RANGE.default_value,
+            ),
+            (
+                &Attributes::OXYGEN_BONUS,
+                Attributes::OXYGEN_BONUS.default_value,
+            ),
+            (
+                &Attributes::BURNING_TIME,
+                Attributes::BURNING_TIME.default_value,
+            ),
+            (
+                &Attributes::EXPLOSION_KNOCKBACK_RESISTANCE,
+                Attributes::EXPLOSION_KNOCKBACK_RESISTANCE.default_value,
+            ),
+            (
+                &Attributes::WATER_MOVEMENT_EFFICIENCY,
+                Attributes::WATER_MOVEMENT_EFFICIENCY.default_value,
+            ),
+            (
+                &Attributes::MOVEMENT_EFFICIENCY,
+                Attributes::MOVEMENT_EFFICIENCY.default_value,
+            ),
+            (
+                &Attributes::ATTACK_KNOCKBACK,
+                Attributes::ATTACK_KNOCKBACK.default_value,
+            ),
+            (
+                &Attributes::CAMERA_DISTANCE,
+                Attributes::CAMERA_DISTANCE.default_value,
+            ),
+            (
+                &Attributes::BOUNCINESS,
+                Attributes::BOUNCINESS.default_value,
+            ),
+            (
+                &Attributes::AIR_DRAG_MODIFIER,
+                Attributes::AIR_DRAG_MODIFIER.default_value,
+            ),
+            (
+                &Attributes::FRICTION_MODIFIER,
+                Attributes::FRICTION_MODIFIER.default_value,
+            ),
+            (
+                &Attributes::NAME_TAG_DISTANCE,
+                Attributes::NAME_TAG_DISTANCE.default_value,
+            ),
+            (
+                &Attributes::BELOW_NAME_DISTANCE,
+                Attributes::BELOW_NAME_DISTANCE.default_value,
+            ),
+            (&Attributes::ATTACK_DAMAGE, 1.0),
+            (
+                &Attributes::ATTACK_SPEED,
+                Attributes::ATTACK_SPEED.default_value,
+            ),
+            (&Attributes::LUCK, Attributes::LUCK.default_value),
+            (
+                &Attributes::BLOCK_INTERACTION_RANGE,
+                Attributes::BLOCK_INTERACTION_RANGE.default_value,
+            ),
+            (
+                &Attributes::BLOCK_BREAK_SPEED,
+                Attributes::BLOCK_BREAK_SPEED.default_value,
+            ),
+            (
+                &Attributes::SUBMERGED_MINING_SPEED,
+                Attributes::SUBMERGED_MINING_SPEED.default_value,
+            ),
+            (
+                &Attributes::SNEAKING_SPEED,
+                Attributes::SNEAKING_SPEED.default_value,
+            ),
+            (
+                &Attributes::MINING_EFFICIENCY,
+                Attributes::MINING_EFFICIENCY.default_value,
+            ),
+            (
+                &Attributes::SWEEPING_DAMAGE_RATIO,
+                Attributes::SWEEPING_DAMAGE_RATIO.default_value,
+            ),
+            (&Attributes::WAYPOINT_TRANSMIT_RANGE, 60_000_000.0),
+            (&Attributes::WAYPOINT_RECEIVE_RANGE, 60_000_000.0),
+        ]
+    }
+
     #[must_use]
     pub fn fetch_skin(properties: &[Property]) -> Option<pumpkin_protocol::bedrock::client::Skin> {
         let textures_prop = properties.iter().find(|p| &*p.name == "textures")?;
@@ -1135,6 +1167,16 @@ impl Player {
             Vector3::new(0.0, 100.0, 0.0),
             &EntityType::PLAYER,
         ));
+        // Install the player-specific attribute supplier before the first tick. The generated
+        // player entity type has no attributes, while vanilla adds these entries in
+        // `Player.createAttributes` (`Player.java:206-220`) and the living defaults come from
+        // `LivingEntity.createLivingAttributes` (`LivingEntity.java:332-359`).
+        for (attribute, base) in Self::create_attributes() {
+            living_entity.set_attribute_base(attribute, *base);
+        }
+        living_entity
+            .speed
+            .store(living_entity.get_attribute_value(&Attributes::MOVEMENT_SPEED));
         living_entity.entity.invulnerable.store(
             matches!(gamemode, GameMode::Creative | GameMode::Spectator),
             Ordering::Relaxed,
@@ -2299,13 +2341,11 @@ impl Player {
 
         let held = self.inventory().held_item().await;
         let abilities = self.abilities.lock().await;
+        // Vanilla `ItemStack.canBreakBlockInAdventureMode` (`ItemStack.java:1042-1045`) owns
+        // the held-stack predicate check used by the block-break path.
         if gamemode == GameMode::Adventure
             && !abilities.allow_modify_world
-            && !held
-                .get_data_component::<CanBreakImpl>()
-                .is_some_and(|predicate| {
-                    adventure_predicate_matches_block(&predicate.predicate, block, state)
-                })
+            && !held.can_break_block_in_adventure_mode(block, state)
         {
             return false;
         }
@@ -2864,6 +2904,26 @@ impl Player {
     pub async fn is_flying(&self) -> bool {
         let abilities = self.abilities.lock().await;
         abilities.flying
+    }
+
+    /// Server-side equivalent of `Player.startFallFlying` and its command gate
+    /// (`Player.java:1463-1474`). The command handler owns plugin cancellation, so this
+    /// predicate only answers whether vanilla would accept the requested transition.
+    pub async fn try_to_start_fall_flying(&self, caller: &Arc<dyn EntityBase>) -> bool {
+        can_start_fall_flying(
+            self.living_entity.entity.is_fall_flying(),
+            self.living_entity.can_glide(caller).await,
+            self.living_entity
+                .entity
+                .was_touching_water
+                .load(Ordering::SeqCst),
+        )
+    }
+
+    /// Sets the shared fall-flying flag after `try_to_start_fall_flying` succeeds
+    /// (`Player.java:1463-1474`). The Java command path calls this before returning success.
+    pub async fn start_fall_flying(&self) {
+        self.living_entity.entity.set_fall_flying(true).await;
     }
 
     fn is_sleeping(&self) -> bool {
@@ -5065,8 +5125,9 @@ impl Player {
             self.update_score_for_criteria("air", air).await;
         }
 
-        // ARMOR: armor attribute value
-        let armor = living.get_attribute_value(&Attributes::ARMOR) as i32;
+        // Vanilla `Player` armor criteria read `LivingEntity.getArmorValue`
+        // (`LivingEntity.java:1877-1879`).
+        let armor = living.get_armor_value();
         let last_armor = self.last_recorded_armor.load(Ordering::Relaxed);
         if armor != last_armor {
             self.last_recorded_armor.store(armor, Ordering::Relaxed);
@@ -5829,6 +5890,12 @@ impl Player {
 
     pub async fn send_system_message(&self, text: &TextComponent) {
         self.send_system_message_raw(text, false).await;
+    }
+
+    /// `ServerPlayer.sendOverlayMessage` forwards to system chat with the overlay bit set
+    /// (`ServerPlayer.java:1798-1805`).
+    pub async fn send_overlay_message(&self, text: &TextComponent) {
+        self.send_system_message_raw(text, true).await;
     }
 
     pub async fn send_system_message_raw(&self, text: &TextComponent, overlay: bool) {
@@ -7739,6 +7806,16 @@ fn extract_parrot_variant(tag: &NbtCompound) -> Option<i32> {
 }
 
 impl EntityBase for Player {
+    /// Vanilla `Player.getDismountPoses` (`Player.java:1871-1874`) extends the living default
+    /// with crouching and swimming exits.
+    fn get_dismount_poses(&self) -> Vec<EntityPose> {
+        vec![
+            EntityPose::Standing,
+            EntityPose::Crouching,
+            EntityPose::Swimming,
+        ]
+    }
+
     /// Vanilla `Player.getFallSounds` (`Player.java:1504-1506`).
     fn get_fall_sound(&self, fall_distance: i32) -> Sound {
         if fall_distance > 4 {
@@ -7746,11 +7823,6 @@ impl EntityBase for Player {
         } else {
             Sound::EntityPlayerSmallFall
         }
-    }
-
-    /// Vanilla players use a 20-tick fire immunity cooldown (`Player.java:408`).
-    fn get_fire_immune_ticks(&self) -> i32 {
-        20
     }
 
     /// `ServerPlayer.onExplosionHit` records the impulse position and only ignores
@@ -7886,8 +7958,22 @@ impl EntityBase for Player {
         self.gamemode.load() == GameMode::Spectator
     }
 
+    /// Vanilla `Player.isPushedByFluid` (`Player.java:1694`) disables fluid currents while
+    /// the player's abilities say they are flying. `Entity.updateFluidInteraction`
+    /// (`Entity.java:1641-1654`) reads this predicate before applying current velocity.
+    fn is_pushed_by_fluids(&self) -> bool {
+        self.abilities
+            .try_lock()
+            .map_or(true, |abilities| !abilities.flying)
+    }
+
     fn is_pickable(&self) -> bool {
         self.get_entity().is_alive() && !self.is_spectator()
+    }
+
+    /// Vanilla `Player.getFireImmuneTicks` returns twenty ticks (`Player.java:406-410`).
+    fn get_fire_immune_ticks(&self) -> i32 {
+        player_fire_immune_ticks()
     }
 
     fn set_on_fire_for_ticks(&self, ticks: u32) {
@@ -8887,16 +8973,29 @@ fn is_valid_for_forced_respawn(state: &BlockState) -> bool {
     vanilla_exception || !state.is_solid()
 }
 
+// `Player.tryToStartFallFlying` accepts only a non-gliding, eligible, dry player
+// (`Player.java:1463-1469`).
+const fn can_start_fall_flying(is_fall_flying: bool, can_glide: bool, in_water: bool) -> bool {
+    !is_fall_flying && can_glide && !in_water
+}
+
+/// Vanilla `Player.getFireImmuneTicks` returns twenty ticks (`Player.java:406-410`).
+const fn player_fire_immune_ticks() -> i32 {
+    20
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         Player, ability_invulnerability_blocks, attack_charge_ready, bedrock_inventory_slot,
-        can_harm_player_teams, damage_dealt_stat_points, extract_parrot_variant,
-        is_crossbow_held_projectile, is_crossbow_inventory_projectile, is_valid_for_forced_respawn,
-        is_vanishing_cursed, player_death_experience_reward, read_last_death_location,
-        read_root_vehicle, write_last_death_location, write_root_vehicle,
+        can_harm_player_teams, can_start_fall_flying, damage_dealt_stat_points,
+        extract_parrot_variant, is_crossbow_held_projectile, is_crossbow_inventory_projectile,
+        is_valid_for_forced_respawn, is_vanishing_cursed, player_death_experience_reward,
+        player_fire_immune_ticks, read_last_death_location, read_root_vehicle,
+        write_last_death_location, write_root_vehicle,
     };
     use pumpkin_data::Block;
+    use pumpkin_data::attributes::Attributes;
     use pumpkin_data::damage::DamageType;
     use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
     use pumpkin_util::math::position::BlockPos;
@@ -8929,6 +9028,12 @@ mod tests {
         assert!(is_crossbow_inventory_projectile(&Item::ARROW));
         assert!(is_crossbow_inventory_projectile(&Item::TIPPED_ARROW));
         assert!(is_crossbow_inventory_projectile(&Item::SPECTRAL_ARROW));
+    }
+
+    #[test]
+    fn player_fire_immune_ticks_match_vanilla() {
+        // Vanilla `Player.getFireImmuneTicks` returns twenty ticks (`Player.java:406-410`).
+        assert_eq!(player_fire_immune_ticks(), 20);
     }
 
     fn stack_with_enchantment(
@@ -9163,5 +9268,40 @@ mod tests {
         assert!(attack_charge_ready(0, 5, 4.0, 1.0));
         assert!(attack_charge_ready(5, 5, 4.0, 1.0));
         assert!(attack_charge_ready(0, 5, 4.0, 0.0));
+    }
+
+    /// `Player.createAttributes` overrides movement and attack damage and adds the player-only
+    /// interaction attributes (`Player.java:206-220`).
+    #[test]
+    fn player_attributes_match_vanilla_supplier() {
+        let attributes = Player::create_attributes();
+        let value = |attribute: &Attributes| {
+            attributes
+                .iter()
+                .find(|(candidate, _)| *candidate == attribute)
+                .map_or_else(
+                    || panic!("missing player attribute {}", attribute.name),
+                    |(_, value)| *value,
+                )
+        };
+
+        assert_eq!(value(&Attributes::ATTACK_DAMAGE), 1.0);
+        assert_eq!(value(&Attributes::MOVEMENT_SPEED), 0.1);
+        assert_eq!(
+            value(&Attributes::ATTACK_SPEED),
+            Attributes::ATTACK_SPEED.default_value
+        );
+        assert_eq!(value(&Attributes::WAYPOINT_TRANSMIT_RANGE), 60_000_000.0);
+        assert_eq!(value(&Attributes::WAYPOINT_RECEIVE_RANGE), 60_000_000.0);
+    }
+
+    /// `Player.tryToStartFallFlying` rejects an existing glide, an invalid glider, or water
+    /// (`Player.java:1463-1469`).
+    #[test]
+    fn fall_flying_start_gate_matches_vanilla() {
+        assert!(can_start_fall_flying(false, true, false));
+        assert!(!can_start_fall_flying(true, true, false));
+        assert!(!can_start_fall_flying(false, false, false));
+        assert!(!can_start_fall_flying(false, true, true));
     }
 }

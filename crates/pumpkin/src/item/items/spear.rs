@@ -325,8 +325,9 @@ impl ItemBehaviour for SpearItem {
 
             let world = player.world();
             let entity = player.get_entity();
-            let (yaw, pitch) = player.rotation();
-            let look = Vector3::rotation_vector(f64::from(pitch), f64::from(yaw));
+            // `ProjectileUtil.getHitEntitiesAlong` uses the attacker's head look angle
+            // (`ProjectileUtil.java:38-45`), including for the kinetic-weapon sweep.
+            let look = player.get_head_look_angle();
 
             // `KineticWeapon.getMotion` (`KineticWeapon.java:78-84`): the attacker's known
             // speed in blocks per second, projected onto the look vector
@@ -405,11 +406,15 @@ impl ItemBehaviour for SpearItem {
             .expand_all(1.0);
 
             let attacker_id = entity.entity_id;
+            let attacker_root_id = entity.root_vehicle_id().await;
             let mut candidates: Vec<Arc<dyn EntityBase>> = Vec::new();
             world.extend_entities_in_box_where(&mut candidates, 64, search, |candidate| {
                 // `PiercingWeapon.canHitEntity` (`PiercingWeapon.java:61-73`), reduced to the
-                // parts Pumpkin can express: never the attacker, and never a dead entity.
-                candidate.get_entity().entity_id != attacker_id && candidate.get_entity().is_alive()
+                // parts that can be checked without awaiting: never the attacker, a dead entity,
+                // or an entity invulnerable to piercing weapons.
+                candidate.get_entity().entity_id != attacker_id
+                    && candidate.get_entity().is_alive()
+                    && !candidate.is_invulnerable_to_piercing_weapon()
             });
 
             let game_time = world.level_time.lock().await.world_age.unsigned_abs();
@@ -417,6 +422,11 @@ impl ItemBehaviour for SpearItem {
 
             for target in candidates {
                 let target_entity = target.get_entity();
+                // `PiercingWeapon.canHitEntity` (`PiercingWeapon.java:71-73`) excludes a target
+                // sharing the attacker's root vehicle, including nested passengers.
+                if target_entity.root_vehicle_id().await == attacker_root_id {
+                    continue;
+                }
                 // Vanilla widens each candidate's box by its pick radius and clips the
                 // segment against it; the hitbox margin plays that role here.
                 let hitbox = target_entity.bounding_box.load().expand_all(margin);
@@ -504,7 +514,7 @@ impl ItemBehaviour for SpearItem {
                     // called twice by `stabAttack`: once at a flat 0.4, once at the
                     // attacker's own `ATTACK_KNOCKBACK`, both directed along the attacker's
                     // facing (`sin(yaw)`, `-cos(yaw)`).
-                    let yaw_rad = f64::from(yaw.to_radians());
+                    let yaw_rad = f64::from(player.get_entity().yaw.load().to_radians());
                     let (dir_x, dir_z) = (yaw_rad.sin(), -yaw_rad.cos());
                     if let Some(living) = target.get_living_entity() {
                         living.knockback_with_resistance(BASE_STAB_KNOCKBACK, dir_x, dir_z);

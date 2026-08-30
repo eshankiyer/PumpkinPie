@@ -1,6 +1,6 @@
 use pumpkin_data::attributes::Attributes;
-use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
+use pumpkin_util::math::{boundingbox::BoundingBox, position::BlockPos};
 use rand::RngExt;
 
 use crate::entity::ai::control::move_control::Operation;
@@ -13,10 +13,8 @@ use crate::entity::mob::Mob;
 /// of `blockTraversalPossible` (fluid/`HAPPY_GHAST_AVOIDS` checks, Ghast.java:302-319) never
 /// runs for an actual `Ghast` and is not ported here.
 ///
-/// `canReach`'s precise per-block `collidedWithShapeMovingFrom` sweep (Ghast.java:262-283) has
-/// no equivalent in Pumpkin's collision system; `can_reach` below samples the straight-line
-/// path at roughly 1-block intervals and rejects it if any sampled block is solid, which
-/// approximates the same "don't fly a path through walls" intent without exact block shapes.
+/// `canReach` uses `Entity.collidedWithShapeMovingFrom` for the precise per-block sweep
+/// (`Ghast.java:262-283` and `Entity.java:1397-1400`).
 pub struct GhastMoveControl {
     wanted_x: f64,
     wanted_y: f64,
@@ -131,8 +129,21 @@ fn can_reach(mob: &dyn Mob, travel: Vector3<f64>) -> bool {
         // than blocking or panicking (world/mod.rs:5578-5585), so a sample that strays into an
         // unloaded chunk is simply treated as passable here.
         let state = world.get_block_state(&block_pos);
-        if !state.is_air() && state.is_solid_block() {
-            return false;
+        if !state.is_air() {
+            if entity
+                .bounding_box
+                .load()
+                .intersects(&BoundingBox::from_block(&block_pos))
+            {
+                continue;
+            }
+            let collision_shapes = state
+                .get_block_collision_shapes_at(&block_pos)
+                .map(|shape| shape.at_pos(block_pos))
+                .collect::<Vec<_>>();
+            if entity.collided_with_shape_moving_from(start, start + travel, &collision_shapes) {
+                return false;
+            }
         }
     }
 

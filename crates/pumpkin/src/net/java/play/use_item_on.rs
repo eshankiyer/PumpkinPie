@@ -57,31 +57,30 @@ impl JavaClient {
         let world = entity.world.load_full();
 
         // ServerGamePacketListenerImpl.handleUseItemOn reports the build limit to the
-        // player instead of silently dropping an out-of-range interaction.
+        // player instead of silently dropping an out-of-range interaction, using the overlay
+        // channel (`ServerPlayer.java:1798-1805`).
         if position.0.y > world.get_top_y() {
             player
-                .send_system_message_raw(
+                .send_overlay_message(
                     &TextComponent::translate_cross(
                         translation::java::BUILD_TOOHIGH,
                         translation::bedrock::BUILD_TOOHIGH,
                         vec![TextComponent::text(world.get_top_y().to_string())],
                     )
                     .color_named(pumpkin_util::text::color::NamedColor::Red),
-                    true,
                 )
                 .await;
             return Ok(());
         }
         if position.0.y < world.get_bottom_y() {
             player
-                .send_system_message_raw(
+                .send_overlay_message(
                     &TextComponent::translate_cross(
                         translation::java::BUILD_TOOLOW,
                         translation::bedrock::BUILD_TOOLOW,
                         vec![TextComponent::text(world.get_bottom_y().to_string())],
                     )
                     .color_named(pumpkin_util::text::color::NamedColor::Red),
-                    true,
                 )
                 .await;
             return Ok(());
@@ -196,6 +195,16 @@ impl JavaClient {
         }
 
         let before = item.clone();
+
+        // Vanilla `ItemStack.useOn` checks `canPlaceOnBlockInAdventureMode` before dispatching
+        // to the item (`ItemStack.java:357-365`); `ServerPlayerGameMode.useItemOn` reaches this
+        // fallback after block interaction (`ServerPlayerGameMode.java:386-395`).
+        if player.gamemode.load() == GameMode::Adventure
+            && !player.abilities.lock().await.allow_modify_world
+            && !item.can_place_on_block_in_adventure_mode(block, world.get_block_state(&position))
+        {
+            return Ok(());
+        }
 
         server
             .item_registry

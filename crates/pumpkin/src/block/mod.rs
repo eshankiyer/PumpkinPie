@@ -1,6 +1,7 @@
 use pumpkin_data::{Block, BlockId, BlockState};
 
 use pumpkin_data::BlockStateId;
+use pumpkin_data::block_properties::blocks_movement;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::random::{RandomGenerator, get_seed, xoroshiro128::Xoroshiro};
 
@@ -77,6 +78,31 @@ pub(crate) fn block_bounce_restitution(block: &Block) -> f64 {
         1.0
     } else {
         0.0
+    }
+}
+
+/// Matches vanilla `BlockStateBase.isSuffocating` (`BlockBehaviour.java:801-803`) and the
+/// block-property overrides registered in `Blocks.java:421-422, 585-586, 637-638, 1299-1300,
+/// 2027-2028, 3702-3703, 5116-5117, 5257-5258, 5478-5479, 5699-5708, 5769-5794`.
+pub(crate) fn is_suffocating(block: &Block, state: &BlockState, shulker_closed: bool) -> bool {
+    match block.name {
+        "farmland" | "dirt_path" | "mud" | "soul_sand" | "end_gateway" => true,
+        "mangrove_roots" | "glass" | "moving_piston" | "repeater" | "tinted_glass"
+        | "firefly_bush" => false,
+        name if name.ends_with("_leaves")
+            || name.ends_with("_stained_glass")
+            || name.ends_with("copper_grate") =>
+        {
+            false
+        }
+        name if name == "shulker_box" || name.ends_with("_shulker_box") => shulker_closed,
+        "piston" | "sticky_piston" => !block.properties(state.id).is_some_and(|properties| {
+            properties
+                .to_props()
+                .iter()
+                .any(|(key, value)| *key == "extended" && *value == "true")
+        }),
+        _ => blocks_movement(state, block.id) && state.is_full_cube(),
     }
 }
 
@@ -738,6 +764,43 @@ mod tests {
                 .next()
                 .is_none()
         );
+    }
+
+    /// Vanilla `BlockStateBase.isSuffocating` defaults at `BlockBehaviour.java:801-803`;
+    /// these cases cover the registered overrides in `Blocks.java:637-638, 1299-1300,
+    /// 3702-3703, 5257-5258, 5783-5785`.
+    #[test]
+    fn suffocation_predicate_matches_vanilla_overrides() {
+        assert!(is_suffocating(
+            &Block::FARMLAND,
+            Block::FARMLAND.default_state,
+            true
+        ));
+        assert!(is_suffocating(
+            &Block::DIRT_PATH,
+            Block::DIRT_PATH.default_state,
+            true
+        ));
+        assert!(!is_suffocating(
+            &Block::GLASS,
+            Block::GLASS.default_state,
+            true
+        ));
+        assert!(!is_suffocating(
+            &Block::COPPER_GRATE,
+            Block::COPPER_GRATE.default_state,
+            true
+        ));
+        assert!(!is_suffocating(
+            &Block::SHULKER_BOX,
+            Block::SHULKER_BOX.default_state,
+            false
+        ));
+        assert!(is_suffocating(
+            &Block::SHULKER_BOX,
+            Block::SHULKER_BOX.default_state,
+            true
+        ));
     }
 
     /// Ore experience is data-driven through `Block.experience` and `block::drop_loot`, not a

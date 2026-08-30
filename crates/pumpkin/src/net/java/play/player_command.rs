@@ -70,22 +70,26 @@ impl JavaClient {
                 }
             }
             Action::OpenVehicleInventory => {
-                debug!("todo");
+                // Vanilla dispatches OPEN_INVENTORY to the ridden vehicle's custom inventory
+                // hook (`ServerGamePacketListenerImpl.java:1734-1737`); the horse and nautilus
+                // implementations eventually use `ServerPlayer.openHorseInventory` and
+                // `openNautilusInventory` (`ServerPlayer.java:1372-1395`).
+                let vehicle = entity.vehicle.lock().await.clone();
+                if let Some(vehicle) = vehicle
+                    && let Some(mob) = vehicle.get_mob()
+                {
+                    mob.open_custom_inventory_screen(player).await;
+                }
             }
             Action::StartFlyingElytra => {
                 // Vanilla `ServerGamePacketListenerImpl.handlePlayerCommand` START_FALL_FLYING
-                // (`ServerGamePacketListenerImpl.java:1736-1739`): `Player.tryToStartFallFlying`
+                // (`ServerGamePacketListenerImpl.java:1739-1742`): `Player.tryToStartFallFlying`
                 // starts the glide only when not already gliding, a valid glider passes
                 // `canGlide`, and the player is not in water; otherwise `stopFallFlying`
                 // resyncs the shared flag so the client ends its glide animation.
                 let living = &player.living_entity;
                 let caller: Arc<dyn EntityBase> = player.clone();
-                let try_start = !living.entity.is_fall_flying()
-                    && living.can_glide(&caller).await
-                    && !living
-                        .entity
-                        .was_touching_water
-                        .load(std::sync::atomic::Ordering::SeqCst);
+                let try_start = player.try_to_start_fall_flying(&caller).await;
                 if try_start {
                     let mut event = crate::plugin::api::events::entity::entity_toggle_glide::EntityToggleGlideEvent::new(
                         living.entity.entity_id,
@@ -95,7 +99,7 @@ impl JavaClient {
                     if event.cancelled || !event.is_gliding {
                         living.entity.stop_fall_flying();
                     } else {
-                        living.entity.set_fall_flying(true).await;
+                        player.start_fall_flying().await;
                     }
                 } else {
                     living.entity.stop_fall_flying();

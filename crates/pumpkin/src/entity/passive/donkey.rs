@@ -170,6 +170,19 @@ impl Mob for DonkeyEntity {
         &self.mob_entity
     }
 
+    /// `ServerPlayer.openHorseInventory` receives the chested horse container
+    /// (`ServerPlayer.java:1372-1382`) after the ridden-vehicle inventory command.
+    fn open_custom_inventory_screen<'a>(
+        &'a self,
+        player: &'a Arc<Player>,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            if self.is_tamed() {
+                AbstractChestedHorse::open_chest_inventory(self, player).await;
+            }
+        })
+    }
+
     // `AbstractHorse` rider, breeding, and leash hooks (`AbstractHorse.java:189-205,878-905`).
     fn can_jump(&self) -> EntityBaseFuture<'_, bool> {
         AbstractHorse::can_jump_now(self)

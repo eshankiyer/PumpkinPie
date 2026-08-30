@@ -349,7 +349,9 @@ fn apply_set_enchantments(
     add: bool,
 ) {
     if stack.item.id == Item::BOOK.id {
-        stack.item = &Item::ENCHANTED_BOOK;
+        // Vanilla `SetEnchantmentsFunction.run` uses `ItemStack.transmuteCopy` here
+        // (`SetEnchantmentsFunction.java:53-56`; `ItemStack.java:599-608`).
+        *stack = stack.transmute_copy(&Item::ENCHANTED_BOOK);
     }
 
     let stored = stack.item.id == Item::ENCHANTED_BOOK.id;
@@ -812,7 +814,9 @@ impl LootFunctionExt for LootFunction {
             LootFunctionTypes::SetItem { item } => {
                 if let Some(item) = Item::from_registry_key(item) {
                     for stack in stacks {
-                        stack.item = item;
+                        // Vanilla `SetItemFunction.run` returns `transmuteCopy` here
+                        // (`SetItemFunction.java:28-31`; `ItemStack.java:599-608`).
+                        *stack = stack.transmute_copy(item);
                     }
                 }
             }

@@ -49,7 +49,9 @@ impl JavaClient {
                             translation::java::BUILD_SPAWN_PROTECTION,
                             vec![TextComponent::text(format!("[{position}]"))],
                         );
-                        player.send_system_message_raw(&message, true).await;
+                        // `ServerPlayer.sendOverlayMessage` uses the overlay chat position
+                        // (`ServerPlayer.java:1798-1805`).
+                        player.send_overlay_message(&message).await;
                         self.update_sequence(player, player_action.sequence.0);
                         return;
                     }

@@ -586,6 +586,7 @@ pub trait AbstractHorse: Animal {
     /// `AbstractHorse.onElasticLeashPull` (`AbstractHorse.java:189-195`) stops grazing when
     /// the shared leash solver applies an elastic pull.
     fn on_elastic_leash_pull(&self) {
+        self.default_on_elastic_leash_pull();
         self.horse_data().set_flag(FLAG_EATING, false);
     }
 
@@ -929,7 +930,7 @@ pub trait AbstractHorse: Animal {
             }
 
             if self.is_tamed() && player.get_entity().is_sneaking() {
-                self.open_custom_inventory_screen(player).await;
+                AbstractHorse::open_custom_inventory_screen(self, player).await;
                 return true;
             }
 

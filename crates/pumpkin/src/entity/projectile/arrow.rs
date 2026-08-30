@@ -800,17 +800,10 @@ impl EntityBase for ArrowEntity {
                     }
 
                     if let Some(living) = target.get_living_entity() {
+                        // Vanilla `AbstractArrow.onHitEntity` increments the victim's tracked
+                        // arrow count for non-piercing hits (`AbstractArrow.java:474-477`).
                         if pierce == 0 {
-                            // `AbstractArrow.onHitEntity` increments the victim's arrow count
-                            // only for non-piercing hits (`AbstractArrow.java:476-484`).
-                            let count = living.arrow_count.fetch_add(1, Ordering::Relaxed) + 1;
-                            living.entity.send_meta_data(
-                                &[Metadata::new(
-                                    pumpkin_data::tracked_data::living_entity::DATA_ARROW_COUNT_ID,
-                                    count,
-                                )],
-                                None,
-                            );
+                            living.add_arrow();
                         }
 
                         // `AbstractArrow.doKnockback`: the push follows the ARROW's horizontal

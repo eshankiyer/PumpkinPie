@@ -77,6 +77,7 @@ use pumpkin_protocol::{
 };
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::vector3::Vector3;
+use pumpkin_util::math::wrap_degrees;
 use pumpkin_util::text::TextComponent;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use std::sync::RwLock;
@@ -111,25 +112,6 @@ fn does_emit_equip_event(is_player: bool, slot: &EquipmentSlot) -> bool {
 /// `Math.round(fallDistance * 100.0)`.
 fn fall_one_cm_stat_amount(fall_distance: f32) -> Option<i32> {
     (fall_distance >= 2.0).then_some((fall_distance * 100.0).round() as i32)
-}
-
-/// Computes one server tick of vanilla `LivingEntity` arrow-count decay
-/// (`LivingEntity.java:2754-2767`).
-const fn arrow_count_tick(count: i32, remove_time: i32) -> (i32, i32) {
-    if count <= 0 {
-        return (count, remove_time);
-    }
-
-    let remove_time = if remove_time <= 0 {
-        20 * (30 - count)
-    } else {
-        remove_time
-    } - 1;
-    if remove_time <= 0 {
-        (count - 1, 0)
-    } else {
-        (count, remove_time)
-    }
 }
 
 /// Vanilla `LivingEntity.causeFallDamage` (`LivingEntity.java:1788-1797`) limits fall distance
@@ -172,6 +154,14 @@ const fn has_landed_in_liquid_state(
 /// Vanilla `LivingEntity.isDeadOrDying` (`LivingEntity.java:1171-1173`).
 const fn dead_or_dying_state(health: f32, dead: bool) -> bool {
     health <= 0.0 || dead
+}
+
+fn accumulated_fall_distance_after_impulse(velocity_y: f64, fall_distance: f32) -> f32 {
+    if velocity_y > -0.5 && fall_distance > 1.0 {
+        1.0
+    } else {
+        fall_distance
+    }
 }
 
 fn armor_resists_damage(stack: &ItemStack, damage_type: &DamageType) -> bool {
@@ -508,6 +498,8 @@ impl LivingEntity {
             },
             health: AtomicCell::new(max_health), // Initial health value from attributes
             air_supply: AtomicI32::new(max_air_supply),
+            arrow_count: AtomicI32::new(0),
+            remove_arrow_time: AtomicI32::new(0),
             stinger_count: AtomicI32::new(0),
             air_random: std::sync::Mutex::new(StdRng::seed_from_u64(rand::rng().random())),
             air_metadata_initialized: AtomicBool::new(false),
@@ -516,8 +508,6 @@ impl LivingEntity {
             skip_drop_experience: AtomicBool::new(false),
             last_hurt_by_player_time: AtomicI32::new(0),
             last_damage_taken: AtomicCell::new(0.0),
-            arrow_count: AtomicI32::new(0),
-            remove_arrow_time: AtomicI32::new(0),
             absorption: AtomicCell::new(0.0),
             fall_distance: AtomicCell::new(0.0),
             post_impulse_context_reset_grace_time: AtomicI32::new(0),
@@ -1488,6 +1478,30 @@ impl LivingEntity {
             .map_or(attribute.default_value, AttributeInstance::value)
     }
 
+    /// Vanilla `LivingEntity.getArmorValue` (`LivingEntity.java:1877-1879`).
+    #[must_use]
+    pub fn get_armor_value(&self) -> i32 {
+        armor_value_from_attribute(self.get_attribute_value(&Attributes::ARMOR))
+    }
+
+    /// Vanilla `LivingEntity.getArrowCount`/`setArrowCount` (`LivingEntity.java:1994-2000`).
+    #[must_use]
+    pub fn get_arrow_count(&self) -> i32 {
+        self.arrow_count.load(Relaxed)
+    }
+
+    /// Increments the tracked arrow count after a successful non-piercing arrow hit.
+    pub fn add_arrow(&self) {
+        let count = self.arrow_count.fetch_add(1, Relaxed) + 1;
+        self.entity.send_meta_data(
+            &[Metadata::new(
+                pumpkin_data::tracked_data::living_entity::DATA_ARROW_COUNT_ID,
+                count,
+            )],
+            None,
+        );
+    }
+
     /// `Mob.setSpeed`: stores the movement factor and mirrors it into the forward
     /// movement input (`setZza`).
     pub fn set_speed(&self, speed: f64) {
@@ -2087,6 +2101,35 @@ impl LivingEntity {
         self.discard_friction.load(Relaxed)
     }
 
+    /// Vanilla `LivingEntity.tick` computes a movement-facing body target after `aiStep`
+    /// (`LivingEntity.java:2797-2816`) and then applies `tickHeadTurn`
+    /// (`LivingEntity.java:3018-3027`). The mob tick already publishes `body_yaw`, so keep that
+    /// existing packet path supplied for entities whose movement controller did not set it.
+    fn tick_head_turn(&self) {
+        let position = self.entity.pos.load();
+        let previous_position = self.entity.last_pos.load();
+        let dx = position.x - previous_position.x;
+        let dz = position.z - previous_position.z;
+        let target_body_yaw = if dx.mul_add(dx, dz * dz) > 0.0025000002 {
+            let walk_direction = dz.atan2(dx).to_degrees() as f32 - 90.0;
+            let facing_difference = wrap_degrees(self.entity.yaw.load() - walk_direction).abs();
+            if (95.0..265.0).contains(&facing_difference) {
+                walk_direction - 180.0
+            } else {
+                walk_direction
+            }
+        } else {
+            self.entity.body_yaw.load()
+        };
+
+        let body_yaw = head_turn_body_yaw(
+            self.entity.body_yaw.load(),
+            target_body_yaw,
+            self.entity.yaw.load(),
+        );
+        self.entity.body_yaw.store(body_yaw);
+    }
+
     #[allow(clippy::too_many_lines)]
     async fn tick_movement<'a>(&'a self, server: &'a Server, caller: &'a Arc<dyn EntityBase>) {
         // `LivingEntity.aiStep` does not call travel when `Mob.isEffectiveAi()` is false.
@@ -2407,12 +2450,7 @@ impl LivingEntity {
     /// is equipped, and at every tenth consecutive glide tick broadcast the glide game
     /// event, damaging a random equipped glider on alternating one-second intervals.
     async fn update_fall_flying<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) {
-        // `Entity.checkFallDistanceAccumulation` (`Entity.java:2890-2894`).
-        let velocity = self.entity.velocity.load();
-        let fall_distance = self.fall_distance.load();
-        if velocity.y > -0.5 && fall_distance > 1.0 {
-            self.fall_distance.store(1.0);
-        }
+        self.check_fall_distance_accumulation();
 
         if !self.can_glide(caller).await {
             // `this.setSharedFlag(7, false)`: end the glide without the forced-resync
@@ -2441,6 +2479,18 @@ impl LivingEntity {
             )
             .await;
         }
+    }
+
+    /// Vanilla `Entity.checkFallDistanceAccumulation` (`Entity.java:2890-2894`) keeps a fall
+    /// from continuing to grow after the entity receives a non-downward impulse.
+    pub fn check_fall_distance_accumulation(&self) {
+        let velocity = self.entity.velocity.load();
+        let fall_distance = self.fall_distance.load();
+        self.fall_distance
+            .store(accumulated_fall_distance_after_impulse(
+                velocity.y,
+                fall_distance,
+            ));
     }
 
     /// Vanilla `LivingEntity.canGlide` (`LivingEntity.java:3204-3216`): airborne, not
@@ -5127,6 +5177,24 @@ impl LivingEntity {
             );
         }
     }
+
+    /// Vanilla `LivingEntity.tick` arrow removal (`LivingEntity.java:2754-2767`) uses a
+    /// count-dependent timer and publishes each decrement through tracked metadata.
+    fn tick_arrows(&self, count: i32) {
+        if count <= 0 {
+            return;
+        }
+
+        if self.remove_arrow_time.load(Relaxed) <= 0 {
+            self.remove_arrow_time
+                .store(arrow_removal_delay(count), Relaxed);
+        }
+
+        if self.remove_arrow_time.fetch_sub(1, Relaxed) <= 1 {
+            self.set_arrow_count(count - 1);
+        }
+    }
+
     /// Restores the `HandItems` / `ArmorItems` lists written by `write_nbt`. Split out of
     /// `read_nbt_non_mut` purely to keep that function within its line budget.
     async fn load_equipment_from_nbt(&self, nbt: &NbtCompound) {
@@ -5164,6 +5232,26 @@ impl LivingEntity {
 }
 
 impl EntityBase for LivingEntity {
+    /// Vanilla `LivingEntity.getBlockSpeedFactor` interpolates movement efficiency between the
+    /// base factor and one (`LivingEntity.java:511-512`; `Entity.java:1084-1091`).
+    fn get_block_speed_factor(&self) -> f32 {
+        let base = self.entity.get_velocity_multiplier();
+        let efficiency = self.get_attribute_value(&Attributes::MOVEMENT_EFFICIENCY) as f32;
+        block_speed_factor(base, efficiency)
+    }
+
+    /// Vanilla `LivingEntity.getEntityBounciness` reads the bounciness attribute
+    /// (`LivingEntity.java:2192-2195`).
+    fn get_entity_bounciness(&self) -> f64 {
+        self.get_attribute_value(&Attributes::BOUNCINESS)
+    }
+
+    /// Vanilla `LivingEntity.getDismountPoses` returns standing as the default pose
+    /// (`LivingEntity.java:3735-3737`; `AbstractBoat.java:653-660`).
+    fn get_dismount_poses(&self) -> Vec<EntityPose> {
+        vec![EntityPose::Standing]
+    }
+
     /// `LivingEntity.igniteForTicks` (`LivingEntity.java:3989`): a living entity scales every
     /// ignite duration by its `minecraft:burning_time` attribute before handing it to
     /// `Entity.igniteForTicks`. Fire Protection is the only vanilla source of a modifier on
@@ -6165,6 +6253,10 @@ impl EntityBase for LivingEntity {
                 self.tick_swim_sound(caller);
             }
 
+            // `LivingEntity.tick` (`LivingEntity.java:2797-2816`) performs the body-yaw update
+            // after movement and before the next entity packet is assembled by `Mob::tick`.
+            self.tick_head_turn();
+
             // TODO
             let player = caller.get_player();
             let is_player = player.is_some();
@@ -6223,15 +6315,11 @@ impl EntityBase for LivingEntity {
             }
 
             self.tick_effects().await;
-            // Vanilla `LivingEntity.tick` decays tracked arrows on the server before
-            // ticking stingers (`LivingEntity.java:2754-2767`).
-            let arrow_count = self.arrow_count.load(Relaxed);
-            let remove_arrow_time = self.remove_arrow_time.load(Relaxed);
-            let (new_arrow_count, new_remove_arrow_time) =
-                arrow_count_tick(arrow_count, remove_arrow_time);
-            self.remove_arrow_time.store(new_remove_arrow_time, Relaxed);
-            if new_arrow_count != arrow_count {
-                self.set_arrow_count(new_arrow_count);
+            // Vanilla `LivingEntity.tick` reads the tracked arrow count before starting removal
+            // (`LivingEntity.java:2754-2767`).
+            let arrow_count = self.get_arrow_count();
+            if arrow_count > 0 {
+                self.tick_arrows(arrow_count);
             }
             self.tick_stingers();
 
@@ -7372,9 +7460,39 @@ fn friction_influenced_speed(speed: f64, slipperiness: f64) -> f64 {
     speed * 0.216_000_02 / (slipperiness * slipperiness * slipperiness)
 }
 
+/// Vanilla `LivingEntity.getArmorValue` floors the effective armor attribute
+/// (`LivingEntity.java:1877-1879`).
+const fn armor_value_from_attribute(value: f64) -> i32 {
+    value.floor() as i32
+}
+
+/// Vanilla `LivingEntity.getBlockSpeedFactor` linearly interpolates from the block factor to
+/// one using movement efficiency (`LivingEntity.java:511-512`).
+fn block_speed_factor(base: f32, efficiency: f32) -> f32 {
+    base + (1.0 - base) * efficiency
+}
+
+/// Vanilla initializes `removeArrowTime` to `20 * (30 - arrowCount)`
+/// (`LivingEntity.java:2759-2763`).
+const fn arrow_removal_delay(arrow_count: i32) -> i32 {
+    20 * (30 - arrow_count)
+}
+
 /// Vanilla `LivingEntity.computeModifiedFriction` (`LivingEntity.java:515-517`).
 fn modified_friction(friction: f64, modifier: f64) -> f64 {
     (1.0 - (1.0 - friction) * modifier).clamp(0.0, 1.0)
+}
+
+fn head_turn_body_yaw(body_yaw: f32, target_body_yaw: f32, entity_yaw: f32) -> f32 {
+    // `LivingEntity.tickHeadTurn` (`LivingEntity.java:3018-3027`) turns the body by 30 percent,
+    // then applies the 50-degree maximum head-to-body difference.
+    let body_yaw = body_yaw + wrap_degrees(target_body_yaw - body_yaw) * 0.3;
+    let head_difference = wrap_degrees(entity_yaw - body_yaw);
+    if head_difference.abs() > 50.0 {
+        body_yaw + head_difference - head_difference.signum() * 50.0
+    } else {
+        body_yaw
+    }
 }
 
 /// Vanilla `LivingEntity.updateFallFlyingMovement`, kept pure so its pitch and velocity
@@ -7469,6 +7587,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn body_yaw_turn_wraps_and_limits_head_difference() {
+        // `LivingEntity.tickHeadTurn` (`LivingEntity.java:3018-3027`) turns 30 percent toward
+        // the target and then limits the head to 50 degrees from the body.
+        assert!((head_turn_body_yaw(0.0, 90.0, 0.0) - 27.0).abs() < 1e-4);
+        assert!((head_turn_body_yaw(350.0, 10.0, 10.0) - 356.0).abs() < 1e-4);
+        assert!((head_turn_body_yaw(0.0, 0.0, 90.0) - 40.0).abs() < 1e-4);
+    }
+
+    #[test]
     fn combat_damage_statistics_use_vanilla_rounding() {
         assert_eq!(damage_stat_amount(0.0), 0);
         assert_eq!(damage_stat_amount(0.04), 0);
@@ -7519,6 +7646,15 @@ mod tests {
         assert_eq!(impulse_limited_fall_distance(8.0, 70.0, 72.5), 2.5);
         assert_eq!(impulse_limited_fall_distance(2.0, 70.0, 72.5), 2.0);
         assert_eq!(impulse_limited_fall_distance(2.0, 73.0, 72.5), -0.5);
+    }
+
+    /// `Entity.checkFallDistanceAccumulation` (`Entity.java:2890-2894`) clamps only after an
+    /// upward or slow impulse, and leaves a normal falling distance unchanged.
+    #[test]
+    fn fall_distance_clamps_after_slow_impulse() {
+        assert_eq!(accumulated_fall_distance_after_impulse(0.0, 4.0), 1.0);
+        assert_eq!(accumulated_fall_distance_after_impulse(-0.5, 4.0), 4.0);
+        assert_eq!(accumulated_fall_distance_after_impulse(-0.6, 0.5), 0.5);
     }
 
     #[test]
@@ -7579,6 +7715,30 @@ mod tests {
         assert_eq!(fall_flying_schedule(20), (true, true));
         assert_eq!(fall_flying_schedule(30), (true, false));
         assert_eq!(fall_flying_schedule(40), (true, true));
+    }
+
+    #[test]
+    fn armor_value_floors_the_effective_attribute() {
+        // Vanilla `LivingEntity.getArmorValue` uses Mth.floor (`LivingEntity.java:1877-1879`).
+        assert_eq!(armor_value_from_attribute(7.99), 7);
+        assert_eq!(armor_value_from_attribute(8.0), 8);
+    }
+
+    #[test]
+    fn block_speed_factor_interpolates_with_movement_efficiency() {
+        // Vanilla `LivingEntity.getBlockSpeedFactor` lerps to one
+        // (`LivingEntity.java:511-512`).
+        assert_eq!(block_speed_factor(0.4, 0.0), 0.4);
+        assert!((block_speed_factor(0.4, 0.5) - 0.7).abs() < 1e-4);
+        assert_eq!(block_speed_factor(0.4, 1.0), 1.0);
+    }
+
+    #[test]
+    fn arrow_removal_delay_scales_with_visible_arrow_count() {
+        // Vanilla initializes `removeArrowTime` from the current count
+        // (`LivingEntity.java:2759-2763`).
+        assert_eq!(arrow_removal_delay(1), 580);
+        assert_eq!(arrow_removal_delay(3), 540);
     }
 
     #[test]
@@ -7694,16 +7854,6 @@ mod tests {
             false,
             false
         ));
-    }
-
-    #[test]
-    fn arrow_count_decay_uses_vanilla_timer() {
-        // `LivingEntity.tick` initializes and decrements `removeArrowTime` before
-        // calling `setArrowCount` (`LivingEntity.java:2754-2767`).
-        assert_eq!(arrow_count_tick(1, 1), (0, 0));
-        assert_eq!(arrow_count_tick(2, 2), (2, 1));
-        assert_eq!(arrow_count_tick(2, 0), (2, 559));
-        assert_eq!(arrow_count_tick(0, 7), (0, 7));
     }
 
     #[test]

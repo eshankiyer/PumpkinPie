@@ -381,7 +381,10 @@ pub mod use_item_on;
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
-    use crate::entity::player::adventure_predicate_matches_block;
+    use pumpkin_data::data_component::DataComponent;
+    use pumpkin_data::data_component_impl::{CanBreakImpl, DataComponentImpl};
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
     use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
     use pumpkin_util::{
         GameMode, Hand,
@@ -408,18 +411,23 @@ mod tests {
             NbtTag::List(vec![NbtTag::String(Box::from("minecraft:stone"))]),
         );
 
+        let mut stack = ItemStack::new(1, &Item::STONE);
+        stack.patch.push((
+            DataComponent::CanBreak,
+            Some(
+                CanBreakImpl {
+                    predicate: NbtTag::Compound(predicate),
+                }
+                .to_dyn(),
+            ),
+        ));
+
         let stone = pumpkin_data::Block::from_name("stone").unwrap();
         let dirt = pumpkin_data::Block::from_name("dirt").unwrap();
-        assert!(adventure_predicate_matches_block(
-            &NbtTag::Compound(predicate.clone()),
-            stone,
-            stone.default_state,
-        ));
-        assert!(!adventure_predicate_matches_block(
-            &NbtTag::Compound(predicate),
-            dirt,
-            dirt.default_state,
-        ));
+        // Vanilla `ItemStack.canBreakBlockInAdventureMode` (`ItemStack.java:1042-1045`)
+        // evaluates the stack predicate against the target block and state.
+        assert!(stack.can_break_block_in_adventure_mode(stone, stone.default_state,));
+        assert!(!stack.can_break_block_in_adventure_mode(dirt, dirt.default_state,));
     }
 
     /// `InteractionHand` is `MAIN_HAND(0)`/`OFF_HAND(1)` on the wire, which is the
