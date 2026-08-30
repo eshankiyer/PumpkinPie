@@ -44,8 +44,10 @@ impl CommandExecutor for DebugPathExecutor {
             // Vanilla constructs a GroundPathNavigation here, independent of the mob's
             // currently configured navigation implementation.
             let mut navigator = Navigator::default();
+            // `Mob.onPathfindingStart/Done` wrap evaluator preparation and cleanup
+            // (`Mob.java:194-198`, `WalkNodeEvaluator.java:39-49`).
             let path = navigator
-                .compute_path(&mob.get_mob_entity().living_entity, destination)
+                .compute_path_with_reach_for_mob(mob, destination, 0)
                 .await
                 .ok_or_else(|| ERROR_NO_PATH.create_without_context())?;
             if !path.can_reach() {

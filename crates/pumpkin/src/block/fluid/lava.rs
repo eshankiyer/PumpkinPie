@@ -51,13 +51,9 @@ impl FlowingLava {
 
     fn is_flammable_state(block_state: &BlockState) -> bool {
         let block = Block::from_state_id(block_state.id);
-        if block.is_waterlogged(block_state.id) {
-            return false;
-        }
-        block
-            .flammable
-            .as_ref()
-            .is_some_and(|flammable| flammable.burn_chance > 0)
+        // `LavaFluid.isFlammable` delegates to `BlockState.ignitedByLava` (`LavaFluid.java:125-137`),
+        // which is distinct from the fire-spread odds and waterlogged check used by FireBlock.
+        block.ignited_by_lava()
     }
 
     fn is_flammable(world: &Arc<World>, pos: &BlockPos) -> bool {

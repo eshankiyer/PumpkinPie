@@ -6173,8 +6173,20 @@ impl Player {
     /// Add experience levels to the player.
     pub async fn add_experience_levels(&self, added_levels: i32) {
         let current_level = self.experience_level.load(Ordering::Relaxed);
-        let new_level = current_level + added_levels;
-        self.set_experience_level(new_level, true).await;
+        // Vanilla `Player.giveExperienceLevels` uses saturated addition and clears all
+        // experience when the resulting level is negative (`Player.java:1561-1567`).
+        let new_level = experience_level_after_delta(current_level, added_levels);
+        if new_level == 0 && current_level.saturating_add(added_levels) < 0 {
+            self.set_experience(0, 0.0, 0).await;
+        } else {
+            // Positive level changes leave progress and current-level points untouched.
+            self.set_experience(
+                new_level,
+                self.experience_progress.load(),
+                self.experience_points.load(Ordering::Relaxed),
+            )
+            .await;
+        }
     }
 
     /// Set the player's experience points directly. Returns `true` if successful.
@@ -8979,6 +8991,13 @@ const fn can_start_fall_flying(is_fall_flying: bool, can_glide: bool, in_water: 
     !is_fall_flying && can_glide && !in_water
 }
 
+/// Applies the level clamp performed by `Player.giveExperienceLevels` after its saturated add
+/// (`Player.java:1561-1567`).
+const fn experience_level_after_delta(current_level: i32, added_levels: i32) -> i32 {
+    let level = current_level.saturating_add(added_levels);
+    if level > 0 { level } else { 0 }
+}
+
 /// Vanilla `Player.getFireImmuneTicks` returns twenty ticks (`Player.java:406-410`).
 const fn player_fire_immune_ticks() -> i32 {
     20
@@ -8989,10 +9008,10 @@ mod tests {
     use super::{
         Player, ability_invulnerability_blocks, attack_charge_ready, bedrock_inventory_slot,
         can_harm_player_teams, can_start_fall_flying, damage_dealt_stat_points,
-        extract_parrot_variant, is_crossbow_held_projectile, is_crossbow_inventory_projectile,
-        is_valid_for_forced_respawn, is_vanishing_cursed, player_death_experience_reward,
-        player_fire_immune_ticks, read_last_death_location, read_root_vehicle,
-        write_last_death_location, write_root_vehicle,
+        experience_level_after_delta, extract_parrot_variant, is_crossbow_held_projectile,
+        is_crossbow_inventory_projectile, is_valid_for_forced_respawn, is_vanishing_cursed,
+        player_death_experience_reward, player_fire_immune_ticks, read_last_death_location,
+        read_root_vehicle, write_last_death_location, write_root_vehicle,
     };
     use pumpkin_data::Block;
     use pumpkin_data::attributes::Attributes;
@@ -9034,6 +9053,15 @@ mod tests {
     fn player_fire_immune_ticks_match_vanilla() {
         // Vanilla `Player.getFireImmuneTicks` returns twenty ticks (`Player.java:406-410`).
         assert_eq!(player_fire_immune_ticks(), 20);
+    }
+
+    #[test]
+    fn experience_level_delta_saturates_and_clamps_like_vanilla() {
+        // `Player.giveExperienceLevels` uses `IntMath.saturatedAdd` and clamps negative results
+        // to zero (`Player.java:1561-1567`).
+        assert_eq!(experience_level_after_delta(i32::MAX, 1), i32::MAX);
+        assert_eq!(experience_level_after_delta(3, -10), 0);
+        assert_eq!(experience_level_after_delta(3, 2), 5);
     }
 
     fn stack_with_enchantment(

@@ -75,7 +75,7 @@ use pumpkin_util::math::{
 };
 use pumpkin_util::text::TextComponent;
 use pumpkin_util::text::hover::HoverEvent;
-use pumpkin_util::version::JavaMinecraftVersion;
+use pumpkin_util::{GameMode, version::JavaMinecraftVersion};
 use std::collections::{BTreeMap, HashSet};
 use std::pin::Pin;
 use std::sync::{
@@ -1460,6 +1460,28 @@ fn piston_axis_movement(previous: f64, requested: f64) -> (f64, f64) {
     (total - previous, total)
 }
 
+#[must_use]
+fn forced_rotation(
+    current_yaw: f32,
+    y_rot: f32,
+    relative_y: bool,
+    current_pitch: f32,
+    x_rot: f32,
+    relative_x: bool,
+) -> (f32, f32) {
+    let yaw = if relative_y {
+        current_yaw + y_rot
+    } else {
+        y_rot
+    };
+    let pitch = if relative_x {
+        current_pitch + x_rot
+    } else {
+        x_rot
+    };
+    (yaw, pitch.clamp(-90.0, 90.0))
+}
+
 /// Vanilla `Entity.restituteMovementAfterCollisions` (`Entity.java:803-818`) suppresses
 /// restitution while the entity is stepping carefully or while the block suppresses bounce.
 const fn should_restitute_after_collision(
@@ -2426,6 +2448,37 @@ impl Entity {
         }
 
         self.supporting_block_pos.load()
+    }
+
+    /// Runs the server-authoritative fall check used by movement packets. Vanilla
+    /// `Entity.doCheckFallDamage` skips unloaded terrain before delegating to the entity's fall
+    /// handler (`Entity.java:1541-1554`).
+    pub async fn do_check_fall_damage(
+        &self,
+        caller: Arc<dyn EntityBase>,
+        _xa: f64,
+        ya: f64,
+        _za: f64,
+        on_ground: bool,
+    ) {
+        if self.touching_unloaded_chunk() {
+            return;
+        }
+
+        let dont_damage = if let Some(player) = caller.get_player() {
+            if player.is_flying().await || player.living_entity.is_dead_or_dying() {
+                return;
+            }
+            player.gamemode.load() == GameMode::Creative
+        } else {
+            false
+        };
+
+        if let Some(living) = caller.get_living_entity() {
+            living
+                .fall(caller.clone(), ya, on_ground, dont_damage)
+                .await;
+        }
     }
 
     #[expect(clippy::float_cmp)]
@@ -4047,6 +4100,23 @@ impl Entity {
     pub fn set_rotation(&self, yaw: f32, pitch: f32) {
         // TODO
         self.yaw.store(yaw);
+        self.set_pitch(pitch);
+    }
+
+    /// Applies an absolute or relative rotation without changing the entity position.
+    /// Vanilla `Entity.forceSetRotation` calculates the absolute rotation, updates head yaw,
+    /// and records the new rotation as the old rotation (`Entity.java:3161-3172`).
+    pub fn force_set_rotation(&self, y_rot: f32, relative_y: bool, x_rot: f32, relative_x: bool) {
+        let (yaw, pitch) = forced_rotation(
+            self.yaw.load(),
+            y_rot,
+            relative_y,
+            self.pitch.load(),
+            x_rot,
+            relative_x,
+        );
+        self.yaw.store(yaw);
+        self.head_yaw.store(yaw);
         self.set_pitch(pitch);
     }
 
@@ -6245,6 +6315,25 @@ mod piston_movement_tests {
         let (movement, total) = piston_axis_movement(0.51, -0.51);
         assert_eq!(movement, -0.51);
         assert_eq!(total, 0.0);
+    }
+}
+
+#[cfg(test)]
+mod forced_rotation_tests {
+    use super::forced_rotation;
+
+    #[test]
+    fn relative_rotation_adds_yaw_and_clamps_pitch() {
+        // `Entity.forceSetRotation` adds relative rotations and clamps X rotation
+        // (`Entity.java:3161-3172`).
+        assert_eq!(
+            forced_rotation(170.0, 25.0, true, 80.0, 20.0, true),
+            (195.0, 90.0)
+        );
+        assert_eq!(
+            forced_rotation(170.0, 25.0, false, 80.0, -200.0, false),
+            (25.0, -90.0)
+        );
     }
 }
 

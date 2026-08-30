@@ -138,9 +138,9 @@ impl TrackTargetGoal {
             let navigator = mob_entity.navigator.lock().unwrap();
             navigator.path_probe()
         };
-        navigator
-            .can_reach_entity(&mob_entity.living_entity, target)
-            .await
+        // `Mob.onPathfindingStart/Done` wrap evaluator preparation and cleanup
+        // (`Mob.java:194-198`, `WalkNodeEvaluator.java:39-49`).
+        navigator.can_reach_entity_for_mob(mob, target).await
     }
 
     fn remembers_visible_target(&self, has_line_of_sight: bool) -> bool {

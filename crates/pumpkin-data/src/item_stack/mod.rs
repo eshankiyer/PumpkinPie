@@ -657,6 +657,14 @@ impl ItemStack {
         self.item_count = count;
     }
 
+    /// Vanilla `ItemStack.limitSize` (`ItemStack.java:1068-1072`) clamps a non-empty stack
+    /// to the maximum accepted by its containing inventory.
+    pub fn limit_size(&mut self, max_stack_size: u8) {
+        if !self.is_empty() && self.item_count > max_stack_size {
+            self.item_count = max_stack_size;
+        }
+    }
+
     pub fn decrement_unless_creative(&mut self, gamemode: GameMode, amount: u8) {
         if gamemode != GameMode::Creative {
             self.item_count = self.item_count.saturating_sub(amount);
@@ -1871,5 +1879,21 @@ mod tests {
         bow.set_damage(1);
         assert!(!bow.is_stackable());
         assert!(ItemStack::new(1, &Item::ARROW).is_stackable());
+    }
+
+    #[test]
+    fn limit_size_clamps_only_non_empty_stacks() {
+        // Vanilla `ItemStack.limitSize` (`ItemStack.java:1068-1072`) leaves an empty stack
+        // unchanged and clamps only when its count exceeds the supplied limit.
+        let mut stack = ItemStack::new(64, &Item::STONE);
+        stack.limit_size(16);
+        assert_eq!(stack.item_count, 16);
+
+        stack.limit_size(32);
+        assert_eq!(stack.item_count, 16);
+
+        let mut empty = ItemStack::EMPTY.clone();
+        empty.limit_size(0);
+        assert!(empty.is_empty());
     }
 }

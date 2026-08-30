@@ -222,12 +222,10 @@ impl LongJumpToRandomPosGoal {
 
             // `navigation.createPath(targetPos, 0, 8)`: only leap where walking will not do.
             let mut navigator = Navigator::default();
+            // `Mob.onPathfindingStart/Done` wrap evaluator preparation and cleanup
+            // (`Mob.java:194-198`, `WalkNodeEvaluator.java:39-49`).
             let walkable = navigator
-                .can_reach_within(
-                    &mob.get_mob_entity().living_entity,
-                    target_pos,
-                    MIN_PATHFIND_DISTANCE_TO_VALID_JUMP,
-                )
+                .can_reach_within_for_mob(mob, target_pos, MIN_PATHFIND_DISTANCE_TO_VALID_JUMP)
                 .await;
             if walkable {
                 continue;

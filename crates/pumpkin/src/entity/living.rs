@@ -151,6 +151,24 @@ const fn has_landed_in_liquid_state(
     velocity_y < 1.0E-5 && (touching_water || touching_lava)
 }
 
+/// Applies vanilla's mounted-entity hitbox floor before melee range checks.
+/// `LivingEntity.getHitbox` raises the minimum Y to the passenger's riding position
+/// (`LivingEntity.java:1692-1700`).
+const fn hitbox_with_riding_floor(bounding_box: BoundingBox, riding_y: Option<f64>) -> BoundingBox {
+    let Some(riding_y) = riding_y else {
+        return bounding_box;
+    };
+
+    BoundingBox::new(
+        Vector3::new(
+            bounding_box.min.x,
+            bounding_box.min.y.max(riding_y),
+            bounding_box.min.z,
+        ),
+        bounding_box.max,
+    )
+}
+
 /// Vanilla `LivingEntity.isDeadOrDying` (`LivingEntity.java:1171-1173`).
 const fn dead_or_dying_state(health: f32, dead: bool) -> bool {
     health <= 0.0 || dead
@@ -386,6 +404,23 @@ impl EffectParticle {
 }
 
 impl LivingEntity {
+    /// Returns the hitbox used by vanilla melee range checks, including the riding-position
+    /// floor for a passenger (`LivingEntity.java:1692-1700`; `Mob.java:1359-1360`).
+    pub(crate) async fn get_hitbox(&self) -> BoundingBox {
+        let bounding_box = self.entity.bounding_box.load();
+        let vehicle = self.entity.vehicle.lock().await.clone();
+        let Some(vehicle) = vehicle else {
+            return bounding_box;
+        };
+
+        let vehicle_entity = vehicle.get_entity();
+        let riding_position = vehicle_entity.pos.load().y + vehicle.get_passengers_riding_offset()
+            - self
+                .get_vehicle_attachment_point(vehicle_entity)
+                .map_or(0.0, |offset| offset.y);
+        hitbox_with_riding_floor(bounding_box, Some(riding_position))
+    }
+
     pub fn knockback_with_resistance(&self, strength: f64, x: f64, z: f64) {
         let resistance = self.get_attribute_value(&Attributes::KNOCKBACK_RESISTANCE);
         self.entity.knockback(
@@ -4624,6 +4659,12 @@ impl LivingEntity {
             && entity_type != &EntityType::SILVERFISH
     }
 
+    /// Vanilla `MovementEmission.emitsEvents` remains enabled for living entities except
+    /// shulkers, whose override returns `NONE` (`Entity.java:4113-4137`; `Shulker.java:104-108`).
+    fn movement_emits_events(entity_type: &'static EntityType) -> bool {
+        entity_type != &EntityType::SHULKER
+    }
+
     /// `Entity.getSwimSound` (Entity.java:1263-1265) returns `entity.generic.swim` for every
     /// entity; the two nautilus species override it.
     fn swim_sound(caller: &Arc<dyn EntityBase>) -> Sound {
@@ -4659,7 +4700,7 @@ impl LivingEntity {
     /// Players are skipped: their client simulates its own movement and plays this sound
     /// locally, which vanilla accounts for by excluding the player from its own
     /// `Player.playSound` broadcast, a distinction `World::play_sound` here does not draw.
-    fn tick_swim_sound(&self, caller: &Arc<dyn EntityBase>) {
+    async fn tick_swim_sound(&self, caller: &Arc<dyn EntityBase>) {
         if self.entity.entity_type == &EntityType::PLAYER {
             return;
         }
@@ -4671,6 +4712,41 @@ impl LivingEntity {
             return;
         }
         self.next_step.store(move_dist.floor() + 1.0);
+
+        // `Entity.applyMovementEmissionAndPlaySound` emits STEP from the supporting block, or
+        // SWIM when no step side effect was produced (`Entity.java:867-901`).
+        if Self::movement_emits_events(self.entity.entity_type) {
+            let (_, supporting_block, supporting_state) =
+                self.entity.get_block_with_y_offset(0.00001);
+            let on_ground = self.entity.on_ground.load(Relaxed);
+            let can_step = !supporting_state.is_air()
+                && (on_ground
+                    || supporting_block.has_tag(&tag::Block::MINECRAFT_CLIMBABLE)
+                    || (self.entity.sneaking.load(Relaxed) && moved.y == 0.0))
+                && !self.entity.swimming.load(Relaxed);
+            let world = self.entity.world.load_full();
+            if can_step {
+                crate::world::game_event::emit_game_event(
+                    &world,
+                    pumpkin_data::game_event::GameEvent::Step,
+                    self.entity.pos.load(),
+                    crate::world::game_event::GameEventContext::of_entity_with_block_state(
+                        caller.clone(),
+                        supporting_state.id,
+                    ),
+                )
+                .await;
+            } else if self.entity.touching_water.load(Relaxed) {
+                crate::world::game_event::emit_game_event(
+                    &world,
+                    pumpkin_data::game_event::GameEvent::Swim,
+                    self.entity.pos.load(),
+                    crate::world::game_event::GameEventContext::of_entity(caller.clone()),
+                )
+                .await;
+            }
+        }
+
         if self.entity.is_silent() || !Self::movement_emits_sounds(self.entity.entity_type) {
             return;
         }
@@ -6250,7 +6326,9 @@ impl EntityBase for LivingEntity {
                 self.tick_auto_spin_attack(caller, previous_bounding_box)
                     .await;
                 self.push_entities(caller).await;
-                self.tick_swim_sound(caller);
+                // The shared movement emission path emits sounds and STEP/SWIM events after
+                // movement crosses the next threshold (`Entity.java:867-901`).
+                self.tick_swim_sound(caller).await;
             }
 
             // `LivingEntity.tick` (`LivingEntity.java:2797-2816`) performs the body-yaw update
@@ -7587,6 +7665,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn mounted_hitbox_raises_only_its_minimum_y() {
+        // `LivingEntity.getHitbox` replaces only minY with the passenger riding position
+        // (`LivingEntity.java:1692-1700`).
+        let box_before =
+            BoundingBox::new(Vector3::new(-0.3, 10.0, -0.3), Vector3::new(0.3, 11.8, 0.3));
+        let box_after = hitbox_with_riding_floor(box_before, Some(10.6));
+        assert_eq!(box_after.min.y, 10.6);
+        assert_eq!(box_after.max.y, 11.8);
+        let unchanged = hitbox_with_riding_floor(box_before, None);
+        assert_eq!(unchanged.min.y, box_before.min.y);
+        assert_eq!(unchanged.max.y, box_before.max.y);
+    }
+
+    #[test]
     fn body_yaw_turn_wraps_and_limits_head_difference() {
         // `LivingEntity.tickHeadTurn` (`LivingEntity.java:3018-3027`) turns 30 percent toward
         // the target and then limits the head to 50 degrees from the body.
@@ -8084,6 +8176,14 @@ mod tests {
     fn ordinary_mobs_emit_movement_sounds() {
         assert!(LivingEntity::movement_emits_sounds(&EntityType::COD));
         assert!(LivingEntity::movement_emits_sounds(&EntityType::ZOMBIE));
+    }
+
+    #[test]
+    fn shulkers_suppress_movement_events_but_ordinary_mobs_emit_them() {
+        // `Shulker.getMovementEmission` returns NONE while the base living path returns ALL
+        // (`Shulker.java:104-108`; `Entity.java:1533-1535`).
+        assert!(!LivingEntity::movement_emits_events(&EntityType::SHULKER));
+        assert!(LivingEntity::movement_emits_events(&EntityType::ZOMBIE));
     }
 
     #[test]

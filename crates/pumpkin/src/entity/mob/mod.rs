@@ -857,7 +857,13 @@ impl MobEntity {
                 )
             });
 
-        let target_hitbox = target.get_entity().bounding_box.load();
+        // `Mob.isWithinMeleeAttackRange` uses the living target's adjusted hitbox
+        // (`Mob.java:1359-1360`).
+        let target_hitbox = if let Some(living) = target.get_living_entity() {
+            living.get_hitbox().await
+        } else {
+            target.get_entity().bounding_box.load()
+        };
 
         if !self
             .get_attack_box(max_range)
@@ -1232,6 +1238,13 @@ const fn spawns_offspring_from_egg(entity_type: &EntityType) -> bool {
 }
 
 pub trait Mob: EntityBase + Send + Sync {
+    /// Vanilla `Mob.onPathfindingStart` and `Mob.onPathfindingDone` are evaluator lifecycle hooks
+    /// (`Mob.java:194-198`). The navigator supplies the evaluator being prepared so overrides can
+    /// change temporary pathfinding maluses on probes as well as the live navigator.
+    fn on_pathfinding_start(&self, _navigator: &mut Navigator) {}
+
+    fn on_pathfinding_done(&self, _navigator: &mut Navigator) {}
+
     /// Vanilla `HasCustomInventoryScreen.openCustomInventoryScreen` is dispatched by the
     /// ridden-vehicle inventory command (`ServerGamePacketListenerImpl.java:1734-1737`).
     fn open_custom_inventory_screen<'a>(
@@ -2828,7 +2841,9 @@ pub(crate) fn tick_mob_ai<'a>(
         drop(target_selector);
 
         let mut navigator = MutexTakeGuard::new(&mob_entity.navigator);
-        navigator.tick(&mob_entity.living_entity).await;
+        // `Mob.onPathfindingStart/Done` surround evaluator preparation and cleanup
+        // (`Mob.java:194-198`, `WalkNodeEvaluator.java:39-49`).
+        navigator.tick(&mob_entity.living_entity, mob).await;
         let navigation_target = navigator.next_movement_target();
         drop(navigator);
 

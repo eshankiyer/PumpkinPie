@@ -261,21 +261,17 @@ impl JavaClient {
                     );
                 }
 
-                // Only process fall damage if player is alive
-                if !player.abilities.lock().await.flying
-                    // `LivingEntity.isDeadOrDying` gates movement-side fall handling
-                    // (`LivingEntity.java:1171-1173`).
-                    && !player.living_entity.is_dead_or_dying()
-                {
-                    player.living_entity
-                        .fall(
-                            player.clone(),
-                            height_difference,
-                            packet.collision & FLAG_ON_GROUND != 0,
-                            player.gamemode.load() == GameMode::Creative,
-                        )
-                        .await;
-                }
+                // `ServerGamePacketListenerImpl` invokes `doCheckFallDamage` after accepting
+                // movement (`ServerGamePacketListenerImpl.java:1165-1167`).
+                entity
+                    .do_check_fall_damage(
+                        player.clone(),
+                        pos.x - last_pos.x,
+                        height_difference,
+                        pos.z - last_pos.z,
+                        packet.collision & FLAG_ON_GROUND != 0,
+                    )
+                    .await;
                 chunker::update_position(player).await;
                 let delta = Vector3::new(
                     pos.x - last_pos.x,
@@ -460,21 +456,17 @@ impl JavaClient {
                         &CHeadRot::new(entity_id.into(), yaw as u8),
                     )
                    ;
-                // Only process fall damage if player is alive
-                if !player.abilities.lock().await.flying
-                    // `LivingEntity.isDeadOrDying` gates movement-side fall handling
-                    // (`LivingEntity.java:1171-1173`).
-                    && !player.living_entity.is_dead_or_dying()
-                {
-                    player.living_entity
-                        .fall(
-                            player.clone(),
-                            height_difference,
-                            (packet.collision & FLAG_ON_GROUND) != 0,
-                            player.gamemode.load() == GameMode::Creative,
-                        )
-                        .await;
-                }
+                // `ServerGamePacketListenerImpl` invokes `doCheckFallDamage` after accepting
+                // movement (`ServerGamePacketListenerImpl.java:1165-1167`).
+                entity
+                    .do_check_fall_damage(
+                        player.clone(),
+                        pos.x - last_pos.x,
+                        height_difference,
+                        pos.z - last_pos.z,
+                        (packet.collision & FLAG_ON_GROUND) != 0,
+                    )
+                    .await;
                 chunker::update_position(player).await;
                 let delta = Vector3::new(
                     pos.x - last_pos.x,

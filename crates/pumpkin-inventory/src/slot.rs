@@ -143,6 +143,11 @@ pub trait Slot: Send + Sync {
     fn set_stack_no_callbacks(&self, stack: ItemStack) -> BoxFuture<'_, ()> {
         // Default implementation logic:
         Box::pin(async move {
+            // `Container.setItem` applies `ItemStack.limitSize(getMaxStackSize(stack))`
+            // (`SimpleContainer.java:111-115`, `Container.java:34-40`) before storing a stack.
+            let mut stack = stack;
+            let max_count = self.get_max_item_count_for_stack(&stack).await;
+            stack.limit_size(max_count);
             let inv = self.get_inventory();
             inv.set_stack(self.get_index(), stack).await;
             self.mark_dirty().await;

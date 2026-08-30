@@ -122,8 +122,10 @@ impl Goal for MeleeAttackGoal {
             // Pathfinding is async. Probe a scratch navigator so the live navigator remains
             // installed while the world is being read and another AI tick cannot overwrite it.
             let mut navigator = mob_entity.navigator.lock().unwrap().path_probe();
+            // `Mob.onPathfindingStart/Done` wrap evaluator preparation and cleanup
+            // (`Mob.java:194-198`, `WalkNodeEvaluator.java:39-49`).
             let path = navigator
-                .compute_path_with_reach(&mob_entity.living_entity, destination, 0)
+                .compute_path_with_reach_for_mob(mob, destination, 0)
                 .await;
 
             // `canUse` and `start` are separate vanilla phases. Do not install a path for a
@@ -282,12 +284,10 @@ impl Goal for MeleeAttackGoal {
                     speed: self.speed,
                 };
                 let mut path_probe = mob.get_mob_entity().navigator.lock().unwrap().path_probe();
+                // `Mob.onPathfindingStart/Done` also cover this refresh probe
+                // (`Mob.java:194-198`, `WalkNodeEvaluator.java:39-49`).
                 let path = path_probe
-                    .compute_path_with_reach(
-                        &mob.get_mob_entity().living_entity,
-                        current_target_pos,
-                        0,
-                    )
+                    .compute_path_with_reach_for_mob(mob, current_target_pos, 0)
                     .await;
                 let path_found = path.is_some();
                 let target_is_current = mob
