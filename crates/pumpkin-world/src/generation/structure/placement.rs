@@ -3,12 +3,10 @@ use pumpkin_data::structures::{
     SpreadType, StructurePlacement, StructurePlacementCalculator, StructurePlacementType,
     StructureSet,
 };
-use pumpkin_util::{
-    math::floor_div,
-    random::{
-        RandomGenerator, RandomImpl, get_carver_seed, get_region_seed, legacy_rand::LegacyRand,
-        xoroshiro128::Xoroshiro,
-    },
+use pumpkin_util::math::{floor_div, position::BlockPos, vector2::Vector2};
+use pumpkin_util::random::{
+    RandomGenerator, RandomImpl, get_carver_seed, get_region_seed, legacy_rand::LegacyRand,
+    xoroshiro128::Xoroshiro,
 };
 use std::f64::consts::PI;
 use std::sync::OnceLock;
@@ -350,6 +348,74 @@ fn is_start_chunk_random_spread(
     let pos = get_start_chunk_random_spread(placement, calculator.seed, chunk_x, chunk_z, salt);
     (chunk_x == pos.0) && (chunk_z == pos.1)
 }
+
+/// Port of `StructurePlacement.getLocatePos` (StructurePlacement.java:98-100).
+/// Returns the block position where the structure should be located for a given chunk position.
+#[must_use]
+pub const fn get_locate_pos(placement: &StructurePlacement, chunk_pos: Vector2<i32>) -> BlockPos {
+    // Vanilla: new BlockPos(chunkPos.getMinBlockX(), 0, chunkPos.getMinBlockZ()).offset(this.locateOffset())
+    // ChunkPos.getMinBlockX() = chunk_x << 4, getMinBlockZ() = chunk_z << 4
+    BlockPos::new(
+        (chunk_pos.x << 4) + placement.locate_offset.0.x,
+        placement.locate_offset.0.y,
+        (chunk_pos.y << 4) + placement.locate_offset.0.z,
+    )
+}
+
+/// Port of `StructurePlacement.applyAdditionalChunkRestrictions` (StructurePlacement.java:88-90).
+/// Checks frequency-based restrictions for structure generation.
+#[must_use]
+pub fn apply_additional_chunk_restrictions(
+    placement: &StructurePlacement,
+    seed: i64,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> bool {
+    apply_frequency_reduction(
+        placement.frequency_reduction_method,
+        seed,
+        chunk_x,
+        chunk_z,
+        placement.salt,
+        placement.frequency.unwrap_or(1.0),
+    )
+}
+
+/// Port of `StructurePlacement.applyInteractionsWithOtherStructures` (StructurePlacement.java:92-94).
+/// Checks exclusion zone restrictions against other structures.
+#[must_use]
+pub fn apply_interactions_with_other_structures(
+    placement: &StructurePlacement,
+    calculator: &StructurePlacementCalculator,
+    chunk_x: i32,
+    chunk_z: i32,
+    global_cache: &GlobalStructureCache,
+    biome_supplier: &ProtoChunk,
+    _allowed_biomes: &[u16],
+) -> bool {
+    placement.exclusion_zone.as_ref().is_none_or(|zone| {
+        let set_name = zone
+            .other_set
+            .strip_prefix("minecraft:")
+            .unwrap_or(zone.other_set);
+        StructureSet::get(set_name).is_none_or(|set| {
+            !(chunk_x - zone.chunk_count..=chunk_x + zone.chunk_count).any(|x| {
+                (chunk_z - zone.chunk_count..=chunk_z + zone.chunk_count).any(|z| {
+                    should_generate_structure(
+                        &set.placement,
+                        calculator,
+                        x,
+                        z,
+                        global_cache,
+                        biome_supplier,
+                        &ProtoChunk::get_allowed_biomes(set),
+                    )
+                })
+            })
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use pumpkin_data::{
@@ -366,11 +432,14 @@ mod tests {
         generation::{
             get_world_gen,
             structure::placement::{
-                GlobalStructureCache, apply_frequency_reduction, get_start_chunk_random_spread,
+                GlobalStructureCache, apply_additional_chunk_restrictions,
+                apply_frequency_reduction, get_locate_pos, get_start_chunk_random_spread,
                 is_start_chunk, should_generate_structure,
             },
         },
     };
+    use pumpkin_data::structures::StructurePlacement;
+    use pumpkin_util::math::{position::BlockPos, vector2::Vector2};
 
     #[test]
     fn get_start_chunk_random() {
@@ -448,6 +517,78 @@ mod tests {
             &cache,
             &chunk,
             &[],
+        ));
+    }
+
+    #[test]
+    fn get_locate_pos_with_zero_offset() {
+        let placement = StructurePlacement {
+            frequency_reduction_method: None,
+            frequency: None,
+            salt: 0,
+            exclusion_zone: None,
+            locate_offset: BlockPos::new(0, 0, 0),
+            placement_type: pumpkin_data::structures::StructurePlacementType::RandomSpread(
+                pumpkin_data::structures::RandomSpreadStructurePlacement {
+                    spacing: 32,
+                    separation: 8,
+                    spread_type: None,
+                },
+            ),
+        };
+        let chunk_pos = Vector2::new(1, 2);
+        let locate_pos = get_locate_pos(&placement, chunk_pos);
+        // chunk (1, 2) -> min block (16, 0, 32)
+        assert_eq!(locate_pos.0.x, 16);
+        assert_eq!(locate_pos.0.y, 0);
+        assert_eq!(locate_pos.0.z, 32);
+    }
+
+    #[test]
+    fn get_locate_pos_with_custom_offset() {
+        let placement = StructurePlacement {
+            frequency_reduction_method: None,
+            frequency: None,
+            salt: 0,
+            exclusion_zone: None,
+            locate_offset: BlockPos::new(9, 0, 9),
+            placement_type: pumpkin_data::structures::StructurePlacementType::RandomSpread(
+                pumpkin_data::structures::RandomSpreadStructurePlacement {
+                    spacing: 32,
+                    separation: 8,
+                    spread_type: None,
+                },
+            ),
+        };
+        let chunk_pos = Vector2::new(1, 2);
+        let locate_pos = get_locate_pos(&placement, chunk_pos);
+        // chunk (1, 2) -> min block (16, 0, 32) + offset (9, 0, 9) = (25, 0, 41)
+        assert_eq!(locate_pos.0.x, 25);
+        assert_eq!(locate_pos.0.y, 0);
+        assert_eq!(locate_pos.0.z, 41);
+    }
+
+    #[test]
+    fn apply_additional_chunk_restrictions_always_true_at_frequency_1() {
+        let placement = StructurePlacement {
+            frequency_reduction_method: None,
+            frequency: Some(1.0),
+            salt: 14357620,
+            exclusion_zone: None,
+            locate_offset: BlockPos::new(0, 0, 0),
+            placement_type: pumpkin_data::structures::StructurePlacementType::RandomSpread(
+                pumpkin_data::structures::RandomSpreadStructurePlacement {
+                    spacing: 32,
+                    separation: 8,
+                    spread_type: None,
+                },
+            ),
+        };
+        let seed = 12345;
+        // Should always return true at frequency 1.0
+        assert!(apply_additional_chunk_restrictions(&placement, seed, 0, 0));
+        assert!(apply_additional_chunk_restrictions(
+            &placement, seed, 100, -50
         ));
     }
 }
