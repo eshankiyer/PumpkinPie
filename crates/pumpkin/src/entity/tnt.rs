@@ -59,7 +59,11 @@ impl EntityBase for TNTEntity {
             if entity.on_ground.load(Ordering::Relaxed) {
                 entity.velocity.store(velo.multiply(0.7, -0.5, 0.7));
             } else {
-                entity.velocity.store(velo.multiply(0.98, 0.98, 0.98));
+                // `PrimedTnt.tick` uses the inherited `Entity.getAirDrag` (`Entity.java:1529-1531`).
+                let air_drag = entity.get_air_drag();
+                entity
+                    .velocity
+                    .store(velo.multiply(air_drag, air_drag, air_drag));
             }
 
             if entity.velocity_dirty.swap(false, Ordering::SeqCst) {

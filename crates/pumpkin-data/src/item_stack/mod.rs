@@ -4,9 +4,9 @@ use crate::data_component::DataComponent;
 use crate::data_component::DataComponent::Enchantments;
 use crate::data_component_impl::{
     BlocksAttacksImpl, CanBreakImpl, CanPlaceOnImpl, ConsumableImpl, CustomDataImpl, DamageImpl,
-    DamageResistantImpl, DamageResistantType, DataComponentImpl, EnchantableImpl, EnchantmentsImpl,
-    IDSet, MaxDamageImpl, MaxStackSizeImpl, PotionContentsImpl, RepairableImpl, ToolImpl,
-    UnbreakableImpl, UseCooldownImpl, get, get_mut, read_data,
+    DamageResistantImpl, DamageResistantType, DamageTypeImpl, DataComponentImpl, EnchantableImpl,
+    EnchantmentsImpl, IDSet, MaxDamageImpl, MaxStackSizeImpl, PotionContentsImpl, RepairableImpl,
+    ToolImpl, UnbreakableImpl, UseCooldownImpl, get, get_mut, read_data,
 };
 use crate::item::Item;
 use crate::recipes::RecipeResultStruct;
@@ -307,6 +307,19 @@ impl ItemStack {
             }
         }
         0
+    }
+
+    /// Vanilla `ItemStack.getDamageSource` (`ItemStack.java:1126-1131`) prefers the
+    /// stack's `DAMAGE_TYPE` component. The Rust damage path carries the resolved
+    /// `DamageType` separately from its source entity, so expose that component-backed
+    /// selection to the live attack callers.
+    #[cfg(feature = "damage")]
+    #[must_use]
+    pub fn get_damage_type(&self) -> Option<DamageType> {
+        // Spears install `DamageTypes.SPEAR` through `Item.Properties.spear`
+        // (`Item.java:486-502`); the generated table represents that holder as this marker.
+        self.get_data_component::<DamageTypeImpl>()
+            .map(|_| DamageType::SPEAR)
     }
 
     #[must_use]
@@ -1189,6 +1202,21 @@ mod tests {
         assert!(plain.is_same_item(&customized));
         assert!(ItemStack::EMPTY.is_same_item(&zero_count_coal));
         assert!(!plain.is_same_item(&ItemStack::new(1, &Item::IRON_INGOT)));
+    }
+
+    #[cfg(feature = "damage")]
+    #[test]
+    fn damage_type_uses_the_stack_component() {
+        // Vanilla `ItemStack.getDamageSource` (`ItemStack.java:1126-1131`) reads the
+        // stack's damage-type component before falling back to the attacker source.
+        // `DamageType` has no `Debug`/`Eq` impl (generated), so compare by id.
+        assert_eq!(
+            ItemStack::new(1, &Item::WOODEN_SPEAR)
+                .get_damage_type()
+                .map(|d| d.id),
+            Some(DamageType::SPEAR.id)
+        );
+        assert!(iron_sword().get_damage_type().is_none());
     }
 
     #[test]

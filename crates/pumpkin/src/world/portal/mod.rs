@@ -236,6 +236,14 @@ impl PortalType {
                                 height: source.height,
                             };
                             let relative_pos = source_result.entity_pos_in_portal(pos, &dimensions);
+                            // Vanilla living entities clear the portal-forward offset before
+                            // calculating the exit (`LivingEntity.java:3385-3387`).
+                            let relative_pos =
+                                caller.get_living_entity().map_or(relative_pos, |_| {
+                                    crate::entity::living::LivingEntity::reset_forward_direction_of_relative_portal_position(
+                                        relative_pos,
+                                    )
+                                });
                             dest_result.calculate_exit_position(relative_pos, &dimensions)
                         },
                     );

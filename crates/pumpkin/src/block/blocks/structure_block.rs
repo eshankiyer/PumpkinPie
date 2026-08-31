@@ -14,10 +14,7 @@ use crate::block::{
 
 /// `net.minecraft.world.level.block.StructureBlock`.
 ///
-/// An operator-only block whose interesting behavior lives on `StructureBlockBlockEntity`. Only
-/// the LOAD half is implemented here (see `StructureBlockBlockEntity::place_structure`); SAVE
-/// needs filesystem-backed template storage that doesn't exist in this codebase yet and is left
-/// as a documented follow-up.
+/// An operator-only block whose interesting behavior lives on `StructureBlockBlockEntity`.
 #[pumpkin_block("minecraft:structure_block")]
 pub struct StructureBlock;
 
@@ -85,21 +82,10 @@ impl BlockBehaviour for StructureBlock {
         })
     }
 
-    /// `StructureBlock.neighborChanged` (`StructureBlock.java:67-97`): on a redstone signal,
-    /// LOAD mode always places the named template (no size-match gating - that's
-    /// `placeStructureIfSameSize`, only reachable from the GUI's load button, which requires the
-    /// C2S structure-block packet this codebase doesn't have yet). SAVE captures the selected area
-    /// in memory, CORNER evicts the named template, and DATA is a no-op here. SAVE has no
-    /// filesystem-backed template writer to save to on this redstone path.
-    ///
-    /// Like `TNTBlock::on_neighbor_update` in this codebase, this checks the current redstone
-    /// state rather than tracking a false-to-true edge, so a template can be re-placed on any
-    /// neighbor update while already powered, not only on the rising edge.
+    /// `StructureBlock.neighborChanged` (`StructureBlock.java:68-81`) triggers only on a rising
+    /// redstone edge; the entity's powered field retains that edge state between updates.
     fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            if !block_receives_redstone_power(args.world, args.position).await {
-                return;
-            }
             let Some(block_entity) = args.world.get_block_entity(args.position) else {
                 return;
             };
@@ -109,17 +95,25 @@ impl BlockBehaviour for StructureBlock {
             else {
                 return;
             };
-            match structure_block.mode.lock().await.as_str() {
-                "LOAD" => {
-                    structure_block.place_structure(args.world).await;
+            let should_trigger = block_receives_redstone_power(args.world, args.position).await;
+            let is_powered = *structure_block.powered.lock().await;
+            if should_trigger && !is_powered {
+                *structure_block.powered.lock().await = true;
+                let mode = structure_block.mode.lock().await.clone();
+                match mode.as_str() {
+                    "LOAD" => {
+                        structure_block.place_structure(args.world).await;
+                    }
+                    "SAVE" => {
+                        structure_block.save_structure(args.world, false).await;
+                    }
+                    "CORNER" => {
+                        structure_block.unload_structure().await;
+                    }
+                    _ => {}
                 }
-                "SAVE" => {
-                    structure_block.save_structure(args.world, false).await;
-                }
-                "CORNER" => {
-                    structure_block.unload_structure().await;
-                }
-                _ => {}
+            } else if !should_trigger && is_powered {
+                *structure_block.powered.lock().await = false;
             }
         })
     }

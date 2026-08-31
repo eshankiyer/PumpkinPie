@@ -56,6 +56,8 @@ pub struct SulfurCubeEntity {
     speed_modifier: AtomicCell<f64>,
     has_split: AtomicBool,
     pickup_timer: AtomicI32,
+    // SulfurCube.java:87, 355-362: cooldown for push sounds, decremented by server AI.
+    push_sound_cooldown: AtomicI32,
     fuse: AtomicI32,
     from_bucket: AtomicBool,
 }
@@ -75,6 +77,7 @@ impl SulfurCubeEntity {
             speed_modifier: AtomicCell::new(0.0),
             has_split: AtomicBool::new(false),
             pickup_timer: AtomicI32::new(0),
+            push_sound_cooldown: AtomicI32::new(0),
             fuse: AtomicI32::new(-1),
             from_bucket: AtomicBool::new(false),
         };
@@ -374,6 +377,80 @@ impl SulfurCubeEntity {
             self.set_size(2, true);
         }
     }
+
+    /// SulfurCube.java:731-767 (`playerTouch`/`playerPush`): pushes an overlapping player or
+    /// the player's root vehicle when the cube is carrying an item.
+    async fn player_push(&self, player: &Player) {
+        if !self.has_body_item().await {
+            return;
+        }
+
+        let player_entity = player.get_entity();
+        let player_is_passenger = player_entity.has_vehicle().await;
+        let (pusher_position, pusher_height) = if player_is_passenger {
+            let mut vehicle = player_entity.vehicle.lock().await.clone();
+            let mut position = player_entity.pos.load();
+            let mut height = player_entity.height();
+            while let Some(current) = vehicle {
+                let current_entity = current.get_entity();
+                position = current_entity.pos.load();
+                height = current_entity.height();
+                // `vehicle` is moved out by this loop's own `while let` each iteration, so
+                // there is nothing to `clone_from` into; this is a fresh assignment, not a
+                // clone-over-existing-value.
+                #[expect(clippy::assigning_clones)]
+                {
+                    vehicle = current_entity.vehicle.lock().await.clone();
+                }
+            }
+            (position, height)
+        } else {
+            (player_entity.pos.load(), player_entity.height())
+        };
+
+        let entity = &self.entity.living_entity.entity;
+        let cube_position = entity.pos.load();
+        let cube_to_pusher = Vector3::new(
+            cube_position.x - pusher_position.x,
+            0.0,
+            cube_position.z - pusher_position.z,
+        );
+        let cube_height = f64::from(entity.height());
+        let pusher_bottom = pusher_position.y;
+        let pusher_top = pusher_bottom + f64::from(pusher_height);
+
+        if cube_to_pusher.horizontal_length() >= 1.3
+            || pusher_bottom > cube_position.y + cube_height
+            || pusher_top <= cube_position.y
+        {
+            return;
+        }
+
+        let knockback = (1.0
+            - self
+                .entity
+                .living_entity
+                .get_attribute_value(&Attributes::KNOCKBACK_RESISTANCE))
+        .max(0.0);
+        let player_speed = (player_entity.velocity.load().length()
+            * 2.0
+            * if player_is_passenger { 0.16 } else { 0.3 })
+        .clamp(0.0, 0.5);
+        let push_velocity = player_push_velocity(
+            cube_to_pusher,
+            knockback,
+            entity.on_ground.load(Ordering::Relaxed),
+            player_speed,
+        );
+
+        if push_velocity.length_squared() > 0.2 * 0.2
+            && self.push_sound_cooldown.load(Ordering::Relaxed) <= 0
+        {
+            self.push_sound_cooldown.store(10, Ordering::Relaxed);
+            self.play_sound(Sound::EntitySulfurCubeRegularPush);
+        }
+        entity.add_velocity(push_velocity);
+    }
 }
 
 fn is_swallowable_item(item_stack: &ItemStack) -> bool {
@@ -386,6 +463,23 @@ fn is_food_item(item_stack: &ItemStack) -> bool {
     item_stack
         .item
         .has_tag(&tag::Item::MINECRAFT_SULFUR_CUBE_FOOD)
+}
+
+/// SulfurCube.java:731-767 (`playerPush`): scales the normalized horizontal push
+/// direction and applies the grounded vertical impulse before adding it to the cube.
+fn player_push_velocity(
+    cube_to_pusher: Vector3<f64>,
+    knockback: f64,
+    on_ground: bool,
+    player_speed: f64,
+) -> Vector3<f64> {
+    let direction = cube_to_pusher.normalize();
+    let scale = player_speed * knockback;
+    Vector3::new(
+        direction.x * scale,
+        if on_ground { 0.3 * scale } else { 0.0 },
+        direction.z * scale,
+    )
 }
 
 impl AgeableMob for SulfurCubeEntity {
@@ -479,6 +573,12 @@ impl Mob for SulfurCubeEntity {
                 self.pickup_timer.fetch_sub(1, Ordering::Relaxed);
             }
 
+            // SulfurCube.java:355-362 (`customServerAiStep`): push sounds have a
+            // server-side cooldown measured in ticks.
+            if self.push_sound_cooldown.load(Ordering::Relaxed) > 0 {
+                self.push_sound_cooldown.fetch_sub(1, Ordering::Relaxed);
+            }
+
             let on_ground = self
                 .entity
                 .living_entity
@@ -511,10 +611,13 @@ impl Mob for SulfurCubeEntity {
 
     fn mob_player_collision<'a>(
         &'a self,
-        _player: &'a Arc<Player>,
+        player: &'a Arc<Player>,
     ) -> crate::entity::EntityBaseFuture<'a, ()> {
-        // SulfurCube.java:222-224 (`isDealsDamage`): peaceful mob, no contact damage.
-        Box::pin(async move {})
+        Box::pin(async move {
+            // SulfurCube.java:731-767 (`playerTouch`/`playerPush`): a cube carrying
+            // an item pushes an overlapping player or the player's root vehicle.
+            self.player_push(player).await;
+        })
     }
 
     fn mob_interact<'a>(
@@ -1066,6 +1169,19 @@ mod tests {
         assert_eq!(
             SulfurCubeEntity::squish_sound_for(1, true),
             Sound::EntitySmallSulfurCubeSquish
+        );
+    }
+
+    #[test]
+    // SulfurCube.java:731-767 (`playerPush`): verify the grounded impulse and horizontal scale.
+    fn player_push_velocity_has_grounded_vertical_impulse() {
+        assert_eq!(
+            player_push_velocity(Vector3::new(1.0, 0.0, 0.0), 1.0, true, 0.5),
+            Vector3::new(0.5, 0.15, 0.0)
+        );
+        assert_eq!(
+            player_push_velocity(Vector3::new(0.0, 0.0, -2.0), 0.5, false, 0.5),
+            Vector3::new(0.0, 0.0, -0.25)
         );
     }
 }

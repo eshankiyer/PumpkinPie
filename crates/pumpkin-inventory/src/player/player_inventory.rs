@@ -20,7 +20,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU8, Ordering};
 use tokio::sync::{Mutex, RwLock};
 use tracing::warn;
 
@@ -39,6 +39,8 @@ pub struct PlayerInventory {
     pub equipment_slots: Arc<HashMap<usize, EquipmentSlot>>,
     /// The currently selected hotbar slot index (0-8).
     pub selected_slot: AtomicU8,
+    /// Number of inventory change notifications (`Inventory.java:456-463`).
+    times_changed: AtomicI32,
     /// The entity equipment storage for armor and off-hand items.
     ///
     /// This is separate from the main inventory and is rendered on the player model.
@@ -67,6 +69,7 @@ impl PlayerInventory {
             main_inventory: RwLock::new(std::array::from_fn(|_| ItemStack::EMPTY.clone())),
             equipment_slots,
             selected_slot: AtomicU8::new(0),
+            times_changed: AtomicI32::new(0),
             entity_equipment,
         }
     }
@@ -517,7 +520,10 @@ impl Inventory for PlayerInventory {
         })
     }
 
-    fn mark_dirty(&self) {}
+    // Vanilla `Inventory.setChanged` increments this counter (`Inventory.java:456-463`).
+    fn mark_dirty(&self) {
+        self.times_changed.fetch_add(1, Ordering::Relaxed);
+    }
 
     fn as_any(&self) -> &dyn Any {
         self
@@ -538,5 +544,25 @@ impl PlayerInventory {
     /// Gets the currently selected hotbar slot index.
     pub fn get_selected_slot(&self) -> u8 {
         self.selected_slot.load(Ordering::Relaxed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::build_equipment_slots;
+
+    // Vanilla exposes the incremented value through `getTimesChanged` (`Inventory.java:456-463`).
+    #[test]
+    fn mark_dirty_counts_inventory_changes() {
+        let inventory = PlayerInventory::new(
+            Arc::new(Mutex::new(EntityEquipment::new())),
+            Arc::new(build_equipment_slots()),
+        );
+
+        Inventory::mark_dirty(&inventory);
+        Inventory::mark_dirty(&inventory);
+
+        assert_eq!(inventory.times_changed.load(Ordering::Relaxed), 2);
     }
 }

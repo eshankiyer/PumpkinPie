@@ -1162,7 +1162,8 @@ impl JavaClient {
                 self.handle_set_structure_block(
                     player,
                     &SSetStructureBlock::read(&mut payload, &version)?,
-                );
+                )
+                .await;
             }
             id if id == SSetGameRule::to_id(version) => {
                 self.handle_set_game_rule(player, &SSetGameRule::read(&mut payload, &version)?);

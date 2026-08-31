@@ -1889,6 +1889,10 @@ impl Player {
         damage = damage.max(0.0);
 
         let pos = victim_entity.pos.load();
+        // Vanilla `Player.createAttackSource` delegates to `ItemStack.getDamageSource`
+        // (`Player.java:1013-1015`), which prefers the stack component
+        // (`ItemStack.java:1126-1131`) over the ordinary player attack type.
+        let item_damage_type = item_stack.get_damage_type();
         let attack_type =
             AttackType::new(self, victim.as_ref(), attack_cooldown_progress as f32).await;
 
@@ -1928,11 +1932,11 @@ impl Player {
             .damage_with_context(
                 &*victim,
                 damage as f32,
-                if is_mace_smash {
+                item_damage_type.unwrap_or(if is_mace_smash {
                     DamageType::MACE_SMASH
                 } else {
                     DamageType::PLAYER_ATTACK
-                },
+                }),
                 Some(self.living_entity.entity.pos.load()),
                 Some(self),
                 Some(self),
@@ -2914,6 +2918,28 @@ impl Player {
     pub async fn is_flying(&self) -> bool {
         let abilities = self.abilities.lock().await;
         abilities.flying
+    }
+
+    /// Applies `Player.onClimbable`'s flying and spectator overrides to the shared climbing
+    /// state (`Player.java:2023-2026`; `LivingEntity.java:1721-1737`).
+    pub(crate) async fn on_climbable(&self) -> bool {
+        player_on_climbable(
+            self.is_flying().await,
+            self.is_spectator(),
+            self.living_entity.climbing.load(Ordering::Relaxed),
+        )
+    }
+
+    /// Returns whether this player emits movement events. Vanilla's `Player.getMovementEmission`
+    /// returns `NONE` while flying or while sneaking on the ground
+    /// (`Player.java:1642-1644`; `Entity.java:2689-2691`).
+    pub(crate) async fn get_movement_emission(&self) -> bool {
+        let flying = self.abilities.lock().await.flying;
+        player_movement_emits_events(
+            flying,
+            self.get_entity().on_ground.load(Ordering::Relaxed),
+            self.get_entity().is_sneaking(),
+        )
     }
 
     /// Server-side equivalent of `Player.startFallFlying` and its command gate
@@ -7842,6 +7868,17 @@ fn extract_parrot_variant(tag: &NbtCompound) -> Option<i32> {
     tag.get_int("Variant").map(|variant| variant.clamp(0, 4))
 }
 
+/// The player-only branch of `Player.getMovementEmission` (`Player.java:1642-1644`).
+const fn player_movement_emits_events(flying: bool, on_ground: bool, sneaking: bool) -> bool {
+    !(flying || on_ground && sneaking)
+}
+
+/// The player-specific branch of `Player.onClimbable` (`Player.java:2023-2026`) over the
+/// shared `LivingEntity.onClimbable` result (`LivingEntity.java:1721-1737`).
+const fn player_on_climbable(flying: bool, spectator: bool, climbing: bool) -> bool {
+    !flying && !spectator && climbing
+}
+
 impl EntityBase for Player {
     /// Vanilla `Player.getDismountPoses` (`Player.java:1871-1874`) extends the living default
     /// with crouching and swimming exits.
@@ -9036,7 +9073,8 @@ mod tests {
         damage_dealt_stat_points, experience_level_after_delta, extract_parrot_variant,
         is_crossbow_held_projectile, is_crossbow_inventory_projectile, is_valid_for_forced_respawn,
         is_vanishing_cursed, player_death_experience_reward, player_fire_immune_ticks,
-        read_last_death_location, read_root_vehicle, write_last_death_location, write_root_vehicle,
+        player_movement_emits_events, player_on_climbable, read_last_death_location,
+        read_root_vehicle, write_last_death_location, write_root_vehicle,
     };
     use pumpkin_data::Block;
     use pumpkin_data::attributes::Attributes;
@@ -9365,5 +9403,25 @@ mod tests {
         assert!(!can_start_fall_flying(true, true, false));
         assert!(!can_start_fall_flying(false, false, false));
         assert!(!can_start_fall_flying(false, true, true));
+    }
+
+    /// Matches `Player.getMovementEmission` (`Player.java:1642-1644`) and its discrete-state
+    /// predicate (`Entity.java:2689-2691`).
+    #[test]
+    fn movement_emission_matches_player_flying_and_sneaking_rules() {
+        assert!(player_movement_emits_events(false, false, false));
+        assert!(player_movement_emits_events(false, true, false));
+        assert!(!player_movement_emits_events(false, true, true));
+        assert!(!player_movement_emits_events(true, false, false));
+    }
+
+    /// Matches `Player.onClimbable` (`Player.java:2023-2026`) and the spectator guard inherited
+    /// from `LivingEntity.onClimbable` (`LivingEntity.java:1721-1724`).
+    #[test]
+    fn climbing_is_disabled_for_flying_and_spectator_players() {
+        assert!(player_on_climbable(false, false, true));
+        assert!(!player_on_climbable(true, false, true));
+        assert!(!player_on_climbable(false, true, true));
+        assert!(!player_on_climbable(false, false, false));
     }
 }

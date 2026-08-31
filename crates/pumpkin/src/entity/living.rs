@@ -420,6 +420,14 @@ impl EffectParticle {
 }
 
 impl LivingEntity {
+    /// Vanilla `LivingEntity.getRelativePortalPosition` delegates to the entity calculation and
+    /// then clears its forward offset (`LivingEntity.java:3385-3387`).
+    pub(crate) const fn reset_forward_direction_of_relative_portal_position(
+        relative_position: Vector3<f64>,
+    ) -> Vector3<f64> {
+        Vector3::new(relative_position.x, relative_position.y, 0.0)
+    }
+
     /// Returns the hitbox used by vanilla melee range checks, including the riding-position
     /// floor for a passenger (`LivingEntity.java:1692-1700`; `Mob.java:1359-1360`).
     pub(crate) async fn get_hitbox(&self) -> BoundingBox {
@@ -1401,6 +1409,13 @@ impl LivingEntity {
         self.get_attribute_value(&Attributes::MAX_HEALTH) as f32
     }
 
+    /// Vanilla `LivingEntity.getMaxAbsorption` reads the current maximum absorption attribute
+    /// (`LivingEntity.java:1990-1992`).
+    #[must_use]
+    pub fn get_max_absorption(&self) -> f32 {
+        self.get_attribute_value(&Attributes::MAX_ABSORPTION) as f32
+    }
+
     /// Sets the maximum health for this entity
     pub async fn set_max_health(&self, max_health: f32) {
         // Update base attribute
@@ -1429,7 +1444,7 @@ impl LivingEntity {
     pub async fn set_absorption(&self, new_abs: f32) {
         // `LivingEntity.setAbsorptionAmount` (`LivingEntity.java:3397-3400`) clamps both
         // sides, including writes above the current max-absorption attribute.
-        let max_absorption = self.get_attribute_value(&Attributes::MAX_ABSORPTION) as f32;
+        let max_absorption = self.get_max_absorption();
         let new_abs = new_abs.clamp(0.0, max_absorption);
 
         // Set local state
@@ -2021,7 +2036,7 @@ impl LivingEntity {
         // MAX_ABSORPTION modifier, and `LivingEntity.onAttributeUpdated` clamps the current
         // amount down to whatever maximum is left instead of zeroing it outright.
         if effect_type == &StatusEffect::ABSORPTION {
-            let max_absorption = self.get_attribute_value(&Attributes::MAX_ABSORPTION) as f32;
+            let max_absorption = self.get_max_absorption();
             let clamped = self.absorption.load().min(max_absorption);
             self.set_absorption(clamped).await;
         }
@@ -2443,11 +2458,15 @@ impl LivingEntity {
         self.entity
             .update_velocity_from_input(self.movement_input.load(), speed);
 
-        self.apply_climbing_speed();
+        // `LivingEntity.travel` consults `onClimbable` before applying the ladder speed and after
+        // movement (`LivingEntity.java:2525-2572`); Player overrides that result while flying
+        // (`Player.java:2023-2026`).
+        self.apply_climbing_speed(self.on_climbable_for(caller.as_ref()).await);
 
         self.make_move(caller).await;
 
         let mut velo = self.entity.velocity.load();
+        let climbing = self.on_climbable_for(caller.as_ref()).await;
 
         let can_powder_snow_climb = if self.entity.was_in_powder_snow.load(Relaxed) {
             crate::block::blocks::powder_snow::can_entity_walk_on_powder_snow(caller.as_ref()).await
@@ -2456,7 +2475,7 @@ impl LivingEntity {
         };
 
         if (self.entity.horizontal_collision.load(SeqCst) || self.jumping.load(SeqCst))
-            && (self.climbing.load(Relaxed) || can_powder_snow_climb)
+            && (climbing || can_powder_snow_climb)
         {
             velo.y = 0.2;
         }
@@ -2508,7 +2527,7 @@ impl LivingEntity {
     /// Vanilla `LivingEntity.travelFallFlying`: update velocity from the look vector before
     /// moving through the normal collision solver.
     async fn travel_fall_flying<'a>(&'a self, caller: &'a Arc<dyn EntityBase>) {
-        if self.climbing.load(Relaxed) {
+        if self.on_climbable_for(caller.as_ref()).await {
             self.travel_in_air(caller).await;
             // Vanilla calls `stopFallFlying` here, which forces a flags resync.
             self.entity.stop_fall_flying();
@@ -2732,7 +2751,9 @@ impl LivingEntity {
             self.make_move(caller).await;
 
             let mut velo = self.entity.velocity.load();
-            if self.entity.horizontal_collision.load(SeqCst) && self.climbing.load(Relaxed) {
+            if self.entity.horizontal_collision.load(SeqCst)
+                && self.on_climbable_for(caller.as_ref()).await
+            {
                 velo.y = 0.2;
             }
 
@@ -2865,8 +2886,10 @@ impl LivingEntity {
         }
     }
 
-    fn apply_climbing_speed(&self) {
-        if self.climbing.load(Relaxed) {
+    /// Applies the ladder movement branch selected by `LivingEntity.onClimbable`
+    /// (`LivingEntity.java:2525-2541`).
+    fn apply_climbing_speed(&self, climbing: bool) {
+        if climbing {
             self.fall_distance.store(0.0);
 
             let mut velo = self.entity.velocity.load();
@@ -2910,6 +2933,16 @@ impl LivingEntity {
             // }
 
             self.entity.velocity.store(velo);
+        }
+    }
+
+    async fn on_climbable_for(&self, caller: &dyn EntityBase) -> bool {
+        // `Player.onClimbable` delegates to the base result only when ability flight is off
+        // (`Player.java:2023-2026`; `LivingEntity.java:1721-1737`).
+        if let Some(player) = caller.get_player() {
+            player.on_climbable().await
+        } else {
+            self.climbing.load(Relaxed)
         }
     }
 
@@ -3080,6 +3113,19 @@ impl LivingEntity {
             } else {
                 self.handle_fall_damage(&*caller, fall_distance, 1.0).await;
             }
+
+            // `Entity.checkFallDamage` emits HIT_GROUND after the landing hook with the
+            // supporting block in its context (`Entity.java:1550-1567`).
+            crate::world::game_event::emit_game_event(
+                &world,
+                pumpkin_data::game_event::GameEvent::HitGround,
+                self.entity.pos.load(),
+                crate::world::game_event::GameEventContext::of_entity_with_block_state(
+                    caller.clone(),
+                    world.get_block_state(&landed_pos).id,
+                ),
+            )
+            .await;
         } else if height_difference < 0.0 {
             let new_fall_distance = if !self.should_prevent_fall_damage()
                 && !self.should_prevent_fall_damage_in_area()
@@ -3821,7 +3867,7 @@ impl LivingEntity {
     /// rather than accumulated, so drinking a second absorption potion does not stack hearts, and
     /// `LivingEntity.setAbsorptionAmount` clamps the result to the max absorption attribute.
     async fn start_absorption(&self, amplifier: u8) {
-        let max_absorption = self.get_attribute_value(&Attributes::MAX_ABSORPTION) as f32;
+        let max_absorption = self.get_max_absorption();
         let granted =
             absorption_after_application(self.absorption.load(), amplifier, max_absorption);
         self.set_absorption(granted).await;
@@ -4787,7 +4833,12 @@ impl LivingEntity {
     /// locally, which vanilla accounts for by excluding the player from its own
     /// `Player.playSound` broadcast, a distinction `World::play_sound` here does not draw.
     async fn tick_swim_sound(&self, caller: &Arc<dyn EntityBase>) {
-        if self.entity.entity_type == &EntityType::PLAYER {
+        // `Entity.move` invokes movement emission only when `getMovementEmission` emits anything
+        // (`Entity.java:785-794`). Player's override suppresses this while flying or sneaking on
+        // ground (`Player.java:1642-1644`); other living entities use the ordinary path.
+        if let Some(player) = caller.get_player()
+            && !player.get_movement_emission().await
+        {
             return;
         }
         let moved = self.entity.pos.load() - self.entity.last_pos.load();
@@ -4834,6 +4885,11 @@ impl LivingEntity {
         }
 
         if self.entity.is_silent() || !Self::movement_emits_sounds(self.entity.entity_type) {
+            return;
+        }
+        // Vanilla's player movement sound is client-local; keep the existing server-side sound
+        // suppression after allowing the server vibration event above.
+        if caller.get_player().is_some() {
             return;
         }
         let on_ground = self.entity.on_ground.load(Relaxed);
@@ -5216,7 +5272,7 @@ impl NBTStorage for LivingEntity {
 
             // Clamp any persisted absorption to the entity's configured max
             let raw_abs = nbt.get_float("AbsorptionAmount").unwrap_or(0.0);
-            let max_abs = self.get_attribute_value(&Attributes::MAX_ABSORPTION) as f32;
+            let max_abs = self.get_max_absorption();
             let clamped_abs = raw_abs.max(0.0).min(max_abs);
             self.absorption.store(clamped_abs);
 
@@ -7780,6 +7836,16 @@ mod tests {
         let unchanged = hitbox_with_riding_floor(box_before, None);
         assert_eq!(unchanged.min.y, box_before.min.y);
         assert_eq!(unchanged.max.y, box_before.max.y);
+    }
+
+    #[test]
+    fn living_portal_position_clears_forward_offset() {
+        // `LivingEntity.getRelativePortalPosition` resets the forward coordinate before the
+        // destination portal uses it (`LivingEntity.java:3385-3387`).
+        let relative = LivingEntity::reset_forward_direction_of_relative_portal_position(
+            Vector3::new(0.25, 0.75, -0.5),
+        );
+        assert_eq!(relative, Vector3::new(0.25, 0.75, 0.0));
     }
 
     #[test]

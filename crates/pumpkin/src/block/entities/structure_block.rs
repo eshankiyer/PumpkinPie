@@ -181,6 +181,128 @@ impl StructureBlockBlockEntity {
         }
     }
 
+    /// Vanilla `StructureBlockEntity` accessors and mutators
+    /// (`StructureBlockEntity.java:160-193, 212-254, 463-477`) are backed by the
+    /// corresponding persisted fields here. The packet handler is the live caller for
+    /// the mutators.
+    pub async fn get_structure_name(&self) -> String {
+        self.name.lock().await.clone()
+    }
+
+    pub async fn has_structure_name(&self) -> bool {
+        !self.name.lock().await.is_empty()
+    }
+
+    pub async fn set_structure_name(&self, name: &str) {
+        *self.name.lock().await = name.to_string();
+    }
+
+    pub async fn set_structure_pos(&self, pos: BlockPos) {
+        *self.pos_x.lock().await = pos.0.x;
+        *self.pos_y.lock().await = pos.0.y;
+        *self.pos_z.lock().await = pos.0.z;
+    }
+
+    pub async fn set_structure_size(&self, size: Vector3<i32>) {
+        *self.size_x.lock().await = size.x;
+        *self.size_y.lock().await = size.y;
+        *self.size_z.lock().await = size.z;
+    }
+
+    pub async fn set_meta_data(&self, metadata: &str) {
+        *self.metadata.lock().await = metadata.to_string();
+    }
+
+    pub async fn set_strict(&self, strict: bool) {
+        *self.strict.lock().await = strict;
+    }
+
+    pub async fn set_integrity(&self, integrity: f32) {
+        *self.integrity.lock().await = integrity;
+    }
+
+    pub async fn set_show_air(&self, show_air: bool) {
+        *self.show_air.lock().await = show_air;
+    }
+
+    pub async fn set_show_bounding_box(&self, show_bounding_box: bool) {
+        *self.show_bounding_box.lock().await = show_bounding_box;
+    }
+
+    /// Vanilla `StructureBlockEntity.detectSize` (`StructureBlockEntity.java:264-288`)
+    /// searches nearby CORNER blocks with the same structure name and derives the inclusive
+    /// capture box. Only loaded positions can be inspected by this server-side world API.
+    pub async fn detect_size(&self, world: &Arc<World>) -> bool {
+        if self.mode.lock().await.as_str() != "SAVE" {
+            return false;
+        }
+
+        let name = self.name.lock().await.clone();
+        let x = self.position.0.x;
+        let z = self.position.0.z;
+        let mut corners = Vec::new();
+        for corner_x in x - 80..=x + 80 {
+            for corner_y in world.get_bottom_y()..=world.get_top_y() {
+                for corner_z in z - 80..=z + 80 {
+                    let candidate = BlockPos::new(corner_x, corner_y, corner_z);
+                    let Some(state_id) = world.get_block_state_id_if_loaded(&candidate) else {
+                        continue;
+                    };
+                    if Block::from_state_id(state_id).name != "structure_block" {
+                        continue;
+                    }
+                    let Some(block_entity) = world.get_block_entity(&candidate) else {
+                        continue;
+                    };
+                    let Some(corner) = block_entity.as_any().downcast_ref::<Self>() else {
+                        continue;
+                    };
+                    if corner.mode.lock().await.as_str() == "CORNER"
+                        && *corner.name.lock().await == name
+                    {
+                        corners.push(candidate);
+                    }
+                }
+            }
+        }
+
+        let Some(first) = corners.first().copied() else {
+            return false;
+        };
+        let (mut min_x, mut min_y, mut min_z) = (first.0.x, first.0.y, first.0.z);
+        let (mut max_x, mut max_y, mut max_z) = (min_x, min_y, min_z);
+        for corner in corners.iter().skip(1) {
+            min_x = min_x.min(corner.0.x);
+            min_y = min_y.min(corner.0.y);
+            min_z = min_z.min(corner.0.z);
+            max_x = max_x.max(corner.0.x);
+            max_y = max_y.max(corner.0.y);
+            max_z = max_z.max(corner.0.z);
+        }
+        if corners.len() == 1 {
+            min_x = min_x.min(x);
+            min_y = min_y.min(self.position.0.y);
+            min_z = min_z.min(z);
+            max_x = max_x.max(x);
+            max_y = max_y.max(self.position.0.y);
+            max_z = max_z.max(z);
+        }
+
+        let (delta_x, delta_y, delta_z) = (max_x - min_x, max_y - min_y, max_z - min_z);
+        if delta_x <= 1 || delta_y <= 1 || delta_z <= 1 {
+            return false;
+        }
+        self.set_structure_pos(BlockPos::new(
+            min_x - x + 1,
+            min_y - self.position.0.y + 1,
+            min_z - z + 1,
+        ))
+        .await;
+        self.set_structure_size(Vector3::new(delta_x - 1, delta_y - 1, delta_z - 1))
+            .await;
+        true
+    }
+
     /// Mirrors `StructureBlockEntity.placeStructure` (`StructureBlockEntity.java:402-430`) for
     /// the LOAD half only: looks up the named template in the embedded/worldgen
     /// `TemplateCache` and places it via the same `WorldBlockPlacer` machinery the `/place
@@ -193,9 +315,8 @@ impl StructureBlockBlockEntity {
     ///   through it touches shared worldgen infrastructure used by `/place` and jigsaw pieces.
     /// - Entities embedded in the template are not placed (`place_template` does not place
     ///   entities at all currently).
-    /// - This only covers the `TemplateCache`'s embedded/worldgen template set, since there is
-    ///   no filesystem-backed structure manager for player-saved templates (that's the SAVE-side
-    ///   gap, out of scope here).
+    /// - This only covers the `TemplateCache`'s embedded/worldgen template set; player-saved
+    ///   templates are available after the `SAVE_AREA` packet path writes them in this server.
     pub async fn place_structure(&self, world: &Arc<World>) -> bool {
         let name = self.name.lock().await.clone();
         if name.is_empty() {
@@ -332,10 +453,14 @@ impl StructureBlockBlockEntity {
     /// (`StructureTemplateManager.save`) is only reachable from
     /// `ServerGamePacketListenerImpl.handleSetStructureBlock`'s `SAVE_AREA` branch
     /// (`ServerGamePacketListenerImpl.java:853`), gated on the client's structure-block editor
-    /// GUI - the same `ServerboundSetStructureBlockPacket` gap `place_structure`'s doc comment
-    /// already notes for LOAD. `save_to_disk: true` is implemented and tested here so the
-    /// writer path is exercised, but in this codebase it currently has no in-game trigger.
+    /// GUI - the same `ServerboundSetStructureBlockPacket` path now invokes it for `SAVE_AREA`.
+    /// `save_to_disk: true` exercises the writer path used by that packet action.
     pub async fn save_structure(&self, world: &Arc<World>, save_to_disk: bool) -> bool {
+        // Vanilla `saveStructure(boolean)` rejects every mode except SAVE
+        // (`StructureBlockEntity.java:318-327`).
+        if self.mode.lock().await.as_str() != "SAVE" {
+            return false;
+        }
         let name = self.name.lock().await.clone();
         if name.is_empty() {
             return false;
@@ -384,6 +509,45 @@ impl StructureBlockBlockEntity {
         *self.size_x.lock().await = template.size.x;
         *self.size_y.lock().await = template.size.y;
         *self.size_z.lock().await = template.size.z;
+    }
+
+    /// Vanilla `StructureBlockEntity.placeStructureIfSameSize`
+    /// (`StructureBlockEntity.java:369-383`) only places a LOAD template when its dimensions
+    /// already match; otherwise it refreshes the editor dimensions.
+    pub async fn place_structure_if_same_size(&self, world: &Arc<World>) -> bool {
+        if self.mode.lock().await.as_str() != "LOAD" {
+            return false;
+        }
+        let name = self.name.lock().await.clone();
+        if name.is_empty() {
+            return false;
+        }
+        let lookup_name = name.strip_prefix("minecraft:").unwrap_or(&name);
+        let Some(template) = get_template(lookup_name) else {
+            return false;
+        };
+        let requested_size = Vector3::new(
+            *self.size_x.lock().await,
+            *self.size_y.lock().await,
+            *self.size_z.lock().await,
+        );
+        if template.size == requested_size {
+            self.place_structure(world).await
+        } else {
+            self.load_structure_info(&template).await;
+            false
+        }
+    }
+
+    /// Vanilla `StructureBlockEntity.isStructureLoadable`
+    /// (`StructureBlockEntity.java:440-452`) requires LOAD mode, a name, and a resolvable
+    /// structure template.
+    pub async fn is_structure_loadable(&self) -> bool {
+        if self.mode.lock().await.as_str() != "LOAD" {
+            return false;
+        }
+        let name = self.name.lock().await.clone();
+        !name.is_empty() && get_template(name.strip_prefix("minecraft:").unwrap_or(&name)).is_some()
     }
 
     /// Mirrors `StructureBlockEntity.unloadStructure` (`StructureBlockEntity.java:432-437`).
@@ -533,6 +697,37 @@ mod tests {
         ));
         assert!(*futures::executor::block_on(loaded.powered.lock()));
         assert!(*futures::executor::block_on(loaded.strict.lock()));
+    }
+
+    #[test]
+    fn packet_backed_structure_fields_use_vanilla_values() {
+        // `ServerGamePacketListenerImpl.handleSetStructureBlock` applies these fields before
+        // the action (`ServerGamePacketListenerImpl.java:830-844`).
+        let entity = StructureBlockBlockEntity::new(BlockPos::new(3, 64, -2));
+        futures::executor::block_on(async {
+            entity.set_structure_name("minecraft:test").await;
+            entity.set_structure_pos(BlockPos::new(-4, 5, 6)).await;
+            entity.set_structure_size(Vector3::new(7, 8, 9)).await;
+            entity.set_meta_data("marker").await;
+            entity.set_integrity(0.25).await;
+            entity.set_strict(true).await;
+            entity.set_show_air(true).await;
+            entity.set_show_bounding_box(false).await;
+
+            assert_eq!(entity.get_structure_name().await, "minecraft:test");
+            assert!(entity.has_structure_name().await);
+            assert_eq!(*entity.pos_x.lock().await, -4);
+            assert_eq!(*entity.pos_y.lock().await, 5);
+            assert_eq!(*entity.pos_z.lock().await, 6);
+            assert_eq!(*entity.size_x.lock().await, 7);
+            assert_eq!(*entity.size_y.lock().await, 8);
+            assert_eq!(*entity.size_z.lock().await, 9);
+            assert_eq!(*entity.metadata.lock().await, "marker");
+            assert_eq!(*entity.integrity.lock().await, 0.25);
+            assert!(*entity.strict.lock().await);
+            assert!(*entity.show_air.lock().await);
+            assert!(!*entity.show_bounding_box.lock().await);
+        });
     }
 
     #[test]

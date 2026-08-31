@@ -6,7 +6,7 @@ use crate::{
     server::Server,
 };
 use pumpkin_data::effect::StatusEffect;
-use pumpkin_util::math::boundingbox::BoundingBox;
+use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
 use pumpkin_util::math::vector3::Vector3;
 
 type EffectEntry = (&'static StatusEffect, i32, u8, bool, bool, bool);
@@ -32,6 +32,11 @@ const MAX_RADIUS: f32 = 32.0;
 const CLOUD_HEIGHT: f64 = 0.5;
 /// `AreaEffectCloud.INFINITE_DURATION`
 const INFINITE_DURATION: i32 = -1;
+
+// AreaEffectCloud.java:341-357 derives a scalable `radius * 2` by `0.5` dimension.
+const fn dimensions_for_radius(radius: f32) -> EntityDimensions {
+    EntityDimensions::scalable(radius * 2.0, CLOUD_HEIGHT as f32)
+}
 
 const fn application_scale(_distance: f64, _radius: f64) -> f32 {
     1.0
@@ -162,11 +167,13 @@ impl AreaEffectCloudEntity {
         custom_particle: Option<CustomParticle>,
         potion_duration_scale: f32,
     ) -> Arc<dyn EntityBase> {
+        // AreaEffectCloud.java:77-80 clamps the tracked radius before it changes dimensions.
+        let radius = radius_in.clamp(0.0, MAX_RADIUS);
         let cloud = Self {
             entity,
             item_stack: Mutex::new(item_stack),
             effects: Mutex::new(effects_in),
-            radius: Mutex::new(radius_in),
+            radius: Mutex::new(radius),
             duration: Mutex::new(duration_in),
             age: Mutex::new(0),
             reapplication_delay: Mutex::new(reapplication_delay_in),
@@ -179,7 +186,21 @@ impl AreaEffectCloudEntity {
             custom_particle: Mutex::new(custom_particle),
         };
 
+        // AreaEffectCloud.java:77-89 refreshes dimensions after a radius update; initialize the
+        // server-side bounds too when a cloud is created with a non-default radius.
+        cloud.update_dimensions(radius);
+
         Arc::new(cloud)
+    }
+
+    // AreaEffectCloud.java:83-89 keeps the entity at its prior position while refreshing its
+    // radius-dependent dimensions.
+    fn update_dimensions(&self, radius: f32) {
+        let dimensions = dimensions_for_radius(radius);
+        self.entity.entity_dimension.store(dimensions);
+        self.entity
+            .bounding_box
+            .store(dimensions.make_bounding_box(self.entity.pos.load()));
     }
 
     /// Stores the radius clamped to `[0, MAX_RADIUS]` and syncs it to clients.
@@ -187,6 +208,9 @@ impl AreaEffectCloudEntity {
     async fn set_radius(&self, radius: f32) -> f32 {
         let clamped = radius.clamp(0.0, MAX_RADIUS);
         *self.radius.lock().await = clamped;
+        // AreaEffectCloud.java:341-357 makes the radius-dependent dimensions observable to the
+        // server entity queries as well as to clients receiving the tracked radius.
+        self.update_dimensions(clamped);
         self.entity.send_meta_data(
             &[pumpkin_protocol::java::client::play::Metadata::new(
                 pumpkin_data::tracked_data::area_effect_cloud::RADIUS,
@@ -498,7 +522,9 @@ impl EntityBase for AreaEffectCloudEntity {
 
 #[cfg(test)]
 mod tests {
-    use super::{application_scale, can_reapply, potion_duration_scale_from_stack};
+    use super::{
+        application_scale, can_reapply, dimensions_for_radius, potion_duration_scale_from_stack,
+    };
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
     use std::collections::HashMap;
@@ -507,6 +533,13 @@ mod tests {
     fn cloud_effect_scale_is_flat() {
         assert_eq!(application_scale(0.0, 3.0), 1.0);
         assert_eq!(application_scale(2.99, 3.0), 1.0);
+    }
+
+    #[test]
+    fn cloud_dimensions_follow_radius() {
+        let dimensions = dimensions_for_radius(2.5);
+        assert_eq!(dimensions.width, 5.0);
+        assert_eq!(dimensions.height, 0.5);
     }
 
     #[test]

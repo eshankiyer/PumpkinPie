@@ -426,6 +426,23 @@ impl MobEntity {
         has_line_of_sight
     }
 
+    /// Vanilla `Mob.ate` (`Mob.java:264-266`) emits `GameEvent.EAT` from the mob's entity
+    /// position, with the mob as the event source.
+    pub async fn ate(&self) {
+        let entity = &self.living_entity.entity;
+        let world = entity.world.load();
+        let context = world
+            .get_entity_by_id(entity.entity_id)
+            .map_or_else(GameEventContext::none, GameEventContext::of_entity);
+        emit_game_event(
+            &world,
+            pumpkin_data::game_event::GameEvent::Eat,
+            entity.pos.load(),
+            context,
+        )
+        .await;
+    }
+
     pub(crate) fn set_strafe_navigation_kind(&self, kind: NavigationKind) {
         let encoded = match kind {
             NavigationKind::Ground => 0,
@@ -447,6 +464,12 @@ impl MobEntity {
 
     pub fn is_in_position_target_range(&self) -> bool {
         self.is_in_position_target_range_pos(&self.living_entity.entity.block_pos.load())
+    }
+
+    /// Vanilla `Mob.clearHome` (`Mob.java:1221-1223`) removes the active home restriction while
+    /// leaving the stored center untouched.
+    pub fn clear_home(&self) {
+        self.position_target_range.store(-1, Relaxed);
     }
 
     pub fn is_in_position_target_range_pos(&self, block_pos: &BlockPos) -> bool {
@@ -1058,6 +1081,12 @@ impl MobEntity {
                 }
             }
         }
+        // Vanilla `Mob.doHurtTarget` uses `weaponItem.getDamageSource(this)`
+        // (`Mob.java:1384-1393`), which resolves the stack's component first
+        // (`ItemStack.java:1126-1131`).
+        let damage_type = held_item
+            .get_damage_type()
+            .unwrap_or(DamageType::MOB_ATTACK);
         drop(held_item);
 
         // `Mob.getKnockback` begins with the attacker's attribute, then adds any Knockback
@@ -1076,7 +1105,7 @@ impl MobEntity {
             .damage_with_context(
                 target,
                 attack_damage as f32,
-                DamageType::MOB_ATTACK,
+                damage_type,
                 Some(self.living_entity.entity.pos.load()),
                 caller.as_deref(),
                 caller.as_deref(),

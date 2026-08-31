@@ -81,6 +81,58 @@ pub(crate) fn block_bounce_restitution(block: &Block) -> f64 {
     }
 }
 
+/// Returns whether a block participates in comparator output notification.
+/// Vanilla's `BlockBehaviour.hasAnalogOutputSignal` defaults to false and is
+/// enabled by the listed block implementations (`BlockBehaviour.java:235-237`,
+/// `BarrelBlock.java:72-75`, `AbstractFurnaceBlock.java:60-64`,
+/// `AbstractCauldronBlock.java:78-82`, and `BlockBehaviour.java:637-643`).
+#[must_use]
+pub(crate) fn has_analog_output_signal(block: &Block) -> bool {
+    let name = block.name;
+    name == "barrel"
+        || name == "furnace"
+        || name == "blast_furnace"
+        || name == "smoker"
+        || name == "cauldron"
+        || name == "water_cauldron"
+        || name == "lava_cauldron"
+        || name == "powder_snow_cauldron"
+        || name == "beehive"
+        || name == "bee_nest"
+        || name == "brewing_stand"
+        || name == "cake"
+        || name.contains("candle_cake")
+        || name == "chest"
+        || name == "trapped_chest"
+        || name == "copper_chest"
+        || name.ends_with("_copper_chest")
+        || name == "chiseled_bookshelf"
+        || name == "command_block"
+        || name == "chain_command_block"
+        || name == "repeating_command_block"
+        || name == "composter"
+        || name == "copper_bulb"
+        || name.ends_with("_copper_bulb")
+        || name == "copper_golem_statue"
+        || name.ends_with("_copper_golem_statue")
+        || name == "crafter"
+        || name == "creaking_heart"
+        || name == "decorated_pot"
+        || name == "detector_rail"
+        || name == "dispenser"
+        || name == "dropper"
+        || name == "end_portal_frame"
+        || name == "hopper"
+        || name == "jukebox"
+        || name == "lectern"
+        || name == "respawn_anchor"
+        || name == "sculk_sensor"
+        || name == "calibrated_sculk_sensor"
+        || name.ends_with("_shelf")
+        || name == "shulker_box"
+        || name.ends_with("_shulker_box")
+}
+
 /// Matches vanilla `BlockStateBase.isSuffocating` (`BlockBehaviour.java:801-803`) and the
 /// block-property overrides registered in `Blocks.java:421-422, 585-586, 637-638, 1299-1300,
 /// 2027-2028, 3702-3703, 5116-5117, 5257-5258, 5478-5479, 5699-5708, 5769-5794`.
@@ -771,6 +823,19 @@ mod tests {
                 .next()
                 .is_none()
         );
+    }
+
+    /// Vanilla gates `Level.updateNeighbourForOutputSignal` on
+    /// `BlockState.hasAnalogOutputSignal` (`Level.java:250-254`; specialized
+    /// registrations are listed at `BarrelBlock.java:72-75` and
+    /// `ChestBlock.java:353-357`).
+    #[test]
+    fn analog_output_signal_registration_matches_vanilla_families() {
+        assert!(has_analog_output_signal(&Block::BARREL));
+        assert!(has_analog_output_signal(&Block::CANDLE_CAKE));
+        assert!(has_analog_output_signal(&Block::WAXED_COPPER_BULB));
+        assert!(!has_analog_output_signal(&Block::ENDER_CHEST));
+        assert!(!has_analog_output_signal(&Block::STONE));
     }
 
     /// Vanilla `BlockStateBase.isSuffocating` defaults at `BlockBehaviour.java:801-803`;
