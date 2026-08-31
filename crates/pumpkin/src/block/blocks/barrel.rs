@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use crate::block::{BlockFuture, GetComparatorOutputArgs, OnPlaceArgs, PlacedArgs};
+use crate::block::{
+    BlockFuture, GetComparatorOutputArgs, OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
+};
 use crate::block::{
     registry::BlockActionResult,
     {BlockBehaviour, NormalUseArgs},
@@ -20,6 +22,7 @@ use pumpkin_inventory::screen_handler::{
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::Inventory;
+use pumpkin_world::tick::TickPriority;
 use tokio::sync::Mutex;
 
 struct BarrelScreenFactory(Arc<dyn Inventory>);
@@ -62,8 +65,14 @@ impl BlockBehaviour for BarrelBlock {
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
             if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(inventory) = block_entity.get_inventory()
+                && let Some(inventory) = block_entity.clone().get_inventory()
             {
+                // `BarrelBlockEntity.startOpen` schedules the first recheck only on the
+                // zero-to-one transition (`BarrelBlockEntity.java:102-109`).
+                let was_empty = block_entity
+                    .as_any()
+                    .downcast_ref::<BarrelBlockEntity>()
+                    .is_some_and(|barrel| barrel.viewer_count() == 0);
                 args.player
                     .increment_interaction_stat(
                         pumpkin_data::statistic::StatisticCategory::Custom,
@@ -71,15 +80,38 @@ impl BlockBehaviour for BarrelBlock {
                         1,
                     )
                     .await;
-                args.player
+                let opened = args
+                    .player
                     .open_handled_screen(&BarrelScreenFactory(inventory), Some(*args.position))
                     .await;
+                if opened.is_some() && was_empty {
+                    // `ContainerOpenersCounter.incrementOpeners` schedules the opener recheck
+                    // when the first viewer arrives (`ContainerOpenersCounter.java:28-38,100-102`).
+                    args.world.schedule_block_tick(
+                        &pumpkin_data::Block::BARREL,
+                        *args.position,
+                        5,
+                        TickPriority::Normal,
+                    );
+                }
                 // Vanilla `BarrelBlock.useWithoutItem` (`BarrelBlock.java:43-52`) angers
                 // nearby piglins after opening the barrel.
                 piglin_shared::anger_nearby_piglins(args.world, args.player).await;
             }
 
             BlockActionResult::Success
+        })
+    }
+
+    fn on_scheduled_tick<'a>(&'a self, args: OnScheduledTickArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if let Some(block_entity) = args.world.get_block_entity(args.position)
+                && let Some(barrel) = block_entity.as_any().downcast_ref::<BarrelBlockEntity>()
+            {
+                // `BarrelBlock.tick` delegates scheduled ticks to
+                // `BarrelBlockEntity.recheckOpen` (`BarrelBlock.java:61-65`).
+                barrel.recheck_open(args.world).await;
+            }
         })
     }
 

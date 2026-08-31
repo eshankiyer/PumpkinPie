@@ -38,6 +38,16 @@ use pumpkin_world::inventory::Inventory;
 /// Type alias for async slot operations.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+fn clone_stack_for_creative(stack: &ItemStack) -> ItemStack {
+    // `Slot.safeClone` (`Slot.java:125-128`) returns no stack for an empty slot and otherwise
+    // copies the item at its own maximum stack size.
+    if stack.is_empty() {
+        ItemStack::EMPTY.clone()
+    } else {
+        stack.copy_with_count(stack.get_max_stack_size())
+    }
+}
+
 /// A slot in an inventory.
 ///
 /// The slot trait defines how individual inventory positions behave.
@@ -110,6 +120,11 @@ pub trait Slot: Send + Sync {
     fn get_cloned_stack(&self) -> BoxFuture<'_, ItemStack> {
         // Default implementation logic:
         Box::pin(async move { self.get_stack().await })
+    }
+
+    /// Creates the stack used by the creative middle-click clone action.
+    fn safe_clone<'a>(&'a self, _player: &'a dyn InventoryPlayer) -> BoxFuture<'a, ItemStack> {
+        Box::pin(async move { clone_stack_for_creative(&self.get_stack().await) })
     }
 
     /// Checks if this slot has a non-empty stack.
@@ -602,5 +617,27 @@ impl Slot for PredicateSlot {
         Box::pin(async move {
             self.inventory.mark_dirty();
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
+
+    #[test]
+    fn safe_clone_stack_keeps_empty_slots_empty() {
+        // `Slot.safeClone` (`Slot.java:125-128`) does not manufacture an AIR stack when the
+        // source slot is empty.
+        let clone = super::clone_stack_for_creative(&ItemStack::EMPTY.clone());
+        assert!(clone.is_empty());
+    }
+
+    #[test]
+    fn safe_clone_stack_uses_the_item_maximum() {
+        // `Slot.safeClone` (`Slot.java:125-128`) fills the creative clone to the item maximum.
+        let stack = ItemStack::new(1, &Item::STONE);
+        let clone = super::clone_stack_for_creative(&stack);
+        assert_eq!(clone.item_count, stack.get_max_stack_size());
     }
 }

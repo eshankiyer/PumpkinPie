@@ -121,6 +121,9 @@ impl CommandExecutor for LootExecutor {
                             has_loot = true;
                             let params = crate::world::loot::LootContextParameters {
                                 world_time: context.world().level_info.load().day_time as u64,
+                                // `LootContext.Builder.create` resolves named sequences with the
+                                // world seed (`LootContext.java:138-142`; `MinecraftServer.java:1766-1767`).
+                                world_seed: context.world().level.seed.0,
                                 ..Default::default()
                             };
                             stacks.extend(loot_table.get_loot(params));
@@ -154,6 +157,9 @@ impl CommandExecutor for LootExecutor {
                             block_state: Some(world.get_block_state(&pos)),
                             tool: tool_stack,
                             world_time: world.level_info.load().day_time as u64,
+                            // `LootContext.Builder.create` resolves named sequences with the
+                            // world seed (`LootContext.java:138-142`; `MinecraftServer.java:1766-1767`).
+                            world_seed: world.level.seed.0,
                             ..Default::default()
                         };
 

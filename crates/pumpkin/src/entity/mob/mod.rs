@@ -1420,6 +1420,13 @@ pub trait Mob: EntityBase + Send + Sync {
         );
     }
 
+    /// Vanilla `CopperGolem.playSpawnSound` (`CopperGolem.java:365-380`) is invoked by both
+    /// the explicit spawn path and `Mob.finalizeSpawn`; the world insertion paths consume this
+    /// hook for mobs that have a spawn sound.
+    fn get_spawn_sound(&self) -> Option<Sound> {
+        None
+    }
+
     /// Vanilla `Mob.canUseNonMeleeWeapon` (`Mob.java:260-262`) is the base capability
     /// predicate consulted by projectile attack behavior. Ordinary mobs cannot select a
     /// non-melee weapon.
@@ -3065,16 +3072,18 @@ pub(crate) fn tick_mob_ai<'a>(
             return;
         }
 
-        // Mob.getNavigation delegates to a controlled Mob vehicle. Resolve that once at the
-        // async AI boundary so the synchronous MoveControl tick can use the same evaluator.
+        // Vanilla Mob.getMoveControl delegates to a controlled Mob vehicle
+        // (`Mob.java:208-210`; `Entity.java:3612-3614`). Keep that vehicle alive through this
+        // tick so the existing navigation result is applied to its live MoveControl.
         let mut strafe_navigation_kind = mob_entity.navigator.lock().unwrap().navigation_kind();
+        let mut controlled_vehicle: Option<&dyn Mob> = None;
         let vehicle = mob_entity.living_entity.entity.vehicle.lock().await.clone();
         mob_entity
             .navigator
             .lock()
             .unwrap()
             .clear_inherited_pathfinding_malus();
-        if let Some(vehicle) = vehicle
+        if let Some(vehicle) = vehicle.as_ref()
             && let Some(vehicle_mob) = vehicle.get_mob()
             && !vehicle_mob.get_mob_entity().is_no_ai()
         {
@@ -3092,6 +3101,7 @@ pub(crate) fn tick_mob_ai<'a>(
                         .entity_type
                         .has_tag(&tag::EntityType::MINECRAFT_NON_CONTROLLING_RIDER)
             }) {
+                controlled_vehicle = Some(vehicle_mob);
                 strafe_navigation_kind = vehicle_mob
                     .get_mob_entity()
                     .navigator
@@ -3153,7 +3163,9 @@ pub(crate) fn tick_mob_ai<'a>(
         // replace the wanted position without a stale navigation result being applied
         // after the hook returns.
         if let Some((target, speed)) = navigation_target {
-            mob_entity
+            controlled_vehicle
+                .unwrap_or(mob)
+                .get_mob_entity()
                 .move_control
                 .lock()
                 .unwrap()
@@ -3175,8 +3187,9 @@ pub(crate) fn tick_mob_ai<'a>(
 
         mob.mob_tick(caller).await;
 
-        let mut move_control = mob_entity.move_control.lock().unwrap();
-        move_control.tick(mob);
+        let control_mob = controlled_vehicle.unwrap_or(mob);
+        let mut move_control = control_mob.get_mob_entity().move_control.lock().unwrap();
+        move_control.tick(control_mob);
 
         {
             let mut look_control = mob_entity.look_control.lock().unwrap();

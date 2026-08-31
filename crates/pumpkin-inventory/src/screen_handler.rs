@@ -1172,8 +1172,9 @@ pub trait ScreenHandler: Send + Sync {
                         return;
                     }
                     let slot = behaviour.slots[slot_index as usize].clone();
-                    let stack = slot.get_stack().await;
-                    *cursor_stack = stack.copy_with_count(stack.get_max_stack_size());
+                    // `AbstractContainerMenu` delegates creative cloning to `Slot.safeClone`
+                    // (`AbstractContainerMenu.java:508-511`), which also rejects empty slots.
+                    *cursor_stack = slot.safe_clone(player).await;
                 }
             } else if (action_type == SlotActionType::Pickup
                 || action_type == SlotActionType::QuickMove)

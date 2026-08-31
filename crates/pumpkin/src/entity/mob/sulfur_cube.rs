@@ -232,7 +232,7 @@ impl SulfurCubeEntity {
     }
 
     /// SulfurCube.java:493-522 (`equipItem`).
-    async fn equip_item(&self, item_stack: &ItemStack) -> bool {
+    pub(crate) async fn equip_item(&self, item_stack: &ItemStack) -> bool {
         if self.is_baby() {
             return false;
         }

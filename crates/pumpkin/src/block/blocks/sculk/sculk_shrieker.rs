@@ -111,6 +111,11 @@ impl GameEventListener for ShriekerListener {
             else {
                 return false;
             };
+            // `VibrationSystem.Listener.handleGameEvent` rejects a new event while a prior
+            // vibration is travelling (`VibrationSystem.java:210-218`).
+            if shrieker.has_current_vibration().await {
+                return false;
+            }
             // `onReceiveVibration` is invoked by the block entity's vibration ticker after travel
             // time, rather than directly from event dispatch (`VibrationSystem.java:342-361`).
             shrieker

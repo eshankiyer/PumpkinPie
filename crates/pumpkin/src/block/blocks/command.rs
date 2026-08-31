@@ -225,7 +225,13 @@ impl BlockBehaviour for CommandBlock {
             let Some(block_entity) = args.world.get_block_entity(args.position) else {
                 return BlockActionResult::Pass;
             };
-            args.world.update_block_entity(&block_entity);
+            let Some(command_entity) = block_entity.as_any().downcast_ref::<CommandBlockEntity>()
+            else {
+                return BlockActionResult::Pass;
+            };
+            // `ServerPlayer.openCommandBlock` sends the custom tag only to the interacting
+            // player (`ServerPlayer.java:1408-1411`); a world update would leak it to trackers.
+            args.player.open_command_block(command_entity).await;
             BlockActionResult::SuccessServer
         })
     }

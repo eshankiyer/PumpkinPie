@@ -93,6 +93,9 @@ pub struct SculkShriekerBlockEntity {
     /// Vanilla stores this as the block entity's `VibrationSystem.Data`
     /// (`SculkShriekerBlockEntity.java:56-58`).
     vibration_data: Mutex<VibrationData>,
+    /// Mirrors `VibrationSystem.User.onDataChanged`, which calls `setChanged` after the
+    /// listener data changes (`SculkShriekerBlockEntity.java:215-218`).
+    dirty: AtomicBool,
 }
 
 impl BlockEntity for SculkShriekerBlockEntity {
@@ -117,7 +120,17 @@ impl BlockEntity for SculkShriekerBlockEntity {
             shrieking_flag: AtomicBool::new(false),
             can_summon_flag: AtomicBool::new(false),
             vibration_data: Mutex::new(VibrationData::default()),
+            dirty: AtomicBool::new(false),
         }
+    }
+
+    /// Exposes the dirty state set by vanilla `onDataChanged` (`SculkShriekerBlockEntity.java:215-218`).
+    fn is_dirty(&self) -> bool {
+        self.dirty.load(Ordering::Acquire)
+    }
+
+    fn clear_dirty(&self) {
+        self.dirty.store(false, Ordering::Release);
     }
 
     /// `saveAdditional` (lines 81-86).
@@ -177,7 +190,20 @@ impl SculkShriekerBlockEntity {
             shrieking_flag: AtomicBool::new(false),
             can_summon_flag: AtomicBool::new(false),
             vibration_data: Mutex::new(VibrationData::default()),
+            dirty: AtomicBool::new(false),
         }
+    }
+
+    /// Implements vanilla `onDataChanged` through the existing block-entity dirty path
+    /// (`SculkShriekerBlockEntity.java:215-218`).
+    fn mark_dirty(&self) {
+        self.dirty.store(true, Ordering::Release);
+    }
+
+    /// Returns the `Data.currentVibration != null` state checked by the vanilla listener before
+    /// accepting another event (`VibrationSystem.java:210-218`).
+    pub(crate) async fn has_current_vibration(&self) -> bool {
+        self.vibration_data.lock().await.current_vibration.is_some()
     }
 
     /// Queues a vibration for the block entity's tick, matching `VibrationSystem.Listener`
@@ -205,27 +231,38 @@ impl SculkShriekerBlockEntity {
     }
 
     async fn tick_vibration(&self, world: &Arc<World>) {
-        let due_source = {
+        let (due_source, data_changed) = {
             let mut data = self.vibration_data.lock().await;
             data.tick = data.tick.saturating_add(1);
-            if data.current_vibration.is_none()
+            let mut data_changed = if data.current_vibration.is_none()
                 && let Some(vibration) = data.selector.chosen_candidate(data.tick)
             {
                 data.travel_time = vibration_travel_time(vibration.distance);
                 data.current_vibration = Some(vibration);
                 data.selector.start_over();
-            }
+                true
+            } else {
+                false
+            };
             if data.current_vibration.is_some() {
+                data_changed |= data.travel_time > 0;
                 data.travel_time = data.travel_time.saturating_sub(1);
             }
-            (data.travel_time == 0)
+            let due_source = (data.travel_time == 0)
                 .then(|| {
                     data.current_vibration
                         .as_ref()
                         .and_then(|v| v.source_entity)
                 })
-                .flatten()
+                .flatten();
+            (due_source, data_changed)
         };
+
+        // Mirrors `VibrationSystem.Ticker` calling `onDataChanged` after selection and travel
+        // progress (`VibrationSystem.java:285-295,300-313`).
+        if data_changed {
+            self.mark_dirty();
+        }
 
         let Some(source_entity) = due_source else {
             return;
@@ -239,8 +276,13 @@ impl SculkShriekerBlockEntity {
                 (vibration.source_entity == Some(source_entity)).then_some(vibration)
             })
         };
-        if source.is_some()
-            && let Some(player) = world.get_player_by_uuid(source_entity)
+        if source.is_some() {
+            // `receiveVibration` clears the current vibration after delivery and then invokes
+            // `onDataChanged` (`VibrationSystem.java:342-360`).
+            self.mark_dirty();
+        }
+        if let Some(player) = world.get_player_by_uuid(source_entity)
+            && source.is_some()
         {
             // `onReceiveVibration` resolves the source entity before calling `tryShriek`
             // (`SculkShriekerBlockEntity.java:204-213`).
@@ -488,12 +530,27 @@ fn warden_fits(world: &Arc<World>, pos: BlockPos) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::vibration_travel_time;
+    use super::{SculkShriekerBlockEntity, vibration_travel_time};
+    use crate::block::entities::BlockEntity;
+    use pumpkin_util::math::position::BlockPos;
 
     #[test]
     fn vibration_travel_time_uses_vanilla_flooring() {
         // `calculateTravelTimeInTicks` uses `Mth.floor` (`VibrationSystem.java:401-403`).
         assert_eq!(vibration_travel_time(3.9), 3);
         assert_eq!(vibration_travel_time(0.9), 0);
+    }
+
+    #[test]
+    fn vibration_data_change_marks_shrieker_dirty_until_cleared() {
+        let shrieker = SculkShriekerBlockEntity::new(BlockPos::ZERO);
+        assert!(!shrieker.is_dirty());
+
+        // `onDataChanged` calls `setChanged` (`SculkShriekerBlockEntity.java:215-218`).
+        shrieker.mark_dirty();
+        assert!(shrieker.is_dirty());
+
+        shrieker.clear_dirty();
+        assert!(!shrieker.is_dirty());
     }
 }

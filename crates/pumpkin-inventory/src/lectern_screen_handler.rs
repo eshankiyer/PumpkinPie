@@ -18,6 +18,10 @@ pub trait LecternController: Send + Sync {
     /// The page currently displayed.
     fn current_page(&self) -> i32;
 
+    /// Whether the lectern still contains a writable or written book.
+    /// (`LecternBlockEntity.java:134-140`.)
+    fn has_book(&self) -> bool;
+
     /// Clamps and persists `page`, emitting a redstone pulse when it changes.
     fn set_page(&self, page: i32) -> ScreenHandlerFuture<'_, ()>;
 
@@ -89,6 +93,13 @@ impl ScreenHandler for LecternScreenHandler {
     /// `World::close_container_screens_at`.
     fn container_access(&self) -> crate::screen_handler::ContainerAccess {
         crate::screen_handler::ContainerAccess::RangeOnly
+    }
+
+    /// Vanilla `bookAccess.stillValid` requires both block-entity range and a
+    /// book (`LecternBlockEntity.java:94-97`). The range check is delegated to
+    /// `ScreenHandler::can_use`; this live override supplies the book condition.
+    fn can_use(&self, player: &dyn InventoryPlayer) -> bool {
+        player.evaluate_container_access(self.container_access()) && self.controller.has_book()
     }
 
     fn as_any(&self) -> &dyn Any {

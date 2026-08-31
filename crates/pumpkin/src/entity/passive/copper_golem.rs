@@ -463,6 +463,12 @@ impl Mob for CopperGolemEntity {
         &self.mob_entity
     }
 
+    /// `CopperGolem.playSpawnSound` (`CopperGolem.java:365-380`) plays this sound from both
+    /// the statue-created spawn and ordinary mob finalization paths.
+    fn get_spawn_sound(&self) -> Option<Sound> {
+        Some(Sound::EntityCopperGolemSpawn)
+    }
+
     /// `CopperGolem.getHurtSound` (`CopperGolem.java:389-391`): the hurt sound follows the
     /// oxidation stage through `CopperGolemOxidationLevels.getOxidationLevel`. The generated
     /// `COPPER_GOLEM.hurt_sound` is `None`, so without this override the mob plays the

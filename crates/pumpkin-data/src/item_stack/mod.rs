@@ -821,30 +821,64 @@ impl ItemStack {
         }
     }
 
+    /// Vanilla `ItemStack.isSameItemSameComponents` compares the effective component map,
+    /// including item defaults (`ItemStack.java:638-643`).
     #[must_use]
-    pub fn are_items_and_components_equal(&self, other: &Self) -> bool {
-        if self.item != other.item {
+    pub fn is_same_item_same_components(left: &Self, right: &Self) -> bool {
+        if !left.is_same_item(right) {
             return false;
         }
-
-        if self.patch.len() != other.patch.len() {
-            return false;
+        if left.is_empty() && right.is_empty() {
+            return true;
         }
 
-        for (id, data) in &self.patch {
-            let Some((_, other_data)) = other.patch.iter().find(|(other_id, _)| id == other_id)
-            else {
-                return false;
-            };
+        for id in left
+            .item
+            .components
+            .iter()
+            .map(|(id, _)| *id)
+            .chain(left.patch.iter().map(|(id, _)| *id))
+            .chain(right.patch.iter().map(|(id, _)| *id))
+        {
+            let left_data = left
+                .patch
+                .iter()
+                .find(|(patch_id, _)| *patch_id == id)
+                .map(|(_, data)| data.as_deref())
+                .unwrap_or_else(|| {
+                    left.item
+                        .components
+                        .iter()
+                        .find(|(item_id, _)| *item_id == id)
+                        .map(|(_, data)| *data)
+                });
+            let right_data = right
+                .patch
+                .iter()
+                .find(|(patch_id, _)| *patch_id == id)
+                .map(|(_, data)| data.as_deref())
+                .unwrap_or_else(|| {
+                    right
+                        .item
+                        .components
+                        .iter()
+                        .find(|(item_id, _)| *item_id == id)
+                        .map(|(_, data)| *data)
+                });
 
-            match (data, other_data) {
-                (Some(data), Some(other_data)) if data.equal(other_data.as_ref()) => {}
+            match (left_data, right_data) {
+                (Some(left_data), Some(right_data)) if left_data.equal(right_data) => {}
                 (None, None) => {}
                 _ => return false,
             }
         }
 
         true
+    }
+
+    #[must_use]
+    pub fn are_items_and_components_equal(&self, other: &Self) -> bool {
+        Self::is_same_item_same_components(self, other)
     }
 
     #[must_use]
@@ -1109,7 +1143,8 @@ mod tests {
     use crate::data_component::DataComponent;
     use crate::data_component_impl::{
         CustomDataImpl, CustomNameImpl, DataComponentImpl, EnchantableImpl,
-        EnchantmentGlintOverrideImpl, EnchantmentsImpl, ItemNameImpl, LoreImpl, UnbreakableImpl,
+        EnchantmentGlintOverrideImpl, EnchantmentsImpl, ItemNameImpl, LoreImpl, MaxStackSizeImpl,
+        UnbreakableImpl,
     };
 
     /// Helper: creates a fresh Iron Sword (max_damage 250, damage 0).
@@ -1248,6 +1283,24 @@ mod tests {
         assert!(!plain.are_items_and_components_equal(&customized));
         assert!(!customized.are_items_and_components_equal(&plain));
         assert!(customized.are_items_and_components_equal(&customized.clone()));
+    }
+
+    #[test]
+    fn same_item_same_components_includes_item_defaults() {
+        // Vanilla compares the complete component map, not only the explicit patch
+        // (`ItemStack.java:638-643`).
+        let plain = ItemStack::new(1, &Item::COAL);
+        let mut explicit_default = plain.clone();
+        explicit_default.patch.push((
+            DataComponent::MaxStackSize,
+            Some(MaxStackSizeImpl { size: 64 }.to_dyn()),
+        ));
+
+        assert!(ItemStack::is_same_item_same_components(
+            &plain,
+            &explicit_default
+        ));
+        assert!(plain.are_items_and_components_equal(&explicit_default));
     }
 
     #[test]

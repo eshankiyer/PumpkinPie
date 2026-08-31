@@ -1431,6 +1431,20 @@ fn velocity_needs_resend(current: Vector3<f64>, last_sent: Vector3<f64>) -> bool
     let difference = current.squared_distance_to_vec(&last_sent);
     difference > 1.0e-7 || (difference > 0.0 && current.length_squared() == 0.0)
 }
+
+/// Vanilla `ServerEntity.sendChanges` sends the current motion after a hit even when the
+/// velocity itself did not change (`ServerEntity.java:224-228`).
+#[expect(clippy::fn_params_excessive_bools)]
+const fn motion_sync_needed(
+    hurt_marked: bool,
+    velocity_dirty: bool,
+    touching_water: bool,
+    touching_lava: bool,
+    velocity_changed: bool,
+) -> bool {
+    hurt_marked || velocity_dirty || touching_water || touching_lava || velocity_changed
+}
+
 /// Vanilla `ServerEntity.teleportDelay`: an absolute position sync is forced once this many ticks
 /// have passed without one, so a client that drifted is put right.
 const MAX_TICKS_BEFORE_POSITION_SYNC: i32 = 400;
@@ -1652,6 +1666,25 @@ fn water_swim_volume(velocity: Vector3<f64>, volume_modifier: f32) -> f32 {
         .min(1.0)
 }
 
+// Vanilla `Entity.getDimensionChangingDelay`, `VehicleEntity.getDimensionChangingDelay`, and the
+// projectile override select 300, 10, or 2 ticks
+// (`Entity.java:2630-2633`; `VehicleEntity.java:115-117`; `Projectile.java:386-389`).
+#[expect(clippy::fn_params_excessive_bools)]
+const fn dimension_changing_delay_for(
+    is_projectile: bool,
+    is_player: bool,
+    has_player_passenger: bool,
+    is_vehicle: bool,
+) -> u32 {
+    if is_projectile {
+        2
+    } else if is_player || has_player_passenger || is_vehicle {
+        10
+    } else {
+        300
+    }
+}
+
 /// `AbstractHorse.getDismountLocationForPassenger` (`AbstractHorse.java:998-1026`) searches
 /// the main-hand side, then the off-hand side, while `DismountHelper` validates the floor and
 /// passenger collision box (`DismountHelper.java:27-50`).
@@ -1714,6 +1747,99 @@ fn horse_dismount_location(
             }
         }
     }
+    None
+}
+
+/// Vanilla `Entity.getCollisionHorizontalEscapeVector` (`Entity.java:3596-3601`) supplies the
+/// five candidate directions used by `Strider.getDismountLocationForPassenger`
+/// (`Strider.java:214-253`).
+fn collision_horizontal_escape_vector(
+    collider_width: f64,
+    colliding_width: f64,
+    direction_degrees: f32,
+) -> Vector3<f64> {
+    let distance = (collider_width + colliding_width + 1.0e-5) / 2.0;
+    let direction_radians = f64::from(direction_degrees).to_radians();
+    let direction_x = -direction_radians.sin();
+    let direction_z = direction_radians.cos();
+    let scale = direction_x.abs().max(direction_z.abs());
+    Vector3::new(
+        direction_x * distance / scale,
+        0.0,
+        direction_z * distance / scale,
+    )
+}
+
+/// Vanilla `Strider.getDismountLocationForPassenger` (`Strider.java:214-253`) searches the
+/// ordered escape directions and vertical block positions, rejecting lava and occupied poses.
+fn strider_dismount_location(
+    world: &World,
+    vehicle: &Entity,
+    passenger: &dyn EntityBase,
+) -> Option<(Vector3<f64>, EntityPose)> {
+    let passenger_entity = passenger.get_entity();
+    let passenger_width = f64::from(passenger_entity.width());
+    let vehicle_width = f64::from(vehicle.width());
+    let passenger_yaw = passenger_entity.yaw.load();
+    let directions = [
+        collision_horizontal_escape_vector(vehicle_width, passenger_width, passenger_yaw),
+        collision_horizontal_escape_vector(vehicle_width, passenger_width, passenger_yaw - 22.5),
+        collision_horizontal_escape_vector(vehicle_width, passenger_width, passenger_yaw + 22.5),
+        collision_horizontal_escape_vector(vehicle_width, passenger_width, passenger_yaw - 45.0),
+        collision_horizontal_escape_vector(vehicle_width, passenger_width, passenger_yaw + 45.0),
+    ];
+
+    let vehicle_position = vehicle.pos.load();
+    let collider_top = vehicle.bounding_box.load().max.y;
+    let collider_bottom = vehicle.bounding_box.load().min.y - 0.5;
+    let mut target_positions = Vec::new();
+    for direction in directions {
+        let mut target = BlockPos::floored(
+            vehicle_position.x + direction.x,
+            collider_top,
+            vehicle_position.z + direction.z,
+        );
+        let mut y = collider_top;
+        while y > collider_bottom {
+            if !target_positions.contains(&target) {
+                target_positions.push(target);
+            }
+            target.0.y -= 1;
+            y -= 1.0;
+        }
+    }
+
+    for target in target_positions {
+        if world
+            .get_fluid(&target)
+            .has_tag(&tag::Fluid::MINECRAFT_LAVA)
+        {
+            continue;
+        }
+
+        let floor_height = world.get_dismount_height(&target);
+        if !floor_height.is_finite() || floor_height >= 1.0 {
+            continue;
+        }
+
+        let location = Vector3::new(
+            f64::from(target.0.x) + 0.5,
+            f64::from(target.0.y) + floor_height,
+            f64::from(target.0.z) + 0.5,
+        );
+        for pose in passenger.get_dismount_poses() {
+            let dimensions = passenger_entity.get_dimensions(pose);
+            if world.is_space_empty(BoundingBox::new_from_pos(
+                location.x,
+                location.y,
+                location.z,
+                &dimensions,
+            )) {
+                return Some((location, pose));
+            }
+        }
+    }
+
     None
 }
 
@@ -2521,6 +2647,13 @@ impl Entity {
         if !velocity_needs_resend(velocity, self.last_sent_velocity.load()) {
             return;
         }
+        self.send_velocity_forced();
+    }
+
+    /// Sends motion without the ordinary delta threshold. Vanilla sends this forced packet for
+    /// `hurtMarked` after `ServerEntity.sendChanges` (`ServerEntity.java:224-228`).
+    pub(crate) fn send_velocity_forced(&self) {
+        let velocity = self.velocity.load();
         self.last_sent_velocity.store(velocity);
         let chunk_pos = self.chunk_pos.load();
         self.world.load().broadcast_to_chunk_editioned_sync(
@@ -2758,16 +2891,27 @@ impl Entity {
             .broadcast_to_chunk(chunk_pos, &CHeadRot::new(self.entity_id.into(), head_yaw));
     }
 
-    fn default_portal_cooldown(&self) -> u32 {
-        // `Projectile.getDimensionChangingDelay` (`Projectile.java:386-389`) overrides
-        // `Entity.getDimensionChangingDelay` with two ticks.
-        if crate::entity::projectile::is_projectile(self.entity_type) {
-            2
-        } else if self.entity_type == &EntityType::PLAYER {
-            10
-        } else {
-            300
-        }
+    /// Vanilla `Entity.getDimensionChangingDelay` (`Entity.java:2630-2633`) uses the first
+    /// passenger's player delay for a vehicle; projectiles retain their two-tick override from
+    /// `Projectile.java:386-389`.
+    async fn get_dimension_changing_delay(&self) -> u32 {
+        let has_player_passenger = self
+            .passengers
+            .lock()
+            .await
+            .first()
+            .is_some_and(|passenger| passenger.get_player().is_some());
+        let resource_name = self.entity_type.resource_name;
+        let is_vehicle = resource_name == "minecart"
+            || resource_name.ends_with("_minecart")
+            || resource_name.ends_with("_boat")
+            || resource_name.ends_with("_raft");
+        dimension_changing_delay_for(
+            crate::entity::projectile::is_projectile(self.entity_type),
+            self.entity_type == &EntityType::PLAYER,
+            has_player_passenger,
+            is_vehicle,
+        )
     }
 
     /// Returns the block position of the block the (non-player) entity is standing on, if any.
@@ -4205,7 +4349,7 @@ impl Entity {
                 caller.can_use_portal(),
             ) {
                 self.portal_cooldown
-                    .store(self.default_portal_cooldown(), Ordering::Relaxed);
+                    .store(self.get_dimension_changing_delay().await, Ordering::Relaxed);
 
                 let transition = portal_processor
                     .portal_type
@@ -4289,7 +4433,7 @@ impl Entity {
                 let passenger_entity = passenger.get_entity();
                 let passenger_yaw = yaw_delta.map(|delta| passenger_entity.yaw.load() + delta);
                 passenger_entity.portal_cooldown.store(
-                    passenger_entity.default_portal_cooldown(),
+                    passenger_entity.get_dimension_changing_delay().await,
                     Ordering::Relaxed,
                 );
 
@@ -4348,7 +4492,7 @@ impl Entity {
 
         if self.portal_cooldown.load(Ordering::Relaxed) > 0 {
             self.portal_cooldown
-                .store(self.default_portal_cooldown(), Ordering::Relaxed);
+                .store(self.get_dimension_changing_delay().await, Ordering::Relaxed);
             return;
         }
 
@@ -6102,7 +6246,19 @@ impl Entity {
                 self.entity_type == &EntityType::HAPPY_GHAST || (is_water && !animal_dismount);
             // `AbstractHorse.getDismountLocationForPassenger` (`AbstractHorse.java:998-1026`)
             // searches its two side directions and climbs only to 0.75 blocks above the horse.
-            let dismount_pos = if is_horse {
+            // `Strider.getDismountLocationForPassenger` (`Strider.java:214-253`) is an
+            // entity-specific side search; use it before the shared fallback below.
+            let strider_dismount = if self.entity_type.id == EntityType::STRIDER.id {
+                strider_dismount_location(&world, self, passenger.as_ref())
+            } else {
+                None
+            };
+            let dismount_pos = if let Some((position, pose)) = strider_dismount {
+                if pose != EntityPose::Standing {
+                    passenger_entity.set_pose(pose);
+                }
+                position
+            } else if is_horse {
                 horse_dismount_location(&world, self, passenger.as_ref()).map_or(
                     fallback_pos,
                     |(position, pose)| {
@@ -6807,6 +6963,36 @@ mod water_swim_sound_tests {
 }
 
 #[cfg(test)]
+mod entity_method_tests {
+    use super::{collision_horizontal_escape_vector, dimension_changing_delay_for};
+
+    #[test]
+    fn vehicle_portal_delay_inherits_first_player_passenger() {
+        // `Entity.getDimensionChangingDelay` uses the first player passenger, vehicles always
+        // use ten ticks, and projectiles remain at two ticks
+        // (`Entity.java:2630-2633`; `VehicleEntity.java:115-117`; `Projectile.java:386-389`).
+        assert_eq!(
+            dimension_changing_delay_for(false, false, false, false),
+            300
+        );
+        assert_eq!(dimension_changing_delay_for(false, false, true, false), 10);
+        assert_eq!(dimension_changing_delay_for(false, true, false, false), 10);
+        assert_eq!(dimension_changing_delay_for(false, false, false, true), 10);
+        assert_eq!(dimension_changing_delay_for(true, false, true, true), 2);
+    }
+
+    #[test]
+    fn horizontal_escape_vector_matches_vanilla_distance() {
+        // `Entity.getCollisionHorizontalEscapeVector` normalizes the selected horizontal
+        // direction by its largest component (`Entity.java:3596-3601`).
+        let vector = collision_horizontal_escape_vector(1.0, 0.5, 0.0);
+        assert_eq!(vector.x, 0.0);
+        assert!((vector.z - 0.750_005).abs() < 1.0e-9);
+        assert_eq!(vector.y, 0.0);
+    }
+}
+
+#[cfg(test)]
 mod piston_movement_tests {
     use super::piston_axis_movement;
 
@@ -6876,7 +7062,7 @@ mod absolute_snap_tests {
 
 #[cfg(test)]
 mod velocity_resend_tests {
-    use super::velocity_needs_resend;
+    use super::{motion_sync_needed, velocity_needs_resend};
     use pumpkin_util::math::vector3::Vector3;
 
     #[test]
@@ -6909,6 +7095,14 @@ mod velocity_resend_tests {
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(1.0e-5, 0.0, 0.0)
         ));
+    }
+
+    #[test]
+    fn hurt_mark_forces_motion_sync_without_velocity_change() {
+        // `ServerEntity.sendChanges` sends motion for `hurtMarked` even when the velocity is
+        // unchanged (`ServerEntity.java:224-228`).
+        assert!(motion_sync_needed(true, false, false, false, false));
+        assert!(!motion_sync_needed(false, false, false, false, false));
     }
 }
 

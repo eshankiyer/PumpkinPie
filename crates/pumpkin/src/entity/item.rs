@@ -566,10 +566,16 @@ impl ItemEntity {
 
         entity.update_fluid_state(caller).await;
 
-        let velocity_dirty = entity.velocity_dirty.swap(false, Ordering::SeqCst)
-            || entity.touching_water.load(Ordering::SeqCst)
-            || entity.touching_lava.load(Ordering::SeqCst)
-            || entity.velocity.load().sub(&original_velo).length_squared() > 0.01;
+        // `ItemEntity.hurtServer` marks the item before changing health (`ItemEntity.java:299-304`),
+        // and `ServerEntity.sendChanges` consumes that mark to resend motion (`ServerEntity.java:224-228`).
+        let hurt_marked = entity.hurt_marked.swap(false, Ordering::SeqCst);
+        let velocity_dirty = super::motion_sync_needed(
+            hurt_marked,
+            entity.velocity_dirty.swap(false, Ordering::SeqCst),
+            entity.touching_water.load(Ordering::SeqCst),
+            entity.touching_lava.load(Ordering::SeqCst),
+            entity.velocity.load().sub(&original_velo).length_squared() > 0.01,
+        );
         let moved = entity.pos.load() != entity.last_sent_pos.load();
         let position_dirty =
             moved && self.item_age.load(Ordering::Relaxed) % (ITEM_UPDATE_INTERVAL as i32) == 0;
@@ -580,7 +586,11 @@ impl ItemEntity {
             entity.send_bedrock_pos();
         }
         if velocity_dirty {
-            entity.send_velocity();
+            if hurt_marked {
+                entity.send_velocity_forced();
+            } else {
+                entity.send_velocity();
+            }
         }
     }
 }
@@ -753,7 +763,7 @@ impl EntityBase for ItemEntity {
             }
 
             // `ItemEntity.hurtServer` marks the item before subtracting health
-            // (`ItemEntity.java:288-303`). The existing dirty-motion sync consumes this mark.
+            // (`ItemEntity.java:299-304`); `sync_motion_if_dirty` consumes the mark after the tick.
             self.entity.mark_hurt();
             loop {
                 let current = self.health.load(Relaxed);

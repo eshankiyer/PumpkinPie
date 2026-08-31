@@ -64,6 +64,10 @@ impl LecternController for LecternPageController {
             .map_or(0, |entity| entity.page.load(Ordering::Relaxed) as i32)
     }
 
+    fn has_book(&self) -> bool {
+        self.entity().is_some_and(LecternBlockEntity::has_book)
+    }
+
     fn set_page(&self, page: i32) -> ScreenHandlerFuture<'_, ()> {
         Box::pin(async move {
             let Some(entity) = self.entity() else {
