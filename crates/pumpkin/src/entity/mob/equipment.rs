@@ -1076,7 +1076,6 @@ pub async fn equip_mob_on_spawn(mob: &dyn EntityBase, world: &Arc<crate::world::
     };
 
     let mut equipment = living.entity_equipment.lock().await;
-    let mut drop_chances = living.equipment_drop_chances.lock().await;
     let mut changes_with_drops = equip_mob_from_def(def, &difficulty);
 
     // Vanilla dispatches subclass weapon-enchant overrides through the virtual
@@ -1094,14 +1093,20 @@ pub async fn equip_mob_on_spawn(mob: &dyn EntityBase, world: &Arc<crate::world::
 
     let mut equipment_changes: Vec<(EquipmentSlot, ItemStack)> = Vec::new();
 
-    for (slot, stack, drop_chance) in changes_with_drops {
-        equipment.put(&slot, stack.clone());
-        drop_chances.insert(slot.clone(), drop_chance);
-        equipment_changes.push((slot, stack));
+    // `Mob.createEquipmentSlotContainer`/`setDropChance` (`Mob.java:864-877,1102-1105`) stores
+    // each generated stack with its per-slot death-drop chance.
+    for (slot, stack, _) in &changes_with_drops {
+        equipment.put(slot, stack.clone());
+        equipment_changes.push((slot.clone(), stack.clone()));
     }
 
     drop(equipment);
-    drop(drop_chances);
+
+    if let Some(mob) = mob.get_mob() {
+        for (slot, _, drop_chance) in changes_with_drops {
+            mob.set_drop_chance(slot, drop_chance).await;
+        }
+    }
 
     living.send_equipment_changes(&equipment_changes);
 }

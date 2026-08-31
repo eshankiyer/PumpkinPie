@@ -1,6 +1,7 @@
 use pumpkin_data::data_component::DataComponent;
 use pumpkin_data::data_component_type_id_remap::remap_data_component_type_id_from_version;
 use pumpkin_data::item_id_remap::remap_item_id_from_version;
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::packet::clientbound::play::MERCHANT_OFFERS;
 use pumpkin_macros::java_packet;
 
@@ -26,6 +27,32 @@ pub struct MerchantOffer {
 }
 
 impl MerchantOffer {
+    /// Vanilla `MerchantOffer::getCostA` (`MerchantOffer.java:119-127`): apply demand and
+    /// special-price adjustments to a copy of the first input stack.
+    #[must_use]
+    pub fn get_cost_a(&self) -> ItemStack {
+        let base_cost = self.base_cost_a.0.as_ref();
+        let count = Self::modified_cost_count(
+            i32::from(base_cost.item_count),
+            self.demand,
+            self.price_multiplier,
+            self.special_price,
+            i32::from(base_cost.get_max_stack_size()),
+        );
+        let mut cost = base_cost.clone();
+        cost.set_count(count as u8);
+        cost
+    }
+
+    /// Vanilla `MerchantOffer::getCostB` (`MerchantOffer.java:129-131`): absent second inputs
+    /// are represented by the empty stack.
+    #[must_use]
+    pub fn get_cost_b(&self) -> ItemStack {
+        self.cost_b
+            .as_ref()
+            .map_or_else(|| ItemStack::EMPTY.clone(), |cost| cost.0.as_ref().clone())
+    }
+
     /// Vanilla `MerchantOffer::getModifiedCostCount` (`MerchantOffer.java:123-127`): the
     /// actual price charged/displayed, layering demand-driven inflation and the
     /// reputation/hero-of-the-village `special_price` discount on top of the trade
@@ -62,6 +89,69 @@ impl MerchantOffer {
 
     pub const fn reset_uses(&mut self) {
         self.uses = 0;
+    }
+
+    /// Vanilla `MerchantOffer::increaseUses` (`MerchantOffer.java:165-167`).
+    pub const fn increase_uses(&mut self) {
+        self.uses += 1;
+    }
+
+    /// Vanilla `MerchantOffer::addToSpecialPriceDiff` (`MerchantOffer.java:173-175`).
+    pub const fn add_to_special_price_diff(&mut self, add: i32) {
+        self.special_price += add;
+    }
+
+    /// Vanilla `MerchantOffer::resetSpecialPriceDiff` (`MerchantOffer.java:177-179`).
+    pub const fn reset_special_price_diff(&mut self) {
+        self.special_price = 0;
+    }
+
+    /// Vanilla `MerchantOffer::setSpecialPriceDiff` (`MerchantOffer.java:185-187`).
+    pub const fn set_special_price_diff(&mut self, value: i32) {
+        self.special_price = value;
+    }
+
+    /// Vanilla `MerchantOffer::shouldRewardExp` (`MerchantOffer.java:209-211`).
+    #[must_use]
+    pub const fn should_reward_exp(&self) -> bool {
+        self.reward_exp
+    }
+
+    /// Vanilla `MerchantOffer::satisfiedBy` (`MerchantOffer.java:213-219`): both inputs must
+    /// match their item costs and contain the required counts.
+    #[must_use]
+    pub fn satisfied_by(&self, buy_a: &ItemStack, buy_b: &ItemStack) -> bool {
+        let base_cost = self.base_cost_a.0.as_ref();
+        if buy_a.is_empty()
+            || !base_cost.are_items_and_components_equal(buy_a)
+            || buy_a.item_count < self.get_cost_a().item_count
+        {
+            return false;
+        }
+
+        let cost_b = self.get_cost_b();
+        if cost_b.is_empty() {
+            buy_b.is_empty()
+        } else {
+            !buy_b.is_empty()
+                && cost_b.are_items_and_components_equal(buy_b)
+                && buy_b.item_count >= cost_b.item_count
+        }
+    }
+
+    /// Vanilla `MerchantOffer::take` (`MerchantOffer.java:221-231`): validate and consume the
+    /// two input stacks in offer order.
+    pub fn take(&self, buy_a: &mut ItemStack, buy_b: &mut ItemStack) -> bool {
+        if !self.satisfied_by(buy_a, buy_b) {
+            return false;
+        }
+
+        buy_a.decrement(self.get_cost_a().item_count);
+        let cost_b = self.get_cost_b();
+        if !cost_b.is_empty() {
+            buy_b.decrement(cost_b.item_count);
+        }
+        true
     }
 
     /// Vanilla `MerchantOffer::setToOutOfStock` (`MerchantOffer.java:201-203`).
@@ -396,6 +486,29 @@ mod tests {
     fn modified_cost_count_clamps_between_one_and_max_stack() {
         assert_eq!(MerchantOffer::modified_cost_count(1, 0, 0.05, -10, 64), 1);
         assert_eq!(MerchantOffer::modified_cost_count(60, 20, 0.5, 0, 64), 64);
+    }
+
+    #[test]
+    fn merchant_offer_adjusts_and_takes_inputs() {
+        // Vanilla `MerchantOffer::getCostA`, `satisfiedBy`, and `take`
+        // (`MerchantOffer.java:119-127,213-231`) share the adjusted first-input count.
+        let mut trade = offer();
+        trade.demand = 2;
+        trade.price_multiplier = 0.5;
+        trade.cost_b = Some(ItemStackSerializer(Cow::Owned(ItemStack::new(
+            2,
+            &Item::PAPER,
+        ))));
+        let mut buy_a = ItemStack::new(24, &Item::EMERALD);
+        let mut buy_b = ItemStack::new(2, &Item::PAPER);
+
+        // base 12, demand 2, multiplier 0.5: 12 + floor(12 * 2 * 0.5) = 24
+        // (`MerchantOffer.java:123-127`).
+        assert_eq!(trade.get_cost_a().item_count, 24);
+        assert!(trade.satisfied_by(&buy_a, &buy_b));
+        assert!(trade.take(&mut buy_a, &mut buy_b));
+        assert!(buy_a.is_empty());
+        assert!(buy_b.is_empty());
     }
 
     #[test]

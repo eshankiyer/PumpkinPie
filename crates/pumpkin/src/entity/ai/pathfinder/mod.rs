@@ -64,6 +64,9 @@ pub struct Navigator {
     total_ticks: u32,
     path_start_pos: Option<Vector3<f64>>,
     path_type_overrides: FxHashMap<PathType, f32>,
+    /// Inherited from a controlled vehicle for `Mob.getPathfindingMalus` (`Mob.java:174-187`).
+    inherited_path_type_overrides: FxHashMap<PathType, f32>,
+    inherited_pathfinding_malus_active: bool,
     mob_width: f32,
     mob_height: f32,
     /// Current `Mob.getMaxFallDistance` value (`Mob.java:834-846`) used by walk-node evaluation.
@@ -107,6 +110,8 @@ impl Default for Navigator {
             total_ticks: 0,
             path_start_pos: None,
             path_type_overrides: FxHashMap::default(),
+            inherited_path_type_overrides: FxHashMap::default(),
+            inherited_pathfinding_malus_active: false,
             mob_width: 0.6,
             mob_height: 1.95,
             max_fall_distance: 3.0,
@@ -256,6 +261,21 @@ impl Navigator {
 
     pub fn set_pathfinding_malus(&mut self, path_type: PathType, malus: f32) {
         self.path_type_overrides.insert(path_type, malus);
+    }
+
+    /// `Mob.getPathfindingMalus` (`Mob.java:174-187`) reads the controlled vehicle's overrides
+    /// when that vehicle opts into passenger inheritance.
+    pub fn inherit_pathfinding_malus_from(&mut self, vehicle: &Self) {
+        self.inherited_path_type_overrides
+            .clone_from(&vehicle.path_type_overrides);
+        self.inherited_pathfinding_malus_active = true;
+    }
+
+    /// `Mob.getPathfindingMalus` (`Mob.java:174-187`) stops consulting vehicle values after the
+    /// mob is no longer riding an inheriting vehicle.
+    pub fn clear_inherited_pathfinding_malus(&mut self) {
+        self.inherited_path_type_overrides.clear();
+        self.inherited_pathfinding_malus_active = false;
     }
 
     /// Vanilla `PathNavigation.isStableDestination`, dispatched per navigation type:
@@ -416,10 +436,17 @@ impl Navigator {
 
     #[must_use]
     pub fn get_pathfinding_malus(&self, path_type: PathType) -> f32 {
-        self.path_type_overrides
-            .get(&path_type)
-            .copied()
-            .unwrap_or_else(|| path_type.get_malus())
+        if self.inherited_pathfinding_malus_active {
+            self.inherited_path_type_overrides
+                .get(&path_type)
+                .copied()
+                .unwrap_or_else(|| path_type.get_malus())
+        } else {
+            self.path_type_overrides
+                .get(&path_type)
+                .copied()
+                .unwrap_or_else(|| path_type.get_malus())
+        }
     }
 
     pub const fn set_mob_dimensions(&mut self, width: f32, height: f32) {
@@ -456,6 +483,8 @@ impl Navigator {
             total_ticks: 0,
             path_start_pos: None,
             path_type_overrides: self.path_type_overrides.clone(),
+            inherited_path_type_overrides: self.inherited_path_type_overrides.clone(),
+            inherited_pathfinding_malus_active: self.inherited_pathfinding_malus_active,
             mob_width: self.mob_width,
             mob_height: self.mob_height,
             max_fall_distance: self.max_fall_distance,
@@ -619,9 +648,17 @@ impl Navigator {
         mob_data.set_pathfinding_malus(PathType::Lava, -1.0);
         mob_data.set_pathfinding_malus(PathType::DangerOther, 8.0);
 
-        // Apply per-mob pathfinding malus overrides
-        for (&path_type, &malus) in &self.path_type_overrides {
-            mob_data.set_pathfinding_malus(path_type, malus);
+        // `Mob.getPathfindingMalus` (`Mob.java:174-187`) checks inherited vehicle values before
+        // applying the passenger's own overrides.
+        if self.inherited_pathfinding_malus_active {
+            for (&path_type, &malus) in &self.inherited_path_type_overrides {
+                mob_data.set_pathfinding_malus(path_type, malus);
+            }
+        } else {
+            // Apply per-mob pathfinding malus overrides.
+            for (&path_type, &malus) in &self.path_type_overrides {
+                mob_data.set_pathfinding_malus(path_type, malus);
+            }
         }
 
         self.evaluator.prepare(context, mob_data);
@@ -1182,5 +1219,26 @@ impl Navigator {
             Vector3::new(f64::from(x), f64::from(y), f64::from(z)),
             goal.speed,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Navigator, node::PathType};
+
+    #[test]
+    fn inherited_pathfinding_malus_is_used_until_cleared() {
+        // `Mob.getPathfindingMalus` (`Mob.java:174-187`) reads the controlled vehicle's value
+        // before falling back to the passenger's own pathfinding defaults.
+        let mut vehicle = Navigator::default();
+        vehicle.set_pathfinding_malus(PathType::Lava, 0.0);
+
+        let mut passenger = Navigator::default();
+        passenger.set_pathfinding_malus(PathType::Lava, 2.0);
+        passenger.inherit_pathfinding_malus_from(&vehicle);
+        assert_eq!(passenger.get_pathfinding_malus(PathType::Lava), 0.0);
+
+        passenger.clear_inherited_pathfinding_malus();
+        assert_ne!(passenger.get_pathfinding_malus(PathType::Lava), 0.0);
     }
 }

@@ -235,7 +235,9 @@ impl HappyGhastEntity {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) =
             Box::new(GhastMoveControl::default());
-        self.mob_entity.clear_ai_goals(self).await;
+        // `Mob.removeFreeWill` (`Mob.java:1417-1421`) is the live reset used before adult goals
+        // are registered.
+        self.mob_entity.remove_free_will(self).await;
         self.mob_entity.add_goal(3, SwimGoal::default());
         self.mob_entity.add_goal(
             4,
@@ -255,7 +257,8 @@ impl HappyGhastEntity {
             .unwrap_or_else(std::sync::PoisonError::into_inner) =
             Box::new(FlyingMoveControl::new(180.0, true));
         self.set_server_still_timeout(0);
-        self.mob_entity.clear_ai_goals(self).await;
+        // `Mob.removeFreeWill` (`Mob.java:1417-1421`) is the live reset for the baby goal set.
+        self.mob_entity.remove_free_will(self).await;
     }
 
     async fn try_equip_harness(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {

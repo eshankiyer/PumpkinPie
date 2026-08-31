@@ -525,8 +525,11 @@ impl EntitySelectorParserSuggestions {
             }
             Self::Gamemode => {
                 let mut prefix = builder.remaining_lowercase();
+                // Vanilla `EntitySelectorOptions` only suggests positive gamemodes while its
+                // invertable state is unrestricted, and only suggests negative values while it
+                // can still accept them (`EntitySelectorOptions.java:185-236`).
                 let mut add_normal = !parser.has_flag(Flags::GAMEMODE_NOT_EQUALS_SET);
-                let mut add_inverted = true;
+                let mut add_inverted = !parser.has_flag(Flags::GAMEMODE_EQUALS_SET);
 
                 if !prefix.is_empty() {
                     // ! is an ASCII character, so this is fine.
@@ -644,6 +647,7 @@ impl EntitySelectorParserSuggestions {
 mod tests {
     use super::EntitySelectorParser;
     use crate::command::string_reader::StringReader;
+    use crate::command::suggestion::suggestions::SuggestionsBuilder;
 
     fn parse(selector: &str) -> bool {
         let mut reader = StringReader::new(selector);
@@ -661,5 +665,26 @@ mod tests {
         assert!(parse("@e[type=!#undead]"));
         assert!(!parse("@e[type=pumpkin:iron_golem]"));
         assert!(!parse("@e[type=minecraft:not_an_entity]"));
+    }
+
+    #[test]
+    fn gamemode_suggestions_respect_positive_state() {
+        // Regression for `EntitySelectorOptions` value suggestions (`EntitySelectorOptions.java:185-236`).
+        let input = "@e[gamemode=survival";
+        let mut reader = StringReader::new(input);
+        let mut parser = EntitySelectorParser::new(&mut reader, true);
+        let _ = parser.parse();
+
+        let suggestions = parser.fill_suggestions(
+            &SuggestionsBuilder::new(input, input.len()),
+            |suggestions| suggestions,
+        );
+
+        assert!(
+            suggestions
+                .suggestions
+                .iter()
+                .all(|suggestion| !suggestion.text_as_string_ref().starts_with('!'))
+        );
     }
 }

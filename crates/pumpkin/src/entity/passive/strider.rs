@@ -5,6 +5,7 @@ use pumpkin_data::sound::Sound;
 use pumpkin_data::{data_component_impl::EquipmentSlot, entity::EntityType, item::Item};
 use pumpkin_util::math::boundingbox::EntityDimensions;
 
+use crate::entity::ai::pathfinder::node::PathType;
 use crate::entity::item_steerable::{ItemBasedSteering, ItemSteerable};
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -43,6 +44,15 @@ impl StriderEntity {
             saddled: std::sync::atomic::AtomicBool::new(false),
         };
         let mob_arc = Arc::new(strider);
+        // `Strider` constructor (`Strider.java:93-100`) supplies these pathfinding maluses.
+        #[allow(clippy::semicolon_if_nothing_returned)]
+        {
+            let mut navigator = mob_arc.mob_entity.navigator.lock().unwrap();
+            navigator.set_pathfinding_malus(PathType::Water, -1.0);
+            navigator.set_pathfinding_malus(PathType::Lava, 0.0);
+            navigator.set_pathfinding_malus(PathType::DangerFire, 0.0);
+            navigator.set_pathfinding_malus(PathType::DamageFire, 0.0)
+        };
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
             Arc::downgrade(&mob_arc)
@@ -118,6 +128,12 @@ impl Animal for StriderEntity {
 }
 
 impl Mob for StriderEntity {
+    /// `Strider.shouldPassengersInheritMalus` (`Strider.java:324-327`) lets controlled mobs use
+    /// the strider's lava-safe pathfinding costs.
+    fn should_passengers_inherit_malus(&self) -> bool {
+        true
+    }
+
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
     }

@@ -842,19 +842,24 @@ impl VillagerEntity {
 
         let mut offers = self.offers.lock().await;
         for offer in offers.iter_mut() {
-            offer.special_price = -((reputation as f32 * offer.price_multiplier).floor() as i32);
+            // Vanilla `MerchantOffer::setSpecialPriceDiff`/`addToSpecialPriceDiff`
+            // (`MerchantOffer.java:173-187`) apply reputation and hero discounts cumulatively.
+            offer.set_special_price_diff(
+                -((reputation as f32 * offer.price_multiplier).floor() as i32),
+            );
             if let Some(amplifier) = hero_amplifier {
                 let discount = ((0.3 + 0.0625 * f64::from(amplifier))
                     * f64::from(offer.base_cost_a.0.item_count))
                 .floor() as i32;
-                offer.special_price -= discount.max(1);
+                offer.add_to_special_price_diff(-discount.max(1));
             }
         }
     }
 
     async fn reset_special_prices(&self) {
         for offer in self.offers.lock().await.iter_mut() {
-            offer.special_price = 0;
+            // Vanilla `MerchantOffer::resetSpecialPriceDiff` (`MerchantOffer.java:177-179`).
+            offer.reset_special_price_diff();
         }
     }
 
@@ -893,8 +898,10 @@ impl VillagerEntity {
             let Some(offer) = offers.get_mut(offer_index) else {
                 return;
             };
-            offer.uses += 1;
-            (offer.xp, offer.reward_exp)
+            // Vanilla `MerchantOffer::increaseUses`/`shouldRewardExp`
+            // (`MerchantOffer.java:165-167,209-211`) update the completed trade.
+            offer.increase_uses();
+            (offer.xp, offer.should_reward_exp())
         };
 
         let current_xp = self.xp.fetch_add(xp_gain, Ordering::Relaxed) + xp_gain;
@@ -1724,15 +1731,9 @@ impl VillagerEntity {
         let mut recipes = Vec::with_capacity(offers.len() + usize::from(level < 5));
         for (index, offer) in offers.iter().enumerate() {
             let base_cost = &offer.base_cost_a.0;
-            let demand_bonus = (i32::from(base_cost.item_count).saturating_mul(offer.demand) as f32
-                * offer.price_multiplier)
-                .floor()
-                .max(0.0) as i32;
-            let adjusted_count = i32::from(base_cost.item_count)
-                .saturating_add(demand_bonus)
-                .saturating_add(offer.special_price)
-                .clamp(1, i32::from(base_cost.get_max_stack_size()))
-                as u8;
+            // Vanilla `MerchantOffer::getCostA` (`MerchantOffer.java:119-127`) supplies the
+            // adjusted Bedrock buy-A count as well as the Java merchant-screen count.
+            let adjusted_cost = offer.get_cost_a();
 
             let mut recipe = NbtCompound::new();
             recipe.put_int("netId", index as i32 + 1);
@@ -1761,7 +1762,10 @@ impl VillagerEntity {
             );
             recipe.put_int("demand", offer.demand);
             recipe.put_int("tier", (index as i32 / 2).min(tier));
-            recipe.put_compound("buyA", Self::bedrock_trade_item(base_cost, adjusted_count));
+            recipe.put_compound(
+                "buyA",
+                Self::bedrock_trade_item(base_cost, adjusted_cost.item_count),
+            );
             recipe.put_compound(
                 "buyB",
                 offer.cost_b.as_ref().map_or_else(NbtCompound::new, |cost| {

@@ -1541,8 +1541,10 @@ impl CollisionRule {
 /// any other entity (`net.minecraft.world.entity.Entity#getScoreboardName`).
 #[must_use]
 pub fn entity_scoreboard_name(entity: &dyn crate::entity::EntityBase) -> String {
+    // Vanilla uses the entity's `getScoreboardName` for non-player scoreholders
+    // (`Entity.java:3259-3262`).
     entity.get_player().map_or_else(
-        || entity.get_entity().entity_uuid.to_string(),
+        || entity.get_entity().get_scoreboard_name(),
         |player| player.gameprofile.name.clone(),
     )
 }

@@ -18,7 +18,13 @@ impl BlockBehaviour for CobwebBlock {
             } else {
                 Vector3::new(0.25, 0.05, 0.25)
             };
-            entity.slow_movement(args.state, vec).await;
+            if let Some(player) = args.entity.get_player() {
+                // `Player.makeStuckInBlock` is the player-specific collision hook
+                // (`Player.java:1515-1520`).
+                player.make_stuck_in_block(args.state, vec).await;
+            } else {
+                entity.slow_movement(args.state, vec).await;
+            }
         })
     }
 }

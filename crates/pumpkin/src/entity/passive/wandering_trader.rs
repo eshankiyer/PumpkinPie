@@ -39,6 +39,12 @@ use crate::entity::{
 /// spawns; traders created via spawn egg/command retain the zero default.
 const DEFAULT_DESPAWN_DELAY: i32 = 0;
 
+// Vanilla `MerchantContainer.stillValid` requires the current trading player
+// (`MerchantContainer.java:79-81`).
+fn trading_player_matches(trading_player: Option<uuid::Uuid>, player_uuid: uuid::Uuid) -> bool {
+    trading_player.is_some_and(|trading_player| trading_player == player_uuid)
+}
+
 /// The seven `AvoidEntityGoal`s of `WanderingTrader.registerGoals`
 /// (`WanderingTrader.java:80-86`), each at priority 1 with speeds `0.5, 0.5`.
 ///
@@ -245,6 +251,7 @@ impl WanderingTraderEntity {
 }
 
 impl ScreenHandlerFactory for WanderingTraderEntity {
+    #[expect(clippy::too_many_lines)]
     fn create_screen_handler<'a>(
         &'a self,
         sync_id: u8,
@@ -302,6 +309,24 @@ impl ScreenHandlerFactory for WanderingTraderEntity {
                     .unwrap_or_else(std::sync::PoisonError::into_inner) =
                     Some(server_player.get_entity().entity_uuid);
             }
+
+            // Vanilla `MerchantMenu.stillValid` delegates to the merchant and only remains
+            // valid for its current trading player (`MerchantContainer.java:79-81`,
+            // `MerchantMenu.java:62-65`).
+            let validity_weak = self_weak.clone();
+            handler.validity_check = Some(Box::new(move |inventory_player| {
+                let Some(player) = inventory_player.as_any().downcast_ref::<Player>() else {
+                    return false;
+                };
+                validity_weak.upgrade().is_some_and(|trader| {
+                    let trading_player = *trader
+                        .trading_player
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    trading_player_matches(trading_player, player.get_entity().entity_uuid)
+                })
+            }));
+
             let close_weak = self_weak.clone();
             handler.on_close = Some(Box::new(move || {
                 let close_weak = close_weak.clone();
@@ -325,8 +350,10 @@ impl ScreenHandlerFactory for WanderingTraderEntity {
                                 return;
                             }
                             let offer = &mut offers[offer_index];
-                            offer.uses += 1;
-                            offer.reward_exp
+                            // Vanilla `MerchantOffer::increaseUses`/`shouldRewardExp`
+                            // (`MerchantOffer.java:165-167,209-211`) update the completed trade.
+                            offer.increase_uses();
+                            offer.should_reward_exp()
                         };
 
                         // `WanderingTrader::rewardTradeXp` (WanderingTrader.java:158-163): unlike
@@ -662,7 +689,7 @@ impl Mob for WanderingTraderEntity {
 
 #[cfg(test)]
 mod tests {
-    use super::AVOIDED;
+    use super::{AVOIDED, trading_player_matches};
     use pumpkin_data::entity::EntityType;
 
     /// `WanderingTrader.registerGoals` (`WanderingTrader.java:80-86`) registers exactly seven
@@ -694,5 +721,17 @@ mod tests {
         assert!((radius(&EntityType::PILLAGER) - 15.0).abs() < f64::EPSILON);
         assert!((radius(&EntityType::ILLUSIONER) - 12.0).abs() < f64::EPSILON);
         assert!((radius(&EntityType::ZOGLIN) - 10.0).abs() < f64::EPSILON);
+    }
+
+    // Vanilla `MerchantContainer.stillValid` compares the current trading player by identity
+    // (`MerchantContainer.java:79-81`).
+    #[test]
+    fn trading_player_validation_requires_the_current_player() {
+        let current = uuid::Uuid::new_v4();
+        let other = uuid::Uuid::new_v4();
+
+        assert!(trading_player_matches(Some(current), current));
+        assert!(!trading_player_matches(Some(current), other));
+        assert!(!trading_player_matches(None, current));
     }
 }

@@ -337,7 +337,12 @@ pub(crate) async fn base_spawner_server_tick(
         entity
             .get_entity()
             .set_rotation(rand::random::<f32>() * 360.0, 0.0);
-        world.spawn_entity(entity).await;
+        world.spawn_entity(entity.clone()).await;
+        // `BaseSpawner.serverTick` (`BaseSpawner.java:169-177`) invokes `Mob.spawnAnim` after
+        // the entity has been added to the level.
+        if let Some(mob) = entity.get_mob() {
+            mob.spawn_anim();
+        }
         world.sync_world_event(WorldEvent::ParticlesMobblockSpawn, position, 0);
         update_spawns = true;
     }

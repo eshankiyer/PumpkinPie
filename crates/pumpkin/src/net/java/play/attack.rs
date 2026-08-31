@@ -35,10 +35,13 @@ impl JavaClient {
             .await;
             return;
         };
-        if !attack_target_is_in_range(
-            player.gamemode.load(),
-            player.eye_position(),
+        let main_hand = player.inventory().held_item().await;
+        // `ServerGamePacketListenerImpl.handleAttack` passes the held weapon and a 3.0 buffer
+        // to `Player.isWithinAttackRange` (`ServerGamePacketListenerImpl.java:1807-1819`).
+        if !player.is_within_attack_range(
+            &main_hand,
             target.get_entity().bounding_box.load(),
+            ATTACK_PACKET_RANGE_BUFFER,
         ) {
             return;
         }
@@ -58,6 +61,11 @@ impl JavaClient {
                 );
                 return;
             }
+        }
+        // Vanilla rejects an undercharged item before `Player.attack`
+        // (`ServerGamePacketListenerImpl.java:1807-1819`).
+        if player.cannot_attack_with_item(&main_hand, 5) {
+            return;
         }
         player.attack(target).await;
     }

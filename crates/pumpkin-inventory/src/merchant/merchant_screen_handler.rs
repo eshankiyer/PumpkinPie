@@ -95,8 +95,10 @@ impl MerchantScreenHandler {
         let Some(offer) = self.offers.get(index) else {
             return;
         };
-        let cost_a = offer.base_cost_a.0.as_ref().clone();
-        let cost_b = offer.cost_b.as_ref().map(|cost| cost.0.as_ref().clone());
+        // Vanilla `MerchantOffer::getCostA`/`getCostB` (`MerchantOffer.java:119-131`) provide
+        // the stacks used to populate the merchant payment slots.
+        let cost_a = offer.get_cost_a();
+        let cost_b = offer.get_cost_b();
         let player_slots_end = self.get_behaviour().slots.len() as i32;
 
         for index in 0..2 {
@@ -118,27 +120,9 @@ impl MerchantScreenHandler {
         }
 
         self.move_from_inventory_to_payment_slot(0, &cost_a).await;
-        if let Some(cost_b) = cost_b {
+        if !cost_b.is_empty() {
             self.move_from_inventory_to_payment_slot(1, &cost_b).await;
         }
-    }
-
-    fn adjusted_cost_a(offer: &pumpkin_protocol::java::client::play::MerchantOffer) -> ItemStack {
-        let mut cost = offer.base_cost_a.0.as_ref().clone();
-        let demand = i32::from(cost.item_count).saturating_mul(offer.demand) as f32;
-        let demand_bonus = (demand * offer.price_multiplier).floor().max(0.0) as i32;
-        let count = i32::from(cost.item_count)
-            .saturating_add(demand_bonus)
-            .saturating_add(offer.special_price)
-            .clamp(1, i32::from(cost.get_max_stack_size()));
-        cost.set_count(count as u8);
-        cost
-    }
-
-    fn matches_cost(cost: &ItemStack, input: &ItemStack) -> bool {
-        !input.is_empty()
-            && cost.are_items_and_components_equal(input)
-            && input.item_count >= cost.item_count
     }
 
     fn satisfies(
@@ -146,11 +130,9 @@ impl MerchantScreenHandler {
         input_a: &ItemStack,
         input_b: &ItemStack,
     ) -> bool {
-        Self::matches_cost(&Self::adjusted_cost_a(offer), input_a)
-            && offer.cost_b.as_ref().map_or_else(
-                || input_b.is_empty(),
-                |cost_b| Self::matches_cost(&cost_b.0, input_b),
-            )
+        // Vanilla `MerchantOffer::satisfiedBy` (`MerchantOffer.java:213-219`) is the live
+        // eligibility check for the result slot.
+        offer.satisfied_by(input_a, input_b)
     }
 
     fn input_order(
@@ -187,16 +169,6 @@ impl MerchantScreenHandler {
             })
     }
 
-    async fn consume_payment(&self, slot: usize, count: u8) {
-        let mut stack = self.inventory.get_stack(slot).await;
-        stack.decrement(count);
-        if stack.is_empty() {
-            stack = ItemStack::EMPTY.clone();
-        }
-        self.inventory.set_stack(slot, stack).await;
-        self.get_behaviour().slots[slot].mark_dirty().await;
-    }
-
     async fn complete_trade(&mut self, player: &dyn InventoryPlayer) -> bool {
         let Some(offer_index) = self.active_offer else {
             return false;
@@ -213,14 +185,42 @@ impl MerchantScreenHandler {
         let Some(swapped) = Self::input_order(offer, &input_a, &input_b) else {
             return false;
         };
-        let cost_a = Self::adjusted_cost_a(offer).item_count;
-        let cost_b = offer.cost_b.as_ref().map(|cost| cost.0.item_count);
 
-        self.consume_payment(usize::from(swapped), cost_a).await;
-        if let Some(cost_b) = cost_b {
-            self.consume_payment(usize::from(!swapped), cost_b).await;
+        // Vanilla `MerchantOffer::take` (`MerchantOffer.java:221-231`) consumes validated
+        // inputs in offer order; retain the slot swap used by the surrounding screen handler.
+        let (mut buy_a, mut buy_b) = if swapped {
+            (input_b, input_a)
+        } else {
+            (input_a, input_b)
+        };
+        if !offer.take(&mut buy_a, &mut buy_b) {
+            return false;
         }
-        self.offers[offer_index].uses += 1;
+        let slot_a = usize::from(swapped);
+        let slot_b = usize::from(!swapped);
+        self.inventory
+            .set_stack(
+                slot_a,
+                if buy_a.is_empty() {
+                    ItemStack::EMPTY.clone()
+                } else {
+                    buy_a
+                },
+            )
+            .await;
+        self.inventory
+            .set_stack(
+                slot_b,
+                if buy_b.is_empty() {
+                    ItemStack::EMPTY.clone()
+                } else {
+                    buy_b
+                },
+            )
+            .await;
+        self.get_behaviour().slots[slot_a].mark_dirty().await;
+        self.get_behaviour().slots[slot_b].mark_dirty().await;
+        self.offers[offer_index].increase_uses();
 
         if let Some(on_trade) = &self.on_trade {
             on_trade(offer_index).await;
@@ -479,6 +479,12 @@ impl ScreenHandler for MerchantScreenHandler {
         player: &'a dyn InventoryPlayer,
     ) -> ScreenHandlerFuture<'a, ()> {
         Box::pin(async move {
+            if action_type == pumpkin_protocol::java::server::play::SlotActionType::PickupAll {
+                // Vanilla `MerchantMenu.canTakeItemForPickAll` rejects every target in this
+                // menu (`MerchantMenu.java:95-98`); `AbstractContainerMenu` applies that hook
+                // while processing PICKUP_ALL (`AbstractContainerMenu.java:534-545`).
+                return;
+            }
             if slot_index == 2 {
                 self.update_result_slot().await;
             }
@@ -911,6 +917,35 @@ mod tests {
         assert_eq!(
             handler.get_behaviour().cursor_stack.lock().await.item.id,
             Item::EMERALD.id
+        );
+    }
+
+    #[tokio::test]
+    async fn pickup_all_does_not_take_merchant_inputs() {
+        let (player_inventory, merchant_inventory) = inventories();
+        merchant_inventory
+            .set_stack(0, ItemStack::new(9, &Item::EMERALD))
+            .await;
+        let player = TestPlayer::new(player_inventory.clone());
+        let mut handler = MerchantScreenHandler::new(
+            1,
+            &player_inventory,
+            merchant_inventory.clone(),
+            vec![bookshelf_offer()],
+        )
+        .await;
+        *handler.get_behaviour().cursor_stack.lock().await = ItemStack::new(1, &Item::EMERALD);
+
+        // Vanilla `MerchantMenu.canTakeItemForPickAll` is false for payment slots too
+        // (`MerchantMenu.java:95-98`).
+        handler
+            .on_slot_click(0, 0, SlotActionType::PickupAll, &player)
+            .await;
+
+        assert_eq!(merchant_inventory.get_stack(0).await.item_count, 9);
+        assert_eq!(
+            handler.get_behaviour().cursor_stack.lock().await.item_count,
+            1
         );
     }
 

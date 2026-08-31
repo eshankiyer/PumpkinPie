@@ -789,6 +789,24 @@ mod tests {
         ));
     }
 
+    /// Vanilla caches `useShapeForLightOcclusion` while constructing each block state
+    /// (`BlockBehaviour.java:227-229,460-465,576-577`); generated state data is the live
+    /// representation used by the lighting and occlusion queries.
+    #[test]
+    fn light_occlusion_shape_selection_is_data_modeled() {
+        assert!(!Block::STONE.default_state.use_shape_for_light_occlusion);
+        assert!(
+            Block::STONECUTTER
+                .default_state
+                .use_shape_for_light_occlusion
+        );
+        assert!(
+            Block::OAK_STAIRS
+                .default_state
+                .use_shape_for_light_occlusion
+        );
+    }
+
     /// Vanilla `BlockStateBase.isSuffocating` defaults at `BlockBehaviour.java:801-803`;
     /// these cases cover the registered overrides in `Blocks.java:637-638, 1299-1300,
     /// 3702-3703, 5257-5258, 5783-5785`.

@@ -112,9 +112,14 @@ impl BlockBehaviour for PowderSnowBlock {
             let stuck_in_snow = args.entity.get_living_entity().is_none()
                 || args.world.get_block(&entity.block_pos.load()) == &Block::POWDER_SNOW;
             if stuck_in_snow {
-                entity
-                    .slow_movement(args.state, Vector3::new(0.9, 1.5, 0.9))
-                    .await;
+                let multiplier = Vector3::new(0.9, 1.5, 0.9);
+                if let Some(player) = args.entity.get_player() {
+                    // `Player.makeStuckInBlock` is the player-specific collision hook
+                    // (`Player.java:1515-1520`).
+                    player.make_stuck_in_block(args.state, multiplier).await;
+                } else {
+                    entity.slow_movement(args.state, multiplier).await;
+                }
             }
 
             if entity.fire_ticks.load(std::sync::atomic::Ordering::Relaxed) > 0 {

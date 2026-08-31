@@ -71,10 +71,13 @@ impl JavaClient {
                                 return;
                             }
 
-                            if !attack_target_is_in_range(
-                                player.gamemode.load(),
-                                player.eye_position(),
+                            let main_hand = player.inventory().held_item().await;
+                            // `Player.isWithinAttackRange` uses the held weapon's attack range
+                            // for attack interactions (`Player.java:2010-2012`).
+                            if !player.is_within_attack_range(
+                                &main_hand,
                                 event.target.get_entity().bounding_box.load(),
+                                ATTACK_PACKET_RANGE_BUFFER,
                             ) {
                                 return;
                             }

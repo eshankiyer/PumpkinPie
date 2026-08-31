@@ -910,7 +910,9 @@ impl LivingEntity {
             return;
         }
 
-        let percent_frozen = f64::from(frozen_ticks) / f64::from(Entity::MAX_FROZEN_TICKS);
+        // `LivingEntity.tryAddFrost` uses `Entity.getPercentFrozen`, including its clamp
+        // (`LivingEntity.java:523-545`; `Entity.java:2815-2818`).
+        let percent_frozen = f64::from(self.entity.get_percent_frozen());
         self.update_attribute(&Attributes::MOVEMENT_SPEED, |instance| {
             instance.add_or_replace_modifier(Modifier {
                 id: Self::POWDER_SNOW_SPEED_MODIFIER_ID.to_string(),
@@ -1702,6 +1704,34 @@ impl LivingEntity {
 
     pub const fn entity_id(&self) -> i32 {
         self.entity.entity_id
+    }
+
+    /// Vanilla `LivingEntity.getFallFlyingTicks` exposes the consecutive glide counter
+    /// (`LivingEntity.java:3661-3663`).
+    #[must_use]
+    pub fn get_fall_flying_ticks(&self) -> u32 {
+        self.fall_fly_ticks.load(Relaxed)
+    }
+
+    /// Vanilla `LivingEntity.getLastHurtByMobTimestamp` exposes the tick at which an attacker
+    /// last damaged this entity (`LivingEntity.java:629-631`).
+    #[must_use]
+    pub fn get_last_hurt_by_mob_timestamp(&self) -> i32 {
+        self.last_attacked_time.load(Relaxed)
+    }
+
+    /// Vanilla `LivingEntity.getLastHurtMobTimestamp` exposes the tick at which this entity
+    /// last damaged another living entity (`LivingEntity.java:655-657`).
+    #[must_use]
+    pub fn get_last_hurt_mob_timestamp(&self) -> i32 {
+        self.last_attack_time.load(Relaxed)
+    }
+
+    /// Vanilla `LivingEntity.getLastHurtByPlayerMemoryTime` exposes the remaining player-kill
+    /// credit timer (`LivingEntity.java:4011-4013`).
+    #[must_use]
+    pub fn get_last_hurt_by_player_memory_time(&self) -> i32 {
+        self.last_hurt_by_player_time.load(Relaxed)
     }
 
     /// Vanilla `LivingEntity.isAffectedByPotions`, which `ArmorStand` overrides to false: splash
@@ -2596,7 +2626,7 @@ impl LivingEntity {
 
         // The counter was already advanced for this tick by `tick_movement`; vanilla adds
         // one to it here (`LivingEntity.java:3190`).
-        let check_fall_fly_ticks = self.fall_fly_ticks.load(Relaxed).wrapping_add(1);
+        let check_fall_fly_ticks = self.get_fall_flying_ticks().wrapping_add(1);
         let (glide_event_tick, damage_glider_tick) = fall_flying_schedule(check_fall_fly_ticks);
 
         if damage_glider_tick {
@@ -3346,7 +3376,7 @@ impl LivingEntity {
                 // `dropAllDeathLoot`: the player-kill branch is driven by the memory window, so
                 // a mob that a player tagged and that then died to fall damage, fire or drowning
                 // still drops and still awards experience.
-                killed_by_player: Some(self.last_hurt_by_player_time.load(Relaxed) > 0),
+                killed_by_player: Some(self.get_last_hurt_by_player_memory_time() > 0),
                 this_entity: Some(self.entity.entity_type),
                 killer_entity: cause.map(|c| c.get_entity().entity_type),
                 direct_killer_entity: source.map(|s| s.get_entity().entity_type),
@@ -6639,7 +6669,10 @@ impl EntityBase for LivingEntity {
 
                 if let Some(item) = item_in_use.as_ref()
                     && remaining_use_ticks.is_some_and(|r| r <= 0)
+                    && !server.item_registry.use_on_release(item.item.id, item)
                 {
+                    // `LivingEntity.updateUsingItem` skips completion for items whose
+                    // `useOnRelease` is true (`LivingEntity.java:3472-3474`).
                     // Consume item
                     if let Some(food) = item.get_data_component::<FoodImpl>()
                         && let Some(player) = caller.get_player()
@@ -6864,7 +6897,7 @@ impl EntityBase for LivingEntity {
                 if self.hurt_cooldown.load(Relaxed) > 0 {
                     self.hurt_cooldown.fetch_sub(1, Relaxed);
                 }
-                if self.last_hurt_by_player_time.load(Relaxed) > 0 {
+                if self.get_last_hurt_by_player_memory_time() > 0 {
                     self.last_hurt_by_player_time.fetch_sub(1, Relaxed);
                 }
                 if self.is_dead_or_dying() {

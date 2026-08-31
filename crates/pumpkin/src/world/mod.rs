@@ -4896,10 +4896,9 @@ impl World {
         let sleeping_player_count = players
             .iter()
             .filter(|player| {
-                player
-                    .sleeping_since
-                    .load()
-                    .is_some_and(|since| since >= 100)
+                // `Player.isSleepingLongEnough` is the vanilla 100-tick night-skip gate
+                // (`Player.java:1355-1357`).
+                player.is_sleeping_long_enough()
             })
             .count();
         drop(players);
@@ -6466,7 +6465,7 @@ impl World {
                 BlockStateId::AIR
             };
 
-            let broken_state_id = self.set_block_state(position, new_state_id, flags).await;
+            self.set_block_state(position, new_state_id, flags).await;
 
             // Level.java destroyBlock, line 298: emitted once the block is actually gone.
             let context =
@@ -6496,11 +6495,13 @@ impl World {
             // (`Player.java:1858-1861`; `BlockBehaviour.java:560-703`).
             let luck = cause.as_ref().map_or(0.0, |player| player.get_luck());
 
-            if Block::from_state_id(broken_state_id) != &Block::FIRE {
+            // Vanilla emits the destroy event from the original state before replacing the block
+            // (`Level.java:280-298`).
+            if Block::from_state_id(broken_block_state) != &Block::FIRE {
                 let je_particles_packet = CWorldEvent::new(
                     WorldEvent::ParticlesDestroyBlock as i32,
                     *position,
-                    broken_state_id.as_u16().into(),
+                    broken_block_state.as_u16().into(),
                     false,
                 );
                 let be_particles_packet = CLevelEvent {
@@ -6510,7 +6511,7 @@ impl World {
                         position.0.y as f32,
                         position.0.z as f32,
                     ),
-                    data: VarInt(BlockState::to_be_network_id(broken_state_id).into()),
+                    data: VarInt(BlockState::to_be_network_id(broken_block_state).into()),
                 };
                 let chunk_pos = position.chunk_position();
                 match &cause {

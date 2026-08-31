@@ -125,9 +125,14 @@ impl BlockBehaviour for SweetBerryBushBlock {
             if entity.entity_type == &EntityType::FOX || entity.entity_type == &EntityType::BEE {
                 return;
             }
-            entity
-                .slow_movement(args.state, Vector3::new(0.8, 0.75, 0.8))
-                .await;
+            let multiplier = Vector3::new(0.8, 0.75, 0.8);
+            if let Some(player) = args.entity.get_player() {
+                // `Player.makeStuckInBlock` is the player-specific collision hook
+                // (`Player.java:1515-1520`).
+                player.make_stuck_in_block(args.state, multiplier).await;
+            } else {
+                entity.slow_movement(args.state, multiplier).await;
+            }
             let mov = if living_entity.is_player() {
                 living_entity.get_movement()
             } else {

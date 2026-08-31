@@ -815,6 +815,7 @@ impl ItemBehaviour for EmptyBucketItem {
 }
 
 impl ItemBehaviour for FilledBucketItem {
+    #[expect(clippy::too_many_lines)]
     fn normal_use<'a>(
         &'a self,
         item: &'a Item,
@@ -843,6 +844,22 @@ impl ItemBehaviour for FilledBucketItem {
             let Some((pos, direction)) = world.raycast(start_pos, end_pos, checker).await else {
                 return;
             };
+
+            // `BucketItem.use` checks `Player.mayUseItemAt` for the adjacent placement
+            // position (`BucketItem.java:54-60`).
+            let placement_pos = pos.offset(direction.to_offset());
+            let held_stack = player.inventory().held_item().await;
+            let permission_stack = if held_stack.item.id == item.id {
+                held_stack
+            } else {
+                player.inventory().off_hand_item().await
+            };
+            if !player
+                .may_use_item_at(&placement_pos, direction, &permission_stack)
+                .await
+            {
+                return;
+            }
 
             let player_arc = world.get_player_by_id(player.get_entity().entity_id);
 

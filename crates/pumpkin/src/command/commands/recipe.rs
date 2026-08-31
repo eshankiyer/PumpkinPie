@@ -9,7 +9,6 @@ use crate::command::suggestion::provider::SuggestionProvider;
 use crate::command::suggestion::suggestions::{Suggestions, SuggestionsBuilder};
 use crate::entity::EntityBase;
 use pumpkin_data::translation;
-use pumpkin_protocol::codec::recipe::DynamicRecipe;
 use pumpkin_util::PermissionLvl;
 use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
 use pumpkin_util::text::TextComponent;
@@ -21,39 +20,6 @@ const PERMISSION: &str = "minecraft:command.recipe";
 
 static ERROR_RECIPE_NOT_FOUND: CommandErrorType<1> =
     CommandErrorType::new(translation::java::RECIPE_NOTFOUND, "Unknown recipe: %s");
-
-fn get_recipe_id(recipe: &DynamicRecipe) -> String {
-    match recipe {
-        DynamicRecipe::Crafting(crafting) => match crafting {
-            pumpkin_protocol::codec::recipe::OwnedCraftingRecipe::Shaped {
-                recipe_id,
-                result,
-                ..
-            }
-            | pumpkin_protocol::codec::recipe::OwnedCraftingRecipe::Shapeless {
-                recipe_id,
-                result,
-                ..
-            }
-            | pumpkin_protocol::codec::recipe::OwnedCraftingRecipe::Dye {
-                recipe_id, result, ..
-            }
-            | pumpkin_protocol::codec::recipe::OwnedCraftingRecipe::Imbue {
-                recipe_id,
-                result,
-                ..
-            } => recipe_id.clone().unwrap_or_else(|| result.item_id.clone()),
-        },
-        DynamicRecipe::Cooking(cooking) => match cooking {
-            pumpkin_protocol::codec::recipe::OwnedCookingRecipeType::Smelting(r)
-            | pumpkin_protocol::codec::recipe::OwnedCookingRecipeType::Blasting(r)
-            | pumpkin_protocol::codec::recipe::OwnedCookingRecipeType::Smoking(r)
-            | pumpkin_protocol::codec::recipe::OwnedCookingRecipeType::CampfireCooking(r) => {
-                r.recipe_id.clone()
-            }
-        },
-    }
-}
 
 struct RecipeSuggestionProvider;
 
@@ -68,9 +34,8 @@ impl SuggestionProvider for RecipeSuggestionProvider {
         Box::pin(async move {
             builder = builder.suggest("*");
             if let Some(server) = server {
-                let recipes = server.recipe_manager.get_dynamic_recipes_internal().await;
-                for recipe in recipes {
-                    let id = get_recipe_id(&recipe);
+                let recipes = server.recipe_manager.get_recipe_ids().await;
+                for id in recipes {
                     builder = builder.suggest(id);
                 }
             }
@@ -92,7 +57,9 @@ impl CommandExecutor for RecipeGiveExecutor {
                     .create_without_context(TextComponent::text(recipe_str.to_string()))
             })?;
 
-            let all_recipes = server.recipe_manager.get_dynamic_recipes_internal().await;
+            // RecipeManager.java:175-177 enumerates the complete recipe map; use the same full
+            // set for `/recipe give`, including generated vanilla recipes.
+            let all_recipes = server.recipe_manager.get_recipe_ids().await;
 
             let is_all = recipe_str == "*";
             let matching_recipes = if is_all {
@@ -100,10 +67,9 @@ impl CommandExecutor for RecipeGiveExecutor {
             } else {
                 all_recipes
                     .iter()
-                    .filter(|r| {
-                        let id = get_recipe_id(r);
-                        id == recipe_str
-                            || id.strip_prefix("minecraft:").unwrap_or(&id) == recipe_str
+                    .filter(|id| {
+                        id.as_str() == recipe_str
+                            || id.strip_prefix("minecraft:").unwrap_or(id) == recipe_str
                     })
                     .cloned()
                     .collect::<Vec<_>>()
@@ -121,8 +87,9 @@ impl CommandExecutor for RecipeGiveExecutor {
                 // player's book, or it is forgotten on reconnect. `award_recipes` also sends
                 // the subset add packet, so sending a full-table add here as well would
                 // overwrite the per-player set that was just established.
-                let ids: Vec<String> = matching_recipes.iter().map(get_recipe_id).collect();
-                player.award_recipes(ids.iter().map(String::as_str)).await;
+                player
+                    .award_recipes(matching_recipes.iter().map(String::as_str))
+                    .await;
             }
 
             let recipe_count_str = recipe_count.to_string();
@@ -166,21 +133,24 @@ impl CommandExecutor for RecipeTakeExecutor {
                     .create_without_context(TextComponent::text(recipe_str.to_string()))
             })?;
 
-            let all_recipes = server.recipe_manager.get_dynamic_recipes_internal().await;
+            // RecipeManager.java:175-177 enumerates the complete recipe map; `/recipe take`
+            // must be able to remove generated vanilla recipes as well as dynamic recipes.
+            let all_recipes = server.recipe_manager.get_recipe_ids().await;
 
             let is_all = recipe_str == "*";
 
             let mut matched = false;
-            let remaining_recipes = if is_all {
+            // RecipeCommand.java:94-99 passes only the selected collection to
+            // `ServerPlayer.resetRecipes`; keep a single-recipe take from removing everything.
+            let matching_recipes = if is_all {
                 matched = true;
-                Vec::new()
+                all_recipes.clone()
             } else {
                 all_recipes
                     .iter()
-                    .filter(|r| {
-                        let id = get_recipe_id(r);
-                        let is_match = id == recipe_str
-                            || id.strip_prefix("minecraft:").unwrap_or(&id) == recipe_str;
+                    .filter(|id| {
+                        let is_match = id.as_str() == recipe_str
+                            || id.strip_prefix("minecraft:").unwrap_or(id) == recipe_str;
                         if is_match {
                             matched = true;
                         }
@@ -195,18 +165,15 @@ impl CommandExecutor for RecipeTakeExecutor {
                     .create_without_context(TextComponent::text(recipe_str.to_string())));
             }
 
-            let taken_count = if is_all {
-                all_recipes.len()
-            } else {
-                all_recipes.len() - remaining_recipes.len()
-            };
+            let taken_count = matching_recipes.len();
 
             for player in &targets {
                 // `reset_recipes` sends the remove packet naming exactly the display ids it
                 // dropped, which is what `ServerRecipeBook.removeRecipes` does. A full-table
                 // add here would re-add everything it had just removed.
-                let ids: Vec<String> = all_recipes.iter().map(get_recipe_id).collect();
-                player.reset_recipes(ids.iter().map(String::as_str)).await;
+                player
+                    .reset_recipes(matching_recipes.iter().map(String::as_str))
+                    .await;
             }
 
             let taken_count_str = taken_count.to_string();
