@@ -1731,6 +1731,19 @@ fn forced_rotation(
     (yaw, pitch.clamp(-90.0, 90.0))
 }
 
+/// Vanilla `Entity.absSnapTo` clamps absolute teleport coordinates before updating the entity
+/// (`Entity.java:1762-1780`).
+#[must_use]
+const fn absolute_snap_position(x: f64, y: f64, z: f64) -> Vector3<f64> {
+    Vector3::new(x.clamp(-3.0e7, 3.0e7), y, z.clamp(-3.0e7, 3.0e7))
+}
+
+/// Vanilla `Entity.absSnapRotationTo` normalizes yaw and clamps pitch before storing both
+/// rotations (`Entity.java:1767-1771`).
+fn absolute_snap_rotation(yaw: f32, pitch: f32) -> (f32, f32) {
+    (yaw % 360.0, pitch.clamp(-90.0, 90.0) % 360.0)
+}
+
 /// Vanilla `Entity.restituteMovementAfterCollisions` (`Entity.java:803-818`) suppresses
 /// restitution while the entity is stepping carefully or while the block suppresses bounce.
 const fn should_restitute_after_collision(
@@ -2630,6 +2643,19 @@ impl Entity {
                 }
             }
         }
+    }
+
+    /// Applies vanilla's absolute teleport coordinate clamp and rotation update. The existing
+    /// player teleport path is the live server caller (`Entity.java:1762-1764`).
+    pub fn abs_snap_to(&self, x: f64, y: f64, z: f64, y_rot: f32, x_rot: f32) -> Vector3<f64> {
+        let position = absolute_snap_position(x, y, z);
+        // Vanilla updates the previous position before `setPos`, preventing interpolation from
+        // animating a teleport (`Entity.java:1774-1780`).
+        self.last_pos.store(position);
+        self.set_pos(position);
+        let (y_rot, x_rot) = absolute_snap_rotation(y_rot, x_rot);
+        self.set_rotation(y_rot, x_rot);
+        position
     }
 
     /// Returns entity rotation as vector
@@ -6757,6 +6783,28 @@ mod forced_rotation_tests {
             forced_rotation(170.0, 25.0, false, 80.0, -200.0, false),
             (25.0, -90.0)
         );
+    }
+}
+
+#[cfg(test)]
+mod absolute_snap_tests {
+    use super::{absolute_snap_position, absolute_snap_rotation};
+
+    #[test]
+    fn absolute_snap_clamps_horizontal_coordinates() {
+        // `Entity.absSnapTo` clamps X and Z to +/-3.0E7 (`Entity.java:1774-1779`).
+        let position = absolute_snap_position(4.0e7, 12.0, -4.0e7);
+        assert_eq!(position.x, 3.0e7);
+        assert_eq!(position.y, 12.0);
+        assert_eq!(position.z, -3.0e7);
+    }
+
+    #[test]
+    fn absolute_snap_normalizes_rotation() {
+        // `Entity.absSnapRotationTo` applies yaw modulo 360 and clamps pitch
+        // (`Entity.java:1767-1769`).
+        assert_eq!(absolute_snap_rotation(450.0, 120.0), (90.0, 90.0));
+        assert_eq!(absolute_snap_rotation(-450.0, -120.0), (-90.0, -90.0));
     }
 }
 

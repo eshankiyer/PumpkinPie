@@ -218,6 +218,18 @@ fn comparator_notification_target(
     }
 }
 
+// `FlowingFluid.affectsFlow` accepts empty neighbors as well as the same fluid
+// (`FlowingFluid.java:55-64, 102-104`).
+fn fluid_affects_flow(neighbor: &Fluid, fluid: &Fluid) -> bool {
+    neighbor == &Fluid::EMPTY || neighbor.matches_type(fluid)
+}
+
+/// Vanilla also runs the removal hook when the replacement remains a rail block, because rail
+/// state changes need the same support notifications (`LevelChunk.java:304-320`).
+fn block_change_needs_removal_hook(old_block: &Block, new_block: &Block) -> bool {
+    old_block != new_block || new_block.has_tag(&tag::Block::MINECRAFT_RAILS)
+}
+
 // Vanilla Level.setBlockState only sends the block update when flag 2 is present
 // (`Level.java:238-248`), which is the live equivalent of ChunkHolder.blockChanged.
 const fn should_notify_block_listeners(flags: BlockFlags) -> bool {
@@ -2357,7 +2369,7 @@ impl World {
 
             let (neighbor_fluid, neighbor_state) = self.get_fluid_and_fluid_state(&pos);
 
-            if neighbor_fluid.matches_type(fluid0) {
+            if fluid_affects_flow(neighbor_fluid, fluid0) {
                 let mut neighbor_height = neighbor_state.height;
                 let mut amplitude = 0.0;
 
@@ -5963,7 +5975,9 @@ impl World {
         }
 
         // WorldChunk.java line 317
-        if is_new_block && (flags.contains(BlockFlags::NOTIFY_NEIGHBORS) || block_moved) {
+        if block_change_needs_removal_hook(old_block, new_block)
+            && (flags.contains(BlockFlags::NOTIFY_NEIGHBORS) || block_moved)
+        {
             if !is_current_mutation() {
                 clear_mutation_version();
                 return None;
@@ -7306,18 +7320,23 @@ impl World {
 
     /// Replaces a freshly placed block entity with the state carried by its item component.
     /// This is the server-side `BlockItem.updateBlockEntityComponents` step
-    /// (`BlockItem.java:101-106`), which runs before the placement callbacks.
+    /// (`BlockItem.java:101-106`), including the typed-data permission gate from
+    /// `BlockItem.updateCustomBlockEntityTag` (`BlockItem.java:148-170`), which runs before the
+    /// placement callbacks.
     pub fn apply_block_entity_item_components(
         &self,
         block_pos: &BlockPos,
         item_stack: &pumpkin_data::item_stack::ItemStack,
+        can_use_game_master_blocks: bool,
     ) {
         let Some(entity) = self.get_block_entity(block_pos) else {
             return;
         };
-        let Some(entity) =
-            crate::block::entities::apply_components_from_item_stack(entity.as_ref(), item_stack)
-        else {
+        let Some(entity) = crate::block::entities::apply_components_from_item_stack_with_permission(
+            entity.as_ref(),
+            item_stack,
+            can_use_game_master_blocks,
+        ) else {
             return;
         };
         self.block_entities
@@ -8392,6 +8411,28 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    // Empty and same-type neighbors affect flow; a different fluid does not
+    // (`FlowingFluid.java:55-64, 102-104`).
+    fn fluid_flow_predicate_matches_vanilla_affects_flow() {
+        assert!(fluid_affects_flow(&Fluid::EMPTY, &Fluid::FLOWING_WATER));
+        assert!(fluid_affects_flow(&Fluid::WATER, &Fluid::FLOWING_WATER));
+        assert!(!fluid_affects_flow(&Fluid::LAVA, &Fluid::FLOWING_WATER));
+    }
+
+    #[test]
+    fn removal_hook_runs_for_same_block_rail_state_changes() {
+        // `LevelChunk.setBlockState` includes rail replacements even when the block identity is
+        // unchanged (`LevelChunk.java:304-320`).
+        assert!(block_change_needs_removal_hook(&Block::RAIL, &Block::RAIL));
+        assert!(block_change_needs_removal_hook(&Block::STONE, &Block::RAIL));
+        assert!(block_change_needs_removal_hook(&Block::RAIL, &Block::AIR));
+        assert!(!block_change_needs_removal_hook(
+            &Block::STONE,
+            &Block::STONE
+        ));
     }
 
     #[test]

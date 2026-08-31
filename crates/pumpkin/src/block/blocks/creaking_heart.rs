@@ -15,7 +15,8 @@ use rand::RngExt;
 use crate::block::entities::creaking_heart::CreakingHeartBlockEntity;
 use crate::block::{
     BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, ExplodeArgs, GetComparatorOutputArgs,
-    GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs, PlayerWillDestroyArgs,
+    GetStateForNeighborUpdateArgs, OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs,
+    PlayerWillDestroyArgs,
 };
 use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::world::World;
@@ -142,6 +143,16 @@ impl BlockBehaviour for CreakingHeartBlock {
                     .remove_protector(args.world, Some(DamageType::EXPLOSION))
                     .await;
             }
+        })
+    }
+
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // `CreakingHeartBlock.affectNeighborsAfterRemoval` (`CreakingHeartBlock.java:154-156`)
+            // refreshes comparator inputs after the heart is removed.
+            args.world
+                .update_comparators(args.position, args.block)
+                .await;
         })
     }
 

@@ -2,6 +2,7 @@ use pumpkin_data::block_properties::{
     AcaciaShelfLikeProperties, BlockProperties, HorizontalFacing, SideChainPart,
 };
 use pumpkin_data::data_component_impl::EquipmentSlot;
+use pumpkin_data::fluid::Fluid;
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
@@ -12,13 +13,15 @@ use pumpkin_inventory::screen_handler::InventoryPlayer;
 use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::inventory::Inventory;
+use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockFlags;
 
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::entities::shelf::ShelfBlockEntity;
 use crate::block::{
-    BlockBehaviour, BlockFuture, BlockHitResult, GetComparatorOutputArgs, OnNeighborUpdateArgs,
-    OnPlaceArgs, OnStateReplacedArgs, PlacedArgs, UseWithItemArgs, registry::BlockActionResult,
+    BlockBehaviour, BlockFuture, BlockHitResult, GetComparatorOutputArgs,
+    GetStateForNeighborUpdateArgs, OnNeighborUpdateArgs, OnPlaceArgs, OnStateReplacedArgs,
+    PlacedArgs, UseWithItemArgs, registry::BlockActionResult,
 };
 use crate::entity::EntityBase;
 use crate::entity::player::Player;
@@ -390,6 +393,26 @@ impl BlockBehaviour for ShelfBlock {
         })
     }
 
+    /// `ShelfBlock.updateShape` (`ShelfBlock.java:296-310`) schedules a water tick for a
+    /// waterlogged shelf whenever the world recomputes its state from a neighbour update.
+    fn get_state_for_neighbor_update<'a>(
+        &'a self,
+        args: GetStateForNeighborUpdateArgs<'a>,
+    ) -> BlockFuture<'a, BlockStateId> {
+        Box::pin(async move {
+            let properties = ShelfProperties::from_state_id(args.state_id, args.block);
+            if properties.waterlogged {
+                args.world.schedule_fluid_tick(
+                    &Fluid::WATER,
+                    *args.position,
+                    Fluid::WATER.flow_speed as u8,
+                    TickPriority::Normal,
+                );
+            }
+            args.state_id
+        })
+    }
+
     /// `ShelfBlock.affectNeighborsAfterRemoval` (`ShelfBlock.java:101-105`): the surviving
     /// neighbours have to forget the shelf that just went away.
     fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
@@ -643,4 +666,47 @@ async fn swap_hotbar(world: &Arc<World>, pos: &BlockPos, player: &Arc<Player>) -
     }
 
     any_swapped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        part_is_chain_end, part_is_connected, part_is_connection_towards,
+        when_connected_to_the_left, when_connected_to_the_right, when_disconnected_from_the_left,
+        when_disconnected_from_the_right,
+    };
+    use pumpkin_data::block_properties::SideChainPart;
+
+    #[test]
+    fn side_chain_state_helpers_match_vanilla() {
+        // `SideChainPart.java:27-65` defines connection, chain-end, and transition semantics.
+        assert!(!part_is_connected(SideChainPart::Unconnected));
+        assert!(part_is_connected(SideChainPart::Center));
+        assert!(part_is_chain_end(SideChainPart::Left));
+        assert!(!part_is_chain_end(SideChainPart::Center));
+        assert!(part_is_connection_towards(
+            SideChainPart::Center,
+            SideChainPart::Left
+        ));
+        assert!(!part_is_connection_towards(
+            SideChainPart::Right,
+            SideChainPart::Left
+        ));
+        assert_eq!(
+            when_connected_to_the_left(SideChainPart::Unconnected),
+            SideChainPart::Right
+        );
+        assert_eq!(
+            when_connected_to_the_right(SideChainPart::Right),
+            SideChainPart::Center
+        );
+        assert_eq!(
+            when_disconnected_from_the_left(SideChainPart::Center),
+            SideChainPart::Left
+        );
+        assert_eq!(
+            when_disconnected_from_the_right(SideChainPart::Center),
+            SideChainPart::Right
+        );
+    }
 }

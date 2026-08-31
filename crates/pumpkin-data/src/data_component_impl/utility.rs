@@ -1,3 +1,4 @@
+use crate::data_component::DataComponent;
 use crate::data_component_impl::{DataComponentImpl, get_i32_hash, get_str_hash};
 use crc_fast::CrcAlgorithm::Crc32Iscsi;
 use crc_fast::Digest;
@@ -61,10 +62,75 @@ impl DataComponentImpl for MapDecorationsImpl {
     default_impl!(MapDecorations);
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub struct MapPostProcessingImpl;
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub enum MapPostProcessing {
+    // `MapPostProcessing.java:9-11` defines LOCK as id 0 and SCALE as id 1.
+    Lock,
+    Scale,
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct MapPostProcessingImpl {
+    pub processing: MapPostProcessing,
+}
+impl MapPostProcessingImpl {
+    pub fn read_data(data: &NbtTag) -> Option<Self> {
+        let processing = match data.extract_string()? {
+            "lock" => MapPostProcessing::Lock,
+            "scale" => MapPostProcessing::Scale,
+            _ => return None,
+        };
+        Some(Self { processing })
+    }
+}
 impl DataComponentImpl for MapPostProcessingImpl {
-    default_impl!(MapPostProcessing);
+    fn write_data(&self) -> NbtTag {
+        NbtTag::String(
+            match self.processing {
+                MapPostProcessing::Lock => "lock",
+                MapPostProcessing::Scale => "scale",
+            }
+            .into(),
+        )
+    }
+
+    fn get_hash(&self) -> i32 {
+        match self.processing {
+            MapPostProcessing::Lock => 0,
+            MapPostProcessing::Scale => 1,
+        }
+    }
+
+    fn equal(&self, other: &dyn DataComponentImpl) -> bool {
+        other
+            .as_any()
+            .downcast_ref::<Self>()
+            .is_some_and(|other| self == other)
+    }
+
+    fn get_enum() -> DataComponent {
+        DataComponent::MapPostProcessing
+    }
+
+    fn get_self_enum(&self) -> DataComponent {
+        DataComponent::MapPostProcessing
+    }
+
+    fn to_dyn(self) -> Box<dyn DataComponentImpl> {
+        Box::new(self)
+    }
+
+    fn clone_dyn(&self) -> Box<dyn DataComponentImpl> {
+        Box::new(*self)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_mut_any(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -142,12 +208,18 @@ impl BundleContentsImpl {
         let weight_per_item = (64 / stack.get_max_stack_size() as u32).max(1);
         let mut inserted_anything = false;
         while stack.item_count > 0 && self.get_weight() + weight_per_item <= 64 {
-            if let Some(top) = self.items.first_mut()
-                && crate::item_stack::ItemStack::are_items_and_components_equal(top, stack)
-                && top.item_count < top.get_max_stack_size()
-            {
-                top.item_count += 1;
+            // Vanilla `BundleContents.Mutable.findStackIndex` scans every stored stack and
+            // `tryInsert` moves a merged stack to index 0 (`BundleContents.java:168-214`).
+            let matching_index = stack.is_stackable().then(|| {
+                self.items.iter().position(|item| {
+                    crate::item_stack::ItemStack::are_items_and_components_equal(item, stack)
+                })
+            });
+            if let Some(Some(index)) = matching_index {
+                let mut merged = self.items.remove(index);
+                merged.item_count += 1;
                 stack.item_count -= 1;
+                self.items.insert(0, merged);
                 inserted_anything = true;
                 continue;
             }
@@ -641,9 +713,31 @@ impl DataComponentImpl for RecipesImpl {
 
 #[cfg(test)]
 mod tests {
-    use super::{DataComponentImpl, RecipesImpl};
+    use super::{BundleContentsImpl, DataComponentImpl, RecipesImpl};
+    use crate::{item::Item, item_stack::ItemStack};
     use pumpkin_nbt::tag::NbtTag;
     use std::borrow::Cow;
+
+    #[test]
+    fn bundle_insert_merges_a_matching_stack_beyond_the_front() {
+        // Vanilla `BundleContents.Mutable.findStackIndex` scans all entries and `tryInsert`
+        // moves the merged entry to the front (`BundleContents.java:168-214`).
+        let mut contents = BundleContentsImpl {
+            items: vec![
+                ItemStack::new(1, &Item::DIRT),
+                ItemStack::new(1, &Item::STONE),
+            ],
+            selected_item: -1,
+        };
+        let mut incoming = ItemStack::new(3, &Item::STONE);
+
+        assert!(contents.try_insert(&mut incoming));
+        assert_eq!(incoming.item_count, 0);
+        assert_eq!(contents.items.len(), 2);
+        assert_eq!(contents.items[0].item.id, Item::STONE.id);
+        assert_eq!(contents.items[0].item_count, 4);
+        assert_eq!(contents.items[1].item.id, Item::DIRT.id);
+    }
 
     /// `Recipe.KEY_CODEC.listOf()` persists as a plain NBT list of strings.
     #[test]

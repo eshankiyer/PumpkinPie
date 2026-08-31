@@ -150,17 +150,21 @@ impl ChunkSections {
 
     #[must_use]
     pub fn unique_biomes(&self) -> Vec<u8> {
+        let mut biomes = Vec::new();
+        // Vanilla `ChunkAccess.collectBiomesInPalette` visits each section's palette
+        // (`ChunkAccess.java:350-353`), rather than scanning all section positions.
         self.biome_sections
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
-            .flat_map(|section| section.iter())
-            .fold(Vec::new(), |mut biomes, biome| {
-                if !biomes.contains(&biome) {
-                    biomes.push(biome);
-                }
-                biomes
-            })
+            .for_each(|section| {
+                section.for_each_in_palette(|biome| {
+                    if !biomes.contains(&biome) {
+                        biomes.push(biome);
+                    }
+                });
+            });
+        biomes
     }
 
     #[cfg(test)]

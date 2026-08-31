@@ -12,6 +12,13 @@ pub struct PotionContents;
 // fields; this tuple is the server-side representation used by the existing effect pipeline.
 pub type PotionEffect = (&'static StatusEffect, i32, u8, bool, bool, bool);
 
+// PotionContents.java:235-237 reads POTION_DURATION_SCALE from the stack and defaults to 1.0.
+fn potion_duration_scale(stack: &ItemStack) -> f32 {
+    stack
+        .get_data_component::<pumpkin_data::data_component_impl::PotionDurationScaleImpl>()
+        .map_or(1.0, |component| component.scale)
+}
+
 /// Source context for applying potion effects (affects scaling rules).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PotionApplicationSource {
@@ -174,12 +181,48 @@ impl PotionContents {
         Self::get_color_optional(effects).unwrap_or(default_color)
     }
 
+    // PotionContents.java:154-164 applies every scaled effect when a consumable finishes.
+    pub async fn on_consume(target: &LivingEntity, stack: &ItemStack) {
+        // PotionContents.java:235-237 reads POTION_DURATION_SCALE from the consumed stack,
+        // defaulting to 1.0 when the component is absent.
+        let duration_scale = potion_duration_scale(stack);
+        let effects = Self::read_potion_effects(stack);
+        Self::apply_effects_to_inner(
+            target,
+            effects,
+            duration_scale,
+            PotionApplicationSource::Normal,
+            1.0,
+            false,
+        )
+        .await;
+    }
+
     /// Apply instant or duration effects to a target living entity.
     pub async fn apply_effects_to(
         target: &LivingEntity,
         effects: Vec<PotionEffect>,
         scale: f32,
         source: PotionApplicationSource,
+    ) {
+        Self::apply_effects_to_inner(
+            target,
+            effects,
+            scale,
+            source,
+            source.instant_scale(scale),
+            true,
+        )
+        .await;
+    }
+
+    async fn apply_effects_to_inner(
+        target: &LivingEntity,
+        effects: Vec<PotionEffect>,
+        scale: f32,
+        source: PotionApplicationSource,
+        instant_scale: f32,
+        drop_short_duration: bool,
     ) {
         for (effect_type, duration, amplifier, ambient, show_particles, show_icon) in effects {
             // Instant effects should apply immediately
@@ -188,9 +231,6 @@ impl PotionContents {
                 || effect_type.id == pumpkin_data::effect::StatusEffect::INSTANT_DAMAGE.id;
 
             if is_instant {
-                // Instant potency scaling
-                let instant_scale = source.instant_scale(scale);
-
                 // Apply instant effects logic directly as they don't tick
                 let inverted = target.is_undead();
                 if LivingEntity::instant_effect_is_damage(effect_type, inverted) {
@@ -239,7 +279,7 @@ impl PotionContents {
                 // ThrownSplashPotion.java:67: `!newEffect.endsWithin(20)`, and endsWithin
                 // (MobEffectInstance.java:183-184) treats an infinite duration as never
                 // ending within any tick count, so it must not be dropped here.
-                if !is_cloud && dur != -1 && dur <= 20 {
+                if drop_short_duration && !is_cloud && dur != -1 && dur <= 20 {
                     continue;
                 }
                 let eff = pumpkin_data::potion::Effect {
@@ -259,7 +299,7 @@ impl PotionContents {
 
 #[cfg(test)]
 mod tests {
-    use super::{PotionApplicationSource, PotionContents};
+    use super::{PotionApplicationSource, PotionContents, potion_duration_scale};
     use pumpkin_data::data_component_impl::PotionDurationScaleImpl;
     use pumpkin_data::effect::StatusEffect;
     use pumpkin_data::item::Item;
@@ -308,5 +348,15 @@ mod tests {
 
         assert_eq!(color, expected);
         assert_eq!(PotionContents::get_color_or(&[], -7), -7);
+    }
+
+    // PotionContents.java:235-237 uses the stack's duration scale and defaults to 1.0.
+    #[test]
+    fn consumed_potion_duration_scale_comes_from_the_stack() {
+        let tipped_arrow = ItemStack::new(1, &Item::TIPPED_ARROW);
+        assert_eq!(potion_duration_scale(&tipped_arrow), 0.125);
+
+        let potion = ItemStack::new(1, &Item::POTION);
+        assert_eq!(potion_duration_scale(&potion), 1.0);
     }
 }

@@ -470,6 +470,25 @@ impl<V: Hash + Eq + Copy + Default, const DIM: usize> PalettedContainer<V, DIM> 
         }
     }
 
+    /// Tests the predicate against the values represented by this palette.
+    // Vanilla `PalettedContainer.maybeHas` delegates to its palette (`PalettedContainer.java:280-283`;
+    // `Palette.java:8-12`), so this checks palette entries rather than every cube position.
+    pub fn maybe_has(&self, predicate: impl Fn(V) -> bool) -> bool {
+        match self {
+            Self::Homogeneous(value) => predicate(*value),
+            Self::Heterogeneous(data) => data.palette.iter().copied().any(predicate),
+        }
+    }
+
+    /// Visits each value represented by this palette once.
+    // Vanilla `PalettedContainer.forEachInPalette` visits the palette's entries (`PalettedContainer.java:285-290`).
+    pub fn for_each_in_palette(&self, mut consumer: impl FnMut(V)) {
+        match self {
+            Self::Homogeneous(value) => consumer(*value),
+            Self::Heterogeneous(data) => data.palette.iter().copied().for_each(consumer),
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         match self {
             Self::Homogeneous(value) => *value == V::default(),
@@ -843,10 +862,9 @@ impl BlockPalette {
     /// Check if the entire chunk is filled with only air
     #[must_use]
     pub fn has_only_air(&self) -> bool {
-        match self {
-            Self::Homogeneous(id) => is_air(*id),
-            Self::Heterogeneous(data) => data.palette.iter().all(|&id| is_air(id)),
-        }
+        // Vanilla `LevelChunkSection.maybeHas` delegates to the block-state container
+        // (`LevelChunkSection.java:185-191`), which lets callers skip sections by palette.
+        !self.maybe_has(|id| !is_air(id))
     }
 
     #[must_use]
@@ -1059,6 +1077,23 @@ mod tests {
     #[test]
     fn bulk_palette_handles_homogeneous_sections() {
         assert_bulk_matches_mutations(|_, _, _| Block::STONE.default_state.id);
+    }
+
+    #[test]
+    fn palette_predicates_and_entries_use_palette_values() {
+        let mut palette = BlockPalette::default();
+        palette.set(0, 0, 0, Block::STONE.default_state.id);
+
+        let mut entries = Vec::new();
+        // Vanilla `PalettedContainer.forEachInPalette` exposes palette entries, not cube cells
+        // (`PalettedContainer.java:285-290`).
+        palette.for_each_in_palette(|id| entries.push(id));
+
+        assert_eq!(entries.len(), 2);
+        assert!(entries.contains(&Block::AIR.default_state.id));
+        assert!(entries.contains(&Block::STONE.default_state.id));
+        assert!(palette.maybe_has(|id| id == Block::STONE.default_state.id));
+        assert!(!palette.maybe_has(|id| id == Block::WATER.default_state.id));
     }
 
     #[test]

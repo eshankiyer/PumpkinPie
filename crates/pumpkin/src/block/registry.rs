@@ -192,6 +192,7 @@ use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::fluid::Fluid;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::sound::Sound;
 use pumpkin_data::{Block, BlockDirection, BlockId, BlockState};
 use pumpkin_protocol::java::server::play::SUseItemOn;
 use pumpkin_util::Hand;
@@ -507,6 +508,41 @@ pub enum BlockPlacingError {
     BlockOutOfWorld,
 }
 
+fn block_item_place_sound(block: &Block) -> (Sound, f32, f32) {
+    // BlockItem gets the sound and its volume/pitch from the placed state's SoundType
+    // (`BlockItem.java:86-87`; `SoundType.java:1-11, 47-54`). The generated block data does not
+    // retain SoundType, so use exact generated sound names first and the shared families used by
+    // the vanilla block definitions (`Blocks.java:96-99, 627-638, 1038-1050`).
+    let direct_name = format!("block.{}.place", block.name);
+    let family_name = match block.name {
+        "anvil" => "block.anvil.place",
+        name if name.ends_with("_wool") || name.ends_with("_carpet") => "block.wool.place",
+        "glass" | "glass_pane" => "block.glass.place",
+        "iron_block" => "block.iron.place",
+        "gold_block" => "block.metal.place",
+        name if name.starts_with("copper") => "block.copper.place",
+        name if name.starts_with("deepslate") => "block.deepslate.place",
+        name if name.ends_with("_planks")
+            || name.ends_with("_log")
+            || name.ends_with("_wood")
+            || name.ends_with("_hyphae")
+            || name.ends_with("_stem") =>
+        {
+            "block.wood.place"
+        }
+        _ => "block.stone.place",
+    };
+    let sound = Sound::from_name(&direct_name)
+        .or_else(|| Sound::from_name(family_name))
+        .unwrap_or(Sound::BlockStonePlace);
+    let (volume, pitch) = match block.name {
+        "anvil" => (0.3, 1.0),
+        "iron_block" | "gold_block" => (1.0, 1.5),
+        _ => (1.0, 1.0),
+    };
+    (sound, f32::midpoint(volume, 1.0), pitch * 0.8)
+}
+
 impl BlockRegistry {
     pub async fn bone_meal(
         &self,
@@ -809,8 +845,29 @@ impl BlockRegistry {
         // setPlacedBy and the block-place event, and only when the block that actually landed
         // is the one we meant to place (`BlockItem.java:76-79`, `:101-106`).
         if world.get_block(&final_block_pos).id == placed_block.id {
-            world.apply_block_entity_item_components(&final_block_pos, &item_stack);
+            world.apply_block_entity_item_components(
+                &final_block_pos,
+                &item_stack,
+                player.can_use_game_master_blocks(),
+            );
         }
+
+        // BlockItem.place plays the placement sound before the block-place game event
+        // (`BlockItem.java:86-88`). The source player is excluded by the existing world helper.
+        let (sound, volume, pitch) = block_item_place_sound(placed_block);
+        let sound_position = pumpkin_util::math::vector3::Vector3::new(
+            f64::from(final_block_pos.0.x) + 0.5,
+            f64::from(final_block_pos.0.y) + 0.5,
+            f64::from(final_block_pos.0.z) + 0.5,
+        );
+        world.play_sound_raw_expect(
+            player,
+            sound as u16,
+            pumpkin_data::sound::SoundCategory::Blocks,
+            &sound_position,
+            volume,
+            pitch,
+        );
 
         // BlockItem.place, line 88: level.gameEvent(GameEvent.BLOCK_PLACE, pos,
         // GameEvent.Context.of(player, placedState)).
@@ -1675,5 +1732,26 @@ impl BlockRegistry {
             || block.rotate(state_id, rotation),
             |pumpkin_block| pumpkin_block.rotate(block, state_id, rotation),
         )
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::block_item_place_sound;
+    use pumpkin_data::{Block, sound::Sound};
+
+    #[test]
+    fn block_item_place_sound_uses_block_and_shared_sound_types() {
+        // Vanilla selects the placed block's SoundType (`BlockItem.java:86-87`; `Blocks.java:96-99`).
+        let (anvil_sound, anvil_volume, anvil_pitch) = block_item_place_sound(&Block::ANVIL);
+        assert_eq!(anvil_sound, Sound::BlockAnvilPlace);
+        assert_eq!(anvil_volume, 0.65);
+        assert_eq!(anvil_pitch, 0.8);
+
+        let (planks_sound, planks_volume, planks_pitch) =
+            block_item_place_sound(&Block::OAK_PLANKS);
+        assert_eq!(planks_sound, Sound::BlockWoodPlace);
+        assert_eq!(planks_volume, 1.0);
+        assert_eq!(planks_pitch, 0.8);
     }
 }

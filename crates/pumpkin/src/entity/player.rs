@@ -962,6 +962,15 @@ struct SkinMetadata {
 }
 
 impl Player {
+    /// Processes the cartography result's map marker before the result enters inventory.
+    /// `ItemStack.onCraftedBy` (`ItemStack.java:722-725`) dispatches through
+    /// `Item.onCraftedBy` (`Item.java:292-297`), and `MapItem.onCraftedPostProcess`
+    /// (`MapItem.java:289-303`) consumes SCALE or LOCK.
+    pub async fn process_item_stack_after_crafting(&self, stack: &mut ItemStack) {
+        let world = self.world();
+        crate::world::map::process_crafted_map(stack, &world).await;
+    }
+
     /// Vanilla `Player.getMaxHeadRotationRelativeToBody` narrows the shared living limit while
     /// the player is blocking (`Player.java:288-290`; base limit `LivingEntity.java:3028-3030`).
     pub(crate) async fn get_max_head_rotation_relative_to_body(&self) -> f32 {
@@ -2909,6 +2918,15 @@ impl Player {
         true
     }
 
+    /// Vanilla `Player.freeAt` delegates obstruction checks to the block's suffocation
+    /// predicate (`Player.java:1441-1443`; `ServerPlayer.java:1261-1263`).
+    pub(crate) fn free_at(&self, pos: &BlockPos) -> bool {
+        let world = self.world();
+        let block = world.get_block(pos);
+        let state = world.get_block_state(pos);
+        !crate::block::is_suffocating(block, state, false)
+    }
+
     pub async fn get_off_ground_speed(&self) -> f64 {
         let sprinting = self.get_entity().is_sprinting();
 
@@ -4841,14 +4859,21 @@ impl Player {
             };
 
             'after: {
-                let position = event.to;
+                let requested_position = event.to;
                 let i = self
                     .teleport_id_count
                     .fetch_add(1, Ordering::Relaxed);
                 let teleport_id = i + 1;
-                self.living_entity.entity.set_pos(position);
                 let entity = &self.living_entity.entity;
-                entity.set_rotation(yaw, pitch);
+                // Vanilla snaps the accepted teleport position before applying its rotation
+                // (`Entity.java:1762-1764`).
+                let position = entity.abs_snap_to(
+                    requested_position.x,
+                    requested_position.y,
+                    requested_position.z,
+                    yaw,
+                    pitch,
+                );
                 match self.client.as_ref() {
                     ClientPlatform::Java(client) => {
                         *self.awaiting_teleport.lock().await =
@@ -8698,6 +8723,15 @@ impl InventoryPlayer for Player {
         })
     }
 
+    fn process_item_stack_after_crafting<'a>(
+        &'a self,
+        stack: &'a mut ItemStack,
+    ) -> PlayerFuture<'a, ()> {
+        Box::pin(async move {
+            Self::process_item_stack_after_crafting(self, stack).await;
+        })
+    }
+
     fn play_sound(&self, sound: Sound) -> PlayerFuture<'_, ()> {
         Box::pin(async move {
             self.world()
@@ -9383,6 +9417,22 @@ mod tests {
         assert!(!sleeping_long_enough(Some(99)));
         assert!(sleeping_long_enough(Some(100)));
         assert!(sleeping_long_enough(Some(101)));
+    }
+
+    /// `Player.freeAt` accepts non-suffocating leaves while rejecting a full wooden block
+    /// (`Player.java:1441-1443`; `BlockBehaviour.java:801-803`).
+    #[test]
+    fn free_at_uses_suffocation_not_solid_predicate() {
+        assert!(!crate::block::is_suffocating(
+            &Block::OAK_LEAVES,
+            Block::OAK_LEAVES.default_state,
+            false
+        ));
+        assert!(crate::block::is_suffocating(
+            &Block::OAK_PLANKS,
+            Block::OAK_PLANKS.default_state,
+            false
+        ));
     }
 
     /// `Player.mayUseItemAt` allows unrestricted players and matching adventure predicates

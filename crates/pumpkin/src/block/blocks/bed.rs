@@ -260,9 +260,9 @@ impl BlockBehaviour for BedBlock {
                 return BlockActionResult::SuccessServer;
             }
 
-            // Make sure the bed is not obstructed
-            if args.world.get_block_state(&bed_head_pos.up()).is_solid()
-                || args.world.get_block_state(&bed_foot_pos.up()).is_solid()
+            // `ServerPlayer.bedBlocked` uses `Player.freeAt`, whose suffocation predicate
+            // differs from a generic solid-block check (`ServerPlayer.java:1261-1263`).
+            if !args.player.free_at(&bed_head_pos.up()) || !args.player.free_at(&bed_foot_pos.up())
             {
                 // Vanilla uses `ServerPlayer.sendOverlayMessage` for bed failure feedback
                 // (`ServerPlayer.java:1798-1805`).

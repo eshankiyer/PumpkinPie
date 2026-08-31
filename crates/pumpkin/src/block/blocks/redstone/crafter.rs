@@ -9,7 +9,7 @@ use crate::block::entities::hopper::HopperBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
     BlockBehaviour, BlockFuture, GetComparatorOutputArgs, NormalUseArgs, OnNeighborUpdateArgs,
-    OnPlaceArgs, OnScheduledTickArgs, PlacedArgs,
+    OnPlaceArgs, OnScheduledTickArgs, OnStateReplacedArgs, PlacedArgs,
 };
 use crate::entity::Entity;
 use crate::entity::item::ItemEntity;
@@ -142,6 +142,16 @@ impl BlockBehaviour for CrafterBlock {
         })
     }
 
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // `CrafterBlock.affectNeighborsAfterRemoval` (`CrafterBlock.java:135-138`)
+            // refreshes comparator inputs after the crafter is removed.
+            args.world
+                .update_comparators(args.position, args.block)
+                .await;
+        })
+    }
+
     fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             let powered = block_receives_redstone_power(args.world, args.position).await;
@@ -228,6 +238,16 @@ impl BlockBehaviour for CrafterBlock {
                 return;
             };
             let result = matched.to_item_stack();
+            if result.is_empty() {
+                args.world
+                    .sync_world_event(WorldEvent::SoundCrafterFail, *args.position, 0);
+                return;
+            }
+
+            // `CrafterBlock.dispenseFrom` invokes `ItemStack.onCraftedBySystem`
+            // (`CrafterBlock.java:157-165`, `ItemStack.java:727-729`) before dispensing.
+            let mut result = result;
+            crate::world::map::process_crafted_map(&mut result, args.world).await;
             if result.is_empty() {
                 args.world
                     .sync_world_event(WorldEvent::SoundCrafterFail, *args.position, 0);

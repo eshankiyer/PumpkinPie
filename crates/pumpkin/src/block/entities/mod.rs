@@ -243,10 +243,20 @@ fn apply_skull_components(
     None
 }
 
-#[expect(clippy::too_many_lines)]
 pub fn apply_components_from_item_stack(
     entity: &dyn BlockEntity,
     stack: &ItemStack,
+) -> Option<Arc<dyn BlockEntity>> {
+    apply_components_from_item_stack_with_permission(entity, stack, true)
+}
+
+/// Applies item components while enforcing the placement permission for typed block-entity data
+/// (`BlockItem.java:101-106, 148-170`).
+#[expect(clippy::too_many_lines)]
+pub(crate) fn apply_components_from_item_stack_with_permission(
+    entity: &dyn BlockEntity,
+    stack: &ItemStack,
+    can_use_game_master_blocks: bool,
 ) -> Option<Arc<dyn BlockEntity>> {
     // Falls through to the generic component path when the skull carries none of its three
     // implicit components, matching the original single-function control flow.
@@ -361,7 +371,14 @@ pub fn apply_components_from_item_stack(
         return block_entity_from_nbt_at(&nbt, position);
     }
 
-    let block_entity_data = stack.get_data_component::<BlockEntityDataImpl>();
+    // `BlockItem.updateCustomBlockEntityTag` rejects typed data for op-only block entities unless
+    // the player can use game-master blocks (`BlockItem.java:148-170`; `BlockEntityTypes.java:211-211`).
+    let block_entity_data = (can_apply_custom_block_entity_data(
+        entity.resource_location(),
+        can_use_game_master_blocks,
+    ))
+    .then(|| stack.get_data_component::<BlockEntityDataImpl>())
+    .flatten();
     let container_loot = stack.get_data_component::<ContainerLootImpl>();
     let custom_name = stack.get_data_component::<CustomNameImpl>();
     if block_entity_data.is_none() && container_loot.is_none() && custom_name.is_none() {
@@ -408,6 +425,24 @@ pub fn apply_components_from_item_stack(
         enchanting_table.apply_implicit_components(stack);
     }
     Some(rebuilt)
+}
+
+// `BlockItem.updateCustomBlockEntityTag` uses the `OP_ONLY_CUSTOM_DATA` set for this gate
+// (`BlockItem.java:162-166`; `BlockEntityTypes.java:211-211`).
+fn can_apply_custom_block_entity_data(
+    resource_location: &str,
+    can_use_game_master_blocks: bool,
+) -> bool {
+    can_use_game_master_blocks
+        || !matches!(
+            resource_location,
+            "minecraft:command_block"
+                | "minecraft:lectern"
+                | "minecraft:sign"
+                | "minecraft:hanging_sign"
+                | "minecraft:mob_spawner"
+                | "minecraft:trial_spawner"
+        )
 }
 
 /// Collects the component used by the beehive creative-break item round trip. This is the live
@@ -882,6 +917,25 @@ mod test {
             Some(("minecraft:chests/simple_dungeon".to_string(), 7))
         );
         assert_eq!(applied.get_position(), position);
+    }
+
+    #[test]
+    fn op_only_block_entity_data_requires_game_master_permission() {
+        // `OP_ONLY_CUSTOM_DATA` is limited to these types unless the player has the permission
+        // checked by `BlockItem.updateCustomBlockEntityTag` (`BlockEntityTypes.java:211-211`;
+        // `BlockItem.java:162-166`).
+        assert!(!super::can_apply_custom_block_entity_data(
+            "minecraft:command_block",
+            false
+        ));
+        assert!(super::can_apply_custom_block_entity_data(
+            "minecraft:command_block",
+            true
+        ));
+        assert!(super::can_apply_custom_block_entity_data(
+            "minecraft:chest",
+            false
+        ));
     }
 
     #[tokio::test]

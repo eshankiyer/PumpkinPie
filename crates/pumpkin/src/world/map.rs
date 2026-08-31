@@ -1,6 +1,12 @@
 use crate::entity::player::Player;
+use crate::world::World;
 use dashmap::DashMap;
+use pumpkin_data::data_component::DataComponent;
+use pumpkin_data::data_component_impl::{
+    DataComponentImpl, MapIdImpl, MapPostProcessing, MapPostProcessingImpl,
+};
 use pumpkin_data::dimension::Dimension;
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::map_decoration::MapDecorationType;
 use pumpkin_util::math::{position::BlockPos, vector2::Vector2};
 use std::sync::Arc;
@@ -44,6 +50,53 @@ impl MapManager {
     }
 }
 
+/// Applies the map item post-processing marker before a crafted result is delivered.
+///
+/// `MapItem.onCraftedPostProcess` (`MapItem.java:289-303`) creates a fresh saved map for
+/// SCALE or LOCK and replaces the result's map id.
+pub async fn process_crafted_map(stack: &mut ItemStack, world: &Arc<World>) {
+    let Some(processing) = stack
+        .get_data_component::<MapPostProcessingImpl>()
+        .map(|value| value.processing)
+    else {
+        return;
+    };
+    // `MapItem.onCraftedPostProcess` removes the marker before looking up the source map
+    // (`MapItem.java:289-303`), so failed lookups do not leave a one-shot marker behind.
+    stack
+        .patch
+        .retain(|(id, _)| *id != DataComponent::MapPostProcessing);
+    let Some(map_id) = stack
+        .get_data_component::<MapIdImpl>()
+        .map(|value| value.id)
+    else {
+        return;
+    };
+    let Some(server) = world.server.upgrade() else {
+        return;
+    };
+    let Some(source) = server.map_manager.get_map(map_id) else {
+        return;
+    };
+    let source = source.lock().await;
+    let new_data = match processing {
+        MapPostProcessing::Lock => source.locked_copy(),
+        MapPostProcessing::Scale => source.scaled(),
+    };
+    drop(source);
+
+    let new_id = server.next_map_id();
+    server
+        .map_manager
+        .maps
+        .insert(new_id, Arc::new(Mutex::new(new_data)));
+    stack.patch.retain(|(id, _)| *id != DataComponent::MapId);
+    stack.patch.push((
+        DataComponent::MapId,
+        Some(MapIdImpl { id: new_id }.to_dyn()),
+    ));
+}
+
 pub struct MapData {
     pub scale: i8,
     pub locked: bool,
@@ -70,6 +123,41 @@ impl MapData {
             dirty: true,
             fully_updated: false,
         }
+    }
+
+    /// `MapItemSavedData.locked` (`MapItemSavedData.java:151-160`) copies the map's
+    /// rendered colors and decorations into a new, locked saved-data instance.
+    #[must_use]
+    pub fn locked_copy(&self) -> Self {
+        Self {
+            scale: self.scale,
+            locked: true,
+            dimension: self.dimension.clone(),
+            center_x: self.center_x,
+            center_z: self.center_z,
+            colors: self.colors.clone(),
+            decorations: self.decorations.clone(),
+            dirty: true,
+            fully_updated: false,
+        }
+    }
+
+    /// `MapItemSavedData.scaled` (`MapItemSavedData.java:162-164`) delegates to
+    /// `createFresh` (`MapItemSavedData.java:131-145`), recalculating the center for the
+    /// larger pixel area and retaining the source dimension.
+    #[must_use]
+    pub fn scaled(&self) -> Self {
+        let scale = self.scale.saturating_add(1).clamp(0, 4);
+        let size = 128 * (1i32 << scale);
+        let center_x = (((f64::from(self.center_x) + 64.0) / f64::from(size)).floor() as i32)
+            * size
+            + size / 2
+            - 64;
+        let center_z = (((f64::from(self.center_z) + 64.0) / f64::from(size)).floor() as i32)
+            * size
+            + size / 2
+            - 64;
+        Self::new(self.dimension.clone(), center_x, center_z, scale)
     }
 
     pub fn set_color(&mut self, x: usize, z: usize, color: u8) {
@@ -202,6 +290,7 @@ fn clamp_map_coordinate(delta: f64) -> i8 {
     }
 }
 
+#[derive(Clone)]
 pub struct MapDecoration {
     /// `MapItemSavedData` keys banner decorations by its block position (`MapItemSavedData.java:405-413`).
     pub key: String,
@@ -252,5 +341,36 @@ mod tests {
             None
         ));
         assert!(map.decorations.is_empty());
+    }
+
+    #[test]
+    fn locked_copy_preserves_rendered_map_state() {
+        let mut map = MapData::new(Dimension::OVERWORLD, 12, -4, 2);
+        map.set_color(3, 7, 19);
+        map.toggle_banner(
+            BlockPos::new(4, 70, -3),
+            &MapDecorationType::BANNER_WHITE,
+            None,
+        );
+
+        let locked = map.locked_copy();
+
+        assert!(locked.locked);
+        assert_eq!(locked.scale, map.scale);
+        assert_eq!(locked.colors, map.colors);
+        assert_eq!(locked.decorations.len(), map.decorations.len());
+        assert!(!locked.fully_updated);
+    }
+
+    #[test]
+    fn scaled_map_is_fresh_at_the_next_scale() {
+        let map = MapData::new(Dimension::OVERWORLD, 12, -4, 2);
+
+        let scaled = map.scaled();
+
+        assert_eq!(scaled.scale, 3);
+        assert_eq!(scaled.center_x, 448);
+        assert_eq!(scaled.center_z, 448);
+        assert!(scaled.decorations.is_empty());
     }
 }

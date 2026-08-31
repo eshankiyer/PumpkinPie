@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::{
     BlockFuture, GetComparatorOutputArgs, OnEntityCollisionArgs, OnNeighborUpdateArgs, OnPlaceArgs,
-    PlacedArgs,
+    OnStateReplacedArgs, PlacedArgs,
 };
 use crate::block::{
     registry::BlockActionResult,
@@ -151,6 +151,16 @@ impl BlockBehaviour for HopperBlock {
             if Block::from_state_id(args.old_state_id) != Block::from_state_id(args.state_id) {
                 check_powered_state(args.world, args.position, args.state_id, args.block).await;
             }
+        })
+    }
+
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // `HopperBlock.affectNeighborsAfterRemoval` (`HopperBlock.java:133-136`)
+            // refreshes comparator inputs after a hopper is removed.
+            args.world
+                .update_comparators(args.position, args.block)
+                .await;
         })
     }
 

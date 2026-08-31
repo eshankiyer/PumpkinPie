@@ -305,6 +305,17 @@ pub trait InventoryPlayer: Send + Sync {
         amount: i32,
     ) -> PlayerFuture<'_, ()>;
 
+    /// Applies item post-processing after a crafted result has been taken.
+    ///
+    /// `ItemStack.onCraftedBySystem` (`ItemStack.java:727-729`) is a server-side
+    /// callback. The default keeps non-world-backed test players inert.
+    fn process_item_stack_after_crafting<'a>(
+        &'a self,
+        _stack: &'a mut ItemStack,
+    ) -> PlayerFuture<'a, ()> {
+        Box::pin(async {})
+    }
+
     /// Fires a prepare item enchant event. Returns true if cancelled.
     fn fire_prepare_item_enchant_event<'a>(
         &'a self,

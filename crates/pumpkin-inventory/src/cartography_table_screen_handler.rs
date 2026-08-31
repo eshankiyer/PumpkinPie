@@ -8,7 +8,9 @@ use crate::screen_handler::{
 };
 use crate::slot::{BoxFuture, PredicateSlot, Slot};
 
-use pumpkin_data::data_component_impl::MapIdImpl;
+use pumpkin_data::data_component_impl::{
+    DataComponentImpl, MapIdImpl, MapPostProcessing, MapPostProcessingImpl,
+};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::screen::WindowType;
@@ -78,20 +80,46 @@ impl CartographyTableScreenHandler {
     }
 
     /// `CartographyTableMenu.slotsChanged`/`setupResultSlot` (`CartographyTableMenu.java:97-141`)
-    /// puts two copies in the result when the map and additional item are both present. The
-    /// map-copy branch only needs the `MAP_ID` component; scale/lock post-processing is not
-    /// represented by the current zero-field `MapPostProcessingImpl`.
+    /// `CartographyTableMenu.setupResultSlot` (`CartographyTableMenu.java:111-139`) puts a
+    /// marked result in the output for scaling/locking, or two copies for map duplication.
     async fn update_result(&self) {
         let map = self.input_inventory.get_stack(0).await;
         let additional = self.input_inventory.get_stack(1).await;
-        let result =
-            if map.get_data_component::<MapIdImpl>().is_some() && additional.item == &Item::MAP {
+        let result = if map.get_data_component::<MapIdImpl>().is_some() {
+            if additional.item == &Item::PAPER {
+                let mut result = map.copy_with_count(1);
+                result.patch.push((
+                    pumpkin_data::data_component::DataComponent::MapPostProcessing,
+                    Some(
+                        MapPostProcessingImpl {
+                            processing: MapPostProcessing::Scale,
+                        }
+                        .to_dyn(),
+                    ),
+                ));
+                result
+            } else if additional.item == &Item::GLASS_PANE {
+                let mut result = map.copy_with_count(1);
+                result.patch.push((
+                    pumpkin_data::data_component::DataComponent::MapPostProcessing,
+                    Some(
+                        MapPostProcessingImpl {
+                            processing: MapPostProcessing::Lock,
+                        }
+                        .to_dyn(),
+                    ),
+                ));
+                result
+            } else if additional.item == &Item::MAP {
                 // `CartographyTableMenu.setupResultSlot` (`CartographyTableMenu.java:125-133`)
                 // copies the map with a count of two.
                 map.copy_with_count(2)
             } else {
                 ItemStack::EMPTY.clone()
-            };
+            }
+        } else {
+            ItemStack::EMPTY.clone()
+        };
         self.output_inventory.set_stack(0, result).await;
     }
 }
@@ -189,6 +217,16 @@ impl ScreenHandler for CartographyTableScreenHandler {
         player: &'a dyn InventoryPlayer,
     ) -> ScreenHandlerFuture<'a, ()> {
         Box::pin(async move {
+            if slot_index == 2
+                && matches!(
+                    action_type,
+                    SlotActionType::Pickup | SlotActionType::QuickMove
+                )
+            {
+                let mut result = self.output_inventory.get_stack(0).await;
+                player.process_item_stack_after_crafting(&mut result).await;
+                self.output_inventory.set_stack(0, result).await;
+            }
             if action_type == SlotActionType::PickupAll && button == 0 {
                 // `canTakeItemForPickAll` excludes slots backed by the result container
                 // (`CartographyTableMenu.java:143-146`). The shared handler has no per-slot
@@ -223,9 +261,9 @@ impl ScreenHandler for CartographyTableScreenHandler {
     /// `CartographyTableMenu.quickMoveStack` (`CartographyTableMenu.java:149-196`).
     ///
     /// The result branch invokes the result-slot callback after moving the stack, matching
-    /// `CartographyTableMenu.java:155-162` and its input consumption at `:67-80`. The scale and
-    /// lock branches remain unavailable because `MapPostProcessingImpl` is a zero-field marker
-    /// (`pumpkin-data/src/data_component_impl/utility.rs:64-68`) with no live consumer.
+    /// `CartographyTableMenu.java:155-162` and its input consumption at `:67-80`. The result is
+    /// processed before the move through `ItemStack.onCraftedBy` (`ItemStack.java:722-725`)
+    /// and `Item.onCraftedBy` (`Item.java:292-297`).
     fn quick_move<'a>(
         &'a mut self,
         player: &'a dyn InventoryPlayer,
@@ -311,7 +349,9 @@ mod tests {
     use crate::entity_equipment::EntityEquipment;
     use crate::player::player_inventory::PlayerInventory;
     use pumpkin_data::data_component::DataComponent;
-    use pumpkin_data::data_component_impl::{DataComponentImpl, MapIdImpl};
+    use pumpkin_data::data_component_impl::{
+        DataComponentImpl, MapIdImpl, MapPostProcessing, MapPostProcessingImpl,
+    };
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
     use pumpkin_world::inventory::Inventory;
@@ -348,6 +388,31 @@ mod tests {
         assert_eq!(
             result.get_data_component::<MapIdImpl>().map(|id| id.id),
             Some(7)
+        );
+    }
+
+    /// `CartographyTableMenu.setupResultSlot` (`CartographyTableMenu.java:116-123`) marks
+    /// paper and glass-pane results for `MapItem.onCraftedPostProcess`.
+    #[tokio::test]
+    async fn map_transform_refreshes_the_result_with_post_processing() {
+        let handler = handler();
+        let mut map = ItemStack::new(1, &Item::FILLED_MAP);
+        map.patch
+            .push((DataComponent::MapId, Some(MapIdImpl { id: 7 }.to_dyn())));
+        handler.input_inventory.set_stack(0, map).await;
+        handler
+            .input_inventory
+            .set_stack(1, ItemStack::new(1, &Item::PAPER))
+            .await;
+
+        handler.update_result().await;
+
+        let result = handler.output_inventory.get_stack(0).await;
+        assert_eq!(
+            result
+                .get_data_component::<MapPostProcessingImpl>()
+                .map(|value| value.processing),
+            Some(MapPostProcessing::Scale)
         );
     }
 }
