@@ -301,6 +301,12 @@ enum RailElevation {
     Down,
 }
 
+/// `BaseRailBlock.affectNeighborsAfterRemoval` only notifies above an ascending rail when the
+/// removal was not caused by a piston (`BaseRailBlock.java:121-132`).
+const fn should_update_ascending_neighbor(moved: bool, shape: RailShape) -> bool {
+    !moved && shape.is_ascending()
+}
+
 pub trait StraightRailShapeExt {
     fn as_shape(&self) -> RailShape;
 }
@@ -338,5 +344,27 @@ impl HorizontalFacingRailExt for HorizontalFacing {
             Self::East => RailShapeStraight::AscendingEast,
             Self::West => RailShapeStraight::AscendingWest,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_update_ascending_neighbor;
+    use pumpkin_data::block_properties::RailShape;
+
+    #[test]
+    fn ascending_rail_removal_notifies_only_for_non_piston_removals() {
+        assert!(should_update_ascending_neighbor(
+            false,
+            RailShape::AscendingEast
+        ));
+        assert!(!should_update_ascending_neighbor(
+            true,
+            RailShape::AscendingEast
+        ));
+        assert!(!should_update_ascending_neighbor(
+            false,
+            RailShape::EastWest
+        ));
     }
 }

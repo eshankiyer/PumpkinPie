@@ -365,6 +365,11 @@ impl HopperBlockEntity {
         if !blocks_hopper_suction(block, state) {
             let entities = world.get_entities_at_box(&suck_box(self.position));
             for entity_base in entities {
+                // `getItemsAtAndAbove` applies `EntitySelector.ENTITY_STILL_ALIVE` to the
+                // suction query (`HopperBlockEntity.java:358-360`).
+                if !entity_base.get_entity().is_alive() {
+                    continue;
+                }
                 if let Some(item_entity) = entity_base.clone().get_item_entity() {
                     let mut stack = item_entity.get_item_stack().lock().await;
                     if stack.is_empty() {

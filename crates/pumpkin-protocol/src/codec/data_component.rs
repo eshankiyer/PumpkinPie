@@ -12,13 +12,14 @@ use pumpkin_data::data_component_impl::{
     EquipmentSlot, EquippableImpl, FireworkExplosionImpl, FireworkExplosionShape, FireworksImpl,
     FoxVariantImpl, FrogVariantImpl, HorseVariantImpl, IDSet, IDSetContent, IdOr, ItemModelImpl,
     ItemNameImpl, LlamaVariantImpl, LodestoneTarget, LodestoneTrackerImpl, LoreImpl, MapIdImpl,
-    MaxStackSizeImpl, MooshroomVariantImpl, PaintingVariantImpl, ParrotVariantImpl,
-    PigSoundVariantImpl, PigVariantImpl, PotionContentsImpl, RabbitVariantImpl, RecipesImpl,
-    SalmonSizeImpl, SheepColorImpl, ShulkerColorImpl, SoundEvent, StatusEffectInstance,
-    StoredEnchantmentsImpl, SuspiciousStewEffect, SuspiciousStewEffectsImpl,
-    TropicalFishBaseColorImpl, TropicalFishPatternColorImpl, TropicalFishPatternImpl,
-    UnbreakableImpl, UseCooldownImpl, VillagerVariantImpl, WolfCollarImpl, WolfSoundVariantImpl,
-    WolfVariantImpl, ZombieNautilusVariantImpl, get,
+    MapPostProcessing, MapPostProcessingImpl, MaxStackSizeImpl, MooshroomVariantImpl,
+    PaintingVariantImpl, ParrotVariantImpl, PigSoundVariantImpl, PigVariantImpl,
+    PotionContentsImpl, RabbitVariantImpl, RecipesImpl, SalmonSizeImpl, SheepColorImpl,
+    ShulkerColorImpl, SoundEvent, StatusEffectInstance, StoredEnchantmentsImpl,
+    SuspiciousStewEffect, SuspiciousStewEffectsImpl, TropicalFishBaseColorImpl,
+    TropicalFishPatternColorImpl, TropicalFishPatternImpl, UnbreakableImpl, UseCooldownImpl,
+    VillagerVariantImpl, WolfCollarImpl, WolfSoundVariantImpl, WolfVariantImpl,
+    ZombieNautilusVariantImpl, get,
 };
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::EntityType;
@@ -889,6 +890,8 @@ pub fn deserialize(
         DataComponent::StoredEnchantments => Ok(StoredEnchantmentsImpl::deserialize(seq)?.to_dyn()),
         DataComponent::UseCooldown => Ok(UseCooldownImpl::deserialize(seq)?.to_dyn()),
         DataComponent::MapId => Ok(MapIdImpl::deserialize(seq)?.to_dyn()),
+        // `MapPostProcessing.java:13-22` encodes LOCK and SCALE as ids 0 and 1.
+        DataComponent::MapPostProcessing => Ok(MapPostProcessingImpl::deserialize(seq)?.to_dyn()),
         DataComponent::BundleContents => Ok(BundleContentsImpl::deserialize(seq)?.to_dyn()),
         DataComponent::BlockState => Ok(BlockStateImpl::deserialize(seq)?.to_dyn()),
         DataComponent::LodestoneTracker => Ok(LodestoneTrackerImpl::deserialize(seq)?.to_dyn()),
@@ -927,6 +930,8 @@ pub fn serialize(
         DataComponent::StoredEnchantments => get::<StoredEnchantmentsImpl>(value).serialize(seq),
         DataComponent::UseCooldown => get::<UseCooldownImpl>(value).serialize(seq),
         DataComponent::MapId => get::<MapIdImpl>(value).serialize(seq),
+        // `MapPostProcessing.java:13-22` encodes LOCK and SCALE as ids 0 and 1.
+        DataComponent::MapPostProcessing => get::<MapPostProcessingImpl>(value).serialize(seq),
         DataComponent::BundleContents => get::<BundleContentsImpl>(value).serialize(seq),
         DataComponent::BlockState => get::<BlockStateImpl>(value).serialize(seq),
         DataComponent::LodestoneTracker => get::<LodestoneTrackerImpl>(value).serialize(seq),
@@ -974,6 +979,30 @@ impl DataComponentCodec<Self> for MapIdImpl {
     fn deserialize(seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
         let id = seq.get_var_int()?.0;
         Ok(Self { id })
+    }
+}
+
+impl DataComponentCodec<Self> for MapPostProcessingImpl {
+    // `MapPostProcessing.java:13-22` uses the enum id mapper for the network codec.
+    fn serialize(&self, seq: &mut impl NetworkWriteExt) -> Result<(), WritingError> {
+        let id = match self.processing {
+            MapPostProcessing::Lock => 0,
+            MapPostProcessing::Scale => 1,
+        };
+        seq.write_var_int(&VarInt(id))
+    }
+
+    fn deserialize(seq: &mut impl NetworkReadExt) -> Result<Self, ReadingError> {
+        let processing = match seq.get_var_int()?.0 {
+            0 => MapPostProcessing::Lock,
+            1 => MapPostProcessing::Scale,
+            id => {
+                return Err(ReadingError::Message(format!(
+                    "Invalid map post-processing id: {id}"
+                )));
+            }
+        };
+        Ok(Self { processing })
     }
 }
 

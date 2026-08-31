@@ -9,11 +9,14 @@ use crate::block::BlockFuture;
 use crate::block::CanPlaceAtArgs;
 use crate::block::OnNeighborUpdateArgs;
 use crate::block::OnPlaceArgs;
+use crate::block::OnStateReplacedArgs;
 use crate::block::PlacedArgs;
 
 use super::StraightRailShapeExt;
 use super::common::{can_place_rail_at, rail_placement_is_valid, update_flanking_rails_shape};
-use super::{HorizontalFacingRailExt, Rail, RailElevation, RailProperties};
+use super::{
+    HorizontalFacingRailExt, Rail, RailElevation, RailProperties, should_update_ascending_neighbor,
+};
 
 #[pumpkin_block("minecraft:rail")]
 pub struct RailBlock;
@@ -107,6 +110,19 @@ impl BlockBehaviour for RailBlock {
             if !rail_placement_is_valid(args.world, args.block, args.position).await {
                 args.world
                     .break_block(args.position, None, BlockFlags::NOTIFY_ALL)
+                    .await;
+            }
+        })
+    }
+
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // `BaseRailBlock.affectNeighborsAfterRemoval` (`BaseRailBlock.java:121-132`)
+            // updates the block above a removed ascending rail. RailBlock is not straight.
+            let rail_props = RailProperties::new(args.old_state_id, args.block);
+            if should_update_ascending_neighbor(args.moved, rail_props.shape()) {
+                args.world
+                    .update_neighbor(&args.position.up(), args.block)
                     .await;
             }
         })

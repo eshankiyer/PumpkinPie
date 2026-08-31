@@ -21,7 +21,7 @@ use tokio::sync::Mutex;
 use crate::{
     block::{
         BlockBehaviour, BlockFuture, BrokenArgs, GetComparatorOutputArgs, NormalUseArgs,
-        OnPlaceArgs, PlacedArgs, registry::BlockActionResult,
+        OnPlaceArgs, OnStateReplacedArgs, PlacedArgs, registry::BlockActionResult,
     },
     entity::experience_orb::ExperienceOrbEntity,
 };
@@ -155,6 +155,16 @@ impl BlockBehaviour for FurnaceBlock {
             } else {
                 None
             }
+        })
+    }
+
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // `AbstractFurnaceBlock.affectNeighborsAfterRemoval` (`AbstractFurnaceBlock.java:57-60`)
+            // refreshes comparator inputs after the furnace is removed.
+            args.world
+                .update_comparators(args.position, args.block)
+                .await;
         })
     }
 }

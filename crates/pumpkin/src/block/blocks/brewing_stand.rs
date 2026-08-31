@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::block::{BlockFuture, GetComparatorOutputArgs, PlacedArgs};
+use crate::block::{BlockFuture, GetComparatorOutputArgs, OnStateReplacedArgs, PlacedArgs};
 use crate::block::{
     registry::BlockActionResult,
     {BlockBehaviour, NormalUseArgs},
@@ -75,6 +75,16 @@ impl BlockBehaviour for BrewingStandBlock {
         Box::pin(async move {
             let be = BrewingStandBlockEntity::new(*args.position);
             args.world.add_block_entity(Arc::new(be));
+        })
+    }
+
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // `BrewingStandBlock.affectNeighborsAfterRemoval` (`BrewingStandBlock.java:86-89`)
+            // refreshes comparator inputs after the stand is removed.
+            args.world
+                .update_comparators(args.position, args.block)
+                .await;
         })
     }
 

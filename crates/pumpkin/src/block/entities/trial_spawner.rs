@@ -26,9 +26,13 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::entity::NBTStorage;
+use crate::entity::{Entity, ominous_item_spawner::OminousItemSpawnerEntity};
 use crate::world::{BlockFlags, World};
 
 // TrialSpawnerConfig.java:92-97 (Builder defaults)
+const DEFAULT_OMINOUS_ITEMS_LOOT_TABLE: &str =
+    "minecraft:spawners/trial_chamber/items_to_drop_when_ominous";
+
 #[derive(Clone)]
 pub struct TrialSpawnerConfig {
     pub spawn_range: i32,
@@ -40,6 +44,8 @@ pub struct TrialSpawnerConfig {
     pub spawn_potentials: Vec<(&'static EntityType, i32, NbtCompound)>,
     // TrialSpawnerConfig.java:47-49 stores the weighted reward-table list.
     pub loot_tables_to_eject: Vec<(String, i32)>,
+    // TrialSpawnerConfig.java:18-27, 50-52 stores the ominous item loot-table key.
+    pub items_to_drop_when_ominous: String,
 }
 
 impl Default for TrialSpawnerConfig {
@@ -54,6 +60,7 @@ impl Default for TrialSpawnerConfig {
             spawn_potentials: Vec::new(),
             // TrialSpawnerConfig.java:98-102 supplies the normal two-table default.
             loot_tables_to_eject: default_loot_tables(),
+            items_to_drop_when_ominous: DEFAULT_OMINOUS_ITEMS_LOOT_TABLE.to_owned(),
         }
     }
 }
@@ -130,7 +137,15 @@ impl TrialSpawnerConfig {
                 })
                 .collect();
         }
+        if let Some(key) = nbt.get_string("items_to_drop_when_ominous") {
+            key.clone_into(&mut config.items_to_drop_when_ominous);
+        }
         config
+    }
+
+    // TrialSpawnerConfig.java:50-52; TrialSpawnerStateData.java:273-294.
+    fn items_to_drop_when_ominous(&self) -> &str {
+        &self.items_to_drop_when_ominous
     }
 
     // TrialSpawnerConfig.java:58-60
@@ -329,6 +344,9 @@ fn built_in_config(key: &str) -> Option<TrialSpawnerConfig> {
         } else {
             default_loot_tables()
         },
+        // TrialSpawnerConfig.java:103: the default ominous item table is shared by
+        // the built-in normal and ominous configurations.
+        items_to_drop_when_ominous: DEFAULT_OMINOUS_ITEMS_LOOT_TABLE.to_owned(),
     })
 }
 
@@ -933,6 +951,10 @@ impl TrialSpawnerBlockEntity {
         }
         let additional_players = self.count_additional_players().await;
         self.try_detect_players(world, is_ominous).await;
+        if is_ominous {
+            self.spawn_ominous_item_spawner(world, config, game_time)
+                .await;
+        }
 
         let total_spawned = self.total_mobs_spawned.load(Ordering::Relaxed);
         if total_spawned >= config.calculate_target_total_mobs(additional_players) {
@@ -954,6 +976,50 @@ impl TrialSpawnerBlockEntity {
                 .store(game_time + config.ticks_between_spawn, Ordering::Relaxed);
         }
         TrialSpawnerState::Active
+    }
+
+    // TrialSpawnerState.java:158-171 and OminousItemSpawner.java:37-42 create one
+    // delayed item-spawner above a nearby detected entity at the configured cadence.
+    async fn spawn_ominous_item_spawner(
+        &self,
+        world: &Arc<World>,
+        config: &TrialSpawnerConfig,
+        game_time: i64,
+    ) {
+        if game_time < self.cooldown_ends_at.load(Ordering::Relaxed) {
+            return;
+        }
+        let Some(item) = ominous_spawner_item(config.items_to_drop_when_ominous()) else {
+            return;
+        };
+        let target_id = self.detected_players.lock().await.iter().next().copied();
+        let Some(target_id) = target_id else {
+            return;
+        };
+        let Some(target) = world.get_entity_by_uuid(target_id) else {
+            return;
+        };
+        let target_entity = target.get_entity();
+        if !target_entity.is_alive() {
+            return;
+        }
+        let target_pos = target_entity.pos.load();
+        let target_box = target_entity.bounding_box.load();
+        let spawn_pos = pumpkin_util::math::vector3::Vector3::new(
+            target_pos.x,
+            target_box.max.y + 2.0 + f64::from(rand::random_range(0..4u8)),
+            target_pos.z,
+        );
+        let entity = Entity::new(world.clone(), spawn_pos, &EntityType::OMINOUS_ITEM_SPAWNER);
+        let item_spawner = OminousItemSpawnerEntity::create(entity, item);
+        world.spawn_entity(item_spawner).await;
+        world.play_block_sound(
+            Sound::BlockTrialSpawnerSpawnItemBegin,
+            SoundCategory::Blocks,
+            self.position,
+        );
+        self.cooldown_ends_at
+            .store(game_time + OMINOUS_ITEM_SPAWNER_INTERVAL, Ordering::Relaxed);
     }
 }
 
@@ -1172,6 +1238,41 @@ fn potion_item(
     stack
 }
 
+// items_to_drop_when_ominous.json:1-179 contains one uniform roll from each
+// pool; the generated server loot tables do not include this spawner namespace.
+fn ominous_spawner_item(table: &str) -> Option<pumpkin_data::item_stack::ItemStack> {
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
+
+    if table != DEFAULT_OMINOUS_ITEMS_LOOT_TABLE {
+        return None;
+    }
+
+    let first_pool = match rand::random_range(0..7u8) {
+        0 => potion_item(&Item::LINGERING_POTION, "wind_charged"),
+        1 => potion_item(&Item::LINGERING_POTION, "oozing"),
+        2 => potion_item(&Item::LINGERING_POTION, "weaving"),
+        3 => potion_item(&Item::LINGERING_POTION, "infested"),
+        4 => potion_item(&Item::LINGERING_POTION, "strength"),
+        5 => potion_item(&Item::LINGERING_POTION, "swiftness"),
+        _ => potion_item(&Item::LINGERING_POTION, "slow_falling"),
+    };
+    let second_pool = match rand::random_range(0..5u8) {
+        0 => ItemStack::new(1, &Item::ARROW),
+        1 => potion_item(&Item::TIPPED_ARROW, "poison"),
+        2 => potion_item(&Item::TIPPED_ARROW, "strong_slowness"),
+        3 => ItemStack::new(1u8 + rand::random_range(0..3u8), &Item::FIRE_CHARGE),
+        _ => ItemStack::new(1u8 + rand::random_range(0..3u8), &Item::WIND_CHARGE),
+    };
+
+    let total_weight = u16::from(first_pool.item_count) + u16::from(second_pool.item_count);
+    if rand::random_range(0..total_weight) < u16::from(first_pool.item_count) {
+        Some(first_pool)
+    } else {
+        Some(second_pool)
+    }
+}
+
 // Hand-ported (no generic loot-table registry entry exists for the
 // "spawners/trial_chamber/*" namespace, only "chests/*" -- see report):
 // data/minecraft/loot_table/spawners/trial_chamber/consumables.json (table 1)
@@ -1308,6 +1409,24 @@ mod tests {
                 .iter()
                 .all(|(_, weight)| *weight == 1)
         );
+        assert_eq!(
+            c.items_to_drop_when_ominous,
+            DEFAULT_OMINOUS_ITEMS_LOOT_TABLE
+        );
+    }
+
+    // TrialSpawnerConfig.java:50-52 accepts an overridable ominous item table key.
+    #[test]
+    fn ominous_item_table_key_is_loaded_and_resolved() {
+        let mut nbt = NbtCompound::new();
+        nbt.put_string(
+            "items_to_drop_when_ominous",
+            "minecraft:custom/table".to_string(),
+        );
+        let config = TrialSpawnerConfig::from_compound(&nbt);
+        assert_eq!(config.items_to_drop_when_ominous, "minecraft:custom/table");
+        assert!(ominous_spawner_item(DEFAULT_OMINOUS_ITEMS_LOOT_TABLE).is_some());
+        assert!(ominous_spawner_item("minecraft:custom/table").is_none());
     }
 
     #[test]

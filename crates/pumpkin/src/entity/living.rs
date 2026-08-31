@@ -253,6 +253,31 @@ fn active_item_for_state(
     }
 }
 
+/// Maps the block behind vanilla's `FallLocation.blockToFallLocation` to its language-key
+/// suffix (`FallLocation.java:12-29`).
+fn fall_location_id(block: &Block) -> &'static str {
+    if block == &Block::LADDER || block.has_tag(&tag::Block::MINECRAFT_TRAPDOORS) {
+        "ladder"
+    } else if block == &Block::VINE {
+        "vines"
+    } else if block == &Block::WEEPING_VINES || block == &Block::WEEPING_VINES_PLANT {
+        "weeping_vines"
+    } else if block == &Block::TWISTING_VINES || block == &Block::TWISTING_VINES_PLANT {
+        "twisting_vines"
+    } else if block == &Block::SCAFFOLDING {
+        "scaffolding"
+    } else {
+        "other_climbable"
+    }
+}
+
+/// The bow's supported projectile predicate (`BowItem.java:107-109`).
+const fn is_bow_projectile(item: &Item) -> bool {
+    item.id == Item::ARROW.id
+        || item.id == Item::TIPPED_ARROW.id
+        || item.id == Item::SPECTRAL_ARROW.id
+}
+
 const MAX_AIR_SUPPLY: i32 = 300;
 
 /// A raider's membership in an active `Raid`.
@@ -1747,6 +1772,13 @@ impl LivingEntity {
     #[must_use]
     pub fn get_last_hurt_by_player_memory_time(&self) -> i32 {
         self.last_hurt_by_player_time.load(Relaxed)
+    }
+
+    /// Vanilla `LivingEntity.getLastClimbablePos` exposes the last climbable block used by
+    /// fall-death message selection (`LivingEntity.java:1717-1719`; `FallLocation.java:36-44`).
+    #[must_use]
+    pub fn get_last_climbable_pos(&self) -> Option<BlockPos> {
+        self.climbing_pos.load()
     }
 
     /// Vanilla `LivingEntity.isAffectedByPotions`, which `ArmorStand` overrides to false: splash
@@ -3306,10 +3338,22 @@ impl LivingEntity {
                 }
             }
             DeathMessageType::FallVariants => {
-                //TODO
+                // `FallLocation.getCurrentFallLocation` prefers the remembered climbable block,
+                // then water, before falling back to generic (`FallLocation.java:36-44`).
+                let location = dyn_self.get_living_entity().and_then(|living| {
+                    let world = living.entity.world.load();
+                    living
+                        .get_last_climbable_pos()
+                        .map(|pos| fall_location_id(world.get_block(&pos)))
+                        .or_else(|| living.entity.touching_water.load(SeqCst).then_some("water"))
+                });
+                let key = location.map_or_else(
+                    || translation::java::DEATH_FELL_ACCIDENT_GENERIC.to_string(),
+                    |location| format!("death.fell.accident.{location}"),
+                );
                 TextComponent::translate_cross(
-                    translation::java::DEATH_FELL_ACCIDENT_GENERIC,
-                    translation::bedrock::DEATH_FELL_ACCIDENT_GENERIC,
+                    key.clone(),
+                    key,
                     [dyn_self.get_display_name().await],
                 )
             }
@@ -4410,6 +4454,25 @@ impl LivingEntity {
             .get(&EquipmentSlot::MAIN_HAND)
             .cloned()
             .unwrap_or_else(|| ItemStack::EMPTY.clone())
+    }
+
+    /// Vanilla `Monster.getProjectile` checks the opposite hand before the weapon hand and
+    /// falls back to a plain arrow (`Monster.java:138-148`; `ProjectileWeaponItem.java:33-40`).
+    /// The live caller is the shared skeleton bow goal.
+    pub async fn get_projectile(&self, held_weapon: &ItemStack) -> ItemStack {
+        if held_weapon.item.id != Item::BOW.id {
+            return ItemStack::EMPTY.clone();
+        }
+
+        let equipment = self.entity_equipment.lock().await;
+        for slot in [EquipmentSlot::OFF_HAND, EquipmentSlot::MAIN_HAND] {
+            let stack = equipment.get(&slot);
+            if !stack.is_empty() && is_bow_projectile(stack.item) {
+                return stack;
+            }
+        }
+
+        ItemStack::new(1, &Item::ARROW)
     }
 
     /// Vanilla `LivingEntity.getActiveItem` (`LivingEntity.java:2235-2241`) returns the item
@@ -6774,8 +6837,9 @@ impl EntityBase for LivingEntity {
 
                     // Handle potion consumption
                     if item.get_data_component::<pumpkin_data::data_component_impl::PotionContentsImpl>().is_some() {
-                        let effects = crate::item::potion::PotionContents::read_potion_effects(item);
-                        crate::item::potion::PotionContents::apply_effects_to(self, effects, 1.0, crate::item::potion::PotionApplicationSource::Normal).await;
+                        // PotionContents.java:154-165 invokes the listener when the item finishes;
+                        // PotionContents.java:235-237 supplies the consumed stack's duration scale.
+                        crate::item::potion::PotionContents::on_consume(self, item).await;
                     }
 
                     // SuspiciousStewEffects.onConsume: every entry is applied as a plain
@@ -7998,6 +8062,31 @@ fn skeleton_swim_sound_volume(on_ground: bool, water_volume: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `FallLocation.blockToFallLocation` preserves the ladder, vine, and scaffolding variants
+    /// used by fall-death translation keys (`FallLocation.java:12-29`).
+    #[test]
+    fn fall_location_keys_match_vanilla_blocks() {
+        assert_eq!(fall_location_id(&Block::LADDER), "ladder");
+        assert_eq!(fall_location_id(&Block::VINE), "vines");
+        assert_eq!(fall_location_id(&Block::WEEPING_VINES), "weeping_vines");
+        assert_eq!(
+            fall_location_id(&Block::TWISTING_VINES_PLANT),
+            "twisting_vines"
+        );
+        assert_eq!(fall_location_id(&Block::SCAFFOLDING), "scaffolding");
+        assert_eq!(fall_location_id(&Block::STONE), "other_climbable");
+    }
+
+    /// `BowItem.getAllSupportedProjectiles` accepts arrows, tipped arrows, and spectral arrows
+    /// (`BowItem.java:107-109`).
+    #[test]
+    fn bow_projectile_predicate_matches_vanilla() {
+        assert!(is_bow_projectile(&Item::ARROW));
+        assert!(is_bow_projectile(&Item::TIPPED_ARROW));
+        assert!(is_bow_projectile(&Item::SPECTRAL_ARROW));
+        assert!(!is_bow_projectile(&Item::FIREWORK_ROCKET));
+    }
 
     /// `Mob.playHurtSound` uses the mob sound source, while players use the player category
     /// (`Mob.java:295-299`; `LivingEntity.java:1427-1434`).

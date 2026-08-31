@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU8, AtomicU16, Ordering};
 
 use crate::player::player_inventory::PlayerInventory;
 use crate::screen_handler::{
-    InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, ScreenHandlerFuture,
+    InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, ScreenHandlerFuture, ScreenProperty,
 };
 use crate::slot::{BoxFuture, NormalSlot, Slot};
 
@@ -15,6 +15,7 @@ use pumpkin_data::screen::WindowType;
 use pumpkin_data::sound::Sound;
 use pumpkin_data::statistic::StatisticCategory;
 use pumpkin_protocol::java::server::play::SlotActionType;
+use pumpkin_world::block::entities::PropertyDelegate;
 use pumpkin_world::inventory::Inventory;
 use pumpkin_world::inventory::SimpleInventory;
 
@@ -22,8 +23,38 @@ pub struct StonecutterScreenHandler {
     behaviour: ScreenHandlerBehaviour,
     pub input_inventory: Arc<SimpleInventory>,
     pub output_inventory: Arc<SimpleInventory>,
-    pub selected_recipe: AtomicU8,
+    pub selected_recipe: Arc<AtomicU8>,
     last_input_item: AtomicU16,
+}
+
+struct SelectedRecipeDelegate(Arc<AtomicU8>);
+
+impl PropertyDelegate for SelectedRecipeDelegate {
+    fn get_property(&self, index: i32) -> i32 {
+        if index != 0 {
+            return 0;
+        }
+
+        let selected_recipe = self.0.load(Ordering::Relaxed);
+        if selected_recipe == u8::MAX {
+            -1
+        } else {
+            i32::from(selected_recipe)
+        }
+    }
+
+    fn set_property(&self, index: i32, value: i32) {
+        if index == 0 {
+            self.0.store(
+                if value < 0 { u8::MAX } else { value as u8 },
+                Ordering::Relaxed,
+            );
+        }
+    }
+
+    fn get_properties_size(&self) -> i32 {
+        1
+    }
 }
 
 impl StonecutterScreenHandler {
@@ -31,12 +62,13 @@ impl StonecutterScreenHandler {
         let behaviour = ScreenHandlerBehaviour::new(sync_id, Some(WindowType::Stonecutter));
         let input_inventory = Arc::new(SimpleInventory::new(1));
         let output_inventory = Arc::new(SimpleInventory::new(1));
+        let selected_recipe = Arc::new(AtomicU8::new(u8::MAX));
 
         let mut handler = Self {
             behaviour,
             input_inventory: input_inventory.clone(),
             output_inventory: output_inventory.clone(),
-            selected_recipe: AtomicU8::new(u8::MAX),
+            selected_recipe: selected_recipe.clone(),
             last_input_item: AtomicU16::new(Item::AIR.id),
         };
 
@@ -53,6 +85,14 @@ impl StonecutterScreenHandler {
         let player_inventory: Arc<dyn Inventory> = player_inventory.clone();
 
         handler.add_player_slots(&player_inventory);
+
+        // `StonecutterMenu` registers selectedRecipeIndex as a DataSlot
+        // (`StonecutterMenu.java:28,85`), whose -1 sentinel is returned by
+        // `getSelectedRecipeIndex` (`StonecutterMenu.java:88-90`).
+        handler.add_property(ScreenProperty::new(
+            Arc::new(SelectedRecipeDelegate(selected_recipe)),
+            0,
+        ));
 
         handler
     }
@@ -372,6 +412,9 @@ mod tests {
             .expect("stonecutter recipe result must be a registered item");
         assert_eq!(output.item.id, expected.id);
         assert_eq!(output.item_count, recipes[0].result.count);
+        // The selected recipe is a synced DataSlot in `StonecutterMenu`
+        // (`StonecutterMenu.java:28,85,88-90`).
+        assert_eq!(handler.get_behaviour().properties[0].get(), 0);
     }
 
     #[tokio::test]
@@ -412,6 +455,9 @@ mod tests {
         handler.update_output().await;
 
         assert_eq!(handler.selected_recipe.load(Ordering::Relaxed), u8::MAX);
+        // Clearing the input resets the selected DataSlot to vanilla's -1 sentinel
+        // (`StonecutterMenu.java:136-143`).
+        assert_eq!(handler.get_behaviour().properties[0].get(), -1);
         let output = handler.output_inventory.get_stack(0).await;
         assert!(output.is_empty());
     }

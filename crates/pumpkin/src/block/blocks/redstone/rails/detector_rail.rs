@@ -18,6 +18,7 @@ use crate::block::OnEntityCollisionArgs;
 use crate::block::OnNeighborUpdateArgs;
 use crate::block::OnPlaceArgs;
 use crate::block::OnScheduledTickArgs;
+use crate::block::OnStateReplacedArgs;
 use crate::block::PlacedArgs;
 use crate::entity::EntityBase;
 use crate::entity::vehicle::minecart::MinecartEntity;
@@ -28,7 +29,7 @@ use super::common::{
     can_place_rail_at, compute_placed_rail_shape, rail_placement_is_valid,
     update_flanking_rails_shape,
 };
-use super::{Rail, RailProperties};
+use super::{Rail, RailProperties, should_update_ascending_neighbor};
 
 /// `DetectorRailBlock.PRESSED_CHECK_PERIOD` (DetectorRailBlock.java:33).
 const PRESSED_CHECK_PERIOD: u8 = 20;
@@ -112,6 +113,20 @@ impl BlockBehaviour for DetectorRailBlock {
                 return;
             }
             Self::check_pressed(args.world, args.block, args.position).await;
+        })
+    }
+
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // `BaseRailBlock.affectNeighborsAfterRemoval` (`BaseRailBlock.java:121-132`)
+            // updates the block above a removed ascending detector rail. DetectorRailBlock is
+            // not straight.
+            let rail_props = RailProperties::new(args.old_state_id, args.block);
+            if should_update_ascending_neighbor(args.moved, rail_props.shape()) {
+                args.world
+                    .update_neighbor(&args.position.up(), args.block)
+                    .await;
+            }
         })
     }
 

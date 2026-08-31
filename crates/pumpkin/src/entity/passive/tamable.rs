@@ -7,11 +7,13 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 use uuid::Uuid;
 
-use crate::entity::{living::LivingEntity, passive::animal::Animal, player::Player};
+use crate::entity::{
+    living::LivingEntity, mob::MobEntity, passive::animal::Animal, player::Player,
+};
 
 // TamableAnimal.java:135-140 (shared healing helper used by Wolf.java:453-459 and
-// Cat.java:423-428). The Rust interaction hooks already own the hand stack, so consuming it
-// directly is the equivalent of usePlayerItem.
+// Cat.java:423-428). The Rust interaction hooks already own the hand stack, so the Mob
+// consumption helper is the equivalent of usePlayerItem.
 pub(crate) fn feed(
     player: &Player,
     item_stack: &mut ItemStack,
@@ -24,7 +26,7 @@ pub(crate) fn feed(
         .get_data_component::<FoodImpl>()
         .map(|food| food.nutrition);
     let healing = feed_healing_amount(nutrition, healing_factor, default_heal);
-    item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+    MobEntity::use_player_item(item_stack, player.gamemode.load());
     living.heal(healing);
     if let Some(sound) = eating_sound {
         let entity = &living.entity;

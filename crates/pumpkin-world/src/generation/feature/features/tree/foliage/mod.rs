@@ -176,12 +176,10 @@ impl FoliagePlacer {
         BlockState::from_id(block.from_properties(&properties).to_state_id(block))
     }
 
-    pub fn is_set<T: GenerationCache>(
-        chunk: &T,
-        pos: BlockPos,
-        foliage_provider: &BlockState,
-    ) -> bool {
-        GenerationCache::get_block_state(chunk, &pos.0) == foliage_provider.id
+    pub fn is_set(foliage_positions: &[BlockPos], pos: BlockPos) -> bool {
+        // Vanilla `FoliageSetter.isSet` (`TreeFeature.java:137-146`) checks the
+        // positions written by this tree, not the block state currently in the chunk.
+        foliage_positions.contains(&pos)
     }
 
     fn try_place_extension<T: GenerationCache>(
@@ -255,7 +253,7 @@ impl FoliagePlacer {
                 .offset_dir(along_edge.to_offset(), -radius);
 
             for _ in -radius..(radius + i) {
-                let leaves_above = Self::is_set(chunk, pos.up(), foliage_provider);
+                let leaves_above = Self::is_set(foliage_positions, pos.up());
                 if leaves_above
                     && Self::try_place_extension(
                         foliage_positions,
@@ -280,6 +278,23 @@ impl FoliagePlacer {
                 pos = pos.offset_dir(along_edge.to_offset(), 1);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod is_set_tests {
+    use pumpkin_util::math::position::BlockPos;
+
+    use super::FoliagePlacer;
+
+    #[test]
+    fn is_set_only_matches_positions_written_by_this_tree() {
+        // `FoliageSetter.isSet` (`TreeFeature.java:137-146`) reads the current
+        // tree's foliage set, independently of the block state stored in the level.
+        let written = [BlockPos::new(3, 8, -2)];
+
+        assert!(FoliagePlacer::is_set(&written, BlockPos::new(3, 8, -2)));
+        assert!(!FoliagePlacer::is_set(&written, BlockPos::new(3, 8, -1)));
     }
 }
 

@@ -22,7 +22,9 @@ use crate::world::game_event::{GameEventContext, emit_game_event};
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::damage::DamageType;
-use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, IDSet, WeaponImpl};
+use pumpkin_data::data_component_impl::{
+    EquipmentSlot, EquippableImpl, IDSet, UseRemainderImpl, WeaponImpl,
+};
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::enchantment::Enchantment;
 use pumpkin_data::entity::entity_from_egg;
@@ -34,13 +36,13 @@ use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::{CHeadRot, CUpdateEntityRot, Metadata};
-use pumpkin_util::Difficulty;
 use pumpkin_util::math::boundingbox::BoundingBox;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::random::xoroshiro128::Xoroshiro;
 use pumpkin_util::random::{RandomGenerator, get_seed};
 use pumpkin_util::version::JavaMinecraftVersion;
+use pumpkin_util::{Difficulty, GameMode};
 use rand::RngExt;
 use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
@@ -314,6 +316,31 @@ const fn max_spawn_cluster_size_for(entity_type_id: u16) -> i32 {
 const NIGHT_START: i64 = 12542;
 const NIGHT_END: i64 = 23459;
 
+/// Resolves the vanilla remainder templates represented by Pumpkin's generated item
+/// components (`UseRemainder.java:9-12, 15-36`).
+fn mob_use_remainder(item_stack: &ItemStack) -> Option<&'static pumpkin_data::item::Item> {
+    item_stack.get_data_component::<UseRemainderImpl>()?;
+    match item_stack.item.id {
+        id if id == pumpkin_data::item::Item::BEETROOT_SOUP.id
+            || id == pumpkin_data::item::Item::MUSHROOM_STEW.id
+            || id == pumpkin_data::item::Item::SUSPICIOUS_STEW.id =>
+        {
+            Some(&pumpkin_data::item::Item::BOWL)
+        }
+        id if id == pumpkin_data::item::Item::HONEY_BOTTLE.id
+            || id == pumpkin_data::item::Item::POTION.id =>
+        {
+            Some(&pumpkin_data::item::Item::GLASS_BOTTLE)
+        }
+        id if id == pumpkin_data::item::Item::MILK_BUCKET.id
+            || id == pumpkin_data::item::Item::POWDER_SNOW_BUCKET.id =>
+        {
+            Some(&pumpkin_data::item::Item::BUCKET)
+        }
+        _ => None,
+    }
+}
+
 impl MobEntity {
     const AI_DISABLED_FLAG: u8 = 1;
     const LEFT_HANDED_FLAG: u8 = 2;
@@ -578,6 +605,24 @@ impl MobEntity {
         world.drop_stack(&entity.block_pos.load(), item).await;
         world.play_sound_event(&shearing_sound, SoundCategory::Neutral, &entity.pos.load());
         true
+    }
+
+    /// Applies the Mob interaction consumption hook to the mutable hand stack. Vanilla's
+    /// `usePlayerItem` applies the use remainder after consuming one item
+    /// (`Mob.java:1184-1193`; `ItemStack.java:396-403`). The interaction dispatcher writes this
+    /// stack back to the player's selected hand after the live `TamableAnimal.feed` caller.
+    pub(crate) fn use_player_item(item_stack: &mut ItemStack, gamemode: GameMode) {
+        let before_count = item_stack.item_count;
+        let remainder = (before_count == 1)
+            .then(|| mob_use_remainder(item_stack))
+            .flatten();
+        item_stack.decrement_unless_creative(gamemode, 1);
+        if gamemode != GameMode::Creative
+            && item_stack.is_empty()
+            && let Some(remainder) = remainder
+        {
+            *item_stack = ItemStack::new(1, remainder);
+        }
     }
 
     pub fn set_attacking(&self, attacking: bool) {
@@ -3678,10 +3723,10 @@ pub trait PathAwareEntity: Mob + Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_ITEM_PICKUP_REACH, EntityType, attack_knockback_strength, can_replace_equal_item,
-        fire_aspect_ticks, is_preserved_equipment_drop_chance, knockback_enchantment_strength,
-        max_fall_distance_for_state, max_spawn_cluster_size_for, mob_weapon_durability_cost,
-        uses_monster_no_action_time,
+        DEFAULT_ITEM_PICKUP_REACH, EntityType, MobEntity, attack_knockback_strength,
+        can_replace_equal_item, fire_aspect_ticks, is_preserved_equipment_drop_chance,
+        knockback_enchantment_strength, max_fall_distance_for_state, max_spawn_cluster_size_for,
+        mob_use_remainder, mob_weapon_durability_cost, uses_monster_no_action_time,
     };
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
@@ -3795,5 +3840,33 @@ mod tests {
         assert_eq!(max_spawn_cluster_size_for(EntityType::SALMON.id), 5);
         assert_eq!(max_spawn_cluster_size_for(EntityType::HORSE.id), 6);
         assert_eq!(max_spawn_cluster_size_for(EntityType::ZOMBIE.id), 4);
+    }
+
+    /// `UseRemainder` converts exhausted soup, bottle, and bucket stacks to their remainder
+    /// item (`Mob.java:1184-1193`; `UseRemainder.java:15-36`).
+    #[test]
+    fn mob_use_remainder_matches_generated_item_components() {
+        assert_eq!(
+            mob_use_remainder(&ItemStack::new(1, &Item::MUSHROOM_STEW)).map(|item| item.id),
+            Some(Item::BOWL.id)
+        );
+        assert_eq!(
+            mob_use_remainder(&ItemStack::new(1, &Item::MILK_BUCKET)).map(|item| item.id),
+            Some(Item::BUCKET.id)
+        );
+        assert!(mob_use_remainder(&ItemStack::new(1, &Item::APPLE)).is_none());
+    }
+
+    #[test]
+    fn mob_use_player_item_replaces_only_an_exhausted_stack() {
+        let mut single = ItemStack::new(1, &Item::MILK_BUCKET);
+        MobEntity::use_player_item(&mut single, pumpkin_util::GameMode::Survival);
+        assert_eq!(single.item.id, Item::BUCKET.id);
+        assert_eq!(single.item_count, 1);
+
+        let mut stack = ItemStack::new(2, &Item::MILK_BUCKET);
+        MobEntity::use_player_item(&mut stack, pumpkin_util::GameMode::Survival);
+        assert_eq!(stack.item.id, Item::MILK_BUCKET.id);
+        assert_eq!(stack.item_count, 1);
     }
 }

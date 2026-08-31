@@ -15,8 +15,8 @@ use crate::block::entities::decorated_pot::{DecoratedPotBlockEntity, WobbleStyle
 use crate::block::registry::BlockActionResult;
 use crate::block::{
     BlockBehaviour, BlockFuture, BrokenArgs, GetCloneItemStackArgs, GetComparatorOutputArgs,
-    NormalUseArgs, OnPlaceArgs, OnSyncedBlockEventArgs, PlacedArgs, PlayerWillDestroyArgs,
-    UseWithItemArgs,
+    NormalUseArgs, OnPlaceArgs, OnStateReplacedArgs, OnSyncedBlockEventArgs, PlacedArgs,
+    PlayerWillDestroyArgs, UseWithItemArgs,
 };
 use pumpkin_world::world::BlockFlags;
 
@@ -134,6 +134,16 @@ impl BlockBehaviour for DecoratedPotBlock {
                 SoundCategory::Blocks,
                 &args.position.to_f64(),
             );
+        })
+    }
+
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            // `DecoratedPotBlock.affectNeighborsAfterRemoval`
+            // (`DecoratedPotBlock.java:176-178`) refreshes comparator inputs after removal.
+            args.world
+                .update_comparators(args.position, args.block)
+                .await;
         })
     }
 

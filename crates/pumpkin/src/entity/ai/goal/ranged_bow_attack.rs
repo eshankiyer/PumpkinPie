@@ -150,8 +150,16 @@ impl RangedBowAttackGoal {
         let shooter = mob.get_entity();
         let world = shooter.world.load_full();
         let arrow_entity = Entity::new(world.clone(), shooter.pos.load(), &EntityType::ARROW);
-        let mut arrow_item =
-            pumpkin_data::item_stack::ItemStack::new(1, &pumpkin_data::item::Item::ARROW);
+        // `AbstractSkeleton.performRangedAttack` passes its `getProjectile` result into the
+        // arrow factory (`AbstractSkeleton.java:160-174`).
+        let Some((_, bow_item)) = Self::held_bow(mob).await else {
+            return;
+        };
+        let mut arrow_item = mob
+            .get_mob_entity()
+            .living_entity
+            .get_projectile(&bow_item)
+            .await;
         if !self.arrow_effects.is_empty() {
             arrow_item.patch.push((
                 DataComponent::PotionContents,
