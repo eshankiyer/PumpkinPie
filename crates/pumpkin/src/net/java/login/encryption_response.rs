@@ -1,5 +1,6 @@
 #[allow(clippy::wildcard_imports)]
 use super::*;
+use crate::net::PlayerConfig;
 
 fn may_omit_verify_token(version: JavaMinecraftVersion) -> bool {
     (JavaMinecraftVersion::V_1_19_3..JavaMinecraftVersion::V_1_20_2).contains(&version)
@@ -163,7 +164,12 @@ impl PendingConnection {
         }
 
         self.connection_state.store(ConnectionState::Play);
-        let config = self.config.clone().unwrap_or_default();
+        // Vanilla's initial connection cookie uses `ClientInformation.createDefault`
+        // (`CommonListenerCookie.java:6-9`) when no settings packet was received.
+        let config = self
+            .config
+            .clone()
+            .unwrap_or_else(PlayerConfig::create_default);
         if let Some(reason) = can_not_join(profile, &self.address, server).await {
             self.kick(reason).await;
             return Some(PacketHandlerResult::Stop);

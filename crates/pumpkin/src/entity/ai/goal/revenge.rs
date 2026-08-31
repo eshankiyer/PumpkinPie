@@ -7,6 +7,7 @@ use crate::entity::ai::goal::GoalFuture;
 use crate::entity::ai::goal::track_target::TrackTargetGoal;
 use crate::entity::ai::target_predicate::TargetPredicate;
 use crate::entity::mob::Mob;
+use crate::entity::passive::panda::PandaEntity;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::tag::{self, Taggable};
@@ -30,12 +31,14 @@ pub struct RevengeGoal {
     /// Vanilla `PolarBear.PolarBearHurtByTargetGoal::alertOther` override: only alert nearby
     /// same-species mobs that aren't babies (`PolarBear.java:296-301`).
     alert_only_adults: bool,
-    /// Vanilla `PolarBear.PolarBearHurtByTargetGoal` never calls `setAlertOthers()`, so the
-    /// base class's unconditional `if (alertSameType) alertOthers()` never fires for it; only
-    /// its `start()` override calls `alertOthers()` directly, and only when the hurt bear
-    /// itself is a baby (`PolarBear.java:284-291`). When set, gates the alert loop below on
-    /// that condition instead of always running it.
+    /// Vanilla `PolarBear.PolarBearHurtByTargetGoal` never calls `setAlertOthers()`; its
+    /// `start()` override calls `alertOthers()` only when the hurt bear is a baby
+    /// (`PolarBear.java:284-291`). When set, gates the opt-in alert loop below on that condition.
     alert_only_when_self_is_baby: bool,
+    /// Vanilla `HurtByTargetGoal.setAlertOthers` (`HurtByTargetGoal.java:53-57`) is opt-in.
+    alert_others: bool,
+    /// `PandaHurtByTargetGoal.alertOther` (`Panda.java:868-871`) only alerts aggressive pandas.
+    alert_only_aggressive: bool,
 }
 
 impl RevengeGoal {
@@ -52,6 +55,8 @@ impl RevengeGoal {
             exclude_raiders: false,
             alert_only_adults: false,
             alert_only_when_self_is_baby: false,
+            alert_others: false,
+            alert_only_aggressive: false,
         }
     }
 
@@ -72,6 +77,31 @@ impl RevengeGoal {
         self.alert_only_when_self_is_baby = true;
         self
     }
+
+    /// Mirrors `HurtByTargetGoal.setAlertOthers` (`HurtByTargetGoal.java:53-57`); callers opt into
+    /// the `alertOthers` loop from `HurtByTargetGoal.start` (`HurtByTargetGoal.java:60-70`).
+    #[must_use]
+    pub const fn alert_others(mut self) -> Self {
+        self.alert_others = true;
+        self
+    }
+
+    /// Mirrors Panda's `alertOther` species filter (`Panda.java:868-871`).
+    #[must_use]
+    pub const fn alert_only_aggressive(mut self) -> Self {
+        self.alert_only_aggressive = true;
+        self
+    }
+}
+
+const fn should_alert_other(
+    alert_others: bool,
+    alert_only_aggressive: bool,
+    other_is_aggressive: bool,
+) -> bool {
+    // `HurtByTargetGoal.start` enters `alertOthers` only when `alertSameType` is set
+    // (`HurtByTargetGoal.java:60-67`).
+    alert_others && (!alert_only_aggressive || other_is_aggressive)
 }
 
 impl Goal for RevengeGoal {
@@ -165,6 +195,9 @@ impl Goal for RevengeGoal {
                 .get_attribute_value(&Attributes::FOLLOW_RANGE);
             let entity_type = entity.entity_type;
 
+            if !self.alert_others {
+                return;
+            }
             for nearby in world
                 .get_nearby_entities(position, follow_range)
                 .into_values()
@@ -172,6 +205,17 @@ impl Goal for RevengeGoal {
                 if nearby.get_entity().entity_id == entity.entity_id
                     || nearby.get_entity().entity_type != entity_type
                 {
+                    continue;
+                }
+                let other_is_aggressive = nearby
+                    .cast_any()
+                    .downcast_ref::<PandaEntity>()
+                    .is_some_and(PandaEntity::is_aggressive_gene);
+                if !should_alert_other(
+                    self.alert_others,
+                    self.alert_only_aggressive,
+                    other_is_aggressive,
+                ) {
                     continue;
                 }
                 let Some(nearby_mob) = nearby.get_mob() else {
@@ -202,7 +246,7 @@ impl Goal for RevengeGoal {
 
 #[cfg(test)]
 mod tests {
-    use super::is_raider;
+    use super::{is_raider, should_alert_other};
     use pumpkin_data::entity::EntityType;
 
     #[test]
@@ -222,5 +266,15 @@ mod tests {
         assert!(!is_raider(&EntityType::VEX));
         assert!(!is_raider(&EntityType::ZOMBIE));
         assert!(!is_raider(&EntityType::PLAYER));
+    }
+
+    #[test]
+    // `setAlertOthers` is opt-in before `HurtByTargetGoal.start` invokes `alertOthers`
+    // (`HurtByTargetGoal.java:53-67`).
+    fn alert_others_is_opt_in() {
+        assert!(!should_alert_other(false, false, true));
+        assert!(should_alert_other(true, false, false));
+        assert!(should_alert_other(true, true, true));
+        assert!(!should_alert_other(true, true, false));
     }
 }

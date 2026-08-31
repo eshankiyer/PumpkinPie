@@ -70,3 +70,23 @@ impl ClientPacket for CDamageEvent {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::CDamageEvent;
+    use crate::{ClientPacket, VarInt};
+    use pumpkin_util::version::JavaMinecraftVersion;
+
+    #[test]
+    fn optional_entity_ids_use_the_vanilla_plus_one_encoding() {
+        // Vanilla writes each optional entity ID as `id + 1` and then writes the optional
+        // source position (`ClientboundDamageEventPacket.java:42-59`).
+        let packet = CDamageEvent::new(VarInt(3), VarInt(5), Some(VarInt(7)), None, None);
+        let mut bytes = Vec::new();
+        packet
+            .write_packet_data(&mut bytes, &JavaMinecraftVersion::V_26_2)
+            .unwrap();
+
+        assert_eq!(bytes, [3, 5, 8, 0, 0]);
+    }
+}

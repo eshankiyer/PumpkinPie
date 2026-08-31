@@ -9,16 +9,15 @@ use crate::entity::EntityBase;
 use crate::entity::player::Player;
 use crate::world::World;
 use crate::world::game_event::{GameEventContext, emit_game_event};
-use pumpkin_data::BlockDirection;
-use pumpkin_data::BlockStateId;
-use pumpkin_data::block_properties::{BlockProperties, Half};
+use pumpkin_data::block_properties::{BlockProperties, Half, HorizontalFacing};
+use pumpkin_data::fluid::Fluid;
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::Taggable;
-use pumpkin_data::{Block, tag};
+use pumpkin_data::{Block, BlockDirection, BlockStateId, tag};
 use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_util::math::position::BlockPos;
-use pumpkin_world::world::BlockFlags;
+use pumpkin_world::{tick::TickPriority, world::BlockFlags};
 use std::sync::Arc;
 
 type TrapDoorProperties = pumpkin_data::block_properties::OakTrapdoorLikeProperties;
@@ -66,6 +65,12 @@ async fn toggle_trapdoor(player: Option<&Arc<Player>>, world: &Arc<World>, block
             BlockFlags::NOTIFY_LISTENERS,
         )
         .await;
+
+    // `TrapDoorBlock.toggle` (`TrapDoorBlock.java:108-114`) schedules the water fluid tick
+    // after changing a waterlogged trapdoor, so flowing water observes the new state.
+    if trapdoor_props.waterlogged {
+        world.schedule_fluid_tick(&Fluid::WATER, *block_pos, 5, TickPriority::Normal);
+    }
 }
 
 fn can_open_trapdoor(block: &Block) -> bool {
@@ -73,6 +78,17 @@ fn can_open_trapdoor(block: &Block) -> bool {
         return false;
     }
     true
+}
+
+// `TrapDoorBlock.getStateForPlacement` (`TrapDoorBlock.java:150-155`) selects the clicked
+// horizontal face, otherwise the opposite of the player's horizontal direction.
+fn placement_facing(
+    direction: BlockDirection,
+    player_facing: HorizontalFacing,
+) -> HorizontalFacing {
+    direction
+        .to_horizontal_facing()
+        .unwrap_or(player_facing.opposite())
 }
 
 fn get_sound(block: &Block, open: bool) -> Sound {
@@ -136,11 +152,10 @@ impl BlockBehaviour for TrapDoorBlock {
 
             let player_facing = args.player.get_entity().get_horizontal_facing();
 
-            // Correct facing logic using Option unwrap
-            let facing = args
-                .direction
-                .to_horizontal_facing()
-                .unwrap_or(player_facing);
+            // `TrapDoorBlock.getStateForPlacement` (`TrapDoorBlock.java:146-161`) uses the
+            // clicked horizontal face, or the opposite of the player's horizontal direction
+            // for a floor/ceiling placement.
+            let facing = placement_facing(args.direction, player_facing);
 
             trapdoor_props.facing = facing;
 
@@ -236,5 +251,26 @@ impl BlockBehaviour for TrapDoorBlock {
             )
             .await;
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::placement_facing;
+    use pumpkin_data::BlockDirection;
+    use pumpkin_data::block_properties::HorizontalFacing;
+
+    #[test]
+    fn vertical_trapdoor_placement_faces_away_from_player() {
+        // `TrapDoorBlock.getStateForPlacement` (`TrapDoorBlock.java:150-155`) uses the
+        // opposite player direction for non-horizontal clicked faces.
+        assert_eq!(
+            placement_facing(BlockDirection::Up, HorizontalFacing::North),
+            HorizontalFacing::South
+        );
+        assert_eq!(
+            placement_facing(BlockDirection::East, HorizontalFacing::North),
+            HorizontalFacing::East
+        );
     }
 }

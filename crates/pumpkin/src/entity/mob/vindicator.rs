@@ -113,7 +113,10 @@ impl VindicatorEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             // Vindicator.java:69-73.
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true).exclude_raiders()));
+            target_selector.add_goal(
+                1,
+                Box::new(RevengeGoal::new(true).exclude_raiders().alert_others()),
+            );
             target_selector.add_goal(
                 2,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),

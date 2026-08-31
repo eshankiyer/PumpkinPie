@@ -68,7 +68,8 @@ impl BlazeEntity {
                 .target_selector
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            // `Blaze.java:50` calls `setAlertOthers` on this revenge goal.
+            target_selector.add_goal(1, Box::new(RevengeGoal::new(true).alert_others()));
 
             goal_selector.add_goal(
                 4,

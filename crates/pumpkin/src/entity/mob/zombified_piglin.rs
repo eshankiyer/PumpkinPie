@@ -82,7 +82,7 @@ impl ZombifiedPiglinEntity {
             // Zombified piglins are neutral: vanilla `ZombifiedPiglin.java:75-77` registers no
             // unconditional player target, only `HurtByTargetGoal(this).setAlertOthers()` plus
             // the anger-gated player target below.
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            target_selector.add_goal(1, Box::new(RevengeGoal::new(true).alert_others()));
 
             // Vanilla `ZombifiedPiglin.java:76`:
             // `NearestAttackableTargetGoal<>(this, Player.class, 10, true, false, this::isAngryAt)`.

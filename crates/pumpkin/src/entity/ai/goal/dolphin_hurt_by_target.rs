@@ -33,7 +33,7 @@ impl DolphinHurtByTargetGoal {
     #[must_use]
     pub fn new() -> Box<Self> {
         Box::new(Self {
-            inner: RevengeGoal::new(true),
+            inner: RevengeGoal::new(true).alert_others(),
         })
     }
 }

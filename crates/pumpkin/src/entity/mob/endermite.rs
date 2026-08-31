@@ -66,7 +66,8 @@ impl EndermiteEntity {
                 .target_selector
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            // `Endermite.java:47` calls `setAlertOthers` on this revenge goal.
+            target_selector.add_goal(1, Box::new(RevengeGoal::new(true).alert_others()));
             // Endermite.java:48 puts the player target goal at priority 2, below the revenge
             // goal; sharing priority 1 with it made the two goals compete instead of nest.
             target_selector.add_goal(

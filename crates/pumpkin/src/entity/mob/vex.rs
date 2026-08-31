@@ -114,7 +114,10 @@ impl VexEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             // Vex.java:93: `HurtByTargetGoal(this, Raider.class).setAlertOthers()`.
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true).exclude_raiders()));
+            target_selector.add_goal(
+                1,
+                Box::new(RevengeGoal::new(true).exclude_raiders().alert_others()),
+            );
             target_selector.add_goal(2, Box::new(VexCopyOwnerTargetGoal::new(vex_weak)));
             target_selector.add_goal(
                 3,

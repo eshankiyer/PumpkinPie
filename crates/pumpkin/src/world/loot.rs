@@ -978,24 +978,14 @@ impl LootPoolEntryTypesExt for LootPoolEntryTypes {
                     return Vec::new();
                 }
 
-                if tag.expand {
-                    // Reached only when this entry sits somewhere `LootTableExt::get_loot`'s
-                    // top-level pool-entry fan-out (`TagEntry.expandTag`, `TagEntry.java:50-65`)
-                    // doesn't apply, e.g. nested inside an `Alternatives`/`Sequence`/`Group`
-                    // entry. Vanilla still fans out to one weighted candidate per tag item in
-                    // that case (`LootPoolEntryContainer.expand`); this uniform pick is an
-                    // approximation, kept because no shipped loot table nests an `expand: true`
-                    // tag this way to exercise it.
-                    let index = rand::random_range(0..items.len() as i32) as usize;
-                    vec![ItemStack::new(1, items[index])]
-                } else {
-                    // `TagEntry.createItemStack` (`TagEntry.java:46-48`): yield one stack of
-                    // every item in the tag.
-                    items
-                        .into_iter()
-                        .map(|item| ItemStack::new(1, item))
-                        .collect()
-                }
+                // `TagEntry.createItemStack` (`TagEntry.java:46-48`) yields one stack for every
+                // member when the entry is evaluated inside a nested sequence, group, or
+                // alternative. Pool-level `TagEntry.expandTag` fan-out remains in
+                // `LootTableExt::get_loot` (`TagEntry.java:50-65`).
+                items
+                    .into_iter()
+                    .map(|item| ItemStack::new(1, item))
+                    .collect()
             }
             Self::Alternatives(alternative_entry) => {
                 for entry in alternative_entry.children {
@@ -1521,6 +1511,7 @@ mod tests {
     use pumpkin_data::entity::EntityType;
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
+    use pumpkin_data::tag::Taggable;
     use pumpkin_data::{
         data_component_impl::ContainerImpl, data_component_impl::ContainerLootImpl,
         data_component_impl::CustomNameImpl, data_component_impl::FireworkExplosionShape,
@@ -1991,6 +1982,26 @@ mod tests {
         assert!(
             wool_fraction > 0.85,
             "expected the 16-item expand tag to dominate the roll (~0.94), got {wool_fraction}"
+        );
+    }
+
+    #[test]
+    fn nested_expanded_tag_yields_each_tag_member() {
+        // `TagEntry.createItemStack` (`TagEntry.java:46-48`) emits every tag member when
+        // nested evaluation reaches the entry itself; `expandTag` (`TagEntry.java:50-65`) only
+        // changes pool-level candidate expansion.
+        let entry = LootPoolEntryTypes::Tag(pumpkin_util::loot_table::TagEntry {
+            name: "minecraft:wool",
+            expand: true,
+        });
+
+        let stacks = entry.get_stacks(&LootContextParameters::default());
+
+        assert_eq!(stacks.len(), 16);
+        assert!(
+            stacks
+                .iter()
+                .all(|stack| stack.item.has_tag(&pumpkin_data::tag::Item::MINECRAFT_WOOL))
         );
     }
 

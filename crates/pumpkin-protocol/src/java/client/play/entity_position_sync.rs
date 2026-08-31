@@ -85,3 +85,40 @@ impl ClientPacket for CEntityPositionSync {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::CEntityPositionSync;
+    use crate::{ClientPacket, VarInt, packet::MultiVersionJavaPacket};
+    use pumpkin_util::math::vector3::Vector3;
+    use pumpkin_util::version::JavaMinecraftVersion;
+
+    #[test]
+    fn legacy_layout_uses_rotations_without_velocity() {
+        // Vanilla `ClientboundEntityPositionSyncPacket` writes the position, rotation,
+        // velocity, and ground fields as one composite (`ClientboundEntityPositionSyncPacket.java:11-20`).
+        let packet = CEntityPositionSync::new(
+            VarInt(7),
+            Vector3::new(1.0, 2.0, 3.0),
+            Vector3::new(4.0, 5.0, 6.0),
+            90.0,
+            -45.0,
+            true,
+        );
+        let mut bytes = Vec::new();
+        packet
+            .write_packet_data(&mut bytes, &JavaMinecraftVersion::V_1_21)
+            .unwrap();
+
+        let mut expected = vec![7];
+        expected.extend(1.0f64.to_be_bytes());
+        expected.extend(2.0f64.to_be_bytes());
+        expected.extend(3.0f64.to_be_bytes());
+        expected.extend([64, 224, 1]);
+        assert_eq!(bytes, expected);
+        assert_eq!(
+            CEntityPositionSync::to_id(JavaMinecraftVersion::V_1_21),
+            super::TELEPORT_ENTITY.to_id(JavaMinecraftVersion::V_1_21)
+        );
+    }
+}

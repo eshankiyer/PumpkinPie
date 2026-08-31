@@ -311,6 +311,13 @@ impl EntityBase for OminousItemSpawnerEntity {
         false
     }
 
+    /// `OminousItemSpawner.getPistonPushReaction` returns `PushReaction.IGNORE`
+    /// (`OminousItemSpawner.java:143-146`), so the existing piston mover must leave this entity
+    /// in place.
+    fn can_be_pushed_by_piston(&self) -> bool {
+        false
+    }
+
     fn send_java_spawn_packet<'a>(
         &'a self,
         client: &'a crate::net::java::JavaClient,

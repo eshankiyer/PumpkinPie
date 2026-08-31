@@ -18,7 +18,11 @@ impl PolarBearHurtByTargetGoal {
     #[must_use]
     pub fn new() -> Box<Self> {
         Box::new(Self {
+            // `PolarBearHurtByTargetGoal.start` calls `alertOthers` for a baby bear
+            // (`PolarBear.java:284-291`), even though its constructor does not call
+            // `setAlertOthers`.
             inner: RevengeGoal::new(true)
+                .alert_others()
                 .alert_only_adults()
                 .alert_only_when_self_is_baby(),
         })

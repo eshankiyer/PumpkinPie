@@ -44,7 +44,8 @@ impl SilverfishEntity {
                 .target_selector
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            // `Silverfish.java:48` calls `setAlertOthers` on this revenge goal.
+            target_selector.add_goal(1, Box::new(RevengeGoal::new(true).alert_others()));
 
             // Silverfish.java:43 registers `FloatGoal` at priority 1, tied with the powder
             // snow goal below, not at 0.

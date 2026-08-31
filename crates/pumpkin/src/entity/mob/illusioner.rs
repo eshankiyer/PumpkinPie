@@ -96,7 +96,11 @@ impl IllusionerEntity {
                 .target_selector
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            // `Illusioner.java:74` calls `setAlertOthers` after excluding `Raider` attackers.
+            target_selector.add_goal(
+                1,
+                Box::new(RevengeGoal::new(true).exclude_raiders().alert_others()),
+            );
             target_selector.add_goal(
                 1,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),
