@@ -1343,6 +1343,12 @@ impl ScreenHandler for CraftingTableScreenHandler {
         })
     }
 
+    /// Excludes the crafting result from pickup-all, matching the separate
+    /// `resultSlots` container in `CraftingMenu.java:155-158`.
+    fn can_take_item_for_pick_all(&self, _carried: &ItemStack, target: &dyn Slot) -> bool {
+        !target.is_fake()
+    }
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -1461,6 +1467,30 @@ mod recipe_remainder_tests {
         assert!(apply_recipe_remainder(&mut consumed_source, returned_original).is_none());
         assert!(consumed_source.item == &Item::WRITTEN_BOOK);
         assert_eq!(consumed_source.item_count, 1);
+    }
+}
+
+#[cfg(test)]
+mod crafting_menu_tests {
+    use super::*;
+    use crate::{build_equipment_slots, entity_equipment::EntityEquipment};
+    use tokio::sync::Mutex as TokioMutex;
+
+    #[tokio::test]
+    async fn pickup_all_excludes_the_result_slot() {
+        // `CraftingMenu.canTakeItemForPickAll` excludes `resultSlots`
+        // (`CraftingMenu.java:155-158`) while allowing the crafting-grid slots.
+        let player_inventory = Arc::new(PlayerInventory::new(
+            Arc::new(TokioMutex::new(EntityEquipment::new())),
+            Arc::new(build_equipment_slots()),
+        ));
+        let handler = CraftingTableScreenHandler::new(0, &player_inventory, None).await;
+        let result_slot = handler.get_behaviour().slots[0].clone();
+        let input_slot = handler.get_behaviour().slots[1].clone();
+        let carried = ItemStack::EMPTY.clone();
+
+        assert!(!handler.can_take_item_for_pick_all(&carried, result_slot.as_ref()));
+        assert!(handler.can_take_item_for_pick_all(&carried, input_slot.as_ref()));
     }
 }
 

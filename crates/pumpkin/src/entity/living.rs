@@ -88,6 +88,28 @@ fn knockback_strength_with_resistance(strength: f64, resistance: f64) -> f64 {
     strength * (1.0 - resistance.clamp(0.0, 1.0))
 }
 
+/// `LivingEntity.handleOnClimbable` keeps a sneaking player from sliding down a ladder, except
+/// while inside scaffolding (`LivingEntity.java:2694-2700`).
+const fn suppress_climb_descent(is_player: bool, sneaking: bool, in_scaffolding: bool) -> bool {
+    is_player && sneaking && !in_scaffolding
+}
+
+/// Selects the category used by the shared hurt-sound path. Vanilla's mob override delegates
+/// to `makeSound`, which uses the mob sound source (`Mob.java:295-299`; `LivingEntity.java:1427-1434`).
+const fn hurt_sound_category(
+    is_player: bool,
+    mob_sound_source: Option<SoundCategory>,
+) -> SoundCategory {
+    if is_player {
+        SoundCategory::Players
+    } else {
+        match mob_sound_source {
+            Some(category) => category,
+            None => SoundCategory::Neutral,
+        }
+    }
+}
+
 /// Vanilla turns a non-finite damage value into the largest finite value before it reaches
 /// cooldown, armor, or health calculations (`LivingEntity.hurtServer`). This matters at the
 /// plugin boundary too: a malformed replacement amount must not poison persistent combat state.
@@ -259,6 +281,9 @@ pub struct LivingEntity {
     /// A sculk catalyst that absorbs a nearby death claims the experience as charge, so the
     /// orb must not also drop (`SculkCatalystBlockEntity.java:80`).
     pub skip_drop_experience: AtomicBool,
+    /// Vanilla `Mob.lootTableSeed` is stored here so every concrete mob can use its existing
+    /// `LivingEntity` NBT delegation (`Mob.java:383-385, 406-407`).
+    pub loot_table_seed: AtomicCell<i64>,
     /// Vanilla `LivingEntity.lastHurtByPlayerMemoryTime`: ticks left in which a death still
     /// counts as a player kill for loot and experience. Set to 100 by any player-sourced damage.
     pub last_hurt_by_player_time: AtomicI32,
@@ -557,6 +582,7 @@ impl LivingEntity {
             entity,
             hurt_cooldown: AtomicI32::new(0),
             skip_drop_experience: AtomicBool::new(false),
+            loot_table_seed: AtomicCell::new(0),
             last_hurt_by_player_time: AtomicI32::new(0),
             last_damage_taken: AtomicCell::new(0.0),
             absorption: AtomicCell::new(0.0),
@@ -2889,25 +2915,18 @@ impl LivingEntity {
 
             velo.y = velo.y.max(neg);
 
-            // TODO
-            // if velo.y < 0.0
-            //     && self.entity.entity_type == &EntityType::PLAYER
-            //     && self.entity.sneaking.load(Relaxed)
-            // {
-            //     let block = self
-            //         .entity
-            //         .world
-            //         .read()
-            //         .await
-            //         .get_block(&self.entity.block_pos.load())
-            //         .await;
-
-            //     if let Some(props) = block.properties(block.default_state.id) {
-            //         if props.name() == "ScaffoldingLikeProperties" {
-            //             velo.y = 0.0;
-            //         }
-            //     }
-            // }
+            // `LivingEntity.handleOnClimbable` checks `getInBlockState` before suppressing
+            // downward motion (`LivingEntity.java:2694-2700`).
+            if velo.y < 0.0
+                && suppress_climb_descent(
+                    self.entity.entity_type == &EntityType::PLAYER,
+                    self.entity.sneaking.load(Relaxed),
+                    Block::from_state_id(self.entity.get_in_block_state().id)
+                        == &Block::SCAFFOLDING,
+                )
+            {
+                velo.y = 0.0;
+            }
 
             self.entity.velocity.store(velo);
         }
@@ -3369,7 +3388,7 @@ impl LivingEntity {
             let should_drop_loot =
                 world.level_info.load().game_rules.mob_drops && (is_monster || !is_baby);
             if should_drop_loot {
-                self.drop_loot(params.clone()).await;
+                self.drop_loot(params.clone(), dyn_self.as_ref()).await;
             }
 
             // `LivingEntity.die` (`world/entity/LivingEntity.java:1474`) calls
@@ -3544,6 +3563,7 @@ impl LivingEntity {
         }
     }
 
+    #[expect(clippy::too_many_lines)]
     async fn update_death_stats(&self, dyn_self: &dyn EntityBase, cause: Option<&dyn EntityBase>) {
         if let Some(victim_player) = dyn_self.get_player() {
             victim_player
@@ -3568,7 +3588,8 @@ impl LivingEntity {
         }
 
         if let Some(killer_player) = cause.and_then(|c| c.get_player()) {
-            if dyn_self.get_player().is_some() {
+            let victim_is_player = dyn_self.get_player().is_some();
+            if victim_is_player {
                 killer_player
                     .increment_stat(
                         StatisticCategory::Custom,
@@ -3621,6 +3642,66 @@ impl LivingEntity {
                     1,
                 )
                 .await;
+
+            // `Entity.awardKillScore` triggers the player-killed-entity criterion, while the
+            // `ServerPlayer` override updates total/player kill objectives
+            // (`Entity.java:2021-2024`; `ServerPlayer.java:955-968`). The statistic updates above
+            // cover the persisted counters; update the live scoreboard criteria and the player
+            // victim criterion here for the existing death path.
+            if killer_player.entity_id() != self.entity.entity_id {
+                let victim_resource =
+                    format!("minecraft:{}", self.entity.entity_type.resource_name);
+                if victim_is_player {
+                    killer_player
+                        .trigger_advancement(
+                            crate::entity::player::advancement::trigger::AdvancementTrigger::PlayerKilledEntity {
+                                entity_type_resource: victim_resource,
+                            },
+                        )
+                        .await;
+                }
+
+                let world = self.entity.world.load();
+                let killer_name = killer_player.gameprofile.name.clone();
+                let mut scoreboard = world.scoreboard.lock().await;
+                let victim_name = crate::world::scoreboard::entity_scoreboard_name(dyn_self);
+                let killer_team_color = scoreboard
+                    .get_team_for_scoreboard_name(&killer_name)
+                    .map(|team| crate::world::scoreboard::named_color_to_str(team.color));
+                let victim_team_color = scoreboard
+                    .get_team_for_scoreboard_name(&victim_name)
+                    .map(|team| crate::world::scoreboard::named_color_to_str(team.color));
+                let mut criteria = vec![(killer_name.clone(), "totalKillCount".to_string())];
+                if victim_is_player {
+                    criteria.push((killer_name.clone(), "playerKillCount".to_string()));
+                }
+                if let Some(color) = victim_team_color {
+                    criteria.push((killer_name.clone(), format!("teamkill.{color}")));
+                }
+                if let Some(color) = killer_team_color {
+                    criteria.push((victim_name, format!("killedByTeam.{color}")));
+                }
+
+                for (holder, criterion) in criteria {
+                    let updates: Vec<(String, i32)> = scoreboard
+                        .get_objectives()
+                        .values()
+                        .filter(|objective| objective.criterion == criterion)
+                        .map(|objective| {
+                            let value = scoreboard
+                                .get_score_value(&holder, &objective.name)
+                                .unwrap_or(0)
+                                .saturating_add(1);
+                            (objective.name.clone(), value)
+                        })
+                        .collect();
+                    for (objective, value) in updates {
+                        scoreboard
+                            .set_score_value(world.as_ref(), holder.clone(), objective, value)
+                            .await;
+                    }
+                }
+            }
         }
     }
 
@@ -3685,8 +3766,15 @@ impl LivingEntity {
         }
     }
 
-    async fn drop_loot(&self, params: LootContextParameters) {
+    async fn drop_loot(&self, mut params: LootContextParameters, caller: &dyn EntityBase) {
         if let Some(loot_table) = &self.get_entity().entity_type.loot_table {
+            // `LivingEntity.dropFromLootTable` passes `getLootTableSeed()` to the table
+            // (`LivingEntity.java:1547-1551, 1577-1578`); carry the same optional seed through
+            // the existing generated entity-table path.
+            params.loot_table_seed = caller
+                .get_mob()
+                .map(Mob::get_loot_table_seed)
+                .filter(|seed| *seed != 0);
             let pos = self.entity.block_pos.load();
             for stack in loot_table.get_loot(params) {
                 self.entity.world.load().drop_stack(&pos, stack).await;
@@ -4160,24 +4248,33 @@ impl LivingEntity {
         caller: &dyn EntityBase,
         damage_amount: f32,
         damage_type: &DamageType,
+        helmet_only: bool,
     ) {
+        // Vanilla's base `hurtArmor` and `hurtHelmet` are empty
+        // (`LivingEntity.java:1881-1885`). The live overrides are Player's humanoid armor
+        // hooks (`Player.java:738-745`), Wolf's body armor hook (`Wolf.java:443-444`), and
+        // Horse's body armor hook (`Horse.java:233-234`). Keep durability on those same
+        // concrete entities; generic living mobs must not lose armor merely because they have
+        // armor attributes or equipment.
+        let entity_type = self.entity.entity_type;
+        let supported = entity_type == &EntityType::PLAYER
+            || entity_type == &EntityType::WOLF
+            || entity_type == &EntityType::HORSE;
+        if !supported {
+            return;
+        }
+
         // Formula: armor loses floor(incoming_damage / 4) durability, minimum 1.
         let armor_damage = (damage_amount / 4.0).floor().max(1.0) as i32;
         let mut equipment_updates = Vec::new();
 
         // TODO: Implement DAMAGE_RESISTANT component checks (e.g. netherite vs fire).
 
-        let helmet_only = damage_type.id == DamageType::FALLING_ANVIL.id
-            || damage_type.id == DamageType::FALLING_BLOCK.id
-            || damage_type.id == DamageType::FALLING_STALACTITE.id;
-
         let armor_slots: Vec<(usize, ItemStack, EquipmentSlot)> = {
             let equipment_lock = self.entity_equipment.lock().await;
             self.equipment_slots
                 .iter()
-                .filter(|(_, slot)| {
-                    slot.is_armor_slot() && (!helmet_only || **slot == EquipmentSlot::HEAD)
-                })
+                .filter(|(_, slot)| hurt_armor_slot(entity_type, slot, helmet_only))
                 .filter_map(|(index, slot)| {
                     equipment_lock
                         .equipment
@@ -5140,6 +5237,12 @@ impl NBTStorage for LivingEntity {
             nbt.put_short("HurtTime", self.hurt_cooldown.load(Relaxed).max(0) as i16);
             nbt.put_short("DeathTime", i16::from(self.death_time.load(Relaxed)));
             nbt.put_bool("FallFlying", self.entity.is_fall_flying());
+            // `Mob.addAdditionalSaveData` writes a non-zero DeathLootTableSeed
+            // (`Mob.java:382-385`).
+            let loot_table_seed = self.loot_table_seed.load();
+            if loot_table_seed != 0 {
+                nbt.put_long("DeathLootTableSeed", loot_table_seed);
+            }
             {
                 let effects = self.active_effects.lock().await;
                 let hidden_effects = self.hidden_effects.lock().await;
@@ -5240,6 +5343,10 @@ impl NBTStorage for LivingEntity {
             self.entity
                 .fall_flying
                 .store(nbt.get_bool("FallFlying").unwrap_or(false), Relaxed);
+            // `Mob.readAdditionalSaveData` restores the optional loot seed, defaulting to zero
+            // (`Mob.java:405-407`).
+            self.loot_table_seed
+                .store(nbt.get_long("DeathLootTableSeed").unwrap_or(0));
             let mut loaded_effects: Vec<Effect> = Vec::new();
             {
                 let mut active_effects = self.active_effects.lock().await;
@@ -5810,7 +5917,13 @@ impl EntityBase for LivingEntity {
                 amount *= 5.0;
             }
 
+            // Vanilla calls `hurtHelmet` before the hurt-cooldown comparison
+            // (`LivingEntity.java:1207-1210`). Only Player overrides this hook in the current
+            // entity hierarchy (`Player.java:743-745`); route its head slot through the same
+            // equipment-damage path before applying the 0.75 damage multiplier.
             if damages_helmet(&damage_type) {
+                self.damage_armor_items(caller, amount, &damage_type, true)
+                    .await;
                 amount *= 0.75;
             }
 
@@ -6085,9 +6198,17 @@ impl EntityBase for LivingEntity {
                 let pitch = caller.get_mob().map_or(1.0, Mob::get_sound_pitch);
                 // `LivingEntity.makeSound` passes `getVoicePitch` to the sound packet
                 // (`LivingEntity.java:1427-1434`).
+                // `Mob.playHurtSound` delegates to `LivingEntity.playHurtSound`, whose
+                // `makeSound` ultimately uses the entity's sound source (`Mob.java:295-299`;
+                // `LivingEntity.java:1427-1434`). Players retain their player category; mobs
+                // use the existing `Mob::get_sound_source` override.
+                let sound_category = hurt_sound_category(
+                    caller.get_player().is_some(),
+                    caller.get_mob().map(Mob::get_sound_source),
+                );
                 world.play_sound_fine(
                     hurt_sound,
-                    SoundCategory::Players,
+                    sound_category,
                     &self.entity.pos.load(),
                     1.0,
                     pitch,
@@ -6344,7 +6465,7 @@ impl EntityBase for LivingEntity {
             // `getDamageAfterAbsorb` reduces at line 1904 -- i.e. `raw_increment`, not the
             // post-reduction `damage_amount`.
             if raw_increment > 0.0 && !bypasses_armor_durability(&damage_type) {
-                self.damage_armor_items(caller, raw_increment, &damage_type)
+                self.damage_armor_items(caller, raw_increment, &damage_type, false)
                     .await;
             }
 
@@ -7558,6 +7679,27 @@ pub(crate) const fn damages_helmet(damage_type: &DamageType) -> bool {
         || damage_type.id == DamageType::FALLING_STALACTITE.id
 }
 
+/// Selects the slots reached by the concrete vanilla `hurtArmor`/`hurtHelmet` overrides
+/// (`LivingEntity.java:1207-1210, 1881-1905`; `Player.java:738-745`; `Wolf.java:443-444`;
+/// `Horse.java:233-234`).
+fn hurt_armor_slot(
+    entity_type: &'static EntityType,
+    slot: &EquipmentSlot,
+    helmet_only: bool,
+) -> bool {
+    if entity_type == &EntityType::PLAYER {
+        return if helmet_only {
+            *slot == EquipmentSlot::HEAD
+        } else {
+            slot.is_armor_slot()
+        };
+    }
+
+    !helmet_only
+        && *slot == EquipmentSlot::BODY
+        && (entity_type == &EntityType::WOLF || entity_type == &EntityType::HORSE)
+}
+
 /// Returns whether vanilla damage tags prevent shield blocking.
 pub(crate) const fn bypasses_shield(damage_type: &DamageType) -> bool {
     matches!(
@@ -7767,6 +7909,68 @@ fn skeleton_swim_sound_volume(on_ground: bool, water_volume: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `Mob.playHurtSound` uses the mob sound source, while players use the player category
+    /// (`Mob.java:295-299`; `LivingEntity.java:1427-1434`).
+    #[test]
+    fn hurt_sound_category_matches_entity_kind() {
+        assert_eq!(
+            hurt_sound_category(true, Some(SoundCategory::Neutral)).to_name(),
+            "players"
+        );
+        assert_eq!(
+            hurt_sound_category(false, Some(SoundCategory::Hostile)).to_name(),
+            "hostile"
+        );
+        assert_eq!(hurt_sound_category(false, None).to_name(), "neutral");
+    }
+
+    /// `LivingEntity.handleOnClimbable` stops downward motion for a sneaking player outside
+    /// scaffolding (`LivingEntity.java:2694-2700`).
+    #[test]
+    fn sneaking_players_stop_on_ladders_but_not_scaffolding() {
+        assert!(suppress_climb_descent(true, true, false));
+        assert!(!suppress_climb_descent(true, true, true));
+        assert!(!suppress_climb_descent(false, true, false));
+        assert!(!suppress_climb_descent(true, false, false));
+    }
+
+    /// Vanilla only reaches the concrete `hurtArmor` overrides on Player, Wolf, and Horse
+    /// (`LivingEntity.java:1881-1905`; `Player.java:738-745`; `Wolf.java:443-444`;
+    /// `Horse.java:233-234`).
+    #[test]
+    fn hurt_armor_slots_match_concrete_vanilla_overrides() {
+        assert!(hurt_armor_slot(
+            &EntityType::PLAYER,
+            &EquipmentSlot::HEAD,
+            true
+        ));
+        assert!(hurt_armor_slot(
+            &EntityType::PLAYER,
+            &EquipmentSlot::CHEST,
+            false
+        ));
+        assert!(hurt_armor_slot(
+            &EntityType::WOLF,
+            &EquipmentSlot::BODY,
+            false
+        ));
+        assert!(hurt_armor_slot(
+            &EntityType::HORSE,
+            &EquipmentSlot::BODY,
+            false
+        ));
+        assert!(!hurt_armor_slot(
+            &EntityType::ZOMBIE,
+            &EquipmentSlot::HEAD,
+            false
+        ));
+        assert!(!hurt_armor_slot(
+            &EntityType::WOLF,
+            &EquipmentSlot::BODY,
+            true
+        ));
+    }
 
     #[test]
     fn mounted_hitbox_raises_only_its_minimum_y() {

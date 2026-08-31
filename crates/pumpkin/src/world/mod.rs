@@ -1970,7 +1970,12 @@ impl World {
         // the current `randomTickSpeed` rule without holding a world-info guard while chunks are
         // inspected.
         let random_tick_speed = self.level_info.load().game_rules.random_tick_speed;
-        let tick_data = self.level.get_tick_data(&active_chunks, random_tick_speed);
+        // Vanilla `ServerLevel.startTickingChunk` (`ServerLevel.java:1749-1751`) anchors chunk
+        // tick delays to the live game time before the scheduled-tick phase.
+        let current_tick = self.level_time.lock().await.world_age;
+        let tick_data = self
+            .level
+            .get_tick_data(&active_chunks, random_tick_speed, current_tick);
 
         for chunk_pos in active_chunks.iter().copied() {
             if rng().random_range(0..48) == 0 {
@@ -6555,6 +6560,10 @@ impl World {
                     )),
                     world_time: self.level_info.load().day_time as u64,
                     tool,
+                    // Vanilla `Block.getDrops` adds `LootContextParams.THIS_ENTITY` from its
+                    // breaker overload (`Block.java:369-382`); retain the player type for the
+                    // existing `LootCondition::EntityProperties` lookup.
+                    this_entity: cause.as_ref().map(|player| player.get_entity().entity_type),
                     is_raining: Some(is_raining),
                     is_thundering: Some(is_thundering),
                     block_entity,

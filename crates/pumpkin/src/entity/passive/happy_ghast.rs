@@ -15,7 +15,7 @@ use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_protocol::java::server::play::SPlayerInput;
-use pumpkin_util::math::boundingbox::EntityDimensions;
+use pumpkin_util::math::boundingbox::{BoundingBox, EntityDimensions};
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
@@ -60,6 +60,16 @@ const fn happy_ghast_voice_pitch() -> f32 {
 #[must_use]
 pub const fn restriction_radius(is_baby: bool, has_body_armor: bool) -> i32 {
     if !is_baby && !has_body_armor { 64 } else { 32 }
+}
+
+/// `AABB.contains` (`AABB.java:259-265`) includes the minimum edge and excludes the maximum.
+fn happy_ghast_detection_box_contains(box_: &BoundingBox, position: Vector3<f64>) -> bool {
+    position.x >= box_.min.x
+        && position.x < box_.max.x
+        && position.y >= box_.min.y
+        && position.y < box_.max.y
+        && position.z >= box_.min.z
+        && position.z < box_.max.z
 }
 
 /// Represents a Happy Ghast, a passive flying mob that can be equipped with a
@@ -345,6 +355,51 @@ impl HappyGhastEntity {
             .position_target
             .store(entity.block_pos.load());
         self.mob_entity.position_target_range.store(radius, Relaxed);
+    }
+
+    /// `HappyGhast.scanPlayerAboveGhast` (`HappyGhast.java:547-568`) detects a non-spectator
+    /// player's root vehicle in the box above the ghast. The caller refreshes the still timeout
+    /// on the same tick as vanilla (`HappyGhast.java:432-434`).
+    async fn scan_player_above_ghast(&self) -> bool {
+        let entity = &self.mob_entity.living_entity.entity;
+        let ghast_box = entity.bounding_box.load();
+        let detection_box = BoundingBox {
+            min: Vector3::new(
+                ghast_box.min.x - 1.0,
+                ghast_box.max.y - 1.0e-5,
+                ghast_box.min.z - 1.0,
+            ),
+            max: Vector3::new(
+                ghast_box.max.x + 1.0,
+                ghast_box.max.y + f64::from(entity.entity_dimension.load().height) / 2.0,
+                ghast_box.max.z + 1.0,
+            ),
+        };
+
+        let players = entity.world.load().players.load().clone();
+        for player in players.iter() {
+            if player.is_spectator() {
+                continue;
+            }
+
+            let mut root_vehicle: Arc<dyn EntityBase> = player.clone();
+            loop {
+                let Some(vehicle) = root_vehicle.get_entity().vehicle.lock().await.clone() else {
+                    break;
+                };
+                root_vehicle = vehicle;
+            }
+
+            let root_entity = root_vehicle.get_entity();
+            let position = root_entity.pos.load();
+            if root_entity.entity_type != &EntityType::HAPPY_GHAST
+                && happy_ghast_detection_box_contains(&detection_box, position)
+            {
+                return true;
+            }
+        }
+
+        false
     }
 
     pub fn set_server_still_timeout(&self, timeout: i32) {
@@ -668,6 +723,23 @@ impl Mob for HappyGhastEntity {
                 return;
             }
 
+            // `HappyGhastBodyRotationControl.clientTick` keeps a vehicle's head and body
+            // aligned to its yaw (`HappyGhast.java:612-625`; `Mob.java:358-361`). Apply the same
+            // invariant on the server's live mob tick before the shared head-turn pass.
+            if !self
+                .mob_entity
+                .living_entity
+                .entity
+                .passengers
+                .lock()
+                .await
+                .is_empty()
+            {
+                let yaw = self.get_entity().yaw.load();
+                self.get_entity().head_yaw.store(yaw);
+                self.get_entity().body_yaw.store(yaw);
+            }
+
             // Vanilla `HappyGhast.aiStep` updates `requiresPrecisePosition` from
             // `isOnStillTimeout` before the base movement tick (`HappyGhast.java:439-445`).
             self.get_entity()
@@ -706,6 +778,12 @@ impl Mob for HappyGhastEntity {
                 self.sync_stay_still_flag();
             }
 
+            // `HappyGhast.tick` refreshes the rider-overhead grace timeout from
+            // `scanPlayerAboveGhast` (`HappyGhast.java:432-434,547-568`).
+            if self.scan_player_above_ghast().await {
+                self.set_server_still_timeout(10);
+            }
+
             // Vanilla `HappyGhast.aiStep` (`HappyGhast.java:438-442`) requests precise position
             // packets while the still-timeout is active, after its server AI step updates it.
             self.get_entity()
@@ -731,8 +809,10 @@ impl Mob for HappyGhastEntity {
 #[cfg(test)]
 mod test {
     use super::{
-        HappyGhastEntity, happy_ghast_fall_damage, happy_ghast_voice_pitch, restriction_radius,
+        BoundingBox, HappyGhastEntity, happy_ghast_detection_box_contains, happy_ghast_fall_damage,
+        happy_ghast_voice_pitch, restriction_radius,
     };
+    use pumpkin_util::math::vector3::Vector3;
 
     #[test]
     fn restriction_radius_matches_vanilla() {
@@ -753,5 +833,27 @@ mod test {
     fn brain_ticks_only_for_babies() {
         assert!(HappyGhastEntity::should_tick_brain_for_age(-1));
         assert!(!HappyGhastEntity::should_tick_brain_for_age(0));
+    }
+
+    // `HappyGhast.scanPlayerAboveGhast` uses `AABB.contains` (`HappyGhast.java:547-568`;
+    // `AABB.java:259-265`).
+    #[test]
+    fn player_above_detection_uses_half_open_bounds() {
+        let detection_box = BoundingBox {
+            min: Vector3::new(-1.0, 2.0, -1.0),
+            max: Vector3::new(1.0, 4.0, 1.0),
+        };
+        assert!(happy_ghast_detection_box_contains(
+            &detection_box,
+            Vector3::new(-1.0, 2.0, 0.0)
+        ));
+        assert!(!happy_ghast_detection_box_contains(
+            &detection_box,
+            Vector3::new(1.0, 2.0, 0.0)
+        ));
+        assert!(!happy_ghast_detection_box_contains(
+            &detection_box,
+            Vector3::new(0.0, 4.0, 0.0)
+        ));
     }
 }

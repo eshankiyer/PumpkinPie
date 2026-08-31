@@ -110,17 +110,20 @@ impl PressurePlate for PressurePlateBlock {
     #[allow(clippy::unused_async_trait_impl)]
     async fn calculate_redstone_output(&self, world: &World, block: &Block, pos: &BlockPos) -> u8 {
         let aabb = detection_box_at(pos);
+        // `BasePressurePlateBlock.getEntityCount` excludes spectators and entities whose
+        // `isIgnoringBlockTriggers` is true (`BasePressurePlateBlock.java:146-148`).
         let entity_triggers = world.get_entities_at_box(&aabb).into_iter().any(|entity| {
-            detects_entity(
-                block,
-                entity.get_living_entity().is_some(),
-                entity.is_spectator(),
-            )
+            !entity.is_ignoring_block_triggers()
+                && detects_entity(
+                    block,
+                    entity.get_living_entity().is_some(),
+                    entity.is_spectator(),
+                )
         });
-        let player_triggers = world
-            .get_players_at_box(&aabb)
-            .into_iter()
-            .any(|player| detects_entity(block, true, player.is_spectator()));
+        let player_triggers = world.get_players_at_box(&aabb).into_iter().any(|player| {
+            !player.is_ignoring_block_triggers()
+                && detects_entity(block, true, player.is_spectator())
+        });
         if entity_triggers || player_triggers {
             return 15;
         }

@@ -23,20 +23,6 @@ use crate::{
 
 use super::tripwire_hook::TripwireHookBlock;
 
-/// Vanilla `Entity.isIgnoringBlockTriggers` overrides: `Marker`, `Interaction`, the
-/// `Display` family, and `OminousItemSpawner` never trigger pressure-sensitive blocks.
-const fn is_ignoring_block_triggers(
-    entity_type: &'static pumpkin_data::entity::EntityType,
-) -> bool {
-    use pumpkin_data::entity::EntityType;
-    entity_type.id == EntityType::MARKER.id
-        || entity_type.id == EntityType::INTERACTION.id
-        || entity_type.id == EntityType::TEXT_DISPLAY.id
-        || entity_type.id == EntityType::BLOCK_DISPLAY.id
-        || entity_type.id == EntityType::ITEM_DISPLAY.id
-        || entity_type.id == EntityType::OMINOUS_ITEM_SPAWNER.id
-}
-
 type TripwireProperties = pumpkin_data::block_properties::TripwireLikeProperties;
 type TripwireHookProperties = pumpkin_data::block_properties::TripwireHookLikeProperties;
 
@@ -62,7 +48,8 @@ impl BlockBehaviour for TripwireBlock {
             {
                 return;
             }
-            if is_ignoring_block_triggers(args.entity.get_entity().entity_type) {
+            // Display overrides `isIgnoringBlockTriggers` (`Display.java:266-268`).
+            if args.entity.is_ignoring_block_triggers() {
                 return;
             }
             props.powered = true;
@@ -193,13 +180,13 @@ impl BlockBehaviour for TripwireBlock {
                 .next()
                 .unwrap_or_else(BoundingBox::full_block)
                 .at_pos(*args.position);
-            // Vanilla `Entity.isIgnoringBlockTriggers`: markers, interaction entities,
-            // display entities, and ominous item spawners never trip a tripwire.
+            // Vanilla `TripWireBlock.checkPressed` ignores entities whose
+            // `isIgnoringBlockTriggers` is true (`Display.java:266-268`; `TripWireBlock.java:172-183`).
             let triggering_entities = args
                 .world
                 .get_entities_at_box(&aabb)
                 .into_iter()
-                .any(|entity| !is_ignoring_block_triggers(entity.get_entity().entity_type));
+                .any(|entity| !entity.is_ignoring_block_triggers());
             if !triggering_entities && args.world.get_players_at_box(&aabb).is_empty() {
                 props.powered = false;
                 let state_id = props.to_state_id(args.block);

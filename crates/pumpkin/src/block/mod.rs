@@ -773,6 +773,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn block_behaviour_blocks_motion_matches_legacy_exceptions() {
+        // Vanilla `BlockStateBase.blocksMotion` uses legacy solidity except for cobweb and
+        // bamboo sapling (`BlockBehaviour.java:541-545`). The generated block-property table is
+        // the live Rust implementation used by fluid and collision callers.
+        assert!(blocks_movement(Block::STONE.default_state, Block::STONE.id));
+        assert!(!blocks_movement(
+            Block::COBWEB.default_state,
+            Block::COBWEB.id
+        ));
+        assert!(!blocks_movement(
+            Block::BAMBOO_SAPLING.default_state,
+            Block::BAMBOO_SAPLING.id
+        ));
+    }
+
     /// Vanilla `BlockStateBase.isSuffocating` defaults at `BlockBehaviour.java:801-803`;
     /// these cases cover the registered overrides in `Blocks.java:637-638, 1299-1300,
     /// 3702-3703, 5257-5258, 5783-5785`.

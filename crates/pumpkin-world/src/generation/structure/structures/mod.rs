@@ -449,13 +449,9 @@ impl StructurePiece {
             return;
         }
 
-        // // Apply Mirror and Rotation
-        // if self.mirror != BlockMirror::None {
-        //     block = block.mirror(self.mirror);
-        // }
-        // if self.rotation != BlockRotation::None {
-        //     block = block.rotate(self.rotation);
-        // }
+        // Match `StructurePiece.placeBlock` (`StructurePiece.java:167-187`): transform the
+        // state before writing it to the generated chunk.
+        let block = self.transform_block_state(block);
 
         // World interaction
         world.set_block_state(block_pos.x, block_pos.y, block_pos.z, block);
@@ -464,6 +460,22 @@ impl StructurePiece {
         // if block.needs_post_processing() {
         //     world.mark_block_for_post_processing(&block_pos);
         // }
+    }
+
+    /// Applies the piece orientation used by vanilla `StructurePiece.placeBlock`.
+    /// (`StructurePiece.java:170-177`)
+    fn transform_block_state(&self, block: &BlockState) -> &'static BlockState {
+        let block = if self.mirror == Mirror::None {
+            BlockState::from_id(block.id)
+        } else {
+            block.mirror(self.mirror)
+        };
+
+        if self.rotation == Rotation::None {
+            block
+        } else {
+            block.rotate(self.rotation)
+        }
     }
 
     /// Places a chest with a deferred loot table at the given local coordinates.
@@ -948,11 +960,13 @@ fn with_facing(
 #[cfg(test)]
 mod reorient_tests {
     use pumpkin_data::block_properties::{BlockProperties, ChestLikeProperties, HorizontalFacing};
-    use pumpkin_data::{Block, BlockState};
+    use pumpkin_data::{Block, BlockState, Mirror, Rotation};
+    use pumpkin_util::math::block_box::BlockBox;
     use pumpkin_util::math::vector3::Vector3;
 
-    use super::reorient;
+    use super::{StructurePiece, reorient};
     use crate::generation::proto_chunk::test_cache::FlatWorld;
+    use crate::generation::structure::piece::StructurePieceType;
 
     const ORIGIN: Vector3<i32> = Vector3::new(0, 0, 0);
 
@@ -1049,5 +1063,29 @@ mod reorient_tests {
             chest_facing(HorizontalFacing::West),
         );
         assert_eq!(facing(state), HorizontalFacing::West);
+    }
+
+    #[test]
+    fn placed_states_follow_piece_rotation() {
+        let mut piece = StructurePiece::new(
+            StructurePieceType::MineshaftCorridor,
+            BlockBox::new(0, 0, 0, 2, 2, 2),
+            0,
+        );
+        let input = Block::OAK_STAIRS.default_state;
+
+        // `StructurePiece.placeBlock` applies its mirror before its rotation
+        // (`StructurePiece.java:170-177`).
+        piece.set_facing(Some(pumpkin_util::BlockDirection::South));
+        assert_eq!(
+            piece.transform_block_state(input).id,
+            input.mirror(Mirror::LeftRight).id
+        );
+
+        piece.set_facing(Some(pumpkin_util::BlockDirection::East));
+        assert_eq!(
+            piece.transform_block_state(input).id,
+            input.rotate(Rotation::Clockwise90).id
+        );
     }
 }

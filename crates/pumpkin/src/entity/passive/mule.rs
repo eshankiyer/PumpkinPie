@@ -22,7 +22,7 @@ use crate::entity::{
         animal::Animal,
         equine::{
             AbstractChestedHorse, AbstractHorse, AbstractHorseData, ChestedHorseData,
-            HORSE_TEMPT_ITEMS,
+            HORSE_TEMPT_ITEMS, MountPanicGoal,
         },
     },
     player::Player,
@@ -70,6 +70,7 @@ impl MuleEntity {
             // has no `addBehaviourGoals` override, so it also inherits the base tempt goal.
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, RunAroundLikeCrazyGoal::new(horse_weak.clone(), 1.2));
+            goal_selector.add_goal(1, MountPanicGoal::new(horse_weak.clone(), 1.2));
             goal_selector.add_goal(3, Box::new(TemptGoal::new(1.25, HORSE_TEMPT_ITEMS, false)));
             // `AbstractHorse.followMommy` (`AbstractHorse.java:561-568`) accepts any bred adult
             // horse-family parent within 16 blocks.

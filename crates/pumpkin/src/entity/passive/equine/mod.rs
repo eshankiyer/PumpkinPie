@@ -93,6 +93,20 @@ pub(crate) async fn equip_saddle_item(
         .map_or(IdOr::Id(Sound::ItemArmorEquipGeneric), |equippable| {
             equippable.equip_sound.clone()
         });
+    let equip_sound = if matches!(
+        mob_entity.living_entity.entity.entity_type.id,
+        id if id == EntityType::HORSE.id
+            || id == EntityType::DONKEY.id
+            || id == EntityType::MULE.id
+            || id == EntityType::SKELETON_HORSE.id
+            || id == EntityType::ZOMBIE_HORSE.id
+    ) {
+        // `AbstractHorse.getEquipSound` (`AbstractHorse.java:315-317`) returns the horse saddle
+        // sound for the saddle slot, even when the item's equippable component has another sound.
+        IdOr::Id(Sound::EntityHorseSaddle)
+    } else {
+        equip_sound
+    };
     let new_stack = item_stack.split_unless_creative(player.gamemode.load(), 1);
     {
         let mut equipment = mob_entity.living_entity.entity_equipment.lock().await;
@@ -166,6 +180,7 @@ pub(crate) async fn mount_player(mob_entity: &MobEntity, player: &Arc<Player>) {
 
 use crate::entity::{
     EntityBase, EntityBaseFuture,
+    ai::goal::{Controls, Goal, GoalFuture, escape_danger::EscapeDangerGoal},
     mob::{Mob, MobEntity},
     passive::animal::Animal,
     player::Player,
@@ -240,6 +255,69 @@ impl AbstractHorseData {
         } else {
             self.flags.fetch_and(!flag, Relaxed);
         }
+    }
+}
+
+/// `AbstractHorse.MountPanicGoal.shouldPanic` (`AbstractHorse.java:1053-1057`) gates the live
+/// `PanicGoal` on mob-controlled passengers.
+///
+/// The existing `EscapeDangerGoal` supplies the shared panic-causing damage/fire behavior and
+/// is registered by each horse constructor.
+pub struct MountPanicGoal<T: ?Sized> {
+    horse: std::sync::Weak<T>,
+    inner: EscapeDangerGoal,
+}
+
+#[must_use]
+const fn mount_panic_allowed(is_mob_controlled: bool) -> bool {
+    !is_mob_controlled
+}
+
+impl<T: AbstractHorse + Mob + ?Sized> MountPanicGoal<T> {
+    #[must_use]
+    pub fn new(horse: std::sync::Weak<T>, speed: f64) -> Box<Self> {
+        Box::new(Self {
+            horse,
+            inner: *EscapeDangerGoal::new(speed),
+        })
+    }
+}
+
+impl<T: AbstractHorse + Mob + ?Sized + Send + Sync + 'static> Goal for MountPanicGoal<T> {
+    fn is_panic_goal(&self) -> bool {
+        true
+    }
+
+    fn can_start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        Box::pin(async move {
+            let Some(horse) = self.horse.upgrade() else {
+                return false;
+            };
+            if !mount_panic_allowed(horse.is_mob_controlled().await) {
+                return false;
+            }
+            self.inner.can_start(mob).await
+        })
+    }
+
+    fn should_continue<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        Box::pin(async move { self.inner.should_continue(mob).await })
+    }
+
+    fn start<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move { self.inner.start(mob).await })
+    }
+
+    fn stop<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move { self.inner.stop(mob).await })
+    }
+
+    fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move { self.inner.tick(mob).await })
+    }
+
+    fn controls(&self) -> Controls {
+        self.inner.controls()
     }
 }
 
@@ -1207,7 +1285,7 @@ pub trait AbstractChestedHorse: AbstractHorse {
 mod tests {
     use super::{
         create_offspring_attribute, generate_jump_strength, generate_max_health, generate_speed,
-        generate_zombie_horse_jump_strength, generate_zombie_horse_speed,
+        generate_zombie_horse_jump_strength, generate_zombie_horse_speed, mount_panic_allowed,
         player_jump_pending_scale,
     };
     use rand::rng;
@@ -1284,5 +1362,13 @@ mod tests {
     fn create_offspring_attribute_rejects_inverted_range() {
         let mut random = rng();
         let _ = create_offspring_attribute(15.0, 30.0, 30.0, 15.0, &mut random);
+    }
+
+    #[test]
+    /// `AbstractHorse.MountPanicGoal.shouldPanic` (`AbstractHorse.java:1053-1057`) rejects
+    /// mob-controlled mounts.
+    fn mount_panic_is_disabled_for_mob_controlled_horses() {
+        assert!(mount_panic_allowed(false));
+        assert!(!mount_panic_allowed(true));
     }
 }

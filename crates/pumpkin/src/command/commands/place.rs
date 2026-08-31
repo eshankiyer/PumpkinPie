@@ -426,86 +426,80 @@ impl CommandExecutor for PlaceStructureExecutor {
                             }
                         }
 
-                        let start_cx = min_x >> 4;
-                        let end_cx = max_x >> 4;
-                        let start_cz = min_z >> 4;
-                        let end_cz = max_z >> 4;
+                        // Vanilla `BoundingBox.intersectingChunks` visits the closed chunk
+                        // rectangle (`BoundingBox.java:106-112`).
+                        let structure_box = BlockBox::new(min_x, 0, min_z, max_x, 0, max_z);
 
-                        for cx in start_cx..=end_cx {
-                            for cz in start_cz..=end_cz {
-                                let mut chunk = ProtoChunk::new(cx, cz, &world_gen);
-                                let chunk_min_y = chunk.bottom_y() as i32;
-                                let chunk_height = chunk.height() as i32;
-                                let surface_y = ground_y(block_pos.0.y, chunk_min_y, chunk_height);
+                        for chunk_pos in structure_box.intersecting_chunks() {
+                            let cx = chunk_pos.x;
+                            let cz = chunk_pos.y;
+                            let mut chunk = ProtoChunk::new(cx, cz, &world_gen);
+                            let chunk_min_y = chunk.bottom_y() as i32;
+                            let chunk_height = chunk.height() as i32;
+                            let surface_y = ground_y(block_pos.0.y, chunk_min_y, chunk_height);
 
-                                // Seed heightmaps and fill below-surface with stone so
-                                // pieces that carve through solid terrain have material
-                                let ground = surface_y as i16;
-                                chunk.flat_surface_height_map = [ground; 256];
-                                chunk.flat_ocean_floor_height_map = [ground; 256];
-                                chunk.flat_motion_blocking_height_map = [ground; 256];
-                                chunk.flat_motion_blocking_no_leaves_height_map = [ground; 256];
+                            // Seed heightmaps and fill below-surface with stone so
+                            // pieces that carve through solid terrain have material
+                            let ground = surface_y as i16;
+                            chunk.flat_surface_height_map = [ground; 256];
+                            chunk.flat_ocean_floor_height_map = [ground; 256];
+                            chunk.flat_motion_blocking_height_map = [ground; 256];
+                            chunk.flat_motion_blocking_no_leaves_height_map = [ground; 256];
 
-                                for x in 0..CHUNK_DIM {
-                                    for z in 0..CHUNK_DIM {
-                                        for y in chunk_min_y..surface_y {
-                                            chunk.set_block_state(
-                                                x,
-                                                y,
-                                                z,
-                                                Block::STONE.default_state,
-                                            );
-                                        }
-                                        chunk.set_block_state(
-                                            x,
-                                            surface_y,
-                                            z,
-                                            Block::GRASS_BLOCK.default_state,
-                                        );
+                            for x in 0..CHUNK_DIM {
+                                for z in 0..CHUNK_DIM {
+                                    for y in chunk_min_y..surface_y {
+                                        chunk.set_block_state(x, y, z, Block::STONE.default_state);
                                     }
+                                    chunk.set_block_state(
+                                        x,
+                                        surface_y,
+                                        z,
+                                        Block::GRASS_BLOCK.default_state,
+                                    );
                                 }
+                            }
 
-                                let chunk_box = BlockBox::new(
-                                    cx << 4,
-                                    chunk_min_y,
-                                    cz << 4,
-                                    (cx << 4) + CHUNK_DIM - 1,
-                                    chunk_min_y + chunk_height - 1,
-                                    (cz << 4) + CHUNK_DIM - 1,
-                                );
+                            let chunk_box = BlockBox::new(
+                                cx << 4,
+                                chunk_min_y,
+                                cz << 4,
+                                (cx << 4) + CHUNK_DIM - 1,
+                                chunk_min_y + chunk_height - 1,
+                                (cz << 4) + CHUNK_DIM - 1,
+                            );
 
-                                let snapshot =
-                                    snapshot_blocks(&chunk, cx, cz, chunk_min_y, chunk_height);
+                            let snapshot =
+                                snapshot_blocks(&chunk, cx, cz, chunk_min_y, chunk_height);
 
-                                let mut rng = RandomGenerator::Legacy(LegacyRand::from_seed(
-                                    chunk_population_seed(cx, cz, seed),
-                                ));
+                            let mut rng = RandomGenerator::Legacy(LegacyRand::from_seed(
+                                chunk_population_seed(cx, cz, seed),
+                            ));
 
-                                for piece in &mut collector.pieces {
-                                    if piece.bounding_box().intersects(&chunk_box) {
-                                        piece.place(
-                                            &mut chunk,
-                                            &reg,
-                                            &mut rng,
-                                            seed as i64,
-                                            &chunk_box,
-                                        );
-                                    }
+                            for piece in &mut collector.pieces {
+                                if piece.bounding_box().intersects(&chunk_box) {
+                                    piece.place(
+                                        &mut chunk,
+                                        &reg,
+                                        &mut rng,
+                                        seed as i64,
+                                        &chunk_box,
+                                    );
                                 }
+                            }
 
-                                apply_delta(
-                                    &chunk,
-                                    &snapshot,
-                                    cx,
-                                    cz,
-                                    chunk_min_y,
-                                    chunk_height,
-                                    &mut placer,
-                                );
+                            apply_delta(
+                                &chunk,
+                                &snapshot,
+                                cx,
+                                cz,
+                                chunk_min_y,
+                                chunk_height,
+                                &mut placer,
+                            );
 
-                                for nbt in chunk.pending_block_entities.drain(..) {
-                                    placer.block_entity_nbts.push(nbt);
-                                }
+                            for nbt in chunk.pending_block_entities.drain(..) {
+                                placer.block_entity_nbts.push(nbt);
                             }
                         }
                     }

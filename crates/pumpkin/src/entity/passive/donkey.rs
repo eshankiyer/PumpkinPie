@@ -24,7 +24,7 @@ use crate::entity::{
         equine::{
             AbstractChestedHorse, AbstractHorse, AbstractHorseData, ChestedHorseData,
             HORSE_TEMPT_ITEMS, MAX_HEALTH, MAX_JUMP_STRENGTH, MAX_MOVEMENT_SPEED, MIN_HEALTH,
-            MIN_JUMP_STRENGTH, MIN_MOVEMENT_SPEED, apply_offspring_attribute,
+            MIN_JUMP_STRENGTH, MIN_MOVEMENT_SPEED, MountPanicGoal, apply_offspring_attribute,
         },
     },
     player::Player,
@@ -70,6 +70,7 @@ impl DonkeyEntity {
             // Donkey uses the same base `addBehaviourGoals`.
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, RunAroundLikeCrazyGoal::new(horse_weak.clone(), 1.2));
+            goal_selector.add_goal(1, MountPanicGoal::new(horse_weak.clone(), 1.2));
             goal_selector.add_goal(2, HorseBreedGoal::new(1.0, COMPATIBLE_MATES));
             goal_selector.add_goal(3, Box::new(TemptGoal::new(1.25, HORSE_TEMPT_ITEMS, false)));
             // `AbstractHorse.followMommy` (`AbstractHorse.java:561-568`) accepts any bred adult

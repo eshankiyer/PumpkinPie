@@ -2,6 +2,7 @@ use crate::{
     BlockDirection,
     math::{
         position::BlockPos,
+        vector2::Vector2,
         vector3::{Axis, Vector3},
     },
 };
@@ -226,6 +227,22 @@ impl BlockBox {
         self.max.x >= min_x && self.min.x <= max_x && self.max.z >= min_z && self.min.z <= max_z
     }
 
+    /// Returns every chunk intersected by this inclusive box.
+    ///
+    /// `BoundingBox.intersectingChunks` (`levelgen/structure/BoundingBox.java:106-112`)
+    /// converts both inclusive block edges to chunk coordinates and visits the closed
+    /// X/Z range.
+    pub fn intersecting_chunks(&self) -> impl Iterator<Item = Vector2<i32>> {
+        let min_chunk_x = self.min.x >> 4;
+        let min_chunk_z = self.min.z >> 4;
+        let max_chunk_x = self.max.x >> 4;
+        let max_chunk_z = self.max.z >> 4;
+
+        (min_chunk_x..=max_chunk_x).flat_map(move |chunk_x| {
+            (min_chunk_z..=max_chunk_z).map(move |chunk_z| Vector2::new(chunk_x, chunk_z))
+        })
+    }
+
     /// Returns the number of blocks along the Y axis.
     #[must_use]
     pub const fn get_block_count_y(&self) -> i32 {
@@ -329,5 +346,28 @@ mod tests {
         let single = BlockBox::from_pos(BlockPos(Vector3::new(6, -1, 2)));
         assert_eq!(single.get_block_count_x(), 1);
         assert_eq!(single.get_block_count_z(), 1);
+    }
+
+    #[test]
+    fn intersecting_chunks_uses_inclusive_block_edges() {
+        // `BoundingBox.intersectingChunks` includes both chunk coordinates
+        // (`BoundingBox.java:106-112`).
+        let box_ = BlockBox::new(-17, 0, 31, 16, 0, 32);
+
+        let chunks: Vec<_> = box_.intersecting_chunks().collect();
+
+        assert_eq!(
+            chunks,
+            vec![
+                Vector2::new(-2, 1),
+                Vector2::new(-2, 2),
+                Vector2::new(-1, 1),
+                Vector2::new(-1, 2),
+                Vector2::new(0, 1),
+                Vector2::new(0, 2),
+                Vector2::new(1, 1),
+                Vector2::new(1, 2),
+            ]
+        );
     }
 }

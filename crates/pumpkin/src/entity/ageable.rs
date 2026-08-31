@@ -50,9 +50,16 @@ impl Default for AgeableData {
 pub trait AgeableMob: Mob {
     fn get_ageable_data(&self) -> &AgeableData;
 
-    /// Vanilla `getDefaultDimensions` override for the baby state.
+    /// Vanilla `LivingEntity.getAgeScale`/`getDefaultDimensions`
+    /// (`LivingEntity.java:555-557, 3731-3733`) scales an ageable entity's type dimensions by
+    /// 0.5 unless the concrete entity supplies a different baby dimension.
     fn baby_dimensions(&self) -> Option<EntityDimensions> {
-        None
+        let entity = &self.get_mob_entity().living_entity.entity;
+        Some(default_baby_dimensions(
+            entity.entity_type.dimension[0],
+            entity.entity_type.dimension[1],
+            entity.entity_type.eye_height,
+        ))
     }
 
     fn get_baby_start_age(&self) -> i32 {
@@ -260,5 +267,25 @@ pub trait AgeableMob: Mob {
             let age = self.get_age() - 1;
             self.set_age(age);
         }
+    }
+}
+
+/// The default `LivingEntity.getAgeScale` result is 0.5 for a baby
+/// (`LivingEntity.java:555-557`).
+fn default_baby_dimensions(width: f32, height: f32, eye_height: f32) -> EntityDimensions {
+    EntityDimensions::new(width * 0.5, height * 0.5, eye_height * 0.5)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::default_baby_dimensions;
+
+    #[test]
+    fn default_baby_dimensions_use_vanilla_age_scale() {
+        // Vanilla `LivingEntity.getAgeScale` (`LivingEntity.java:555-557`) returns 0.5 for babies.
+        let dimensions = default_baby_dimensions(0.9, 1.4, 1.3);
+        assert!((dimensions.width - 0.45).abs() < f32::EPSILON);
+        assert!((dimensions.height - 0.7).abs() < f32::EPSILON);
+        assert!((dimensions.eye_height - 0.65).abs() < f32::EPSILON);
     }
 }

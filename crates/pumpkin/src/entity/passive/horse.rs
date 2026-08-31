@@ -26,7 +26,7 @@ use crate::entity::{
         animal::Animal,
         equine::{
             AbstractHorse, AbstractHorseData, HORSE_TEMPT_ITEMS, MAX_HEALTH, MAX_JUMP_STRENGTH,
-            MAX_MOVEMENT_SPEED, MIN_HEALTH, MIN_JUMP_STRENGTH, MIN_MOVEMENT_SPEED,
+            MAX_MOVEMENT_SPEED, MIN_HEALTH, MIN_JUMP_STRENGTH, MIN_MOVEMENT_SPEED, MountPanicGoal,
             apply_offspring_attribute,
         },
     },
@@ -83,11 +83,12 @@ impl HorseEntity {
 
             // `AbstractHorse.java:134-151` (`registerGoals`/`addBehaviourGoals`, base
             // `addBehaviourGoals` applies to Horse/Donkey/Mule): 0 float, 1 run-around-like-crazy
-            // (and, at the same priority, 1 panic-when-ridden deferred, no rider-tracking
-            // infra), 2 breed, 3 tempt, 4 follow parent, 6 water-avoiding wander, 7 look at
+            // (and, at the same priority, 1 mount panic), 2 breed, 3 tempt, 4 follow parent,
+            // 6 water-avoiding wander, 7 look at
             // player, 8 random look around, 9 random stand.
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, RunAroundLikeCrazyGoal::new(horse_weak.clone(), 1.2));
+            goal_selector.add_goal(1, MountPanicGoal::new(horse_weak.clone(), 1.2));
             goal_selector.add_goal(2, HorseBreedGoal::new(1.0, COMPATIBLE_MATES));
             goal_selector.add_goal(3, Box::new(TemptGoal::new(1.25, HORSE_TEMPT_ITEMS, false)));
             // `AbstractHorse.followMommy` (`AbstractHorse.java:561-568`) accepts any bred adult

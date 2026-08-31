@@ -521,6 +521,12 @@ pub trait ScreenHandler: Send + Sync {
         })
     }
 
+    /// Mirrors `AbstractContainerMenu.canTakeItemForPickAll`'s per-menu hook
+    /// (`AbstractContainerMenu.java:534-545,583-585`).
+    fn can_take_item_for_pick_all(&self, _carried: &ItemStack, _target: &dyn Slot) -> bool {
+        true
+    }
+
     /// Drops all items from an inventory into the world.
     fn drop_inventory<'a>(
         &'a self,
@@ -984,14 +990,21 @@ pub trait ScreenHandler: Send + Sync {
         player: &'a dyn InventoryPlayer,
     ) -> ScreenHandlerFuture<'a, ()> {
         Box::pin(async move {
+            // Vanilla pickup-all checks the menu hook for every target
+            // (`AbstractContainerMenu.java:534-545`).
             if action_type == SlotActionType::PickupAll && button == 0 {
-                let behavior = self.get_behaviour_mut();
-                let mut cursor_stack = behavior.cursor_stack.lock().await;
+                let slots = self.get_behaviour().slots.clone();
+                let cursor_stack_handle = self.get_behaviour().cursor_stack.clone();
+                let mut cursor_stack = cursor_stack_handle.lock().await;
                 let mut to_pick_up = cursor_stack.get_max_stack_size() - cursor_stack.item_count;
 
-                for slot in &behavior.slots {
+                for slot in &slots {
                     if to_pick_up == 0 {
                         break;
+                    }
+
+                    if !self.can_take_item_for_pick_all(&cursor_stack, slot.as_ref()) {
+                        continue;
                     }
 
                     let item_stack = slot.get_cloned_stack().await;

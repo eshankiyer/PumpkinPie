@@ -105,6 +105,19 @@ fn sky_attenuation(from_level: u8, opacity: u8, down: bool) -> u8 {
     }
 }
 
+/// Matches `LightEngine.hasDifferentLightProperties` (`LightEngine.java:41-48`)
+/// for the state pair supplied by a live block replacement.
+fn has_different_light_properties(
+    old_state: &'static pumpkin_data::BlockState,
+    new_state: &'static pumpkin_data::BlockState,
+) -> bool {
+    old_state != new_state
+        && (old_state.opacity != new_state.opacity
+            || old_state.luminance != new_state.luminance
+            || old_state.use_shape_for_light_occlusion
+            || new_state.use_shape_for_light_occlusion)
+}
+
 impl DynamicLightEngine {
     /// Finds the lowest direct-sky source in a column, matching
     /// `ChunkSkyLightSources.findLowestSourceY`. A source begins immediately
@@ -731,11 +744,7 @@ impl DynamicLightEngine {
 
         let current_light = self.get_block_light_level(level, &pos).unwrap_or(0);
         let expected_light = block_state.luminance;
-        let properties_changed = old_state != block_state
-            && (old_state.opacity != block_state.opacity
-                || old_state.luminance != block_state.luminance
-                || old_state.use_shape_for_light_occlusion
-                || block_state.use_shape_for_light_occlusion);
+        let properties_changed = has_different_light_properties(old_state, block_state);
 
         // Handle light decrease (removing light source or placing opaque block)
         if expected_light < current_light {
@@ -756,6 +765,11 @@ impl DynamicLightEngine {
             // This is vanilla's PULL_LIGHT_IN_ENTRY: a shape or opacity
             // replacement invalidates paths even when emission is unchanged.
             self.queue_block_light_decrease(pos, 1);
+            // BlockLightEngine.checkNode re-enqueues a remaining emission after
+            // pulling the old path out (`BlockLightEngine.java:25-41`).
+            if expected_light > 0 {
+                self.queue_block_light_increase(pos, expected_light);
+            }
         }
 
         // Only check neighbors if we didn't trigger a decrease
@@ -968,10 +982,7 @@ impl DynamicLightEngine {
 
         let current_light = self.get_sky_light_level(level, &pos);
         let opacity = block_state.opacity;
-        let properties_changed = old_state != block_state
-            && (old_state.opacity != block_state.opacity
-                || old_state.use_shape_for_light_occlusion
-                || block_state.use_shape_for_light_occlusion);
+        let properties_changed = has_different_light_properties(old_state, block_state);
 
         // Calculate expected sky light
         let source_y = Self::lowest_sky_source_y(level, &pos, None);
@@ -1011,6 +1022,11 @@ impl DynamicLightEngine {
             self.queue_sky_light_increase(pos, expected_light);
         } else if properties_changed {
             self.queue_sky_light_decrease(pos, 1);
+            // SkyLightEngine.checkNode refreshes a direct-sky source after its
+            // old source path is removed (`SkyLightEngine.java:48-71`).
+            if pos.0.y >= source_y && expected_light > 0 {
+                self.queue_sky_light_increase(pos, expected_light);
+            }
         }
 
         // Notify neighbors if light increased or stayed same
@@ -1234,7 +1250,9 @@ impl DynamicLightEngine {
 #[cfg(test)]
 mod tests {
     use super::DynamicLightEngine;
+    use super::has_different_light_properties;
     use super::sky_attenuation;
+    use pumpkin_data::Block;
     use pumpkin_util::math::vector2::Vector2;
 
     // vanilla: fromLevel - max(1, dampening) (LightEngine.getOpacity,
@@ -1242,6 +1260,23 @@ mod tests {
     #[test]
     fn transparent_block_decays_by_one() {
         assert_eq!(sky_attenuation(15, 0, false), 14);
+    }
+
+    #[test]
+    fn light_property_changes_match_vanilla_predicate() {
+        // Vanilla predicate: `LightEngine.java:41-48`.
+        assert!(!has_different_light_properties(
+            Block::AIR.default_state,
+            Block::AIR.default_state,
+        ));
+        assert!(has_different_light_properties(
+            Block::AIR.default_state,
+            Block::STONE.default_state,
+        ));
+        assert!(has_different_light_properties(
+            Block::TORCH.default_state,
+            Block::LANTERN.default_state,
+        ));
     }
 
     #[test]

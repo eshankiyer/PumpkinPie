@@ -33,6 +33,17 @@ use crate::screen_handler::{
 };
 use crate::slot::{BoxFuture, Slot};
 
+// `LoomMenu.java:27-30,64-88,211-245` fixes the four input/result slots and the two
+// player-inventory ranges used by quick-move routing.
+const BANNER_SLOT: i32 = 0;
+const DYE_SLOT: i32 = 1;
+const PATTERN_SLOT: i32 = 2;
+const RESULT_SLOT: i32 = 3;
+const INV_SLOT_START: i32 = 4;
+const INV_SLOT_END: i32 = 31;
+const USE_ROW_SLOT_START: i32 = 31;
+const USE_ROW_SLOT_END: i32 = 40;
+
 fn is_banner(stack: &ItemStack) -> bool {
     stack.item.has_tag(&ItemTag::MINECRAFT_BANNERS)
 }
@@ -151,35 +162,58 @@ impl ScreenHandler for LoomScreenHandler {
             let mut item = slot.get_cloned_stack().await;
             stack_left = item.clone();
 
-            if slot_index == 3 {
-                if !self.insert_item(&mut item, 4, 40, true).await {
+            if slot_index == RESULT_SLOT {
+                if !self
+                    .insert_item(&mut item, INV_SLOT_START, USE_ROW_SLOT_END, true)
+                    .await
+                {
                     return ItemStack::EMPTY.clone();
                 }
                 slot.on_quick_move_crafted(item.clone(), stack_left.clone())
                     .await;
-            } else if slot_index != 0 && slot_index != 1 && slot_index != 2 {
+            } else if slot_index != BANNER_SLOT
+                && slot_index != DYE_SLOT
+                && slot_index != PATTERN_SLOT
+            {
                 if is_banner(&item) {
-                    if !self.insert_item(&mut item, 0, 1, false).await {
+                    if !self
+                        .insert_item(&mut item, BANNER_SLOT, BANNER_SLOT + 1, false)
+                        .await
+                    {
                         return ItemStack::EMPTY.clone();
                     }
                 } else if is_dye_item(&item) {
-                    if !self.insert_item(&mut item, 1, 2, false).await {
+                    if !self
+                        .insert_item(&mut item, DYE_SLOT, DYE_SLOT + 1, false)
+                        .await
+                    {
                         return ItemStack::EMPTY.clone();
                     }
                 } else if is_pattern_item(&item) {
-                    if !self.insert_item(&mut item, 2, 3, false).await {
+                    if !self
+                        .insert_item(&mut item, PATTERN_SLOT, PATTERN_SLOT + 1, false)
+                        .await
+                    {
                         return ItemStack::EMPTY.clone();
                     }
-                } else if (4..31).contains(&slot_index) {
-                    if !self.insert_item(&mut item, 31, 40, false).await {
+                } else if (INV_SLOT_START..INV_SLOT_END).contains(&slot_index) {
+                    if !self
+                        .insert_item(&mut item, USE_ROW_SLOT_START, USE_ROW_SLOT_END, false)
+                        .await
+                    {
                         return ItemStack::EMPTY.clone();
                     }
-                } else if (31..40).contains(&slot_index)
-                    && !self.insert_item(&mut item, 4, 31, false).await
+                } else if (USE_ROW_SLOT_START..USE_ROW_SLOT_END).contains(&slot_index)
+                    && !self
+                        .insert_item(&mut item, INV_SLOT_START, INV_SLOT_END, false)
+                        .await
                 {
                     return ItemStack::EMPTY.clone();
                 }
-            } else if !self.insert_item(&mut item, 4, 40, false).await {
+            } else if !self
+                .insert_item(&mut item, INV_SLOT_START, USE_ROW_SLOT_END, false)
+                .await
+            {
                 return ItemStack::EMPTY.clone();
             }
 
@@ -342,5 +376,19 @@ mod tests {
                 .can_insert(&ItemStack::new(1, &Item::WHITE_BANNER))
                 .await
         );
+    }
+
+    #[test]
+    fn slot_layout_matches_vanilla_ranges() {
+        // `LoomMenu.java:27-30,64-88,106` defines slots 0-3 followed by 36 player slots.
+        let handler = handler();
+        assert_eq!(
+            handler.get_behaviour().slots.len(),
+            USE_ROW_SLOT_END as usize
+        );
+        assert_eq!(handler.get_behaviour().slots[0].get_index(), 0);
+        assert_eq!(handler.get_behaviour().slots[1].get_index(), 1);
+        assert_eq!(handler.get_behaviour().slots[2].get_index(), 2);
+        assert_eq!(handler.get_behaviour().slots[3].get_index(), 0);
     }
 }

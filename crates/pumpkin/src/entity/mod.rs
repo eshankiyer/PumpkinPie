@@ -75,7 +75,7 @@ use pumpkin_util::math::{
 };
 use pumpkin_util::text::TextComponent;
 use pumpkin_util::text::hover::HoverEvent;
-use pumpkin_util::{GameMode, version::JavaMinecraftVersion};
+use pumpkin_util::{GameMode, Hand, version::JavaMinecraftVersion};
 use std::collections::{BTreeMap, HashSet};
 use std::pin::Pin;
 use std::sync::{
@@ -169,6 +169,52 @@ fn collides_along_vector(
                     .is_some()
             })
     })
+}
+
+// Vanilla's marker-like entity overrides are the only true cases in the server entity set
+// (`Display.java:266-268`; `Marker.java:62-64`; `Interaction.java:95-97`; `OminousItemSpawner.java:149-151`).
+const fn entity_type_ignores_block_triggers(entity_type: &'static EntityType) -> bool {
+    entity_type.id == EntityType::MARKER.id
+        || entity_type.id == EntityType::INTERACTION.id
+        || entity_type.id == EntityType::TEXT_DISPLAY.id
+        || entity_type.id == EntityType::BLOCK_DISPLAY.id
+        || entity_type.id == EntityType::ITEM_DISPLAY.id
+        || entity_type.id == EntityType::OMINOUS_ITEM_SPAWNER.id
+}
+
+#[cfg(test)]
+mod block_trigger_tests {
+    use super::entity_type_ignores_block_triggers;
+    use pumpkin_data::entity::EntityType;
+
+    #[test]
+    fn marker_like_entities_are_not_block_triggers() {
+        // Vanilla overrides `Entity.isIgnoringBlockTriggers` for these entity types
+        // (`Display.java:266-268`; `Marker.java:62-64`; `Interaction.java:95-97`;
+        // `OminousItemSpawner.java:149-151`).
+        for entity_type in [
+            &EntityType::MARKER,
+            &EntityType::INTERACTION,
+            &EntityType::TEXT_DISPLAY,
+            &EntityType::BLOCK_DISPLAY,
+            &EntityType::ITEM_DISPLAY,
+            &EntityType::OMINOUS_ITEM_SPAWNER,
+        ] {
+            assert!(entity_type_ignores_block_triggers(entity_type));
+        }
+        assert!(!entity_type_ignores_block_triggers(&EntityType::ITEM));
+    }
+}
+
+fn add_velocity_state(current: Vector3<f64>, momentum: Vector3<f64>) -> Option<Vector3<f64>> {
+    let updated = current + momentum;
+    (momentum.x.is_finite()
+        && momentum.y.is_finite()
+        && momentum.z.is_finite()
+        && updated.x.is_finite()
+        && updated.y.is_finite()
+        && updated.z.is_finite())
+    .then_some(updated)
 }
 
 /// vanilla `EntitySelector.pushableBy`.
@@ -574,6 +620,13 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         false
     }
 
+    /// Vanilla `Entity.isIgnoringBlockTriggers` defaults to false, while Display and the
+    /// marker-like entity types override it (`Entity.java:3223-3225`; `Display.java:266-268`;
+    /// `Marker.java:62-64`; `Interaction.java:95-97`; `OminousItemSpawner.java:149-151`).
+    fn is_ignoring_block_triggers(&self) -> bool {
+        entity_type_ignores_block_triggers(self.get_entity().entity_type)
+    }
+
     /// Vanilla `Entity.canBeCollidedWith` used by collision queries whose source
     /// entity is null. Most entities, including ordinary mobs, return false.
     fn can_be_collided_with(&self) -> bool {
@@ -934,6 +987,17 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         Box::pin(async move {
             let self_entity = self.get_entity();
             let other_entity = entity.get_entity();
+
+            // Vanilla `Warden.doPush` (`Warden.java:528-537`) runs from the living push
+            // override before the shared physical displacement. Reuse the existing collision
+            // call site so touch anger cannot become an uncalled helper.
+            if self_entity.entity_type == &EntityType::WARDEN
+                && let Some(warden) = self
+                    .cast_any()
+                    .downcast_ref::<crate::entity::mob::warden::WardenEntity>()
+            {
+                warden.on_push(entity).await;
+            }
 
             // Vanilla `IronGolem.doPush` (`IronGolem.java:103-110`) gives the golem a
             // target with a 1/20 roll when it physically collides with an Enemy other
@@ -1516,6 +1580,71 @@ fn water_swim_volume(velocity: Vector3<f64>, volume_modifier: f32) -> f32 {
         .min(1.0)
 }
 
+/// `AbstractHorse.getDismountLocationForPassenger` (`AbstractHorse.java:998-1026`) searches
+/// the main-hand side, then the off-hand side, while `DismountHelper` validates the floor and
+/// passenger collision box (`DismountHelper.java:27-50`).
+fn horse_dismount_location(
+    world: &World,
+    vehicle: &Entity,
+    passenger: &dyn EntityBase,
+) -> Option<(Vector3<f64>, EntityPose)> {
+    let passenger_entity = passenger.get_entity();
+    let passenger_width = f64::from(passenger_entity.width());
+    let vehicle_width = f64::from(vehicle.width());
+    let distance = (vehicle_width + passenger_width + 1.0e-5) / 2.0;
+    let main_hand_right = passenger
+        .get_player()
+        .is_none_or(|player| matches!(player.config.load().main_hand, Hand::Right));
+    let side_angle = vehicle.yaw.load() + if main_hand_right { 90.0 } else { -90.0 };
+    let side_angle = f64::from(side_angle).to_radians();
+    let direction_x = -side_angle.sin();
+    let direction_z = side_angle.cos();
+    let scale = direction_x.abs().max(direction_z.abs());
+    let main_hand_direction = Vector3::new(
+        direction_x * distance / scale,
+        0.0,
+        direction_z * distance / scale,
+    );
+    let off_hand_angle = vehicle.yaw.load() + if main_hand_right { -90.0 } else { 90.0 };
+    let off_hand_angle = f64::from(off_hand_angle).to_radians();
+    let off_hand_direction = Vector3::new(
+        -off_hand_angle.sin() * distance
+            / off_hand_angle.sin().abs().max(off_hand_angle.cos().abs()),
+        0.0,
+        off_hand_angle.cos() * distance
+            / off_hand_angle.sin().abs().max(off_hand_angle.cos().abs()),
+    );
+
+    let target_y = vehicle.bounding_box.load().min.y;
+    let dismount_limit = vehicle.bounding_box.load().max.y + 0.75;
+    let directions = [main_hand_direction, off_hand_direction];
+    for direction in directions {
+        let target_x = vehicle.pos.load().x + direction.x;
+        let target_z = vehicle.pos.load().z + direction.z;
+        for pose in passenger.get_dismount_poses() {
+            let pose_box = passenger_entity.get_dimensions(pose);
+            let mut target = BlockPos::floored(target_x, target_y, target_z);
+            while f64::from(target.0.y) < dismount_limit {
+                let floor_height = world.get_dismount_height(&target);
+                if f64::from(target.0.y) + floor_height > dismount_limit {
+                    break;
+                }
+                if !floor_height.is_infinite() && floor_height < 1.0 {
+                    let location =
+                        Vector3::new(target_x, f64::from(target.0.y) + floor_height, target_z);
+                    if world.is_space_empty(BoundingBox::new_from_pos(
+                        location.x, location.y, location.z, &pose_box,
+                    )) {
+                        return Some((location, pose));
+                    }
+                }
+                target.0.y += 1;
+            }
+        }
+    }
+    None
+}
+
 /// Vanilla `Entity.applyPistonMovementRestriction` (`Entity.java:1112-1119`).
 fn piston_axis_movement(previous: f64, requested: f64) -> (f64, f64) {
     let total = (requested + previous).clamp(-0.51, 0.51);
@@ -2052,12 +2181,28 @@ impl Entity {
     }
 
     pub fn add_velocity(&self, velocity: Vector3<f64>) {
-        self.set_velocity(self.velocity.load() + velocity);
+        // `Entity.addDeltaMovement` accepts only finite momentum and updates the current
+        // movement (`Entity.java:3732-3735`). `AtomicCell<Vector3<f64>>` has no compare-and-swap
+        // path (crossbeam's `fetch_update`/`compare_exchange` require `T: Eq`, which `f64` does
+        // not implement), so this reads and writes the same way every other velocity field in
+        // this struct does.
+        let current = self.velocity.load();
+        if let Some(updated) = add_velocity_state(current, velocity) {
+            self.velocity.store(updated);
+            self.send_velocity();
+        }
     }
 
     pub fn set_velocity(&self, velocity: Vector3<f64>) {
         self.velocity.store(velocity);
         self.send_velocity();
+    }
+
+    /// Vanilla `Entity.getKnownMovement` returns the current delta movement used by
+    /// projectile launch and absolute position synchronization (`Entity.java:4003-4005`).
+    #[must_use]
+    pub fn get_known_movement(&self) -> Vector3<f64> {
+        self.velocity.load()
     }
 
     /// Vanilla `Entity.markHurt` (`Entity.java:1912-1914`) marks the entity so the server sends
@@ -2778,6 +2923,18 @@ impl Entity {
     }
 
     async fn tick_block_collisions(&self, caller: &Arc<dyn EntityBase>, server: &Server) -> bool {
+        // `Entity.applyEffectsFromBlocks` invokes the block's step hook before inside-block
+        // effects (`Entity.java:904-914`). LivingEntity has a later, shared step path; non-living
+        // entities reach this live collision path instead.
+        if caller.get_living_entity().is_none() && self.on_ground.load(Relaxed) {
+            let (position, block, state) = self.get_block_with_y_offset(0.2);
+            let world = self.world.load();
+            world
+                .block_registry
+                .on_entity_step(block, &world, caller.as_ref(), &position, state, false)
+                .await;
+        }
+
         // `Entity.applyEffectsFromBlocks` compares fire state before and after block effects
         // (`Entity.java:964-973`).
         let was_on_fire = self.fire_ticks.load(Relaxed) > 0;
@@ -3112,6 +3269,13 @@ impl Entity {
         old
     }
 
+    /// Vanilla `Entity.getKnownSpeed` exposes the last per-tick movement delta
+    /// (`Entity.java:4007-4009`).
+    #[must_use]
+    pub fn get_known_speed(&self) -> Vector3<f64> {
+        self.movement.load()
+    }
+
     /// Vanilla falls back to `ClientboundEntityPositionSyncPacket` whenever the delta cannot be
     /// expressed as a short, so the client is told where the entity actually is.
     fn send_position_sync(&self, chunk_pos: Vector2<i32>, position: Vector3<f64>) {
@@ -3131,7 +3295,7 @@ impl Entity {
             &CEntityPositionSync::new(
                 self.entity_id.into(),
                 position,
-                self.velocity.load(),
+                self.get_known_movement(),
                 yaw,
                 pitch,
                 self.on_ground.load(Relaxed),
@@ -3516,6 +3680,13 @@ impl Entity {
     pub(crate) fn get_block_state_on_legacy(&self) -> &'static BlockState {
         let (pos, _, state) = self.get_pos_with_y_offset(0.2);
         state.unwrap_or_else(|| self.world.load().get_block_state(&pos))
+    }
+
+    /// Vanilla `Entity.getInBlockState` reads the state at the entity's current block position
+    /// (`Entity.java:3710-3715`).
+    #[must_use]
+    pub fn get_in_block_state(&self) -> &'static BlockState {
+        self.world.load().get_block_state(&self.block_pos.load())
     }
 
     // Entity.updateVelocity in yarn
@@ -5701,9 +5872,29 @@ impl Entity {
             let fallback_pos =
                 Vector3::new(self.pos.load().x, vehicle_box.max.y, self.pos.load().z);
 
+            let is_horse = matches!(
+                self.entity_type.id,
+                id if id == EntityType::HORSE.id
+                    || id == EntityType::DONKEY.id
+                    || id == EntityType::MULE.id
+                    || id == EntityType::SKELETON_HORSE.id
+                    || id == EntityType::ZOMBIE_HORSE.id
+            );
+            // `AbstractHorse.getDismountLocationForPassenger` (`AbstractHorse.java:998-1026`)
+            // searches its two side directions and climbs only to 0.75 blocks above the horse.
+            let dismount_pos = if is_horse {
+                horse_dismount_location(&world, self, passenger.as_ref()).map_or(
+                    fallback_pos,
+                    |(position, pose)| {
+                        if pose != EntityPose::Standing {
+                            passenger_entity.set_pose(pose);
+                        }
+                        position
+                    },
+                )
             // HappyGhast.getDismountLocationForPassenger (`HappyGhast.java:593-596`) always
             // returns the vehicle's top center, rather than searching for a side exit.
-            let dismount_pos = if self.entity_type == &EntityType::HAPPY_GHAST || is_water {
+            } else if self.entity_type == &EntityType::HAPPY_GHAST || is_water {
                 fallback_pos
             } else {
                 // Vanilla checks the passenger's `getDismountPoses` order, with the current
@@ -6672,6 +6863,28 @@ mod tests {
         assert_eq!(head_look_vector(0.0, 0.0), Vector3::new(0.0, 0.0, 1.0));
         assert!((head_look_vector(90.0, 0.0).x + 1.0).abs() < f64::EPSILON);
         assert!((head_look_vector(0.0, 90.0).y + 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn delta_movement_rejects_non_finite_updates() {
+        // `Entity.addDeltaMovement` ignores non-finite momentum and resulting movement
+        // (`Entity.java:3732-3735`).
+        let current = Vector3::new(1.0, 2.0, 3.0);
+        assert_eq!(
+            add_velocity_state(current, Vector3::new(0.5, -1.0, 2.0)),
+            Some(Vector3::new(1.5, 1.0, 5.0))
+        );
+        assert_eq!(
+            add_velocity_state(current, Vector3::new(f64::NAN, 0.0, 0.0)),
+            None
+        );
+        assert_eq!(
+            add_velocity_state(
+                Vector3::new(f64::MAX, 0.0, 0.0),
+                Vector3::new(f64::MAX, 0.0, 0.0)
+            ),
+            None
+        );
     }
 }
 

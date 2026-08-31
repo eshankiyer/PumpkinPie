@@ -10,6 +10,7 @@ use crate::{
         GetRedstonePowerArgs, OnEntityCollisionArgs, OnNeighborUpdateArgs, OnScheduledTickArgs,
         OnStateReplacedArgs,
     },
+    entity::EntityBase,
     world::World,
 };
 
@@ -111,7 +112,20 @@ impl PressurePlate for WeightedPressurePlateBlock {
             150
         };
         let aabb = detection_box_at(pos);
-        let len = world.get_entities_at_box(&aabb).len() + world.get_players_at_box(&aabb).len();
+        // `BasePressurePlateBlock.getEntityCount` filters spectators and entities whose
+        // `isIgnoringBlockTriggers` is true for Display (`Display.java:266-268`), and
+        // `BasePressurePlateBlock.getEntityCount` filters it (`BasePressurePlateBlock.java:146-148`).
+        let entity_count = world
+            .get_entities_at_box(&aabb)
+            .into_iter()
+            .filter(|entity| !entity.is_ignoring_block_triggers())
+            .count();
+        let player_count = world
+            .get_players_at_box(&aabb)
+            .into_iter()
+            .filter(|player| !player.is_spectator() && !player.is_ignoring_block_triggers())
+            .count();
+        let len = entity_count + player_count;
         Self::signal_for_count(weight, len)
     }
 

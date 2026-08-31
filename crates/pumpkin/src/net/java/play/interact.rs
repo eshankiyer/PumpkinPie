@@ -120,6 +120,8 @@ impl JavaClient {
                                 }
                             }
                             let mut stack = player.inventory().held_item().await;
+                            let original_stack = stack.clone();
+                            let creative = player.gamemode.load() == GameMode::Creative;
                             // CuredZombieVillager fires when conversion actually completes
                             // (ZombieVillagerEntity::finish_conversion), gated on the zombie
                             // villager having Weakness -- not immediately on this click,
@@ -132,11 +134,28 @@ impl JavaClient {
                             }
 
                             let interacted = event.target.interact(player, &mut stack).await;
-                            if !interacted {
+                            if interacted {
+                                if creative {
+                                    // `Player.interactOn` restores a creative stack's count
+                                    // after a consuming entity interaction (`Player.java:832-840`).
+                                    crate::entity::player::restore_creative_interaction_count(
+                                        &mut stack,
+                                        original_stack.item_count,
+                                    );
+                                }
+                            } else {
+                                if creative {
+                                    // `Player.interactOn` uses a clone for item interaction in
+                                    // infinite-materials mode (`Player.java:841-847`).
+                                    stack = original_stack.clone();
+                                }
                                 server
                                     .item_registry
                                     .use_on_entity(&mut stack, player, event.target)
                                     .await;
+                                if creative {
+                                    stack = original_stack;
+                                }
                             }
                             player.inventory().set_held_item(stack).await;
                         }

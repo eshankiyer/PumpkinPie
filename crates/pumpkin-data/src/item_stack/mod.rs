@@ -4,9 +4,10 @@ use crate::data_component::DataComponent;
 use crate::data_component::DataComponent::Enchantments;
 use crate::data_component_impl::{
     BlocksAttacksImpl, CanBreakImpl, CanPlaceOnImpl, ConsumableImpl, CustomDataImpl, DamageImpl,
-    DamageResistantImpl, DamageResistantType, DataComponentImpl, EnchantableImpl, EnchantmentsImpl,
-    IDSet, MaxDamageImpl, MaxStackSizeImpl, PotionContentsImpl, RepairableImpl, ToolImpl,
-    UnbreakableImpl, UseCooldownImpl, get, get_mut, read_data,
+    DamageResistantImpl, DamageResistantType, DataComponentImpl, EnchantableImpl,
+    EnchantmentGlintOverrideImpl, EnchantmentsImpl, IDSet, MaxDamageImpl, MaxStackSizeImpl,
+    PotionContentsImpl, RepairableImpl, ToolImpl, UnbreakableImpl, UseCooldownImpl, get, get_mut,
+    read_data,
 };
 use crate::item::Item;
 use crate::recipes::RecipeResultStruct;
@@ -209,6 +210,15 @@ impl ItemStack {
     pub fn has_enchantments(&self) -> bool {
         self.get_data_component::<EnchantmentsImpl>()
             .is_some_and(|e| !e.enchantment.is_empty())
+    }
+
+    /// Vanilla `ItemStack.hasFoil` (`ItemStack.java:968-971`) uses an explicit glint override
+    /// when present and otherwise falls back to non-empty enchantments.
+    #[must_use]
+    pub fn has_foil(&self) -> bool {
+        self.get_data_component::<EnchantmentGlintOverrideImpl>()
+            .is_some()
+            || self.has_enchantments()
     }
 
     /// Vanilla `ItemStack.isEnchantable` (`ItemStack.java:986-993`) requires both the
@@ -1055,8 +1065,8 @@ mod tests {
     use super::*;
     use crate::data_component::DataComponent;
     use crate::data_component_impl::{
-        CustomDataImpl, CustomNameImpl, DataComponentImpl, EnchantableImpl, EnchantmentsImpl,
-        ItemNameImpl, LoreImpl, UnbreakableImpl,
+        CustomDataImpl, CustomNameImpl, DataComponentImpl, EnchantableImpl,
+        EnchantmentGlintOverrideImpl, EnchantmentsImpl, ItemNameImpl, LoreImpl, UnbreakableImpl,
     };
 
     /// Helper: creates a fresh Iron Sword (max_damage 250, damage 0).
@@ -1114,6 +1124,26 @@ mod tests {
             ),
         ));
         assert!(stack.is_enchantable());
+    }
+
+    #[test]
+    fn foil_uses_enchantments_or_explicit_override() {
+        // Vanilla `ItemStack.hasFoil` (`ItemStack.java:968-971`) checks the override before
+        // falling back to the stack's enchantments.
+        let mut stack = ItemStack::new(1, &Item::IRON_SWORD);
+        assert!(!stack.has_foil());
+
+        stack.add_enchantment(&Enchantment::SHARPNESS, 1);
+        assert!(stack.has_foil());
+
+        let plain = ItemStack::new(1, &Item::IRON_SWORD);
+        assert!(!plain.has_foil());
+        stack.patch.clear();
+        stack.patch.push((
+            DataComponent::EnchantmentGlintOverride,
+            Some(EnchantmentGlintOverrideImpl.to_dyn()),
+        ));
+        assert!(stack.has_foil());
     }
 
     #[test]
