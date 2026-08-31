@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use pumpkin_data::item::Item;
 use pumpkin_data::recipes::{
     CookingRecipeType, CraftingRecipeTypes, RECIPES_COOKING, RECIPES_CRAFTING,
-    RecipeIngredientTypes, RecipeResultStruct,
+    RECIPES_STONECUTTING, RecipeIngredientTypes, RecipeResultStruct,
 };
 use pumpkin_data::tag::{RegistryKey, get_tag_ids};
 use pumpkin_nbt::compound::NbtCompound;
@@ -548,6 +548,23 @@ fn build_registry() -> RecipeRegistry {
             cooking.recipe_id,
             display_id,
             item_id_of(cooking.result.id),
+            &ingredients,
+        );
+        display_id += 1;
+    }
+
+    // `StonecutterRecipe.display()` and `recipeBookCategory()` add these entries after the
+    // cooking displays (`StonecutterRecipe.java:37-49`), matching the packet writer's order.
+    for recipe in RECIPES_STONECUTTING {
+        ingredients.clear();
+        ingredient_item_ids(&recipe.ingredient, &mut ingredients);
+        ingredients.sort_unstable();
+        ingredients.dedup();
+        push(
+            &mut registry,
+            recipe.result.id,
+            display_id,
+            item_id_of(recipe.result.id),
             &ingredients,
         );
         display_id += 1;

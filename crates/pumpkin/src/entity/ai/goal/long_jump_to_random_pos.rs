@@ -10,12 +10,6 @@
 //!
 //! Deliberate deviations from vanilla, all of them bounded-cost or missing-API decisions:
 //!
-//! - `defaultAcceptableLandingSpot` (`LongJumpToRandomPos.java:60-64`) tests
-//!   `getPathfindingMalus(getPathTypeStatic(mob, pos)) == 0`. There is no static path-type
-//!   lookup exposed here, so the substitute test is "the block below renders solid and neither
-//!   the target block nor the one above it is solid" -- the same thing the malus check buys for
-//!   a walking mob, minus the danger-block penalties (a goat may pick a landing spot vanilla
-//!   would have refused for, say, a nearby fire).
 //! - `pickCandidate` (`LongJumpToRandomPos.java:150-171`) loops until the candidate list is
 //!   empty within a single tick, computing a path per surviving candidate. That is unbounded
 //!   pathfinding inside one tick. Here at most `CANDIDATES_PER_TICK` candidates are examined per
@@ -129,9 +123,9 @@ impl LongJumpToRandomPosGoal {
             .random_range(self.time_between_min..=self.time_between_max)
     }
 
-    /// `LongJumpToRandomPos.defaultAcceptableLandingSpot` (`LongJumpToRandomPos.java:60-64`)
-    /// plus the same-column rejection from `isAcceptableLandingPosition`
-    /// (`LongJumpToRandomPos.java:181-187`). See the module doc for the malus substitute.
+    /// LongJumpToRandomPos.defaultAcceptableLandingSpot (LongJumpToRandomPos.java:60-64)
+    /// plus the same-column rejection from isAcceptableLandingPosition
+    /// (LongJumpToRandomPos.java:186-190).
     fn is_acceptable_landing_position(mob: &dyn Mob, target: &BlockPos) -> bool {
         let entity = mob.get_entity();
         let mob_pos = entity.block_pos.load();
@@ -141,8 +135,12 @@ impl LongJumpToRandomPosGoal {
 
         let world = entity.world.load();
         world.get_block_state(&target.down()).is_solid_render()
-            && !world.get_block_state(target).is_solid()
-            && !world.get_block_state(&target.up()).is_solid()
+            && !mob
+                .get_mob_entity()
+                .navigator
+                .lock()
+                .unwrap()
+                .has_pathfinding_malus(&world, target)
     }
 
     /// `LongJumpToRandomPos.getJumpCandidate` (`LongJumpToRandomPos.java:173-179`): a

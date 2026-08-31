@@ -42,6 +42,7 @@ impl JavaClient {
             })
             .count();
         let cooking_display_count = RECIPES_COOKING.len();
+        let stonecutting_display_count = pumpkin_data::recipes::RECIPES_STONECUTTING.len();
         let dynamic_recipes = server.recipe_manager.get_dynamic_recipes().await;
 
         let (grid_width, crafting_inv) = {
@@ -126,8 +127,18 @@ impl JavaClient {
         } else if target_id < crafting_display_count + cooking_display_count {
             // TODO: cooking recipes
             return;
+        } else if target_id
+            < crafting_display_count + cooking_display_count + stonecutting_display_count
+        {
+            // Vanilla `StonecutterRecipe.display()` entries use the shared recipe-book display
+            // id stream (`StonecutterRecipe.java:37-49`); stonecutter selection is handled by
+            // its screen button rather than this crafting-grid placement path.
+            return;
         } else {
-            let dynamic_id = target_id - crafting_display_count - cooking_display_count;
+            let dynamic_id = target_id
+                - crafting_display_count
+                - cooking_display_count
+                - stonecutting_display_count;
             let Some(DynamicRecipe::Crafting(crafting)) = dynamic_recipes.get(dynamic_id) else {
                 return;
             };

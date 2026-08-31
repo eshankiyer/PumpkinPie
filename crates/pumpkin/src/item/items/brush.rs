@@ -10,12 +10,14 @@ use crate::entity::player::Player;
 use crate::entity::{Entity, EntityBase};
 use crate::item::{ItemBehaviour, ItemMetadata};
 use crate::server::Server;
+use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::{Block, BlockDirection};
 use pumpkin_protocol::codec::var_int::VarInt;
+use pumpkin_util::Hand;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 
@@ -28,12 +30,11 @@ impl ItemMetadata for BrushItem {
 }
 
 impl ItemBehaviour for BrushItem {
-    /// `BrushItem.useOn` (`BrushItem.java:37-45`) only starts the use animation; all of
-    /// the work happens in `onUseTick`. Vanilla's `Item.use` is not overridden, so
-    /// right-clicking air does nothing.
+    /// `BrushItem.useOn` (`BrushItem.java:37-45`) recalculates the view hit before
+    /// starting the use animation; all of the work happens in `onUseTick`.
     fn use_on_block<'a>(
         &'a self,
-        _item: &'a mut ItemStack,
+        item: &'a mut ItemStack,
         player: &'a Player,
         _location: BlockPos,
         _face: BlockDirection,
@@ -42,10 +43,21 @@ impl ItemBehaviour for BrushItem {
         _server: &'a Server,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
-            let stack = player.inventory().held_item().await;
+            let world = player.world();
+            let (start, end) = self.get_start_and_end_pos(player);
+            if world
+                .raycast(start, end, async |pos, w| !w.get_block_state(pos).is_air())
+                .await
+                .is_none()
+            {
+                return;
+            }
+
+            let off_hand = player.inventory().off_hand_item().await;
+            let hand = brushing_hand(item, &off_hand);
             player
                 .living_entity
-                .set_active_hand(pumpkin_util::Hand::Right, stack, Self::USE_DURATION)
+                .set_active_hand(hand, item.clone(), Self::USE_DURATION)
                 .await;
         })
     }
@@ -55,7 +67,7 @@ impl ItemBehaviour for BrushItem {
     /// finished the block off (`BrushItem.java:81-87`).
     fn on_use_tick<'a>(
         &'a self,
-        _stack: &'a ItemStack,
+        stack: &'a ItemStack,
         player: &'a Player,
         remaining_use_ticks: i32,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
@@ -133,7 +145,15 @@ impl ItemBehaviour for BrushItem {
 
             let game_time = world.get_world_age().await;
             if brush_be.brush(&world, game_time, face).await {
-                player.damage_held_item(1).await;
+                // `BrushItem.onUseTick` chooses OFFHAND when the active stack equals the
+                // off-hand stack, otherwise MAINHAND (`BrushItem.java:80-87`).
+                let off_hand = player.inventory().off_hand_item().await;
+                let hand = brushing_hand(stack, &off_hand);
+                let equipment_slot = match hand {
+                    Hand::Right => EquipmentSlot::MAIN_HAND,
+                    Hand::Left => EquipmentSlot::OFF_HAND,
+                };
+                player.damage_item_in_slot(&equipment_slot, 1).await;
             }
         })
     }
@@ -192,9 +212,23 @@ impl BrushItem {
     pub const USE_DURATION: i32 = 200;
 }
 
+/// `ItemStack.equals` in the vanilla off-hand choice (`BrushItem.java:83-85`) includes the
+/// item count and components; `ItemStack.are_equal` is the matching workspace primitive.
+fn brushing_hand(stack: &ItemStack, off_hand: &ItemStack) -> Hand {
+    if stack.are_equal(off_hand) {
+        Hand::Left
+    } else {
+        Hand::Right
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::BrushItem;
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
+    use pumpkin_util::Hand;
+
+    use super::{BrushItem, brushing_hand};
 
     /// `BrushItem.onUseTick` (`BrushItem.java:62-64`): with `getUseDuration` = 200 and a
     /// `remaining_use_ticks` that starts at 200 and decrements by one per tick, a stroke
@@ -207,5 +241,15 @@ mod tests {
             .map(|remaining| BrushItem::USE_DURATION - remaining)
             .collect();
         assert_eq!(strokes, vec![4, 14, 24, 34]);
+    }
+
+    /// `BrushItem.onUseTick` (`BrushItem.java:83-85`) prefers the off-hand when its
+    /// complete stack equals the active brush stack.
+    #[test]
+    fn matching_off_hand_is_damaged() {
+        let active = ItemStack::new(1, &Item::BRUSH);
+        let off_hand = ItemStack::new(1, &Item::BRUSH);
+
+        assert!(matches!(brushing_hand(&active, &off_hand), Hand::Left));
     }
 }

@@ -51,6 +51,9 @@ pub struct StructurePlaceSettings {
     pub processors: Vec<StructureProcessor>,
     pub finalize_entities: bool,
     pub palette_index: Option<usize>,
+    /// The optional source used by seeded structure placement, matching vanilla's nullable
+    /// `random` field (`StructurePlaceSettings.java:20-21`).
+    pub(crate) random: Option<pumpkin_util::random::legacy_rand::LegacyRand>,
 }
 
 impl Default for StructurePlaceSettings {
@@ -66,6 +69,7 @@ impl Default for StructurePlaceSettings {
             processors: Vec::new(),
             finalize_entities: false,
             palette_index: None,
+            random: None,
         }
     }
 }
@@ -109,6 +113,17 @@ impl StructurePlaceSettings {
     #[must_use]
     pub const fn set_apply_waterlogging(mut self, apply_waterlogging: bool) -> Self {
         self.apply_waterlogging = apply_waterlogging;
+        self
+    }
+
+    /// Sets the random source used by seeded placement, matching vanilla's nullable setter
+    /// (`StructurePlaceSettings.java:68-70`).
+    #[must_use]
+    pub const fn set_random(
+        mut self,
+        random: Option<pumpkin_util::random::legacy_rand::LegacyRand>,
+    ) -> Self {
+        self.random = random;
         self
     }
 
@@ -1407,6 +1422,17 @@ impl StructureTemplate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn set_random_replaces_nullable_source() {
+        // Vanilla stores the supplied source and permits clearing it
+        // (`StructurePlaceSettings.java:68-70`).
+        let settings = StructurePlaceSettings::new().set_random(Some(
+            pumpkin_util::random::legacy_rand::LegacyRand::from_seed(42),
+        ));
+        assert!(settings.random.is_some());
+        assert!(settings.set_random(None).random.is_none());
+    }
 
     #[test]
     fn palette_entry_creation() {
