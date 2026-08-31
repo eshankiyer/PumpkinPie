@@ -408,7 +408,12 @@ impl PendingConnection {
                 let Some(profile) = self.gameprofile.clone() else {
                     return Ok(Some(PacketHandlerResult::Stop));
                 };
-                let config = self.config.clone().unwrap_or_default();
+                // Vanilla's initial connection cookie uses `ClientInformation.createDefault`
+                // (`CommonListenerCookie.java:6-9`) when no settings packet was received.
+                let config = self
+                    .config
+                    .clone()
+                    .unwrap_or_else(PlayerConfig::create_default);
                 self.connection_state.store(ConnectionState::Play);
                 if let Some(reason) = can_not_join(&profile, &self.address, server).await {
                     self.kick(reason).await;

@@ -1,5 +1,24 @@
 #[allow(clippy::wildcard_imports)]
 use super::*;
+use pumpkin_data::tag::Taggable;
+
+/// `AxeItem.useOn` (`AxeItem.java:64-66`) does not use a main-hand axe while an
+/// off-hand `BLOCKS_ATTACKS` item is active, except during secondary use.
+fn axe_use_blocked_by_offhand(
+    hand: Hand,
+    item: &ItemStack,
+    off_hand_item: &ItemStack,
+    secondary_use_active: bool,
+) -> bool {
+    uses_main_hand(hand)
+        && item
+            .get_item()
+            .has_tag(&pumpkin_data::tag::Item::MINECRAFT_AXES)
+        && off_hand_item
+            .get_data_component::<BlocksAttacksImpl>()
+            .is_some()
+        && !secondary_use_active
+}
 
 /// `ServerGamePacketListenerImpl.handleUseItemOn`'s hit-location guard
 /// (ServerGamePacketListenerImpl.java:1346-1348): the packet carries the hit point relative to
@@ -206,6 +225,12 @@ impl JavaClient {
             return Ok(());
         }
 
+        // `AxeItem.useOn` (`AxeItem.java:64-66`) passes when the main-hand axe is
+        // blocked by an off-hand item with `BLOCKS_ATTACKS`, unless secondary use is active.
+        if axe_use_blocked_by_offhand(hand, &item, &off_hand_item, sneaking) {
+            return Ok(());
+        }
+
         server
             .item_registry
             .use_on_block(&mut item, player, position, face, cursor_pos, block, server)
@@ -337,5 +362,39 @@ impl JavaClient {
     pub async fn send_sign_packet(&self, block_position: BlockPos, is_front_text: bool) {
         self.enqueue_client_packet(&COpenSignEditor::new(block_position, is_front_text))
             .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::axe_use_blocked_by_offhand;
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
+    use pumpkin_util::Hand;
+
+    #[test]
+    // `AxeItem.useOn` (`AxeItem.java:64-66`) only blocks the main-hand action.
+    fn axe_use_respects_offhand_attack_blocking() {
+        let axe = ItemStack::static_new_java(1, &Item::IRON_AXE);
+        let shield = ItemStack::static_new_java(1, &Item::SHIELD);
+
+        assert!(axe_use_blocked_by_offhand(
+            Hand::Right,
+            &axe,
+            &shield,
+            false
+        ));
+        assert!(!axe_use_blocked_by_offhand(
+            Hand::Right,
+            &axe,
+            &shield,
+            true
+        ));
+        assert!(!axe_use_blocked_by_offhand(
+            Hand::Left,
+            &axe,
+            &shield,
+            false
+        ));
     }
 }

@@ -46,6 +46,16 @@ fn cloud_radius_per_tick() -> f32 {
     (CLOUD_MAX_RADIUS - CLOUD_RADIUS) / CLOUD_DURATION as f32
 }
 
+/// `AbstractHurtingProjectile.createParticleTrail` (`AbstractHurtingProjectile.java:129-134`)
+/// uses `DragonFireball.getTrailParticle` (`DragonFireball.java:63-66`) at the projectile's
+/// position, with a dragon-breath power of 1.0.
+const fn get_trail_particle() -> (pumpkin_data::particle::Particle, [u8; 4]) {
+    (
+        pumpkin_data::particle::Particle::DragonBreath,
+        1.0f32.to_be_bytes(),
+    )
+}
+
 /// The guard from `DragonFireball.onHit` (DragonFireball.java:31):
 /// `hitResult.getType() != ENTITY || !this.ownedBy(hitResult.getEntity())`. A fireball that
 /// lands on its own shooter produces no cloud at all.
@@ -184,6 +194,20 @@ impl EntityBase for DragonFireballEntity {
             }
 
             self.thrown.process_tick(caller, server).await;
+
+            // `AbstractHurtingProjectile.tick` creates the trail after hit handling
+            // (`AbstractHurtingProjectile.java:92-96`), including on the server's particle path.
+            let (particle, data) = get_trail_particle();
+            let position = entity.pos.load();
+            let world = entity.world.load();
+            world.spawn_particle_with_data(
+                Vector3::new(position.x, position.y + 0.5, position.z),
+                Vector3::default(),
+                0.0,
+                1,
+                particle,
+                &data,
+            );
         })
     }
 
@@ -300,6 +324,15 @@ mod test {
         assert!((per_tick - (7.0 - 3.0) / 600.0).abs() < f32::EPSILON);
         let final_radius = CLOUD_RADIUS + per_tick * CLOUD_DURATION as f32;
         assert!((final_radius - CLOUD_MAX_RADIUS).abs() < 1e-4);
+    }
+
+    // `DragonFireball.getTrailParticle` returns dragon breath with power 1.0
+    // (`DragonFireball.java:63-66`).
+    #[test]
+    fn trail_particle_matches_vanilla_dragon_breath_power() {
+        let (particle, data) = get_trail_particle();
+        assert_eq!(particle, pumpkin_data::particle::Particle::DragonBreath);
+        assert_eq!(data, 1.0f32.to_be_bytes());
     }
 
     #[test]

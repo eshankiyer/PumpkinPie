@@ -31,6 +31,23 @@ const PULSE_TICKS: u8 = 8;
 /// `CatalystListener.getListenerRadius()` (lines 74-77).
 const LISTENER_RADIUS: i32 = 8;
 
+/// `SculkCatalystBlock.spawnAfterBreak` delegates to `tryDropExperience` only when the
+/// break supplied `dropExperience` (`SculkCatalystBlock.java:61-66`).
+const fn should_drop_experience(
+    drop_experience: bool,
+    block_drops: bool,
+    game_mode: pumpkin_util::GameMode,
+    silk_touch: bool,
+) -> bool {
+    drop_experience
+        && block_drops
+        && !matches!(
+            game_mode,
+            pumpkin_util::GameMode::Creative | pumpkin_util::GameMode::Spectator
+        )
+        && !silk_touch
+}
+
 pub struct SculkCatalystBlock;
 
 impl BlockMetadata for SculkCatalystBlock {
@@ -83,14 +100,13 @@ impl BlockBehaviour for SculkCatalystBlock {
     /// experience when the break is allowed to drop experience and the tool lacks Silk Touch.
     fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            if args.player.gamemode.load() == pumpkin_util::GameMode::Creative
-                || !args.world.level_info.load().game_rules.block_drops
-            {
-                return;
-            }
-
             let tool = args.player.inventory().held_item().await;
-            if tool.get_enchantment_level(&pumpkin_data::Enchantment::SILK_TOUCH) > 0 {
+            if !should_drop_experience(
+                args.drop_experience,
+                args.world.level_info.load().game_rules.block_drops,
+                args.player.gamemode.load(),
+                tool.get_enchantment_level(&pumpkin_data::Enchantment::SILK_TOUCH) > 0,
+            ) {
                 return;
             }
 
@@ -217,6 +233,42 @@ async fn bloom(world: &Arc<World>, pos: BlockPos) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pumpkin_util::GameMode;
+
+    #[test]
+    fn catalyst_experience_requires_vanillas_drop_experience_gate() {
+        // `SculkCatalystBlock.spawnAfterBreak` checks `dropExperience` before XP (`SculkCatalystBlock.java:61-66`).
+        assert!(should_drop_experience(
+            true,
+            true,
+            GameMode::Survival,
+            false
+        ));
+        assert!(!should_drop_experience(
+            false,
+            true,
+            GameMode::Survival,
+            false
+        ));
+        assert!(!should_drop_experience(
+            true,
+            true,
+            GameMode::Creative,
+            false
+        ));
+        assert!(!should_drop_experience(
+            true,
+            true,
+            GameMode::Survival,
+            true
+        ));
+        assert!(!should_drop_experience(
+            true,
+            false,
+            GameMode::Survival,
+            false
+        ));
+    }
 
     #[test]
     fn listener_radius_matches_vanilla() {

@@ -86,7 +86,8 @@ impl ZombieEntityBase {
             );
             goal_selector.add_goal(8, Box::new(RandomLookAroundGoal::default()));
 
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            // `Zombie.java:124` calls `setAlertOthers(ZombifiedPiglin.class)` on this goal.
+            target_selector.add_goal(1, Box::new(RevengeGoal::new(true).alert_others()));
             target_selector.add_goal(
                 2,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),

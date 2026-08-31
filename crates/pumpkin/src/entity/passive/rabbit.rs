@@ -286,7 +286,8 @@ impl RabbitEntity {
                     .add_goal(4, Box::new(MeleeAttackGoal::new(1.4, true)));
 
                 let mut target_selector = self.mob_entity.target_selector.lock().unwrap();
-                target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+                // `Rabbit.java:372` calls `setAlertOthers` on this revenge goal.
+                target_selector.add_goal(1, Box::new(RevengeGoal::new(true).alert_others()));
                 target_selector.add_goal(
                     2,
                     ActiveTargetGoal::with_default(&self.mob_entity, &EntityType::PLAYER, true),

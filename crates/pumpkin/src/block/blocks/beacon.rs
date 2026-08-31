@@ -12,7 +12,7 @@ use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::Inventory;
 
 use crate::block::registry::BlockActionResult;
-use crate::block::{BlockBehaviour, BlockFuture, NormalUseArgs};
+use crate::block::{BlockBehaviour, BlockFuture, NormalUseArgs, PlacedArgs};
 
 // Create the factory just like ChestScreenFactory
 struct BeaconScreenFactory(
@@ -51,6 +51,16 @@ impl ScreenHandlerFactory for BeaconScreenFactory {
 pub struct BeaconBlock;
 
 impl BlockBehaviour for BeaconBlock {
+    /// `BeaconBlock.newBlockEntity` (`BeaconBlock.java:37-40`) supplies the block entity when a
+    /// beacon is placed; the placement hook is the live Rust block-entity creation path.
+    fn placed<'a>(&'a self, args: PlacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            args.world.add_block_entity(Arc::new(
+                crate::block::entities::beacon::BeaconBlockEntity::new(*args.position),
+            ));
+        })
+    }
+
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
             let block_entity = args.world.get_block_entity(args.position);

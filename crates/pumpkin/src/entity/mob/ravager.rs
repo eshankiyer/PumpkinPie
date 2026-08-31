@@ -80,7 +80,10 @@ impl RavagerEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             // Ravager.java:81: `HurtByTargetGoal(this, Raider.class).setAlertOthers()`.
-            target_selector.add_goal(2, Box::new(RevengeGoal::new(true).exclude_raiders()));
+            target_selector.add_goal(
+                2,
+                Box::new(RevengeGoal::new(true).exclude_raiders().alert_others()),
+            );
             target_selector.add_goal(
                 3,
                 ActiveTargetGoal::with_default(&mob_arc.mob_entity, &EntityType::PLAYER, true),

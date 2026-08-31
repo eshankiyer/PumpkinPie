@@ -90,7 +90,10 @@ impl EvokerEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             // Evoker.java:66: `HurtByTargetGoal(this, Raider.class).setAlertOthers()`.
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true).exclude_raiders()));
+            target_selector.add_goal(
+                1,
+                Box::new(RevengeGoal::new(true).exclude_raiders().alert_others()),
+            );
             target_selector.add_goal(
                 2,
                 ActiveTargetGoal::with_default_and_memory(

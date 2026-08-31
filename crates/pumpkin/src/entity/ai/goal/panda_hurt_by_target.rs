@@ -9,11 +9,8 @@ use crate::entity::passive::panda::PandaEntity;
 /// (`gotBamboo`) or landed a bite of its own (`didBite`), it drops the target and stops
 /// chasing.
 ///
-/// Vanilla also overrides `alertOther` so only AGGRESSIVE-gened pandas join in. `RevengeGoal`'s
-/// alert loop has no per-candidate hook to intercept here, so this goal does not call
-/// `setAlertOthers` at all -- one panda's grudge stays its own. That is narrower than vanilla
-/// rather than wider: a non-aggressive panda would never have been alerted anyway, and the
-/// aggressive-panda pile-on is the documented gap.
+/// Vanilla also overrides `alertOther` so only AGGRESSIVE-gened pandas join in
+/// (`Panda.java:868-871`).
 pub struct PandaHurtByTargetGoal {
     inner: RevengeGoal,
 }
@@ -22,7 +19,10 @@ impl PandaHurtByTargetGoal {
     #[must_use]
     pub fn new() -> Box<Self> {
         Box::new(Self {
-            inner: RevengeGoal::new(true),
+            // `Panda.java:281` calls `setAlertOthers` on this goal.
+            inner: RevengeGoal::new(true)
+                .alert_others()
+                .alert_only_aggressive(),
         })
     }
 }

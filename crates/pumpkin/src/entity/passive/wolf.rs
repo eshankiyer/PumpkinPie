@@ -136,7 +136,8 @@ impl WolfEntity {
             let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
             target_selector.add_goal(1, OwnerHurtByTargetGoal::new());
             target_selector.add_goal(2, OwnerHurtTargetGoal::new());
-            target_selector.add_goal(3, Box::new(RevengeGoal::new(true)));
+            // `Wolf.java:143` calls `setAlertOthers` on this revenge goal.
+            target_selector.add_goal(3, Box::new(RevengeGoal::new(true).alert_others()));
 
             // Vanilla priority 4: `NearestAttackableTargetGoal<Player>(..., this::isAngryAt)`.
             // The predicate only sees the candidate, not the mob, so it closes over a weak

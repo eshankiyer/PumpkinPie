@@ -14,7 +14,7 @@ use pumpkin_data::block_state::BlockState;
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_data::{Block, effect::StatusEffect, potion::Effect};
+use pumpkin_data::{Block, effect::StatusEffect, item::Item, potion::Effect};
 use pumpkin_data::{entity::EntityType, tracked_data};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
@@ -24,6 +24,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
 
+use crate::block::blocks::plant::wither_rose::WitherRoseBlock;
 use crate::block::entities::BlockEntity;
 use crate::block::entities::beehive::{BeehiveBlockEntity, bees_stay_in_hive, is_beehive};
 use crate::entity::{
@@ -205,7 +206,7 @@ impl BeeEntity {
 
             let mut target_selector = mob_arc.mob_entity.target_selector.lock().unwrap();
             // `new Bee.BeeHurtByOtherGoal(this).setAlertOthers()` (`Bee.java:192`).
-            target_selector.add_goal(1, Box::new(RevengeGoal::new(true)));
+            target_selector.add_goal(1, Box::new(RevengeGoal::new(true).alert_others()));
             // `new Bee.BeeBecomeAngryTargetGoal(this)` (`Bee.java:193`), which is
             // `NearestAttackableTargetGoal<Player>(bee, Player.class, 10, true, false,
             // bee::isAngryAt)` (`Bee.java:714-717`). The predicate only sees the candidate, so
@@ -1194,7 +1195,21 @@ impl Mob for BeeEntity {
         player: &'a Arc<Player>,
         item_stack: &'a mut ItemStack,
     ) -> EntityBaseFuture<'a, bool> {
-        self.animal_interact(player, item_stack, Sound::EntityBeeLoop)
+        Box::pin(async move {
+            // `Bee.mobInteract` consumes bee food and applies the flower's effect before generic
+            // animal interaction (`Bee.java:557-570`); `WitherRoseBlock.java:78-81` supplies it.
+            if item_stack.item.id == Item::WITHER_ROSE.id {
+                item_stack.decrement_unless_creative(player.gamemode.load(), 1);
+                self.mob_entity
+                    .living_entity
+                    .add_effect(WitherRoseBlock::bee_interaction_effect())
+                    .await;
+                return true;
+            }
+
+            self.animal_interact(player, item_stack, Sound::EntityBeeLoop)
+                .await
+        })
     }
 
     /// `Bee.getBreedOffspring` (`Bee.java:604`): a plain new bee, no inherited state.

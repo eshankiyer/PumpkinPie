@@ -38,6 +38,26 @@ impl BlockMetadata for CarvedPumpkinBlock {
 }
 
 impl CarvedPumpkinBlock {
+    /// Vanilla `CarvedPumpkinBlock.clearPatternBlocks` (CarvedPumpkinBlock.java:119-127)
+    /// clears every cell in the matched pattern and emits the pre-removal block event for each.
+    async fn clear_pattern_blocks(world: &Arc<World>, pattern: &[BlockPos]) {
+        for pos in pattern {
+            let state_id = world.get_block_state_id(pos);
+            world
+                .set_block_state(
+                    pos,
+                    Block::AIR.default_state.id,
+                    BlockFlags::NOTIFY_LISTENERS,
+                )
+                .await;
+            world.sync_world_event(
+                WorldEvent::ParticlesDestroyBlock,
+                *pos,
+                state_id.as_u16().into(),
+            );
+        }
+    }
+
     /// Vanilla `CarvedPumpkinBlock.canSpawnGolem` (CarvedPumpkinBlock.java:59-63): reports
     /// whether placing a golem head at `top_pos` completes a build. Checks each
     /// `getOrCreate*Base` pattern (snow :148-157, copper :196-202, iron :171-181) anchored
@@ -276,20 +296,7 @@ impl BlockBehaviour for CarvedPumpkinBlock {
             let lower = args.world.get_block(&down_pos.down());
             if upper == &Block::SNOW_BLOCK && lower == &Block::SNOW_BLOCK {
                 let cleared = [*args.position, down_pos, down_pos.down()];
-                for pos in cleared {
-                    args.world
-                        .set_block_state(
-                            &pos,
-                            Block::AIR.default_state.id,
-                            BlockFlags::NOTIFY_LISTENERS,
-                        )
-                        .await;
-                    args.world.sync_world_event(
-                        WorldEvent::ParticlesDestroyBlock,
-                        pos,
-                        Block::SNOW_BLOCK.default_state.id.as_u16().into(),
-                    );
-                }
+                Self::clear_pattern_blocks(args.world, &cleared).await;
                 let entity = Entity::new(
                     args.world.clone(),
                     down_pos.down().to_centered_f64(),
@@ -307,25 +314,33 @@ impl BlockBehaviour for CarvedPumpkinBlock {
                     let arm1 = down_pos.offset(dir.to_offset());
                     let arm2 = down_pos.offset(opposite.to_offset());
 
+                    // `CarvedPumpkinBlock.getOrCreateIronGolemFull` requires the four `~`
+                    // cells to be air (`CarvedPumpkinBlock.java:183-190`).
                     if args.world.get_block(&arm1) == &Block::IRON_BLOCK
                         && args.world.get_block(&arm2) == &Block::IRON_BLOCK
+                        && args
+                            .world
+                            .get_block_state(&args.position.offset(dir.to_offset()))
+                            .is_air()
+                        && args
+                            .world
+                            .get_block_state(&args.position.offset(opposite.to_offset()))
+                            .is_air()
+                        && args.world.get_block_state(&arm1.down()).is_air()
+                        && args.world.get_block_state(&arm2.down()).is_air()
                     {
-                        let pattern = [*args.position, down_pos, down_pos.down(), arm1, arm2];
-
-                        for p in pattern {
-                            args.world
-                                .set_block_state(
-                                    &p,
-                                    Block::AIR.default_state.id,
-                                    BlockFlags::NOTIFY_LISTENERS,
-                                )
-                                .await;
-                            args.world.sync_world_event(
-                                WorldEvent::ParticlesDestroyBlock,
-                                p,
-                                Block::IRON_BLOCK.default_state.id.as_u16().into(),
-                            );
-                        }
+                        let pattern = [
+                            *args.position,
+                            args.position.offset(dir.to_offset()),
+                            args.position.offset(opposite.to_offset()),
+                            down_pos,
+                            arm1,
+                            arm2,
+                            down_pos.down(),
+                            arm1.down(),
+                            arm2.down(),
+                        ];
+                        Self::clear_pattern_blocks(args.world, &pattern).await;
 
                         let entity = Entity::new(
                             args.world.clone(),
