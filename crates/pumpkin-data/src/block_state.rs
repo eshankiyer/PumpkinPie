@@ -241,6 +241,37 @@ impl BlockState {
             .map(|&id| COLLISION_SHAPES[id as usize])
     }
 
+    /// Returns whether this state must be considered from the neighboring block
+    /// positions during collision queries. Vanilla's cache returns true for
+    /// dynamic shapes and for shapes extending outside the unit block
+    /// (`BlockBehaviour.java:572-574, 923-947`; `Blocks.java:830, 4265, 4377,
+    /// 5126, 5336-5353, 5781`).
+    #[must_use]
+    pub fn has_large_collision_shape(&self) -> bool {
+        let block = Block::from_state_id(self.id);
+        let dynamic_shape = matches!(
+            block.name,
+            "moving_piston"
+                | "bamboo"
+                | "scaffolding"
+                | "powder_snow"
+                | "pointed_dripstone"
+                | "sulfur_spike"
+        ) || block.name == "shulker_box"
+            || block.name.ends_with("_shulker_box");
+
+        dynamic_shape
+            || block.shape_offset().is_some()
+            || self.get_block_collision_shapes().any(|shape| {
+                shape.min.x < 0.0
+                    || shape.max.x > 1.0
+                    || shape.min.y < 0.0
+                    || shape.max.y > 1.0
+                    || shape.min.z < 0.0
+                    || shape.max.z > 1.0
+            })
+    }
+
     /// Returns block-local collision shapes with vanilla's coordinate-derived offset applied.
     pub fn get_block_collision_shapes_at(
         &self,
@@ -507,6 +538,16 @@ mod tests {
         assert_close(shifted_shape.max.x, 0.84375);
         assert_close(shifted_shape.min.z, 0.65625);
         assert_close(shifted_shape.max.z, 0.84375);
+    }
+
+    #[test]
+    fn large_collision_shape_matches_vanilla_cache_rule() {
+        // `BlockBehaviour.BlockStateBase.hasLargeCollisionShape` treats offset
+        // states as dynamic and therefore checks neighboring cursor positions
+        // (`BlockBehaviour.java:572-574, 923-947`; `Blocks.java:4265`).
+        assert!(!Block::STONE.default_state.has_large_collision_shape());
+        assert!(Block::BAMBOO.default_state.has_large_collision_shape());
+        assert!(Block::POWDER_SNOW.default_state.has_large_collision_shape());
     }
 
     #[test]

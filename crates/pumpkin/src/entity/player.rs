@@ -210,7 +210,7 @@ use pumpkin_data::attributes::Attributes;
 use pumpkin_data::block_properties::{BlockProperties, HorizontalFacing};
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::data_component_impl::{
-    AttackRangeImpl, AttributeModifiersImpl, EnchantmentsImpl, MinimumAttackChargeImpl, Operation,
+    AttributeModifiersImpl, EnchantmentsImpl, MinimumAttackChargeImpl, Operation,
 };
 use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, ToolImpl, WeaponImpl};
 use pumpkin_data::effect::StatusEffect;
@@ -243,16 +243,16 @@ use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::codec::var_long::VarLong;
 use pumpkin_protocol::codec::var_ulong::VarULong;
 use pumpkin_protocol::java::client::play::{
-    Animation, CActionBar, CAwardStats, CBlockUpdate, CChangeDifficulty, CCloseContainer,
-    CCombatDeath, CCustomPayload, CDisguisedChatMessage, CEntityAnimation, CEntityPositionSync,
-    CGameEvent, CItemCooldown, CMapItemData, COpenScreen, CParticle, CPlayerAbilities,
-    CPlayerInfoUpdate, CPlayerPosition, CPlayerSpawnPosition, CRecipeBookAddSubset,
-    CRecipeBookRemove, CRecipeBookSettings, CRespawn, CSetCamera, CSetContainerContent,
-    CSetContainerProperty, CSetContainerSlot, CSetCursorItem, CSetExperience, CSetHealth,
-    CSetPlayerInventory, CSetSelectedSlot, CSoundEffect, CStopSound, CSubtitle, CSystemChatMessage,
-    CTabList, CTitleAnimation, CTitleText, CUnloadChunk, CUpdateMobEffect, CUpdateTime, GameEvent,
-    MapIcon, MapPatch, Metadata, PlayerAction, PlayerInfoFlags, PlayerSpawnData, PreviousMessage,
-    RecipeBookEntry, Statistic,
+    Animation, CActionBar, CAwardStats, CBlockEntityData, CBlockUpdate, CChangeDifficulty,
+    CCloseContainer, CCombatDeath, CCustomPayload, CDisguisedChatMessage, CEntityAnimation,
+    CEntityPositionSync, CGameEvent, CItemCooldown, CMapItemData, COpenScreen, CParticle,
+    CPlayerAbilities, CPlayerInfoUpdate, CPlayerPosition, CPlayerSpawnPosition,
+    CRecipeBookAddSubset, CRecipeBookRemove, CRecipeBookSettings, CRespawn, CSetCamera,
+    CSetContainerContent, CSetContainerProperty, CSetContainerSlot, CSetCursorItem, CSetExperience,
+    CSetHealth, CSetPlayerInventory, CSetSelectedSlot, CSoundEffect, CStopSound, CSubtitle,
+    CSystemChatMessage, CTabList, CTitleAnimation, CTitleText, CUnloadChunk, CUpdateMobEffect,
+    CUpdateTime, GameEvent, MapIcon, MapPatch, Metadata, PlayerAction, PlayerInfoFlags,
+    PlayerSpawnData, PreviousMessage, RecipeBookEntry, Statistic,
 };
 use pumpkin_protocol::java::server::play::{
     SClickSlot, SContainerButtonClick, SRenameItem, SSetBeacon, SlotActionType,
@@ -272,6 +272,7 @@ use pumpkin_world::level::{Level, SyncChunk, SyncEntityChunk};
 
 use crate::block;
 use crate::block::blocks::bed::BedBlock;
+use crate::block::entities::{BlockEntity, command_block::CommandBlockEntity};
 use crate::command::context::command_source::CommandSource;
 use crate::command::node::dispatcher::CommandDispatcher;
 use crate::command::{CommandSender, client_suggestions};
@@ -3940,6 +3941,17 @@ impl Player {
         }
     }
 
+    /// `ServerPlayer.onUpdateAbilities` sends the ability packet and refreshes spectator
+    /// invisibility (`Player.java:1646`; `ServerPlayer.java:1740-1745`).
+    pub async fn on_update_abilities(&self) {
+        self.send_abilities_update().await;
+        if self.gamemode.load() == GameMode::Spectator {
+            self.get_entity().set_invisible(true).await;
+        } else {
+            self.living_entity.update_effect_visibility().await;
+        }
+    }
+
     pub async fn send_stats(&self) {
         if let ClientPlatform::Java(java) = self.client.as_ref() {
             let stats_guard = self.stats.lock().await;
@@ -4931,23 +4943,20 @@ impl Player {
         target_bounds: BoundingBox,
         buffer: f64,
     ) -> bool {
-        let (min_reach, max_reach, hitbox_margin) = weapon_item
-            .get_data_component::<AttackRangeImpl>()
-            .map_or((0.0, self.entity_interaction_range(), 0.0), |range| {
-                if self.gamemode.load() == GameMode::Creative {
-                    (
-                        f64::from(range.min_creative_reach),
-                        f64::from(range.max_creative_reach),
-                        f64::from(range.hitbox_margin),
-                    )
-                } else {
-                    (
-                        f64::from(range.min_reach),
-                        f64::from(range.max_reach),
-                        f64::from(range.hitbox_margin),
-                    )
-                }
-            });
+        let range = self.living_entity.get_attack_range_with(weapon_item);
+        let (min_reach, max_reach, hitbox_margin) = if self.gamemode.load() == GameMode::Creative {
+            (
+                f64::from(range.min_creative_reach),
+                f64::from(range.max_creative_reach),
+                f64::from(range.hitbox_margin),
+            )
+        } else {
+            (
+                f64::from(range.min_reach),
+                f64::from(range.max_reach),
+                f64::from(range.hitbox_margin),
+            )
+        };
         let distance = target_bounds.squared_magnitude(self.eye_position()).sqrt();
         attack_range_is_in_range(distance, min_reach, max_reach, hitbox_margin, buffer)
     }
@@ -5535,7 +5544,13 @@ impl Player {
             .retain(|_, stack| !is_vanishing_cursed(stack));
     }
 
-    async fn handle_killed(&self, death_msg: TextComponent) {
+    async fn handle_killed(&self, death_msg: TextComponent, has_damage_source: bool) {
+        // `Player.die` applies the death impulse after `LivingEntity.die`; with no damage
+        // source vanilla gives only the upward impulse (`Player.java:526-549`).
+        let yaw = f64::from(self.get_entity().yaw.load()).to_radians();
+        let death_velocity = player_death_velocity(has_damage_source, yaw);
+        self.get_entity().set_velocity(death_velocity);
+
         self.trigger_advancement(
             crate::entity::player::advancement::trigger::AdvancementTrigger::PlayerKilled,
         )
@@ -5551,7 +5566,7 @@ impl Player {
 
         let keep_inventory = { self.world().level_info.load().game_rules.keep_inventory };
 
-        if !keep_inventory {
+        if !self.is_spectator() && !keep_inventory {
             // `Player.dropEquipment` (`world/entity/player/Player.java:551-557`) calls
             // `destroyVanishingCursedItems` *before* `inventory.dropAll()`, so cursed items
             // are erased rather than dropped. Gated on `keepInventory` exactly as vanilla is.
@@ -5586,6 +5601,18 @@ impl Player {
                 }
             }
         }
+
+        // `Player.die` resets the rest timer and clears both fire state fields after dropping
+        // inventory (`Player.java:542-548`). Death statistics already reset time-since-death in
+        // the shared `LivingEntity::update_death_stats` path.
+        self.set_stat(
+            statistics::StatisticCategory::Custom,
+            statistics::CustomStatistic::TimeSinceRest as i32,
+            0,
+        )
+        .await;
+        self.get_entity().extinguish();
+        self.get_entity().set_on_fire(false).await;
 
         // Reset air supply & drowning ticks on death
         self.breath_manager.reset(self);
@@ -5656,7 +5683,10 @@ impl Player {
                 {
                     self.abilities.lock().await.flying = false;
                 }
-                self.send_abilities_update().await;
+                // `ServerPlayerGameMode.changeGameModeForPlayer` invokes
+                // `ServerPlayer.onUpdateAbilities` after changing the mode
+                // (`ServerPlayerGameMode.java:55-70`).
+                self.on_update_abilities().await;
 
                 if gamemode == GameMode::Creative {
                     self.get_entity().extinguish();
@@ -6694,6 +6724,20 @@ impl Player {
 
             None
         }
+    }
+
+    /// Sends a command block's custom update tag only to this player, matching
+    /// `ServerPlayer.openCommandBlock` (`Player.java:783-784`; `ServerPlayer.java:1408-1411`).
+    pub async fn open_command_block(&self, command_block: &CommandBlockEntity) {
+        let mut nbt = NbtCompound::new();
+        command_block.write_nbt(&mut nbt).await;
+        let bytes = pumpkin_nbt::Nbt::from(nbt).write_unnamed();
+        self.send_client_packet(&CBlockEntityData::new(
+            command_block.get_position(),
+            VarInt(command_block.get_id() as i32),
+            bytes.as_ref().into(),
+        ))
+        .await;
     }
 
     pub async fn open_handled_screen_direct(
@@ -7924,6 +7968,17 @@ fn player_death_experience_reward(level: i32, keep_inventory: bool, spectator: b
     }
 }
 
+/// Computes the player death impulse from `Player.die` (`Player.java:534-540`). The server-side
+/// player has no separate `hurtDir` callback in the current entity interface, so the live death
+/// path supplies the body's yaw and preserves the vanilla zero-valued hurt direction.
+fn player_death_velocity(has_damage_source: bool, body_yaw: f64) -> Vector3<f64> {
+    if has_damage_source {
+        Vector3::new(-body_yaw.cos() * 0.1, 0.1, -body_yaw.sin() * 0.1)
+    } else {
+        Vector3::new(0.0, 0.1, 0.0)
+    }
+}
+
 fn sleeping_long_enough(sleeping_since: Option<u8>) -> bool {
     sleeping_since.is_some_and(|since| since >= 100)
 }
@@ -8086,7 +8141,9 @@ impl EntityBase for Player {
                 if health <= 0.0 {
                     let death_message =
                         LivingEntity::get_death_message(caller, damage_type, source, cause).await;
-                    self.handle_killed(death_message).await;
+                    // `damage_type` is the non-null damage source carried by every live damage
+                    // call, even when that source has no entity (`Player.java:526-540`).
+                    self.handle_killed(death_message, true).await;
                 }
             }
             result
@@ -9210,10 +9267,10 @@ mod tests {
         can_start_fall_flying, can_use_game_master_blocks_state, damage_dealt_stat_points,
         experience_level_after_delta, extract_parrot_variant, is_crossbow_held_projectile,
         is_crossbow_inventory_projectile, is_valid_for_forced_respawn, is_vanishing_cursed,
-        may_use_item_at_allowed, player_death_experience_reward, player_fire_immune_ticks,
-        player_movement_emits_events, player_on_climbable, read_last_death_location,
-        read_root_vehicle, restore_creative_interaction_count, sleeping_long_enough,
-        write_last_death_location, write_root_vehicle,
+        may_use_item_at_allowed, player_death_experience_reward, player_death_velocity,
+        player_fire_immune_ticks, player_movement_emits_events, player_on_climbable,
+        read_last_death_location, read_root_vehicle, restore_creative_interaction_count,
+        sleeping_long_enough, write_last_death_location, write_root_vehicle,
     };
     use pumpkin_data::Block;
     use pumpkin_data::attributes::Attributes;
@@ -9222,6 +9279,7 @@ mod tests {
     use pumpkin_data::item_stack::ItemStack;
     use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
     use pumpkin_util::math::position::BlockPos;
+    use pumpkin_util::math::vector3::Vector3;
     use uuid::Uuid;
 
     /// `Player.extractParrotVariant` accepts namespaced and legacy ids, and `Parrot.byId` clamps
@@ -9374,6 +9432,20 @@ mod tests {
         assert_eq!(player_death_experience_reward(20, false, false), 100);
         assert_eq!(player_death_experience_reward(5, true, false), 0);
         assert_eq!(player_death_experience_reward(5, false, true), 0);
+    }
+
+    /// `Player.die` gives sourced deaths a horizontal impulse and source-less deaths only an
+    /// upward impulse (`Player.java:526-549`).
+    #[test]
+    fn player_death_velocity_matches_vanilla_branches() {
+        assert_eq!(
+            player_death_velocity(true, 0.0),
+            Vector3::new(-0.1, 0.1, 0.0)
+        );
+        assert_eq!(
+            player_death_velocity(false, 1.0),
+            Vector3::new(0.0, 0.1, 0.0)
+        );
     }
 
     /// `Player.isSleepingLongEnough` uses a 100-tick threshold (`Player.java:1355-1357`).

@@ -20,6 +20,9 @@ use pumpkin_world::inventory::{Clearable, Inventory, InventoryFuture};
 pub struct LecternBlockEntity {
     pub position: BlockPos,
     pub book: Arc<Mutex<ItemStack>>,
+    // Mirrors `hasBook` so synchronous menu validation can read the component state
+    // (`LecternBlockEntity.java:134-140`).
+    has_book: AtomicBool,
     pub page: AtomicUsize,
     pub dirty: AtomicBool,
 }
@@ -42,7 +45,10 @@ impl BlockEntity for LecternBlockEntity {
             .and_then(ItemStack::read_item_stack)
             .unwrap_or_else(|| ItemStack::EMPTY.clone());
 
+        // `loadAdditional` derives page data from the loaded book stack
+        // (`LecternBlockEntity.java:203-208,248-255`).
         let page_count = Self::page_count_of(&book_stack);
+        let has_book = Self::stack_has_book(&book_stack);
         let page = nbt
             .get_int("Page")
             .unwrap_or(0)
@@ -52,6 +58,7 @@ impl BlockEntity for LecternBlockEntity {
         Self {
             position,
             book,
+            has_book: AtomicBool::new(has_book),
             page: AtomicUsize::new(page),
             dirty: AtomicBool::new(false),
         }
@@ -110,6 +117,7 @@ impl LecternBlockEntity {
         Self {
             position,
             book: Arc::new(Mutex::new(ItemStack::EMPTY.clone())),
+            has_book: AtomicBool::new(false),
             page: AtomicUsize::new(0),
             dirty: AtomicBool::new(false),
         }
@@ -129,24 +137,46 @@ impl LecternBlockEntity {
             .map_or(0, |pages| pages as i32)
     }
 
+    fn stack_has_book(stack: &ItemStack) -> bool {
+        // `hasBook` checks components, not merely a non-empty item stack
+        // (`LecternBlockEntity.java:134-140`).
+        !stack.is_empty()
+            && (stack
+                .get_data_component::<WritableBookContentImpl>()
+                .is_some()
+                || stack
+                    .get_data_component::<WrittenBookContentImpl>()
+                    .is_some())
+    }
+
+    /// Vanilla `hasBook` checks for either book-content component
+    /// (`LecternBlockEntity.java:134-140`). The atomic mirror keeps that result
+    /// available to synchronous menu validation while the item stack remains async.
+    #[must_use]
+    pub fn has_book(&self) -> bool {
+        self.has_book.load(Ordering::Relaxed)
+    }
+
     pub async fn page_count(&self) -> i32 {
         Self::page_count_of(&*self.book.lock().await)
     }
 
-    /// Vanilla comparator output: `floor(page / (page_count - 1) * 14) + 1`,
-    /// or `0` without a book. Single-page books emit `1` (`0 / 0` is `NaN`,
-    /// which vanilla's `MathHelper.floor` turns into `0`).
+    /// Vanilla comparator output (`LecternBlockEntity.java:172-175`): books with
+    /// at most one page use full progress, while multi-page books scale by page.
     pub async fn comparator_output(&self) -> u8 {
         let book = self.book.lock().await;
-        if book.is_empty() {
+        if !Self::stack_has_book(&book) {
             return 0;
         }
 
         let page = self.page.load(Ordering::Relaxed) as f32;
-        let page_count = Self::page_count_of(&book) as f32;
-        let fraction = page / (page_count - 1.0) * 14.0;
-        // `NaN as u8` is 0, matching vanilla's cast of NaN to int.
-        fraction.floor() as u8 + 1
+        let page_count = Self::page_count_of(&book);
+        let page_progress = if page_count > 1 {
+            page / (page_count as f32 - 1.0)
+        } else {
+            1.0
+        };
+        (page_progress * 14.0).floor() as u8 + 1
     }
 }
 
@@ -168,6 +198,9 @@ impl Inventory for LecternBlockEntity {
             let mut removed = ItemStack::EMPTY.clone();
             let mut guard = self.book.lock().await;
             std::mem::swap(&mut removed, &mut *guard);
+            // `removeItemNoUpdate` calls `onBookItemRemove` after clearing slot 0
+            // (`LecternBlockEntity.java:69-74`).
+            self.has_book.store(false, Ordering::Relaxed);
             self.page.store(0, Ordering::Relaxed);
             self.mark_dirty();
             removed
@@ -187,6 +220,9 @@ impl Inventory for LecternBlockEntity {
                 // callback is handled by the screen controller; keep the entity's
                 // page state in sync here as well.
                 self.page.store(0, Ordering::Relaxed);
+                // `removeItem` clears the book state when the split empties slot 0
+                // (`LecternBlockEntity.java:55-60`).
+                self.has_book.store(false, Ordering::Relaxed);
             }
             self.mark_dirty();
             res
@@ -195,7 +231,11 @@ impl Inventory for LecternBlockEntity {
 
     fn set_stack(&self, _slot: usize, stack: ItemStack) -> InventoryFuture<'_, ()> {
         Box::pin(async move {
+            let has_book = Self::stack_has_book(&stack);
+            // `setBook` replaces the stack and recomputes its book state
+            // (`LecternBlockEntity.java:152-156`).
             *self.book.lock().await = stack;
+            self.has_book.store(has_book, Ordering::Relaxed);
             // A freshly placed book always opens on its first page.
             self.page.store(0, Ordering::Relaxed);
             self.mark_dirty();
@@ -228,11 +268,75 @@ impl Clearable for LecternBlockEntity {
     fn clear(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         Box::pin(async move {
             *self.book.lock().await = ItemStack::EMPTY.clone();
+            // `clearContent` delegates to `setBook(ItemStack.EMPTY)`
+            // (`LecternBlockEntity.java:220-223,152-156`).
+            self.has_book.store(false, Ordering::Relaxed);
             // Vanilla `setBook(ItemStack.EMPTY)` resets both page and page count
             // (`LecternBlockEntity.java:152-156`), which is the outer Clearable
             // behavior behind `clearContent` (`:220-223`).
             self.page.store(0, Ordering::Relaxed);
             self.mark_dirty();
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pumpkin_data::data_component::DataComponent;
+    use pumpkin_data::data_component_impl::DataComponentImpl;
+    use pumpkin_data::item::Item;
+    use pumpkin_util::math::position::BlockPos;
+    use std::sync::atomic::Ordering;
+
+    use super::*;
+
+    #[test]
+    fn book_state_and_comparator_follow_vanilla() {
+        // `hasBook` checks book components and `getRedstoneSignal` uses page progress
+        // (`LecternBlockEntity.java:134-140,172-175`).
+        let entity = LecternBlockEntity::new(BlockPos::new(0, 64, 0));
+        assert!(!entity.has_book());
+
+        let book = ItemStack::new_with_component(
+            1,
+            &Item::WRITABLE_BOOK,
+            vec![(
+                DataComponent::WritableBookContent,
+                Some(
+                    WritableBookContentImpl {
+                        pages: vec!["first".to_owned(), "second".to_owned()],
+                    }
+                    .to_dyn(),
+                ),
+            )],
+        );
+        futures::executor::block_on(entity.set_stack(0, book));
+        assert!(entity.has_book());
+        assert_eq!(futures::executor::block_on(entity.comparator_output()), 1);
+
+        entity.page.store(1, Ordering::Relaxed);
+        assert_eq!(futures::executor::block_on(entity.comparator_output()), 15);
+
+        futures::executor::block_on(entity.set_stack(
+            0,
+            ItemStack::new_with_component(
+                1,
+                &Item::WRITABLE_BOOK,
+                vec![(
+                    DataComponent::WritableBookContent,
+                    Some(
+                        WritableBookContentImpl {
+                            pages: vec!["only".to_owned()],
+                        }
+                        .to_dyn(),
+                    ),
+                )],
+            ),
+        ));
+        assert_eq!(futures::executor::block_on(entity.comparator_output()), 15);
+
+        futures::executor::block_on(entity.set_stack(0, ItemStack::new(1, &Item::STONE)));
+        assert!(!entity.has_book());
+        assert_eq!(futures::executor::block_on(entity.comparator_output()), 0);
     }
 }

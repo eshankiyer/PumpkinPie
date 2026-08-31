@@ -45,6 +45,9 @@ pub struct LootContextParameters {
     /// Whether the killed entity was on fire at death time.
     /// Computed from `Entity.fire_ticks > 0`.
     pub is_on_fire: Option<bool>,
+    /// World seed used by named random sequences.
+    /// Mirrors `MinecraftServer.getRandomSequence` (`MinecraftServer.java:1766-1767`).
+    pub world_seed: u64,
     /// Block entity captured before removal, read by block loot functions such as
     /// `ShulkerBoxBlock.getDrops` (`ShulkerBoxBlock.java:127-139`) and
     /// `DecoratedPotBlock.getDrops` (`DecoratedPotBlock.java:181-191`).
@@ -88,6 +91,18 @@ fn push_split_stack(stacks: &mut Vec<ItemStack>, stack: ItemStack) {
     }
 }
 
+fn random_sequence_seed(world_seed: u64, key: &str) -> (u64, u64) {
+    // `RandomSequences.createSequence` upgrades the world seed, xors the key hash, and mixes
+    // the result before constructing the Xoroshiro source (`RandomSequences.java:50-58`;
+    // `RandomSequence.java:29-40`).
+    let low = world_seed ^ 0x6a09_e667_f3bc_c909u64;
+    let high = low.wrapping_add((-7_046_029_254_386_353_131i64) as u64);
+    let hash = md5::compute(key.as_bytes());
+    let key_low = u64::from_be_bytes(hash[0..8].try_into().unwrap_or([0; 8]));
+    let key_high = u64::from_be_bytes(hash[8..16].try_into().unwrap_or([0; 8]));
+    (low ^ key_low, high ^ key_high)
+}
+
 /// Resolves an item tag's members. Shared by `TagEntry.createItemStack` (`TagEntry.java:46-48`,
 /// `expand: false`) below and by the pool-level `expand: true` fan-out
 /// (`TagEntry.expandTag`, `TagEntry.java:50-65`) in `LootTableExt::get_loot`.
@@ -114,11 +129,16 @@ pub trait LootTableExt {
 impl LootTableExt for LootTable {
     fn get_loot(&self, params: LootContextParameters) -> Vec<ItemStack> {
         let mut stacks = Vec::new();
-        let seed = params
-            .loot_table_seed
-            .filter(|seed| *seed != 0)
-            .map_or_else(get_seed, |seed| seed as u64);
-        let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(seed));
+        // `LootContext.Builder.create` prefers an explicit seed, then the table's named random
+        // sequence, and otherwise the level random (`LootContext.java:121-142`; `LootTable.java:84-127`).
+        let mut random = if let Some(seed) = params.loot_table_seed.filter(|seed| *seed != 0) {
+            RandomGenerator::Xoroshiro(Xoroshiro::from_seed(seed as u64))
+        } else if let Some(sequence) = self.random_sequence {
+            let (low, high) = random_sequence_seed(params.world_seed, sequence);
+            RandomGenerator::Xoroshiro(Xoroshiro::from_seed128(low, high))
+        } else {
+            RandomGenerator::Xoroshiro(Xoroshiro::from_seed(get_seed()))
+        };
 
         if let Some(pools) = self.pools {
             for pool in pools {
@@ -2076,6 +2096,20 @@ mod tests {
         let first = table.get_loot(params.clone());
         let second = table.get_loot(params);
         assert_eq!(first[0].item.id, second[0].item.id);
+    }
+
+    #[test]
+    fn named_random_sequence_seed_depends_on_world_and_sequence() {
+        // `RandomSequences.createSequence` includes the world seed and sequence identifier in
+        // each named source (`RandomSequences.java:50-58`; `RandomSequence.java:29-40`).
+        assert_ne!(
+            random_sequence_seed(1234, "minecraft:entities/pig"),
+            random_sequence_seed(5678, "minecraft:entities/pig")
+        );
+        assert_ne!(
+            random_sequence_seed(1234, "minecraft:entities/pig"),
+            random_sequence_seed(1234, "minecraft:entities/cow")
+        );
     }
 
     #[tokio::test]

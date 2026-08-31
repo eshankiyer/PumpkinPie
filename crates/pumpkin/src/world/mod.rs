@@ -40,7 +40,9 @@ use crate::{
         {OnNeighborUpdateArgs, OnScheduledTickArgs},
     },
     command::client_suggestions,
-    entity::{Entity, EntityBase, NBTStorage, RemovalReason, player::Player, r#type::from_type},
+    entity::{
+        Entity, EntityBase, NBTStorage, RemovalReason, mob::Mob, player::Player, r#type::from_type,
+    },
     error::PumpkinError,
     net::{ClientPlatform, bedrock::BedrockClient, java::JavaClient},
     plugin::{
@@ -2521,12 +2523,36 @@ impl World {
 
         let mut positions = Vec::new();
 
-        let min = BlockPos::floored_v(bounding_box.min.add_raw(0.0, -0.50001, 0.0));
-        let max = bounding_box.max_block_pos();
+        let query_min = BlockPos::floored_v(bounding_box.min.add_raw(0.0, -0.50001, 0.0));
+        let query_max = bounding_box.max_block_pos();
+        // `BlockCollisions` scans one block beyond the box and admits those
+        // candidates only when `hasLargeCollisionShape()` is true
+        // (`BlockCollisions.java:86-101`). This catches offset and out-of-unit
+        // shapes that overlap the box from an adjacent block position.
+        let min = BlockPos::new(
+            query_min.0.x.saturating_sub(1),
+            query_min.0.y.saturating_sub(1),
+            query_min.0.z.saturating_sub(1),
+        );
+        let max = BlockPos::new(
+            query_max.0.x.saturating_add(1),
+            query_max.0.y.saturating_add(1),
+            query_max.0.z.saturating_add(1),
+        );
         let pos_iter = BlockPos::iterate(min, max);
 
         for pos in pos_iter {
             let state = self.get_block_state(&pos);
+
+            let outside_query = pos.0.x < query_min.0.x
+                || pos.0.y < query_min.0.y
+                || pos.0.z < query_min.0.z
+                || pos.0.x > query_max.0.x
+                || pos.0.y > query_max.0.y
+                || pos.0.z > query_max.0.z;
+            if outside_query && !state.has_large_collision_shape() {
+                continue;
+            }
 
             if state.is_air() {
                 continue;
@@ -2602,11 +2628,32 @@ impl World {
     }
 
     pub fn is_space_empty(&self, bounding_box: BoundingBox) -> bool {
-        let min = bounding_box.min_block_pos();
-        let max = bounding_box.max_block_pos();
+        let query_min = bounding_box.min_block_pos();
+        let query_max = bounding_box.max_block_pos();
+        // The vanilla block-collision cursor includes adjacent positions for
+        // large collision shapes (`BlockCollisions.java:86-101`).
+        let min = BlockPos::new(
+            query_min.0.x.saturating_sub(1),
+            query_min.0.y.saturating_sub(1),
+            query_min.0.z.saturating_sub(1),
+        );
+        let max = BlockPos::new(
+            query_max.0.x.saturating_add(1),
+            query_max.0.y.saturating_add(1),
+            query_max.0.z.saturating_add(1),
+        );
 
         for pos in BlockPos::iterate(min, max) {
             let state = self.get_block_state(&pos);
+            let outside_query = pos.0.x < query_min.0.x
+                || pos.0.y < query_min.0.y
+                || pos.0.z < query_min.0.z
+                || pos.0.x > query_max.0.x
+                || pos.0.y > query_max.0.y
+                || pos.0.z > query_max.0.z;
+            if outside_query && !state.has_large_collision_shape() {
+                continue;
+            }
             let collided = Self::check_collision(&bounding_box, pos, state, false, |_| ());
 
             if collided {
@@ -5546,6 +5593,15 @@ impl World {
     pub fn spawn_entity_non_save(&self, entity: &Arc<dyn EntityBase>) {
         let _base_entity = entity.get_entity();
         self.broadcast_entity_spawn(entity);
+        // `Mob.finalizeSpawn` invokes the concrete `playSpawnSound` before the entity is added
+        // (`CopperGolem.java:370-380`); natural spawning uses this non-saving insertion path.
+        if let Some(sound) = entity.get_mob().and_then(Mob::get_spawn_sound) {
+            self.play_sound(
+                sound,
+                SoundCategory::Neutral,
+                &entity.get_entity().pos.load(),
+            );
+        }
         self.spawn_state.load().add_entity(self, entity.as_ref());
 
         self.entities.rcu(|current_entities| {
@@ -5571,6 +5627,15 @@ impl World {
 
         self.broadcast_entity_spawn(&entity);
         entity.init_data_tracker().await;
+        // `Mob.finalizeSpawn` invokes the concrete `playSpawnSound` before the entity is added
+        // (`CopperGolem.java:370-380`); this is the ordinary accepted spawn insertion path.
+        if let Some(sound) = entity.get_mob().and_then(Mob::get_spawn_sound) {
+            self.play_sound(
+                sound,
+                SoundCategory::Neutral,
+                &entity.get_entity().pos.load(),
+            );
+        }
         if let Some(living) = entity.get_living_entity() {
             let equipment = {
                 let equipment_guard = living.entity_equipment.lock().await;

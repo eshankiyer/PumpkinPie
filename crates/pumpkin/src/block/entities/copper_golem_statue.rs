@@ -4,7 +4,6 @@ use std::sync::Arc;
 use pumpkin_data::Block;
 use pumpkin_data::block_properties::HorizontalFacing;
 use pumpkin_data::entity::EntityType;
-use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
@@ -97,14 +96,6 @@ impl CopperGolemStatueBlockEntity {
 
         let golem = CopperGolemEntity::new(entity);
         world.spawn_entity(golem).await;
-
-        // `CopperGolemStatueBlockEntity.initCopperGolem` finishes with `playSpawnSound()`
-        // (`CopperGolem.playSpawnSound`, CopperGolem.java:378-380).
-        world.play_sound(
-            Sound::EntityCopperGolemSpawn,
-            SoundCategory::Neutral,
-            &center,
-        );
 
         let remaining = if waterlogged {
             Block::WATER.default_state.id

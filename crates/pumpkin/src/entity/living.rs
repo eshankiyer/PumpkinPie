@@ -52,9 +52,9 @@ use pumpkin_data::data_component_impl::food::{
     ConsumableImpl, ConsumeAnimation, ConsumeEffect, UseEffectsImpl, UseRemainderImpl,
 };
 use pumpkin_data::data_component_impl::{
-    AttributeModifiersImpl, BlocksAttacksImpl, DamageResistantImpl, DamageResistantType,
-    DeathProtectionImpl, EnchantmentsImpl, EquipmentSlot, EquipmentType, EquippableImpl, FoodImpl,
-    GliderImpl, OminousBottleAmplifierImpl, WeaponImpl,
+    AttackRangeImpl, AttributeModifiersImpl, BlocksAttacksImpl, DamageResistantImpl,
+    DamageResistantType, DeathProtectionImpl, EnchantmentsImpl, EquipmentSlot, EquipmentType,
+    EquippableImpl, FoodImpl, GliderImpl, OminousBottleAmplifierImpl, WeaponImpl,
 };
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::{EntityPose, EntityStatus, EntityType, MobCategory};
@@ -201,6 +201,21 @@ fn accumulated_fall_distance_after_impulse(velocity_y: f64, fall_distance: f32) 
         1.0
     } else {
         fall_distance
+    }
+}
+
+/// Builds the default attack range used when an item has no `attack_range` component.
+/// `LivingEntity.getAttackRangeWith` uses the entity-interaction attribute for that default
+/// (`LivingEntity.java:2230-2233`; `AttackRange.java:55-59`).
+const fn default_attack_range(interaction_range: f64) -> AttackRangeImpl {
+    let interaction_range = interaction_range as f32;
+    AttackRangeImpl {
+        min_reach: 0.0,
+        max_reach: interaction_range,
+        min_creative_reach: 0.0,
+        max_creative_reach: interaction_range,
+        hitbox_margin: 0.0,
+        mob_factor: 1.0,
     }
 }
 
@@ -1614,6 +1629,21 @@ impl LivingEntity {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         map.get(&attribute.id)
             .map_or(attribute.default_value, AttributeInstance::value)
+    }
+
+    /// Vanilla `LivingEntity.getAttackRangeWith` returns the item's component or the
+    /// entity-interaction default (`LivingEntity.java:2230-2233`; `AttackRange.java:55-59`).
+    /// The returned generated component is consumed by the live player attack-range and
+    /// kinetic-weapon sweep paths.
+    pub(crate) fn get_attack_range_with(&self, weapon_item: &ItemStack) -> AttackRangeImpl {
+        weapon_item
+            .get_data_component::<AttackRangeImpl>()
+            .cloned()
+            .unwrap_or_else(|| {
+                default_attack_range(
+                    self.get_attribute_value(&Attributes::ENTITY_INTERACTION_RANGE),
+                )
+            })
     }
 
     /// Vanilla `LivingEntity.getArmorValue` (`LivingEntity.java:1877-1879`).
@@ -3851,6 +3881,9 @@ impl LivingEntity {
                 .get_mob()
                 .map(Mob::get_loot_table_seed)
                 .filter(|seed| *seed != 0);
+            // `LootContext.Builder.create` resolves a table random sequence from the server
+            // world seed (`LootContext.java:138-142`; `MinecraftServer.java:1766-1767`).
+            params.world_seed = self.entity.world.load().level.seed.0;
             let pos = self.entity.block_pos.load();
             for stack in loot_table.get_loot(params) {
                 self.entity.world.load().drop_stack(&pos, stack).await;
@@ -7998,6 +8031,20 @@ fn skeleton_swim_sound_volume(on_ground: bool, water_volume: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `AttackRange.defaultFor` copies the entity-interaction range into both survival and
+    /// creative maxima (`AttackRange.java:55-59`).
+    #[test]
+    fn default_attack_range_uses_entity_interaction_range() {
+        let range = default_attack_range(3.5);
+
+        assert_eq!(range.min_reach, 0.0);
+        assert_eq!(range.max_reach, 3.5);
+        assert_eq!(range.min_creative_reach, 0.0);
+        assert_eq!(range.max_creative_reach, 3.5);
+        assert_eq!(range.hitbox_margin, 0.0);
+        assert_eq!(range.mob_factor, 1.0);
+    }
 
     /// `Mob.playHurtSound` uses the mob sound source, while players use the player category
     /// (`Mob.java:295-299`; `LivingEntity.java:1427-1434`).

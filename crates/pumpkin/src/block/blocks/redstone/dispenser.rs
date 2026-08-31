@@ -14,6 +14,7 @@ use crate::block::{
 };
 use crate::entity::decoration::armor_stand::ArmorStandEntity;
 use crate::entity::item::ItemEntity;
+use crate::entity::mob::sulfur_cube::SulfurCubeEntity;
 use crate::entity::passive::sheep::SheepEntity;
 use crate::entity::projectile::ThrownItemEntity;
 use crate::entity::projectile::arrow::{ArrowEntity, ArrowPickup};
@@ -51,6 +52,7 @@ use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::translation;
 use pumpkin_data::world::WorldEvent;
 use pumpkin_inventory::generic_container_screen_handler::create_generic_3x3;
@@ -331,8 +333,14 @@ impl DispenserBlock {
                 Self::drop_item(ctx, item).await;
             }
         } else if item.item.id == Item::TNT.id {
-            // TNT
-            Self::dispense_tnt(ctx, item).await;
+            // The registered TNT behavior first offers the stack to a sulfur cube
+            // (`DispenseItemBehavior.java:198-218`) through the same special behavior used by
+            // the swallowable-item default (`DispenserBlock.java:108-124`).
+            if Self::dispense_sulfur_cube(ctx, item).await {
+                Self::play_dispense_effects(ctx, WorldEvent::SoundDispenserDispense);
+            } else {
+                Self::dispense_tnt(ctx, item).await;
+            }
         } else if item.item.id == Item::SNOWBALL.id {
             Self::dispense_snowball(ctx, item).await;
         } else if item.item.id == Item::EGG.id {
@@ -376,6 +384,24 @@ impl DispenserBlock {
             // OptionalDispenseItemBehavior never falls back to dropping the item on
             // failure - it just plays the fail sound and leaves the shears in the dispenser.
             Self::dispense_shears(ctx, item).await;
+        } else if item
+            .item
+            .has_tag(&tag::Item::MINECRAFT_SULFUR_CUBE_SWALLOWABLE)
+        {
+            // `DispenserBlock.getDefaultDispenseMethod` selects the sulfur-cube behavior for
+            // this tag (`DispenserBlock.java:108-124`). It equips in the front block and only
+            // falls back to the default item drop when no cube accepts it
+            // (`SulfurCubeBlockDispenseItemBehavior.java:14-28`).
+            if Self::dispense_sulfur_cube(ctx, item).await {
+                Self::play_dispense_effects(ctx, WorldEvent::SoundDispenserDispense);
+            } else {
+                Self::drop_item(ctx, item).await;
+            }
+        } else if Self::dispense_equipment(ctx, item).await {
+            // The default dispenser method also selects equipment before its item drop
+            // (`DispenserBlock.java:108-124`); the live equipment behavior equips the first
+            // eligible entity in the front block (`EquipmentDispenseItemBehavior.java:12-36`).
+            Self::play_dispense_effects(ctx, WorldEvent::SoundDispenserDispense);
         } else {
             // Default / Drop
             Self::drop_item(ctx, item).await;
@@ -428,6 +454,23 @@ impl DispenserBlock {
         }
         living.send_equipment_changes(&[(slot, equipped)]);
         true
+    }
+
+    async fn dispense_sulfur_cube(ctx: &DispenseContext<'_>, item: &mut ItemStack) -> bool {
+        let target = Self::target_position(ctx);
+        let min = target.to_f64();
+        let aabb = BoundingBox::new(min, min.add_raw(1.0, 1.0, 1.0));
+
+        for entity in ctx.world.get_entities_at_box(&aabb) {
+            if let Some(cube) = entity.cast_any().downcast_ref::<SulfurCubeEntity>()
+                && cube.equip_item(item).await
+            {
+                item.decrement(1);
+                return true;
+            }
+        }
+
+        false
     }
 
     fn projectile_spawn_position(ctx: &DispenseContext<'_>) -> Vector3<f64> {
@@ -1146,7 +1189,18 @@ impl DispenserBlock {
 mod tests {
     use super::{DispenserBlock, to_normal};
     use pumpkin_data::block_properties::Facing;
+    use pumpkin_data::item::Item;
+    use pumpkin_data::tag::{self, Taggable};
     use pumpkin_util::math::vector3::Vector3;
+
+    /// `DispenserBlock.getDefaultDispenseMethod` checks the swallowable item tag
+    /// (`DispenserBlock.java:108-124`) before choosing `SulfurCubeBlockDispenseItemBehavior`
+    /// (`SulfurCubeBlockDispenseItemBehavior.java:14-28`).
+    #[test]
+    fn sulfur_cube_dispense_items_use_the_special_behavior_tag() {
+        assert!(Item::TNT.has_tag(&tag::Item::MINECRAFT_SULFUR_CUBE_SWALLOWABLE));
+        assert!(!Item::DIAMOND.has_tag(&tag::Item::MINECRAFT_SULFUR_CUBE_SWALLOWABLE));
+    }
 
     /// `Projectile.shoot` (Projectile.java:208-219) normalizes the raw direction before adding
     /// the uncertainty term, and `ProjectileDispenseBehavior.execute`

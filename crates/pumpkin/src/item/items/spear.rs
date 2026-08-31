@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::damage::DamageType;
-use pumpkin_data::data_component_impl::AttackRangeImpl;
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
@@ -338,9 +337,9 @@ impl ItemBehaviour for SpearItem {
             // `AttackRange.effectiveMinRange`/`effectiveMaxRange`
             // (`AttackRange.java:88-102`): a player uses the creative pair in creative mode
             // and the survival pair otherwise, with no `mobFactor` applied.
-            let Some(attack_range) = stack.get_data_component::<AttackRangeImpl>() else {
-                return;
-            };
+            // `LivingEntity.getAttackRangeWith` supplies the component or its interaction-range
+            // default (`LivingEntity.java:2230-2233`; `AttackRange.java:55-59`).
+            let attack_range = player.living_entity.get_attack_range_with(stack);
             let creative = player.gamemode.load() == GameMode::Creative;
             let (min_reach, max_reach, margin) = if creative {
                 (

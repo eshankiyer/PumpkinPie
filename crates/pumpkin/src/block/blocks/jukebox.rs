@@ -47,6 +47,13 @@ impl JukeboxBlock {
             .await;
     }
 
+    /// Matches `JukeboxBlockEntity.onSongChanged`: notify adjacent blocks after playback or
+    /// record contents change (`JukeboxBlockEntity.java:36-39`).
+    async fn on_song_changed(world: &Arc<World>, position: &BlockPos) {
+        world.update_neighbors(position, None).await;
+        world.update_comparators(position, &Block::JUKEBOX).await;
+    }
+
     /// Drops the record from the jukebox - matches vanilla's `JukeboxBlockEntity.dropRecord()`
     /// Spawns item at (pos + 0.5, pos + 1.01, pos + 0.5) with horizontal random offset
     async fn drop_record(position: &BlockPos, world: &Arc<World>) {
@@ -84,6 +91,9 @@ impl JukeboxBlock {
             .await;
         }
         Self::set_record_state(false, block, position, world).await;
+        // `JukeboxSongPlayer.stop` invokes the `onSongChanged` callback after clearing playback
+        // (`JukeboxSongPlayer.java:53-60`; `JukeboxBlockEntity.java:36-39`).
+        Self::on_song_changed(world, position).await;
         world.sync_world_event(WorldEvent::SoundStopJukeboxSong, *position, 0);
     }
 
@@ -121,8 +131,9 @@ impl JukeboxBlock {
 
         jukebox.start_playing(song.length_in_ticks());
         Self::set_record_state(true, &Block::JUKEBOX, position, world).await;
-        world.update_neighbors(position, None).await;
-        world.update_comparators(position, &Block::JUKEBOX).await;
+        // Hopper insertion reaches the same `setTheItem`/`onSongChanged` notification path
+        // (`JukeboxBlockEntity.java:113-123`, `JukeboxBlockEntity.java:36-39`).
+        Self::on_song_changed(world, position).await;
         emit_game_event(
             world,
             GameEvent::BlockChange,
@@ -258,6 +269,11 @@ impl BlockBehaviour for JukeboxBlock {
                 GameEventContext::none(),
             )
             .await;
+
+            // `JukeboxBlockEntity.setTheItem` invokes `onSongChanged` after insertion, which
+            // updates neighbors and redstone consumers (`JukeboxBlockEntity.java:113-123`,
+            // `JukeboxBlockEntity.java:36-39`).
+            Self::on_song_changed(world, args.position).await;
 
             BlockActionResult::Success
         })

@@ -43,6 +43,14 @@ impl Xoroshiro {
         Self::new(lo, hi)
     }
 
+    /// Creates a generator from the already-upgraded 128-bit seed used by a named sequence.
+    /// Mirrors `RandomSupport.Seed128bit.mixed` and `XoroshiroRandomSource` construction
+    /// (`RandomSupport.java:23-35,53-55`; `XoroshiroRandomSource.java:20-25`).
+    #[must_use]
+    pub const fn from_seed128(lo: u64, hi: u64) -> Self {
+        Self::new(mix_stafford_13(lo), mix_stafford_13(hi))
+    }
+
     /// Creates a new Xoroshiro generator with the given state words.
     ///
     /// If both state words are zero, they are replaced with default values

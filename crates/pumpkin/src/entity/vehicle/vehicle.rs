@@ -48,6 +48,13 @@ impl VehicleEntity {
                 });
             });
         }
+
+        // `VehicleEntity.hurtServer` marks a damaged vehicle (`VehicleEntity.java:44-48`),
+        // and `ServerEntity.sendChanges` resends its motion after the entity update
+        // (`ServerEntity.java:224-228`).
+        if self.entity.hurt_marked.swap(false, Ordering::Relaxed) {
+            self.entity.send_velocity_forced();
+        }
     }
 
     pub async fn create(&self) {
@@ -171,6 +178,9 @@ impl VehicleEntity {
                 is_raining: Some(is_raining),
                 is_thundering: Some(is_thundering),
                 world_time: world.level_info.load().day_time as u64,
+                // `LootContext.Builder.create` resolves named sequences with the server world
+                // seed (`LootContext.java:138-142`; `MinecraftServer.java:1766-1767`).
+                world_seed: world.level.seed.0,
                 ..Default::default()
             };
             for stack in loot_table.get_loot(params) {

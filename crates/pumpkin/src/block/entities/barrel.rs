@@ -137,6 +137,42 @@ impl BarrelBlockEntity {
         }
     }
 
+    /// Reconciles menu callbacks with players still viewing this barrel, matching
+    /// `BarrelBlockEntity.recheckOpen` (`BarrelBlockEntity.java:120-127`) through the existing
+    /// opener recheck model (`ContainerOpenersCounter.java:51-102`).
+    pub async fn recheck_open(&self, world: &Arc<World>) {
+        let open_count = world
+            .players
+            .load()
+            .iter()
+            .filter(|player| {
+                player.gamemode.load() != pumpkin_util::GameMode::Spectator
+                    && player.open_container_pos.load() == Some(self.position)
+                    && player.can_interact_with_block_at(&self.position, 4.0)
+            })
+            .count()
+            .min(usize::from(u16::MAX)) as u16;
+        self.viewers.current.store(open_count, Ordering::Relaxed);
+        self.viewers
+            .update_viewer_count::<Self>(self, world, &self.position)
+            .await;
+
+        if open_count > 0 {
+            world.schedule_block_tick(
+                &Block::BARREL,
+                self.position,
+                5,
+                pumpkin_world::tick::TickPriority::Normal,
+            );
+        }
+    }
+
+    /// Returns the current opener count used to schedule the vanilla-style recheck only when the
+    /// first viewer arrives (`ContainerOpenersCounter.java:28-38,96-102`).
+    pub(crate) fn viewer_count(&self) -> u16 {
+        self.viewers.get_viewer_count()
+    }
+
     async fn set_open(&self, world: &Arc<World>, open: bool) {
         let state = world.get_block_state(&self.position);
         let mut properties = BarrelLikeProperties::from_state_id(state.id, &Block::BARREL);
@@ -251,5 +287,29 @@ impl Clearable for BarrelBlockEntity {
             items.fill_with(|| ItemStack::EMPTY.clone());
             self.mark_dirty();
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BarrelBlockEntity;
+    use pumpkin_util::math::position::BlockPos;
+    use pumpkin_world::inventory::Inventory;
+
+    #[test]
+    fn container_size_and_open_close_lifecycle_match_vanilla() {
+        // `BarrelBlockEntity.getContainerSize`, `startOpen`, and `stopOpen`
+        // (`BarrelBlockEntity.java:77-79,102-117`) define the 27-slot container
+        // and its viewer lifecycle.
+        let barrel = BarrelBlockEntity::new(BlockPos::ZERO);
+
+        assert_eq!(barrel.size(), BarrelBlockEntity::INVENTORY_SIZE);
+        assert_eq!(barrel.viewers.get_viewer_count(), 0);
+
+        futures::executor::block_on(barrel.on_open());
+        assert_eq!(barrel.viewers.get_viewer_count(), 1);
+
+        futures::executor::block_on(barrel.on_close());
+        assert_eq!(barrel.viewers.get_viewer_count(), 0);
     }
 }

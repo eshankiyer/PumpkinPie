@@ -38,6 +38,7 @@ use crate::item::items::glowing_ink_sac::GlowingInkSacItem;
 use crate::item::items::honeycomb::HoneyCombItem;
 use crate::item::items::ink_sac::InkSacItem;
 use crate::net::ClientPlatform;
+use crate::server::Server;
 use crate::world::World;
 
 #[pumpkin_block_from_tag("minecraft:all_signs")]
@@ -139,6 +140,46 @@ pub(crate) fn as_sign_text_access(entity: &dyn std::any::Any) -> Option<&dyn Sig
         },
         |sign| Some(sign as &dyn SignTextAccess),
     )
+}
+
+fn click_command(line: &str) -> Option<String> {
+    let component = serde_json::from_str::<TextComponent>(line).ok()?;
+    match &component.0.style.click_event {
+        Some(pumpkin_util::text::click::ClickEvent::RunCommand { command }) => {
+            Some(command.to_string())
+        }
+        _ => None,
+    }
+}
+
+async fn execute_click_commands_if_present(
+    sign_entity: &dyn SignTextAccess,
+    is_front_text: bool,
+    server: &Arc<Server>,
+) -> bool {
+    // `SignBlockEntity.executeClickCommandsIfPresent` runs every root-line click command
+    // (`SignBlockEntity.java:189-213`); use the existing dispatcher for this workspace's
+    // `RunCommand` event.
+    let text = if is_front_text {
+        sign_entity.front_text()
+    } else {
+        sign_entity.back_text()
+    };
+    let lines = text.messages.lock().unwrap().clone();
+    let mut executed = false;
+    for line in &lines {
+        let Some(command) = click_command(line) else {
+            continue;
+        };
+        let source = CommandSender::Dummy.into_source(server).await;
+        server
+            .command_dispatcher
+            .load()
+            .handle_command(&source, &command)
+            .await;
+        executed = true;
+    }
+    executed
 }
 
 /// Helper struct to hold support detection results
@@ -547,47 +588,17 @@ impl BlockBehaviour for SignBlock {
                 return BlockActionResult::Pass;
             };
 
-            // Vanilla `SignBlockEntity.canExecuteClickCommands`
-            // (`SignBlockEntity.java:185-187`) requires `isWaxed()` before
-            // `executeClickCommandsIfPresent` (:189-215) ever runs - an unwaxed sign's click
-            // events are inert, only a waxed one's fire. Checked before the loop below so a
-            // click-styled unwaxed sign (settable via NBT/plugins even though the client's own
-            // sign-edit UI cannot produce one) can't run commands.
-            let mut executed_command = false;
-            if sign_entity.sign_is_waxed()
+            // `canExecuteClickCommands` gates `executeClickCommandsIfPresent` on wax
+            // (`SignBlockEntity.java:185-213`).
+            let executed_command = if sign_entity.sign_is_waxed()
                 && let Some(server) = args.world.server.upgrade()
             {
                 let is_facing_front =
                     is_facing_front_text(args.world, args.position, args.block, args.player);
-                let text = if is_facing_front {
-                    sign_entity.front_text()
-                } else {
-                    sign_entity.back_text()
-                };
-                let lines = text.messages.lock().unwrap().clone();
-                for line in &lines {
-                    let Ok(component) =
-                        serde_json::from_str::<pumpkin_util::text::TextComponent>(line)
-                    else {
-                        continue;
-                    };
-                    let Some(pumpkin_util::text::click::ClickEvent::RunCommand { command }) =
-                        &component.0.style.click_event
-                    else {
-                        continue;
-                    };
-                    let source = CommandSender::Dummy.into_source(&server).await;
-                    server
-                        .command_dispatcher
-                        .load()
-                        .handle_command(&source, command)
-                        .await;
-                    executed_command = true;
-                }
-            }
-            if executed_command {
-                return BlockActionResult::SuccessServer;
-            }
+                execute_click_commands_if_present(sign_entity, is_facing_front, &server).await
+            } else {
+                false
+            };
 
             if sign_entity.sign_is_waxed() {
                 // Vanilla plays `getSignInteractionFailedSoundEvent()`, which differs per
@@ -598,6 +609,9 @@ impl BlockBehaviour for SignBlock {
                     pumpkin_data::sound::SoundCategory::Blocks,
                     *args.position,
                 );
+                return BlockActionResult::SuccessServer;
+            }
+            if executed_command {
                 return BlockActionResult::SuccessServer;
             }
 
@@ -640,6 +654,7 @@ impl BlockBehaviour for SignBlock {
     /// Mirrors `SignBlock.useItemOn` from
     /// `net/minecraft/world/level/block/SignBlock.java:91-125`: only a build-capable sign
     /// applicator may mutate the text, and an item attempt must not claim the text editor.
+    #[expect(clippy::too_many_lines)]
     fn use_with_item<'a>(
         &'a self,
         args: UseWithItemArgs<'a>,
@@ -735,6 +750,13 @@ impl BlockBehaviour for SignBlock {
                 );
 
             if result == BlockActionResult::Success {
+                // Vanilla invokes `executeClickCommandsIfPresent` after a successful sign
+                // applicator (`SignBlock.java:103-112`), so use the same live path here.
+                if let Some(server) = args.world.server.upgrade() {
+                    let is_facing_front =
+                        is_facing_front_text(args.world, args.position, args.block, args.player);
+                    execute_click_commands_if_present(sign_entity, is_facing_front, &server).await;
+                }
                 if pumpkin_item
                     .as_any()
                     .downcast_ref::<crate::item::items::glowing_ink_sac::GlowingInkSacItem>()
@@ -857,4 +879,27 @@ fn has_editable_text(text: &crate::block::entities::sign::Text) -> bool {
                     matches!(&*component.0.content, TextContent::Text { .. })
                 })
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::click_command;
+
+    #[test]
+    fn click_command_reads_root_run_command_events() {
+        // The parser feeds the live SignBlock click-command path implementing
+        // `SignBlockEntity.executeClickCommandsIfPresent` (`SignBlockEntity.java:189-213`).
+        assert_eq!(
+            click_command(
+                r#"{"text":"run","click_event":{"action":"run_command","command":"say hi"}}"#
+            ),
+            Some("say hi".to_string())
+        );
+        assert_eq!(
+            click_command(
+                r#"{"text":"suggest","click_event":{"action":"suggest_command","command":"say hi"}}"#
+            ),
+            None
+        );
+    }
 }

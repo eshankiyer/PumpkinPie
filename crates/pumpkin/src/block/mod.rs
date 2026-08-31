@@ -653,6 +653,10 @@ pub async fn drop_loot(
     experience: bool,
     params: LootContextParameters,
 ) {
+    // `LootContext.Builder.create` resolves named sequences with the server world seed
+    // (`LootContext.java:138-142`; `MinecraftServer.java:1766-1767`).
+    let mut params = params;
+    params.world_seed = world.level.seed.0;
     // In 1.21 a tool's `block_experience` enchantment effects are folded over
     // the sampled amount, and Silk Touch is the only enchantment that defines
     // one: it sets the result to zero. Special-casing it is equivalent for
