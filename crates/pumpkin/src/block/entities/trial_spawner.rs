@@ -4,7 +4,9 @@ use super::BlockEntity;
 use pumpkin_data::block_properties::{
     BlockProperties, TrialSpawnerLikeProperties, TrialSpawnerState,
 };
+use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::potion::Effect;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::{Block, BlockStateId, world::WorldEvent};
 use pumpkin_nbt::compound::NbtCompound;
@@ -356,6 +358,9 @@ const DELAY_BEFORE_EJECT_AFTER_KILLING_LAST_MOB: i64 = 40;
 const TIME_BETWEEN_EACH_EJECTION: i64 = 30;
 // TrialSpawner.java:59
 const MAX_MOB_TRACKING_DISTANCE_SQR: i32 = 47 * 47;
+// TrialSpawnerStateData.java:45 and TrialSpawnerConfig.java:66-68
+const TRIAL_OMEN_PER_BAD_OMEN_LEVEL: i32 = 18_000;
+const OMINOUS_ITEM_SPAWNER_INTERVAL: i64 = 160;
 
 impl TrialSpawnerBlockEntity {
     pub const ID: &'static str = "minecraft:trial_spawner";
@@ -452,6 +457,118 @@ impl TrialSpawnerBlockEntity {
         (self.detected_players.lock().await.len() as i32 - 1).max(0)
     }
 
+    fn trial_omen_duration(amplifier: u8) -> i32 {
+        TRIAL_OMEN_PER_BAD_OMEN_LEVEL * (i32::from(amplifier) + 1)
+    }
+
+    // TrialSpawnerBlockEntity.java:87-91
+    fn mark_updated(&self, world: &Arc<World>) {
+        if let Some(block_entity) = world.get_block_entity(&self.position) {
+            world.update_block_entity(&block_entity);
+        }
+    }
+
+    // TrialSpawnerStateData.java:127-137, 180-200 and TrialSpawner.java:102-107
+    async fn apply_ominous(
+        &self,
+        world: &Arc<World>,
+        player: &Arc<crate::entity::player::Player>,
+        bad_omen: Option<Effect>,
+        game_time: i64,
+    ) {
+        if let Some(effect) = bad_omen {
+            player.remove_effect(&StatusEffect::BAD_OMEN).await;
+            player
+                .add_effect(Effect {
+                    effect_type: &StatusEffect::TRIAL_OMEN,
+                    duration: Self::trial_omen_duration(effect.amplifier),
+                    amplifier: 0,
+                    ambient: false,
+                    show_particles: true,
+                    show_icon: true,
+                    blend: false,
+                })
+                .await;
+        }
+
+        world.sync_world_event(
+            WorldEvent::ParticlesTrialSpawnerBecomeOminous,
+            BlockPos::floored(
+                player.eye_position().x,
+                player.eye_position().y,
+                player.eye_position().z,
+            ),
+            0,
+        );
+
+        let state_id = world.get_block_state_id(&self.position);
+        let block = Block::from_state_id(state_id);
+        if TrialSpawnerLikeProperties::handles_block_id(block.id) {
+            let mut props = TrialSpawnerLikeProperties::from_state_id(state_id, block);
+            props.ominous = true;
+            world
+                .set_block_state(
+                    &self.position,
+                    props.to_state_id(block),
+                    BlockFlags::NOTIFY_ALL,
+                )
+                .await;
+        }
+        world.sync_world_event(
+            WorldEvent::ParticlesTrialSpawnerBecomeOminous,
+            self.position,
+            1,
+        );
+
+        let mobs = {
+            let mut current_mobs = self.current_mobs.lock().await;
+            let mobs = current_mobs.iter().copied().collect::<Vec<_>>();
+            current_mobs.clear();
+            mobs
+        };
+        for id in mobs {
+            if let Some(entity) = world.get_entity_by_uuid(id) {
+                // TrialSpawnerStateData.java:180-189 and Mob.java:923-938
+                if let Some(mob) = entity.get_mob() {
+                    mob.drop_preserved_equipment().await;
+                }
+                entity.get_entity().remove().await;
+            }
+        }
+
+        if !self.active_config(true).spawn_potentials.is_empty() {
+            *self.next_spawn_entity.lock().unwrap() = None;
+            *self.next_spawn_data.lock().unwrap() = None;
+        }
+        self.total_mobs_spawned.store(0, Ordering::Relaxed);
+        self.next_mob_spawns_at.store(
+            game_time + self.active_config(true).ticks_between_spawn,
+            Ordering::Relaxed,
+        );
+        self.cooldown_ends_at
+            .store(game_time + OMINOUS_ITEM_SPAWNER_INTERVAL, Ordering::Relaxed);
+        self.mark_updated(world);
+    }
+
+    // TrialSpawnerState.java:147-150 and TrialSpawner.java:109-112
+    async fn remove_ominous(&self, world: &Arc<World>) {
+        let state_id = world.get_block_state_id(&self.position);
+        let block = Block::from_state_id(state_id);
+        if TrialSpawnerLikeProperties::handles_block_id(block.id) {
+            let mut props = TrialSpawnerLikeProperties::from_state_id(state_id, block);
+            if props.ominous {
+                props.ominous = false;
+                world
+                    .set_block_state(
+                        &self.position,
+                        props.to_state_id(block),
+                        BlockFlags::NOTIFY_ALL,
+                    )
+                    .await;
+            }
+        }
+    }
+
     // TrialSpawner.java:150-158. overridePeacefulAndMobSpawnRule is a
     // @VisibleForTesting-only escape hatch, never set by gameplay code, so it
     // is omitted.
@@ -462,10 +579,9 @@ impl TrialSpawnerBlockEntity {
             && level_data.game_rules.spawn_mobs
     }
 
-    // StateData.java:121-159, simplified: no line-of-sight raycast, no ominous
-    // acquisition (bad omen -> trial omen transform, TrialSpawner.java:103-113;
-    // OminousItemSpawner) -- deferred, see report.
-    async fn try_detect_players(&self, world: &Arc<World>, is_ominous: bool) {
+    // TrialSpawnerStateData.java:120-177; the existing world raycast supplies the
+    // visual-block line-of-sight check used by PlayerDetector.
+    async fn try_detect_players(&self, world: &Arc<World>, mut is_ominous: bool) {
         let game_time = world.get_world_age().await;
         if (self.position.0.x as i64
             + self.position.0.y as i64
@@ -477,11 +593,60 @@ impl TrialSpawnerBlockEntity {
             return;
         }
         let nearby = world.get_nearby_players(self.position.to_f64(), self.required_player_range);
-        let found: HashSet<Uuid> = nearby
-            .iter()
-            .filter(|p| !matches!(p.gamemode.load(), GameMode::Spectator))
-            .map(|p| p.gameprofile.id)
-            .collect();
+        let mut eligible = Vec::new();
+        let mut visible = Vec::new();
+        for player in nearby {
+            if matches!(
+                player.gamemode.load(),
+                GameMode::Spectator | GameMode::Creative
+            ) {
+                continue;
+            }
+            if world
+                .raycast(
+                    self.position.to_centered_f64(),
+                    player.eye_position(),
+                    async |block_pos, world| !world.get_block_state(block_pos).is_air(),
+                )
+                .await
+                .is_none()
+            {
+                visible.push(player.clone());
+            }
+            eligible.push(player);
+        }
+
+        let mut became_ominous = false;
+        if !is_ominous {
+            let mut bad_omen = None;
+            let mut ominous_player = None;
+            for player in &visible {
+                if player.get_effect(&StatusEffect::TRIAL_OMEN).await.is_some() {
+                    ominous_player = Some((player.clone(), None));
+                    break;
+                }
+                if bad_omen.is_none()
+                    && let Some(effect) = player.get_effect(&StatusEffect::BAD_OMEN).await
+                {
+                    bad_omen = Some((player.clone(), Some(effect)));
+                }
+            }
+            if let Some((player, effect)) = ominous_player.or(bad_omen) {
+                self.apply_ominous(world, &player, effect, game_time).await;
+                is_ominous = true;
+                became_ominous = true;
+            }
+        }
+
+        let searching_for_first_player = self.detected_players.lock().await.is_empty();
+        let found: HashSet<Uuid> = (if searching_for_first_player {
+            visible
+        } else {
+            eligible
+        })
+        .iter()
+        .map(|p| p.gameprofile.id)
+        .collect();
 
         let mut detected = self.detected_players.lock().await;
         let before = detected.len();
@@ -494,7 +659,9 @@ impl TrialSpawnerBlockEntity {
             } else {
                 WorldEvent::ParticlesTrialSpawnerDetectPlayer
             };
-            world.sync_world_event(event, self.position, detected.len() as i32);
+            if !became_ominous {
+                world.sync_world_event(event, self.position, detected.len() as i32);
+            }
         }
     }
 
@@ -576,15 +743,18 @@ impl TrialSpawnerBlockEntity {
             BlockPos::floored(spawn_pos.x, spawn_pos.y, spawn_pos.z),
             0,
         );
-        let mut next = self.next_spawn_entity.lock().unwrap();
-        let mut next_data = self.next_spawn_data.lock().unwrap();
-        if let Some((next_entity, spawn_data)) = config.pick_random_spawn_data() {
-            *next = Some(next_entity);
-            *next_data = Some(spawn_data);
-        } else {
-            *next = None;
-            *next_data = None;
+        {
+            let mut next = self.next_spawn_entity.lock().unwrap();
+            let mut next_data = self.next_spawn_data.lock().unwrap();
+            if let Some((next_entity, spawn_data)) = config.pick_random_spawn_data() {
+                *next = Some(next_entity);
+                *next_data = Some(spawn_data);
+            } else {
+                *next = None;
+                *next_data = None;
+            }
         }
+        self.mark_updated(world);
         Some(uuid)
     }
 
@@ -734,6 +904,7 @@ impl TrialSpawnerBlockEntity {
                     self.next_mob_spawns_at.store(0, Ordering::Relaxed);
                     TrialSpawnerState::Active
                 } else if game_time >= self.cooldown_ends_at.load(Ordering::Relaxed) {
+                    self.remove_ominous(world).await;
                     self.reset().await;
                     TrialSpawnerState::WaitingForPlayers
                 } else {
@@ -1103,6 +1274,14 @@ mod tests {
             cooldown_started_at + DELAY_BEFORE_EJECT_AFTER_KILLING_LAST_MOB,
             100_000 + DELAY_BEFORE_EJECT_AFTER_KILLING_LAST_MOB
         );
+    }
+
+    #[test]
+    fn bad_omen_duration_scales_with_amplifier() {
+        // TrialSpawnerStateData.java:202-209 converts Bad Omen to Trial Omen for
+        // 18000 ticks per one-based Bad Omen amplifier.
+        assert_eq!(TrialSpawnerBlockEntity::trial_omen_duration(0), 18_000);
+        assert_eq!(TrialSpawnerBlockEntity::trial_omen_duration(2), 54_000);
     }
 
     #[test]

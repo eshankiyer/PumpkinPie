@@ -54,11 +54,9 @@
 //   `EntityBase::is_pushable`, whose default is `false` for every mob in this codebase, so an
 //   emerging warden is already unpushable. Restoring mob pushability in general is a
 //   `mob/mod.rs` change, and the warden override only becomes meaningful after it.
-// - `doPush`-triggered touch anger (Warden.java lines 528-537): Pumpkin's `EntityBase`
-//   has no entity-entity collision/push hook to attach this to at all (grepped
-//   `pumpkin/src/entity/{mod,living}.rs` and `mob/mod.rs` — no `on_push`/`do_push`).
-//   `touch_cooldown` below is kept as a field and constant for when such a hook exists,
-//   but is never set.
+// - `doPush`-triggered touch anger (Warden.java lines 528-537) is wired through the existing
+//   `EntityBase::push` collision path below. The plain `touch_cooldown` field models the
+//   expiring Brain memory used by that override.
 // - The uuid-side-map anger persistence across chunk unload (`AngerManagement`'s
 //   `angerByUuid`) and `addAdditionalSaveData`/`readAdditionalSaveData` NBT round-trip:
 //   see `warden_anger.rs` module doc comment.
@@ -216,7 +214,7 @@ pub struct WardenEntity {
     pub mob_entity: MobEntity,
     anger: AsyncMutex<AngerManagement>,
     vibration_cooldown: AtomicI32,
-    /// Never set (see module doc comment on the missing push hook); kept for when one exists.
+    /// `Warden.doPush` touch-memory expiry (`Warden.java:528-537`), decremented by `mob_tick`.
     touch_cooldown: AtomicI32,
     sonic_boom_cooldown: AtomicI32,
     listener_registered: AtomicBool,
@@ -546,6 +544,25 @@ impl WardenEntity {
         if !already_angry && !has_target {
             *self.mob_entity.target.lock().await = Some(source.clone());
         }
+    }
+
+    /// Vanilla `Warden.doPush` (`Warden.java:528-537`) records touch anger once per
+    /// `TOUCH_COOLDOWN_TICKS`, then delegates the physical displacement to `super.doPush`.
+    pub(crate) fn on_push<'a>(
+        &'a self,
+        entity: &'a Arc<dyn EntityBase>,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            if self.mob_entity.is_no_ai() || self.touch_cooldown.load(Ordering::Relaxed) > 0 {
+                return;
+            }
+
+            self.touch_cooldown
+                .store(warden_anger::TOUCH_COOLDOWN_TICKS, Ordering::Relaxed);
+            self.increase_anger_at(entity, warden_anger::DEFAULT_ANGER, true)
+                .await;
+            self.set_disturbance(entity).await;
+        })
     }
 
     /// `VibrationSystem.User.onReceiveVibration` (`Warden.VibrationUser`), minus the

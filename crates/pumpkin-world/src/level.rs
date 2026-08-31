@@ -557,6 +557,7 @@ impl Level {
         &self,
         active_chunks: &FxHashSet<Vector2<i32>>,
         random_tick_speed: i64,
+        current_tick: i64,
     ) -> TickData {
         let random_tick_samples_per_section = random_tick_samples_per_section(random_tick_speed);
         let mut ticks = TickData {
@@ -571,6 +572,10 @@ impl Level {
         for pos in active_chunks {
             if let Some(chunk) = self.loaded_chunks.get(pos) {
                 let chunk = chunk.value();
+                // Vanilla `ServerLevel.startTickingChunk` (`ServerLevel.java:1749-1751`) calls
+                // `LevelChunk.unpackTicks` before the first scheduled tick at this game time.
+                chunk.block_ticks.unpack(current_tick);
+                chunk.fluid_ticks.unpack(current_tick);
                 let chunk_x_base = chunk.x * 16;
                 let chunk_z_base = chunk.z * 16;
                 let section_count = chunk.section.section_count();
@@ -626,6 +631,11 @@ impl Level {
         for pos in scheduled_chunk_pos {
             if let Some(chunk) = self.loaded_chunks.get(&pos) {
                 let chunk = chunk.value();
+                // Vanilla `ServerLevel.startTickingChunk` (`ServerLevel.java:1749-1751`) must
+                // also initialize a chunk that enters the scheduled-tick set before it enters
+                // the active random-tick set.
+                chunk.block_ticks.unpack(current_tick);
+                chunk.fluid_ticks.unpack(current_tick);
                 ticks.block_ticks.append(&mut chunk.block_ticks.step_tick());
                 ticks.fluid_ticks.append(&mut chunk.fluid_ticks.step_tick());
 

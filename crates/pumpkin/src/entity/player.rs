@@ -9028,6 +9028,14 @@ const fn player_fire_immune_ticks() -> i32 {
     20
 }
 
+/// Restores only the count after a creative entity interaction, matching the
+/// `ItemStack.setCount` branch in `Player.interactOn` (`Player.java:832-840`).
+pub(crate) const fn restore_creative_interaction_count(stack: &mut ItemStack, original_count: u8) {
+    if stack.item_count < original_count {
+        stack.set_count(original_count);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -9036,7 +9044,8 @@ mod tests {
         damage_dealt_stat_points, experience_level_after_delta, extract_parrot_variant,
         is_crossbow_held_projectile, is_crossbow_inventory_projectile, is_valid_for_forced_respawn,
         is_vanishing_cursed, player_death_experience_reward, player_fire_immune_ticks,
-        read_last_death_location, read_root_vehicle, write_last_death_location, write_root_vehicle,
+        read_last_death_location, read_root_vehicle, restore_creative_interaction_count,
+        write_last_death_location, write_root_vehicle,
     };
     use pumpkin_data::Block;
     use pumpkin_data::attributes::Attributes;
@@ -9078,6 +9087,21 @@ mod tests {
     fn player_fire_immune_ticks_match_vanilla() {
         // Vanilla `Player.getFireImmuneTicks` returns twenty ticks (`Player.java:406-410`).
         assert_eq!(player_fire_immune_ticks(), 20);
+    }
+
+    // `Player.interactOn` restores a consumed creative stack count (`Player.java:832-840`).
+    #[test]
+    fn creative_entity_interaction_restores_consumed_count() {
+        use pumpkin_data::item::Item;
+
+        let mut stack = pumpkin_data::item_stack::ItemStack::new(1, &Item::APPLE);
+        stack.set_count(0);
+        restore_creative_interaction_count(&mut stack, 1);
+        assert_eq!(stack.item_count, 1);
+
+        stack.set_count(2);
+        restore_creative_interaction_count(&mut stack, 1);
+        assert_eq!(stack.item_count, 2);
     }
 
     #[test]

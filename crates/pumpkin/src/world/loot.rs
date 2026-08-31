@@ -39,6 +39,9 @@ pub struct LootContextParameters {
     pub tool: Option<ItemStack>,
     pub is_raining: Option<bool>,
     pub is_thundering: Option<bool>,
+    /// Optional entity loot seed; zero is represented by `None` because vanilla treats a zero
+    /// optional seed as an unseeded random source (`LootTable.java:103-104`; `LootContext.java:121-123`).
+    pub loot_table_seed: Option<i64>,
     /// Whether the killed entity was on fire at death time.
     /// Computed from `Entity.fire_ticks > 0`.
     pub is_on_fire: Option<bool>,
@@ -111,7 +114,11 @@ pub trait LootTableExt {
 impl LootTableExt for LootTable {
     fn get_loot(&self, params: LootContextParameters) -> Vec<ItemStack> {
         let mut stacks = Vec::new();
-        let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(get_seed()));
+        let seed = params
+            .loot_table_seed
+            .filter(|seed| *seed != 0)
+            .map_or_else(get_seed, |seed| seed as u64);
+        let mut random = RandomGenerator::Xoroshiro(Xoroshiro::from_seed(seed));
 
         if let Some(pools) = self.pools {
             for pool in pools {
@@ -2017,6 +2024,58 @@ mod tests {
             damage_type: Some(DamageType::GENERIC),
             ..Default::default()
         }
+    }
+
+    /// Vanilla `LootTable.getRandomItems` uses a non-zero optional seed to build the loot
+    /// context's random source (`LootTable.java:103-104, 122-123`).
+    #[test]
+    fn explicit_loot_seed_repeats_entity_table_rolls() {
+        let entries: &'static [LootPoolEntry] = Box::leak(
+            vec![
+                LootPoolEntry {
+                    content: LootPoolEntryTypes::Item(pumpkin_util::loot_table::ItemEntry {
+                        name: "minecraft:stone",
+                    }),
+                    weight: 1,
+                    quality: 0,
+                    conditions: None,
+                    functions: None,
+                },
+                LootPoolEntry {
+                    content: LootPoolEntryTypes::Item(pumpkin_util::loot_table::ItemEntry {
+                        name: "minecraft:dirt",
+                    }),
+                    weight: 1,
+                    quality: 0,
+                    conditions: None,
+                    functions: None,
+                },
+            ]
+            .into_boxed_slice(),
+        );
+        let pools: &'static [pumpkin_util::loot_table::LootPool] = Box::leak(
+            vec![pumpkin_util::loot_table::LootPool {
+                entries,
+                rolls: pumpkin_util::loot_table::LootNumberProviderTypes::Constant(1.0),
+                bonus_rolls: pumpkin_util::loot_table::LootNumberProviderTypes::Constant(0.0),
+                conditions: None,
+                functions: None,
+            }]
+            .into_boxed_slice(),
+        );
+        let table = LootTable {
+            r#type: pumpkin_util::loot_table::LootTableType::Entity,
+            random_sequence: None,
+            pools: Some(pools),
+        };
+        let params = LootContextParameters {
+            loot_table_seed: Some(1234),
+            ..Default::default()
+        };
+
+        let first = table.get_loot(params.clone());
+        let second = table.get_loot(params);
+        assert_eq!(first[0].item.id, second[0].item.id);
     }
 
     #[tokio::test]

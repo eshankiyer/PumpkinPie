@@ -66,6 +66,25 @@ pub fn is_projectile(entity_type: &EntityType) -> bool {
         || *entity_type == EntityType::LLAMA_SPIT
 }
 
+/// Applies `Projectile.shootFromRotation`'s known-motion inheritance
+/// (`Projectile.java:157-159`).
+fn add_known_movement(
+    projectile_velocity: Vector3<f64>,
+    source_movement: Vector3<f64>,
+    source_on_ground: bool,
+) -> Vector3<f64> {
+    Vector3::new(
+        projectile_velocity.x + source_movement.x,
+        projectile_velocity.y
+            + if source_on_ground {
+                0.0
+            } else {
+                source_movement.y
+            },
+        projectile_velocity.z + source_movement.z,
+    )
+}
+
 /// Minimum horizontal distance between the shooter and the impact for `adventure/bullseye`.
 const BULLSEYE_MIN_HORIZONTAL_DISTANCE: f64 = 30.0;
 
@@ -350,7 +369,7 @@ impl ThrownItemEntity {
 
     pub fn set_velocity_from(
         &self,
-        _shooter: &Entity,
+        shooter: &Entity,
         pitch: f32,
         yaw: f32,
         roll: f32,
@@ -372,6 +391,16 @@ impl ThrownItemEntity {
             f64::from(speed),
             f64::from(divergence),
         );
+
+        // Vanilla `Projectile.shootFromRotation` inherits the shooter's known movement
+        // after aiming, omitting vertical movement while grounded (`Projectile.java:157-159`).
+        let source_movement = shooter.get_known_movement();
+        let velocity = add_known_movement(
+            self.entity.velocity.load(),
+            source_movement,
+            shooter.on_ground.load(Ordering::Relaxed),
+        );
+        self.entity.velocity.store(velocity);
     }
 
     pub fn set_velocity(&self, x: f64, y: f64, z: f64, power: f64, uncertainty: f64) {
@@ -705,5 +734,28 @@ impl ProjectileHit {
             Self::Block { face, .. } => Some(*face),
             Self::Entity { .. } => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::add_known_movement;
+    use pumpkin_util::math::vector3::Vector3;
+
+    /// `Projectile.shootFromRotation` keeps horizontal source motion in both cases, but
+    /// only keeps vertical source motion while airborne (`Projectile.java:157-159`).
+    #[test]
+    fn known_source_motion_is_added_with_grounded_vertical_gate() {
+        let projectile = Vector3::new(1.0, 2.0, 3.0);
+        let source = Vector3::new(0.25, 0.5, -0.75);
+
+        assert_eq!(
+            add_known_movement(projectile, source, true),
+            Vector3::new(1.25, 2.0, 2.25)
+        );
+        assert_eq!(
+            add_known_movement(projectile, source, false),
+            Vector3::new(1.25, 2.5, 2.25)
+        );
     }
 }

@@ -23,7 +23,7 @@ use crate::entity::{
     mob::{Mob, MobEntity},
     passive::{
         animal::Animal,
-        equine::{AbstractHorse, AbstractHorseData},
+        equine::{AbstractHorse, AbstractHorseData, MountPanicGoal},
     },
     player::Player,
 };
@@ -73,16 +73,17 @@ impl SkeletonHorseEntity {
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             // Both at vanilla priority 1: `RunAroundLikeCrazyGoal` from the base
-            // `AbstractHorse.registerGoals` (`AbstractHorse.java:134`) -- effectively inert here
+            // `AbstractHorse.registerGoals` (`AbstractHorse.java:134-151`) -- effectively inert here
             // since `mob_interact` below never lets a player mount an untamed skeleton horse,
             // but kept for architectural parity -- and `skeletonTrapGoal`, dynamically
             // added/removed via `setTrap` in vanilla; see `SkeletonTrapGoal`'s doc comment for
             // why Pumpkin registers it unconditionally.
             goal_selector.add_goal(1, RunAroundLikeCrazyGoal::new(horse_weak.clone(), 1.2));
+            goal_selector.add_goal(1, MountPanicGoal::new(horse_weak.clone(), 1.2));
             goal_selector.add_goal(1, SkeletonTrapGoal::new(Arc::downgrade(&mob_arc)));
             // `SkeletonHorse.java:65-66`: `addBehaviourGoals` is overridden to empty, so no
-            // tempt/float/panic goal here (unlike Horse/Donkey/Mule) -- only the base
-            // `AbstractHorse.registerGoals` priorities 4/6/7/8/9 apply.
+            // tempt goal here; `AbstractHorse.registerGoals` (`AbstractHorse.java:134-151`)
+            // still supplies float and mount panic alongside priorities 4/6/7/8/9.
             // `AbstractHorse.followMommy` (`AbstractHorse.java:561-568`) accepts any bred adult
             // horse-family parent within 16 blocks.
             goal_selector.add_goal(4, Box::new(FollowParentGoal::new_horse(1.0)));

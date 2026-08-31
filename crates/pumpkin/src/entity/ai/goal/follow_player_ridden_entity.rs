@@ -3,8 +3,8 @@
 //!
 //! `Entity.hasMovedHorizontallyRecently` (`Entity.java:942-944`) is
 //! `|lastKnownSpeed.horizontalDistance()| > 1.0E-5`. This codebase already keeps the same
-//! quantity: `Entity::update_last_pos` (`entity/mod.rs:2373-2379`) runs from `Entity::tick`
-//! and stores `pos - last_pos` in `Entity::movement`, so no new per-entity state is needed.
+//! quantity in `Entity::get_known_speed` (`Entity.java:4007-4009`), populated by
+//! `Entity::update_last_pos` (`entity/mod.rs:2373-2379`).
 //!
 //! Not ported: the per-tick `moveRelative`/`move(MoverType.SELF, ...)` nudge
 //! (`FollowPlayerRiddenEntityGoal.java:68-70`), which reads `xxa`/`yya`/`zza` AI move inputs
@@ -64,7 +64,7 @@ impl FollowPlayerRiddenEntityGoal {
     }
 
     fn has_moved_horizontally_recently(entity: &crate::entity::Entity) -> bool {
-        entity.movement.load().horizontal_length() > MOVED_EPSILON
+        entity.get_known_speed().horizontal_length() > MOVED_EPSILON
     }
 
     /// The controlling passenger of a nearby vehicle of one of `vehicle_types`, if it is a

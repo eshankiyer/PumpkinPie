@@ -8,6 +8,17 @@ use rand::RngExt;
 
 use crate::block::{BlockBehaviour, BlockFuture, BrokenArgs, OnSyncedBlockEventArgs, PlacedArgs};
 
+/// Vanilla `SpawnerBlock.spawnAfterBreak` (`SpawnerBlock.java:41-47`) only awards
+/// experience when the break may drop it; `Block.popExperience` also requires
+/// block drops (`Block.java:446-449`).
+const fn should_drop_experience(
+    drop_experience: bool,
+    block_drops: bool,
+    game_mode: GameMode,
+) -> bool {
+    drop_experience && block_drops && !matches!(game_mode, GameMode::Creative | GameMode::Spectator)
+}
+
 #[pumpkin_block("minecraft:spawner")]
 pub struct SpawnerBlock;
 
@@ -31,13 +42,13 @@ impl BlockBehaviour for SpawnerBlock {
         })
     }
 
-    /// `SpawnerBlock.spawnAfterBreak` (`SpawnerBlock.java:41-47`) awards two independent
-    /// `nextInt(15)` rolls plus 15 experience when the break is allowed to drop experience.
+    /// Vanilla `SpawnerBlock.spawnAfterBreak` (`SpawnerBlock.java:41-47`) awards two
+    /// independent `nextInt(15)` rolls plus 15 experience when allowed to drop experience.
     fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            if args.player.gamemode.load() == GameMode::Creative
-                || !args.world.level_info.load().game_rules.block_drops
-            {
+            let block_drops = args.world.level_info.load().game_rules.block_drops;
+            let game_mode = args.player.gamemode.load();
+            if !should_drop_experience(args.drop_experience, block_drops, game_mode) {
                 return;
             }
 
@@ -45,10 +56,27 @@ impl BlockBehaviour for SpawnerBlock {
                 let mut random = rand::rng();
                 15 + random.random_range(0..15) + random.random_range(0..15)
             };
-            // `popExperience` (`Block.java:445-449`): `ExperienceOrb.award(level,
+            // `popExperience` (`Block.java:446-449`): `ExperienceOrb.award(level,
             // Vec3.atCenterOf(pos), amount)`.
             ExperienceOrbEntity::spawn(args.world, args.position.to_centered_f64(), amount as u32)
                 .await;
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_drop_experience;
+    use pumpkin_util::GameMode;
+
+    // Vanilla `SpawnerBlock.spawnAfterBreak` (`SpawnerBlock.java:41-47`) is
+    // gated by drop experience, block drops, and the player's game mode.
+    #[test]
+    fn spawner_experience_requires_drop_experience_and_block_drops() {
+        assert!(should_drop_experience(true, true, GameMode::Survival));
+        assert!(!should_drop_experience(false, true, GameMode::Survival));
+        assert!(!should_drop_experience(true, false, GameMode::Survival));
+        assert!(!should_drop_experience(true, true, GameMode::Creative));
+        assert!(!should_drop_experience(true, true, GameMode::Spectator));
     }
 }

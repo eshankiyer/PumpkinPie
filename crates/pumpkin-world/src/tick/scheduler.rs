@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     sync::{
         Mutex,
-        atomic::{AtomicI64, Ordering},
+        atomic::{AtomicBool, AtomicI64, Ordering},
     },
 };
 
@@ -19,6 +19,7 @@ use crate::tick::{OrderedTick, ScheduledTick, TickPriority};
 pub struct ChunkTickScheduler<T> {
     inner: Mutex<Option<Box<ChunkTickSchedulerInner<T>>>>,
     current_tick: AtomicI64,
+    unpacked: AtomicBool,
 }
 
 struct ChunkTickSchedulerInner<T> {
@@ -85,6 +86,35 @@ impl<'a, T: std::hash::Hash + Eq> ChunkTickScheduler<&'a T> {
                 },
             );
         }
+    }
+
+    /// Re-anchors pending delays when a chunk starts ticking in a level.
+    // Vanilla `LevelChunk.unpackTicks` (`LevelChunk.java:621-624`) unpacks both containers at the
+    // level's current game time before the chunk's first scheduled tick is processed.
+    pub fn unpack(&self, current_tick: i64) {
+        if self.unpacked.swap(true, Ordering::AcqRel) {
+            return;
+        }
+
+        let mut inner_guard = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(inner) = inner_guard.as_mut() {
+            let saved_tick = self.current_tick.load(Ordering::SeqCst);
+            let mut rebased = BTreeMap::new();
+            for ((trigger_tick, priority, sub_tick_order), tick) in
+                std::mem::take(&mut inner.tick_queue)
+            {
+                let delay = trigger_tick.saturating_sub(saved_tick);
+                rebased.insert(
+                    (current_tick.saturating_add(delay), priority, sub_tick_order),
+                    tick,
+                );
+            }
+            inner.tick_queue = rebased;
+        }
+        self.current_tick.store(current_tick, Ordering::SeqCst);
     }
 
     pub fn is_scheduled(&self, pos: BlockPos, value: &T) -> bool {
@@ -157,6 +187,7 @@ impl<T> Default for ChunkTickScheduler<T> {
         Self {
             inner: Mutex::new(None),
             current_tick: AtomicI64::new(0),
+            unpacked: AtomicBool::new(false),
         }
     }
 }
@@ -235,5 +266,27 @@ mod tests {
         );
         assert_eq!(saved[0].position, BlockPos::new(1, 0, 0));
         assert_eq!(saved[1].position, BlockPos::new(2, 0, 0));
+    }
+
+    #[test]
+    fn unpack_rebases_pending_ticks_to_the_level_game_time() {
+        // Vanilla `LevelChunk.unpackTicks` (`LevelChunk.java:621-624`) preserves the saved delay
+        // when a chunk starts ticking at a nonzero level game time.
+        let scheduler = ChunkTickScheduler::default();
+        scheduler.schedule_tick(
+            &ScheduledTick {
+                delay: 5,
+                priority: TickPriority::Normal,
+                position: BlockPos::new(3, 0, 4),
+                value: &Block::STONE,
+            },
+            0,
+        );
+
+        scheduler.unpack(100);
+        for _ in 0..4 {
+            assert!(scheduler.step_tick().is_empty());
+        }
+        assert_eq!(scheduler.step_tick().len(), 1);
     }
 }

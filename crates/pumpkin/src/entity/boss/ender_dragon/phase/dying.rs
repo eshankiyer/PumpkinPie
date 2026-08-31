@@ -8,6 +8,19 @@ use pumpkin_util::math::vector3::Vector3;
 
 pub struct DyingPhase;
 
+/// Vanilla `EnderDragon.tickDeath` applies this self-motion every tick
+/// (`EnderDragon.java:538-544`).
+fn death_animation_position(position: Vector3<f64>) -> Vector3<f64> {
+    position + Vector3::new(0.0, 0.1, 0.0)
+}
+
+/// Vanilla `EnderDragon.tickDeath` awards periodic death XP only when the
+/// `mob_drops` rule is enabled and the timer is on a five-tick boundary
+/// (`EnderDragon.java:528-531`).
+const fn should_drop_death_experience(mob_drops: bool, death_time: i32) -> bool {
+    mob_drops && death_time > 150 && death_time % 5 == 0
+}
+
 impl super::Phase for DyingPhase {
     fn get_type(&self) -> EnderDragonPhase {
         EnderDragonPhase::Dying
@@ -61,7 +74,8 @@ impl super::Phase for DyingPhase {
                 500
             };
 
-            if *t > 150 && *t % 5 == 0 {
+            let mob_drops = world.level_info.load().game_rules.mob_drops;
+            if should_drop_death_experience(mob_drops, *t) {
                 ExperienceOrbEntity::spawn(
                     &world,
                     entity.pos.load(),
@@ -70,15 +84,29 @@ impl super::Phase for DyingPhase {
                 .await;
             }
 
-            entity.velocity.store(Vector3::new(0.0, 0.1, 0.0));
+            // Vanilla moves the dragon and every part directly during `tickDeath`; clear the
+            // shared living-tick velocity so Pumpkin does not apply this move a second time on
+            // the next tick (`EnderDragon.java:538-544`).
+            entity.set_pos(death_animation_position(entity.pos.load()));
+            entity.velocity.store(Vector3::new(0.0, 0.0, 0.0));
+            entity.send_pos_rot();
+            for part in &dragon.parts {
+                part.entity
+                    .set_pos(death_animation_position(part.entity.pos.load()));
+                part.entity.send_pos_rot();
+            }
 
             if *t >= DEATH_TIMER_MAX {
-                ExperienceOrbEntity::spawn(
-                    &world,
-                    entity.pos.load(),
-                    (xp_count as f32 * 0.2) as u32,
-                )
-                .await;
+                // Vanilla gates the final XP award on `mob_drops` too
+                // (`EnderDragon.java:546-549`).
+                if mob_drops {
+                    ExperienceOrbEntity::spawn(
+                        &world,
+                        entity.pos.load(),
+                        (xp_count as f32 * 0.2) as u32,
+                    )
+                    .await;
+                }
 
                 if let Some(ref fight_mutex) = world.dragon_fight {
                     fight_mutex
@@ -87,11 +115,42 @@ impl super::Phase for DyingPhase {
                         .set_dragon_killed(&world, entity.entity_uuid)
                         .await;
                 }
+                // Vanilla `EnderDragon.tickDeath` emits `ENTITY_DIE` before removing the
+                // dragon (`EnderDragon.java:546-557`).
+                crate::world::game_event::emit_game_event(
+                    &world,
+                    pumpkin_data::game_event::GameEvent::EntityDie,
+                    entity.pos.load(),
+                    crate::world::game_event::GameEventContext::none(),
+                )
+                .await;
                 for part in &dragon.parts {
                     part.entity.remove().await;
                 }
                 entity.remove().await;
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{death_animation_position, should_drop_death_experience};
+    use pumpkin_util::math::vector3::Vector3;
+
+    #[test]
+    fn death_animation_moves_up_by_one_tenth() {
+        assert_eq!(
+            death_animation_position(Vector3::new(2.0, 3.0, 4.0)),
+            Vector3::new(2.0, 3.1, 4.0)
+        );
+    }
+
+    #[test]
+    fn death_experience_obeys_rule_and_cadence() {
+        assert!(!should_drop_death_experience(false, 155));
+        assert!(!should_drop_death_experience(true, 150));
+        assert!(!should_drop_death_experience(true, 152));
+        assert!(should_drop_death_experience(true, 155));
     }
 }

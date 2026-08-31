@@ -12,6 +12,7 @@ use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::math::boundingbox::EntityDimensions;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
@@ -33,6 +34,12 @@ pub const ARMADILLO_BABY_START_AGE: i32 = -48000;
 pub const SCARE_CHECK_INTERVAL: i32 = 80;
 pub const SCARE_DISTANCE_HORIZONTAL: f64 = 7.0;
 pub const SCARE_DISTANCE_VERTICAL: f64 = 2.0;
+
+/// Vanilla `Armadillo.BABY_DIMENSIONS` (`Armadillo.java:57-63`) scales the type dimensions by
+/// 0.6 and replaces the eye height with 0.21875.
+fn armadillo_baby_dimensions(width: f32, height: f32) -> EntityDimensions {
+    EntityDimensions::new(width * 0.6, height * 0.6, 0.21875)
+}
 
 fn pick_next_scute_drop_time() -> i32 {
     let rand_ticks = (rand::random::<u32>() % 6000) as i32;
@@ -290,6 +297,16 @@ impl AgeableMob for ArmadilloEntity {
         &self.ageable_data
     }
 
+    /// Vanilla `Armadillo.getDefaultDimensions` (`Armadillo.java:179-187`) uses the
+    /// 0.6 baby scale and the fixed baby eye height from `BABY_DIMENSIONS` (`Armadillo.java:57-63`).
+    fn baby_dimensions(&self) -> Option<EntityDimensions> {
+        let entity = self.get_entity();
+        Some(armadillo_baby_dimensions(
+            entity.entity_type.dimension[0],
+            entity.entity_type.dimension[1],
+        ))
+    }
+
     fn get_baby_start_age(&self) -> i32 {
         ARMADILLO_BABY_START_AGE
     }
@@ -463,5 +480,19 @@ impl Mob for ArmadilloEntity {
             self.animal_interact(player, item_stack, Sound::EntityArmadilloAmbient)
                 .await
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::armadillo_baby_dimensions;
+
+    #[test]
+    fn baby_dimensions_use_armadillo_scale_and_eye_height() {
+        // Vanilla `Armadillo.BABY_DIMENSIONS` (`Armadillo.java:57-63`) fixes this scale and eye height.
+        let dimensions = armadillo_baby_dimensions(0.7, 0.875);
+        assert!((dimensions.width - 0.42).abs() < f32::EPSILON);
+        assert!((dimensions.height - 0.525).abs() < f32::EPSILON);
+        assert!((dimensions.eye_height - 0.21875).abs() < f32::EPSILON);
     }
 }

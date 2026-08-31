@@ -1628,6 +1628,12 @@ pub trait Mob: EntityBase + Send + Sync {
         None
     }
 
+    /// Vanilla `Mob.getLootTableSeed` returns the saved seed used by entity loot generation
+    /// (`Mob.java:418-424`; `LivingEntity.java:1536-1538, 1577-1578`).
+    fn get_loot_table_seed(&self) -> i64 {
+        self.get_mob_entity().living_entity.loot_table_seed.load()
+    }
+
     /// Vanilla `Mob.getAmbientSoundInterval` (Mob.java:274-276), with the
     /// `AbstractGolem` override (`AbstractGolem.java:29-31`) for every concrete golem.
     fn get_ambient_sound_interval(&self) -> i32 {

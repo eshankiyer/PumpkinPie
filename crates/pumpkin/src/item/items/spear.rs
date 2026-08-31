@@ -332,9 +332,8 @@ impl ItemBehaviour for SpearItem {
             // `KineticWeapon.getMotion` (`KineticWeapon.java:78-84`): the attacker's known
             // speed in blocks per second, projected onto the look vector
             // (`KineticWeapon.java:105-106`). `Entity.getKnownSpeed` is the per-tick position
-            // delta (`Entity.java:572`), which is exactly what `Entity::update_last_pos`
-            // stores in `Entity::movement`.
-            let attacker_speed = look.dot(&(entity.movement.load() * TICKS_PER_SECOND));
+            // delta (`Entity.java:4007-4009`).
+            let attacker_speed = look.dot(&(entity.get_known_speed() * TICKS_PER_SECOND));
 
             // `AttackRange.effectiveMinRange`/`effectiveMaxRange`
             // (`AttackRange.java:88-102`): a player uses the creative pair in creative mode
@@ -361,7 +360,7 @@ impl ItemBehaviour for SpearItem {
             // runs from `eye + look * minRange` to `eye + look * (maxRange + max(0, movement
             // projected on look))`, so a moving attacker reaches further ahead.
             let eye = player.eye_position();
-            let movement_component = look.dot(&entity.movement.load()).max(0.0);
+            let movement_component = look.dot(&entity.get_known_speed()).max(0.0);
             let from = eye + look * min_reach;
             let mut to = eye + look * (max_reach + movement_component);
 
@@ -447,7 +446,7 @@ impl ItemBehaviour for SpearItem {
                 }
 
                 // `KineticWeapon.java:124-125`: closing speed, never negative.
-                let target_speed = look.dot(&(target_entity.movement.load() * TICKS_PER_SECOND));
+                let target_speed = look.dot(&(target_entity.get_known_speed() * TICKS_PER_SECOND));
                 let relative_speed = (attacker_speed - target_speed).max(0.0);
 
                 // `KineticWeapon.java:126-131`.

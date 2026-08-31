@@ -23,7 +23,7 @@ use crate::entity::{
     mob::{Mob, MobEntity},
     passive::{
         animal::Animal,
-        equine::{AbstractHorse, AbstractHorseData},
+        equine::{AbstractHorse, AbstractHorseData, MountPanicGoal},
     },
     player::Player,
 };
@@ -88,10 +88,11 @@ impl ZombieHorseEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             // `ZombieHorse.java:126-129` (`addBehaviourGoals`): float + tempt only, no panic
-            // goal. Wander/look/stand/run-around-like-crazy come from the base
-            // `AbstractHorse.registerGoals`.
+            // goal. Wander/look/stand/run-around-like-crazy and mount panic come from the base
+            // `AbstractHorse.registerGoals` (`AbstractHorse.java:134-151`).
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(1, RunAroundLikeCrazyGoal::new(horse_weak.clone(), 1.2));
+            goal_selector.add_goal(1, MountPanicGoal::new(horse_weak.clone(), 1.2));
             goal_selector.add_goal(3, Box::new(TemptGoal::new(1.25, TEMPT_ITEMS, false)));
             // `AbstractHorse.followMommy` (`AbstractHorse.java:561-568`) accepts any bred adult
             // horse-family parent within 16 blocks.

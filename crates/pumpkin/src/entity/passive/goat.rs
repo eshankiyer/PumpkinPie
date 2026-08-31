@@ -10,6 +10,7 @@ use pumpkin_data::{entity::EntityType, item::Item};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::GameMode;
+use pumpkin_util::math::boundingbox::EntityDimensions;
 use rand::RngExt;
 
 use crate::entity::{
@@ -26,6 +27,12 @@ use crate::entity::{
 };
 
 const TEMPT_ITEMS: &[&Item] = &[&Item::WHEAT];
+
+/// Vanilla `Goat.BABY_DIMENSIONS` (`Goat.java:57-61`) supplies the baby width, height, and eye
+/// height used by `Goat.getDefaultDimensions` (`Goat.java:250-254`).
+const fn goat_baby_dimensions() -> EntityDimensions {
+    EntityDimensions::new(0.45, 0.65, 0.59375)
+}
 
 /// `GoatAi.TIME_BETWEEN_LONG_JUMPS = UniformInt.of(600, 1200)` (`GoatAi.java:45`).
 const TIME_BETWEEN_LONG_JUMPS: (i32, i32) = (600, 1200);
@@ -246,6 +253,12 @@ impl AgeableMob for GoatEntity {
     fn get_ageable_data(&self) -> &AgeableData {
         &self.ageable_data
     }
+
+    /// Vanilla `Goat.getDefaultDimensions` (`Goat.java:250-254`) selects `BABY_DIMENSIONS`
+    /// (`Goat.java:57-65`) for a baby before applying the long-jump pose scale.
+    fn baby_dimensions(&self) -> Option<EntityDimensions> {
+        Some(goat_baby_dimensions())
+    }
 }
 
 impl NBTStorage for GoatEntity {
@@ -393,5 +406,19 @@ impl Mob for GoatEntity {
 
             Some(baby)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::goat_baby_dimensions;
+
+    #[test]
+    fn baby_dimensions_match_vanilla_constants() {
+        // Vanilla `Goat.BABY_DIMENSIONS` (`Goat.java:57-61`) supplies these dimensions.
+        let dimensions = goat_baby_dimensions();
+        assert_eq!(dimensions.width, 0.45);
+        assert_eq!(dimensions.height, 0.65);
+        assert_eq!(dimensions.eye_height, 0.59375);
     }
 }

@@ -476,9 +476,9 @@ impl EntityBase for TridentEntity {
         Box::pin(async move {
             let has_foil = {
                 let stack = self.item_stack.lock().await;
-                stack
-                    .get_data_component::<pumpkin_data::data_component_impl::EnchantmentsImpl>()
-                    .is_some_and(|e| !e.enchantment.is_empty())
+                // `ItemStack.hasFoil` (`ItemStack.java:968-971`) supplies the trident's glint
+                // metadata from the same stack-level rule used by vanilla.
+                stack.has_foil()
             };
 
             self.entity.send_meta_data(
