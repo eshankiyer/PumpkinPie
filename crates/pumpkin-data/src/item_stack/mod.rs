@@ -3,11 +3,11 @@ use crate::damage::DamageType;
 use crate::data_component::DataComponent;
 use crate::data_component::DataComponent::Enchantments;
 use crate::data_component_impl::{
-    BlocksAttacksImpl, CanBreakImpl, CanPlaceOnImpl, ConsumableImpl, CustomDataImpl, DamageImpl,
-    DamageResistantImpl, DamageResistantType, DamageTypeImpl, DataComponentImpl, EnchantableImpl,
-    EnchantmentGlintOverrideImpl, EnchantmentsImpl, IDSet, MaxDamageImpl, MaxStackSizeImpl,
-    PotionContentsImpl, RepairableImpl, ToolImpl, UnbreakableImpl, UseCooldownImpl, get, get_mut,
-    read_data,
+    BlocksAttacksImpl, CanBreakImpl, CanPlaceOnImpl, ConsumableImpl, CustomDataImpl,
+    CustomNameImpl, DamageImpl, DamageResistantImpl, DamageResistantType, DamageTypeImpl,
+    DataComponentImpl, EnchantableImpl, EnchantmentGlintOverrideImpl, EnchantmentsImpl, IDSet,
+    ItemNameImpl, MaxDamageImpl, MaxStackSizeImpl, PotionContentsImpl, RepairableImpl, ToolImpl,
+    UnbreakableImpl, UseCooldownImpl, get, get_mut, read_data,
 };
 use crate::item::Item;
 use crate::recipes::RecipeResultStruct;
@@ -513,6 +513,36 @@ impl ItemStack {
         } else {
             self.item
         }
+    }
+
+    /// Resolve the stack's effective item name, including a stack-specific `ItemName` component.
+    /// Vanilla `ItemStack.getItemName` delegates to `Item.getName`, which reads that component;
+    /// empty stacks expose an empty component map (`ItemStack.java:219-220,825-827`;
+    /// `Item.java:342-344`).
+    #[must_use]
+    #[allow(deprecated)]
+    pub fn get_item_name(&self) -> pumpkin_util::text::TextComponent {
+        if self.is_empty() {
+            return pumpkin_util::text::TextComponent::empty();
+        }
+
+        self.get_data_component::<ItemNameImpl>().map_or_else(
+            || self.get_item().translated_name(),
+            |name| pumpkin_util::text::TextComponent::translate(name.name.clone(), []),
+        )
+    }
+
+    /// Resolve the name displayed for the stack, preferring a custom name over its item name.
+    /// Vanilla `ItemStack.getHoverName` follows the same custom-name fallback
+    /// (`ItemStack.java:803-806`).
+    #[must_use]
+    pub fn get_hover_name(&self) -> pumpkin_util::text::TextComponent {
+        if self.is_empty() {
+            return pumpkin_util::text::TextComponent::empty();
+        }
+
+        self.get_data_component::<CustomNameImpl>()
+            .map_or_else(|| self.get_item_name(), |name| name.name.clone())
     }
 
     #[must_use]
@@ -1450,6 +1480,34 @@ mod tests {
                 .name,
             "filled_map.mansion"
         );
+    }
+
+    #[test]
+    fn item_name_uses_stack_component_over_item_default() {
+        // Vanilla `Item.getName` reads `DataComponents.ITEM_NAME` from the stack
+        // (`Item.java:342-344`).
+        let mut stack = ItemStack::new(1, &Item::FILLED_MAP);
+        stack.patch.push((
+            DataComponent::ItemName,
+            Some(
+                ItemNameImpl {
+                    name: Cow::Borrowed("filled_map.mansion"),
+                }
+                .to_dyn(),
+            ),
+        ));
+
+        assert_eq!(stack.get_item_name().get_text(), "Woodland Explorer Map");
+    }
+
+    #[test]
+    fn hover_name_prefers_custom_name() {
+        // Vanilla `ItemStack.getHoverName` returns `CUSTOM_NAME` before `getItemName`
+        // (`ItemStack.java:803-806`).
+        let mut stack = ItemStack::new(1, &Item::FILLED_MAP);
+        stack.set_custom_name("named map".to_owned());
+
+        assert_eq!(stack.get_hover_name().get_text(), "named map");
     }
 
     #[test]

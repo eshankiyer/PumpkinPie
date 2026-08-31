@@ -1,3 +1,4 @@
+use pumpkin_data::sound::Sound;
 use pumpkin_data::{Block, BlockId, BlockState};
 
 use pumpkin_data::BlockStateId;
@@ -78,6 +79,139 @@ pub(crate) fn block_bounce_restitution(block: &Block) -> f64 {
         1.0
     } else {
         0.0
+    }
+}
+
+/// Returns the server-side step/fall sounds and the vanilla sound volume/pitch modifiers.
+/// `BlockBehaviour.getSoundType` returns the registered `SoundType` (`BlockBehaviour.java:405-407`);
+/// common material registrations are in `SoundType.java:10-46` and
+/// `Blocks.java:83-98,315-324,547-552,557-563`.
+#[must_use]
+#[expect(clippy::too_many_lines)]
+pub(crate) fn block_sound_type(block: &Block) -> (Sound, Sound, f32, f32) {
+    let name = block.name;
+    match name {
+        "anvil" => (Sound::BlockAnvilStep, Sound::BlockAnvilFall, 0.3, 1.0),
+        "slime_block" => (
+            Sound::BlockSlimeBlockStep,
+            Sound::BlockSlimeBlockFall,
+            1.0,
+            1.0,
+        ),
+        "honey_block" => (
+            Sound::BlockHoneyBlockStep,
+            Sound::BlockHoneyBlockFall,
+            1.0,
+            1.0,
+        ),
+        "powder_snow" => (
+            Sound::BlockPowderSnowStep,
+            Sound::BlockPowderSnowFall,
+            1.0,
+            1.0,
+        ),
+        "snow" | "snow_block" => (Sound::BlockSnowStep, Sound::BlockSnowFall, 1.0, 1.0),
+        "sand" | "red_sand" => (Sound::BlockSandStep, Sound::BlockSandFall, 1.0, 1.0),
+        "suspicious_sand" => (
+            Sound::BlockSuspiciousSandStep,
+            Sound::BlockSuspiciousSandFall,
+            1.0,
+            1.0,
+        ),
+        "gravel" => (Sound::BlockGravelStep, Sound::BlockGravelFall, 1.0, 1.0),
+        "suspicious_gravel" => (
+            Sound::BlockSuspiciousGravelStep,
+            Sound::BlockSuspiciousGravelFall,
+            1.0,
+            1.0,
+        ),
+        "glass" | "glass_pane" | "tinted_glass" => {
+            (Sound::BlockGlassStep, Sound::BlockGlassFall, 1.0, 1.0)
+        }
+        name if name.ends_with("_glass") || name.ends_with("_glass_pane") => {
+            (Sound::BlockGlassStep, Sound::BlockGlassFall, 1.0, 1.0)
+        }
+        "grass_block" | "short_grass" | "tall_grass" => {
+            (Sound::BlockGrassStep, Sound::BlockGrassFall, 1.0, 1.0)
+        }
+        name if name.ends_with("_leaves") => {
+            (Sound::BlockGrassStep, Sound::BlockGrassFall, 1.0, 1.0)
+        }
+        "dirt" | "coarse_dirt" | "podzol" | "mycelium" | "rooted_dirt" | "dirt_path"
+        | "farmland" | "clay" => (Sound::BlockGravelStep, Sound::BlockGravelFall, 1.0, 1.0),
+        "moss_block" => (Sound::BlockMossStep, Sound::BlockMossFall, 1.0, 1.0),
+        "mud" => (Sound::BlockMudStep, Sound::BlockMudFall, 1.0, 1.0),
+        "netherrack" => (
+            Sound::BlockNetherrackStep,
+            Sound::BlockNetherrackFall,
+            1.0,
+            1.0,
+        ),
+        name if name.starts_with("deepslate") => (
+            Sound::BlockDeepslateStep,
+            Sound::BlockDeepslateFall,
+            1.0,
+            1.0,
+        ),
+        name if name.starts_with("copper") || name.ends_with("_copper_block") => {
+            (Sound::BlockCopperStep, Sound::BlockCopperFall, 1.0, 1.0)
+        }
+        name if name.starts_with("tuff") => (Sound::BlockTuffStep, Sound::BlockTuffFall, 1.0, 1.0),
+        name if name.starts_with("resin") => {
+            (Sound::BlockResinStep, Sound::BlockResinFall, 1.0, 1.0)
+        }
+        name if name.starts_with("sulfur") => {
+            (Sound::BlockSulfurStep, Sound::BlockSulfurFall, 1.0, 1.0)
+        }
+        name if name.starts_with("cinnabar") => {
+            (Sound::BlockCinnabarStep, Sound::BlockCinnabarFall, 1.0, 1.0)
+        }
+        "bamboo" | "bamboo_sapling" => (Sound::BlockBambooStep, Sound::BlockBambooFall, 1.0, 1.0),
+        name if name.starts_with("bamboo_") => (
+            Sound::BlockBambooWoodStep,
+            Sound::BlockBambooWoodFall,
+            1.0,
+            1.0,
+        ),
+        name if name.starts_with("cherry_")
+            && (name.ends_with("_planks") || name.ends_with("_log") || name.ends_with("_wood")) =>
+        {
+            (
+                Sound::BlockCherryWoodStep,
+                Sound::BlockCherryWoodFall,
+                1.0,
+                1.0,
+            )
+        }
+        name if (name.starts_with("crimson_") || name.starts_with("warped_"))
+            && (name.ends_with("_planks")
+                || name.ends_with("_stem")
+                || name.ends_with("_hyphae")) =>
+        {
+            (
+                Sound::BlockNetherWoodStep,
+                Sound::BlockNetherWoodFall,
+                1.0,
+                1.0,
+            )
+        }
+        name if name.ends_with("_planks")
+            || name.ends_with("_log")
+            || name.ends_with("_wood")
+            || name.starts_with("stripped_") =>
+        {
+            (Sound::BlockWoodStep, Sound::BlockWoodFall, 1.0, 1.0)
+        }
+        name if name.ends_with("_wool") || name.ends_with("_carpet") => {
+            (Sound::BlockWoolStep, Sound::BlockWoolFall, 1.0, 1.0)
+        }
+        name if name == "iron_block" || name.ends_with("_iron_bars") => {
+            (Sound::BlockIronStep, Sound::BlockIronFall, 1.0, 1.0)
+        }
+        name if name.ends_with("_block") && (name.contains("gold") || name.contains("diamond")) => {
+            (Sound::BlockMetalStep, Sound::BlockMetalFall, 1.0, 1.0)
+        }
+        _ => (Sound::BlockStoneStep, Sound::BlockStoneFall, 1.0, 1.0),
     }
 }
 
@@ -795,6 +929,28 @@ mod tests {
         assert_eq!(block_bounce_restitution(&Block::RED_BED), 0.75);
         assert_eq!(block_bounce_restitution(&Block::SLIME_BLOCK), 1.0);
         assert_eq!(block_bounce_restitution(&Block::STONE), 0.0);
+    }
+
+    /// Vanilla walking and landing use the block `SoundType` step/fall sounds
+    /// (`Entity.java:1457-1460`; `LivingEntity.java:1858-1867`).
+    #[test]
+    fn block_sound_type_matches_common_vanilla_materials() {
+        assert_eq!(
+            block_sound_type(&Block::STONE),
+            (Sound::BlockStoneStep, Sound::BlockStoneFall, 1.0, 1.0)
+        );
+        assert_eq!(
+            block_sound_type(&Block::GRASS_BLOCK),
+            (Sound::BlockGrassStep, Sound::BlockGrassFall, 1.0, 1.0)
+        );
+        assert_eq!(
+            block_sound_type(&Block::SAND),
+            (Sound::BlockSandStep, Sound::BlockSandFall, 1.0, 1.0)
+        );
+        assert_eq!(
+            block_sound_type(&Block::ANVIL),
+            (Sound::BlockAnvilStep, Sound::BlockAnvilFall, 0.3, 1.0)
+        );
     }
 
     /// `BlockBehaviour` stores the shared material values in its properties

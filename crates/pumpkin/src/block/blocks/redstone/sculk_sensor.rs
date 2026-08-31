@@ -30,6 +30,7 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockFlags;
+use rustc_hash::FxHashSet;
 
 pub struct SculkSensorBlock;
 
@@ -39,6 +40,28 @@ const LISTENER_RANGE: i32 = 8;
 struct SculkSensorListener {
     pos: BlockPos,
     radius: i32,
+}
+
+/// `VibrationSystem.Ticker.areAdjacentChunksTicking` (`VibrationSystem.java:342-374`).
+fn adjacent_chunks_are_ticking(world: &World, position: BlockPos) -> bool {
+    let center = position.chunk_position();
+    let active_chunks = world.active_chunks.load();
+    adjacent_chunks_are_ticking_in_sets(center, &active_chunks, |chunk| {
+        world.level.is_chunk_loaded(chunk)
+    })
+}
+
+fn adjacent_chunks_are_ticking_in_sets(
+    center: pumpkin_util::math::vector2::Vector2<i32>,
+    active_chunks: &FxHashSet<pumpkin_util::math::vector2::Vector2<i32>>,
+    is_loaded: impl Fn(&pumpkin_util::math::vector2::Vector2<i32>) -> bool,
+) -> bool {
+    (-1..=1).all(|dx| {
+        (-1..=1).all(|dz| {
+            let chunk = pumpkin_util::math::vector2::Vector2::new(center.x + dx, center.y + dz);
+            active_chunks.contains(&chunk) && is_loaded(&chunk)
+        })
+    })
 }
 
 /// Re-registers a sensor loaded from disk in the world's flat game-event registry.
@@ -214,6 +237,12 @@ impl SculkSensorBlock {
         power: u8,
         frequency: i32,
     ) {
+        // Vanilla delays `onReceiveVibration` until all adjacent chunks are ticking
+        // (`VibrationSystem.java:342-374`); this shared receive path also covers `stepOn`.
+        if !adjacent_chunks_are_ticking(world, *pos) {
+            return;
+        }
+
         if block.id == BlockId::SCULK_SENSOR {
             let state = world.get_block_state(pos);
             let mut props = SculkSensorLikeProperties::from_state_id(state.id, block);
@@ -541,5 +570,39 @@ impl BlockBehaviour for SculkSensorBlock {
                 }
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::adjacent_chunks_are_ticking_in_sets;
+    use rustc_hash::FxHashSet;
+
+    #[test]
+    fn sensor_requires_all_adjacent_chunks_to_be_active_and_loaded() {
+        // `VibrationSystem.Ticker.areAdjacentChunksTicking` checks the full 3x3 neighborhood
+        // (`VibrationSystem.java:363-374`).
+        let center = pumpkin_util::math::vector2::Vector2::new(0, 0);
+        let mut active = FxHashSet::default();
+        let mut loaded = FxHashSet::default();
+        for dx in -1..=1 {
+            for dz in -1..=1 {
+                let chunk = pumpkin_util::math::vector2::Vector2::new(dx, dz);
+                active.insert(chunk);
+                loaded.insert(chunk);
+            }
+        }
+
+        assert!(adjacent_chunks_are_ticking_in_sets(
+            center,
+            &active,
+            |chunk| { loaded.contains(chunk) }
+        ));
+        loaded.remove(&pumpkin_util::math::vector2::Vector2::new(1, 1));
+        assert!(!adjacent_chunks_are_ticking_in_sets(
+            center,
+            &active,
+            |chunk| { loaded.contains(chunk) }
+        ));
     }
 }

@@ -326,6 +326,35 @@ pub fn apply_components_from_item_stack(
         return block_entity_from_nbt_at(&nbt, position);
     }
 
+    if entity.as_any().is::<campfire::CampfireBlockEntity>()
+        && let Some(container) = stack.get_data_component::<ContainerImpl>()
+    {
+        // `CampfireBlockEntity.applyImplicitComponents` copies CONTAINER into its four slots
+        // (`CampfireBlockEntity.java:207-210`) during `BlockItem.updateBlockEntityComponents`.
+        let position = entity.get_position();
+        let items: [ItemStack; 4] = from_fn(|slot| {
+            container
+                .items
+                .iter()
+                .find(|(item_slot, _)| usize::from(*item_slot) == slot)
+                .map_or_else(|| ItemStack::EMPTY.clone(), |(_, item)| item.clone())
+        });
+        let mut nbt = stack
+            .get_data_component::<BlockEntityDataImpl>()
+            .map_or_else(NbtCompound::new, |data| data.nbt.clone());
+        if let Some(id) = nbt.get_string("id")
+            && id != entity.resource_location()
+        {
+            return None;
+        }
+        nbt.put_string("id", entity.resource_location().to_string());
+        nbt.put_int("x", position.0.x);
+        nbt.put_int("y", position.0.y);
+        nbt.put_int("z", position.0.z);
+        pumpkin_world::inventory::sync_write_items_to_nbt(&items, &mut nbt);
+        return block_entity_from_nbt_at(&nbt, position);
+    }
+
     if entity
         .as_any()
         .is::<decorated_pot::DecoratedPotBlockEntity>()
@@ -358,6 +387,50 @@ pub fn apply_components_from_item_stack(
         // `DecoratedPotBlockEntity.applyImplicitComponents` restores POT_DECORATIONS and the
         // one-slot CONTAINER component (`DecoratedPotBlockEntity.java:119-123`) during the live
         // placement hook (`BlockItem.java:101-106`).
+        return block_entity_from_nbt_at(&nbt, position);
+    }
+
+    if entity.as_any().is::<shulker_box::ShulkerBoxBlockEntity>()
+        && (stack.get_data_component::<ContainerImpl>().is_some()
+            || stack.get_data_component::<ContainerLootImpl>().is_some())
+    {
+        let position = entity.get_position();
+        let container = stack.get_data_component::<ContainerImpl>();
+        let items: [ItemStack; shulker_box::ShulkerBoxBlockEntity::INVENTORY_SIZE] =
+            from_fn(|slot| {
+                container
+                    .and_then(|container| {
+                        container
+                            .items
+                            .iter()
+                            .find(|(item_slot, _)| usize::from(*item_slot) == slot)
+                            .map(|(_, item)| item.clone())
+                    })
+                    .unwrap_or_else(|| ItemStack::EMPTY.clone())
+            });
+        let mut nbt = stack
+            .get_data_component::<BlockEntityDataImpl>()
+            .map_or_else(NbtCompound::new, |data| data.nbt.clone());
+        if let Some(id) = nbt.get_string("id")
+            && id != entity.resource_location()
+        {
+            return None;
+        }
+        nbt.put_string("id", entity.resource_location().to_string());
+        nbt.put_int("x", position.0.x);
+        nbt.put_int("y", position.0.y);
+        nbt.put_int("z", position.0.z);
+        pumpkin_world::inventory::sync_write_items_to_nbt(&items, &mut nbt);
+        if let Some(loot) = stack.get_data_component::<ContainerLootImpl>() {
+            nbt.put_string("LootTable", loot.loot_table.clone());
+            if loot.seed != 0 {
+                nbt.put_long("LootTableSeed", loot.seed);
+            }
+        }
+        // `BaseContainerBlockEntity.applyImplicitComponents` and
+        // `RandomizableContainerBlockEntity.applyImplicitComponents`
+        // (`BaseContainerBlockEntity.java:149-164`; `RandomizableContainerBlockEntity.java:97-105`)
+        // apply both container contents and deferred loot during placement.
         return block_entity_from_nbt_at(&nbt, position);
     }
 
@@ -412,6 +485,7 @@ pub fn apply_components_from_item_stack(
 
 /// Collects the component used by the beehive creative-break item round trip. This is the live
 /// `collectImplicitComponents` path (`BeehiveBlockEntity.java:317-321`).
+#[expect(clippy::too_many_lines)]
 pub(crate) async fn collect_components_from_block_entity(
     entity: &dyn BlockEntity,
 ) -> Vec<(
@@ -469,6 +543,25 @@ pub(crate) async fn collect_components_from_block_entity(
         return components;
     }
 
+    if let Some(campfire) = entity
+        .as_any()
+        .downcast_ref::<campfire::CampfireBlockEntity>()
+    {
+        // `CampfireBlockEntity.collectImplicitComponents` exports CONTAINER from all four slots
+        // (`CampfireBlockEntity.java:212-215`) for the creative include-data pick path.
+        let mut items = Vec::new();
+        for (slot, item) in campfire.items.iter().enumerate() {
+            let item = item.lock().await;
+            if !item.is_empty() {
+                items.push((slot as u8, item.clone()));
+            }
+        }
+        return vec![(
+            pumpkin_data::data_component::DataComponent::Container,
+            Some(Box::new(ContainerImpl { items }).to_dyn()),
+        )];
+    }
+
     if let Some(pot) = entity
         .as_any()
         .downcast_ref::<decorated_pot::DecoratedPotBlockEntity>()
@@ -477,6 +570,46 @@ pub(crate) async fn collect_components_from_block_entity(
         // CONTAINER (`DecoratedPotBlockEntity.java:112-116`); the live collector is used by
         // the creative include-data pick-item path (`ServerGamePacketListenerImpl.java:699-709`).
         return pot.collect_implicit_components().await;
+    }
+
+    if let Some(shulker) = entity
+        .as_any()
+        .downcast_ref::<shulker_box::ShulkerBoxBlockEntity>()
+    {
+        let items = shulker.items.read().await;
+        let container = ContainerImpl {
+            items: items
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| !item.is_empty())
+                .map(|(slot, item)| (slot as u8, item.clone()))
+                .collect(),
+        };
+        let mut components = vec![(
+            pumpkin_data::data_component::DataComponent::Container,
+            Some(Box::new(container).to_dyn()),
+        )];
+        let loot_table = shulker
+            .loot_table
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if let Some(loot_table) = loot_table {
+            // `RandomizableContainerBlockEntity.collectImplicitComponents`
+            // (`RandomizableContainerBlockEntity.java:107-113`) exports deferred loot alongside
+            // the base container component (`BaseContainerBlockEntity.java:157-165`).
+            components.push((
+                pumpkin_data::data_component::DataComponent::ContainerLoot,
+                Some(
+                    Box::new(ContainerLootImpl {
+                        loot_table,
+                        seed: shulker.loot_table_seed,
+                    })
+                    .to_dyn(),
+                ),
+            ));
+        }
+        return components;
     }
 
     let Some(hive) = entity
@@ -518,6 +651,18 @@ pub(crate) async fn block_entity_data_component(
         .is::<enchanting_table::EnchantingTableBlockEntity>()
     {
         nbt.child_tags.remove("CustomName");
+    } else if entity.as_any().is::<campfire::CampfireBlockEntity>() {
+        // `CampfireBlockEntity.removeComponentsFromTag` removes Items because that field is
+        // represented by CONTAINER (`CampfireBlockEntity.java:219-220`).
+        nbt.child_tags.remove("Items");
+    } else if entity.as_any().is::<shulker_box::ShulkerBoxBlockEntity>() {
+        // `BaseContainerBlockEntity.removeComponentsFromTag` and
+        // `RandomizableContainerBlockEntity.removeComponentsFromTag`
+        // (`BaseContainerBlockEntity.java:167-172`; `RandomizableContainerBlockEntity.java:115-120`)
+        // keep implicit container data out of the custom block-entity component.
+        nbt.child_tags.remove("Items");
+        nbt.child_tags.remove("LootTable");
+        nbt.child_tags.remove("LootTableSeed");
     }
 
     (!nbt.is_empty()).then_some((
@@ -815,13 +960,13 @@ pub fn create_block_entity(
 mod test {
     use super::{
         BlockEntity, apply_components_from_item_stack, beehive::BeehiveBlockEntity,
-        block_entity_from_nbt, chest::ChestBlockEntity, collect_components_from_block_entity,
-        decorated_pot::DecoratedPotBlockEntity, furnace::FurnaceBlockEntity,
-        skull::SkullBlockEntity, test_block::TestBlockBlockEntity,
+        block_entity_data_component, block_entity_from_nbt, chest::ChestBlockEntity,
+        collect_components_from_block_entity, decorated_pot::DecoratedPotBlockEntity,
+        furnace::FurnaceBlockEntity, skull::SkullBlockEntity, test_block::TestBlockBlockEntity,
     };
     use pumpkin_data::data_component_impl::{
-        BlockEntityDataImpl, ContainerImpl, ContainerLootImpl, CustomNameImpl, PotDecorationsImpl,
-        ProfileImpl,
+        BlockEntityDataImpl, ContainerImpl, ContainerLootImpl, CustomNameImpl, DataComponentImpl,
+        PotDecorationsImpl, ProfileImpl,
     };
     use pumpkin_data::{data_component::DataComponent, item::Item, item_stack::ItemStack};
     use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
@@ -958,6 +1103,90 @@ mod test {
         assert_eq!(slot.get_item().id, Item::DIAMOND.id);
         assert_eq!(slot.item_count, 3);
         assert!(inventory.get_stack(2).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn campfire_container_component_round_trips_without_raw_items() {
+        // `CampfireBlockEntity` collects CONTAINER, applies it to its slots, and removes Items
+        // from block-entity data (`CampfireBlockEntity.java:207-220`).
+        let position = BlockPos::new(3, 64, -2);
+        let campfire = super::campfire::CampfireBlockEntity::new(position);
+        *campfire.items[1].lock().await = ItemStack::new(1, &Item::BEEF);
+
+        let components = collect_components_from_block_entity(&campfire).await;
+        let container = components
+            .iter()
+            .find(|(id, _)| *id == DataComponent::Container)
+            .and_then(|(_, component)| component.as_ref())
+            .and_then(|component| component.as_any().downcast_ref::<ContainerImpl>())
+            .expect("campfire container component");
+        assert_eq!(container.items[0].0, 1);
+        assert_eq!(container.items[0].1.get_item().id, Item::BEEF.id);
+
+        let stack = ItemStack::new_with_component(
+            1,
+            &Item::CAMPFIRE,
+            vec![(DataComponent::Container, Some(container.clone().to_dyn()))],
+        );
+        let placed = apply_components_from_item_stack(
+            &super::campfire::CampfireBlockEntity::new(position),
+            &stack,
+        )
+        .expect("campfire container should rebuild the placed entity");
+        let placed_inventory = placed.get_inventory().expect("placed campfire inventory");
+        let placed_item = placed_inventory.get_stack(1).await;
+        assert_eq!(placed_item.get_item().id, Item::BEEF.id);
+
+        let Some((_, Some(block_entity_data))) = block_entity_data_component(&campfire).await
+        else {
+            panic!("campfire cooking data should remain after Items is removed");
+        };
+        let NbtTag::Compound(block_entity_data) = block_entity_data.write_data() else {
+            panic!("block entity data should be an NBT compound");
+        };
+        assert!(block_entity_data.get_list("Items").is_none());
+        assert!(block_entity_data.get_int_array("CookingTimes").is_some());
+    }
+
+    #[tokio::test]
+    async fn shulker_container_component_round_trips_without_raw_items() {
+        // `BaseContainerBlockEntity.collectImplicitComponents`/`applyImplicitComponents`
+        // (`BaseContainerBlockEntity.java:149-165`) carry shulker contents in CONTAINER.
+        let position = BlockPos::new(3, 64, -2);
+        let shulker = super::shulker_box::ShulkerBoxBlockEntity::new(position);
+        shulker
+            .set_stack(3, ItemStack::new(5, &Item::DIAMOND))
+            .await;
+
+        let components = collect_components_from_block_entity(&shulker).await;
+        let container = components
+            .iter()
+            .find(|(id, _)| *id == DataComponent::Container)
+            .and_then(|(_, component)| component.as_ref())
+            .and_then(|component| component.as_any().downcast_ref::<ContainerImpl>())
+            .expect("shulker container component");
+        assert_eq!(container.items.len(), 1);
+        assert_eq!(container.items[0].0, 3);
+        assert_eq!(container.items[0].1.get_item().id, Item::DIAMOND.id);
+        assert_eq!(container.items[0].1.item_count, 5);
+
+        let stack = ItemStack::new_with_component(
+            1,
+            &Item::SHULKER_BOX,
+            vec![(DataComponent::Container, Some(container.clone().to_dyn()))],
+        );
+        let placed = apply_components_from_item_stack(
+            &super::shulker_box::ShulkerBoxBlockEntity::new(position),
+            &stack,
+        )
+        .expect("shulker container should rebuild the placed entity");
+        let placed_item = placed
+            .get_inventory()
+            .expect("placed shulker inventory")
+            .get_stack(3)
+            .await;
+        assert_eq!(placed_item.get_item().id, Item::DIAMOND.id);
+        assert_eq!(placed_item.item_count, 5);
     }
 
     #[tokio::test]

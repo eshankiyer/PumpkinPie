@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use crate::entity::EntityBase;
+
 use crate::block::{
     BlockFuture, GetComparatorOutputArgs, OnPlaceArgs, OnStateReplacedArgs, OnSyncedBlockEventArgs,
     PlacedArgs,
@@ -9,7 +11,7 @@ use crate::block::{
     {BlockBehaviour, NormalUseArgs},
 };
 
-use crate::block::entities::shulker_box::ShulkerBoxBlockEntity;
+use crate::block::entities::{BlockEntity, shulker_box::ShulkerBoxBlockEntity};
 use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::BlockProperties;
 use pumpkin_data::translation;
@@ -26,6 +28,22 @@ use pumpkin_world::inventory::Inventory;
 use tokio::sync::Mutex;
 
 struct ShulkerBoxScreenFactory(Arc<dyn Inventory>);
+
+async fn unpack_shulker_loot(entity: &Arc<dyn BlockEntity>) {
+    let Some((loot_key, seed)) = entity.take_loot_table() else {
+        return;
+    };
+    let Some(table) = pumpkin_data::chest_loot_table::get_chest_loot_table(&loot_key) else {
+        return;
+    };
+    let Some(inventory) = entity.clone().get_inventory() else {
+        return;
+    };
+    // `RandomizableContainerBlockEntity.createMenu` (`RandomizableContainerBlockEntity.java:84-87`)
+    // unpacks deferred loot immediately before creating the menu.
+    crate::world::loot::fill_chest_inventory(&inventory, table, seed).await;
+    inventory.mark_dirty();
+}
 
 /// `Shulker.getProgressDeltaAabb` (`Shulker.java:262-274`) for a closed-to-half-open lid,
 /// used by `ShulkerBoxBlock.canOpen` (`ShulkerBoxBlock.java:90-97`).
@@ -124,9 +142,18 @@ impl BlockBehaviour for ShulkerBoxBlock {
 
     fn normal_use<'a>(&'a self, args: NormalUseArgs<'a>) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
-            if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(inventory) = block_entity.clone().get_inventory()
-            {
+            if let Some(block_entity) = args.world.get_block_entity(args.position) {
+                // `RandomizableContainerBlockEntity.canOpen` (`RandomizableContainerBlockEntity.java:79-81`)
+                // keeps spectators from opening a container whose loot has not been generated.
+                if args.player.is_spectator() && block_entity.has_loot_table() {
+                    return BlockActionResult::Success;
+                }
+                if !args.player.is_spectator() {
+                    unpack_shulker_loot(&block_entity).await;
+                }
+                let Some(inventory) = block_entity.clone().get_inventory() else {
+                    return BlockActionResult::Success;
+                };
                 if let Some(shulker) = block_entity
                     .as_any()
                     .downcast_ref::<ShulkerBoxBlockEntity>()
@@ -160,6 +187,19 @@ impl BlockBehaviour for ShulkerBoxBlock {
             }
 
             BlockActionResult::Success
+        })
+    }
+
+    fn player_will_destroy<'a>(
+        &'a self,
+        args: crate::block::PlayerWillDestroyArgs<'a>,
+    ) -> BlockFuture<'a, ()> {
+        Box::pin(async move {
+            if let Some(block_entity) = args.world.get_block_entity(args.position) {
+                // `ShulkerBoxBlock.playerWillDestroy` (`ShulkerBoxBlock.java:110-124`) unpacks
+                // deferred loot before the block is removed and its contents are copied to drops.
+                unpack_shulker_loot(&block_entity).await;
+            }
         })
     }
 

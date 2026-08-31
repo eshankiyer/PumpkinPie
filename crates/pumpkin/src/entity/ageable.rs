@@ -5,12 +5,51 @@ use pumpkin_util::math::{
     boundingbox::{BoundingBox, EntityDimensions},
     vector3::Vector3,
 };
+use rand::RngExt;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering::Relaxed};
 
 use crate::entity::mob::Mob;
 
 pub const BABY_START_AGE: i32 = -24000;
 pub const FORCED_AGE_PARTICLE_TICKS: i32 = 40;
+
+/// Equivalent to `AgeableMob.makeAgeLockedParticle` (`AgeableMob.java:215-235`). The vanilla
+/// client adds the particle locally; the server sends the same particle to tracked players.
+pub fn make_age_locked_particle<M: Mob + ?Sized>(
+    mob: &M,
+    age_lock_particle_timer: i32,
+    is_age_locked: bool,
+) -> i32 {
+    if age_lock_particle_timer > 0 {
+        if age_lock_particle_timer % 2 == 0 {
+            let entity = mob.get_entity();
+            let mut random = mob.get_random();
+            let position = entity.pos.load();
+            let world = entity.world.load();
+            let x = position.x + random.random_range(-0.5..0.5) * f64::from(entity.width());
+            let y = position.y
+                + f64::from(entity.height())
+                + random.random_range(0.0..0.2)
+                + if is_age_locked { 0.2 } else { 0.0 };
+            let z = position.z + random.random_range(-0.5..0.5) * f64::from(entity.width());
+            world.spawn_particle(
+                Vector3::new(x, y, z),
+                Vector3::new(0.0, 0.0, 0.0),
+                0.0,
+                1,
+                if is_age_locked {
+                    pumpkin_data::particle::Particle::PauseMobGrowth
+                } else {
+                    pumpkin_data::particle::Particle::ResetMobGrowth
+                },
+            );
+        }
+
+        age_locked_particle_timer_step(age_lock_particle_timer)
+    } else {
+        age_lock_particle_timer
+    }
+}
 
 /// Equivalent to `AgeableMob.canUseGoldenDandelion` (`AgeableMob.java:78-80`).
 #[must_use]
@@ -267,6 +306,16 @@ pub trait AgeableMob: Mob {
             let age = self.get_age() - 1;
             self.set_age(age);
         }
+
+        // Vanilla `AgeableMob.aiStep` invokes `makeAgeLockedParticle` every tick
+        // (`AgeableMob.java:196-216`), including the timer-only server branch.
+        let data = self.get_ageable_data();
+        let timer = make_age_locked_particle(
+            self,
+            data.age_lock_particle_timer.load(Relaxed),
+            self.is_age_locked(),
+        );
+        data.age_lock_particle_timer.store(timer, Relaxed);
     }
 }
 
@@ -276,9 +325,13 @@ fn default_baby_dimensions(width: f32, height: f32, eye_height: f32) -> EntityDi
     EntityDimensions::new(width * 0.5, height * 0.5, eye_height * 0.5)
 }
 
+const fn age_locked_particle_timer_step(timer: i32) -> i32 {
+    if timer > 0 { timer - 1 } else { timer }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::default_baby_dimensions;
+    use super::{age_locked_particle_timer_step, default_baby_dimensions};
 
     #[test]
     fn default_baby_dimensions_use_vanilla_age_scale() {
@@ -287,5 +340,14 @@ mod tests {
         assert!((dimensions.width - 0.45).abs() < f32::EPSILON);
         assert!((dimensions.height - 0.7).abs() < f32::EPSILON);
         assert!((dimensions.eye_height - 0.65).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn age_locked_particle_timer_counts_down_to_zero() {
+        // Vanilla `AgeableMob.makeAgeLockedParticle` decrements a positive timer once per tick
+        // (`AgeableMob.java:222-235`).
+        assert_eq!(age_locked_particle_timer_step(2), 1);
+        assert_eq!(age_locked_particle_timer_step(1), 0);
+        assert_eq!(age_locked_particle_timer_step(0), 0);
     }
 }

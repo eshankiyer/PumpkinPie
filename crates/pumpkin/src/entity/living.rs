@@ -253,6 +253,22 @@ fn active_item_for_state(
     }
 }
 
+/// Vanilla `LivingEntity.getWeaponItem` returns the main-hand item, while `Player` returns the
+/// captured spin-attack item during a spin (`LivingEntity.java:2226-2228`; `Player.java:520-523`).
+fn weapon_item_for_state(
+    auto_spin_attack: bool,
+    auto_spin_attack_item: Option<&ItemStack>,
+    main_hand: &ItemStack,
+) -> ItemStack {
+    if auto_spin_attack {
+        auto_spin_attack_item
+            .cloned()
+            .unwrap_or_else(|| main_hand.clone())
+    } else {
+        main_hand.clone()
+    }
+}
+
 const MAX_AIR_SUPPLY: i32 = 300;
 
 /// A raider's membership in an active `Raid`.
@@ -416,6 +432,14 @@ struct EffectParticle {
 }
 
 struct EffectParticles(Vec<EffectParticle>);
+
+/// Vanilla updates the ambient flag from every active visible effect, including an empty
+/// collection (`LivingEntity.java:909-910, 960-967`).
+fn all_effects_ambient<'a>(effects: impl Iterator<Item = &'a Effect>) -> bool {
+    effects
+        .filter(|effect| effect.show_particles)
+        .all(|effect| effect.ambient)
+}
 
 impl MetadataSerializer for EffectParticles {
     fn write_metadata(
@@ -1982,7 +2006,6 @@ impl LivingEntity {
 
     async fn sync_effect_particles(&self) {
         let effects = self.active_effects.lock().await;
-        let has_effects = !effects.is_empty();
         let particles = EffectParticles(
             effects
                 .values()
@@ -1990,10 +2013,7 @@ impl LivingEntity {
                 .map(EffectParticle::from_effect)
                 .collect(),
         );
-        let ambient = effects
-            .values()
-            .filter(|effect| effect.show_particles)
-            .all(|effect| effect.ambient);
+        let ambient = all_effects_ambient(effects.values());
         drop(effects);
 
         self.entity.send_meta_data(
@@ -2003,15 +2023,15 @@ impl LivingEntity {
             )],
             None,
         );
-        if has_effects {
-            self.entity.send_meta_data(
-                &[Metadata::new(
-                    tracked_data::living_entity::EFFECT_AMBIENCE_ID,
-                    ambient,
-                )],
-                None,
-            );
-        }
+        // Vanilla writes this field even when the active-effect collection is empty, clearing
+        // the client state after the last effect is removed (`LivingEntity.java:909-910`).
+        self.entity.send_meta_data(
+            &[Metadata::new(
+                tracked_data::living_entity::EFFECT_AMBIENCE_ID,
+                ambient,
+            )],
+            None,
+        );
     }
 
     pub async fn remove_all_effects(&self) -> bool {
@@ -3230,6 +3250,21 @@ impl LivingEntity {
             if check_damage {
                 self.entity
                     .play_sound(caller.get_fall_sound(fall_distance as i32));
+                // `LivingEntity.playBlockFallSound` follows entity fall damage and applies the
+                // block sound type's volume/pitch (`LivingEntity.java:1804-1806,1858-1867`).
+                let (_, supporting_block, supporting_state) =
+                    self.entity.get_block_with_y_offset(0.2);
+                if !supporting_state.is_air() {
+                    let (_, sound, sound_volume, sound_pitch) =
+                        crate::block::block_sound_type(supporting_block);
+                    self.entity.world.load().play_sound_fine(
+                        sound,
+                        SoundCategory::Neutral,
+                        &self.entity.pos.load(),
+                        sound_volume * 0.5,
+                        sound_pitch * 0.75,
+                    );
+                }
             }
         }
     }
@@ -4412,6 +4447,18 @@ impl LivingEntity {
             .unwrap_or_else(|| ItemStack::EMPTY.clone())
     }
 
+    /// Resolves the weapon stack used by vanilla combat code, including the player's captured
+    /// spin-attack stack (`LivingEntity.java:2226-2228`; `Player.java:520-523`).
+    pub async fn weapon_item(&self, caller: &dyn EntityBase) -> ItemStack {
+        let main_hand = self.held_item(caller).await;
+        let auto_spin_attack_item = self.auto_spin_attack_item().await;
+        weapon_item_for_state(
+            self.is_auto_spin_attack(),
+            Some(&auto_spin_attack_item),
+            &main_hand,
+        )
+    }
+
     /// Vanilla `LivingEntity.getActiveItem` (`LivingEntity.java:2235-2241`) returns the item
     /// being used, falling back to the main-hand item when no use is active.
     pub async fn active_item(&self, caller: &dyn EntityBase) -> ItemStack {
@@ -4977,11 +5024,13 @@ impl LivingEntity {
         }
         self.next_step.store(move_dist.floor() + 1.0);
 
+        // `Entity.walkingStepSound` reads the supporting block's sound type
+        // (`Entity.java:1457-1460`).
+        let (_, supporting_block, supporting_state) = self.entity.get_block_with_y_offset(0.00001);
+
         // `Entity.applyMovementEmissionAndPlaySound` emits STEP from the supporting block, or
         // SWIM when no step side effect was produced (`Entity.java:867-901`).
         if Self::movement_emits_events(self.entity.entity_type) {
-            let (_, supporting_block, supporting_state) =
-                self.entity.get_block_with_y_offset(0.00001);
             let on_ground = self.entity.on_ground.load(Relaxed);
             let can_step = !supporting_state.is_air()
                 && (on_ground
@@ -5047,9 +5096,16 @@ impl LivingEntity {
                 volume,
                 pitch,
             );
-        } else if self.entity.on_ground.load(Relaxed)
-            && let Some(sound) = caller.get_mob().and_then(Mob::get_step_sound)
-        {
+        } else if on_ground && !supporting_state.is_air() {
+            let (sound, volume, pitch) =
+                caller.get_mob().and_then(Mob::get_step_sound).map_or_else(
+                    || {
+                        let (sound, _, sound_volume, sound_pitch) =
+                            crate::block::block_sound_type(supporting_block);
+                        (sound, 0.15 * sound_volume, sound_pitch)
+                    },
+                    |sound| (sound, 0.15, 1.0),
+                );
             // `vibrationAndSoundEffectsFromBlock` only calls `walkingStepSound` ->
             // `playStepSound` when `onGround() || climbable || (crouching && no vertical
             // movement) || onRails()` (Entity.java:993-994); this checks only the common
@@ -5059,8 +5115,8 @@ impl LivingEntity {
                 sound,
                 SoundCategory::Neutral,
                 &self.entity.pos.load(),
-                0.15,
-                1.0,
+                volume,
+                pitch,
             );
         }
     }
@@ -5935,7 +5991,10 @@ impl EntityBase for LivingEntity {
                         // `LivingEntity.getSecondsToDisableBlocking` compares the weapon item
                         // with `getActiveItem` (`LivingEntity.java:3967-3971`; active selection
                         // at `LivingEntity.java:2235-2241`) before applying its cooldown.
-                        let weapon_item = attacker_living.held_item(attacker).await;
+                        // `Player.blockUsingItem` asks the attacker for `getSecondsToDisableBlocking`,
+                        // which reads `getWeaponItem`; retain the auto-spin override here
+                        // (`Player.java:711-719`; `LivingEntity.java:3967-3971`).
+                        let weapon_item = attacker_living.weapon_item(attacker).await;
                         let active_item = attacker_living.active_item(attacker).await;
                         if weapon_item.are_equal(&active_item)
                             && let Some(weapon) = weapon_item.get_data_component::<WeaponImpl>()
@@ -6579,6 +6638,15 @@ impl EntityBase for LivingEntity {
     ) -> EntityBaseFuture<'a, ()> {
         Box::pin(async move {
             self.entity.tick(caller, server).await;
+            if let Some(mob) = caller.get_mob()
+                && mob.get_entity().entity_id == self.entity.entity_id
+            {
+                // Vanilla `LivingEntity.baseTick` calls `super.baseTick` before its own
+                // bookkeeping (`LivingEntity.java:409-430`), and `Mob.baseTick` performs the
+                // ambient roll immediately after that base tick (`Mob.java:283-292`). Keep the
+                // live mob equivalent before AI, movement, and collision processing.
+                mob.tick_ambient_sound();
+            }
             // Vanilla `LivingEntity.tick` decrements the post-impulse grace timer once per tick
             // (`LivingEntity.java:2864-2868`).
             let _ = self.post_impulse_context_reset_grace_time.fetch_update(
@@ -7554,6 +7622,34 @@ mod absorption_tests {
     fn the_max_absorption_attribute_caps_the_result() {
         assert_eq!(absorption_after_application(0.0, 3, 8.0), 8.0);
         assert_eq!(absorption_after_application(0.0, 0, 0.0), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod effect_ambient_tests {
+    use super::all_effects_ambient;
+    use pumpkin_data::effect::StatusEffect;
+    use pumpkin_data::potion::Effect;
+
+    fn effect(ambient: bool, show_particles: bool) -> Effect {
+        Effect {
+            effect_type: &StatusEffect::STRENGTH,
+            duration: 100,
+            amplifier: 0,
+            ambient,
+            show_particles,
+            show_icon: true,
+            blend: false,
+        }
+    }
+
+    #[test]
+    fn empty_and_hidden_effects_are_ambient_but_visible_nonambient_is_not() {
+        // `areAllEffectsAmbient` ignores invisible effects and returns true for an empty
+        // collection (`LivingEntity.java:960-967`).
+        assert!(all_effects_ambient([].iter()));
+        assert!(all_effects_ambient([effect(false, false)].iter()));
+        assert!(!all_effects_ambient([effect(false, true)].iter()));
     }
 }
 
@@ -8696,7 +8792,7 @@ mod tests {
 
 #[cfg(test)]
 mod active_item_tests {
-    use super::active_item_for_state;
+    use super::{active_item_for_state, weapon_item_for_state};
     use pumpkin_data::item::Item;
     use pumpkin_data::item_stack::ItemStack;
 
@@ -8710,6 +8806,18 @@ mod active_item_tests {
         assert!(active_item_for_state(false, Some(&use_item), &main_hand).are_equal(&main_hand));
         assert!(active_item_for_state(true, Some(&use_item), &main_hand).are_equal(&use_item));
         assert!(active_item_for_state(true, None, &main_hand).is_empty());
+    }
+
+    #[test]
+    fn weapon_item_prefers_the_captured_spin_attack_stack() {
+        let main_hand = ItemStack::new(1, &Item::IRON_SWORD);
+        let spin_item = ItemStack::new(1, &Item::TRIDENT);
+
+        // `Player.getWeaponItem` returns `autoSpinAttackItemStack` while spinning, otherwise
+        // it delegates to `LivingEntity.getWeaponItem` (`Player.java:520-523`).
+        assert!(weapon_item_for_state(false, Some(&spin_item), &main_hand).are_equal(&main_hand));
+        assert!(weapon_item_for_state(true, Some(&spin_item), &main_hand).are_equal(&spin_item));
+        assert!(weapon_item_for_state(true, None, &main_hand).are_equal(&main_hand));
     }
 }
 

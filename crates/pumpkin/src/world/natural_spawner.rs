@@ -1,4 +1,5 @@
 use crate::entity::EntityBase;
+use crate::entity::passive::polar_bear::PolarBearEntity;
 use crate::entity::passive::tropical_fish::TropicalFishEntity;
 use crate::entity::r#type::{
     SpawnRuleContext, check_spawn_obstruction, check_spawn_obstruction_state, check_spawn_rules,
@@ -69,6 +70,15 @@ fn initialize_schooling_spawn(
     }
 
     mob.is_max_group_size_reached(group_size)
+}
+
+fn finalize_natural_spawn(entity: &Arc<dyn EntityBase>, group_size: i32) {
+    if let Some(polar_bear) = entity.cast_any().downcast_ref::<PolarBearEntity>() {
+        // `NaturalSpawner` calls `finalizeSpawn` before incrementing groupSize
+        // (`NaturalSpawner.java:198-210`); Polar Bear's override passes the group data to
+        // `AgeableMob.finalizeSpawn` (`PolarBear.java:244-251`).
+        polar_bear.finalize_spawn(group_size);
+    }
 }
 
 /// Matches the base `NaturalSpawner.createState` persistence predicate.
@@ -718,6 +728,7 @@ pub fn spawn_mobs_for_chunk_generation(
                     entity
                         .get_entity()
                         .set_rotation(rand::random::<f32>() * 360., 0.);
+                    finalize_natural_spawn(&entity, group_size);
                     group_size += 1;
                     initialize_schooling_spawn(&entity, &mut schooling_leader, group_size, true);
                     world.spawn_entity_non_save(&entity);
@@ -898,6 +909,7 @@ pub fn spawn_category_for_position(
             entity
                 .get_entity()
                 .set_rotation(rng().random::<f32>() * 360., 0.);
+            finalize_natural_spawn(&entity, group_size);
             let entity_uuid = entity.get_entity().entity_uuid;
 
             spawn_cluster_size += 1;

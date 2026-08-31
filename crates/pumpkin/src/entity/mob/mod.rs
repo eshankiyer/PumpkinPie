@@ -3317,7 +3317,6 @@ impl<T: Mob + Send + 'static> EntityBase for T {
             }
 
             mob_entity.living_entity.tick(caller, server).await;
-            self.tick_ambient_sound();
             self.tick_sun_burn().await;
             self.mob_try_pick_up_items().await;
             mob_entity.reset_schooling_if_isolated(self.get_random().random_range(0..200));

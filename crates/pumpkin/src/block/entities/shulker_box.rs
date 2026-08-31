@@ -7,7 +7,10 @@ use std::any::Any;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::{array::from_fn, sync::Arc};
+use std::{
+    array::from_fn,
+    sync::{Arc, Mutex as StdMutex},
+};
 use tokio::sync::RwLock;
 
 use crate::block::entities::BlockEntity;
@@ -29,6 +32,11 @@ pub struct ShulkerBoxBlockEntity {
 
     // Viewer
     pub viewers: ViewerCountTracker,
+
+    /// Pending `LootTable` state is consumed when a non-spectator opens or breaks the box.
+    /// (`RandomizableContainerBlockEntity.java:20-45,79-94`)
+    pub loot_table: StdMutex<Option<String>>,
+    pub loot_table_seed: i64,
 }
 
 #[repr(u8)]
@@ -53,6 +61,10 @@ impl BlockEntity for ShulkerBoxBlockEntity {
     where
         Self: Sized,
     {
+        // `ShulkerBoxBlockEntity.loadFromTag` (`ShulkerBoxBlockEntity.java:202-219`) loads
+        // deferred loot instead of applying saved Items at the same time.
+        let loot_table = nbt.get_string("LootTable").map(ToString::to_string);
+        let has_loot_table = loot_table.is_some();
         let mut shulker_box = Self {
             position,
             items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
@@ -60,9 +72,13 @@ impl BlockEntity for ShulkerBoxBlockEntity {
             animation_status: AtomicU8::new(AnimationStatus::Closed as u8),
             animation_ticks: AtomicU8::new(0),
             viewers: ViewerCountTracker::new(),
+            loot_table: StdMutex::new(loot_table),
+            loot_table_seed: nbt.get_long("LootTableSeed").unwrap_or(0),
         };
 
-        pumpkin_world::inventory::sync_read_items_from_nbt(nbt, shulker_box.items.get_mut());
+        if !has_loot_table {
+            pumpkin_world::inventory::sync_read_items_from_nbt(nbt, shulker_box.items.get_mut());
+        }
 
         shulker_box
     }
@@ -71,7 +87,23 @@ impl BlockEntity for ShulkerBoxBlockEntity {
         &'a self,
         nbt: &'a mut NbtCompound,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
-        self.write_inventory_nbt(nbt, true)
+        Box::pin(async move {
+            // `ShulkerBoxBlockEntity.saveAdditional` (`ShulkerBoxBlockEntity.java:208-212`)
+            // preserves deferred loot metadata and only writes Items after loot is unpacked.
+            let loot_table = self
+                .loot_table
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            if let Some(loot_table) = loot_table {
+                nbt.put_string("LootTable", loot_table);
+                if self.loot_table_seed != 0 {
+                    nbt.put_long("LootTableSeed", self.loot_table_seed);
+                }
+            } else {
+                self.write_inventory_nbt(nbt, true).await;
+            }
+        })
     }
 
     fn tick<'a>(&'a self, world: &'a Arc<World>) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
@@ -110,13 +142,25 @@ impl BlockEntity for ShulkerBoxBlockEntity {
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
         let mut nbt = NbtCompound::new();
-        let items = futures::executor::block_on(self.items.read());
-        sync_write_items_to_nbt(items.as_slice(), &mut nbt);
+        // `ShulkerBoxBlockEntity.saveAdditional` (`ShulkerBoxBlockEntity.java:208-212`)
+        // does not expose item contents while a loot table is still pending.
+        if !self.has_pending_loot_table() {
+            let items = futures::executor::block_on(self.items.read());
+            sync_write_items_to_nbt(items.as_slice(), &mut nbt);
+        }
         Some(nbt)
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+
+    fn take_loot_table(&self) -> Option<(String, i64)> {
+        self.take_pending_loot_table()
+    }
+
+    fn has_loot_table(&self) -> bool {
+        self.has_pending_loot_table()
     }
 }
 
@@ -183,6 +227,8 @@ impl ShulkerBoxBlockEntity {
             animation_status: AtomicU8::new(AnimationStatus::Closed as u8),
             animation_ticks: AtomicU8::new(0),
             viewers: ViewerCountTracker::new(),
+            loot_table: StdMutex::new(None),
+            loot_table_seed: 0,
         }
     }
 
@@ -229,6 +275,23 @@ impl ShulkerBoxBlockEntity {
     pub fn update_viewers(&self, world: &Arc<World>) {
         let viewer_count = self.viewers.current.load(Ordering::Relaxed);
         Self::play_sound(world, &self.position, i32::from(viewer_count));
+    }
+
+    /// `RandomizableContainerBlockEntity.getLootTable`/`setLootTable` state is exposed through
+    /// the live block-entity loot hooks (`RandomizableContainerBlockEntity.java:28-45`).
+    pub fn take_pending_loot_table(&self) -> Option<(String, i64)> {
+        let mut loot_table = self
+            .loot_table
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        loot_table.take().map(|key| (key, self.loot_table_seed))
+    }
+
+    pub fn has_pending_loot_table(&self) -> bool {
+        self.loot_table
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
     }
 
     fn play_sound(world: &World, position: &BlockPos, viewer_count: i32) {
@@ -341,7 +404,8 @@ impl Clearable for ShulkerBoxBlockEntity {
 
 #[cfg(test)]
 mod tests {
-    use super::{AnimationStatus, ShulkerBoxBlockEntity};
+    use super::{AnimationStatus, BlockEntity, ShulkerBoxBlockEntity};
+    use pumpkin_nbt::compound::NbtCompound;
     use pumpkin_util::math::position::BlockPos;
     use std::sync::atomic::Ordering;
 
@@ -367,5 +431,27 @@ mod tests {
             entity.tick_animation();
         }
         assert_eq!(entity.get_animation_status(), AnimationStatus::Closed);
+    }
+
+    #[tokio::test]
+    async fn deferred_loot_table_round_trips_without_item_payload() {
+        // `ShulkerBoxBlockEntity.loadFromTag`/`saveAdditional`
+        // (`ShulkerBoxBlockEntity.java:202-219,208-212`) preserve deferred loot instead of
+        // loading or saving an ordinary Items list.
+        let mut nbt = NbtCompound::new();
+        nbt.put_string("LootTable", "minecraft:chests/simple_dungeon".to_string());
+        nbt.put_long("LootTableSeed", 42);
+
+        let entity = ShulkerBoxBlockEntity::from_nbt(&nbt, BlockPos::new(0, 64, 0));
+        assert!(entity.has_pending_loot_table());
+
+        let mut saved = NbtCompound::new();
+        entity.write_nbt(&mut saved).await;
+        assert_eq!(
+            saved.get_string("LootTable"),
+            Some("minecraft:chests/simple_dungeon")
+        );
+        assert_eq!(saved.get_long("LootTableSeed"), Some(42));
+        assert!(saved.get_list("Items").is_none());
     }
 }

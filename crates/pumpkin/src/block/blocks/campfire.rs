@@ -16,7 +16,7 @@ use crate::block::entities::campfire::CampfireBlockEntity;
 use crate::block::registry::BlockActionResult;
 use crate::{
     block::{
-        BlockBehaviour, BlockFuture, BlockIsReplacing, BrokenArgs, GetStateForNeighborUpdateArgs,
+        BlockBehaviour, BlockFuture, BlockIsReplacing, GetStateForNeighborUpdateArgs,
         NormalUseArgs, OnEntityCollisionArgs, OnPlaceArgs, OnProjectileHitArgs, PlacedArgs,
         UseWithItemArgs,
     },
@@ -29,6 +29,9 @@ use std::sync::atomic::Ordering;
 #[pumpkin_block_from_tag("minecraft:campfires")]
 pub struct CampfireBlock;
 
+// Campfire contents use the shared pre-removal block-entity drop path, matching
+// `CampfireBlockEntity.preRemoveSideEffects` (`CampfireBlockEntity.java:199-204`); the post-break
+// `broken` hook must not drop the same inventory again.
 impl CampfireBlock {
     /// `CampfireBlock.placeLiquid` (`CampfireBlock.java:203-220`): water extinguishes a dry
     /// campfire, emits the block-change event, and schedules the water fluid tick.
@@ -127,6 +130,14 @@ impl BlockBehaviour for CampfireBlock {
                 return BlockActionResult::Pass;
             };
             let item = &mut *args.item_stack;
+            let is_campfire_input = pumpkin_data::recipes::get_cooking_recipe_with_ingredient(
+                item.item,
+                pumpkin_data::recipes::CookingRecipeKind::CampfireCooking,
+            )
+            .is_some();
+            if !is_campfire_input {
+                return BlockActionResult::Pass;
+            }
             if campfire.add_item(item, args.player.is_creative()).await {
                 // Vanilla `CampfireBlockEntity.placeFood` (`CampfireBlockEntity.java:179-198`)
                 // emits BLOCK_CHANGE after accepting a recipe item; this is observable by
@@ -150,7 +161,9 @@ impl BlockBehaviour for CampfireBlock {
                     .await;
                 BlockActionResult::Success
             } else {
-                BlockActionResult::Pass
+                // `CampfireBlock.useItemOn` consumes a valid campfire input even when
+                // `placeFood` cannot find an empty slot (`CampfireBlock.java:100-112`).
+                BlockActionResult::Consume
             }
         })
     }
@@ -159,24 +172,6 @@ impl BlockBehaviour for CampfireBlock {
         Box::pin(async move {
             let entity = CampfireBlockEntity::new(*args.position);
             args.world.add_block_entity(Arc::new(entity));
-        })
-    }
-
-    fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            // `CampfireBlockEntity.preRemoveSideEffects` (`CampfireBlockEntity.java:199-204`)
-            // drops every item still sitting on the campfire via `Containers.dropContents`
-            // before the block entity goes away.
-            if let Some(block_entity) = args.world.get_block_entity(args.position)
-                && let Some(campfire) = block_entity.as_any().downcast_ref::<CampfireBlockEntity>()
-            {
-                for slot in 0..campfire.items.len() {
-                    let item = campfire.items[slot].lock().await.clone();
-                    if !item.is_empty() {
-                        args.world.drop_stack(args.position, item).await;
-                    }
-                }
-            }
         })
     }
 

@@ -180,6 +180,20 @@ impl PolarBearEntity {
             self.warning_sound_ticks.store(40, Relaxed);
         }
     }
+
+    /// Vanilla `PolarBear.finalizeSpawn` supplies `AgeableMobGroupData(1.0F)`, so the first
+    /// group member is adult and every later member is a baby (`PolarBear.java:244-251`,
+    /// `AgeableMob.java:47-62`).
+    pub fn finalize_spawn(&self, group_size: i32) {
+        if should_spawn_as_baby(group_size) {
+            self.set_baby(true);
+        }
+    }
+}
+
+#[must_use]
+const fn should_spawn_as_baby(group_size: i32) -> bool {
+    group_size > 0
 }
 
 impl AgeableMob for PolarBearEntity {
@@ -261,5 +275,19 @@ impl Mob for PolarBearEntity {
                 }
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_spawn_as_baby;
+
+    #[test]
+    fn only_non_first_group_members_are_babies() {
+        // `AgeableMob.finalizeSpawn` checks groupSize > 0 before the 1.0F baby chance
+        // (`AgeableMob.java:54-61`).
+        assert!(!should_spawn_as_baby(0));
+        assert!(should_spawn_as_baby(1));
+        assert!(should_spawn_as_baby(3));
     }
 }

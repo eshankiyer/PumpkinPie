@@ -36,7 +36,6 @@ impl CommandExecutor for Executor {
             let targets = PlayersArgumentConsumer.find_arg_default_name(args)?;
 
             let (item_name, parsed_stack) = ItemArgumentConsumer::find_arg(args, ARG_ITEM)?;
-            let item = parsed_stack.item;
 
             let item_count = match item_count_consumer().find_arg_default_name(args) {
                 Err(_) => 1,
@@ -66,8 +65,10 @@ impl CommandExecutor for Executor {
                     pumpkin_data::translation::bedrock::COMMANDS_GIVE_SUCCESS,
                     [
                         TextComponent::text(item_count.to_string()),
+                        // Vanilla item feedback uses the stack's effective item name
+                        // (`ItemStack.java:825-827`; `Item.java:342-344`).
                         TextComponent::text("[")
-                            .add_child(item.translated_name())
+                            .add_child(parsed_stack.get_item_name())
                             .add_child(TextComponent::text("]"))
                             .hover_event(HoverEvent::ShowItem {
                                 id: item_name.to_string().into(),
@@ -82,8 +83,10 @@ impl CommandExecutor for Executor {
                     pumpkin_data::translation::bedrock::COMMANDS_GIVE_SUCCESS,
                     [
                         TextComponent::text(item_count.to_string()),
+                        // Vanilla item feedback uses the stack's effective item name
+                        // (`ItemStack.java:825-827`; `Item.java:342-344`).
                         TextComponent::text("[")
-                            .add_child(item.translated_name())
+                            .add_child(parsed_stack.get_item_name())
                             .add_child(TextComponent::text("]"))
                             .hover_event(HoverEvent::ShowItem {
                                 id: item_name.to_string().into(),

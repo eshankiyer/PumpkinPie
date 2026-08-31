@@ -1467,6 +1467,20 @@ const fn clear_fire_ticks(fire_ticks: i32) -> i32 {
     if fire_ticks < 0 { fire_ticks } else { 0 }
 }
 
+/// Vanilla `Entity.displayFireAnimation` excludes spectators
+/// (`Entity.java:3241-3243`), and `FallingBlockEntity` also overrides it to false
+/// (`FallingBlockEntity.java:319-321`).
+#[expect(clippy::fn_params_excessive_bools)]
+const fn display_fire_animation_state(
+    remaining_fire_ticks: i32,
+    fire_immune: bool,
+    spectator: bool,
+    magma_cube: bool,
+    falling_block: bool,
+) -> bool {
+    remaining_fire_ticks > 0 && !fire_immune && !spectator && !magma_cube && !falling_block
+}
+
 /// Selects the splash sound used by `Entity.doWaterSplashEffect`. Vanilla's base, monster,
 /// dolphin, axolotl, and player overrides are `Entity.java:1263-1272`, `Monster.java:60-63`,
 /// `Dolphin.java:343-346`, `Axolotl.java:518-520`, and `Player.java:383-390`.
@@ -2772,6 +2786,7 @@ impl Entity {
     }
 
     #[expect(clippy::float_cmp)]
+    #[expect(clippy::too_many_lines)]
     async fn adjust_movement_for_collisions(
         &self,
         movement: Vector3<f64>,
@@ -2787,11 +2802,40 @@ impl Entity {
 
         let bounding_box = self.bounding_box.load();
 
-        let (collisions, block_positions) = self
+        let (mut collisions, block_positions) = self
             .world
             .load()
             .get_block_collisions(bounding_box.stretch(movement), caller)
             .await;
+
+        // Vanilla `Entity.move` adds `level.getEntityCollisions` before resolving movement
+        // (`Entity.java:1138-1141`), and `EntityGetter.getEntityCollisions` filters spectators,
+        // same-vehicle passengers, and `canBeCollidedWith` (`EntityGetter.java:54-66`).
+        let world = self.world.load();
+        let root_vehicle_id = self.root_vehicle_id().await;
+        let mut entity_collisions = Vec::new();
+        for entity in world.get_all_at_box(
+            &bounding_box
+                .stretch(movement)
+                .expand(1.0e-7, 1.0e-7, 1.0e-7),
+        ) {
+            if entity.get_entity().entity_id == self.entity_id
+                || entity.get_entity().is_removed()
+                || entity.is_spectator()
+                || !entity.can_be_collided_with()
+            {
+                continue;
+            }
+
+            // `Entity.isPassengerOfSameVehicle` is the exclusion used by the vanilla collision
+            // query (`Entity.java:3561-3562`).
+            if entity.get_entity().root_vehicle_id().await == root_vehicle_id {
+                continue;
+            }
+
+            entity_collisions.push(entity.get_entity().bounding_box.load());
+        }
+        collisions.extend(entity_collisions.iter().copied());
 
         if collisions.is_empty() {
             return movement;
@@ -2838,6 +2882,19 @@ impl Entity {
                 self.on_ground
                     .store(supporting_block_pos.is_some(), Ordering::SeqCst);
                 self.supporting_block_pos.store(supporting_block_pos);
+            }
+
+            for inert_box in &entity_collisions {
+                if let Some(collision_time) = bounding_box.calculate_collision_time(
+                    inert_box,
+                    adjusted_movement,
+                    Axis::Y,
+                    1.0,
+                ) && collision_time != 1.0
+                {
+                    let changed_component = adjusted_movement.get_axis(Axis::Y) * collision_time;
+                    adjusted_movement.set_axis(Axis::Y, changed_component);
+                }
             }
         }
 
@@ -5233,6 +5290,10 @@ impl Entity {
     ) {
         // Update server-side position and bounding box
         self.set_pos(position);
+        // Vanilla clears the per-tick movement cache after applying a teleport
+        // (`Entity.java:3149-3158`); otherwise the next movement-emission read treats the
+        // teleport displacement as ordinary movement.
+        self.movement.store(Vector3::default());
         if let Some(yaw) = yaw {
             self.yaw.store(yaw);
         }
@@ -6540,8 +6601,13 @@ impl EntityBase for Entity {
             // MagmaCube.java isOnFire(): always false, purely a render override; it still
             // takes normal fire damage above since is_immune is untouched.
             let is_magma_cube = self.entity_type == &EntityType::MAGMA_CUBE;
-            let should_render_fire =
-                self.get_remaining_fire_ticks() > 0 && !is_immune && !is_magma_cube;
+            let should_render_fire = display_fire_animation_state(
+                self.get_remaining_fire_ticks(),
+                is_immune,
+                caller.is_spectator(),
+                is_magma_cube,
+                self.entity_type == &EntityType::FALLING_BLOCK,
+            );
             self.set_on_fire(should_render_fire).await;
 
             let riding_cooldown = self.riding_cooldown.load(Ordering::Relaxed);
@@ -7437,7 +7503,7 @@ mod metadata_type_resolves_on_target_version_tests {
 
 #[cfg(test)]
 mod fire_immunity_tests {
-    use super::{clear_fire_ticks, fire_ticks_after_block_effects};
+    use super::{clear_fire_ticks, display_fire_animation_state, fire_ticks_after_block_effects};
 
     /// `Entity.applyEffectsFromBlocks` does not arm immunity when a block ignites the entity
     /// during the same pass (`Entity.java:964-973`).
@@ -7453,6 +7519,18 @@ mod fire_immunity_tests {
         // (`Entity.java:651-653`).
         assert_eq!(clear_fire_ticks(40), 0);
         assert_eq!(clear_fire_ticks(-20), -20);
+    }
+
+    /// `Entity.displayFireAnimation` and the falling-block override keep fire visuals
+    /// entity-specific (`Entity.java:3241-3243`; `FallingBlockEntity.java:319-321`).
+    #[test]
+    fn fire_animation_respects_render_overrides() {
+        assert!(display_fire_animation_state(20, false, false, false, false));
+        assert!(!display_fire_animation_state(20, false, true, false, false));
+        assert!(!display_fire_animation_state(20, false, false, false, true));
+        assert!(!display_fire_animation_state(20, false, false, true, false));
+        assert!(!display_fire_animation_state(20, true, false, false, false));
+        assert!(!display_fire_animation_state(0, false, false, false, false));
     }
 }
 

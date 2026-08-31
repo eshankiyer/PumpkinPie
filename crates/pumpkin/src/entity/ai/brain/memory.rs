@@ -412,17 +412,29 @@ impl MemoryStore {
     }
 
     pub fn set<K: MemoryKey>(&mut self, value: K::Value) {
-        self.slots[K::ID.index()] = MemorySlot {
-            value: Some(Box::new(value)),
-            time_to_live: None,
-        };
+        // `Brain.setMemoryInternal` clears empty collections instead of storing them
+        // (`Brain.java:201-213`).
+        if is_empty_collection(&value) {
+            self.erase_by_id(K::ID);
+        } else {
+            self.slots[K::ID.index()] = MemorySlot {
+                value: Some(Box::new(value)),
+                time_to_live: None,
+            };
+        }
     }
 
     pub fn set_with_expiry<K: MemoryKey>(&mut self, value: K::Value, time_to_live: i64) {
-        self.slots[K::ID.index()] = MemorySlot {
-            value: Some(Box::new(value)),
-            time_to_live: Some(time_to_live),
-        };
+        // The expiry overload applies the same empty-collection clearing rule
+        // (`Brain.java:186-199`).
+        if is_empty_collection(&value) {
+            self.erase_by_id(K::ID);
+        } else {
+            self.slots[K::ID.index()] = MemorySlot {
+                value: Some(Box::new(value)),
+                time_to_live: Some(time_to_live),
+            };
+        }
     }
 
     pub fn erase<K: MemoryKey>(&mut self) {
@@ -481,6 +493,17 @@ impl MemoryStore {
     pub fn is_empty(&self) -> bool {
         self.registered.iter().all(|registered| !registered)
     }
+}
+
+/// `Brain.isEmptyCollection` (`Brain.java:186-213`) applies to the collection-valued memory
+/// keys represented in this port.
+fn is_empty_collection(value: &dyn Any) -> bool {
+    value
+        .downcast_ref::<Vec<Weak<dyn EntityBase>>>()
+        .is_some_and(Vec::is_empty)
+        || value
+            .downcast_ref::<NearestVisibleLivingEntities>()
+            .is_some_and(|entities| entities.entities.is_empty())
 }
 
 #[cfg(test)]
@@ -552,5 +575,23 @@ mod tests {
         assert_eq!(store.get::<ItemPickupCooldownTicksMemory>(), Some(&2));
         store.erase::<LikedNoteblockCooldownTicksMemory>();
         assert_eq!(store.get::<ItemPickupCooldownTicksMemory>(), Some(&2));
+    }
+
+    #[test]
+    fn empty_collection_memory_is_cleared() {
+        // `Brain.setMemoryInternal` turns an empty `Collection` into an empty slot
+        // (`Brain.java:186-213`); both nearest-entity memories use that rule.
+        let mut store = MemoryStore::new();
+        store.register(MemoryKeyId::NearestLivingEntities);
+        store.register(MemoryKeyId::NearestVisibleLivingEntities);
+
+        store.set::<NearestLivingEntitiesMemory>(Vec::new());
+        store.set_with_expiry::<NearestVisibleLivingEntitiesMemory>(
+            NearestVisibleLivingEntities::empty(),
+            20,
+        );
+
+        assert!(!store.has_value::<NearestLivingEntitiesMemory>());
+        assert!(!store.has_value::<NearestVisibleLivingEntitiesMemory>());
     }
 }

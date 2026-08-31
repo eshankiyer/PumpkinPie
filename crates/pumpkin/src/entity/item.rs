@@ -5,8 +5,6 @@ use crossbeam::atomic::AtomicCell;
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::data_component_impl::BundleContentsImpl;
 use pumpkin_data::data_component_impl::ContainerImpl;
-use pumpkin_data::data_component_impl::DamageResistantImpl;
-use pumpkin_data::data_component_impl::DamageResistantType;
 use pumpkin_data::packet::CURRENT_MC_VERSION;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{Block, item_stack::ItemStack};
@@ -201,11 +199,15 @@ impl ItemEntity {
     /// (`ItemEntity.fireImmune`), so it has to be refreshed whenever the stack
     /// is replaced -- notably when an entity is restored from NBT.
     fn update_fire_immunity(entity: &Entity, item_stack: &ItemStack) {
-        let immune = item_stack
-            .get_data_component::<DamageResistantImpl>()
-            .is_some_and(|res| res.res_type == DamageResistantType::Fire);
+        let immune = Self::item_is_fire_immune(item_stack);
 
         entity.fire_immune.store(immune, Ordering::Relaxed);
+    }
+
+    /// Mirrors `ItemEntity.fireImmune` (`ItemEntity.java:271-272`) through the stack's
+    /// source-of-truth damage-resistance check (`ItemStack.java:1112-1115`).
+    fn item_is_fire_immune(item_stack: &ItemStack) -> bool {
+        !item_stack.can_be_hurt_by(&DamageType::IN_FIRE)
     }
 
     pub const fn get_item_stack(&self) -> &Mutex<ItemStack> {
@@ -667,6 +669,13 @@ impl EntityBase for ItemEntity {
         Box::pin(async move {
             let entity = &self.entity;
 
+            // `Entity.baseTick` calls the virtual `fireImmune` while processing existing fire
+            // (`Entity.java:536-548`). Item stacks are mutable through the live item lock, so
+            // refresh the cached flag after hopper/mob changes and before that base tick.
+            let item_stack = self.item_stack.lock().await;
+            Self::update_fire_immunity(entity, &item_stack);
+            drop(item_stack);
+
             if self.item_stack.lock().await.is_empty() {
                 entity.remove().await;
                 return;
@@ -956,5 +965,20 @@ mod tests {
 
         assert!(!never_pickup.load(std::sync::atomic::Ordering::Relaxed));
         assert_eq!(pickup_delay.load(std::sync::atomic::Ordering::Relaxed), 4);
+    }
+
+    #[test]
+    fn fire_immunity_follows_the_current_item_stack() {
+        // `ItemEntity.fireImmune` delegates to `ItemStack.canBeHurtBy` (`ItemEntity.java:271-272`,
+        // `ItemStack.java:1112-1115`); ancient debris carries fire resistance
+        // (`generated/item.rs:1035-1059`).
+        assert!(!ItemEntity::item_is_fire_immune(&ItemStack::new(
+            1,
+            &Item::COAL
+        )));
+        assert!(ItemEntity::item_is_fire_immune(&ItemStack::new(
+            1,
+            &Item::ANCIENT_DEBRIS,
+        )));
     }
 }

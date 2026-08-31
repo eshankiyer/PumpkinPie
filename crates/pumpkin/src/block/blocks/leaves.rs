@@ -5,6 +5,7 @@ use crate::block::{
 use pumpkin_data::block_properties::{
     BlockProperties, MangrovePropaguleLikeProperties, OakLeavesLikeProperties,
 };
+use pumpkin_data::fluid::Fluid;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{Block, BlockDirection, BlockStateId};
 use pumpkin_macros::pumpkin_block_from_tag;
@@ -48,6 +49,13 @@ fn compute_distance(world: &World, position: &BlockPos) -> u8 {
         }
     }
     distance
+}
+
+// `LeavesBlock.updateShape` (`LeavesBlock.java:103-105`) schedules a one-tick update unless the
+// neighbor's distance produces the current leaf distance.
+fn should_schedule_distance_tick(current_distance: u8, neighbor_distance: Option<u8>) -> bool {
+    let distance_from_neighbor = neighbor_distance.unwrap_or(MAX_DISTANCE).saturating_add(1);
+    distance_from_neighbor != 1 || current_distance != distance_from_neighbor
 }
 
 impl BlockBehaviour for LeavesBlock {
@@ -104,8 +112,24 @@ impl BlockBehaviour for LeavesBlock {
         args: GetStateForNeighborUpdateArgs<'a>,
     ) -> BlockFuture<'a, BlockStateId> {
         Box::pin(async move {
-            args.world
-                .schedule_block_tick(args.block, *args.position, 1, TickPriority::Normal);
+            // `LeavesBlock.updateShape` (`LeavesBlock.java:89-108`) schedules water for
+            // waterlogged leaves and only schedules the leaf tick when its distance changes.
+            let props = LeavesProperties::from_state_id(args.state_id, args.block);
+            if props.waterlogged {
+                args.world.schedule_fluid_tick(
+                    &Fluid::WATER,
+                    *args.position,
+                    Fluid::WATER.flow_speed as u8,
+                    TickPriority::Normal,
+                );
+            }
+
+            let neighbor_block = Block::from_state_id(args.neighbor_state_id);
+            let neighbor_distance = distance_from_state(neighbor_block, args.neighbor_state_id);
+            if should_schedule_distance_tick(props.distance, neighbor_distance) {
+                args.world
+                    .schedule_block_tick(args.block, *args.position, 1, TickPriority::Normal);
+            }
             args.state_id
         })
     }
@@ -143,7 +167,7 @@ impl BlockBehaviour for LeavesBlock {
 
 #[cfg(test)]
 mod tests {
-    use super::distance_from_state;
+    use super::{distance_from_state, should_schedule_distance_tick};
     use pumpkin_data::Block;
 
     #[test]
@@ -170,5 +194,15 @@ mod tests {
             distance_from_state(&Block::STONE, Block::STONE.default_state.id),
             None
         );
+    }
+
+    #[test]
+    fn neighbor_tick_schedule_matches_vanilla_distance_check() {
+        // `LeavesBlock.updateShape` (`LeavesBlock.java:103-105`) skips a tick only when the
+        // neighbor distance produces the current leaf distance of one.
+        assert!(!should_schedule_distance_tick(1, Some(0)));
+        assert!(should_schedule_distance_tick(3, Some(2)));
+        assert!(should_schedule_distance_tick(3, Some(1)));
+        assert!(should_schedule_distance_tick(7, None));
     }
 }
