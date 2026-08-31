@@ -19,6 +19,11 @@ impl JavaClient {
         }
 
         player.last_input.store(input.input, Ordering::Relaxed);
+        // Vanilla refreshes the idle-action timer for input from a loaded client
+        // (`ServerGamePacketListenerImpl.java:421-428`).
+        if player.has_client_loaded() {
+            player.update_last_action_time();
+        }
 
         let sneak = input.input & SPlayerInput::SNEAK != 0;
         if sneak

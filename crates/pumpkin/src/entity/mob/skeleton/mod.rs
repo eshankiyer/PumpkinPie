@@ -177,14 +177,15 @@ impl SkeletonEntityBase {
                 } else {
                     &[][..]
                 };
-                goal_selector.add_goal(
-                    4,
-                    Box::new(RangedBowAttackGoal::with_arrow_effects(
-                        interval,
-                        15.0,
-                        arrow_effects,
-                    )),
+                // `AbstractSkeleton.reassessWeaponGoal` constructs the bow goal, then applies
+                // `setMinAttackInterval` (`AbstractSkeleton.java:132-145`).
+                let mut bow_goal = RangedBowAttackGoal::with_arrow_effects(
+                    SKELETON_ATTACK_INTERVAL,
+                    15.0,
+                    arrow_effects,
                 );
+                bow_goal.set_min_attack_interval(interval);
+                goal_selector.add_goal(4, Box::new(bow_goal));
             } else {
                 goal_selector.add_goal(4, Box::new(MeleeAttackGoal::new(1.2, false)));
             }
@@ -245,14 +246,15 @@ impl SkeletonEntityBase {
             } else {
                 &[][..]
             };
-            goals.add_goal(
-                4,
-                Box::new(RangedBowAttackGoal::with_arrow_effects(
-                    interval,
-                    15.0,
-                    arrow_effects,
-                )),
+            // `AbstractSkeleton.reassessWeaponGoal` applies the interval after construction
+            // (`AbstractSkeleton.java:132-145`).
+            let mut bow_goal = RangedBowAttackGoal::with_arrow_effects(
+                SKELETON_ATTACK_INTERVAL,
+                15.0,
+                arrow_effects,
             );
+            bow_goal.set_min_attack_interval(interval);
+            goals.add_goal(4, Box::new(bow_goal));
         } else {
             goals.add_goal(4, Box::new(MeleeAttackGoal::new(1.2, false)));
         }

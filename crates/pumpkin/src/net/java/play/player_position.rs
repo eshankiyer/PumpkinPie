@@ -278,6 +278,9 @@ impl JavaClient {
                     pos.y - last_pos.y,
                     pos.z - last_pos.z,
                 );
+                // `handleMovePlayer` records accepted client movement until the next tick-end
+                // packet (`ServerGamePacketListenerImpl.java:1165-1168`).
+                self.handle_player_known_movement(player, delta);
                 // Only update idle timeout if there's actual movement (vanilla threshold)
                 if delta.length_squared() > 1.0E-5 {
                     player.update_last_action_time();
@@ -473,6 +476,9 @@ impl JavaClient {
                     pos.y - last_pos.y,
                     pos.z - last_pos.z,
                 );
+                // `handleMovePlayer` records accepted client movement until the next tick-end
+                // packet (`ServerGamePacketListenerImpl.java:1165-1168`).
+                self.handle_player_known_movement(player, delta);
                 // Only update idle timeout if there's actual movement (vanilla threshold)
                 if delta.length_squared() > 1.0E-5 {
                     player.update_last_action_time();

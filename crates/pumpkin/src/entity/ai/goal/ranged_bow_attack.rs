@@ -65,6 +65,11 @@ impl RangedBowAttackGoal {
         }
     }
 
+    /// `RangedBowAttackGoal.setMinAttackInterval` (`RangedBowAttackGoal.java:31-33`).
+    pub const fn set_min_attack_interval(&mut self, ticks: i32) {
+        self.attack_interval = ticks;
+    }
+
     const fn reset_attack_time(&mut self) {
         self.attack_time = self.attack_interval;
     }
@@ -362,6 +367,15 @@ mod tests {
         let mut goal = RangedBowAttackGoal::new(20, 15.0);
         goal.reset_attack_time();
         assert_eq!(goal.attack_time, 20);
+    }
+
+    #[test]
+    fn updates_the_minimum_attack_interval() {
+        // `AbstractSkeleton.reassessWeaponGoal` applies this setter (`AbstractSkeleton.java:132-145`).
+        let mut goal = RangedBowAttackGoal::new(20, 15.0);
+        goal.set_min_attack_interval(50);
+        goal.reset_attack_time();
+        assert_eq!(goal.attack_time, 50);
     }
 
     #[test]

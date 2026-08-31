@@ -166,6 +166,7 @@ use crate::block::blocks::sponge::{SpongeBlock, WetSpongeBlock};
 use crate::block::blocks::stairs::StairBlock;
 use crate::block::blocks::structure_block::StructureBlock;
 use crate::block::blocks::test_block::TestBlock;
+use crate::block::blocks::test_instance_block::TestInstanceBlock;
 use crate::block::blocks::tnt::TNTBlock;
 use crate::block::blocks::torches::TorchBlock;
 use crate::block::blocks::trapdoor::TrapDoorBlock;
@@ -430,6 +431,9 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(LightningRodBlock);
     manager.register(SculkSensorBlock);
     manager.register(TestBlock);
+    // `TestInstanceBlock.useWithoutItem` (`TestInstanceBlock.java:28-45`) is dispatched by the
+    // existing normal-use path once this server block behavior is registered.
+    manager.register(TestInstanceBlock);
     manager.register(SculkCatalystBlock);
     manager.register(SculkShriekerBlock);
     manager.register(ObserverBlock);
@@ -841,16 +845,17 @@ impl BlockRegistry {
             .set_block_state(&final_block_pos, new_state, BlockFlags::NOTIFY_ALL)
             .await;
 
-        // BlockItem.updateBlockEntityComponents applies the held item's components before
-        // setPlacedBy and the block-place event, and only when the block that actually landed
-        // is the one we meant to place (`BlockItem.java:76-79`, `:101-106`).
-        if world.get_block(&final_block_pos).id == placed_block.id {
+        // `SignItem.updateCustomBlockEntityTag` uses this result to decide whether its editor
+        // fallback runs (`SignItem.java:23-35`; `BlockItem.java:76-81,148-170`).
+        let custom_data_applied = if world.get_block(&final_block_pos).id == placed_block.id {
             world.apply_block_entity_item_components(
                 &final_block_pos,
                 &item_stack,
                 player.can_use_game_master_blocks(),
-            );
-        }
+            )
+        } else {
+            false
+        };
 
         // BlockItem.place plays the placement sound before the block-place game event
         // (`BlockItem.java:86-88`). The source player is excluded by the existing world helper.
@@ -892,6 +897,7 @@ impl BlockRegistry {
             &final_block_pos,
             face,
             player,
+            custom_data_applied,
         )
         .await;
 
@@ -1299,6 +1305,7 @@ impl BlockRegistry {
         block.default_state.id
     }
 
+    #[expect(clippy::too_many_arguments)]
     pub async fn player_placed(
         &self,
         world: &Arc<World>,
@@ -1307,6 +1314,7 @@ impl BlockRegistry {
         position: &BlockPos,
         direction: BlockDirection,
         player: &Player,
+        custom_data_applied: bool,
     ) {
         let pumpkin_block = self.get_pumpkin_block(block.id);
         if let Some(pumpkin_block) = pumpkin_block {
@@ -1318,6 +1326,7 @@ impl BlockRegistry {
                     position,
                     direction,
                     player,
+                    custom_data_applied,
                 })
                 .await;
         }

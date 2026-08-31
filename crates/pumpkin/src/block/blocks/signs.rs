@@ -18,6 +18,7 @@ use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::text::{TextComponent, TextContent};
+use pumpkin_world::world::BlockAccessor;
 use uuid::Uuid;
 
 use crate::block::BlockBehaviour;
@@ -197,8 +198,55 @@ struct SignPlacement {
 }
 
 impl SignBlock {
+    /// Mirrors `HangingSignItem.canPlace` delegating to `WallHangingSignBlock.canPlace`
+    /// (`HangingSignItem.java:15-20`; `WallHangingSignBlock.java:103-115`). A neighboring wall
+    /// hanging sign is valid support only when its facing axis matches this sign's axis.
+    fn wall_hanging_can_place(
+        world: &dyn BlockAccessor,
+        position: &BlockPos,
+        facing: BlockDirection,
+    ) -> bool {
+        let Some(
+            [
+                (clockwise_pos, clockwise_face),
+                (counter_clockwise_pos, counter_clockwise_face),
+            ],
+        ) = wall_hanging_attachment_directions(facing)
+        else {
+            return false;
+        };
+
+        [
+            (clockwise_pos, clockwise_face),
+            (counter_clockwise_pos, counter_clockwise_face),
+        ]
+        .into_iter()
+        .any(|(offset, attach_face)| {
+            let attach_pos = position.offset(offset.to_offset());
+            let (block, state) = world.get_block_and_state(&attach_pos);
+            if block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_WALL_HANGING_SIGNS) {
+                let Some(other_facing) = block.properties(state.id).and_then(|props| {
+                    props
+                        .to_props()
+                        .into_iter()
+                        .find(|(key, _)| *key == "facing")
+                        .and_then(|(_, value)| horizontal_direction(value))
+                }) else {
+                    return false;
+                };
+                other_facing.to_axis() == facing.to_axis()
+            } else {
+                state.is_side_solid(attach_face)
+            }
+        })
+    }
+
     /// Checks if a block can provide support for a sign.
-    fn is_valid_support(world: &World, pos: &BlockPos, direction: BlockDirection) -> bool {
+    fn is_valid_support(
+        world: &dyn BlockAccessor,
+        pos: &BlockPos,
+        direction: BlockDirection,
+    ) -> bool {
         let (block, state) = world.get_block_and_state(pos);
         let is_permissive = block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_LEAVES)
             || block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_SIGNS);
@@ -211,7 +259,7 @@ impl SignBlock {
     }
 
     /// Detects available support points around a position.
-    fn detect_support(world: &World, position: &BlockPos) -> SupportInfo {
+    fn detect_support(world: &dyn BlockAccessor, position: &BlockPos) -> SupportInfo {
         let (block_above, state_above) = world.get_block_and_state(&position.up());
         let above_is_valid = state_above.is_side_solid(BlockDirection::Down)
             || block_above.has_tag(&pumpkin_data::tag::Block::MINECRAFT_SIGNS)
@@ -463,11 +511,15 @@ impl BlockBehaviour for SignBlock {
 
     fn player_placed<'a>(&'a self, args: PlayerPlacedArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            match args.player.client.as_ref() {
-                crate::net::ClientPlatform::Java(java) => {
-                    java.send_sign_packet(*args.position, true).await;
+            // `SignItem.updateCustomBlockEntityTag` opens the editor only when its superclass
+            // did not load typed data (`SignItem.java:23-35`; `BlockItem.java:148-170`).
+            if should_open_text_editor(args.custom_data_applied) {
+                match args.player.client.as_ref() {
+                    crate::net::ClientPlatform::Java(java) => {
+                        java.send_sign_packet(*args.position, true).await;
+                    }
+                    crate::net::ClientPlatform::Bedrock(_bedrock) => {}
                 }
-                crate::net::ClientPlatform::Bedrock(_bedrock) => {}
             }
         })
     }
@@ -478,6 +530,29 @@ impl BlockBehaviour for SignBlock {
             .use_item_on
             .and_then(|u| pumpkin_data::BlockDirection::try_from(u.face.0).ok())
             .unwrap_or(pumpkin_data::BlockDirection::Up);
+
+        if is_hanging
+            && (clicked_face.is_horizontal() || clicked_face == BlockDirection::Up)
+            && let Some(side_direction) =
+                Self::detect_support(args.block_accessor, args.position).side_direction
+        {
+            let wall_direction = if clicked_face.is_horizontal() {
+                clicked_face
+            } else {
+                side_direction
+            };
+            let wall_facing = Self::calculate_wall_hanging_facing(
+                wall_direction,
+                args.player
+                    .map_or(0.0, |player| player.get_entity().yaw.load()),
+            );
+            let Some(wall_facing) = horizontal_direction(wall_facing) else {
+                return false;
+            };
+            if !Self::wall_hanging_can_place(args.block_accessor, args.position, wall_facing) {
+                return false;
+            }
+        }
 
         // Detection for floor-to-wall attachment (broken rn)
         if is_hanging && clicked_face == BlockDirection::Up {
@@ -774,6 +849,36 @@ impl BlockBehaviour for SignBlock {
     }
 }
 
+// `SignItem.updateCustomBlockEntityTag` falls back to opening the editor only when its
+// superclass returns false (`SignItem.java:23-35`; `BlockItem.java:109-112,148-170`).
+const fn should_open_text_editor(custom_data_applied: bool) -> bool {
+    !custom_data_applied
+}
+
+fn horizontal_direction(value: &str) -> Option<BlockDirection> {
+    match value {
+        "north" => Some(BlockDirection::North),
+        "south" => Some(BlockDirection::South),
+        "west" => Some(BlockDirection::West),
+        "east" => Some(BlockDirection::East),
+        _ => None,
+    }
+}
+
+const fn wall_hanging_attachment_directions(
+    facing: BlockDirection,
+) -> Option<[(BlockDirection, BlockDirection); 2]> {
+    if !facing.is_horizontal() {
+        return None;
+    }
+    let clockwise = facing.rotate_clockwise();
+    let counter_clockwise = facing.rotate_counter_clockwise();
+    Some([
+        (clockwise, counter_clockwise),
+        (counter_clockwise, clockwise),
+    ])
+}
+
 /// Returns the direction of the block supporting the wall sign.
 fn get_wall_support_direction(block: &Block, state_id: BlockStateId) -> Option<BlockDirection> {
     block.properties(state_id).and_then(|props| {
@@ -883,7 +988,8 @@ fn has_editable_text(text: &crate::block::entities::sign::Text) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::click_command;
+    use super::{click_command, should_open_text_editor, wall_hanging_attachment_directions};
+    use pumpkin_data::BlockDirection;
 
     #[test]
     fn click_command_reads_root_run_command_events() {
@@ -901,5 +1007,27 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn wall_hanging_support_checks_both_rotated_faces() {
+        // `WallHangingSignBlock.canPlace` checks clockwise and counter-clockwise neighbors
+        // (`WallHangingSignBlock.java:103-115`).
+        assert_eq!(
+            wall_hanging_attachment_directions(BlockDirection::North),
+            Some([
+                (BlockDirection::East, BlockDirection::West),
+                (BlockDirection::West, BlockDirection::East),
+            ])
+        );
+        assert_eq!(wall_hanging_attachment_directions(BlockDirection::Up), None);
+    }
+
+    #[test]
+    fn custom_sign_data_skips_editor_fallback() {
+        // `SignItem.updateCustomBlockEntityTag` opens the editor only after an unsuccessful
+        // superclass update (`SignItem.java:23-35`).
+        assert!(!should_open_text_editor(true));
+        assert!(should_open_text_editor(false));
     }
 }
