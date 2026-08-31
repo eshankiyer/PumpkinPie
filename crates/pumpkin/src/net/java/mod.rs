@@ -38,6 +38,7 @@ use pumpkin_protocol::{
     },
     ser::{NetworkWriteExt, WritingError},
 };
+use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::text::TextComponent;
 use pumpkin_util::version::JavaMinecraftVersion;
 use tokio::{
@@ -64,6 +65,7 @@ pub mod status;
 use arc_swap::ArcSwap;
 use pending::PendingConnection;
 
+use crate::entity::EntityBase;
 use crate::entity::player::Player;
 use crate::net::{GameProfile, PacketHandlerResult, PacketRateLimiter, PlayerConfig};
 use crate::plugin::api::events::world::chunk_send::ChunkSend;
@@ -111,6 +113,9 @@ pub struct JavaClient {
     pub keep_alive_id: AtomicCell<i64>,
     /// The last time we sent a keep alive packet.
     pub last_keep_alive_time: AtomicCell<Instant>,
+    /// Whether an accepted movement packet arrived since the client's last tick-end packet.
+    /// Vanilla resets this flag in `handleClientTickEnd` (`ServerGamePacketListenerImpl.java:2186-2192`).
+    received_movement_this_tick: AtomicBool,
     /// The last time any packet was received from the client.
     pub last_packet_time: AtomicCell<Instant>,
     /// Recent in-flight keep alive IDs with their sent timestamps.
@@ -124,6 +129,12 @@ pub struct JavaClient {
 pub enum OutgoingPacketType {
     Normal,
     HighPriority,
+}
+
+/// Vanilla clears known movement only when no movement packet was accepted in the tick
+/// (`ServerGamePacketListenerImpl.java:2188-2192`).
+const fn should_clear_known_movement(received_movement_this_tick: bool) -> bool {
+    !received_movement_this_tick
 }
 
 struct OutgoingPacket {
@@ -178,6 +189,7 @@ impl JavaClient {
             wait_for_keep_alive: AtomicBool::new(false),
             keep_alive_id: AtomicCell::new(0),
             last_keep_alive_time: AtomicCell::new(Instant::now()),
+            received_movement_this_tick: AtomicBool::new(false),
             last_packet_time: AtomicCell::new(Instant::now()),
             pending_keep_alives: std::sync::Mutex::new(Vec::new()),
             packet_sequence: AtomicI32::new(-1),
@@ -187,6 +199,28 @@ impl JavaClient {
 
     pub fn set_player(&self, player: Arc<Player>) {
         self.player.store(Arc::new(Some(player)));
+    }
+
+    /// Mirrors `handlePlayerKnownMovement`: accepted movement updates the player's known client
+    /// movement and marks the current client tick as having movement (`ServerGamePacketListenerImpl.java:2195-2201`).
+    fn handle_player_known_movement(&self, player: &Player, movement: Vector3<f64>) {
+        if movement.length_squared() > 1.0E-5 {
+            player.update_last_action_time();
+        }
+        player.get_entity().set_known_movement(movement);
+        self.received_movement_this_tick
+            .store(true, Ordering::Relaxed);
+    }
+
+    /// Mirrors `handleClientTickEnd`: a tick with no accepted movement publishes zero known
+    /// movement, then starts a fresh movement window (`ServerGamePacketListenerImpl.java:2186-2192`).
+    fn handle_client_tick_end(&self, player: &Player) {
+        if should_clear_known_movement(
+            self.received_movement_this_tick
+                .swap(false, Ordering::Relaxed),
+        ) {
+            player.get_entity().set_known_movement(Vector3::default());
+        }
     }
 
     #[expect(clippy::too_many_lines)]
@@ -845,7 +879,7 @@ impl JavaClient {
                 );
             }
             id if id == SClientTickEnd::to_id(version) => {
-                // TODO
+                self.handle_client_tick_end(player);
             }
             id if id == STestInstanceBlockAction::to_id(version) => {
                 self.handle_test_instance_block_action(
@@ -1190,5 +1224,16 @@ impl JavaClient {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_clear_known_movement;
+
+    #[test]
+    fn client_tick_end_clears_only_without_received_movement() {
+        assert!(should_clear_known_movement(false));
+        assert!(!should_clear_known_movement(true));
     }
 }

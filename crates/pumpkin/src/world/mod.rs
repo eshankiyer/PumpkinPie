@@ -7387,28 +7387,30 @@ impl World {
     /// This is the server-side `BlockItem.updateBlockEntityComponents` step
     /// (`BlockItem.java:101-106`), including the typed-data permission gate from
     /// `BlockItem.updateCustomBlockEntityTag` (`BlockItem.java:148-170`), which runs before the
-    /// placement callbacks.
+    /// placement callbacks. Returns whether an item component was successfully applied.
+    #[must_use]
     pub fn apply_block_entity_item_components(
         &self,
         block_pos: &BlockPos,
         item_stack: &pumpkin_data::item_stack::ItemStack,
         can_use_game_master_blocks: bool,
-    ) {
+    ) -> bool {
         let Some(entity) = self.get_block_entity(block_pos) else {
-            return;
+            return false;
         };
         let Some(entity) = crate::block::entities::apply_components_from_item_stack_with_permission(
             entity.as_ref(),
             item_stack,
             can_use_game_master_blocks,
         ) else {
-            return;
+            return false;
         };
         self.block_entities
             .entry(block_pos.chunk_position())
             .or_default()
             .insert(*block_pos, entity.clone());
         self.update_block_entity(&entity);
+        true
     }
 
     pub(crate) fn add_block_entity_nbt(&self, block_pos: BlockPos, nbt: &NbtCompound) {

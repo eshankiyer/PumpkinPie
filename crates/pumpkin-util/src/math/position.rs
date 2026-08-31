@@ -3,7 +3,7 @@ use super::{
     vector3::{self, Vector3},
 };
 use std::fmt;
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 
 use crate::math::vector2::Vector2;
 use num_traits::Euclid;
@@ -198,8 +198,21 @@ impl Iterator for OutwardIterator {
 }
 
 /// Represents a position in a 2D block grid on the XZ plane.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct ColumnPos(pub Vector2<i32>);
+
+/// `ChunkPos.hashCode` delegates to `ChunkPos.hash` (`ChunkPos.java:93-102`).
+impl Hash for ColumnPos {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let x_transform = 1_664_525i32
+            .wrapping_mul(self.0.x)
+            .wrapping_add(1_013_904_223);
+        let z_transform = 1_664_525i32
+            .wrapping_mul(self.0.y ^ (0xDEAD_BEEFu32 as i32))
+            .wrapping_add(1_013_904_223);
+        state.write_i32(x_transform ^ z_transform);
+    }
+}
 
 /// Represents a position in a 3D block grid.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -753,10 +766,45 @@ pub const fn pack_local_chunk_section(block_pos: &BlockPos) -> i16 {
 
 #[cfg(test)]
 mod test {
-    use crate::math::position::BlockPos;
+    use crate::math::position::{BlockPos, ColumnPos};
+    use crate::math::vector2::Vector2;
     use pumpkin_codecs::{assert_decode, assert_encode_success};
     use pumpkin_nbt::nbt_ops::NbtOps;
     use pumpkin_nbt::tag::NbtTag;
+    use std::hash::{Hash, Hasher};
+
+    #[derive(Default)]
+    struct I32Hasher(Option<i32>);
+
+    impl Hasher for I32Hasher {
+        fn finish(&self) -> u64 {
+            self.0.unwrap_or_default() as u32 as u64
+        }
+
+        fn write(&mut self, bytes: &[u8]) {
+            let mut value = [0; 4];
+            value.copy_from_slice(bytes);
+            self.0 = Some(i32::from_ne_bytes(value));
+        }
+
+        fn write_i32(&mut self, value: i32) {
+            self.0 = Some(value);
+        }
+    }
+
+    #[test]
+    fn column_pos_hash_matches_chunk_pos_hash() {
+        for (x, z) in [(0, 0), (12, -34), (i32::MIN, i32::MAX)] {
+            let mut hasher = I32Hasher::default();
+            ColumnPos(Vector2::new(x, z)).hash(&mut hasher);
+
+            let x_transform = 1_664_525i32.wrapping_mul(x).wrapping_add(1_013_904_223);
+            let z_transform = 1_664_525i32
+                .wrapping_mul(z ^ (0xDEAD_BEEFu32 as i32))
+                .wrapping_add(1_013_904_223);
+            assert_eq!(hasher.0, Some(x_transform ^ z_transform));
+        }
+    }
 
     #[test]
     fn codec() {

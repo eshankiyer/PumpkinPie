@@ -511,6 +511,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn walk_target_preserves_close_enough_distance() {
+        // `WalkTarget` stores the constructor value returned by `getCloseEnoughDist`
+        // (`WalkTarget.java:27-31,41-43`).
+        let target = WalkTarget::new(PositionTracker::of_block(BlockPos::new(1, 2, 3)), 1.0, 4);
+        assert_eq!(target.close_enough_dist, 4);
+    }
+
+    #[test]
     fn set_get_erase_roundtrip() {
         let mut store = MemoryStore::new();
         store.register(MemoryKeyId::LikedNoteblockCooldownTicks);

@@ -124,6 +124,7 @@ pub mod ladder;
 pub mod slime;
 pub mod spawner;
 pub mod test_block;
+pub mod test_instance_block;
 pub mod tnt;
 pub mod trial_spawner;
 pub mod vault;

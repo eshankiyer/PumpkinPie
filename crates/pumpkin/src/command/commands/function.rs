@@ -32,7 +32,9 @@ static ERROR_INSTANTIATION_FAILURE: CommandErrorType<2> = CommandErrorType::new(
     translation::java::COMMANDS_FUNCTION_INSTANTIATIONFAILURE,
 );
 
-struct FunctionSuggestionProvider;
+// Vanilla supplies the same function-name suggestions to `/function` and the execute-function
+// argument (`ExecuteCommand.java:652-656`, `FunctionCommand.java:160-164`).
+pub(super) struct FunctionSuggestionProvider;
 
 impl SuggestionProvider for FunctionSuggestionProvider {
     fn suggest<'a>(

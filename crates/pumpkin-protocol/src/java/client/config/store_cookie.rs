@@ -6,6 +6,10 @@ use crate::ClientPacket;
 use crate::ser::NetworkWriteExt;
 use pumpkin_util::version::JavaMinecraftVersion;
 
+// `ClientboundStoreCookiePacket.PAYLOAD_STREAM_CODEC` limits payloads to 5120 bytes
+// (`ClientboundStoreCookiePacket.java:15-16`).
+const MAX_PAYLOAD_SIZE: usize = 5120;
+
 #[java_packet(STORE_COOKIE)]
 /// Stores some arbitrary data on the client, which persists between server transfers.
 /// The Notchian (vanilla) client only accepts cookies of up to 5 KiB in size.
@@ -27,6 +31,11 @@ impl ClientPacket for CStoreCookie<'_> {
         mut write: impl std::io::Write,
         _version: &JavaMinecraftVersion,
     ) -> Result<(), crate::ser::WritingError> {
+        if self.payload.len() > MAX_PAYLOAD_SIZE {
+            return Err(crate::ser::WritingError::Message(format!(
+                "cookie payload exceeds {MAX_PAYLOAD_SIZE} bytes"
+            )));
+        }
         write.write_string(self.key)?;
         write.write_var_int(&crate::VarInt(self.payload.len() as i32))?;
         write.write_all(self.payload)?;

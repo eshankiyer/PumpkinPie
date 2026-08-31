@@ -234,9 +234,17 @@ impl ActiveTargetGoal {
                 }
                 result
             } else {
+                // Vanilla `getTargetSearchArea` inflates the mob's bounding box before
+                // `findTarget` queries entities in that area (`NearestAttackableTargetGoal.java:58-60,66-72`).
+                let search_box = mob_entity
+                    .living_entity
+                    .entity
+                    .bounding_box
+                    .load()
+                    .expand_all(follow_range);
                 let mut candidates: Vec<Arc<dyn EntityBase>> = world
-                    .get_nearby_entities(search_pos, follow_range)
-                    .into_values()
+                    .get_all_at_box(&search_box)
+                    .into_iter()
                     .filter(|entity| match (self.target_types, self.target_type) {
                         (Some(target_types), _) => {
                             target_types.contains(&entity.get_entity().entity_type)

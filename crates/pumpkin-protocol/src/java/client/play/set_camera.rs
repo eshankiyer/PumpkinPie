@@ -26,3 +26,15 @@ impl ClientPacket for CSetCamera {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::packet::MultiVersionJavaPacket;
+
+    #[test]
+    fn set_camera_uses_vanilla_26_2_packet_type_id() {
+        // ClientboundSetCameraPacket.java:29-31 returns the packet type represented here by the generated ID table.
+        assert_eq!(CSetCamera::to_id(JavaMinecraftVersion::V_26_2), 93);
+    }
+}

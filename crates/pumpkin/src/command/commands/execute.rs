@@ -5,17 +5,20 @@ use crate::command::argument_types::coordinates::block_pos::NOT_LOADED_ERROR_TYP
 use crate::command::argument_types::coordinates::rotation::RotationArgumentType;
 use crate::command::argument_types::coordinates::swizzle::SwizzleArgumentType;
 use crate::command::argument_types::coordinates::vec3::Vec3ArgumentType;
+use crate::command::argument_types::core::string::StringArgumentType;
 use crate::command::argument_types::entity::EntityArgumentType;
 use crate::command::argument_types::entity_anchor::EntityAnchorArgumentType;
 use crate::command::argument_types::heightmap::HeightmapTypeArgumentType;
 use crate::command::argument_types::resource::{ENTITY_TYPE_ARGUMENT, ResourceArgument};
 use crate::command::argument_types::resource_key::ResourceKeyArgument;
 use crate::command::context::command_context::CommandContext;
+use crate::command::errors::command_syntax_error::CommandSyntaxError;
 use crate::command::errors::error_types::CommandErrorType;
 use crate::command::node::attached::{CommandNodeId, NodeId};
 use crate::command::node::dispatcher::CommandDispatcher;
 use crate::command::node::tree::Tree;
 use crate::command::node::{RedirectModifier, Redirection};
+use crate::data::datapack::ExecuteFunctionError;
 use crate::entity::r#type::from_type;
 use pumpkin_util::PermissionLvl;
 use pumpkin_util::identifier::Identifier;
@@ -34,6 +37,16 @@ static ERROR_INVALID_DIMENSION: CommandErrorType<1> =
     CommandErrorType::new("argument.dimension.invalid", "argument.dimension.invalid");
 
 static DIMENSION_REGISTRY: &Identifier = &Identifier::vanilla_static("dimension");
+
+static ERROR_UNKNOWN_FUNCTION: CommandErrorType<1> = CommandErrorType::new(
+    pumpkin_data::translation::java::ARGUMENTS_FUNCTION_UNKNOWN,
+    pumpkin_data::translation::java::ARGUMENTS_FUNCTION_UNKNOWN,
+);
+
+static ERROR_FUNCTION_INSTANTIATION_FAILURE: CommandErrorType<2> = CommandErrorType::new(
+    pumpkin_data::translation::java::COMMANDS_EXECUTE_FUNCTION_INSTANTIATIONFAILURE,
+    pumpkin_data::translation::java::COMMANDS_EXECUTE_FUNCTION_INSTANTIATIONFAILURE,
+);
 
 fn execute_as_modifier<'a>(
     context: &'a CommandContext,
@@ -398,6 +411,58 @@ fn execute_unless_dimension_modifier<'a>(
     })
 }
 
+fn map_function_condition_error(error: ExecuteFunctionError) -> CommandSyntaxError {
+    match error {
+        ExecuteFunctionError::Unknown(function_id) => {
+            ERROR_UNKNOWN_FUNCTION.create_without_context(TextComponent::text(function_id))
+        }
+        ExecuteFunctionError::InstantiationFailure {
+            function_id,
+            reason,
+        } => ERROR_FUNCTION_INSTANTIATION_FAILURE
+            .create_without_context(TextComponent::text(function_id), reason),
+    }
+}
+
+const fn function_condition_matches(executed_count: usize, expected: bool) -> bool {
+    (executed_count != 0) == expected
+}
+
+/// Implements the function branch of vanilla `ExecuteCommand.scheduleFunctionConditionsAndTest`
+/// (`ExecuteCommand.java:652-657,1057-1113`) using the existing datapack function executor.
+fn execute_function_modifier<'a>(
+    context: &'a CommandContext,
+    expected: bool,
+) -> crate::command::node::RedirectModifierResult<'a> {
+    Box::pin(async move {
+        let name = StringArgumentType::get(context, "name")?;
+        let executed_count = context
+            .server()
+            .datapack_manager
+            .execute_function(context.server(), &context.source, name, None)
+            .await
+            .map_err(map_function_condition_error)?;
+
+        if function_condition_matches(executed_count, expected) {
+            Ok(vec![context.source.clone()])
+        } else {
+            Ok(vec![])
+        }
+    })
+}
+
+fn execute_if_function_modifier<'a>(
+    context: &'a CommandContext,
+) -> crate::command::node::RedirectModifierResult<'a> {
+    execute_function_modifier(context, true)
+}
+
+fn execute_unless_function_modifier<'a>(
+    context: &'a CommandContext,
+) -> crate::command::node::RedirectModifierResult<'a> {
+    execute_function_modifier(context, false)
+}
+
 fn execute_summon_modifier<'a>(
     context: &'a CommandContext,
 ) -> crate::command::node::RedirectModifierResult<'a> {
@@ -540,6 +605,18 @@ pub fn register(dispatcher: &mut CommandDispatcher, registry: &PermissionRegistr
                                 RedirectModifier::Custom(Arc::new(execute_if_dimension_modifier)),
                             ),
                     ),
+                )
+                .then(
+                    literal("function").then(
+                        argument("name", StringArgumentType::SingleWord)
+                            // Vanilla attaches FunctionCommand.SUGGEST_FUNCTION here
+                            // (`ExecuteCommand.java:652-656`).
+                            .suggests(super::function::FunctionSuggestionProvider)
+                            .redirect_with_modifier(
+                                Redirection::Root,
+                                RedirectModifier::Custom(Arc::new(execute_if_function_modifier)),
+                            ),
+                    ),
                 ),
         )
         .then(
@@ -574,6 +651,20 @@ pub fn register(dispatcher: &mut CommandDispatcher, registry: &PermissionRegistr
                                 )),
                             ),
                     ),
+                )
+                .then(
+                    literal("function").then(
+                        argument("name", StringArgumentType::SingleWord)
+                            // Vanilla attaches FunctionCommand.SUGGEST_FUNCTION here
+                            // (`ExecuteCommand.java:652-656`).
+                            .suggests(super::function::FunctionSuggestionProvider)
+                            .redirect_with_modifier(
+                                Redirection::Root,
+                                RedirectModifier::Custom(Arc::new(
+                                    execute_unless_function_modifier,
+                                )),
+                            ),
+                    ),
                 ),
         )
         .then(literal("summon").then(
@@ -601,5 +692,20 @@ fn set_redirects_to_execute(tree: &mut Tree, parent: NodeId, execute_id: Command
             tree[child_id].set_redirect(Some(Redirection::Local(NodeId::from(execute_id))));
         }
         set_redirects_to_execute(tree, child_id, execute_id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::function_condition_matches;
+
+    #[test]
+    fn function_condition_uses_nonzero_execution_result() {
+        // Vanilla tests the function callback result in `scheduleFunctionConditionsAndTest`
+        // (`ExecuteCommand.java:1094-1099`).
+        assert!(function_condition_matches(1, true));
+        assert!(!function_condition_matches(0, true));
+        assert!(function_condition_matches(0, false));
+        assert!(!function_condition_matches(1, false));
     }
 }

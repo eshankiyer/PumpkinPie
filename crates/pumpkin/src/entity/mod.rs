@@ -1916,6 +1916,9 @@ pub struct Entity {
     pub last_pos: AtomicCell<Vector3<f64>>,
     /// The last movement vector
     pub movement: AtomicCell<Vector3<f64>>,
+    /// Client-authoritative movement for the current tick, when this entity is a player.
+    /// Vanilla stores this separately from delta movement (`ServerPlayer.java:2196-2209`).
+    client_known_movement: AtomicCell<Option<Vector3<f64>>>,
     /// Vanilla `Entity.moveDist`/`nextStep` for non-living entities that use the shared movement
     /// emission path (`Entity.java:238,241,867-901`).
     movement_sound_distance: AtomicCell<f32>,
@@ -2312,6 +2315,10 @@ impl Entity {
             pos: AtomicCell::new(position),
             last_pos: AtomicCell::new(position),
             movement: AtomicCell::new(Vector3::default()),
+            // `ServerPlayer.lastKnownClientMovement` starts at zero (`ServerPlayer.java:273-274`).
+            client_known_movement: AtomicCell::new(
+                (entity_type == &EntityType::PLAYER).then_some(Vector3::default()),
+            ),
             movement_sound_distance: AtomicCell::new(0.0),
             movement_sound_next_step: AtomicCell::new(1.0),
             block_pos: AtomicCell::new(BlockPos(Vector3::new(floor_x, floor_y, floor_z))),
@@ -2414,11 +2421,20 @@ impl Entity {
         self.send_velocity();
     }
 
-    /// Vanilla `Entity.getKnownMovement` returns the current delta movement used by
-    /// projectile launch and absolute position synchronization (`Entity.java:4003-4005`).
+    /// Vanilla `Entity.getKnownMovement` returns player client movement or current delta
+    /// movement (`Entity.java:4003-4005`; `ServerPlayer.java:2196-2209`).
     #[must_use]
     pub fn get_known_movement(&self) -> Vector3<f64> {
-        self.velocity.load()
+        self.client_known_movement
+            .load()
+            .unwrap_or_else(|| self.velocity.load())
+    }
+
+    /// Records movement accepted from a player movement packet for the current client tick.
+    /// Vanilla updates `lastKnownClientMovement` in `ServerPlayer.setKnownMovement`
+    /// (`ServerPlayer.java:2207-2209`).
+    pub fn set_known_movement(&self, movement: Vector3<f64>) {
+        self.client_known_movement.store(Some(movement));
     }
 
     /// Vanilla `Entity.markHurt` (`Entity.java:1912-1914`) marks the entity so the server sends

@@ -413,3 +413,29 @@ pub fn register(dispatcher: &mut CommandDispatcher, registry: &PermissionRegistr
             ),
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{absolute_distance, horizontal_distance};
+    use pumpkin_util::math::position::BlockPos;
+
+    #[test]
+    fn locate_result_uses_horizontal_distance_for_structures_and_pois() {
+        // Mirrors `LocateCommand.showLocateResult`'s `dist` branch
+        // (`LocateCommand.java:174-177,190-193`).
+        let origin = BlockPos::new(0, 64, 0);
+        let target = BlockPos::new(3, 128, 4);
+
+        assert_eq!(horizontal_distance(&origin, &target), 5);
+    }
+
+    #[test]
+    fn locate_result_uses_three_dimensional_distance_for_biomes() {
+        // Mirrors `LocateCommand.showLocateResult`'s `distSqr` branch
+        // (`LocateCommand.java:174-177`).
+        let origin = BlockPos::new(0, 64, 0);
+        let target = BlockPos::new(2, 67, 6);
+
+        assert_eq!(absolute_distance(&origin, &target), 7);
+    }
+}

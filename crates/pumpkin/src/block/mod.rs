@@ -652,6 +652,9 @@ pub struct PlayerPlacedArgs<'a> {
     pub position: &'a BlockPos,
     pub direction: BlockDirection,
     pub player: &'a Player,
+    /// Whether `BlockItem.updateCustomBlockEntityTag` loaded the held item's typed data before
+    /// the placement callback (`SignItem.java:23-35`; `BlockItem.java:76-81,148-170`).
+    pub custom_data_applied: bool,
 }
 
 pub struct OnLandedUponArgs<'a> {
