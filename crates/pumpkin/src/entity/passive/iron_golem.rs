@@ -362,15 +362,16 @@ impl Mob for IronGolemEntity {
         Box::pin(async move {
             self.persistent_anger.tick().await;
 
-            // Vanilla `IronGolem.aiStep` calls `updatePersistentAnger(level, true)`
-            // (`IronGolem.java:125-127`), refreshing the grudge while a target remains present.
+            // Vanilla `NeutralMob.updatePersistentAnger` refreshes the timer whenever a target is
+            // present because IronGolem passes `stayAngryIfTargetPresent = true`
+            // (`NeutralMob.java:58-82`; `IronGolem.java:125-127`).
             let current_target = self.mob_entity.target.lock().await.clone();
             if let Some(target) = current_target {
                 let target_uuid = target.get_entity().entity_uuid;
                 if !self.persistent_anger.is_angry_at(target_uuid).await {
                     self.persistent_anger.set_angry_at(Some(target_uuid)).await;
-                    self.persistent_anger.start_timer();
                 }
+                self.persistent_anger.start_timer();
             }
 
             let attack_tick = self.attack_animation_tick.load(Ordering::Relaxed);

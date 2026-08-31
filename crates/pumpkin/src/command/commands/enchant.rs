@@ -166,7 +166,9 @@ async fn enchant_target(
         let msg = TextComponent::translate_cross(
             translation::java::COMMANDS_ENCHANT_FAILED_INCOMPATIBLE,
             translation::bedrock::COMMANDS_ENCHANT_CANTENCHANT,
-            [item.item.translated_name()],
+            // Vanilla `EnchantCommand` uses `ItemStack.getHoverName` for this error
+            // (`EnchantCommand.java:83`; `ItemStack.java:803-806`).
+            [item.get_hover_name()],
         );
         return Err(CommandError::CommandFailed(msg));
     }
@@ -177,7 +179,9 @@ async fn enchant_target(
         let msg = TextComponent::translate_cross(
             translation::java::COMMANDS_ENCHANT_FAILED_INCOMPATIBLE,
             translation::bedrock::COMMANDS_ENCHANT_CANTENCHANT,
-            [item.item.translated_name()],
+            // Vanilla `EnchantCommand` uses `ItemStack.getHoverName` for this error
+            // (`EnchantCommand.java:83`; `ItemStack.java:803-806`).
+            [item.get_hover_name()],
         );
         return Err(CommandError::CommandFailed(msg));
     }

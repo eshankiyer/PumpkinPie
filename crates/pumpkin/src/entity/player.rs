@@ -820,6 +820,9 @@ pub struct Player {
     pub delayed_mining_start_time: AtomicI32,
     pub start_mining_time: AtomicI32,
     pub tick_counter: AtomicI32,
+    /// Vanilla `Player.lastLevelUpTime`, used to throttle the level-up sound
+    /// (`Player.java:1561-1574`).
+    last_level_up_time: AtomicI32,
     /// Vanilla `ServerPlayer.levitationStartPos` (`ServerPlayer.java:254`): the position at
     /// which the player's current levitation effect began, `None` while not levitating.
     pub levitation_start_pos: AtomicCell<Option<Vector3<f64>>>,
@@ -1273,6 +1276,8 @@ impl Player {
             delayed_mining_start_time: AtomicI32::new(0),
             mining_pos: Mutex::new(BlockPos::ZERO),
             mining_action_lock: Mutex::new(()),
+            // Vanilla initializes `Player.lastLevelUpTime` to zero (`Player.java:161-167`).
+            last_level_up_time: AtomicI32::new(0),
             abilities: Mutex::new(abilities),
             stats: Mutex::new(statistics::Statistics::default()),
             recipe_book: Mutex::new(ServerRecipeBook::new()),
@@ -6343,6 +6348,8 @@ impl Player {
             )
             .await;
         }
+
+        self.maybe_play_level_up_sound(added_levels, new_level);
     }
 
     /// Set the player's experience points directly. Returns `true` if successful.
@@ -6391,6 +6398,36 @@ impl Player {
         let progress = experience::progress_in_level(new_points, new_level);
 
         self.set_experience(new_level, progress, new_points).await;
+
+        // Vanilla `giveExperiencePoints` calls `giveExperienceLevels` once per crossed level,
+        // so use the first fifth level crossed for its level-up sound (`Player.java:1523-1543`).
+        if let Some(sound_level) = first_fifth_level_crossed(current_level, new_level, added_points)
+        {
+            self.maybe_play_level_up_sound(1, sound_level);
+        }
+    }
+
+    /// Emits the sound used by `Player.giveExperienceLevels` when its level-up throttle allows it
+    /// (`Player.java:1561-1574`).
+    fn maybe_play_level_up_sound(&self, added_levels: i32, level: i32) {
+        let current_tick = self.tick_counter.load(Ordering::Relaxed);
+        if let Some(volume) = level_up_sound_volume(
+            added_levels,
+            level,
+            self.last_level_up_time.load(Ordering::Relaxed),
+            current_tick,
+        ) {
+            let position = self.position();
+            self.world().play_sound_fine(
+                Sound::EntityPlayerLevelup,
+                SoundCategory::Players,
+                &position,
+                volume,
+                1.0,
+            );
+            self.last_level_up_time
+                .store(current_tick, Ordering::Relaxed);
+        }
     }
 
     pub async fn apply_mending_from_xp(&self, mut xp: i32) -> i32 {
@@ -9223,6 +9260,47 @@ const fn experience_level_after_delta(current_level: i32, added_levels: i32) -> 
     if level > 0 { level } else { 0 }
 }
 
+/// Returns the vanilla level-up sound volume when `giveExperienceLevels` should emit it
+/// (`Player.java:1561-1574`).
+const fn level_up_sound_volume(
+    added_levels: i32,
+    level: i32,
+    last_level_up_time: i32,
+    tick_count: i32,
+) -> Option<f32> {
+    if added_levels > 0 && level % 5 == 0 && last_level_up_time < tick_count - 100 {
+        Some((if level > 30 { 1.0 } else { level as f32 / 30.0 }) * 0.75)
+    } else {
+        None
+    }
+}
+
+/// Finds the first fifth level reached by point XP; vanilla checks each crossed level separately
+/// (`Player.java:1528-1543`).
+const fn first_fifth_level_crossed(
+    current_level: i32,
+    new_level: i32,
+    added_points: i32,
+) -> Option<i32> {
+    if added_points <= 0 || new_level <= current_level {
+        return None;
+    }
+
+    let next_level = current_level.saturating_add(1);
+    let remainder = next_level.rem_euclid(5);
+    let first_fifth_level = if remainder == 0 {
+        next_level
+    } else {
+        next_level.saturating_add(5 - remainder)
+    };
+
+    if first_fifth_level <= new_level {
+        Some(first_fifth_level)
+    } else {
+        None
+    }
+}
+
 /// Vanilla `Player.getFireImmuneTicks` returns twenty ticks (`Player.java:406-410`).
 const fn player_fire_immune_ticks() -> i32 {
     20
@@ -9242,12 +9320,13 @@ mod tests {
         Player, ability_invulnerability_blocks, attack_charge_ready, attack_range_is_in_range,
         attack_speed_for_item, bedrock_inventory_slot, can_harm_player_teams,
         can_start_fall_flying, can_use_game_master_blocks_state, damage_dealt_stat_points,
-        experience_level_after_delta, extract_parrot_variant, is_crossbow_held_projectile,
-        is_crossbow_inventory_projectile, is_valid_for_forced_respawn, is_vanishing_cursed,
-        may_use_item_at_allowed, player_death_experience_reward, player_fire_immune_ticks,
-        player_movement_emits_events, player_on_climbable, read_last_death_location,
-        read_root_vehicle, restore_creative_interaction_count, sleeping_long_enough,
-        write_last_death_location, write_root_vehicle,
+        experience_level_after_delta, extract_parrot_variant, first_fifth_level_crossed,
+        is_crossbow_held_projectile, is_crossbow_inventory_projectile, is_valid_for_forced_respawn,
+        is_vanishing_cursed, level_up_sound_volume, may_use_item_at_allowed,
+        player_death_experience_reward, player_fire_immune_ticks, player_movement_emits_events,
+        player_on_climbable, read_last_death_location, read_root_vehicle,
+        restore_creative_interaction_count, sleeping_long_enough, write_last_death_location,
+        write_root_vehicle,
     };
     use pumpkin_data::Block;
     use pumpkin_data::attributes::Attributes;
@@ -9315,6 +9394,27 @@ mod tests {
         assert_eq!(experience_level_after_delta(i32::MAX, 1), i32::MAX);
         assert_eq!(experience_level_after_delta(3, -10), 0);
         assert_eq!(experience_level_after_delta(3, 2), 5);
+    }
+
+    #[test]
+    fn level_up_sound_matches_vanilla_thresholds() {
+        // `Player.giveExperienceLevels` gates the sound by positive changes, fifth levels,
+        // and a 100-tick cooldown (`Player.java:1561-1574`).
+        assert_eq!(level_up_sound_volume(1, 5, 0, 101), Some(0.125));
+        assert_eq!(level_up_sound_volume(1, 6, 0, 101), None);
+        assert_eq!(level_up_sound_volume(-1, 5, 0, 101), None);
+        assert_eq!(level_up_sound_volume(1, 5, 1, 101), None);
+        assert_eq!(level_up_sound_volume(1, 35, 0, 101), Some(0.75));
+    }
+
+    #[test]
+    fn point_xp_uses_first_fifth_level_crossed() {
+        // `Player.giveExperiencePoints` advances levels one at a time
+        // (`Player.java:1528-1543`).
+        assert_eq!(first_fifth_level_crossed(4, 10, 100), Some(5));
+        assert_eq!(first_fifth_level_crossed(5, 10, 100), Some(10));
+        assert_eq!(first_fifth_level_crossed(5, 5, 100), None);
+        assert_eq!(first_fifth_level_crossed(10, 5, -100), None);
     }
 
     fn stack_with_enchantment(
