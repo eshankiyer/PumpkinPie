@@ -338,8 +338,11 @@ impl BedrockClient {
                         }
 
                         if !cooldown_active {
+                            // Vanilla `Item.use` starts consumables, shields, and kinetic weapons
+                            // (`Item.java:189-209`), with the long duration from `Item.java:310-316`.
                             if held.get_data_component::<ConsumableImpl>().is_some()
                                 || held.get_data_component::<BlocksAttacksImpl>().is_some()
+                                || held.get_data_component::<KineticWeaponImpl>().is_some()
                             {
                                 if let Some(food) = held.get_data_component::<FoodImpl>() {
                                     if player.abilities.lock().await.invulnerable

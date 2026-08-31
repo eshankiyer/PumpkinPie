@@ -6,7 +6,7 @@ use std::{
 use pumpkin_data::{
     data_component_impl::{
         BlocksAttacksImpl, ConsumableImpl, ConsumeAnimation, EquipmentSlot, EquippableImpl,
-        FoodImpl,
+        FoodImpl, KineticWeaponImpl,
     },
     item_stack::ItemStack,
 };

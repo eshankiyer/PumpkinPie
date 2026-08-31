@@ -114,8 +114,12 @@ impl JavaClient {
     ) {
         let inventory = player.inventory();
 
+        // Vanilla `Item.use` starts consumables, shields, and kinetic weapons
+        // (`Item.java:189-209`); all three use the stack's long-use duration
+        // (`Item.java:310-316`).
         if held.get_data_component::<ConsumableImpl>().is_some()
             || held.get_data_component::<BlocksAttacksImpl>().is_some()
+            || held.get_data_component::<KineticWeaponImpl>().is_some()
         {
             // If its food we want to make sure we can actually consume it
             if let Some(food) = held.get_data_component::<FoodImpl>() {

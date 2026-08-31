@@ -287,12 +287,6 @@ impl ItemBehaviour for SpearItem {
                 return;
             };
 
-            let stack = player.inventory().held_item().await;
-            player
-                .living_entity
-                .set_active_hand(pumpkin_util::Hand::Right, stack, USE_DURATION)
-                .await;
-
             // `KineticWeapon.makeSound` (`KineticWeapon.java:86-91`) plays at the user, for
             // everyone, at volume and pitch 1.0.
             player

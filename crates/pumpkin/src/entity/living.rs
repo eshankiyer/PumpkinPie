@@ -7381,9 +7381,18 @@ fn consumable_clears_all_effects(item: &ItemStack) -> bool {
 fn consumable_remainder(item: &ItemStack) -> Option<&'static Item> {
     item.get_data_component::<UseRemainderImpl>()?;
 
+    // Vanilla item registrations attach `usingConvertsTo` to these seven consumables
+    // (`Items.java:1041-1043,1246-1249,1360-1367,1579,1619-1622,1791-1798,1919-1922`).
     match item.item.id {
+        id if id == Item::BEETROOT_SOUP.id
+            || id == Item::MUSHROOM_STEW.id
+            || id == Item::RABBIT_STEW.id
+            || id == Item::SUSPICIOUS_STEW.id =>
+        {
+            Some(&Item::BOWL)
+        }
+        id if id == Item::HONEY_BOTTLE.id || id == Item::POTION.id => Some(&Item::GLASS_BOTTLE),
         id if id == Item::MILK_BUCKET.id => Some(&Item::BUCKET),
-        id if id == Item::POTION.id => Some(&Item::GLASS_BOTTLE),
         _ => None,
     }
 }
@@ -7871,6 +7880,29 @@ mod milk_bucket_tests {
         assert_eq!(
             consumable_remainder(&milk).map(|item| item.id),
             Some(Item::BUCKET.id)
+        );
+    }
+
+    #[test]
+    fn container_consumables_return_their_vanilla_remainders() {
+        // Vanilla `usingConvertsTo` registrations (`Items.java:1041-1043,1579,1619-1622,
+        // 1791-1798,1919-1922`) return a bowl for stews and a glass bottle for honey.
+        for item in [
+            &Item::BEETROOT_SOUP,
+            &Item::MUSHROOM_STEW,
+            &Item::RABBIT_STEW,
+            &Item::SUSPICIOUS_STEW,
+        ] {
+            assert_eq!(
+                consumable_remainder(&ItemStack::new(1, item)).map(|remainder| remainder.id),
+                Some(Item::BOWL.id)
+            );
+        }
+
+        assert_eq!(
+            consumable_remainder(&ItemStack::new(1, &Item::HONEY_BOTTLE))
+                .map(|remainder| remainder.id),
+            Some(Item::GLASS_BOTTLE.id)
         );
     }
 
