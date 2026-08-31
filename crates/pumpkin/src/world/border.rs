@@ -20,6 +20,9 @@ pub struct Worldborder {
     /// `WorldBorder.MovingBorderExtent`). `old_diameter`/`new_diameter` stay pure
     /// lerp endpoints for the client packets, matching vanilla's `from`/`to`.
     current_diameter: f64,
+    // Vanilla MovingBorderExtent stores previousSize before calculating size on each update,
+    // and zero-partial-tick bounds read that previous value (WorldBorder.java:353-385,431-436).
+    previous_diameter: f64,
     lerp_ticks_total: i64,
     lerp_ticks_remaining: i64,
     pub speed: i64,
@@ -46,6 +49,7 @@ impl Worldborder {
             old_diameter: diameter,
             new_diameter: diameter,
             current_diameter: diameter,
+            previous_diameter: diameter,
             lerp_ticks_total: 0,
             lerp_ticks_remaining: 0,
             speed,
@@ -78,6 +82,7 @@ impl Worldborder {
                 settings.size
             },
             current_diameter: settings.size,
+            previous_diameter: settings.size,
             lerp_ticks_total: if lerping { settings.lerp_time } else { 0 },
             lerp_ticks_remaining: if lerping { settings.lerp_time } else { 0 },
             speed: settings.lerp_time,
@@ -147,6 +152,9 @@ impl Worldborder {
         // Vanilla `WorldBorderCommand.setSize` lerps from `border.getSize()`, the
         // current interpolated size, not from the previous lerp target.
         self.old_diameter = self.current_diameter;
+        // MovingBorderExtent initializes previousSize from its calculated size
+        // (WorldBorder.java:340-350).
+        self.previous_diameter = self.current_diameter;
         self.new_diameter = diameter;
 
         // A zero (or negative) tick duration has nothing to interpolate over --
@@ -184,7 +192,14 @@ impl Worldborder {
     /// Per-tick lerp update, mirroring vanilla `WorldBorder.MovingBorderExtent::update`.
     /// A no-op once the lerp has completed (`lerp_ticks_remaining == 0`).
     pub fn tick(&mut self, _world: &World) {
+        self.update_lerp();
+    }
+
+    // Vanilla MovingBorderExtent.update assigns previousSize before calculateSize, then
+    // returns the static extent at completion (WorldBorder.java:431-436).
+    fn update_lerp(&mut self) {
         if self.lerp_ticks_remaining > 0 {
+            self.previous_diameter = self.current_diameter;
             self.lerp_ticks_remaining -= 1;
             self.current_diameter = if self.lerp_ticks_remaining > 0 {
                 let progress = (self.lerp_ticks_total - self.lerp_ticks_remaining) as f64
@@ -222,7 +237,14 @@ impl Worldborder {
     /// the half-diameter offsets from the center, each clamped to
     /// `±absoluteMaxSize` (`WorldBorder.StaticBorderExtent.updateBox`).
     fn bounds(&self) -> (f64, f64, f64, f64) {
-        let half = self.current_diameter / 2.0;
+        // Vanilla getMin/MaxX/Z with deltaPartialTick == 0 use previousSize while a
+        // MovingBorderExtent is active (WorldBorder.java:353-385).
+        let diameter = if self.lerp_ticks_remaining > 0 {
+            self.previous_diameter
+        } else {
+            self.current_diameter
+        };
+        let half = diameter / 2.0;
         let limit = f64::from(self.portal_teleport_boundary);
         (
             clamp(self.center_x - half, -limit, limit),
@@ -474,6 +496,30 @@ mod tests {
             1.0,
         );
         assert!(collision_time.is_some_and(|time| (time - 0.2).abs() < 1.0e-12));
+    }
+
+    #[test]
+    fn moving_bounds_use_the_previous_size_at_zero_partial_tick() {
+        // Vanilla MovingBorderExtent.update and getMinX(0) use previousSize for the
+        // current server query (WorldBorder.java:353-385,431-436).
+        let mut border = border(0.0, 16.0);
+        border.old_diameter = 16.0;
+        border.new_diameter = 32.0;
+        border.lerp_ticks_total = 4;
+        border.lerp_ticks_remaining = 4;
+
+        border.update_lerp();
+        assert_eq!(border.size(), 20.0);
+        assert_eq!(border.min_x(), -8.0);
+
+        border.update_lerp();
+        assert_eq!(border.size(), 24.0);
+        assert_eq!(border.min_x(), -10.0);
+
+        border.update_lerp();
+        border.update_lerp();
+        assert_eq!(border.size(), 32.0);
+        assert_eq!(border.min_x(), -16.0);
     }
 
     #[test]

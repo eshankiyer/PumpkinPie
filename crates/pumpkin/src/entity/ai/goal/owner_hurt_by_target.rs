@@ -38,7 +38,9 @@ impl Goal for OwnerHurtByTargetGoal {
                 return false;
             };
 
-            let attacked_time = owner.living_entity.last_attacked_time.load(Relaxed);
+            // `LivingEntity.getLastHurtByMobTimestamp` is the owner's hurt timestamp
+            // (`LivingEntity.java:629-631`).
+            let attacked_time = owner.living_entity.get_last_hurt_by_mob_timestamp();
             if attacked_time == self.last_attacked_time {
                 return false;
             }
@@ -88,7 +90,7 @@ impl Goal for OwnerHurtByTargetGoal {
             if let Some(owner_uuid) = mob.get_owner_uuid() {
                 let world = mob_entity.living_entity.entity.world.load_full();
                 if let Some(owner) = world.get_player_by_uuid(owner_uuid) {
-                    self.last_attacked_time = owner.living_entity.last_attacked_time.load(Relaxed);
+                    self.last_attacked_time = owner.living_entity.get_last_hurt_by_mob_timestamp();
                 }
             }
         })

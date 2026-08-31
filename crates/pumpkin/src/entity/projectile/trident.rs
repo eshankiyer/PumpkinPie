@@ -177,8 +177,11 @@ impl TridentEntity {
             return true;
         }
 
-        // Skip owner for initial frames (5 ticks)
-        if Some(other_ent.entity_id) == self.owner_id && self_ent.age.load(Ordering::Relaxed) < 5 {
+        // `Projectile.canHitEntity` excludes the owner until `leftOwner` is set
+        // (`Projectile.java:317-324`).
+        if Some(other_ent.entity_id) == self.owner_id
+            && !self_ent.projectile_left_owner.load(Ordering::Relaxed)
+        {
             return true;
         }
 
@@ -371,7 +374,15 @@ impl TridentEntity {
                 continue;
             }
 
-            let ebb = cand.get_entity().bounding_box.load().expand(0.3, 0.3, 0.3);
+            // `ProjectileUtil.getEntityHitResult` inflates the target by its pick radius
+            // (`ProjectileUtil.java:109-120`).
+            let pick_radius =
+                crate::entity::projectile::projectile_target_pick_radius(cand.as_ref());
+            let ebb =
+                cand.get_entity()
+                    .bounding_box
+                    .load()
+                    .expand(pick_radius, pick_radius, pick_radius);
             if let Some(t) = calculate_ray_intersection(&start_pos, &velocity, &ebb)
                 && t < closest_t
             {
@@ -544,6 +555,10 @@ impl EntityBase for TridentEntity {
             velocity = velocity.multiply(inertia, inertia, inertia);
 
             entity.velocity.store(velocity);
+
+            // `Projectile.checkLeftOwner` runs before `ThrownTrident` scans for a hit
+            // (`Projectile.java:105-127`; `ThrownTrident.java:63-97`).
+            crate::entity::projectile::check_left_owner(entity, self.owner_id, velocity).await;
 
             // Update rotation based on velocity
             let len = velocity.horizontal_length();

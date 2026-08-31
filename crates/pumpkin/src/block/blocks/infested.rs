@@ -1,12 +1,10 @@
-use std::sync::Arc;
-
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{BlockId, BlockStateId};
 use pumpkin_util::GameMode;
 
 use crate::block::{BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, OnPlaceArgs};
-use crate::entity::Entity;
+use crate::entity::r#type::from_type;
 use pumpkin_data::block_properties::{BlockProperties, PaleOakWoodLikeProperties};
 
 pub struct InfestedBlock;
@@ -75,9 +73,19 @@ impl BlockBehaviour for InfestedBlock {
             let mut spawn_pos = args.position.0.to_f64();
             spawn_pos.x += 0.5;
             spawn_pos.z += 0.5;
-            let entity = Entity::new(args.world.clone(), spawn_pos, &EntityType::SILVERFISH);
+            let entity = from_type(
+                &EntityType::SILVERFISH,
+                spawn_pos,
+                args.world,
+                uuid::Uuid::new_v4(),
+            );
 
-            args.world.spawn_entity(Arc::new(entity)).await;
+            args.world.spawn_entity(entity.clone()).await;
+            // `InfestedBlock.spawnInfestation` (`InfestedBlock.java:51-57`) adds the silverfish
+            // and then invokes `Mob.spawnAnim`.
+            if let Some(mob) = entity.get_mob() {
+                mob.spawn_anim();
+            }
         })
     }
 }

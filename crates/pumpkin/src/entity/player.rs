@@ -204,12 +204,13 @@ impl BedrockPlayer<'_> {
         self.client_data().map(|d| d.graphics_mode)
     }
 }
+use pumpkin_data::BlockDirection;
 use pumpkin_data::HorizontalFacingExt;
 use pumpkin_data::attributes::Attributes;
 use pumpkin_data::block_properties::{BlockProperties, HorizontalFacing};
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::data_component_impl::{
-    AttributeModifiersImpl, EnchantmentsImpl, MinimumAttackChargeImpl, Operation,
+    AttackRangeImpl, AttributeModifiersImpl, EnchantmentsImpl, MinimumAttackChargeImpl, Operation,
 };
 use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, ToolImpl, WeaponImpl};
 use pumpkin_data::effect::StatusEffect;
@@ -1848,20 +1849,12 @@ impl Player {
 
         let attack_speed = base_attack_speed + add_speed;
 
-        // `Player.cannotAttackWithItem` rejects spear attacks until the optimistic attack
-        // strength reaches the item's minimum charge (`Player.java:1820-1824`); spear items set
-        // that component to 1.0 (`Item.java:516-527`). The generated component is a marker, so
-        // the value is taken from the vanilla spear definition.
-        if item_stack
-            .get_data_component::<MinimumAttackChargeImpl>()
-            .is_some()
-            && !attack_charge_ready(
-                self.last_attacked_ticks.load(Ordering::Acquire),
-                5,
-                attack_speed,
-                1.0,
-            )
-        {
+        // `ServerGamePacketListenerImpl.handleAttack` applies
+        // `Player.cannotAttackWithItem` before calling `Player.attack`
+        // (`ServerGamePacketListenerImpl.java:1807-1819`). Keep the same gate here for
+        // non-packet callers, using the item's current attack speed
+        // (`Player.java:1816-1824`).
+        if self.cannot_attack_with_item(&item_stack, 5) {
             return;
         }
 
@@ -2173,6 +2166,25 @@ impl Player {
             if config.knockback {
                 combat::handle_knockback(attacker_entity, victim.as_ref(), knockback_strength);
             }
+        }
+
+        if extra_ench_damage > 0.0 {
+            // `Player.attackVisualEffects` calls `magicCrit` for a positive magic boost
+            // (`Player.java:1060-1075`); `ServerPlayer.magicCrit` broadcasts animation 5
+            // (`ServerPlayer.java:1734-1737`).
+            let java_packet = CEntityAnimation::new(
+                victim_entity.entity_id.into(),
+                Animation::MagicCriticaleffect,
+            );
+            let bedrock_packet = pumpkin_protocol::bedrock::server::animate::SAnimate {
+                action: pumpkin_protocol::bedrock::server::animate::AnimateAction::MagicCriticalHit,
+                runtime_entity_id: VarULong(victim_entity.entity_id as u64),
+                data: 0.0,
+                swing_source: None,
+            };
+            world
+                .broadcast_editioned(&java_packet, &bedrock_packet)
+                .await;
         }
 
         // NOTE: TOCTOU race condition in single-player context.
@@ -2936,8 +2948,26 @@ impl Player {
         self.living_entity.entity.set_fall_flying(true).await;
     }
 
+    /// Mirrors `Player.makeStuckInBlock` (`Player.java:1515-1520`): flying players avoid the
+    /// movement multiplier, but every player resets the current impulse context.
+    pub async fn make_stuck_in_block(&self, state: &BlockState, multiplier: Vector3<f64>) {
+        self.living_entity.try_reset_current_impulse_context();
+        if !self.is_flying().await {
+            self.living_entity
+                .entity
+                .slow_movement(state, multiplier)
+                .await;
+        }
+    }
+
     fn is_sleeping(&self) -> bool {
         self.sleeping_pos.load().is_some()
+    }
+
+    /// Vanilla `Player.isSleepingLongEnough` (`Player.java:1355-1357`) gates night skipping
+    /// after the player's sleep timer reaches 100 ticks.
+    pub fn is_sleeping_long_enough(&self) -> bool {
+        self.is_sleeping() && sleeping_long_enough(self.sleeping_since.load())
     }
 
     async fn is_swimming(&self, flying: bool) -> bool {
@@ -3695,6 +3725,21 @@ impl Player {
         let progress_per_tick = tps / attack_speed;
         let progress = x / progress_per_tick;
         progress.clamp(0.0, 1.0)
+    }
+
+    /// `Player.cannotAttackWithItem` rejects an attack while the optimistic charge is below the
+    /// item's minimum (`Player.java:1816-1824`). `MinimumAttackCharge` is a marker in Pumpkin's
+    /// generated item data; vanilla spear definitions provide the value `1.0`.
+    pub fn cannot_attack_with_item(&self, item_stack: &ItemStack, tolerance: u32) -> bool {
+        let required_strength = item_stack
+            .get_data_component::<MinimumAttackChargeImpl>()
+            .map_or(0.0, |_| 1.0);
+        !attack_charge_ready(
+            self.last_attacked_ticks.load(Ordering::Acquire),
+            tolerance,
+            attack_speed_for_item(item_stack),
+            required_strength,
+        )
     }
 
     pub async fn fire_packet_sent<P: Send + Sync + std::any::Any>(
@@ -4850,6 +4895,56 @@ impl Player {
     ) -> bool {
         let max_range = self.entity_interaction_range() + additional_range;
         target_bounds.squared_magnitude(self.eye_position()) < max_range * max_range
+    }
+
+    /// Mirrors `Player.isWithinAttackRange` (`Player.java:2010-2012`) and the
+    /// `AttackRange` effective bounds (`AttackRange.java:88-116`).
+    pub fn is_within_attack_range(
+        &self,
+        weapon_item: &ItemStack,
+        target_bounds: BoundingBox,
+        buffer: f64,
+    ) -> bool {
+        let (min_reach, max_reach, hitbox_margin) = weapon_item
+            .get_data_component::<AttackRangeImpl>()
+            .map_or((0.0, self.entity_interaction_range(), 0.0), |range| {
+                if self.gamemode.load() == GameMode::Creative {
+                    (
+                        f64::from(range.min_creative_reach),
+                        f64::from(range.max_creative_reach),
+                        f64::from(range.hitbox_margin),
+                    )
+                } else {
+                    (
+                        f64::from(range.min_reach),
+                        f64::from(range.max_reach),
+                        f64::from(range.hitbox_margin),
+                    )
+                }
+            });
+        let distance = target_bounds.squared_magnitude(self.eye_position()).sqrt();
+        attack_range_is_in_range(distance, min_reach, max_reach, hitbox_margin, buffer)
+    }
+
+    /// Mirrors `Player.mayUseItemAt` (`Player.java:1616-1623`): unrestricted players may use
+    /// the item anywhere, while adventure players must have a matching support-block predicate.
+    pub async fn may_use_item_at(
+        &self,
+        position: &BlockPos,
+        direction: BlockDirection,
+        item_stack: &ItemStack,
+    ) -> bool {
+        let may_build = self.abilities.lock().await.allow_modify_world;
+        if may_use_item_at_allowed(may_build, false) {
+            return true;
+        }
+
+        let target = position.offset(direction.opposite().to_offset());
+        let (block, state) = self.world().get_block_and_state(&target);
+        may_use_item_at_allowed(
+            false,
+            item_stack.can_place_on_block_in_adventure_mode(block, state),
+        )
     }
 
     pub fn can_interact_with_block_at(&self, position: &BlockPos, additional_range: f64) -> bool {
@@ -7803,6 +7898,24 @@ fn player_death_experience_reward(level: i32, keep_inventory: bool, spectator: b
     }
 }
 
+fn sleeping_long_enough(sleeping_since: Option<u8>) -> bool {
+    sleeping_since.is_some_and(|since| since >= 100)
+}
+
+const fn may_use_item_at_allowed(may_build: bool, can_place_on_block: bool) -> bool {
+    may_build || can_place_on_block
+}
+
+fn attack_range_is_in_range(
+    distance: f64,
+    min_reach: f64,
+    max_reach: f64,
+    hitbox_margin: f64,
+    buffer: f64,
+) -> bool {
+    distance >= min_reach - hitbox_margin - buffer && distance <= max_reach + hitbox_margin + buffer
+}
+
 /// Vanilla `CUSTOM.damage_dealt`: the target's actual health loss times ten, rounded to the
 /// nearest point (`Math.round`); no loss (or a health gain) awards nothing.
 fn damage_dealt_stat_points(health_before: f32, health_after: f32) -> i32 {
@@ -7830,6 +7943,22 @@ fn attack_charge_ready(
     required_strength <= 0.0
         || (f64::from(attack_ticks) + f64::from(tolerance)) / (20.0 / attack_speed)
             >= required_strength
+}
+
+/// Matches the attack-speed portion of `Player.getCurrentItemAttackStrengthDelay` and
+/// `Player.attack` (`Player.java:1816-1824`; `Player.java:953-958`).
+fn attack_speed_for_item(item_stack: &ItemStack) -> f64 {
+    let mut add_speed = if item_stack.is_empty() { -2.4 } else { 0.0 };
+    if let Some(modifiers) = item_stack.get_data_component::<AttributeModifiersImpl>() {
+        for item_modifier in modifiers.attribute_modifiers.iter() {
+            if item_modifier.operation == Operation::AddValue
+                && item_modifier.id == "minecraft:base_attack_speed"
+            {
+                add_speed = item_modifier.amount;
+            }
+        }
+    }
+    4.0 + add_speed
 }
 
 /// `Player.extractParrotVariant` accepts only a parrot entity tag and clamps the variant through
@@ -9031,16 +9160,20 @@ const fn player_fire_immune_ticks() -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        Player, ability_invulnerability_blocks, attack_charge_ready, bedrock_inventory_slot,
-        can_harm_player_teams, can_start_fall_flying, can_use_game_master_blocks_state,
-        damage_dealt_stat_points, experience_level_after_delta, extract_parrot_variant,
-        is_crossbow_held_projectile, is_crossbow_inventory_projectile, is_valid_for_forced_respawn,
-        is_vanishing_cursed, player_death_experience_reward, player_fire_immune_ticks,
-        read_last_death_location, read_root_vehicle, write_last_death_location, write_root_vehicle,
+        Player, ability_invulnerability_blocks, attack_charge_ready, attack_range_is_in_range,
+        attack_speed_for_item, bedrock_inventory_slot, can_harm_player_teams,
+        can_start_fall_flying, can_use_game_master_blocks_state, damage_dealt_stat_points,
+        experience_level_after_delta, extract_parrot_variant, is_crossbow_held_projectile,
+        is_crossbow_inventory_projectile, is_valid_for_forced_respawn, is_vanishing_cursed,
+        may_use_item_at_allowed, player_death_experience_reward, player_fire_immune_ticks,
+        read_last_death_location, read_root_vehicle, sleeping_long_enough,
+        write_last_death_location, write_root_vehicle,
     };
     use pumpkin_data::Block;
     use pumpkin_data::attributes::Attributes;
     use pumpkin_data::damage::DamageType;
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
     use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
     use pumpkin_util::math::position::BlockPos;
     use uuid::Uuid;
@@ -9180,6 +9313,33 @@ mod tests {
         assert_eq!(player_death_experience_reward(20, false, false), 100);
         assert_eq!(player_death_experience_reward(5, true, false), 0);
         assert_eq!(player_death_experience_reward(5, false, true), 0);
+    }
+
+    /// `Player.isSleepingLongEnough` uses a 100-tick threshold (`Player.java:1355-1357`).
+    #[test]
+    fn sleeping_long_enough_uses_vanilla_threshold() {
+        assert!(!sleeping_long_enough(None));
+        assert!(!sleeping_long_enough(Some(99)));
+        assert!(sleeping_long_enough(Some(100)));
+        assert!(sleeping_long_enough(Some(101)));
+    }
+
+    /// `Player.mayUseItemAt` allows unrestricted players and matching adventure predicates
+    /// (`Player.java:1616-1623`).
+    #[test]
+    fn may_use_item_at_allows_builders_or_matching_predicates() {
+        assert!(may_use_item_at_allowed(true, false));
+        assert!(may_use_item_at_allowed(false, true));
+        assert!(!may_use_item_at_allowed(false, false));
+    }
+
+    /// `AttackRange.isInRange` includes the hitbox margin and packet buffer on both bounds
+    /// (`AttackRange.java:108-116`).
+    #[test]
+    fn attack_range_includes_margin_and_buffer() {
+        assert!(attack_range_is_in_range(7.625, 2.0, 4.5, 0.125, 3.0));
+        assert!(!attack_range_is_in_range(7.626, 2.0, 4.5, 0.125, 3.0));
+        assert!(attack_range_is_in_range(0.0, 2.0, 4.5, 0.125, 3.0));
     }
 
     #[test]
@@ -9330,6 +9490,17 @@ mod tests {
         assert!(attack_charge_ready(0, 5, 4.0, 1.0));
         assert!(attack_charge_ready(5, 5, 4.0, 1.0));
         assert!(attack_charge_ready(0, 5, 4.0, 0.0));
+    }
+
+    /// The packet gate uses the held item's attack-speed modifier when calculating the current
+    /// charge (`Player.java:1816-1824`).
+    #[test]
+    fn attack_charge_uses_held_item_attack_speed() {
+        let empty = ItemStack::EMPTY.clone();
+        assert_eq!(attack_speed_for_item(&empty), 1.6);
+
+        let spear = ItemStack::new(1, &Item::WOODEN_SPEAR);
+        assert!(attack_speed_for_item(&spear) < 2.0);
     }
 
     /// `Player.createAttributes` overrides movement and attack damage and adds the player-only

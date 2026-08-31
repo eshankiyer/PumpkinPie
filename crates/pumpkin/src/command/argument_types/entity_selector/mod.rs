@@ -504,6 +504,19 @@ fn entity_actual_name(entity: &dyn EntityBase) -> String {
     }
 }
 
+fn matches_rotation(bounds: FloatDegreeBounds, degrees: f32) -> bool {
+    // Vanilla wraps an omitted maximum to 359 degrees when creating the rotation predicate
+    // (`EntitySelectorParser.java:172-192`).
+    let min = wrap_degrees(bounds.min().unwrap_or(0.0));
+    let max = wrap_degrees(bounds.max().unwrap_or(359.0));
+    let degrees = wrap_degrees(degrees);
+    if min > max {
+        degrees >= min || degrees <= max
+    } else {
+        degrees >= min && degrees <= max
+    }
+}
+
 impl EntitySelectorPredicate {
     #[must_use]
     pub const fn new_all_of(predicates: Vec<Self>) -> Self {
@@ -520,16 +533,7 @@ impl EntitySelectorPredicate {
             Self::ExperienceLevel(bounds) => entity
                 .get_player()
                 .is_some_and(|p| bounds.matches(p.experience_level.load(Ordering::Relaxed))),
-            Self::Rotation(bounds, f) => {
-                let min = wrap_degrees(bounds.min().unwrap_or(0.0f32));
-                let max = wrap_degrees(bounds.max().unwrap_or(360.0f32));
-                let degrees = wrap_degrees(f.value_from_entity(entity));
-                if min > max {
-                    degrees >= min || degrees <= max
-                } else {
-                    degrees >= min && degrees <= max
-                }
-            }
+            Self::Rotation(bounds, f) => matches_rotation(*bounds, f.value_from_entity(entity)),
             Self::BoundingBox(bounding_box) => entity
                 .get_entity()
                 .bounding_box
@@ -622,7 +626,7 @@ impl EntitySelectorPredicate {
 #[cfg(test)]
 mod tests {
     use super::parser::EntitySelectorParser;
-    use super::{EntitySelector, EntitySelectorPredicate};
+    use super::{EntitySelector, EntitySelectorPredicate, RotationType, matches_rotation};
     use crate::command::string_reader::StringReader;
     use pumpkin_data::entity::EntityType;
 
@@ -691,5 +695,23 @@ mod tests {
     fn type_option_rejects_an_unknown_path() {
         assert!(parse("@e[type=minecraft:not_an_entity]").is_err());
         assert!(parse("@e[type=not_an_entity]").is_err());
+    }
+
+    #[test]
+    fn open_rotation_bound_matches_vanilla() {
+        // Regression for `EntitySelectorParser.createRotationPredicate` (`EntitySelectorParser.java:172-192`).
+        let selector = parse("@e[x_rotation=10..]").expect("selector should parse");
+        let bounds = selector
+            .predicates
+            .iter()
+            .find_map(|predicate| match predicate {
+                EntitySelectorPredicate::Rotation(bounds, RotationType::Yaw) => Some(*bounds),
+                _ => None,
+            })
+            .expect("an x rotation predicate should have been added");
+
+        assert_eq!(bounds.max(), None);
+        assert!(matches_rotation(bounds, 359.0));
+        assert!(!matches_rotation(bounds, 360.0));
     }
 }

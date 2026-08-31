@@ -74,6 +74,13 @@ impl ItemRegistry {
         }
     }
 
+    /// Dispatches `ItemStack.useOnRelease` (`ItemStack.java:756-757`) through the registered item.
+    #[must_use]
+    pub fn use_on_release(&self, item_id: u16, stack: &ItemStack) -> bool {
+        self.get_pumpkin_item(item_id)
+            .is_some_and(|behaviour| behaviour.use_on_release(stack))
+    }
+
     /// Returns the item's use duration in ticks, as defined by its registered behaviour.
     /// Returns `None` if the item has no registered behaviour or its duration is 0.
     #[must_use]

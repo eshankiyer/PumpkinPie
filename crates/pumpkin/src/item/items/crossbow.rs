@@ -84,6 +84,33 @@ fn charge_duration_ticks(stack: &ItemStack) -> i32 {
     charge_time.max(0)
 }
 
+/// Vanilla `CrossbowItem#getChargingSounds` selects the highest Quick Charge sound entry
+/// (`CrossbowItem.java:202-235,255-257`; `quick_charge.json:7-29`).
+fn charging_sounds(stack: &ItemStack) -> (Option<Sound>, Option<Sound>, Sound) {
+    match stack.get_enchantment_level(&Enchantment::QUICK_CHARGE) {
+        1 => (
+            Some(Sound::ItemCrossbowQuickCharge1),
+            None,
+            Sound::ItemCrossbowLoadingEnd,
+        ),
+        2 => (
+            Some(Sound::ItemCrossbowQuickCharge2),
+            None,
+            Sound::ItemCrossbowLoadingEnd,
+        ),
+        3.. => (
+            Some(Sound::ItemCrossbowQuickCharge3),
+            None,
+            Sound::ItemCrossbowLoadingEnd,
+        ),
+        _ => (
+            Some(Sound::ItemCrossbowLoadingStart),
+            Some(Sound::ItemCrossbowLoadingMiddle),
+            Sound::ItemCrossbowLoadingEnd,
+        ),
+    }
+}
+
 impl ItemBehaviour for CrossbowItem {
     fn normal_use<'a>(
         &'a self,
@@ -142,7 +169,8 @@ impl ItemBehaviour for CrossbowItem {
             let use_ticks = 72000 - use_ticks;
 
             if use_ticks >= charge_duration_ticks(&stack) {
-                Self::try_load_projectiles(player).await;
+                let (_, _, end_sound) = charging_sounds(&stack);
+                Self::try_load_projectiles(player, end_sound).await;
             }
             player.living_entity.clear_active_hand().await;
         })
@@ -172,6 +200,7 @@ impl ItemBehaviour for CrossbowItem {
             }
 
             let held_ticks = 72000 - remaining_use_ticks;
+            let (start_sound, mid_sound, end_sound) = charging_sounds(&stack);
 
             // Vanilla `CrossbowItem#onUseTick` (CrossbowItem.java:202-238): the charging
             // progress is `(useDuration - ticksRemaining) / chargeDuration`, with sounds at
@@ -181,18 +210,22 @@ impl ItemBehaviour for CrossbowItem {
             let start_at = (0.2 * charge_duration as f32).ceil() as i32;
             let mid_at = (0.5 * charge_duration as f32).ceil() as i32;
 
-            if held_ticks == start_at {
+            if held_ticks == start_at
+                && let Some(sound) = start_sound
+            {
                 player.world().play_sound_fine(
-                    Sound::ItemCrossbowLoadingStart,
+                    sound,
                     SoundCategory::Players,
                     &player.position(),
                     0.5,
                     1.0,
                 );
             }
-            if held_ticks == mid_at {
+            if held_ticks == mid_at
+                && let Some(sound) = mid_sound
+            {
                 player.world().play_sound_fine(
-                    Sound::ItemCrossbowLoadingMiddle,
+                    sound,
                     SoundCategory::Players,
                     &player.position(),
                     0.5,
@@ -203,9 +236,15 @@ impl ItemBehaviour for CrossbowItem {
             if held_ticks >= charge_duration {
                 // Vanilla CrossbowItem.java:222-236: loading at full charge; the
                 // loading-end sound inside is gated on the load succeeding.
-                Self::try_load_projectiles(player).await;
+                Self::try_load_projectiles(player, end_sound).await;
             }
         })
+    }
+
+    /// Vanilla `CrossbowItem.useOnRelease` keeps the active use alive until release
+    /// (`CrossbowItem.java:269-271`).
+    fn use_on_release(&self, _stack: &ItemStack) -> bool {
+        true
     }
 
     fn get_use_duration(&self) -> i32 {
@@ -258,7 +297,7 @@ impl CrossbowItem {
     /// item into the `CHARGED_PROJECTILES` component. Returns whether anything was loaded;
     /// on success it also plays the loading-end sound exactly as `onUseTick` does
     /// (CrossbowItem.java:222-236).
-    async fn try_load_projectiles(player: &Player) -> bool {
+    async fn try_load_projectiles(player: &Player, end_sound: Sound) -> bool {
         let arrow_slot = player.find_crossbow_projectile().await;
         let (arrow_nbt_wrapper, slot) = {
             if let Some(slot) = arrow_slot {
@@ -305,7 +344,7 @@ impl CrossbowItem {
         // Vanilla `CrossbowItem#onUseTick`: volume 1.0, pitch
         // 1.0F / (random.nextFloat() * 0.5F + 1.0F) + 0.2F.
         player.world().play_sound_fine(
-            Sound::ItemCrossbowLoadingEnd,
+            end_sound,
             SoundCategory::Players,
             &player.position(),
             1.0,
@@ -396,6 +435,10 @@ impl CrossbowItem {
                             &projectile,
                             pickup,
                         );
+                        // Vanilla `CrossbowItem#createProjectile` assigns CROSSBOW_HIT to arrows
+                        // (`CrossbowItem.java:150-163`); `AbstractArrow` plays that event on entity
+                        // hit (`AbstractArrow.java:425-426,502-503`).
+                        arrow.set_sound_event(Sound::ItemCrossbowHit);
                         arrow.set_velocity_from_rotation(shot_pitch, shot_yaw, 0.0, power, 1.0);
                         if pierce_level > 0 {
                             arrow.set_pierce_level(pierce_level);
@@ -427,8 +470,48 @@ impl CrossbowItem {
 
 #[cfg(test)]
 mod tests {
-    use super::{crossbow_shot_pitch, piercing_count, rotate_shot_vector};
+    use super::{
+        CrossbowItem, charging_sounds, crossbow_shot_pitch, piercing_count, rotate_shot_vector,
+    };
+    use crate::item::ItemBehaviour;
+    use pumpkin_data::item::Item;
+    use pumpkin_data::item_stack::ItemStack;
+    use pumpkin_data::sound::Sound;
     use pumpkin_util::math::vector3::Vector3;
+
+    #[test]
+    fn crossbow_use_completes_on_release() {
+        // Vanilla `CrossbowItem.useOnRelease` returns true (`CrossbowItem.java:269-271`).
+        assert!(CrossbowItem::use_on_release(
+            &super::CrossbowItem,
+            &ItemStack::new(1, &Item::CROSSBOW)
+        ));
+    }
+
+    #[test]
+    fn quick_charge_uses_vanilla_charging_sounds() {
+        // Vanilla `CrossbowItem#getChargingSounds` and quick_charge.json select one start sound
+        // and no middle sound for each Quick Charge level (`CrossbowItem.java:255-257`).
+        let mut stack = ItemStack::new(1, &Item::CROSSBOW);
+        assert_eq!(
+            charging_sounds(&stack),
+            (
+                Some(Sound::ItemCrossbowLoadingStart),
+                Some(Sound::ItemCrossbowLoadingMiddle),
+                Sound::ItemCrossbowLoadingEnd,
+            )
+        );
+
+        stack.enchant(&pumpkin_data::Enchantment::QUICK_CHARGE, 2);
+        assert_eq!(
+            charging_sounds(&stack),
+            (
+                Some(Sound::ItemCrossbowQuickCharge2),
+                None,
+                Sound::ItemCrossbowLoadingEnd,
+            )
+        );
+    }
 
     #[test]
     fn piercing_count_is_one_per_level() {

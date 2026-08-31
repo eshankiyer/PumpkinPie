@@ -34,6 +34,16 @@ use pumpkin_world::tick::TickPriority;
 use pumpkin_world::world::BlockFlags;
 use tokio::sync::Mutex;
 
+/// Mirrors the final non-book branch of `LecternBlock.useItemOn`: only an empty main hand
+/// passes without invoking the empty-hand action (`LecternBlock.java:211-227`).
+const fn non_book_item_result(item_is_empty: bool, main_hand: bool) -> BlockActionResult {
+    if item_is_empty && main_hand {
+        BlockActionResult::Pass
+    } else {
+        BlockActionResult::PassToDefaultBlockAction
+    }
+}
+
 /// Bridges the screen handler back into the world: page changes emit the
 /// vanilla redstone pulse and taking the book clears `has_book`.
 struct LecternPageController {
@@ -164,7 +174,6 @@ impl LecternBlock {
         world
             .set_block_state(position, new_state_id, BlockFlags::NOTIFY_ALL)
             .await;
-        Self::update_neighbors_below(world, position).await;
 
         let context = GameEventContext {
             source_entity,
@@ -177,6 +186,9 @@ impl LecternBlock {
             context,
         )
         .await;
+        // `resetBookState` emits `BLOCK_CHANGE` before updating the block below
+        // (`LecternBlock.java:148-153`).
+        Self::update_neighbors_below(world, position).await;
     }
 }
 
@@ -208,14 +220,21 @@ impl BlockBehaviour for LecternBlock {
                 args.block,
             );
             if !props.has_book {
-                return BlockActionResult::Pass;
+                // `LecternBlock.useWithoutItem` consumes an empty lectern interaction
+                // (`LecternBlock.java:230-241`).
+                return BlockActionResult::Consume;
             }
 
             let Some(block_entity) = args.world.get_block_entity(args.position) else {
-                return BlockActionResult::Pass;
+                // `useWithoutItem` returns SUCCESS after `openScreen`, even when its
+                // `instanceof LecternBlockEntity` check finds no entity
+                // (`LecternBlock.java:233-241,249-253`).
+                return BlockActionResult::Success;
             };
             let Some(inventory) = block_entity.get_inventory() else {
-                return BlockActionResult::Pass;
+                // The outer `useWithoutItem` result remains SUCCESS when `openScreen` cannot
+                // open a menu (`LecternBlock.java:233-241,249-253`).
+                return BlockActionResult::Success;
             };
 
             args.player
@@ -251,10 +270,6 @@ impl BlockBehaviour for LecternBlock {
     ) -> BlockFuture<'a, BlockActionResult> {
         Box::pin(async move {
             let item_stack = &mut *args.item_stack;
-            if !item_stack.item.has_tag(&tag::Item::MINECRAFT_LECTERN_BOOKS) {
-                return BlockActionResult::PassToDefaultBlockAction;
-            }
-
             let props = LecternLikeProperties::from_state_id(
                 args.world.get_block_state(args.position).id,
                 args.block,
@@ -264,11 +279,27 @@ impl BlockBehaviour for LecternBlock {
                 return BlockActionResult::PassToDefaultBlockAction;
             }
 
+            if !item_stack.item.has_tag(&tag::Item::MINECRAFT_LECTERN_BOOKS) {
+                // `useItemOn` passes an empty main hand, but tries the empty-hand action for
+                // every other non-book item (`LecternBlock.java:211-227`).
+                return non_book_item_result(
+                    item_stack.is_empty(),
+                    matches!(
+                        args.equipment_slot,
+                        &pumpkin_data::data_component_impl::EquipmentSlot::MainHand(_)
+                    ),
+                );
+            }
+
             let Some(lectern) = args.world.get_block_entity(args.position) else {
-                return BlockActionResult::PassToDefaultBlockAction;
+                // `tryPlaceBook` returns true from the state check even if `placeBook` finds no
+                // block entity (`LecternBlock.java:126-145`).
+                return BlockActionResult::Success;
             };
             let Some(lectern) = lectern.as_any().downcast_ref::<LecternBlockEntity>() else {
-                return BlockActionResult::PassToDefaultBlockAction;
+                // The same `tryPlaceBook` success result applies when `placeBook`'s type check
+                // has no matching entity (`LecternBlock.java:126-145`).
+                return BlockActionResult::Success;
             };
 
             let book = item_stack.split_unless_creative(args.player.gamemode.load(), 1);
@@ -386,6 +417,13 @@ impl BlockBehaviour for LecternBlock {
         args: GetComparatorOutputArgs<'a>,
     ) -> BlockFuture<'a, Option<u8>> {
         Box::pin(async move {
+            let props = LecternLikeProperties::from_state_id(args.state.id, args.block);
+            // `getAnalogOutputSignal` is gated by `HAS_BOOK` before reading the block entity
+            // (`LecternBlock.java:198-207`).
+            if !props.has_book {
+                return Some(0);
+            }
+
             if let Some(block_entity) = args.world.get_block_entity(args.position)
                 && let Some(lectern_entity) =
                     block_entity.as_any().downcast_ref::<LecternBlockEntity>()
@@ -395,5 +433,25 @@ impl BlockBehaviour for LecternBlock {
                 Some(0)
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BlockActionResult, non_book_item_result};
+
+    #[test]
+    fn non_book_lectern_use_matches_vanilla_hand_fallback() {
+        // `LecternBlock.useItemOn` passes only for an empty main hand and otherwise requests
+        // the empty-hand action (`LecternBlock.java:211-227`).
+        assert_eq!(non_book_item_result(true, true), BlockActionResult::Pass);
+        assert_eq!(
+            non_book_item_result(false, true),
+            BlockActionResult::PassToDefaultBlockAction
+        );
+        assert_eq!(
+            non_book_item_result(true, false),
+            BlockActionResult::PassToDefaultBlockAction
+        );
     }
 }

@@ -293,6 +293,73 @@ pub fn try_deflect(hit: &ProjectileHit, projectile: &Arc<dyn EntityBase>) -> boo
     true
 }
 
+/// Mirrors `Projectile.checkLeftOwner` and `isOutsideOwnerCollisionRange`
+/// (`Projectile.java:105-127`). The movement loops below call this before their hit scan;
+/// the shared entity flag lets arrows and tridents retain the same state as thrown items.
+pub(crate) async fn check_left_owner(
+    entity: &Entity,
+    owner_id: Option<i32>,
+    movement: Vector3<f64>,
+) {
+    if entity.projectile_left_owner.load(Ordering::Relaxed) {
+        return;
+    }
+
+    let Some(owner_id) = owner_id else {
+        entity.projectile_left_owner.store(true, Ordering::Relaxed);
+        return;
+    };
+    let world = entity.world.load();
+    let Some(owner) = world.get_entity_by_id(owner_id) else {
+        entity.projectile_left_owner.store(true, Ordering::Relaxed);
+        return;
+    };
+
+    let root_id = owner.get_entity().root_vehicle_id().await;
+    let root = world
+        .get_entity_by_id(root_id)
+        .unwrap_or_else(|| owner.clone());
+    let collision_box = entity
+        .bounding_box
+        .load()
+        .expand_towards(movement.x, movement.y, movement.z)
+        .expand(1.0, 1.0, 1.0);
+
+    let mut pending = vec![root];
+    while let Some(candidate) = pending.pop() {
+        // `EntitySelector.CAN_BE_PICKED` is exactly the entity pickability predicate
+        // (`EntitySelector.java:19`; `Projectile.java:117-124`).
+        if candidate.is_pickable()
+            && collision_box.intersects(&candidate.get_entity().bounding_box.load())
+        {
+            return;
+        }
+        pending.extend(
+            candidate
+                .get_entity()
+                .passengers
+                .lock()
+                .await
+                .iter()
+                .cloned(),
+        );
+    }
+
+    entity.projectile_left_owner.store(true, Ordering::Relaxed);
+}
+
+/// Returns the vanilla projectile override of `Entity.getPickRadius`
+/// (`Projectile.java:370-378`). Projectile targets that are pickable use a one-block margin;
+/// ordinary entities retain the base entity radius of zero (`Entity.java:2563-2565`).
+#[must_use]
+pub(crate) fn projectile_target_pick_radius(target: &dyn EntityBase) -> f64 {
+    if is_projectile(target.get_entity().entity_type) && target.is_pickable() {
+        1.0
+    } else {
+        0.0
+    }
+}
+
 /// Emits `GameEvent.PROJECTILE_LAND`; call after `on_hit` runs.
 ///
 /// `Projectile.onHit`, lines 299-300/304-305: `onHitEntity`/`onHitBlock` runs first,
@@ -398,6 +465,7 @@ impl ThrownItemEntity {
 
 impl ThrownItemEntity {
     /// Process a tick for projectile movement and collisions
+    #[expect(clippy::too_many_lines)]
     pub async fn process_tick<'a>(&'a self, caller: &'a Arc<dyn EntityBase>, server: &'a Server) {
         let entity = self.get_entity();
         let world = entity.world.load();
@@ -423,12 +491,20 @@ impl ThrownItemEntity {
         // Store velocity
         entity.velocity.store(velocity);
 
+        // `Projectile.checkLeftOwner` runs before the projectile hit scan
+        // (`Projectile.java:105-127`).
+        check_left_owner(entity, self.owner_id, velocity).await;
+
         let start_pos = entity.pos.load();
         let delta = velocity;
 
         // Update position
         let new_pos = start_pos.add(&delta);
         entity.set_pos(new_pos);
+
+        // `Projectile.updateRotation` follows movement for throwable projectiles
+        // (`Projectile.java:326-343`).
+        update_rotation(entity, velocity);
 
         // Send updated velocity to clients
         let packet = CEntityVelocity::new(entity.entity_id.into(), velocity);
@@ -487,7 +563,14 @@ impl ThrownItemEntity {
                 continue;
             }
 
-            let ebb = cand.get_entity().bounding_box.load().expand(0.3, 0.3, 0.3);
+            // `ProjectileUtil.getEntityHitResult` inflates the target by its pick radius
+            // (`ProjectileUtil.java:109-120`).
+            let pick_radius = projectile_target_pick_radius(cand.as_ref());
+            let ebb =
+                cand.get_entity()
+                    .bounding_box
+                    .load()
+                    .expand(pick_radius, pick_radius, pick_radius);
             if let Some(t) = calculate_ray_intersection(&start_pos, &delta, &ebb)
                 && t < closest_t
             {
@@ -552,8 +635,11 @@ impl ThrownItemEntity {
             return true;
         }
 
-        // Skip owner for initial frames
-        if Some(other_ent.entity_id) == self.owner_id && self_ent.age.load(Ordering::Relaxed) < 5 {
+        // `Projectile.canHitEntity` excludes the owner until `leftOwner` is set
+        // (`Projectile.java:317-324`).
+        if Some(other_ent.entity_id) == self.owner_id
+            && !self_ent.projectile_left_owner.load(Ordering::Relaxed)
+        {
             return true;
         }
 
@@ -615,6 +701,27 @@ impl ThrownItemEntity {
     const fn get_gravity(&self) -> f64 {
         self.gravity
     }
+}
+
+/// Vanilla `Projectile.updateRotation` uses a wrapped angular interpolation before setting the
+/// projectile rotation (`Projectile.java:326-343`).
+fn update_rotation(entity: &Entity, movement: Vector3<f64>) {
+    let horizontal = movement.horizontal_length();
+    let target_pitch = movement.y.atan2(horizontal).to_degrees() as f32;
+    let target_yaw = movement.x.atan2(movement.z).to_degrees() as f32;
+    let pitch = lerp_rotation(entity.pitch.load(), target_pitch);
+    let yaw = lerp_rotation(entity.yaw.load(), target_yaw);
+    entity.set_rotation(yaw, pitch);
+}
+
+fn lerp_rotation(mut old: f32, rotation: f32) -> f32 {
+    while rotation - old < -180.0 {
+        old -= 360.0;
+    }
+    while rotation - old >= 180.0 {
+        old += 360.0;
+    }
+    old + (rotation - old) * 0.2
 }
 
 /// Ray intersection algorithm for AABBs, returning a t value
@@ -705,5 +812,18 @@ impl ProjectileHit {
             Self::Block { face, .. } => Some(*face),
             Self::Entity { .. } => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lerp_rotation;
+
+    #[test]
+    fn update_rotation_interpolates_and_wraps_angles() {
+        // `Projectile.lerpRotation` wraps before applying the 0.2 interpolation
+        // (`Projectile.java:333-343`).
+        assert_eq!(lerp_rotation(0.0, 90.0), 18.0);
+        assert_eq!(lerp_rotation(170.0, -170.0), -186.0);
     }
 }

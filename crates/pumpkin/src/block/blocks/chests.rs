@@ -32,8 +32,8 @@ use tokio::sync::Mutex;
 use crate::block::blocks::copper_weathering;
 use crate::block::{
     BlockFuture, BrokenArgs, EmitsRedstonePowerArgs, GetComparatorOutputArgs, GetRedstonePowerArgs,
-    GetStateForNeighborUpdateArgs, NormalUseArgs, OnPlaceArgs, OnSyncedBlockEventArgs, PlacedArgs,
-    PlayerPlacedArgs, RandomTickArgs,
+    GetStateForNeighborUpdateArgs, NormalUseArgs, OnPlaceArgs, OnStateReplacedArgs,
+    OnSyncedBlockEventArgs, PlacedArgs, PlayerPlacedArgs, RandomTickArgs,
 };
 use crate::entity::EntityBase;
 use crate::entity::mob::piglin_shared;
@@ -505,6 +505,14 @@ async fn broken_chest_impl(args: BrokenArgs<'_>, copper: bool) {
     }
 }
 
+async fn on_state_replaced_chest_impl(args: OnStateReplacedArgs<'_>) {
+    // Vanilla ChestBlock.affectNeighborsAfterRemoval (ChestBlock.java:251-253) updates
+    // adjacent comparators using the old chest state before the block is removed.
+    args.world
+        .update_comparators(args.position, args.block)
+        .await;
+}
+
 #[pumpkin_block_from_tag("c:chests/wooden")]
 pub struct ChestBlock;
 
@@ -546,6 +554,11 @@ impl BlockBehaviour for ChestBlock {
 
     fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(broken_chest_impl(args, false))
+    }
+
+    // ChestBlock.affectNeighborsAfterRemoval (ChestBlock.java:251-253) is a live removal hook.
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(on_state_replaced_chest_impl(args))
     }
 
     fn get_comparator_output<'a>(
@@ -598,6 +611,11 @@ impl BlockBehaviour for CopperChestBlock {
 
     fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(broken_chest_impl(args, true))
+    }
+
+    // CopperChestBlock inherits ChestBlock.affectNeighborsAfterRemoval (ChestBlock.java:251-253).
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(on_state_replaced_chest_impl(args))
     }
 
     fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
@@ -744,6 +762,11 @@ impl BlockBehaviour for TrappedChestBlock {
 
     fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(broken_chest_impl(args, false))
+    }
+
+    // TrappedChestBlock inherits ChestBlock.affectNeighborsAfterRemoval (ChestBlock.java:251-253).
+    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>) -> BlockFuture<'a, ()> {
+        Box::pin(on_state_replaced_chest_impl(args))
     }
 
     fn emits_redstone_power<'a>(

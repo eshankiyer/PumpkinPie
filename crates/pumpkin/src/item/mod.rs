@@ -81,6 +81,11 @@ pub trait ItemBehaviour: Send + Sync {
         Box::pin(async {})
     }
 
+    /// Mirrors `Item.useOnRelease`, which defaults to false (`Item.java:356-358`).
+    fn use_on_release(&self, _stack: &ItemStack) -> bool {
+        false
+    }
+
     /// Returns the maximum number of ticks this item can be used for.
     /// Return 0 if the item does not have a behaviour-driven use duration.
     fn get_use_duration(&self) -> i32 {

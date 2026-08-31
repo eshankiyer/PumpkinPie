@@ -39,6 +39,13 @@ impl JavaClient {
                 )
                 .await;
                 stack.patch.extend(components);
+                // Preserve the custom portion of `saveCustomOnly` after removing fields already
+                // represented by implicit components (`ServerGamePacketListenerImpl.java:715-724`).
+                if let Some(component) =
+                    crate::block::entities::block_entity_data_component(block_entity.as_ref()).await
+                {
+                    stack.patch.push(component);
+                }
             }
         }
 

@@ -26,7 +26,7 @@ use pumpkin_data::data_component_impl::{EquipmentSlot, EquippableImpl, IDSet, We
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::enchantment::Enchantment;
 use pumpkin_data::entity::entity_from_egg;
-use pumpkin_data::entity::{EntityType, MobCategory};
+use pumpkin_data::entity::{EntityStatus, EntityType, MobCategory};
 use pumpkin_data::item_stack::{DamageResult, ItemStack};
 use pumpkin_data::potion::Effect;
 use pumpkin_data::sound::{Sound, SoundCategory};
@@ -651,6 +651,15 @@ impl MobEntity {
             .clear();
         for mut goal in running_target_goals {
             goal.goal.stop(mob).await;
+        }
+    }
+
+    /// Vanilla `Mob.removeFreeWill` (`Mob.java:1417-1421`) clears both goal selectors and
+    /// the brain's registered behaviors. Happy Ghast age setup is the live caller.
+    pub(crate) async fn remove_free_will(&self, mob: &dyn Mob) {
+        self.clear_ai_goals(mob).await;
+        if let Some(brain) = &self.brain {
+            brain.remove_all_behaviors();
         }
     }
 
@@ -1321,6 +1330,22 @@ const fn spawns_offspring_from_egg(entity_type: &EntityType) -> bool {
 }
 
 pub trait Mob: EntityBase + Send + Sync {
+    /// Vanilla `Mob.shouldPassengersInheritMalus` (`Mob.java:174-187`) defaults to false;
+    /// Strider overrides it so a controlled passenger uses the strider's path costs.
+    fn should_passengers_inherit_malus(&self) -> bool {
+        false
+    }
+
+    /// Vanilla `Mob.spawnAnim` (`Mob.java:325-330`) broadcasts entity status 20 on the server.
+    /// `SilverfishMergeAnim` is the generated name for that shared status byte.
+    fn spawn_anim(&self) {
+        self.get_entity().world.load().send_entity_status(
+            self.get_entity(),
+            EntityStatus::SilverfishMergeAnim,
+            None,
+        );
+    }
+
     /// Vanilla `Mob.canUseNonMeleeWeapon` (`Mob.java:260-262`) is the base capability
     /// predicate consulted by projectile attack behavior. Ordinary mobs cannot select a
     /// non-melee weapon.
@@ -2646,12 +2671,34 @@ pub trait Mob: EntityBase + Send + Sync {
                 .lock()
                 .await
                 .put(&slot, stack.clone());
-            living
+            self.set_guaranteed_drop(slot.clone()).await;
+            living.send_equipment_changes(&[(slot, stack)]);
+        })
+    }
+
+    /// Vanilla `Mob.setGuaranteedDrop` (`Mob.java:601-603`) marks one equipment slot with the
+    /// sentinel chance used by the death-drop logic.
+    fn set_guaranteed_drop(&self, slot: EquipmentSlot) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            self.get_mob_entity()
+                .living_entity
                 .equipment_drop_chances
                 .lock()
                 .await
-                .insert(slot.clone(), 2.0);
-            living.send_equipment_changes(&[(slot, stack)]);
+                .insert(slot, 2.0);
+        })
+    }
+
+    /// Vanilla `Mob.setDropChance` (`Mob.java:1102-1105`) updates the per-slot equipment drop
+    /// chance during spawn finalization.
+    fn set_drop_chance(&self, slot: EquipmentSlot, chance: f32) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            self.get_mob_entity()
+                .living_entity
+                .equipment_drop_chances
+                .lock()
+                .await
+                .insert(slot, chance);
         })
     }
 
@@ -2915,6 +2962,7 @@ impl<T> Drop for MutexTakeGuard<'_, T> {
 /// Vanilla reaches this after `LivingEntity.aiStep` has prepared input and before jump,
 /// travel, and collision effects. Keeping the selector/navigation/controller phase here
 /// lets the generic living tick place it correctly for every mob implementation.
+#[expect(clippy::too_many_lines)]
 pub(crate) fn tick_mob_ai<'a>(
     mob: &'a dyn Mob,
     caller: &'a Arc<dyn EntityBase>,
@@ -2941,6 +2989,11 @@ pub(crate) fn tick_mob_ai<'a>(
         // async AI boundary so the synchronous MoveControl tick can use the same evaluator.
         let mut strafe_navigation_kind = mob_entity.navigator.lock().unwrap().navigation_kind();
         let vehicle = mob_entity.living_entity.entity.vehicle.lock().await.clone();
+        mob_entity
+            .navigator
+            .lock()
+            .unwrap()
+            .clear_inherited_pathfinding_malus();
         if let Some(vehicle) = vehicle
             && let Some(vehicle_mob) = vehicle.get_mob()
             && !vehicle_mob.get_mob_entity().is_no_ai()
@@ -2965,6 +3018,14 @@ pub(crate) fn tick_mob_ai<'a>(
                     .lock()
                     .unwrap()
                     .navigation_kind();
+                if vehicle_mob.should_passengers_inherit_malus() {
+                    let vehicle_navigator = vehicle_mob.get_mob_entity().navigator.lock().unwrap();
+                    mob_entity
+                        .navigator
+                        .lock()
+                        .unwrap()
+                        .inherit_pathfinding_malus_from(&vehicle_navigator);
+                }
             }
         }
         mob_entity.set_strafe_navigation_kind(strafe_navigation_kind);

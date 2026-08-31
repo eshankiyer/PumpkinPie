@@ -1283,12 +1283,14 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
                 ),
             );
             let name_clone = name.clone();
+            // `Entity.getStringUUID` supplies both the hover UUID and insertion text
+            // (`Entity.java:3255-3257`).
             name = name.hover_event(HoverEvent::show_entity(
-                entity.entity_uuid.to_string(),
+                entity.get_string_uuid(),
                 entity.entity_type.resource_name.into(),
                 Some(name_clone),
             ));
-            name = name.insertion(entity.entity_uuid.to_string());
+            name = name.insertion(entity.get_string_uuid());
             name
         })
     }
@@ -1420,6 +1422,52 @@ fn water_splash_sound(entity_type: &'static EntityType, high_speed: bool) -> Sou
     }
 
     Sound::EntityGenericSplash
+}
+
+/// Current Animal implementations that inherit the base method use the Animal-specific
+/// dismount search (`Animal.java:249-275`) from the shared live vehicle-removal caller.
+const fn uses_animal_dismount(entity_type: &'static EntityType) -> bool {
+    let id = entity_type.id;
+    id == EntityType::ARMADILLO.id
+        || id == EntityType::BEE.id
+        || id == EntityType::CAT.id
+        || id == EntityType::CHICKEN.id
+        || id == EntityType::COW.id
+        || id == EntityType::DONKEY.id
+        || id == EntityType::FOX.id
+        || id == EntityType::FROG.id
+        || id == EntityType::GOAT.id
+        || id == EntityType::HORSE.id
+        || id == EntityType::LLAMA.id
+        || id == EntityType::MOOSHROOM.id
+        || id == EntityType::MULE.id
+        || id == EntityType::NAUTILUS.id
+        || id == EntityType::OCELOT.id
+        || id == EntityType::PANDA.id
+        || id == EntityType::PIG.id
+        || id == EntityType::RABBIT.id
+        || id == EntityType::SHEEP.id
+        || id == EntityType::SKELETON_HORSE.id
+        || id == EntityType::SNIFFER.id
+        || id == EntityType::STRIDER.id
+        || id == EntityType::TRADER_LLAMA.id
+        || id == EntityType::TURTLE.id
+        || id == EntityType::WOLF.id
+        || id == EntityType::ZOMBIE_HORSE.id
+        || id == EntityType::ZOMBIE_NAUTILUS.id
+}
+
+/// Vanilla `Entity.getPercentFrozen` clamps the tracked value at the required freeze ticks
+/// before dividing (`Entity.java:2815-2818`).
+fn percent_frozen(ticks_frozen: i32, ticks_required: i32) -> f32 {
+    (ticks_frozen.min(ticks_required) as f32) / ticks_required as f32
+}
+
+/// Vanilla `Entity.getSharedFlag` reads one bit from the tracked shared-flags byte
+/// (`Entity.java:2778-2780`).
+const fn shared_flag(flags: i8, flag: u8) -> bool {
+    let mask = (1i8).wrapping_shl(flag as u32);
+    flags & mask != 0
 }
 
 /// `ServerPlayer.onExplosionHit` treats the player-thrown wind-charge entity as the
@@ -1635,6 +1683,9 @@ pub struct Entity {
     /// change's reach (`block/blocks/redstone/dispenser.rs` among them), and because the arrow
     /// has its own projectile struct that needs the same guard.
     pub last_deflected_by: AtomicI32,
+    /// `Projectile.leftOwner` (`Projectile.java:43-45`), shared by projectile implementations
+    /// that keep their movement loop outside `Entity::tick`.
+    pub projectile_left_owner: AtomicBool,
     /// Indicates whether the entity is touching lava
     pub touching_lava: AtomicBool,
     /// Indicates the fluid height
@@ -1961,6 +2012,8 @@ impl Entity {
             eye_in_water: AtomicBool::new(false),
             water_height: AtomicCell::new(0.0),
             last_deflected_by: AtomicI32::new(-1),
+            // `Projectile.leftOwner` is initially false (`Projectile.java:43-45`).
+            projectile_left_owner: AtomicBool::new(false),
             touching_lava: AtomicBool::new(false),
             lava_height: AtomicCell::new(0.0),
             horizontal_collision: AtomicBool::new(false),
@@ -2238,6 +2291,20 @@ impl Entity {
         self.silent.load(Ordering::Relaxed)
     }
 
+    /// Vanilla `Entity.getStringUUID` returns the cached UUID string, and the base
+    /// `Entity.getScoreboardName` uses the same value (`Entity.java:3255-3262`).
+    #[must_use]
+    pub fn get_string_uuid(&self) -> String {
+        self.entity_uuid.to_string()
+    }
+
+    /// Vanilla base scoreboard entries are keyed by the entity UUID string
+    /// (`Entity.java:3259-3262`). Players are resolved separately by the scoreboard helper.
+    #[must_use]
+    pub fn get_scoreboard_name(&self) -> String {
+        self.get_string_uuid()
+    }
+
     /// Vanilla `Entity.shouldPlayLavaHurtSound` (`Entity.java:614-628`) has no
     /// overrides and permits the lava damage path to play its burn sound.
     pub const fn should_play_lava_hurt_sound(&self) -> bool {
@@ -2362,6 +2429,12 @@ impl Entity {
 
     pub fn get_eye_height(&self) -> f64 {
         f64::from(self.entity_dimension.load().eye_height)
+    }
+
+    /// Vanilla's base entity targeting margin is zero (`Entity.java:2563-2565`).
+    #[must_use]
+    pub const fn get_pick_radius(&self) -> f32 {
+        0.0
     }
 
     /// Updates the entity's position, block position, and chunk position.
@@ -4081,8 +4154,25 @@ impl Entity {
             .ok();
     }
 
+    /// Vanilla `Entity.getRemainingFireTicks` exposes the current fire countdown
+    /// (`Entity.java:647-649`).
+    #[must_use]
+    pub fn get_remaining_fire_ticks(&self) -> i32 {
+        self.fire_ticks.load(Ordering::Relaxed)
+    }
+
     /// Maximum freeze ticks (7 seconds at 20 tps)
     pub const MAX_FROZEN_TICKS: i32 = 140;
+
+    /// Vanilla `Entity.getPercentFrozen` is the clamped frozen-ticks fraction
+    /// (`Entity.java:2815-2818`).
+    #[must_use]
+    pub fn get_percent_frozen(&self) -> f32 {
+        percent_frozen(
+            self.frozen_ticks.load(Ordering::Relaxed),
+            Self::MAX_FROZEN_TICKS,
+        )
+    }
 
     /// Freeze damage is dealt every 40 ticks when fully frozen
     const FREEZE_DAMAGE_INTERVAL: i32 = 40;
@@ -4296,7 +4386,7 @@ impl Entity {
         self.set_flag(Flag::Sneaking, sneaking);
     }
     pub fn is_sneaking(&self) -> bool {
-        self.sneaking.load(Ordering::Relaxed)
+        self.get_shared_flag(Flag::Sneaking as u8)
     }
 
     pub async fn set_swimming(&self, swimming: bool) {
@@ -4567,6 +4657,12 @@ impl Entity {
         let mask = (1i8).wrapping_shl(index as u32);
         self.flags.fetch_or(mask, Relaxed);
         self.set_flag(Flag::FallFlying, false);
+    }
+
+    /// Vanilla `Entity.getSharedFlag` reads one bit from the tracked shared-flags byte
+    /// (`Entity.java:2778-2780`).
+    fn get_shared_flag(&self, flag: u8) -> bool {
+        shared_flag(self.flags.load(Ordering::Relaxed), flag)
     }
 
     fn set_flag(&self, flag: Flag, value: bool) {
@@ -5294,17 +5390,14 @@ impl Entity {
         }
     }
 
-    /// Vanilla `Entity.hasExactlyOnePlayerPassenger` counts all indirect passengers
-    /// (`Entity.java:3525-3553`), not only the direct passenger list.
-    pub async fn has_exactly_one_player_passenger(&self) -> bool {
+    /// Vanilla `Entity.countPlayerPassengers` counts all indirect passengers
+    /// (`Entity.java:3543-3546`), not only the direct passenger list.
+    pub async fn count_player_passengers(&self) -> usize {
         let mut pending = self.passengers.lock().await.clone();
         let mut player_count = 0;
         while let Some(passenger) = pending.pop() {
             if passenger.get_player().is_some() {
                 player_count += 1;
-                if player_count > 1 {
-                    return false;
-                }
             }
             pending.extend(
                 passenger
@@ -5316,7 +5409,13 @@ impl Entity {
                     .cloned(),
             );
         }
-        exactly_one_player_passenger(player_count)
+        player_count
+    }
+
+    /// Vanilla `Entity.hasExactlyOnePlayerPassenger` compares the recursive count with one
+    /// (`Entity.java:3548`).
+    pub async fn has_exactly_one_player_passenger(&self) -> bool {
+        exactly_one_player_passenger(self.count_player_passengers().await)
     }
 
     pub async fn has_vehicle(&self) -> bool {
@@ -5686,7 +5785,10 @@ impl Entity {
                 (fx, fz),
             ];
 
-            let target_block_y = vehicle_box.max.y.floor() as i32;
+            // Animal.getDismountLocationForPassenger starts its side-exit search at the
+            // vehicle block position (`Animal.java:255-267`), not the bounding-box top.
+            let vehicle_block_pos = self.block_pos.load();
+            let target_block_y = vehicle_block_pos.0.y;
             let below_pos = BlockPos(Vector3::new(
                 self.pos.load().x.floor() as i32,
                 target_block_y - 1,
@@ -5703,18 +5805,24 @@ impl Entity {
 
             // HappyGhast.getDismountLocationForPassenger (`HappyGhast.java:593-596`) always
             // returns the vehicle's top center, rather than searching for a side exit.
-            let dismount_pos = if self.entity_type == &EntityType::HAPPY_GHAST || is_water {
+            let animal_dismount = uses_animal_dismount(self.entity_type);
+            let use_top_center_dismount =
+                self.entity_type == &EntityType::HAPPY_GHAST || (is_water && !animal_dismount);
+            let dismount_pos = if use_top_center_dismount {
                 fallback_pos
             } else {
                 // Vanilla checks the passenger's `getDismountPoses` order, with the current
                 // living-entity implementation returning standing (`LivingEntity.java:3735-3737`).
                 let poses = passenger.get_dismount_poses();
 
-                let vehicle_block_pos = self.block_pos.load();
                 let mut found = None;
 
                 'search: for pose in poses {
-                    let y_offsets = if pose == EntityPose::Swimming {
+                    // `Animal.getDismountLocationForPassenger` checks only the vehicle block Y
+                    // (`Animal.java:255-267`); the extra offsets belong to the shared fallback.
+                    let y_offsets = if animal_dismount {
+                        vec![0]
+                    } else if pose == EntityPose::Swimming {
                         vec![0, 1]
                     } else {
                         vec![0, 1, -1]
@@ -6180,7 +6288,7 @@ impl EntityBase for Entity {
 
             // `Entity.baseTick`: rain puts a burning entity out. `isInRain` tests the block the
             // entity stands in and the one at the top of its bounding box.
-            if self.fire_ticks.load(Ordering::Relaxed) > 0 {
+            if self.get_remaining_fire_ticks() > 0 {
                 let block_pos = self.block_pos.load();
                 let pos = self.pos.load();
                 let head_pos = BlockPos::floored(pos.x, self.bounding_box.load().max.y, pos.z);
@@ -6189,7 +6297,7 @@ impl EntityBase for Entity {
                 }
             }
 
-            let fire_ticks = self.fire_ticks.load(Ordering::Relaxed);
+            let fire_ticks = self.get_remaining_fire_ticks();
 
             // Check for fire immunity (or if the specific entity is)
             let is_immune =
@@ -6197,7 +6305,7 @@ impl EntityBase for Entity {
             if fire_ticks > 0 {
                 if is_immune {
                     self.fire_ticks.store(fire_ticks - 4, Ordering::Relaxed);
-                    if self.fire_ticks.load(Ordering::Relaxed) < 0 {
+                    if self.get_remaining_fire_ticks() < 0 {
                         self.extinguish();
                     }
                 } else {
@@ -6214,7 +6322,7 @@ impl EntityBase for Entity {
             // takes normal fire damage above since is_immune is untouched.
             let is_magma_cube = self.entity_type == &EntityType::MAGMA_CUBE;
             let should_render_fire =
-                self.fire_ticks.load(Ordering::Relaxed) > 0 && !is_immune && !is_magma_cube;
+                self.get_remaining_fire_ticks() > 0 && !is_immune && !is_magma_cube;
             self.set_on_fire(should_render_fire).await;
 
             let riding_cooldown = self.riding_cooldown.load(Ordering::Relaxed);
@@ -6473,7 +6581,11 @@ mod velocity_resend_tests {
 
 #[cfg(test)]
 mod entity_hook_tests {
-    use super::{broadcast_to_player_state, can_control_vehicle_state, can_teleport_state};
+    use super::{
+        broadcast_to_player_state, can_control_vehicle_state, can_teleport_state,
+        uses_animal_dismount,
+    };
+    use pumpkin_data::entity::EntityType;
 
     #[test]
     fn non_controlling_riders_cannot_control_vehicles() {
@@ -6500,6 +6612,15 @@ mod entity_hook_tests {
         assert!(!broadcast_to_player_state(8, 7, true, false));
         assert!(broadcast_to_player_state(8, 7, false, false));
         assert!(!broadcast_to_player_state(8, 7, false, true));
+    }
+
+    #[test]
+    fn animal_vehicles_use_the_animal_dismount_search() {
+        // `Animal.getDismountLocationForPassenger` is the side-exit override for animal
+        // vehicles (`Animal.java:249-275`).
+        assert!(uses_animal_dismount(&EntityType::COW));
+        assert!(uses_animal_dismount(&EntityType::HORSE));
+        assert!(!uses_animal_dismount(&EntityType::ZOMBIE));
     }
 }
 
@@ -6615,6 +6736,24 @@ mod tests {
             water_splash_sound(&EntityType::COD, true),
             Sound::EntityGenericSplash
         );
+    }
+
+    #[test]
+    fn percent_frozen_clamps_at_the_required_freeze_ticks() {
+        // Vanilla `Entity.getPercentFrozen` clamps before dividing
+        // (`Entity.java:2815-2818`).
+        assert_eq!(percent_frozen(0, 140), 0.0);
+        assert_eq!(percent_frozen(70, 140), 0.5);
+        assert_eq!(percent_frozen(280, 140), 1.0);
+    }
+
+    #[test]
+    fn shared_flag_reads_the_requested_bit() {
+        // Vanilla `Entity.getSharedFlag` masks the tracked flags byte
+        // (`Entity.java:2778-2780`).
+        assert!(shared_flag(0b0000_0010, 1));
+        assert!(!shared_flag(0b0000_0010, 0));
+        assert!(shared_flag(i8::MIN, 7));
     }
 
     #[test]

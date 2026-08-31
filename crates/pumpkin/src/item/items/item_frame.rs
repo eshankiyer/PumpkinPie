@@ -56,10 +56,14 @@ impl ItemBehaviour for ItemFrameItem {
         Box::pin(async move {
             let target = BlockPos(location.0 + face.to_offset());
             // `ItemFrameItem.mayPlace` overrides `HangingEntityItem.mayPlace` and checks
-            // `isInsideBuildHeight(blockPos)` without rejecting vertical directions. The
-            // player protection hook (`mayUseItemAt`) is not modelled by this placement API.
+            // `isInsideBuildHeight(blockPos)` without rejecting vertical directions.
             let world = player.world();
             if !world.is_in_height_limit(target.0.y) {
+                return;
+            }
+            // `ItemFrameItem.mayPlace` delegates to `Player.mayUseItemAt`
+            // (`ItemFrameItem.java:14-17`).
+            if !player.may_use_item_at(&target, face, item).await {
                 return;
             }
 

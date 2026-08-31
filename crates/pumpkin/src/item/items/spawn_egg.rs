@@ -130,7 +130,7 @@ impl ItemBehaviour for SpawnEggItem {
                 true
             };
 
-            let Some((pos, _face)) = world.raycast(start_pos, end_pos, checker).await else {
+            let Some((pos, face)) = world.raycast(start_pos, end_pos, checker).await else {
                 return;
             };
 
@@ -153,6 +153,12 @@ impl ItemBehaviour for SpawnEggItem {
                     return;
                 }
             };
+
+            // `SpawnEggItem.use` gates liquid spawning with `Player.mayUseItemAt`
+            // (`SpawnEggItem.java:112-119`).
+            if !player.may_use_item_at(&pos, face, &stack).await {
+                return;
+            }
 
             let spawn_pos = Vector3::new(
                 f64::from(pos.0.x) + 0.5,

@@ -62,6 +62,9 @@ pub struct ArrowEntity {
     pub entity: Entity,
     pub owner_id: Option<i32>,
     pub item_stack: RwLock<ItemStack>,
+    /// Vanilla `AbstractArrow.soundEvent` (`AbstractArrow.java:77,129-131`), used for the next
+    /// entity hit and reset to the ground-hit sound after a block hit.
+    pub sound_event: AtomicCell<Sound>,
     effect_color: AtomicI32,
     pub base_damage: AtomicCell<f64>,
     pub pickup: AtomicCell<ArrowPickup>,
@@ -106,6 +109,7 @@ impl ArrowEntity {
             entity,
             owner_id,
             item_stack: RwLock::new(item_stack.copy_with_count(1)),
+            sound_event: AtomicCell::new(Sound::EntityArrowHit),
             effect_color: AtomicI32::new(Self::potion_effect_color(item_stack)),
             base_damage: AtomicCell::new(Self::ARROW_BASE_DAMAGE),
             pickup: AtomicCell::new(pickup),
@@ -153,6 +157,7 @@ impl ArrowEntity {
             entity,
             owner_id: Some(shooter.entity_id),
             item_stack: RwLock::new(item_stack.copy_with_count(1)),
+            sound_event: AtomicCell::new(Sound::EntityArrowHit),
             effect_color: AtomicI32::new(Self::potion_effect_color(item_stack)),
             base_damage: AtomicCell::new(Self::ARROW_BASE_DAMAGE),
             pickup: AtomicCell::new(pickup),
@@ -169,6 +174,11 @@ impl ArrowEntity {
             last_block_state_id: AtomicCell::new(None),
             pierced_entity_ids: Mutex::new(HashSet::new()),
         }
+    }
+
+    /// Vanilla `AbstractArrow#setSoundEvent` (`AbstractArrow.java:129-131`).
+    pub fn set_sound_event(&self, sound: Sound) {
+        self.sound_event.store(sound);
     }
 
     #[must_use]
@@ -507,6 +517,10 @@ impl EntityBase for ArrowEntity {
 
             entity.velocity.store(velocity);
 
+            // `Projectile.checkLeftOwner` runs before `AbstractArrow` scans for a hit
+            // (`Projectile.java:105-127`; `AbstractArrow.java:243-257`).
+            crate::entity::projectile::check_left_owner(entity, self.owner_id, velocity).await;
+
             // Update rotation based on velocity
             let len = velocity.horizontal_length();
             entity.set_rotation(
@@ -588,7 +602,15 @@ impl EntityBase for ArrowEntity {
                     continue;
                 }
 
-                let ebb = cand.get_entity().bounding_box.load().expand(0.3, 0.3, 0.3);
+                // `ProjectileUtil.getEntityHitResult` inflates the target by its pick radius
+                // (`ProjectileUtil.java:109-120`).
+                let pick_radius =
+                    crate::entity::projectile::projectile_target_pick_radius(cand.as_ref());
+                let ebb = cand.get_entity().bounding_box.load().expand(
+                    pick_radius,
+                    pick_radius,
+                    pick_radius,
+                );
                 if let Some(t) = calculate_ray_intersection(&start_pos, &velocity, &ebb)
                     && t < closest_t
                 {
@@ -697,9 +719,10 @@ impl EntityBase for ArrowEntity {
                     entity.velocity.store(Vector3::new(0.0, 0.0, 0.0));
                     entity.set_pos(hit_pos);
 
-                    // Play sound
+                    // Vanilla `AbstractArrow.onHitBlock` plays the current sound and then resets
+                    // it to ARROW_HIT (`AbstractArrow.java:533-552`).
                     let sound_packet = CSoundEffect::new(
-                        IdOr::Id(Sound::EntityArrowHit as u16),
+                        IdOr::Id(self.sound_event.load() as u16),
                         SoundCategory::Neutral,
                         &hit_pos,
                         1.0,
@@ -708,6 +731,7 @@ impl EntityBase for ArrowEntity {
                     );
                     let chunk_pos = entity.chunk_pos.load();
                     world.broadcast_to_chunk(chunk_pos, &sound_packet);
+                    self.sound_event.store(Sound::EntityArrowHit);
 
                     // Reset critical flag
                     self.is_critical.store(false, Ordering::Relaxed);
@@ -829,9 +853,10 @@ impl EntityBase for ArrowEntity {
                             }
                         }
 
-                        // Play hit sound
+                        // Vanilla `AbstractArrow.onHitEntity` plays its configured sound event
+                        // (`AbstractArrow.java:425-426,502-503`).
                         let sound_packet = CSoundEffect::new(
-                            IdOr::Id(Sound::EntityArrowHit as u16),
+                            IdOr::Id(self.sound_event.load() as u16),
                             SoundCategory::Neutral,
                             &hit_pos,
                             1.0,
@@ -959,8 +984,11 @@ impl ArrowEntity {
             return true;
         }
 
-        // Skip owner for initial frames (5 ticks)
-        if Some(other_ent.entity_id) == self.owner_id && self_ent.age.load(Ordering::Relaxed) < 5 {
+        // `Projectile.canHitEntity` excludes the owner until `leftOwner` is set
+        // (`Projectile.java:317-324`).
+        if Some(other_ent.entity_id) == self.owner_id
+            && !self_ent.projectile_left_owner.load(Ordering::Relaxed)
+        {
             return true;
         }
 

@@ -145,8 +145,14 @@ impl ItemBehaviour for BoatItem {
                     continue;
                 }
 
-                // Vanilla: expand by getTargetingMargin() (0.0 for most entities)
-                let entity_box = entity.get_entity().bounding_box.load();
+                // Vanilla inflates this box by `Entity.getPickRadius` (`BoatItem.java:45-48`;
+                // base `Entity.java:2563-2565`).
+                let pick_radius = f64::from(entity.get_entity().get_pick_radius());
+                let entity_box = entity.get_entity().bounding_box.load().expand(
+                    pick_radius,
+                    pick_radius,
+                    pick_radius,
+                );
                 // Check if entity's bounding box contains the player's eye position
                 if entity_box.intersects(&BoundingBox::new(player_eye_pos, player_eye_pos)) {
                     // Entity is blocking the line of sight at eye position

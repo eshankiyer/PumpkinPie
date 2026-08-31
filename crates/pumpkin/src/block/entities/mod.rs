@@ -444,6 +444,41 @@ pub(crate) async fn collect_components_from_block_entity(
     )]
 }
 
+/// Serializes the custom block-entity payload used by creative pick-block. Vanilla writes
+/// `saveCustomOnly`, removes fields exported as implicit components, and stores the remainder as
+/// block-entity data (`ServerGamePacketListenerImpl.java:715-724`; `BlockEntity.java:141-151,
+/// 302-314`).
+pub(crate) async fn block_entity_data_component(
+    entity: &dyn BlockEntity,
+) -> Option<(
+    pumpkin_data::data_component::DataComponent,
+    Option<Box<dyn DataComponentImpl>>,
+)> {
+    let mut nbt = NbtCompound::new();
+    entity.write_nbt(&mut nbt).await;
+
+    // These fields are represented by the implicit components collected above. The removals
+    // match the concrete vanilla overrides (`BeehiveBlockEntity.java:317-327`;
+    // `SkullBlockEntity.java:90-103`; `EnchantingTableBlockEntity.java:129-137`).
+    if entity.as_any().is::<beehive::BeehiveBlockEntity>() {
+        nbt.child_tags.remove("bees");
+    } else if entity.as_any().is::<skull::SkullBlockEntity>() {
+        nbt.child_tags.remove("profile");
+        nbt.child_tags.remove("note_block_sound");
+        nbt.child_tags.remove("custom_name");
+    } else if entity
+        .as_any()
+        .is::<enchanting_table::EnchantingTableBlockEntity>()
+    {
+        nbt.child_tags.remove("CustomName");
+    }
+
+    (!nbt.is_empty()).then_some((
+        pumpkin_data::data_component::DataComponent::BlockEntityData,
+        Some(Box::new(BlockEntityDataImpl { nbt }).to_dyn()),
+    ))
+}
+
 #[must_use]
 pub fn block_entity_from_generic<T: BlockEntity>(nbt: &NbtCompound) -> T {
     let x = nbt.get_int("x").unwrap_or(0);
@@ -734,7 +769,7 @@ mod test {
     use super::{
         BlockEntity, apply_components_from_item_stack, beehive::BeehiveBlockEntity,
         block_entity_from_nbt, chest::ChestBlockEntity, collect_components_from_block_entity,
-        furnace::FurnaceBlockEntity, skull::SkullBlockEntity,
+        furnace::FurnaceBlockEntity, skull::SkullBlockEntity, test_block::TestBlockBlockEntity,
     };
     use pumpkin_data::data_component_impl::{
         BlockEntityDataImpl, ContainerLootImpl, CustomNameImpl, ProfileImpl,
@@ -830,6 +865,22 @@ mod test {
         let restored = inventory.get_stack(0).await;
         assert_eq!(restored.item.id, Item::DIAMOND.id);
         assert_eq!(restored.item_count, 5);
+    }
+
+    #[tokio::test]
+    async fn creative_pick_preserves_custom_block_entity_data() {
+        // `addBlockDataToItem` stores the result of `saveCustomOnly` as block-entity data
+        // (`ServerGamePacketListenerImpl.java:715-724`; `BlockEntity.java:141-151`).
+        let entity = TestBlockBlockEntity::new(BlockPos::new(3, 64, -2));
+        entity.set_message("keep me".to_string()).await;
+
+        let Some((_, Some(component))) = super::block_entity_data_component(&entity).await else {
+            panic!("custom block-entity data should be serialized for pick-block");
+        };
+        let NbtTag::Compound(data) = component.write_data() else {
+            panic!("block-entity data component should contain an NBT compound");
+        };
+        assert_eq!(data.get_string("message"), Some("keep me"));
     }
 
     #[tokio::test]

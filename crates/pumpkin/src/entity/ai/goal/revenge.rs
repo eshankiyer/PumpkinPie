@@ -80,7 +80,9 @@ impl Goal for RevengeGoal {
             let mob_entity = mob.get_mob_entity();
             let living = &mob_entity.living_entity;
 
-            let attacked_time = living.last_attacked_time.load(Relaxed);
+            // `LivingEntity.getLastHurtByMobTimestamp` supplies this revenge-goal timestamp
+            // (`LivingEntity.java:629-631`).
+            let attacked_time = living.get_last_hurt_by_mob_timestamp();
             if attacked_time == self.last_attacked_time {
                 return false;
             }
@@ -144,7 +146,7 @@ impl Goal for RevengeGoal {
             mob.set_mob_target(self.target.clone()).await;
 
             let mob_entity = mob.get_mob_entity();
-            self.last_attacked_time = mob_entity.living_entity.last_attacked_time.load(Relaxed);
+            self.last_attacked_time = mob_entity.living_entity.get_last_hurt_by_mob_timestamp();
             self.track_target_goal.max_time_without_visibility = 300;
             self.track_target_goal.start(mob).await;
 

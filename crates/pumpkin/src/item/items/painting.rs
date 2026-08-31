@@ -148,6 +148,11 @@ impl ItemBehaviour for PaintingItem {
             if !world.is_in_height_limit(anchor.0.y) {
                 return;
             }
+            // `HangingEntityItem.mayPlace` checks `Player.mayUseItemAt`
+            // (`HangingEntityItem.java:79-81`).
+            if !player.may_use_item_at(&anchor, face, item).await {
+                return;
+            }
 
             let border = world.worldborder.lock().await;
             // `Painting.create`: keep the placeable variants that survive here, then the
