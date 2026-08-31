@@ -6,8 +6,8 @@ use crate::data_component_impl::{
     BlocksAttacksImpl, CanBreakImpl, CanPlaceOnImpl, ConsumableImpl, CustomDataImpl,
     CustomNameImpl, DamageImpl, DamageResistantImpl, DamageResistantType, DamageTypeImpl,
     DataComponentImpl, EnchantableImpl, EnchantmentGlintOverrideImpl, EnchantmentsImpl, IDSet,
-    ItemNameImpl, MaxDamageImpl, MaxStackSizeImpl, PotionContentsImpl, RepairableImpl, ToolImpl,
-    UnbreakableImpl, UseCooldownImpl, get, get_mut, read_data,
+    ItemNameImpl, KineticWeaponImpl, MaxDamageImpl, MaxStackSizeImpl, PotionContentsImpl,
+    RepairableImpl, ToolImpl, UnbreakableImpl, UseCooldownImpl, get, get_mut, read_data,
 };
 use crate::item::Item;
 use crate::recipes::RecipeResultStruct;
@@ -500,7 +500,11 @@ impl ItemStack {
         if let Some(value) = self.get_data_component::<ConsumableImpl>() {
             return value.consume_ticks();
         }
-        if self.get_data_component::<BlocksAttacksImpl>().is_some() {
+        // Vanilla `Item.getUseDuration` (`Item.java:310-316`) uses the long duration for
+        // both `BLOCKS_ATTACKS` and `KINETIC_WEAPON` items.
+        if self.get_data_component::<BlocksAttacksImpl>().is_some()
+            || self.get_data_component::<KineticWeaponImpl>().is_some()
+        {
             return 72000;
         }
         0
@@ -1137,6 +1141,22 @@ impl From<&RecipeResultStruct> for ItemStack {
     }
 }
 
+impl Item {
+    /// Returns the item registered for a block, defaulting to air when the block has no
+    /// item form. Mirrors `Item.byBlock` (`Item.java:130-133`).
+    ///
+    /// Hand-written rather than generated: `impl Item` blocks in `generated/item.rs` are
+    /// overwritten by the codegen tool, so extension methods live here instead, matching
+    /// the precedent for `Block` in `pumpkin-data/src/blocks.rs`.
+    #[must_use]
+    pub const fn by_block(block: &Block) -> &'static Self {
+        match Self::from_id(block.item_id) {
+            Some(item) => item,
+            None => &Self::AIR,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1315,6 +1335,24 @@ mod tests {
         assert!(plain.is_same_item(&customized));
         assert!(ItemStack::EMPTY.is_same_item(&zero_count_coal));
         assert!(!plain.is_same_item(&ItemStack::new(1, &Item::IRON_INGOT)));
+    }
+
+    #[test]
+    fn item_by_block_returns_registered_item_or_air() {
+        // Vanilla `Item.byBlock` (`Item.java:130-133`) returns the registered item and uses air
+        // as the fallback for a block without a distinct item form.
+        assert_eq!(Item::by_block(&Block::STONE).id, Item::STONE.id);
+        assert_eq!(Item::by_block(&Block::AIR).id, Item::AIR.id);
+    }
+
+    #[test]
+    fn kinetic_weapon_uses_vanilla_long_use_duration() {
+        // Vanilla `Item.use` starts kinetic weapons (`Item.java:202-207`) and
+        // `Item.getUseDuration` gives them 72000 ticks (`Item.java:310-316`).
+        assert_eq!(
+            ItemStack::new(1, &Item::WOODEN_SPEAR).get_max_use_time(),
+            72000
+        );
     }
 
     #[cfg(feature = "damage")]

@@ -1245,17 +1245,31 @@ pub trait ScreenHandler: Send + Sync {
                                 .get_data_component::<pumpkin_data::data_component_impl::BundleContentsImpl>()
                                 .is_some()
                         {
-                            let mut inner_slot_stack = slot.get_stack().await;
-                            let Some(bundle) = cursor_stack
-                                .get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
-                            else {
-                                return;
+                            // `BundleContents.Mutable.tryTransfer` uses `Slot.safeTake`, so
+                            // slot permissions and the slot's transfer callbacks must run
+                            // before the extracted stack enters the bundle
+                            // (`BundleContents.java:217-225`).
+                            let max_amount = cursor_stack
+                                .get_data_component::<pumpkin_data::data_component_impl::BundleContentsImpl>()
+                                .map_or(0, |bundle| {
+                                    let weight_per_item =
+                                        (64 / slot_stack.get_max_stack_size() as u32).max(1);
+                                    ((64u32.saturating_sub(bundle.get_weight()) / weight_per_item)
+                                        .min(u32::from(slot_stack.item_count)))
+                                        as u8
+                                });
+                            let mut inner_slot_stack = if max_amount == 0 {
+                                ItemStack::EMPTY.clone()
+                            } else {
+                                slot.safe_take(slot_stack.item_count, max_amount, player)
+                                    .await
                             };
-                            let inserted = bundle.try_insert(&mut inner_slot_stack);
-                            if inner_slot_stack.item_count == 0 {
-                                inner_slot_stack = ItemStack::EMPTY.clone();
+                            let inserted = cursor_stack
+                                .get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
+                                .is_some_and(|bundle| bundle.try_insert(&mut inner_slot_stack));
+                            if !inner_slot_stack.is_empty() {
+                                let _ = slot.insert_stack(inner_slot_stack).await;
                             }
-                            slot.set_stack(inner_slot_stack).await;
                             player
                                 .play_sound(if inserted {
                                     Sound::ItemBundleInsert
@@ -1318,7 +1332,16 @@ pub trait ScreenHandler: Send + Sync {
                         if !intercepted && slot_stack.is_empty()
                             && let Some(bundle) = cursor_stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
                                 && let Some(extracted) = bundle.try_extract() {
-                                    slot.set_stack(extracted).await;
+                                    // `BundleItem.overrideStackedOnOther` delegates the
+                                    // extracted stack to `Slot.safeInsert`, preserving slot
+                                    // limits and returning any remainder to the bundle
+                                    // (`BundleItem.java:59-81`).
+                                    let mut remainder = slot.insert_stack(extracted).await;
+                                    if !remainder.is_empty()
+                                        && let Some(bundle) = cursor_stack.get_data_component_mut::<pumpkin_data::data_component_impl::BundleContentsImpl>()
+                                    {
+                                        let _ = bundle.try_insert(&mut remainder);
+                                    }
                                     player.play_sound(Sound::ItemBundleRemoveOne).await;
                                     intercepted = true;
                                 }

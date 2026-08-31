@@ -15,12 +15,12 @@ impl JavaClient {
         let block = world.get_block(&pick_item.pos);
 
         // Vanilla `Block#getCloneItemStack`: a block may override the item a player receives when
-        // middle-clicking it (e.g. attached stems give their seed). Otherwise fall back to the
-        // block's registered item; an `item_id` of 0 means the block cannot be picked.
+        // middle-clicking it (e.g. attached stems give their seed). Otherwise `Item.byBlock`
+        // (`Item.java:130-133`) supplies the registered item, defaulting to air.
         let Some(mut stack) = world
             .block_registry
             .get_clone_item_stack(block, &world, &pick_item.pos)
-            .or_else(|| Item::from_id(block.item_id).map(|item| ItemStack::new(1, item)))
+            .or_else(|| Some(ItemStack::new(1, Item::by_block(block))))
         else {
             return;
         };
