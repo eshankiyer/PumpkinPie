@@ -3,8 +3,9 @@ use pumpkin_data::item_id_remap::remap_item_id_for_version;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::packet::clientbound::play::RECIPE_BOOK_ADD;
 use pumpkin_data::recipes::{
-    CookingRecipeType, CraftingRecipeTypes, RECIPES_COOKING, RECIPES_CRAFTING, RecipeCategoryTypes,
-    RecipeIngredientTypes, RecipeResultStruct,
+    CookingRecipeType, CraftingRecipeTypes, RECIPES_COOKING, RECIPES_CRAFTING,
+    RECIPES_STONECUTTING, RecipeCategoryTypes, RecipeIngredientTypes, RecipeResultStruct,
+    StonecutterRecipe,
 };
 use pumpkin_macros::java_packet;
 use pumpkin_util::version::JavaMinecraftVersion;
@@ -20,6 +21,8 @@ use pumpkin_data::slot_display_id_remap::remap_slot_display_id_for_version;
 const RECIPE_DISPLAY_SHAPELESS: i32 = 0;
 const RECIPE_DISPLAY_SHAPED: i32 = 1;
 const RECIPE_DISPLAY_FURNACE: i32 = 2;
+// `RecipeDisplays.bootstrap` registers stonecutter fourth (`RecipeDisplays.java:5-11`).
+const RECIPE_DISPLAY_STONECUTTER: i32 = 3;
 
 // Slot Display base type IDs (26.2)
 const SLOT_DISPLAY_EMPTY: u32 = 0;
@@ -42,6 +45,8 @@ const CATEGORY_FURNACE_MISC: i32 = 6;
 const CATEGORY_BLAST_FURNACE_BLOCKS: i32 = 7;
 const CATEGORY_BLAST_FURNACE_MISC: i32 = 8;
 const CATEGORY_SMOKER_FOOD: i32 = 9;
+// `RecipeBookCategories` registers stonecutter after smoker (`RecipeBookCategories.java:6-19`).
+const CATEGORY_STONECUTTER: i32 = 10;
 const CATEGORY_CAMPFIRE: i32 = 12;
 
 use crate::codec::recipe::DynamicRecipe;
@@ -466,6 +471,21 @@ pub fn write_recipe_display(
     Ok(false)
 }
 
+/// Writes vanilla `StonecutterRecipe.display()` as a
+/// `StonecutterRecipeDisplay` (`StonecutterRecipe.java:37-44`).
+fn write_stonecutter_recipe_display(
+    write: &mut impl Write,
+    version: JavaMinecraftVersion,
+    stonecutter: &Item,
+    recipe: &StonecutterRecipe,
+) -> Result<(), WritingError> {
+    write.write_var_int(&VarInt(RECIPE_DISPLAY_STONECUTTER))?;
+    write_ingredient_slot_display(write, &recipe.ingredient, version)?;
+    write_result_slot_display(write, &recipe.result, version)?;
+    write_item_slot_display(write, stonecutter, version)?;
+    Ok(())
+}
+
 /// Write a single `RecipeDisplayEntry` + flags byte.
 /// Returns `Ok(true)` if written, `Ok(false)` if skipped (special recipe).
 #[allow(clippy::too_many_arguments)]
@@ -480,9 +500,11 @@ fn write_entry(
     furnace: &Item,
     blast_furnace: &Item,
     smoker: &Item,
+    stonecutter: &Item,
     campfire: &Item,
     crafting_recipe: Option<&CraftingRecipeTypes>,
     cooking_recipe: Option<(&CookingRecipeType, i32)>,
+    stonecutter_recipe: Option<&StonecutterRecipe>,
 ) -> Result<bool, WritingError> {
     if let Some(recipe) = crafting_recipe {
         // Bail out before a single byte is written: these have no RecipeDisplay, and
@@ -613,6 +635,18 @@ fn write_entry(
         return Ok(true);
     }
 
+    if let Some(recipe) = stonecutter_recipe {
+        write.write_var_int(&VarInt(display_id))?;
+        write_stonecutter_recipe_display(write, version, stonecutter, recipe)?;
+        // `StonecutterRecipe.recipeBookCategory()` is the registered stonecutter category
+        // (`StonecutterRecipe.java:46-49`), and its single input is the crafting requirement.
+        write_optional_var_int(write, group_id)?;
+        write.write_var_int(&VarInt(CATEGORY_STONECUTTER))?;
+        write_crafting_requirements(write, &[&recipe.ingredient], version)?;
+        write.write_u8(flags)?;
+        return Ok(true);
+    }
+
     Ok(false)
 }
 
@@ -634,6 +668,8 @@ impl ClientPacket for CRecipeBookAdd<'_> {
             .ok_or_else(|| WritingError::Message("blast_furnace item must exist".into()))?;
         let smoker = Item::from_registry_key("smoker")
             .ok_or_else(|| WritingError::Message("smoker item must exist".into()))?;
+        let stonecutter = Item::from_registry_key("stonecutter")
+            .ok_or_else(|| WritingError::Message("stonecutter item must exist".into()))?;
         let campfire = Item::from_registry_key("campfire")
             .ok_or_else(|| WritingError::Message("campfire item must exist".into()))?;
 
@@ -649,7 +685,10 @@ impl ClientPacket for CRecipeBookAdd<'_> {
             })
             .count();
         let dynamic_count = self.dynamic_recipes.len();
-        let total = crafting_count + RECIPES_COOKING.len() + dynamic_count;
+        // `StonecutterRecipe.display()` contributes one entry per static recipe
+        // (`StonecutterRecipe.java:37-49`).
+        let total =
+            crafting_count + RECIPES_COOKING.len() + RECIPES_STONECUTTING.len() + dynamic_count;
 
         // Entry count (VarInt)
         write.write_var_int(&VarInt(total as i32))?;
@@ -688,8 +727,10 @@ impl ClientPacket for CRecipeBookAdd<'_> {
                 furnace,
                 blast_furnace,
                 smoker,
+                stonecutter,
                 campfire,
                 Some(recipe),
+                None,
                 None,
             )?;
             if written {
@@ -734,9 +775,34 @@ impl ClientPacket for CRecipeBookAdd<'_> {
                 furnace,
                 blast_furnace,
                 smoker,
+                stonecutter,
                 campfire,
                 None,
                 Some((recipe, book_category)),
+                None,
+            )?;
+            display_id += 1;
+        }
+
+        // Vanilla `StonecutterRecipe.display()` contributes a static recipe-book entry
+        // (`StonecutterRecipe.java:37-49`) after the cooking displays.
+        for recipe in RECIPES_STONECUTTING {
+            let flags = entry_flags(self.replace, true, highlight);
+            write_entry(
+                &mut write,
+                display_id,
+                *version,
+                None,
+                flags,
+                crafting_table,
+                furnace,
+                blast_furnace,
+                smoker,
+                stonecutter,
+                campfire,
+                None,
+                None,
+                Some(recipe),
             )?;
             display_id += 1;
         }
@@ -1237,7 +1303,8 @@ fn show_notification(display_id: i32) -> bool {
 /// `replace = false`, and `ServerRecipeBook.sendInitialRecipeBook`
 /// (`ServerRecipeBook.java:112-121`) sends the known set with `replace = true`.
 ///
-/// [`CRecipeBookAdd`] emits every entry of `RECIPES_CRAFTING` and `RECIPES_COOKING`
+/// [`CRecipeBookAdd`] emits every entry of `RECIPES_CRAFTING`, `RECIPES_COOKING`, and
+/// `RECIPES_STONECUTTING`
 /// unconditionally and so cannot express either; this type shares its entry writer
 /// and its display-id numbering, so an entry written here is byte-identical to the
 /// same entry written there.
@@ -1258,12 +1325,13 @@ impl<'a> CRecipeBookAddSubset<'a> {
     }
 }
 
-/// The five crafting-station items every `RecipeDisplay` names.
+/// The six crafting-station items every static `RecipeDisplay` names.
 struct Stations {
     crafting_table: &'static Item,
     furnace: &'static Item,
     blast_furnace: &'static Item,
     smoker: &'static Item,
+    stonecutter: &'static Item,
     campfire: &'static Item,
 }
 
@@ -1278,6 +1346,7 @@ impl Stations {
             furnace: get("furnace")?,
             blast_furnace: get("blast_furnace")?,
             smoker: get("smoker")?,
+            stonecutter: get("stonecutter")?,
             campfire: get("campfire")?,
         })
     }
@@ -1313,7 +1382,7 @@ impl SubsetWriter<'_> {
             let group_id =
                 resolve_group_id_owned(&mut self.group_ids, &mut self.next_group_id, group);
             if let Some(entry) = self.wanted.get(&self.display_id).copied() {
-                self.emit(entry, group_id, Some(recipe), None)?;
+                self.emit(entry, group_id, Some(recipe), None, None)?;
             }
             self.display_id += 1;
         }
@@ -1329,7 +1398,17 @@ impl SubsetWriter<'_> {
                 group.map(Cow::Borrowed),
             );
             if let Some(entry) = self.wanted.get(&self.display_id).copied() {
-                self.emit(entry, group_id, None, Some((recipe, book_category)))?;
+                self.emit(entry, group_id, None, Some((recipe, book_category)), None)?;
+            }
+            self.display_id += 1;
+        }
+        Ok(())
+    }
+
+    fn write_stonecutter(&mut self) -> Result<(), WritingError> {
+        for recipe in RECIPES_STONECUTTING {
+            if let Some(entry) = self.wanted.get(&self.display_id).copied() {
+                self.emit(entry, None, None, None, Some(recipe))?;
             }
             self.display_id += 1;
         }
@@ -1342,6 +1421,7 @@ impl SubsetWriter<'_> {
         group_id: Option<i32>,
         crafting_recipe: Option<&CraftingRecipeTypes>,
         cooking_recipe: Option<(&CookingRecipeType, i32)>,
+        stonecutter_recipe: Option<&StonecutterRecipe>,
     ) -> Result<(), WritingError> {
         if write_entry(
             &mut self.body,
@@ -1353,9 +1433,11 @@ impl SubsetWriter<'_> {
             self.stations.furnace,
             self.stations.blast_furnace,
             self.stations.smoker,
+            self.stations.stonecutter,
             self.stations.campfire,
             crafting_recipe,
             cooking_recipe,
+            stonecutter_recipe,
         )? {
             self.written += 1;
         }
@@ -1413,6 +1495,7 @@ impl ClientPacket for CRecipeBookAddSubset<'_> {
 
         writer.write_crafting()?;
         writer.write_cooking()?;
+        writer.write_stonecutter()?;
 
         write.write_var_int(&VarInt(writer.written))?;
         write.write_slice(&writer.body)?;

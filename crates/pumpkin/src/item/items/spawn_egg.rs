@@ -10,6 +10,7 @@ use crate::entity::r#type::from_type;
 use crate::item::{ItemBehaviour, ItemMetadata};
 use crate::server::Server;
 use crate::world::World;
+use crate::world::game_event::{GameEventContext, emit_game_event};
 use pumpkin_data::data_component_impl::{
     AxolotlVariantImpl, CatVariantImpl, ChickenVariantImpl, CowVariantImpl, FoxVariantImpl,
     FrogVariantImpl, HorseVariantImpl, LlamaVariantImpl, MooshroomVariantImpl, PigVariantImpl,
@@ -77,6 +78,7 @@ async fn spawn_egg_mob(
     stack: &ItemStack,
     world: &Arc<World>,
     pos: Vector3<f64>,
+    player: &Player,
 ) {
     // Create rotation like Vanilla
     let yaw = wrap_degrees(rand::random::<f32>() * 360.0) % 360.0;
@@ -96,6 +98,17 @@ async fn spawn_egg_mob(
 
     // Broadcast the new mob to all players
     world.spawn_entity(mob).await;
+
+    // `SpawnEggItem.spawn` emits ENTITY_PLACE after a successful spawn (`SpawnEggItem.java:90-93`).
+    if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id) {
+        emit_game_event(
+            world,
+            pumpkin_data::game_event::GameEvent::EntityPlace,
+            pos,
+            GameEventContext::of_entity(player_arc),
+        )
+        .await;
+    }
 }
 
 impl ItemBehaviour for SpawnEggItem {
@@ -165,7 +178,16 @@ impl ItemBehaviour for SpawnEggItem {
                 f64::from(pos.0.y),
                 f64::from(pos.0.z) + 0.5,
             );
-            spawn_egg_mob(entity_type, &stack, &world, spawn_pos).await;
+            spawn_egg_mob(entity_type, &stack, &world, spawn_pos, player).await;
+            // `SpawnEggItem.use` awards ITEM_USED after a successful liquid spawn
+            // (`SpawnEggItem.java:118-122`).
+            player
+                .increment_stat(
+                    pumpkin_data::statistic::StatisticCategory::Used,
+                    item.id as i32,
+                    1,
+                )
+                .await;
             stack.decrement_unless_creative(player.gamemode.load(), 1);
             inventory.set_stack_in_hand(hand, stack).await;
         })
@@ -192,6 +214,18 @@ impl ItemBehaviour for SpawnEggItem {
                 {
                     spawner.set_entity_type(entity_type);
                     world.update_block_entity(&block_entity);
+                    // `SpawnEggItem.useOn` emits BLOCK_CHANGE after retargeting a spawner
+                    // (`SpawnEggItem.java:62-65`).
+                    if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id)
+                    {
+                        emit_game_event(
+                            &world,
+                            pumpkin_data::game_event::GameEvent::BlockChange,
+                            location.to_centered_f64(),
+                            GameEventContext::of_entity(player_arc),
+                        )
+                        .await;
+                    }
                     item.decrement_unless_creative(player.gamemode.load(), 1);
                     return;
                 }
@@ -205,6 +239,18 @@ impl ItemBehaviour for SpawnEggItem {
                 {
                     trial_spawner.set_entity_id(&world, entity_type).await;
                     world.update_block_entity(&block_entity);
+                    // `SpawnEggItem.useOn` emits BLOCK_CHANGE after retargeting a spawner
+                    // (`SpawnEggItem.java:62-65`).
+                    if let Some(player_arc) = world.get_player_by_id(player.get_entity().entity_id)
+                    {
+                        emit_game_event(
+                            &world,
+                            pumpkin_data::game_event::GameEvent::BlockChange,
+                            location.to_centered_f64(),
+                            GameEventContext::of_entity(player_arc),
+                        )
+                        .await;
+                    }
                     item.decrement_unless_creative(player.gamemode.load(), 1);
                     return;
                 }
@@ -226,7 +272,7 @@ impl ItemBehaviour for SpawnEggItem {
                     f64::from(pos.0.y),
                     f64::from(pos.0.z) + 0.5,
                 );
-                spawn_egg_mob(entity_type, item, &world, pos).await;
+                spawn_egg_mob(entity_type, item, &world, pos, player).await;
                 item.decrement_unless_creative(player.gamemode.load(), 1);
             }
         })

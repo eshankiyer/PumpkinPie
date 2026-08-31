@@ -9,6 +9,7 @@ use pumpkin_data::particle::Particle;
 use pumpkin_data::potion::Effect;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_protocol::java::client::play::{CEntityPositionSync, CEntityVelocity};
+use pumpkin_util::Difficulty;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
@@ -28,6 +29,12 @@ const DIR_EAST: u8 = 5;
 const DIR_NONE: u8 = 255;
 
 const SPEED: f64 = 0.15;
+
+/// Vanilla `ShulkerBullet.checkDespawn` (`ShulkerBullet.java:177-182`) only despawns in
+/// peaceful difficulty.
+const fn should_despawn(difficulty: Difficulty) -> bool {
+    matches!(difficulty, Difficulty::Peaceful)
+}
 
 pub struct ShulkerBulletEntity {
     pub entity: Entity,
@@ -297,6 +304,16 @@ impl EntityBase for ShulkerBulletEntity {
         self
     }
 
+    /// Vanilla `ShulkerBullet.checkDespawn` (`ShulkerBullet.java:177-182`) discards the
+    /// projectile when the world is peaceful. The world entity loop already calls this hook.
+    fn check_despawn(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            if should_despawn(self.entity.world.load().level_info.load().difficulty) {
+                self.entity.remove().await;
+            }
+        })
+    }
+
     /// Any hit destroys the bullet (melee, arrow, etc.).
     fn damage_with_context<'a>(
         &'a self,
@@ -381,9 +398,11 @@ impl EntityBase for ShulkerBulletEntity {
             };
 
             // Apply gravity only if target is null, dead, or a spectator.
+            // Vanilla `ShulkerBullet.tick` applies gravity to dead or spectator targets
+            // (`ShulkerBullet.java:192-204`).
             let target_alive = target_opt
                 .as_ref()
-                .is_some_and(|t| t.get_entity().is_alive());
+                .is_some_and(|t| t.get_entity().is_alive() && !t.get_entity().is_spectator());
 
             if !target_alive && target_id >= 0 {
                 // Target ID is set but entity was not found (dead/left the world).
@@ -596,5 +615,20 @@ impl EntityBase for ShulkerBulletEntity {
                 }
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn peaceful_difficulty_is_the_despawn_condition() {
+        // Vanilla `ShulkerBullet.checkDespawn` (`ShulkerBullet.java:177-182`) only checks
+        // peaceful difficulty before discarding the entity.
+        assert!(should_despawn(Difficulty::Peaceful));
+        assert!(!should_despawn(Difficulty::Easy));
+        assert!(!should_despawn(Difficulty::Normal));
+        assert!(!should_despawn(Difficulty::Hard));
     }
 }

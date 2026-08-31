@@ -243,6 +243,11 @@ impl DatapackManager {
         name: &str,
         arguments: Option<&NbtCompound>,
     ) -> Result<usize, ExecuteFunctionError> {
+        // `FunctionCommand.modifySenderForExecution` suppresses output from commands dispatched
+        // by a function (`FunctionCommand.java:106-108`). Keep the original source for the
+        // caller's result/feedback and use the suppressed copy for every function line.
+        let function_source = function_source_for_execution(source);
+
         // Vanilla clamps the chain limit to at least 1
         // (`Commands.java:400`).
         let fallback_registry = GameRuleRegistry::default();
@@ -259,14 +264,14 @@ impl DatapackManager {
         // ExecutionContext (`Commands.java:412-414`).
         if REMAINING_COMMAND_QUOTA.try_with(Cell::get).is_ok() {
             return self
-                .execute_function_in_context(server, source, name, arguments, limit)
+                .execute_function_in_context(server, &function_source, name, arguments, limit)
                 .await;
         }
 
         REMAINING_COMMAND_QUOTA
             .scope(
                 Cell::new(limit),
-                self.execute_function_in_context(server, source, name, arguments, limit),
+                self.execute_function_in_context(server, &function_source, name, arguments, limit),
             )
             .await
     }
@@ -390,6 +395,13 @@ impl DatapackManager {
     }
 }
 
+/// Builds the execution source used by `FunctionCommand.runGuarded` after
+/// `modifySenderForExecution` (`FunctionCommand.java:235-264`, with source modification at
+/// `:106-108`).
+fn function_source_for_execution(source: &CommandSource) -> CommandSource {
+    source.clone().with_silent()
+}
+
 /// Translates a macro instantiation failure into the user-facing component
 /// vanilla produces before wrapping it in `ERROR_FUNCTION_INSTANTATION_FAILURE`
 /// (`FunctionCommand.java:139-141`): "missing arguments to function %s"
@@ -467,5 +479,21 @@ fn load_recipes_from_dir(
                 *count += 1;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CommandSource, function_source_for_execution};
+
+    /// `FunctionCommand.modifySenderForExecution` (`FunctionCommand.java:106-108`) suppresses
+    /// output on the function execution source while leaving the caller's source unchanged.
+    #[test]
+    fn function_execution_source_suppresses_output() {
+        let source = CommandSource::dummy();
+        let function_source = function_source_for_execution(&source);
+
+        assert!(!source.silent);
+        assert!(function_source.silent);
     }
 }

@@ -29,6 +29,14 @@ const JUMP_SCALE: f64 = 0.25;
 const MAX_Y_EXPLODE_MARGIN: i32 = 30;
 pub const WIND_CHARGE_GRAVITY: f64 = 0.0;
 
+/// Decrements a normal wind charge's deflection cooldown without allowing it to underflow.
+/// Mirrors `WindCharge.tick` (`WindCharge.java:43-49`).
+fn tick_deflect_cooldown(cooldown: &AtomicU8) {
+    let _ = cooldown.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |ticks| {
+        ticks.checked_sub(1)
+    });
+}
+
 /// A kind to differentiate both types of wind charges from each other.
 enum WindChargeKind {
     /// Represents a wind charge spawned by a player or dispenser.
@@ -188,10 +196,9 @@ impl EntityBase for WindChargeEntity {
             self.thrown_item_entity.process_tick(caller, server).await;
 
             if let Some(cooldown) = self.deflect_cooldown() {
-                let cooldown_ticks = cooldown.load(Ordering::Relaxed);
-                if cooldown_ticks > 0 {
-                    cooldown.store(cooldown_ticks - 1, Ordering::Relaxed);
-                }
+                // Vanilla `WindCharge.tick` decrements noDeflectTicks once per tick without
+                // changing zero (`WindCharge.java:43-49`).
+                tick_deflect_cooldown(cooldown);
             }
         })
     }
@@ -232,5 +239,22 @@ impl EntityBase for WindChargeEntity {
             };
             self.create_explosion(explosion_pos).await;
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deflect_cooldown_ticks_down_without_underflow() {
+        // `WindCharge.tick` preserves a zero cooldown while decrementing positive values
+        // (`WindCharge.java:43-49`).
+        let cooldown = AtomicU8::new(2);
+        tick_deflect_cooldown(&cooldown);
+        assert_eq!(cooldown.load(Ordering::Relaxed), 1);
+        tick_deflect_cooldown(&cooldown);
+        tick_deflect_cooldown(&cooldown);
+        assert_eq!(cooldown.load(Ordering::Relaxed), 0);
     }
 }

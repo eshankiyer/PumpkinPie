@@ -2,6 +2,7 @@ use pumpkin_data::BlockStateId;
 use pumpkin_data::block_properties::{BlockProperties, DriedGhastLikeProperties, HorizontalFacing};
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::fluid::Fluid;
+use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::vector3::Vector3;
@@ -101,6 +102,18 @@ impl BlockBehaviour for DriedGhastBlock {
                             BlockFlags::NOTIFY_LISTENERS,
                         )
                         .await;
+                    // DriedGhastBlock.tick emits BLOCK_CHANGE after drying
+                    // (DriedGhastBlock.java:93-101).
+                    crate::world::game_event::emit_game_event(
+                        args.world,
+                        GameEvent::BlockChange,
+                        args.position.to_centered_f64(),
+                        crate::world::game_event::GameEventContext {
+                            source_entity: None,
+                            affected_block_state: Some(state_id),
+                        },
+                    )
+                    .await;
                 }
                 return;
             }
@@ -120,6 +133,18 @@ impl BlockBehaviour for DriedGhastBlock {
                         BlockFlags::NOTIFY_LISTENERS,
                     )
                     .await;
+                // DriedGhastBlock.tickWaterlogged emits BLOCK_CHANGE after each
+                // hydration step (DriedGhastBlock.java:105-109).
+                crate::world::game_event::emit_game_event(
+                    args.world,
+                    GameEvent::BlockChange,
+                    args.position.to_centered_f64(),
+                    crate::world::game_event::GameEventContext {
+                        source_entity: None,
+                        affected_block_state: Some(state_id),
+                    },
+                )
+                .await;
                 return;
             }
 

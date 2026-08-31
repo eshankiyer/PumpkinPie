@@ -134,7 +134,12 @@ pub fn place_template_with_seed(
         processors,
         chunk_box,
         false,
-        Some(seed),
+        Some(
+            StructurePlaceSettings::new()
+                // StructureBlockEntity passes the seeded source through `setRandom`
+                // (`StructureBlockEntity.java:413-422`).
+                .set_random(Some(LegacyRand::from_seed(seed))),
+        ),
     );
 }
 
@@ -178,7 +183,7 @@ fn place_template_with_options_seed(
     processors: &[StructureProcessor],
     chunk_box: Option<&pumpkin_util::math::block_box::BlockBox>,
     keep_jigsaws: bool,
-    placement_seed: Option<u64>,
+    placement_settings: Option<StructurePlaceSettings>,
 ) {
     let (rotated_ox, rotated_oz) = rotation.rotate_offset(offset.0, offset.1);
     let world_x = origin.x + rotated_ox;
@@ -187,7 +192,9 @@ fn place_template_with_options_seed(
     let mut context_rng = LegacyRand::from_seed(hash_block_pos(world_x, origin.y, world_z) as u64);
     let mut context = processor::ProcessorContext::new(origin, processors, &mut context_rng);
 
-    let mut placement_rng = placement_seed.map(LegacyRand::from_seed);
+    // `StructurePlaceSettings.setRandom` supplies the processor source used by seeded
+    // structure placement (`StructurePlaceSettings.java:68-70`; `StructureBlockEntity.java:420-429`).
+    let mut placement_rng = placement_settings.and_then(|settings| settings.random);
 
     for block in &template.blocks {
         let palette_entry = &template.palette[block.state as usize];

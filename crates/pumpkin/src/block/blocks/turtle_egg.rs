@@ -4,7 +4,7 @@ use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::Taggable;
 use pumpkin_data::world::WorldEvent;
-use pumpkin_data::{Block, BlockDirection, BlockStateId, tag};
+use pumpkin_data::{Block, BlockDirection, BlockState, BlockStateId, tag};
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_world::tick::TickPriority;
@@ -131,19 +131,17 @@ impl BlockBehaviour for TurtleEggBlock {
             // Vanilla `fallOn` (TurtleEggBlock.java:65-71): falling onto the egg (zombies are
             // immune) rolls against randomness 3.
             if args.entity.get_entity().entity_type.id != EntityType::ZOMBIE.id {
-                let block = args.world.get_block(args.position);
-                destroy_egg(args.world, block, args.position, args.entity, 3).await;
+                let (block, state) = args.world.get_block_and_state(args.position);
+                destroy_egg(args.world, block, state, args.position, args.entity, 3).await;
             }
         })
     }
 
     fn broken<'a>(&'a self, args: BrokenArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            // Vanilla `playerDestroy` (TurtleEggBlock.java:142-152): after the normal break
-            // (loot handled by the engine), the cluster loses exactly one egg - mining a
-            // 4-egg block leaves a 3-egg block behind. `registry.broken` is only invoked
-            // from the player-mining path (`entity/player.rs`), matching vanilla's context.
-            decrease_eggs(args.world, args.block, args.position).await;
+            // Vanilla `playerDestroy` (TurtleEggBlock.java:141-152) receives the original state
+            // after the normal break, so a multi-egg cluster leaves one fewer egg behind.
+            decrease_eggs(args.world, args.block, args.state, args.position).await;
         })
     }
 
@@ -153,7 +151,15 @@ impl BlockBehaviour for TurtleEggBlock {
     fn on_entity_step<'a>(&'a self, args: OnEntityStepArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
             if !args.entity.get_entity().sneaking.load(Relaxed) {
-                destroy_egg(args.world, args.block, args.position, args.entity, 100).await;
+                destroy_egg(
+                    args.world,
+                    args.block,
+                    args.state,
+                    args.position,
+                    args.entity,
+                    100,
+                )
+                .await;
             }
         })
     }
@@ -165,6 +171,7 @@ impl BlockBehaviour for TurtleEggBlock {
 async fn destroy_egg(
     world: &std::sync::Arc<crate::world::World>,
     block: &Block,
+    state: &BlockState,
     position: &BlockPos,
     entity: &dyn EntityBase,
     randomness: i32,
@@ -188,7 +195,7 @@ async fn destroy_egg(
         return;
     }
 
-    decrease_eggs(world, block, position).await;
+    decrease_eggs(world, block, state, position).await;
 }
 
 /// Vanilla `decreaseEggs` (TurtleEggBlock.java:82-92): `TURTLE_EGG_BREAK` at volume 0.7 and
@@ -199,6 +206,7 @@ async fn destroy_egg(
 async fn decrease_eggs(
     world: &std::sync::Arc<crate::world::World>,
     block: &Block,
+    state: &BlockState,
     position: &BlockPos,
 ) {
     world.play_sound_raw(
@@ -209,20 +217,9 @@ async fn decrease_eggs(
         0.9 + rng().random::<f32>() * 0.2,
     );
 
-    let state_id = world.get_block_state_id(position);
-    let mut props = TurtleEggProperties::from_state_id(state_id, block);
-    if props.eggs <= 1 {
+    if let Some(state_id) = decreased_egg_state(state.id, block) {
         world
-            .break_block(position, None, BlockFlags::SKIP_DROPS)
-            .await;
-    } else {
-        props.eggs -= 1;
-        world
-            .set_block_state(
-                position,
-                props.to_state_id(block),
-                BlockFlags::NOTIFY_LISTENERS,
-            )
+            .set_block_state(position, state_id, BlockFlags::NOTIFY_LISTENERS)
             .await;
 
         emit_game_event(
@@ -235,12 +232,54 @@ async fn decrease_eggs(
         world.sync_world_event(
             WorldEvent::ParticlesDestroyBlock,
             *position,
-            i32::from(state_id.as_u16()),
+            i32::from(state.id.as_u16()),
         );
+    } else {
+        world
+            .break_block(position, None, BlockFlags::SKIP_DROPS)
+            .await;
+    }
+}
+
+/// Vanilla `decreaseEggs` uses the state passed by `playerDestroy`, not the now-air world state
+/// (`TurtleEggBlock.java:82-90, 141-152`).
+fn decreased_egg_state(state_id: BlockStateId, block: &Block) -> Option<BlockStateId> {
+    let mut properties = TurtleEggProperties::from_state_id(state_id, block);
+    if properties.eggs <= 1 {
+        None
+    } else {
+        properties.eggs -= 1;
+        Some(properties.to_state_id(block))
     }
 }
 
 fn can_place_at(block_accessor: &dyn BlockAccessor, position: &BlockPos) -> bool {
     let (support_block, state) = block_accessor.get_block_and_state(&position.down());
     support_block.has_tag(&tag::Block::MINECRAFT_SAND) || state.is_center_solid(BlockDirection::Up)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TurtleEggProperties, decreased_egg_state};
+    use pumpkin_data::Block;
+    use pumpkin_data::block_properties::BlockProperties;
+
+    /// `decreaseEggs` keeps a multi-egg state with one fewer egg and removes a single egg
+    /// (`TurtleEggBlock.java:82-90`).
+    #[test]
+    fn decreased_egg_state_matches_vanilla() {
+        let mut properties = TurtleEggProperties::default(&Block::TURTLE_EGG);
+        properties.eggs = 4;
+        let four_eggs = properties.to_state_id(&Block::TURTLE_EGG);
+
+        let three_eggs = decreased_egg_state(four_eggs, &Block::TURTLE_EGG).unwrap();
+        assert_eq!(
+            TurtleEggProperties::from_state_id(three_eggs, &Block::TURTLE_EGG).eggs,
+            3
+        );
+
+        let one_egg =
+            TurtleEggProperties::default(&Block::TURTLE_EGG).to_state_id(&Block::TURTLE_EGG);
+        assert!(decreased_egg_state(one_egg, &Block::TURTLE_EGG).is_none());
+    }
 }

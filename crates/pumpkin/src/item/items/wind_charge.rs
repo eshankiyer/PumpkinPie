@@ -5,6 +5,7 @@ use crate::entity::player::Player;
 use pumpkin_data::entity::EntityType;
 use pumpkin_data::item::Item;
 use pumpkin_data::sound::Sound;
+use pumpkin_data::statistic::StatisticCategory;
 
 use crate::entity::Entity;
 use crate::entity::EntityBase;
@@ -52,6 +53,12 @@ impl ItemBehaviour for WindChargeItem {
                 0.5,
                 super::throw_sound_pitch(rand::random()),
             );
+
+            // Vanilla `WindChargeItem.use` awards ITEM_USED before consuming the stack
+            // (`WindChargeItem.java:41-53`).
+            player
+                .increment_stat(StatisticCategory::Used, Item::WIND_CHARGE.id as i32, 1)
+                .await;
 
             let mut main_hand = player.inventory.held_item().await;
             let consumed = if !main_hand.is_empty() && main_hand.item.id == Item::WIND_CHARGE.id {
