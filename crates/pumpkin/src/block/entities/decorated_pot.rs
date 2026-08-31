@@ -1,5 +1,7 @@
 use super::BlockEntity;
 use crate::world::World;
+use pumpkin_data::data_component::DataComponent;
+use pumpkin_data::data_component_impl::{ContainerImpl, DataComponentImpl, PotDecorationsImpl};
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
@@ -144,6 +146,49 @@ impl DecoratedPotBlockEntity {
             .collect::<Option<Vec<_>>>()?
             .try_into()
             .ok()
+    }
+
+    /// Exports the item-backed components used by the creative include-data pick path.
+    /// `DecoratedPotBlockEntity.collectImplicitComponents` writes both components
+    /// (`DecoratedPotBlockEntity.java:112-116`), and the live caller is
+    /// `JavaClient::handle_pick_item_from_block` (`ServerGamePacketListenerImpl.java:699-709`).
+    pub(crate) async fn collect_implicit_components(
+        &self,
+    ) -> Vec<(DataComponent, Option<Box<dyn DataComponentImpl>>)> {
+        let decorations = {
+            let sherds = self.sherds.lock().await;
+            sherds.as_ref().and_then(|sherds| {
+                sherds
+                    .iter()
+                    .map(|tag| {
+                        tag.extract_string()
+                            .map(|value| Cow::Owned(value.to_string()))
+                    })
+                    .collect::<Option<Vec<_>>>()?
+                    .try_into()
+                    .ok()
+            })
+        };
+        let item = self.item.lock().await.clone();
+        let mut components = Vec::with_capacity(2);
+        if let Some(decorations) = decorations {
+            components.push((
+                DataComponent::PotDecorations,
+                Some(Box::new(PotDecorationsImpl { decorations }).to_dyn()),
+            ));
+        }
+        if let Some(item) = item.filter(|item| !item.is_empty()) {
+            components.push((
+                DataComponent::Container,
+                Some(
+                    Box::new(ContainerImpl {
+                        items: vec![(0, item)],
+                    })
+                    .to_dyn(),
+                ),
+            ));
+        }
+        components
     }
 
     pub async fn take_item(&self) -> Option<ItemStack> {

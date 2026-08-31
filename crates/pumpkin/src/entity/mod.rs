@@ -648,6 +648,12 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
         false
     }
 
+    /// Vanilla `Entity.getPickResult` (`Entity.java:3858-3860`) returns no item unless an
+    /// entity type supplies a concrete pick-block result.
+    fn get_pick_result(&self) -> EntityBaseFuture<'_, Option<ItemStack>> {
+        Box::pin(async { None })
+    }
+
     /// Vanilla `LivingEntity.canBeSeenByAnyone` (`LivingEntity.java:956-958`). Entity
     /// implementations with additional visibility rules override this; armor stands hide
     /// themselves when invisible or marker-configured.
@@ -1532,6 +1538,10 @@ fn percent_frozen(ticks_frozen: i32, ticks_required: i32) -> f32 {
 const fn shared_flag(flags: i8, flag: u8) -> bool {
     let mask = (1i8).wrapping_shl(flag as u32);
     flags & mask != 0
+}
+
+const fn default_air_drag() -> f64 {
+    0.98
 }
 
 /// `ServerPlayer.onExplosionHit` treats the player-thrown wind-charge entity as the
@@ -3813,6 +3823,13 @@ impl Entity {
         }
     }
 
+    /// Vanilla `Entity.getAirDrag` supplies the default air friction used by non-living
+    /// entities (`Entity.java:1529-1531`).
+    #[expect(clippy::unused_self, clippy::missing_const_for_fn)]
+    fn get_air_drag(&self) -> f64 {
+        default_air_drag()
+    }
+
     #[expect(clippy::float_cmp)]
     fn get_jump_velocity_multiplier(&self) -> f32 {
         let f = self
@@ -5836,6 +5853,17 @@ impl Entity {
         let chunk_pos = self.chunk_pos.load();
 
         if let Some(passenger) = removed_passenger {
+            // `HappyGhast.removePassenger` clears its home restriction after the last passenger
+            // leaves (`HappyGhast.java:324-333`). Resolve the live vehicle so this generic
+            // dismount path invokes the existing Mob home state directly.
+            if self.entity_type.id == EntityType::HAPPY_GHAST.id
+                && self.passengers.lock().await.is_empty()
+                && let Some(vehicle) = self.world.load().get_entity_by_id(self.entity_id)
+                && let Some(mob) = vehicle.get_mob()
+            {
+                mob.get_mob_entity().clear_home();
+            }
+
             let vehicle_box = self.bounding_box.load();
             let passenger_entity = passenger.get_entity();
 
@@ -6862,6 +6890,12 @@ mod tests {
     use super::*;
     use pumpkin_util::math::boundingbox::BoundingBox;
     use pumpkin_util::math::vector3::Vector3;
+
+    #[test]
+    fn base_air_drag_matches_vanilla() {
+        // `Entity.getAirDrag` returns 0.98 in the base entity (`Entity.java:1529-1531`).
+        assert_eq!(default_air_drag(), 0.98);
+    }
 
     #[test]
     fn wind_charge_source_matches_server_player_explosion_rule() {

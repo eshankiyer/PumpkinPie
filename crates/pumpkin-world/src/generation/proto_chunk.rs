@@ -17,7 +17,7 @@ use pumpkin_util::random::xoroshiro128::XoroshiroSplitter;
 use pumpkin_util::random::{RandomImpl, get_carver_seed};
 use pumpkin_util::{
     HeightMap,
-    math::{block_box::BlockBox, position::BlockPos, vector3::Vector3},
+    math::{block_box::BlockBox, position::BlockPos, vector2::Vector2, vector3::Vector3},
     random::{RandomGenerator, get_decorator_seed, xoroshiro128::Xoroshiro},
 };
 use rustc_hash::FxHashMap;
@@ -35,7 +35,7 @@ use super::{
     surface::{MaterialRuleContext, estimate_surface_height, terrain::SurfaceTerrainBuilder},
 };
 use crate::biome::{BiomeSupplier, MultiNoiseBiomeSupplier, end::TheEndBiomeSupplier};
-use crate::chunk::format::LightContainer;
+use crate::chunk::format::{LightContainer, block_entity_position_from_tag};
 use crate::chunk::{ChunkData, ChunkHeightmapType, ChunkLight};
 use crate::chunk_system::StagedChunkEnum;
 use crate::generation::height_limit::HeightLimitView;
@@ -781,6 +781,12 @@ impl ProtoChunk {
     }
 
     pub fn add_block_entity(&mut self, nbt: NbtCompound) {
+        // ProtoChunk.setBlockEntity replaces a pending entity at the same position
+        // (`ProtoChunk.java:172-176`).
+        let chunk_pos = Vector2::new(self.x, self.z);
+        let position = block_entity_position_from_tag(chunk_pos, &nbt);
+        self.pending_block_entities
+            .retain(|pending| block_entity_position_from_tag(chunk_pos, pending) != position);
         self.pending_block_entities.push(nbt);
     }
 
@@ -2197,6 +2203,9 @@ mod tests {
         Biome, Dimension, build_features_per_step, collect_possible_biomes_3x3,
         features_for_biomes_at_step, possible_biomes_for_dimension,
     };
+    use crate::generation::{get_world_gen, proto_chunk::ProtoChunk};
+    use pumpkin_nbt::compound::NbtCompound;
+    use pumpkin_util::world_seed::Seed;
 
     #[test]
     fn decoration_collects_biomes_from_the_surrounding_three_by_three_chunks() {
@@ -2216,6 +2225,42 @@ mod tests {
         assert_eq!(
             biomes,
             vec![Biome::PLAINS.id, Biome::BADLANDS.id, Biome::DESERT.id]
+        );
+    }
+
+    // Matches ProtoChunk.setBlockEntity's replacement of a pending entry by position
+    // (`ProtoChunk.java:172-176`).
+    #[test]
+    fn pending_block_entity_at_position_is_replaced() {
+        let generator = get_world_gen(
+            Seed(0),
+            Dimension::OVERWORLD,
+            true,
+            Vec::new(),
+            String::new(),
+        );
+        let mut chunk = ProtoChunk::new(0, 0, &generator);
+
+        let mut first = NbtCompound::new();
+        first.put_string("id", "minecraft:chest".to_string());
+        first.put_int("x", 3);
+        first.put_int("y", 64);
+        first.put_int("z", 5);
+        first.put_string("LootTable", "minecraft:chests/simple_dungeon".to_string());
+        chunk.add_block_entity(first);
+
+        let mut replacement = NbtCompound::new();
+        replacement.put_string("id", "minecraft:chest".to_string());
+        replacement.put_int("x", 3);
+        replacement.put_int("y", 64);
+        replacement.put_int("z", 5);
+        replacement.put_string("LootTable", "minecraft:chests/igloo_chest".to_string());
+        chunk.add_block_entity(replacement);
+
+        assert_eq!(chunk.pending_block_entities.len(), 1);
+        assert_eq!(
+            chunk.pending_block_entities[0].get_string("LootTable"),
+            Some("minecraft:chests/igloo_chest")
         );
     }
 

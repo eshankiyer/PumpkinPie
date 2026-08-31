@@ -1,10 +1,7 @@
 use super::{Controls, Goal, GoalFuture};
 use crate::entity::mob::Mob;
-use crate::world::game_event::{GameEventContext, emit_game_event};
 use pumpkin_data::Block;
-use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::tag::{self, Taggable};
-use pumpkin_util::math::vector3::Vector3;
 use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
 
@@ -169,7 +166,9 @@ impl Goal for EatGrassGoal {
 
                 if outcome.ate {
                     mob.on_eating_grass().await;
-                    emit_eat_game_event(&world, &block_pos).await;
+                    // `EatBlockGoal.tick` calls `Mob.ate()` after either branch
+                    // (`EatBlockGoal.java:59-78`), including when mob griefing is disabled.
+                    mob.get_mob_entity().ate().await;
                 }
             }
         })
@@ -188,24 +187,6 @@ impl Goal for EatGrassGoal {
     fn controls(&self) -> Controls {
         self.goal_control
     }
-}
-
-// Mob.ate() -> gameEvent(GameEvent.EAT); no Arc<dyn EntityBase> available here, so none().
-async fn emit_eat_game_event(
-    world: &std::sync::Arc<crate::world::World>,
-    block_pos: &pumpkin_util::math::position::BlockPos,
-) {
-    emit_game_event(
-        world,
-        GameEvent::Eat,
-        Vector3::new(
-            f64::from(block_pos.0.x) + 0.5,
-            f64::from(block_pos.0.y) + 0.5,
-            f64::from(block_pos.0.z) + 0.5,
-        ),
-        GameEventContext::none(),
-    )
-    .await;
 }
 
 #[cfg(test)]

@@ -5,14 +5,18 @@ use crate::{
         BlockBehaviour, BlockFuture, GetComparatorOutputArgs, NormalUseArgs, OnScheduledTickArgs,
         UseWithItemArgs, registry::BlockActionResult,
     },
-    entity::{Entity, item::ItemEntity},
-    world::World,
+    entity::{Entity, EntityBase, item::ItemEntity},
+    world::{
+        World,
+        game_event::{GameEventContext, emit_game_event},
+    },
 };
 use pumpkin_data::{
     Block, BlockDirection, BlockStateId,
     block_properties::{BlockProperties, ComposterLikeProperties},
     composter_increase_chance::get_composter_increase_chance_from_item_id,
     entity::EntityType,
+    game_event::GameEvent,
     item::Item,
     item_stack::ItemStack,
     sound::{Sound, SoundCategory},
@@ -36,8 +40,14 @@ impl BlockBehaviour for ComposterBlock {
             let state_id = args.world.get_block_state_id(args.position);
             let props = ComposterLikeProperties::from_state_id(state_id, args.block);
             if props.level == 8 {
-                self.clear_composter(args.world, args.position, state_id, args.block)
-                    .await;
+                self.clear_composter_with_source(
+                    args.world,
+                    args.position,
+                    state_id,
+                    args.block,
+                    Some(args.player.clone() as Arc<dyn EntityBase>),
+                )
+                .await;
                 // Vanilla `ComposterBlock.useWithoutItem` returns SUCCESS for a full
                 // composter (`ComposterBlock.java:273-285`).
                 return BlockActionResult::Success;
@@ -89,6 +99,15 @@ impl BlockBehaviour for ComposterBlock {
                         state_id,
                         args.block,
                         level + 1,
+                    )
+                    .await;
+                    // `ComposterBlock.addItem` emits BLOCK_CHANGE after raising the level
+                    // (`ComposterBlock.java:318-335`).
+                    emit_game_event(
+                        args.world,
+                        GameEvent::BlockChange,
+                        args.position.to_centered_f64(),
+                        GameEventContext::of_entity(args.player.clone() as Arc<dyn EntityBase>),
                     )
                     .await;
                 }
@@ -169,6 +188,15 @@ impl ComposterBlock {
         if rose {
             Self.update_level_composter(world, location, state_id, block, level + 1)
                 .await;
+            // `ComposterBlock.addItem` emits BLOCK_CHANGE after raising the level
+            // (`ComposterBlock.java:318-335`).
+            emit_game_event(
+                world,
+                GameEvent::BlockChange,
+                location.to_centered_f64(),
+                GameEventContext::none(),
+            )
+            .await;
         }
         item_stack.decrement(1);
         true
@@ -199,6 +227,20 @@ impl ComposterBlock {
         state_id: BlockStateId,
         block: &Block,
     ) {
+        self.clear_composter_with_source(world, location, state_id, block, None)
+            .await;
+    }
+
+    // `ComposterBlock.extractProduce` passes the interacting entity through `empty`
+    // (`ComposterBlock.java:298-315`).
+    async fn clear_composter_with_source(
+        &self,
+        world: &Arc<World>,
+        location: &BlockPos,
+        state_id: BlockStateId,
+        block: &Block,
+        source_entity: Option<Arc<dyn EntityBase>>,
+    ) {
         self.update_level_composter(world, location, state_id, block, 0)
             .await;
 
@@ -219,6 +261,16 @@ impl ComposterBlock {
         );
 
         world.spawn_entity(Arc::new(item_entity)).await;
+
+        // `ComposterBlock.empty` emits BLOCK_CHANGE after replacing the state
+        // (`ComposterBlock.java:311-315`).
+        emit_game_event(
+            world,
+            GameEvent::BlockChange,
+            location.to_centered_f64(),
+            source_entity.map_or_else(GameEventContext::none, GameEventContext::of_entity),
+        )
+        .await;
 
         world.play_sound(
             Sound::BlockComposterEmpty,
@@ -266,6 +318,15 @@ pub async fn hopper_insert_item(
         ComposterBlock
             .update_level_composter(world, position, state_id, block, level + 1)
             .await;
+        // `ComposterBlock.addItem` emits BLOCK_CHANGE after raising the level
+        // (`ComposterBlock.java:318-335`).
+        emit_game_event(
+            world,
+            GameEvent::BlockChange,
+            position.to_centered_f64(),
+            GameEventContext::none(),
+        )
+        .await;
     }
     world.sync_world_event(WorldEvent::ComposterFill, *position, i32::from(rose));
     true
@@ -296,6 +357,15 @@ pub async fn hopper_take_output(world: &Arc<World>, position: &BlockPos) {
     ComposterBlock
         .update_level_composter(world, position, state_id, block, 0)
         .await;
+    // `ComposterBlock.OutputContainer.setChanged` calls `empty`, which emits BLOCK_CHANGE
+    // (`ComposterBlock.java:442-479`, `ComposterBlock.java:311-315`).
+    emit_game_event(
+        world,
+        GameEvent::BlockChange,
+        position.to_centered_f64(),
+        GameEventContext::none(),
+    )
+    .await;
 }
 
 #[cfg(test)]

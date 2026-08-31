@@ -19,6 +19,7 @@ use pumpkin_protocol::bedrock::client::available_commands::{
     arg_types, command_permissions,
 };
 use pumpkin_protocol::java::client::play::SuggestionProviders;
+use rustc_hash::FxHashSet;
 
 #[expect(clippy::too_many_lines)]
 pub async fn send_c_commands_packet(
@@ -27,6 +28,7 @@ pub async fn send_c_commands_packet(
     dispatcher: &CommandDispatcher,
 ) {
     let cmd_src = super::CommandSender::Player(player.clone());
+    let permitted_nodes = permitted_nodes_for_player(player, dispatcher).await;
 
     let mut first_level = Vec::new();
 
@@ -93,6 +95,7 @@ pub async fn send_c_commands_packet(
             .children_ref()
             .values()
             .copied()
+            .filter(|id| permitted_nodes.contains(id))
             .map(|id| resolve_node_id(id, node_id_offset, root_node_index))
             .map(|i| VarInt(i as i32))
             .collect();
@@ -101,8 +104,6 @@ pub async fn send_c_commands_packet(
             .redirect()
             .and_then(|redirection| dispatcher.tree.resolve(redirection))
             .map(|id| resolve_node_id(id, node_id_offset, root_node_index) as i32);
-
-        let satisfies_requirements = true;
 
         match node {
             AttachedNode::Root(_) => {
@@ -115,6 +116,7 @@ pub async fn send_c_commands_packet(
                     .children_ref()
                     .values()
                     .copied()
+                    .filter(|id| permitted_nodes.contains(id))
                     .filter(|id| {
                         let (disabled, name) = match &dispatcher.tree[*id] {
                             AttachedNode::Literal(child) => (
@@ -151,7 +153,7 @@ pub async fn send_c_commands_packet(
                         name,
                         is_executable: literal_attached_node.owned.command.is_some(),
                         redirect_target,
-                        restricted: !satisfies_requirements,
+                        restricted: false,
                     },
                 };
                 proto_nodes.push(node);
@@ -168,7 +170,7 @@ pub async fn send_c_commands_packet(
                         name,
                         is_executable: command_attached_node.owned.command.is_some(),
                         redirect_target,
-                        restricted: !satisfies_requirements,
+                        restricted: false,
                     },
                 };
                 proto_nodes.push(node);
@@ -192,7 +194,7 @@ pub async fn send_c_commands_packet(
                             arg_type.override_suggestion_providers()
                         },
                         redirect_target,
-                        restricted: !satisfies_requirements,
+                        restricted: false,
                     },
                 };
                 proto_nodes.push(node);
@@ -313,6 +315,35 @@ fn nodes_to_proto_node_builders<'a>(
     (is_executable, child_nodes)
 }
 
+// Commands.java:413-439 copies only nodes whose canUse check accepts the player.
+async fn permitted_nodes_for_player(
+    player: &Arc<Player>,
+    dispatcher: &CommandDispatcher,
+) -> FxHashSet<NodeId> {
+    let Some(server) = player.world().server.upgrade() else {
+        return FxHashSet::default();
+    };
+    let source = player.get_command_source(&server).await;
+    permitted_nodes_for_source(dispatcher, &source).await
+}
+
+async fn permitted_nodes_for_source(
+    dispatcher: &CommandDispatcher,
+    source: &crate::command::context::command_source::CommandSource,
+) -> FxHashSet<NodeId> {
+    let mut permitted = FxHashSet::default();
+    let mut pending = dispatcher.tree.get_children(ROOT_NODE_ID);
+
+    while let Some(node) = pending.pop() {
+        if dispatcher.tree.can_use(node, source).await {
+            permitted.insert(node);
+            pending.extend(dispatcher.tree.get_children(node));
+        }
+    }
+
+    permitted
+}
+
 struct BuilderContext<'a> {
     enum_values: &'a mut Vec<String>,
     enums: &'a mut Vec<CommandEnum>,
@@ -325,6 +356,7 @@ pub async fn send_bedrock_commands_packet(
     dispatcher: &CommandDispatcher,
 ) {
     let cmd_src = super::CommandSender::Player(player.clone());
+    let permitted_nodes = permitted_nodes_for_player(player, dispatcher).await;
 
     let mut enum_values: Vec<String> = Vec::new();
     let mut enums: Vec<CommandEnum> = Vec::new();
@@ -376,7 +408,13 @@ pub async fn send_bedrock_commands_packet(
         .first()
         .and_then(|n| {
             if let AttachedNode::Root(_) = n {
-                Some(n.children_ref().values().copied().collect())
+                Some(
+                    n.children_ref()
+                        .values()
+                        .copied()
+                        .filter(|id| permitted_nodes.contains(id))
+                        .collect(),
+                )
             } else {
                 None
             }
@@ -393,12 +431,20 @@ pub async fn send_bedrock_commands_packet(
             AttachedNode::Literal(lit) => (
                 lit.meta.literal.to_string(),
                 lit.owned.command.is_some(),
-                node.children_ref().values().copied().collect::<Vec<_>>(),
+                node.children_ref()
+                    .values()
+                    .copied()
+                    .filter(|id| permitted_nodes.contains(id))
+                    .collect::<Vec<_>>(),
             ),
             AttachedNode::Command(cmd) => (
                 cmd.meta.literal.to_string(),
                 cmd.owned.command.is_some(),
-                node.children_ref().values().copied().collect::<Vec<_>>(),
+                node.children_ref()
+                    .values()
+                    .copied()
+                    .filter(|id| permitted_nodes.contains(id))
+                    .collect::<Vec<_>>(),
             ),
             _ => continue,
         };
@@ -416,8 +462,13 @@ pub async fn send_bedrock_commands_packet(
             enums: &mut enums,
         };
 
-        let overloads =
-            build_overloads_from_attached_nodes(&tree_nodes, &child_ids, is_executable, &mut ctx);
+        let overloads = build_overloads_from_attached_nodes(
+            &tree_nodes,
+            &child_ids,
+            is_executable,
+            &permitted_nodes,
+            &mut ctx,
+        );
 
         commands.push(Command {
             name,
@@ -523,6 +574,7 @@ fn build_overloads_from_attached_nodes(
     tree: &[&AttachedNode],
     child_ids: &[NodeId],
     is_root_executable: bool,
+    permitted_nodes: &FxHashSet<NodeId>,
     ctx: &mut BuilderContext,
 ) -> Vec<CommandOverload> {
     let mut overloads = Vec::new();
@@ -532,7 +584,14 @@ fn build_overloads_from_attached_nodes(
             parameters: Vec::new(),
         });
     }
-    collect_overloads_from_attached(tree, child_ids, &Vec::new(), &mut overloads, ctx);
+    collect_overloads_from_attached(
+        tree,
+        child_ids,
+        &Vec::new(),
+        &mut overloads,
+        permitted_nodes,
+        ctx,
+    );
     if overloads.is_empty() {
         overloads.push(CommandOverload {
             chaining: false,
@@ -542,14 +601,19 @@ fn build_overloads_from_attached_nodes(
     overloads
 }
 
+#[expect(clippy::too_many_lines)]
 fn collect_overloads_from_attached(
     tree: &[&AttachedNode],
     child_ids: &[NodeId],
     current_params: &[CommandParameter],
     overloads: &mut Vec<CommandOverload>,
+    permitted_nodes: &FxHashSet<NodeId>,
     ctx: &mut BuilderContext,
 ) {
     for &child_id in child_ids {
+        if !permitted_nodes.contains(&child_id) {
+            continue;
+        }
         let idx = child_id.0.get() - 1;
         let Some(node) = tree.get(idx) else { continue };
 
@@ -571,14 +635,26 @@ fn collect_overloads_from_attached(
                     optional: false,
                     options: 0,
                 });
-                let grandchild_ids: Vec<NodeId> = node.children_ref().values().copied().collect();
+                let grandchild_ids: Vec<NodeId> = node
+                    .children_ref()
+                    .values()
+                    .copied()
+                    .filter(|id| permitted_nodes.contains(id))
+                    .collect();
                 if lit.owned.command.is_some() {
                     overloads.push(CommandOverload {
                         chaining: false,
                         parameters: params.clone(),
                     });
                 }
-                collect_overloads_from_attached(tree, &grandchild_ids, &params, overloads, ctx);
+                collect_overloads_from_attached(
+                    tree,
+                    &grandchild_ids,
+                    &params,
+                    overloads,
+                    permitted_nodes,
+                    ctx,
+                );
             }
             AttachedNode::Command(cmd) => {
                 let name = cmd.meta.literal.as_ref();
@@ -597,14 +673,26 @@ fn collect_overloads_from_attached(
                     optional: false,
                     options: 0,
                 });
-                let grandchild_ids: Vec<NodeId> = node.children_ref().values().copied().collect();
+                let grandchild_ids: Vec<NodeId> = node
+                    .children_ref()
+                    .values()
+                    .copied()
+                    .filter(|id| permitted_nodes.contains(id))
+                    .collect();
                 if cmd.owned.command.is_some() {
                     overloads.push(CommandOverload {
                         chaining: false,
                         parameters: params.clone(),
                     });
                 }
-                collect_overloads_from_attached(tree, &grandchild_ids, &params, overloads, ctx);
+                collect_overloads_from_attached(
+                    tree,
+                    &grandchild_ids,
+                    &params,
+                    overloads,
+                    permitted_nodes,
+                    ctx,
+                );
             }
             AttachedNode::Argument(arg) => {
                 let parser = arg.meta.argument_type.client_side_parser();
@@ -615,14 +703,26 @@ fn collect_overloads_from_attached(
                     optional: false,
                     options: 0,
                 });
-                let grandchild_ids: Vec<NodeId> = node.children_ref().values().copied().collect();
+                let grandchild_ids: Vec<NodeId> = node
+                    .children_ref()
+                    .values()
+                    .copied()
+                    .filter(|id| permitted_nodes.contains(id))
+                    .collect();
                 if arg.owned.command.is_some() {
                     overloads.push(CommandOverload {
                         chaining: false,
                         parameters: params.clone(),
                     });
                 }
-                collect_overloads_from_attached(tree, &grandchild_ids, &params, overloads, ctx);
+                collect_overloads_from_attached(
+                    tree,
+                    &grandchild_ids,
+                    &params,
+                    overloads,
+                    permitted_nodes,
+                    ctx,
+                );
             }
             AttachedNode::Root(_) => {}
         }
@@ -691,4 +791,30 @@ const fn bedrock_param_type(arg: &ArgumentType) -> u32 {
         _ => arg_types::ARG_TYPE_STRING,
     };
     base | arg_flags::ARG_FLAG_VALID
+}
+
+#[cfg(test)]
+mod tests {
+    use super::permitted_nodes_for_source;
+    use crate::command::argument_builder::{ArgumentBuilder, command};
+    use crate::command::context::command_source::CommandSource;
+    use crate::command::node::RequirementResult;
+    use crate::command::node::attached::NodeId;
+    use crate::command::node::dispatcher::CommandDispatcher;
+
+    fn denied(_: &CommandSource) -> RequirementResult<'_> {
+        Box::pin(async { false })
+    }
+
+    #[tokio::test]
+    async fn command_packets_omit_nodes_the_source_cannot_use() {
+        let mut dispatcher = CommandDispatcher::new();
+        let allowed = dispatcher.register(command("allowed", "").build());
+        let blocked = dispatcher.register(command("blocked", "").requires(denied).build());
+
+        let permitted = permitted_nodes_for_source(&dispatcher, &CommandSource::dummy()).await;
+
+        assert!(permitted.contains(&NodeId::from(allowed)));
+        assert!(!permitted.contains(&NodeId::from(blocked)));
+    }
 }

@@ -1,4 +1,7 @@
-use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU8, Ordering};
+use std::sync::{
+    Arc,
+    atomic::{AtomicI32, AtomicI64, AtomicU8, Ordering},
+};
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture, living::LivingEntity,
@@ -11,6 +14,7 @@ use pumpkin_data::{
     damage::DamageType,
     data_component_impl::{EquipmentSlot, EquipmentType},
     entity::EntityStatus,
+    entity::EntityType,
     item::Item,
     particle::Particle,
     sound::{Sound, SoundCategory},
@@ -95,6 +99,12 @@ pub struct ArmorStandEntity {
     disabled_slots: AtomicI32,
 
     rotation: AtomicCell<PackedRotation>,
+}
+
+/// Vanilla `ArmorStand.pushEntities` (`ArmorStand.java:178-184`) selects only the plain,
+/// rideable minecart and accepts distances up to 0.2 squared.
+fn is_rideable_minecart(entity_type_id: u16, distance_squared: f64) -> bool {
+    entity_type_id == EntityType::MINECART.id && distance_squared <= 0.2
 }
 
 impl ArmorStandEntity {
@@ -368,6 +378,34 @@ impl EntityBase for ArmorStandEntity {
         self.get_entity().is_alive() && !self.is_marker()
     }
 
+    /// Vanilla `ArmorStand.pushEntities` (`ArmorStand.java:178-184`) pushes only nearby
+    /// rideable minecarts, even though the stand itself is not pushable.
+    fn push_entities<'a>(
+        &'a self,
+        dyn_self: &'a Arc<dyn EntityBase>,
+    ) -> EntityBaseFuture<'a, bool> {
+        Box::pin(async move {
+            let entity = self.get_entity();
+            let position = entity.pos.load();
+            let entities = entity
+                .world
+                .load()
+                .get_entities_at_box(&entity.bounding_box.load());
+
+            for other in entities {
+                let other_entity = other.get_entity();
+                if is_rideable_minecart(
+                    other_entity.entity_type.id,
+                    position.squared_distance_to_vec(&other_entity.pos.load()),
+                ) {
+                    other.push(dyn_self).await;
+                }
+            }
+
+            false
+        })
+    }
+
     /// Vanilla `ArmorStand.isEffectiveAi` (`ArmorStand.java:118-121`) gates the inherited
     /// living movement path on the stand having physics.
     fn is_effective_ai(&self) -> bool {
@@ -580,4 +618,19 @@ pub enum ArmorStandFlags {
     HideBasePlate = 8,
     /// Marker Flag
     Marker = 16,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_rideable_minecart;
+    use pumpkin_data::entity::EntityType;
+
+    #[test]
+    fn armor_stand_pushes_only_close_rideable_minecarts() {
+        // Vanilla `ArmorStand.pushEntities` (`ArmorStand.java:178-184`) uses the rideable
+        // minecart predicate and the inclusive 0.2 distance threshold.
+        assert!(is_rideable_minecart(EntityType::MINECART.id, 0.2));
+        assert!(!is_rideable_minecart(EntityType::MINECART.id, 0.200_001));
+        assert!(!is_rideable_minecart(EntityType::CHEST_MINECART.id, 0.0));
+    }
 }

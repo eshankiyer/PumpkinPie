@@ -89,12 +89,43 @@ impl JavaClient {
             return;
         };
 
-        let p_eye = player.get_entity().get_eye_pos();
-        let t_eye = target.get_eye_pos();
-        let dx = p_eye.x - t_eye.x;
-        let dy = p_eye.y - t_eye.y;
-        let dz = p_eye.z - t_eye.z;
-        if dx * dx + dy * dy + dz * dz > 64.0 {
+        // `ServerGamePacketListenerImpl.handlePickItemFromEntity` (`ServerGamePacketListenerImpl.java:729-737`)
+        // uses the player's entity-interaction attribute plus a three-block buffer and the
+        // target bounding box, matching the normal entity-interaction packet path.
+        if target.get_entity().is_removed()
+            || !player
+                .is_within_entity_interaction_range(target.get_entity().bounding_box.load(), 3.0)
+        {
+            return;
+        }
+
+        if let Some(stack) = target.get_pick_result().await {
+            let slot_with_stack = player.inventory().get_slot_with_stack(&stack).await;
+
+            if slot_with_stack != -1 {
+                if PlayerInventory::is_valid_hotbar_index(slot_with_stack as usize) {
+                    player.inventory.set_selected_slot(slot_with_stack as u8);
+                } else {
+                    player
+                        .inventory
+                        .swap_slot_with_hotbar(slot_with_stack as usize)
+                        .await;
+                }
+            } else if player.gamemode.load() == GameMode::Creative {
+                player.inventory.swap_stack_with_hotbar(stack).await;
+            }
+
+            player
+                .send_client_packet(&CSetSelectedSlot::new(
+                    player.inventory.get_selected_slot() as i8
+                ))
+                .await;
+            player
+                .player_screen_handler
+                .lock()
+                .await
+                .send_content_updates()
+                .await;
             return;
         }
 

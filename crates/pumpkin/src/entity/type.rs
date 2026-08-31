@@ -419,6 +419,12 @@ pub fn check_spawn_rules(
         return world.level_info.load().difficulty != pumpkin_util::Difficulty::Peaceful;
     }
 
+    // SulfurCube.java:226-229 (`checkSulfurCubeSpawnRules`) accepts every spawn
+    // attempt; do not substitute the generic monster darkness predicate here.
+    if id == EntityType::SULFUR_CUBE.id {
+        return true;
+    }
+
     // `Ghast.checkGhastSpawnRules` (Ghast.java:149-153): no darkness requirement, but only
     // one in twenty attempts succeeds. Its `checkMobSpawnRules` call is the support-block
     // test, which the ON_GROUND placement check already applies before this function runs.

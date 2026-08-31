@@ -3,10 +3,11 @@ use std::{any::Any, sync::Arc};
 
 use pumpkin_data::data_component_impl::{
     BeesImpl, BlockEntityDataImpl, ContainerImpl, ContainerLootImpl, CustomNameImpl,
-    DataComponentImpl, NoteBlockSoundImpl, ProfileImpl,
+    DataComponentImpl, NoteBlockSoundImpl, PotDecorationsImpl, ProfileImpl,
 };
 use pumpkin_data::{Block, BlockStateId, block_properties::BLOCK_ENTITY_TYPES};
 use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
 use std::array::from_fn;
 
@@ -242,6 +243,7 @@ fn apply_skull_components(
     None
 }
 
+#[expect(clippy::too_many_lines)]
 pub fn apply_components_from_item_stack(
     entity: &dyn BlockEntity,
     stack: &ItemStack,
@@ -321,6 +323,41 @@ pub fn apply_components_from_item_stack(
                     .unwrap_or_else(|| ItemStack::EMPTY.clone())
             });
         pumpkin_world::inventory::sync_write_items_to_nbt(&items, &mut nbt);
+        return block_entity_from_nbt_at(&nbt, position);
+    }
+
+    if entity
+        .as_any()
+        .is::<decorated_pot::DecoratedPotBlockEntity>()
+        && (stack.get_data_component::<PotDecorationsImpl>().is_some()
+            || stack.get_data_component::<ContainerImpl>().is_some())
+    {
+        let position = entity.get_position();
+        let mut nbt = NbtCompound::new();
+        nbt.put_string("id", entity.resource_location().to_string());
+        nbt.put_int("x", position.0.x);
+        nbt.put_int("y", position.0.y);
+        nbt.put_int("z", position.0.z);
+        if let Some(decorations) = stack.get_data_component::<PotDecorationsImpl>() {
+            nbt.put_list(
+                "sherds",
+                decorations
+                    .decorations
+                    .iter()
+                    .map(|decoration| NbtTag::String(decoration.to_string().into_boxed_str()))
+                    .collect(),
+            );
+        }
+        if let Some(container) = stack.get_data_component::<ContainerImpl>()
+            && let Some((_, item)) = container.items.iter().find(|(slot, _)| *slot == 0)
+        {
+            let mut item_nbt = NbtCompound::new();
+            item.write_item_stack(&mut item_nbt);
+            nbt.put_compound("item", item_nbt);
+        }
+        // `DecoratedPotBlockEntity.applyImplicitComponents` restores POT_DECORATIONS and the
+        // one-slot CONTAINER component (`DecoratedPotBlockEntity.java:119-123`) during the live
+        // placement hook (`BlockItem.java:101-106`).
         return block_entity_from_nbt_at(&nbt, position);
     }
 
@@ -430,6 +467,16 @@ pub(crate) async fn collect_components_from_block_entity(
             ));
         }
         return components;
+    }
+
+    if let Some(pot) = entity
+        .as_any()
+        .downcast_ref::<decorated_pot::DecoratedPotBlockEntity>()
+    {
+        // `DecoratedPotBlockEntity.collectImplicitComponents` exports POT_DECORATIONS and
+        // CONTAINER (`DecoratedPotBlockEntity.java:112-116`); the live collector is used by
+        // the creative include-data pick-item path (`ServerGamePacketListenerImpl.java:699-709`).
+        return pot.collect_implicit_components().await;
     }
 
     let Some(hive) = entity
@@ -769,12 +816,14 @@ mod test {
     use super::{
         BlockEntity, apply_components_from_item_stack, beehive::BeehiveBlockEntity,
         block_entity_from_nbt, chest::ChestBlockEntity, collect_components_from_block_entity,
-        furnace::FurnaceBlockEntity, skull::SkullBlockEntity, test_block::TestBlockBlockEntity,
+        decorated_pot::DecoratedPotBlockEntity, furnace::FurnaceBlockEntity,
+        skull::SkullBlockEntity, test_block::TestBlockBlockEntity,
     };
     use pumpkin_data::data_component_impl::{
-        BlockEntityDataImpl, ContainerLootImpl, CustomNameImpl, ProfileImpl,
+        BlockEntityDataImpl, ContainerImpl, ContainerLootImpl, CustomNameImpl, PotDecorationsImpl,
+        ProfileImpl,
     };
-    use pumpkin_data::{item::Item, item_stack::ItemStack};
+    use pumpkin_data::{data_component::DataComponent, item::Item, item_stack::ItemStack};
     use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
     use pumpkin_util::math::position::BlockPos;
     use pumpkin_util::text::TextComponent;
@@ -971,6 +1020,65 @@ mod test {
                 .iter()
                 .any(|(id, _)| { *id == pumpkin_data::data_component::DataComponent::CustomName })
         );
+    }
+
+    #[tokio::test]
+    async fn decorated_pot_implicit_components_are_collected() {
+        // `DecoratedPotBlockEntity.collectImplicitComponents` exports the decoration and
+        // one-slot container components (`DecoratedPotBlockEntity.java:112-116`).
+        let entity = DecoratedPotBlockEntity::new(BlockPos::new(3, 64, -2));
+        *entity.sherds.lock().await = Some(vec![
+            NbtTag::String("minecraft:brick".into()),
+            NbtTag::String("minecraft:brick".into()),
+            NbtTag::String("minecraft:brick".into()),
+            NbtTag::String("minecraft:brick".into()),
+        ]);
+        *entity.item.lock().await = Some(ItemStack::new(2, &Item::DIAMOND));
+
+        let components = collect_components_from_block_entity(&entity).await;
+
+        assert_eq!(components.len(), 2);
+        let decorations = components
+            .iter()
+            .find(|(id, _)| *id == DataComponent::PotDecorations)
+            .and_then(|(_, component)| component.as_ref())
+            .and_then(|component| component.as_any().downcast_ref::<PotDecorationsImpl>())
+            .expect("pot decorations should be collected");
+        assert_eq!(decorations.decorations.len(), 4);
+
+        let container = components
+            .iter()
+            .find(|(id, _)| *id == DataComponent::Container)
+            .and_then(|(_, component)| component.as_ref())
+            .and_then(|component| component.as_any().downcast_ref::<ContainerImpl>())
+            .expect("pot item should be collected as a container component");
+        assert_eq!(container.items[0].0, 0);
+        assert_eq!(container.items[0].1.get_item().id, Item::DIAMOND.id);
+        assert_eq!(container.items[0].1.item_count, 2);
+
+        let stack = ItemStack::new_with_component(1, &Item::DECORATED_POT, components);
+        let placed = apply_components_from_item_stack(
+            &DecoratedPotBlockEntity::new(BlockPos::new(3, 64, -2)),
+            &stack,
+        )
+        .expect("pot components should be applied during placement");
+        let placed = placed
+            .as_any()
+            .downcast_ref::<DecoratedPotBlockEntity>()
+            .expect("component application should preserve the pot type");
+        assert_eq!(
+            placed
+                .decorations()
+                .expect("decorations should round-trip")
+                .len(),
+            4
+        );
+        let placed_item = placed
+            .get_item()
+            .await
+            .expect("pot item should round-trip through the container component");
+        assert_eq!(placed_item.get_item().id, Item::DIAMOND.id);
+        assert_eq!(placed_item.item_count, 2);
     }
 
     #[tokio::test]

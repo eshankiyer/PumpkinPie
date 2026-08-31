@@ -146,6 +146,16 @@ impl ItemFrameEntity {
         self.entity.entity_type == &EntityType::GLOW_ITEM_FRAME
     }
 
+    /// `GlowItemFrame.getFrameItemStack` (`GlowItemFrame.java:47-50`) changes only the dropped
+    /// and picked frame item; all other frame behavior is shared.
+    const fn frame_item(is_glow: bool) -> &'static Item {
+        if is_glow {
+            &Item::GLOW_ITEM_FRAME
+        } else {
+            &Item::ITEM_FRAME
+        }
+    }
+
     fn play_frame_sound(&self, plain: Sound, glow: Sound) {
         self.entity.world.load().play_sound(
             if self.is_glow() { glow } else { plain },
@@ -295,13 +305,9 @@ impl ItemFrameEntity {
 
         let pos = self.entity.block_pos.load();
         if with_frame {
-            // GlowItemFrame.getFrameItemStack
-            let frame_item = if self.is_glow() {
-                &Item::GLOW_ITEM_FRAME
-            } else {
-                &Item::ITEM_FRAME
-            };
-            world.drop_stack(&pos, ItemStack::new(1, frame_item)).await;
+            world
+                .drop_stack(&pos, ItemStack::new(1, Self::frame_item(self.is_glow())))
+                .await;
         }
         if !item_stack.is_empty() && rand::rng().random::<f32>() < self.item_drop_chance.load() {
             world.drop_stack(&pos, item_stack).await;
@@ -388,6 +394,19 @@ impl EntityBase for ItemFrameEntity {
 
     fn is_pickable(&self) -> bool {
         true
+    }
+
+    /// Vanilla `ItemFrame.getPickResult` (`ItemFrame.java:413-416`) returns the displayed item,
+    /// or the matching frame item when the frame is empty.
+    fn get_pick_result(&self) -> EntityBaseFuture<'_, Option<ItemStack>> {
+        Box::pin(async move {
+            let item = self.item_stack.lock().await;
+            if item.is_empty() {
+                Some(ItemStack::new(1, Self::frame_item(self.is_glow())))
+            } else {
+                Some(item.clone())
+            }
+        })
     }
 
     /// `ItemFrame.move` (`ItemFrame.java:140-145`): fixed frames ignore entity
@@ -573,5 +592,21 @@ impl EntityBase for ItemFrameEntity {
 
     fn cast_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Item, ItemFrameEntity};
+
+    #[test]
+    fn empty_frame_pick_item_matches_frame_type() {
+        // `ItemFrame.getPickResult` and `GlowItemFrame.getFrameItemStack`
+        // (`ItemFrame.java:413-416`; `GlowItemFrame.java:47-50`) select the corresponding frame.
+        assert_eq!(ItemFrameEntity::frame_item(false).id, Item::ITEM_FRAME.id);
+        assert_eq!(
+            ItemFrameEntity::frame_item(true).id,
+            Item::GLOW_ITEM_FRAME.id
+        );
     }
 }

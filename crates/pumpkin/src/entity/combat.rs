@@ -94,7 +94,9 @@ impl AttackType {
             .get_effect(&pumpkin_data::effect::StatusEffect::BLINDNESS)
             .await
             .is_some();
-        let climbing = player.living_entity.climbing.load(Ordering::Relaxed);
+        // Player's override suppresses the shared climbing state while flying
+        // (`Player.java:2023-2026`; `LivingEntity.java:1721-1737`).
+        let climbing = player.on_climbable().await;
         let mounted = entity.has_vehicle().await;
         let target_is_living = target.get_living_entity().is_some();
         let movement = entity.velocity.load();

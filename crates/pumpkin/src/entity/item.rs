@@ -480,7 +480,9 @@ impl ItemEntity {
         entity.move_entity(caller, move_velo).await;
         entity.tick_block_collisions(caller, server).await;
 
-        let mut friction = 0.98;
+        // `ItemEntity.tick` uses the inherited `Entity.getAirDrag` (`Entity.java:1529-1531`).
+        let air_drag = entity.get_air_drag();
+        let mut friction = air_drag;
         let on_ground = entity.on_ground.load(Ordering::SeqCst);
 
         let mut velo = entity.velocity.load();
@@ -489,7 +491,7 @@ impl ItemEntity {
             friction *= f64::from(block_affecting_velo.slipperiness);
         }
 
-        velo = velo.multiply(friction, 0.98, friction);
+        velo = velo.multiply(friction, air_drag, friction);
 
         // `ItemEntity.tick`: a landing item bounces at half its downward speed rather than
         // stopping dead.

@@ -282,7 +282,8 @@ impl EntityBase for ExperienceOrbEntity {
             // orb kept accelerating and the pull toward a player made it overshoot and oscillate
             // instead of converging.
             let on_ground = entity.on_ground.load(Ordering::Relaxed);
-            let mut friction = 0.98;
+            // `ExperienceOrb.tick` uses the inherited `Entity.getAirDrag` (`Entity.java:1529-1531`).
+            let mut friction = entity.get_air_drag();
             if on_ground {
                 friction *= f64::from(entity.get_block_with_y_offset(0.999_999).1.slipperiness);
             }

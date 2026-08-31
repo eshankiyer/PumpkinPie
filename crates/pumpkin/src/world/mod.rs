@@ -218,6 +218,12 @@ fn comparator_notification_target(
     }
 }
 
+// Vanilla Level.setBlockState only sends the block update when flag 2 is present
+// (`Level.java:238-248`), which is the live equivalent of ChunkHolder.blockChanged.
+const fn should_notify_block_listeners(flags: BlockFlags) -> bool {
+    flags.contains(BlockFlags::NOTIFY_LISTENERS)
+}
+
 /// Runs one vanilla chunk-tick phase in collection order.
 ///
 /// Vanilla runs all scheduled block ticks, then scheduled fluid ticks, and finally chunk random
@@ -5873,7 +5879,11 @@ impl World {
                 .or_insert(1);
             *mutation_version
         };
-        unsent_block_changes.insert(*position, block_state_id);
+        if should_notify_block_listeners(flags) {
+            // Vanilla ChunkHolder.blockChanged records updates only for its ticking chunk
+            // (`ChunkHolder.java:123-139`); the loaded-chunk map is Pumpkin's equivalent.
+            unsent_block_changes.insert(*position, block_state_id);
+        }
         drop(unsent_block_changes);
 
         let is_current_mutation = || {
@@ -6022,10 +6032,14 @@ impl World {
                     clear_mutation_version();
                     return None;
                 }
-                self.update_comparators(position, new_block).await;
-                if !is_current_mutation() {
-                    clear_mutation_version();
-                    return None;
+                // Vanilla only notifies comparators when the new state advertises
+                // analog output (`Level.java:250-254`; `ServerLevel.java:862-865`).
+                if crate::block::has_analog_output_signal(new_block) {
+                    self.update_comparators(position, new_block).await;
+                    if !is_current_mutation() {
+                        clear_mutation_version();
+                        return None;
+                    }
                 }
             }
 
@@ -8378,6 +8392,16 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    // Vanilla Level.setBlockState uses update flag 2 for client notification
+    // (`Level.java:244-248`).
+    fn block_listener_notifications_follow_update_flags() {
+        assert!(should_notify_block_listeners(BlockFlags::NOTIFY_LISTENERS));
+        assert!(should_notify_block_listeners(BlockFlags::NOTIFY_ALL));
+        assert!(!should_notify_block_listeners(BlockFlags::NOTIFY_NEIGHBORS));
+        assert!(!should_notify_block_listeners(BlockFlags::empty()));
     }
 
     #[tokio::test]
