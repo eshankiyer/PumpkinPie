@@ -153,7 +153,7 @@ mod tests {
     use super::*;
     use crate::block::sculk_behaviour::ChargeCursor;
 
-    #[tokio::test]
+    #[test]
     fn cursors_survive_an_nbt_round_trip() {
         let entity = SculkCatalystBlockEntity::new(BlockPos::new(4, 5, 6));
         entity
@@ -177,7 +177,7 @@ mod tests {
         assert_eq!(cursors, vec![1000, 500]);
     }
 
-    #[tokio::test]
+    #[test]
     fn a_fresh_catalyst_has_no_cursors() {
         let entity = SculkCatalystBlockEntity::new(BlockPos::new(0, 0, 0));
         assert!(

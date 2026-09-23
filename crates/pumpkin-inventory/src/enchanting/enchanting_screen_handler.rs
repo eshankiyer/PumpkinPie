@@ -75,7 +75,7 @@ impl Slot for LapisSlot {
     }
 
     fn mark_dirty(&self) {
-        self.0.mark_dirty()
+        self.0.mark_dirty();
     }
 }
 
@@ -478,11 +478,7 @@ impl ScreenHandler for EnchantingTableScreenHandler {
         true
     }
 
-    fn quick_move(
-        &mut self,
-        player: &dyn InventoryPlayer, // FIX: Changed _player to player
-        slot_index: i32,
-    ) -> ItemStack {
+    fn quick_move(&mut self, player: &dyn InventoryPlayer, slot_index: i32) -> ItemStack {
         let mut stack_left = ItemStack::EMPTY.clone();
         let slot = self.get_behaviour().slots[slot_index as usize].clone();
 

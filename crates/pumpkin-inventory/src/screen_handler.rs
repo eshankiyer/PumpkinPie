@@ -54,7 +54,6 @@ use pumpkin_world::{
     block::entities::PropertyDelegate,
     inventory::{ComparableInventory, Inventory},
 };
-use std::pin::Pin;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::{any::Any, collections::HashMap, sync::Arc};
@@ -121,10 +120,6 @@ impl ScreenProperty {
         has_changed
     }
 }
-
-/// Type alias for async player operations.
-/// Type alias for async player operations.
-pub type PlayerFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// Interface for player interactions with containers.
 ///
@@ -315,6 +310,9 @@ pub trait InventoryPlayer: Send + Sync {
     ) -> bool {
         false
     }
+
+    /// Closes the player's current handled screen.
+    fn close_screen_handler(&self) {}
 }
 
 /// Gives a stack to the player or drops it if inventory is full.
@@ -325,15 +323,6 @@ pub fn offer_or_drop_stack(player: &dyn InventoryPlayer, stack: ItemStack) {
     // TODO: Super weird disconnect logic in vanilla, investigate this later
     player.get_inventory().offer_or_drop_stack(stack, player);
 }
-
-/// Type alias for async screen handler operations.
-pub type ScreenHandlerFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-
-/// Future type that returns an `ItemStack` (used by `quick_move`).
-pub type ItemStackFuture<'a> = ScreenHandlerFuture<'a, ItemStack>;
-
-/// Future type that returns an optional slot index.
-pub type OptionUsizeFuture<'a> = ScreenHandlerFuture<'a, Option<usize>>;
 
 /// The main trait for container screen handlers.
 ///
@@ -477,8 +466,6 @@ pub trait ScreenHandler: Send + Sync {
         }
     }
 
-    // --- Asynchronous Methods ---
-
     /// Called when the container is closed by the player.
     ///
     /// Default implementation drops the cursor item.
@@ -490,7 +477,6 @@ pub trait ScreenHandler: Send + Sync {
     fn default_on_closed(&mut self, player: &dyn InventoryPlayer) {
         let behaviour = self.get_behaviour_mut();
 
-        // Lock and clone are performed inside the async block
         let mut cursor_stack_lock = behaviour
             .cursor_stack
             .lock()
@@ -585,7 +571,7 @@ pub trait ScreenHandler: Send + Sync {
                 behaviour,
                 &previous_tracked_stacks,
                 &cursor_stack,
-                behaviour.tracked_property_values.clone(),
+                &behaviour.tracked_property_values,
                 next_revision,
             );
         }
@@ -600,7 +586,7 @@ pub trait ScreenHandler: Send + Sync {
     /// Attaches a sync handler and performs initial sync.
     fn update_sync_handler(&mut self, sync_handler: Arc<SyncHandler>) {
         let behaviour = self.get_behaviour_mut();
-        behaviour.sync_handler = Some(sync_handler.clone());
+        behaviour.sync_handler = Some(sync_handler);
         self.sync_state();
     }
 
@@ -1410,8 +1396,6 @@ pub trait ScreenHandlerListener: Send + Sync {
     ) {
     }
 }
-
-pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 pub type SharedScreenHandler = Arc<Mutex<dyn ScreenHandler>>;
 

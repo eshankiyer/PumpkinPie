@@ -541,18 +541,14 @@ impl WitherEntity {
 }
 
 impl NBTStorage for WitherEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> crate::entity::NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt);
-            nbt.put_int("Invul", self.invulnerable_ticks());
-        })
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        nbt.put_int("Invul", self.invulnerable_ticks());
     }
 
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> crate::entity::NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt);
-            self.set_invulnerable_ticks(nbt.get_int("Invul").unwrap_or(0));
-        })
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        self.set_invulnerable_ticks(nbt.get_int("Invul").unwrap_or(0));
     }
 }
 

@@ -24,7 +24,7 @@ impl CommandExecutor for TellRawExecutor {
         _server: &crate::server::Server,
         args: &ConsumedArgs,
     ) -> CommandResult {
-        let Some(Arg::Players(targets)) = args.get(&ARG_TARGETS) else {
+        let Some(Arg::Players(targets)) = args.get(ARG_TARGETS) else {
             return Err(CommandError::InvalidConsumption(Some(ARG_TARGETS.into())));
         };
 

@@ -155,7 +155,6 @@ pub trait BlockEntity: Any + Send + Sync {
     {
         Box::pin(async move {
             if let Some(inventory) = self.get_inventory() {
-                // Assuming scatter_inventory is an async method on World
                 world.scatter_inventory(&position, &inventory);
             }
         })
@@ -1093,7 +1092,7 @@ mod test {
         ));
     }
 
-    #[tokio::test]
+    #[test]
     fn placed_block_entity_data_component_is_applied() {
         // `BlockItem.updateCustomBlockEntityTag` loads the typed payload into the freshly
         // placed entity before the remaining placement callbacks (`BlockItem.java:76-80,
@@ -1125,7 +1124,7 @@ mod test {
         assert_eq!(restored.item_count, 5);
     }
 
-    #[tokio::test]
+    #[test]
     fn creative_pick_preserves_custom_block_entity_data() {
         // `addBlockDataToItem` stores the result of `saveCustomOnly` as block-entity data
         // (`ServerGamePacketListenerImpl.java:715-724`; `BlockEntity.java:141-151`).
@@ -1141,7 +1140,7 @@ mod test {
         assert_eq!(data.get_string("message"), Some("keep me"));
     }
 
-    #[tokio::test]
+    #[test]
     fn placed_shelf_container_component_is_applied() {
         // `ShelfBlockEntity.applyImplicitComponents` copies `DataComponents.CONTAINER` into the
         // shelf slots (`ShelfBlockEntity.java:104-107`).
@@ -1169,7 +1168,7 @@ mod test {
         assert!(inventory.get_stack(2).is_empty());
     }
 
-    #[tokio::test]
+    #[test]
     fn campfire_container_component_round_trips_without_raw_items() {
         // `CampfireBlockEntity` collects CONTAINER, applies it to its slots, and removes Items
         // from block-entity data (`CampfireBlockEntity.java:207-220`).
@@ -1213,7 +1212,7 @@ mod test {
         assert!(block_entity_data.get_int_array("CookingTimes").is_some());
     }
 
-    #[tokio::test]
+    #[test]
     fn shulker_container_component_round_trips_without_raw_items() {
         // `BaseContainerBlockEntity.collectImplicitComponents`/`applyImplicitComponents`
         // (`BaseContainerBlockEntity.java:149-165`) carry shulker contents in CONTAINER.
@@ -1251,7 +1250,7 @@ mod test {
         assert_eq!(placed_item.item_count, 5);
     }
 
-    #[tokio::test]
+    #[test]
     fn placed_beehive_bees_component_is_applied() {
         // `BeehiveBlockEntity.applyImplicitComponents` reads `DataComponents.BEES`
         // (`BeehiveBlockEntity.java:309-315`).
@@ -1282,7 +1281,7 @@ mod test {
         assert_eq!(hive.occupant_count(), 1);
     }
 
-    #[tokio::test]
+    #[test]
     fn skull_implicit_components_are_collected() {
         // `SkullBlockEntity.collectImplicitComponents` exports the three modeled components
         // (`SkullBlockEntity.java:90-95`).
@@ -1323,7 +1322,7 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[test]
     fn decorated_pot_implicit_components_are_collected() {
         // `DecoratedPotBlockEntity.collectImplicitComponents` exports the decoration and
         // one-slot container components (`DecoratedPotBlockEntity.java:112-116`).
@@ -1388,7 +1387,7 @@ mod test {
         assert_eq!(placed_item.item_count, 2);
     }
 
-    #[tokio::test]
+    #[test]
     fn enchanting_table_custom_name_components_round_trip() {
         // EnchantingTableBlockEntity.collectImplicitComponents and applyImplicitComponents carry
         // CUSTOM_NAME (EnchantingTableBlockEntity.java:123-132).
@@ -1432,7 +1431,7 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[test]
     fn placed_skull_profile_component_is_applied() {
         // `SkullBlockEntity.applyImplicitComponents` loads PROFILE into the placed entity
         // (`SkullBlockEntity.java:82-87`).

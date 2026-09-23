@@ -234,7 +234,7 @@ impl PotionContents {
                 if LivingEntity::instant_effect_is_damage(effect_type, inverted) {
                     let amount = (6 * ((amplifier as i32) + 1)) as f32 * instant_scale;
 
-                    target.damage(
+                    let _ = target.damage(
                         target.get_entity(),
                         amount,
                         pumpkin_data::damage::DamageType::MAGIC,

@@ -429,7 +429,7 @@ impl WalkNodeEvaluator {
         }
 
         // Temporarily take the context out to avoid overlapping borrows when calling
-        // the async helper which requires `&mut self`
+        // the helper which requires `&mut self`
         let path_type = if let Some(mut ctx) = self.base.context.take()
             && let Some(mob_data) = self.base.mob_data
         {
@@ -999,7 +999,6 @@ impl NodeEvaluator for WalkNodeEvaluator {
     }
 
     #[allow(clippy::too_many_lines)]
-    #[allow(clippy::unused_async_trait_impl)]
     fn get_path_type_of_mob(
         &mut self,
         context: &mut PathfindingContext,
@@ -1134,7 +1133,6 @@ impl NodeEvaluator for WalkNodeEvaluator {
         result
     }
 
-    #[allow(clippy::unused_async_trait_impl)]
     fn get_path_type(&mut self, context: &mut PathfindingContext, pos: Vector3<i32>) -> PathType {
         context.get_path_type_from_state(pos)
     }

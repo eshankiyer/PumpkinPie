@@ -27,7 +27,7 @@ pub struct MarkerEntity {
 
 impl MarkerEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
-        entity.no_clip.store(true, Ordering::Relaxed);
+        entity.no_physics.store(true, Ordering::Relaxed);
         Arc::new(Self {
             entity,
             data: Mutex::new(NbtCompound::new()),

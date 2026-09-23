@@ -110,7 +110,7 @@ mod tests {
         let sensor = SculkSensorBlockEntity::new(BlockPos::ZERO);
         assert!(!sensor.is_dirty());
 
-        futures::executor::block_on(sensor.set_last_vibration_frequency(7));
+        sensor.set_last_vibration_frequency(7);
         assert!(sensor.is_dirty());
 
         sensor.clear_dirty();

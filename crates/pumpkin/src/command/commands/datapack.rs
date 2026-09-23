@@ -374,7 +374,7 @@ impl CommandExecutor for DatapackEnableExistingExecutor {
         }
 
         let target = target_pack.clone();
-        let existing = existing_pack.clone();
+        let existing = existing_pack;
         let before_or_after = self.0;
         server.level_info.rcu(|level_info| {
             let mut new_info = (**level_info).clone();

@@ -7,7 +7,7 @@ use pumpkin_data::{
 use pumpkin_inventory::grindstone_screen_handler::GrindstoneScreenHandler;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
-    BoxFuture as ScreenHandlerBoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
+    InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
 };
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
@@ -67,10 +67,10 @@ impl BlockBehaviour for GrindstoneBlock {
 }
 
 impl WallMountedBlock for GrindstoneBlock {
-    fn can_place_at<'a>(
-        &'a self,
-        _world: &'a dyn BlockAccessor,
-        _pos: &'a BlockPos,
+    fn can_place_at(
+        &self,
+        _world: &dyn BlockAccessor,
+        _pos: &BlockPos,
         _direction: BlockDirection,
     ) -> bool {
         true
@@ -89,19 +89,17 @@ impl WallMountedBlock for GrindstoneBlock {
 struct GrindstoneScreenFactory;
 
 impl ScreenHandlerFactory for GrindstoneScreenFactory {
-    fn create_screen_handler<'a>(
-        &'a self,
+    fn create_screen_handler(
+        &self,
         sync_id: u8,
-        player_inventory: &'a Arc<PlayerInventory>,
-        _player: &'a dyn InventoryPlayer,
-    ) -> ScreenHandlerBoxFuture<'a, Option<SharedScreenHandler>> {
-        Box::pin(async move {
-            let handler: SharedScreenHandler = Arc::new(Mutex::new(GrindstoneScreenHandler::new(
-                sync_id,
-                player_inventory,
-            )));
-            Some(handler)
-        })
+        player_inventory: &Arc<PlayerInventory>,
+        _player: &dyn InventoryPlayer,
+    ) -> Option<SharedScreenHandler> {
+        let handler: SharedScreenHandler = Arc::new(Mutex::new(GrindstoneScreenHandler::new(
+            sync_id,
+            player_inventory,
+        )));
+        Some(handler)
     }
 
     fn get_display_name(&self) -> TextComponent {

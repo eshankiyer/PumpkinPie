@@ -75,7 +75,7 @@ impl PortalType {
         dest_world: Arc<World>,
         caller: &Arc<dyn crate::entity::EntityBase>,
         _portal_entry_pos: BlockPos,
-        source_portal: Option<SourcePortalInfo>,
+        source_portal: Option<&SourcePortalInfo>,
     ) -> Option<TeleportTransition> {
         match self {
             Self::End => {
@@ -91,13 +91,6 @@ impl PortalType {
                         let y = if is_player { 49.0 } else { 50.0 };
 
                         // Ensure chunks covering the platform are loaded/generated
-                        dest_world
-                            .get_block_state_async(&BlockPos::new(98, 49, -2))
-                            .await;
-                        dest_world
-                            .get_block_state_async(&BlockPos::new(102, 49, 2))
-                            .await;
-
                         // Generate/regenerate the obsidian platform (5x5 obsidian at Y=48, and 5x5x3 air above it)
                         let platform_pos = BlockPos::new(100, 49, 0);
                         for dx in -2..=2 {
@@ -154,12 +147,12 @@ impl PortalType {
                             player.seen_credits.store(true, Ordering::Relaxed);
                             match player.client.as_ref() {
                                 crate::net::ClientPlatform::Java(client) => {
-                                    client
-                                        .enqueue_client_packet(&pumpkin_protocol::java::client::play::CGameEvent::new(
-                                            pumpkin_protocol::java::client::play::GameEvent::WinGame,
-                                            0.0,
-                                        ))
-                                        .await;
+                                    if let Ok(data) = client.serialize_packet(&pumpkin_protocol::java::client::play::CGameEvent::new(
+                                        pumpkin_protocol::java::client::play::GameEvent::WinGame,
+                                        0.0,
+                                    )) {
+                                        client.try_enqueue_packet(data);
+                                    }
                                 }
                                 crate::net::ClientPlatform::Bedrock(client) => {
                                     // Vanilla's seenCredits mechanic is Java-only; there's no
@@ -168,16 +161,16 @@ impl PortalType {
                                     // credits packet on every single exit-portal crossing, since
                                     // repeating it every time is clearly not the intended
                                     // behavior even without an exact source to confirm against.
-                                    client
-                                        .send_packet(
-                                            &pumpkin_protocol::bedrock::client::CShowCredits {
-                                                player_runtime_id: (caller.get_entity().entity_id
-                                                    as u64)
-                                                    .into(),
-                                                credits_state: 0.into(),
-                                            },
-                                        )
-                                        .await;
+                                    if let Ok(data) = client.serialize_packet(
+                                        &pumpkin_protocol::bedrock::client::CShowCredits {
+                                            player_runtime_id: (caller.get_entity().entity_id
+                                                as u64)
+                                                .into(),
+                                            credits_state: 0.into(),
+                                        },
+                                    ) {
+                                        client.try_enqueue_packet(data);
+                                    }
                                 }
                             }
                             return None;
@@ -219,7 +212,7 @@ impl PortalType {
                 let target_pos =
                     BlockPos::floored(pos.x * scale_factor, pos.y, pos.z * scale_factor);
 
-                let source_axis = source_portal.as_ref().map(|p| p.axis);
+                let source_axis = source_portal.map(|p| p.axis);
 
                 let (final_pos, yaw) = if let Some(dest_result) =
                     NetherPortal::search_for_portal(&dest_world, target_pos)

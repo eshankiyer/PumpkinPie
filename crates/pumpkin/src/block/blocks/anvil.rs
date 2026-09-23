@@ -61,7 +61,7 @@ impl BlockBehaviour for AnvilBlock {
         &self,
         args: GetStateForNeighborUpdateArgs<'_>,
     ) -> BlockStateId {
-        Box::pin(async move { FallingBlock::get_state_for_neighbor_update(&FallingBlock, args) })
+        FallingBlock::get_state_for_neighbor_update(&FallingBlock, args)
     }
 }
 

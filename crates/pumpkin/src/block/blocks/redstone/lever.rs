@@ -37,7 +37,7 @@ fn toggle_lever(world: &Arc<World>, block_pos: &BlockPos) {
         BlockFlags::NOTIFY_ALL,
     );
 
-    LeverBlock::update_neighbors(world, block_pos, &lever_props);
+    LeverBlock::update_neighbors(world, block_pos, lever_props);
 
     // LeverBlock.java:97-100 (`playSound`) / :93-94 (`pull`): LEVER_CLICK at volume 0.3,
     // pitch 0.6 when switching on / 0.5 when switching off, plus BLOCK_ACTIVATE /
@@ -110,7 +110,7 @@ impl BlockBehaviour for LeverBlock {
         if !args.moved {
             let lever_props = LeverLikeProperties::from_state_id(args.old_state_id, args.block);
             if lever_props.powered {
-                Self::update_neighbors(args.world, args.position, &lever_props);
+                Self::update_neighbors(args.world, args.position, lever_props);
             }
         }
     }
@@ -155,7 +155,7 @@ impl LeverBlock {
     fn update_neighbors(
         world: &Arc<World>,
         block_pos: &BlockPos,
-        lever_props: &LeverLikeProperties,
+        lever_props: LeverLikeProperties,
     ) {
         let direction = lever_props.get_direction().opposite();
         world.update_neighbors(block_pos, None);

@@ -95,7 +95,7 @@ impl TraderLlamaEntity {
     /// `Llama.spit` (`Llama.java:340-365`), also reachable through [`RangedAttackMob`].
     pub fn spit(&self, target: &Arc<dyn EntityBase>) {
         let entity = self.get_entity();
-        let world = entity.world.load();
+        let world = entity.world.load_full();
 
         let spit_entity = Entity::new(world.clone(), entity.pos.load(), &EntityType::LLAMA_SPIT);
         let spit = LlamaSpitEntity::new_shot(spit_entity, entity);

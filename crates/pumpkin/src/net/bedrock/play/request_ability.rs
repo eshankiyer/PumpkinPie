@@ -5,7 +5,7 @@ impl BedrockClient {
     pub fn handle_request_ability(
         &self,
         player: &Arc<Player>,
-        packet: pumpkin_protocol::bedrock::server::request_ability::SRequestAbility,
+        packet: &pumpkin_protocol::bedrock::server::request_ability::SRequestAbility,
     ) {
         player.update_last_action_time();
         let ability_id = packet.ability.0;
@@ -16,13 +16,17 @@ impl BedrockClient {
                     requested_flying,
                 ) = packet.value
                 {
-                    let mut abilities = player.abilities.lock();
-                    if abilities.allow_flying {
-                        abilities.flying = requested_flying;
-                    } else {
-                        abilities.flying = false;
+                    {
+                        let mut abilities = player
+                            .abilities
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        if abilities.allow_flying {
+                            abilities.flying = requested_flying;
+                        } else {
+                            abilities.flying = false;
+                        }
                     }
-                    drop(abilities);
                     player.send_abilities_update();
                 }
             }

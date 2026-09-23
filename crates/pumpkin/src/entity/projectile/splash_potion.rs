@@ -292,36 +292,28 @@ impl EntityBase for SplashPotionEntity {
             .clamp(0.0, 0.3) as f64;
 
         for cand in candidates {
-            let cand_clone = cand.clone();
-            let effs_clone: Vec<_> = effects.clone();
-            tokio::spawn(async move {
-                // `ThrownSplashPotion.hitBlock`: an entity that is not affected by potions,
-                // such as an armour stand, is skipped before the range test.
-                if let Some(living) = cand_clone
-                    .get_living_entity()
-                    .filter(|living| living.is_affected_by_potions())
-                {
-                    let target_aabb = cand_clone
-                        .get_entity()
-                        .bounding_box
-                        .load()
-                        .expand_all(margin);
-                    let dist_sq = potion_aabb.squared_distance_to_box(&target_aabb);
-                    if dist_sq >= 16.0 {
-                        return;
-                    }
-
-                    // Distance scaling
-                    let scale = (1.0f32 - (dist_sq.sqrt() as f32 / 4.0)).max(0.0);
-
-                    crate::item::potion::PotionContents::apply_effects_to(
-                        living,
-                        effs_clone,
-                        scale,
-                        crate::item::potion::PotionApplicationSource::Normal,
-                    );
+            // `ThrownSplashPotion.hitBlock`: an entity that is not affected by potions,
+            // such as an armour stand, is skipped before the range test.
+            if let Some(living) = cand
+                .get_living_entity()
+                .filter(|living| living.is_affected_by_potions())
+            {
+                let target_aabb = cand.get_entity().bounding_box.load().expand_all(margin);
+                let dist_sq = potion_aabb.squared_distance_to_box(&target_aabb);
+                if dist_sq >= 16.0 {
+                    continue;
                 }
-            });
+
+                // Distance scaling
+                let scale = (1.0f32 - (dist_sq.sqrt() as f32 / 4.0)).max(0.0);
+
+                crate::item::potion::PotionContents::apply_effects_to(
+                    living,
+                    effects.clone(),
+                    scale,
+                    crate::item::potion::PotionApplicationSource::Normal,
+                );
+            }
         }
     }
 }

@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::{collections::HashMap, hash::Hash, sync::Arc};
 
 use bounded_num::{NotInBounds, Number};
@@ -60,12 +59,10 @@ pub mod textcomponent;
 pub mod time;
 
 /// see [`crate::command::tree::builder::argument`]
-pub type ConsumeResult<'a> = Pin<Box<dyn Future<Output = Option<Arg<'a>>> + Send + 'a>>;
-pub type ConsumeResultWithSyntax<'a> =
-    Pin<Box<dyn Future<Output = Result<Option<Arg<'a>>, CommandSyntaxError>> + Send + 'a>>;
+pub type ConsumeResult<'a> = Option<Arg<'a>>;
+pub type ConsumeResultWithSyntax<'a> = Result<Option<Arg<'a>>, CommandSyntaxError>;
 
-pub type SuggestResult<'a> =
-    Pin<Box<dyn Future<Output = Result<Option<Vec<CommandSuggestion>>, CommandError>> + Send + 'a>>;
+pub type SuggestResult = Result<Option<Vec<CommandSuggestion>>, CommandError>;
 
 pub trait ArgumentConsumer: Sync + Send + GetClientSideArgParser {
     fn consume<'a>(
@@ -81,8 +78,7 @@ pub trait ArgumentConsumer: Sync + Send + GetClientSideArgParser {
         server: &'a Server,
         args: &mut RawArgs<'a>,
     ) -> ConsumeResultWithSyntax<'a> {
-        let future = self.consume(sender, server, args);
-        Box::pin(async move { Ok(future.await) })
+        Ok(self.consume(sender, server, args))
     }
 
     /// Used for tab completion (but only if argument suggestion type is "`minecraft:ask_server`"!).

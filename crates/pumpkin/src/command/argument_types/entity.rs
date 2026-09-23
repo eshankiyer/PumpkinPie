@@ -117,7 +117,7 @@ impl ArgumentType for EntityArgumentType {
         context: &CommandContext,
         builder: SuggestionsBuilder,
     ) -> Suggestions {
-        EntitySelectorParserSuggestions::list_suggestions(context, builder)
+        EntitySelectorParserSuggestions::list_suggestions(context, &builder)
     }
 }
 

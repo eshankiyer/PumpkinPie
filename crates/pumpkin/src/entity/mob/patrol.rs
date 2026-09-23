@@ -95,17 +95,11 @@ pub trait PatrollingMonster: Mob {
         if self.is_patrol_leader() {
             let banner = create_ominous_banner();
             let living = &self.get_mob_entity().living_entity;
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    let mut equipment = living
-                        .entity_equipment
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    equipment.put(&EquipmentSlot::HEAD, banner.clone());
-                    drop(equipment);
-                    living.send_equipment_changes(&[(EquipmentSlot::HEAD, banner)]);
-                });
-            });
+            if let Ok(mut equipment) = living.entity_equipment.try_lock() {
+                equipment.put(&EquipmentSlot::HEAD, banner.clone());
+                drop(equipment);
+                living.send_equipment_changes(&[(EquipmentSlot::HEAD, banner)]);
+            }
         }
 
         if is_patrol_spawn {
@@ -173,25 +167,15 @@ impl Goal for LongDistancePatrolGoal {
             .query_daytime();
         let is_on_cooldown = game_time < self.cooldown_until;
 
-        let target = mob
-            .get_mob_entity()
-            .target
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let target = mob.get_mob_entity().get_target().clone();
         patrol.is_patrolling() && target.is_none() && patrol.has_patrol_target() && !is_on_cooldown
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         let Some(patrol) = mob.as_patrolling_monster() else {
             return false;
         };
-        let target = mob
-            .get_mob_entity()
-            .target
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let target = mob.get_mob_entity().get_target().clone();
         patrol.is_patrolling() && target.is_none() && patrol.has_patrol_target()
     }
 

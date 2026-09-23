@@ -71,7 +71,7 @@ impl TitleBuilder {
     }
 
     /// Sends the title configuration to the specified player.
-    pub async fn send_to(&self, player: &Player) {
+    pub fn send_to(&self, player: &Player) {
         if let (Some(fade_in), Some(stay), Some(fade_out)) =
             (self.fade_in, self.stay, self.fade_out)
         {

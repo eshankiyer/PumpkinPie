@@ -23,7 +23,7 @@ use crate::command::argument_types::resource_or_tag::{
     STRUCTURE_REGISTRY,
 };
 use crate::command::context::command_context::CommandContext;
-use crate::command::errors::error_types::{CommandErrorType, LiteralCommandErrorType};
+use crate::command::errors::error_types::CommandErrorType;
 use crate::command::node::dispatcher::CommandDispatcher;
 use crate::command::node::{CommandExecutor, CommandExecutorResult};
 
@@ -67,11 +67,6 @@ static POI_NOT_FOUND_ERROR_TYPE: CommandErrorType<1> = CommandErrorType::new(
     translation::java::COMMANDS_LOCATE_POI_NOT_FOUND,
     translation::java::COMMANDS_LOCATE_POI_NOT_FOUND,
 );
-
-/// Raised if a blocking search task panics or is cancelled instead of
-/// running to completion. Purely internal, so it has no translation.
-static SEARCH_FAILED_ERROR_TYPE: LiteralCommandErrorType =
-    LiteralCommandErrorType::new("The locate search failed unexpectedly");
 
 /// Builds the clickable green `[x, ~, z]` (or `[x, y, z]` when `absolute_y`)
 /// coordinates component used by vanilla's locate feedback.
@@ -180,43 +175,36 @@ impl CommandExecutor for LocateStructureExecutor {
         let seed = world.level.seed.0;
         let world_gen = world.level.world_gen.load_full();
 
-        // Scanning up to `STRUCTURE_SEARCH_RADIUS` regions of placement
-        // data is CPU-bound just like the biome spiral, so keep it off
-        // the async workers too.
-        let found = tokio::task::spawn_blocking(move || {
-            match &set.placement.placement_type {
-                // Strongholds come out of the pre-computed ring cache, which
-                // already holds positions they really occupy.
-                StructurePlacementType::ConcentricRings(_) => {
-                    world_gen.global_structure_cache().and_then(|global_cache| {
-                        find_nearest_structure(
-                            origin,
-                            &[&set.placement],
-                            STRUCTURE_SEARCH_RADIUS,
-                            seed as i64,
-                            global_cache,
-                        )
-                    })
-                }
-                // Everything else is spread over a grid whose candidate chunks
-                // are only *possible* sites: the biome at a candidate can still
-                // reject every structure in the set. Resolving the start makes
-                // sure the reported position actually holds one.
-                StructurePlacementType::RandomSpread(_) => {
-                    let targets: Vec<StructureKeys> =
-                        set.structures.iter().map(|entry| entry.structure).collect();
-                    find_nearest_structure_start(
+        let found = match &set.placement.placement_type {
+            // Strongholds come out of the pre-computed ring cache, which
+            // already holds positions they really occupy.
+            StructurePlacementType::ConcentricRings(_) => {
+                world_gen.global_structure_cache().and_then(|global_cache| {
+                    find_nearest_structure(
                         origin,
-                        set,
-                        &targets,
+                        &[&set.placement],
                         STRUCTURE_SEARCH_RADIUS,
-                        &world_gen,
+                        seed as i64,
+                        global_cache,
                     )
-                }
+                })
             }
-        })
-        .await
-        .map_err(|_| SEARCH_FAILED_ERROR_TYPE.create_without_context())?;
+            // Everything else is spread over a grid whose candidate chunks
+            // are only *possible* sites: the biome at a candidate can still
+            // reject every structure in the set. Resolving the start makes
+            // sure the reported position actually holds one.
+            StructurePlacementType::RandomSpread(_) => {
+                let targets: Vec<StructureKeys> =
+                    set.structures.iter().map(|entry| entry.structure).collect();
+                find_nearest_structure_start(
+                    origin,
+                    set,
+                    &targets,
+                    STRUCTURE_SEARCH_RADIUS,
+                    &world_gen,
+                )
+            }
+        };
 
         let Some(target) = found else {
             return Err(STRUCTURE_NOT_FOUND_ERROR_TYPE
@@ -274,21 +262,14 @@ impl CommandExecutor for LocateBiomeExecutor {
         let world = context.source.world().clone();
         let world_gen = world.level.world_gen.load_full();
 
-        // The spiral scan can probe hundreds of thousands of noise
-        // points when the biome is rare, so keep it off the async
-        // workers.
-        let found = tokio::task::spawn_blocking(move || {
-            find_closest_biome_3d(
-                &world_gen,
-                origin,
-                &targets,
-                BIOME_SEARCH_RADIUS,
-                BIOME_SEARCH_HORIZONTAL_STEP,
-                BIOME_SEARCH_VERTICAL_STEP,
-            )
-        })
-        .await
-        .map_err(|_| SEARCH_FAILED_ERROR_TYPE.create_without_context())?;
+        let found = find_closest_biome_3d(
+            &world_gen,
+            origin,
+            &targets,
+            BIOME_SEARCH_RADIUS,
+            BIOME_SEARCH_HORIZONTAL_STEP,
+            BIOME_SEARCH_VERTICAL_STEP,
+        );
 
         let Some((target, biome)) = found else {
             return Err(not_found());

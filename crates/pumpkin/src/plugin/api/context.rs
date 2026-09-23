@@ -154,19 +154,18 @@ impl Context {
         <dyn Payload>::downcast_arc::<T>(service)
     }
 
-    /// Asynchronously registers a command with the server.
+    /// Registers a new command to the server with a specified permission level.
     ///
     /// # Arguments
     /// - `tree`: The command tree to register.
     /// - `permission`: The permission level required to execute the command.
-    pub async fn register_command<P: Into<String>>(
+    pub fn register_command<P: Into<String>>(
         &self,
-        tree: crate::command::tree::CommandTree,
+        mut tree: crate::command::tree::CommandTree,
         permission: P,
     ) {
         let permission = permission.into();
 
-        let mut tree = tree.clone();
         tree.source = Some(self.metadata.name.clone());
 
         let full_permission_node = if permission.contains(':') {
@@ -186,7 +185,7 @@ impl Context {
         self.reload_commands_for_everyone();
     }
 
-    /// Asynchronously unregisters a command from the server.
+    /// Unregisters a command from the server.
     ///
     /// # Arguments
     /// - `name`: The name of the command to unregister.
@@ -200,7 +199,7 @@ impl Context {
         self.reload_commands_for_everyone();
     }
 
-    /// Asynchronously reloads (resends) all commands for all currently online players.
+    /// Reloads (resends) all commands for all currently online players.
     pub fn reload_commands_for_everyone(&self) {
         for world in self.server.worlds.load().iter() {
             for player in world.players.load().iter() {
@@ -209,7 +208,7 @@ impl Context {
         }
     }
 
-    /// Asynchronously reloads (resends) all commands for a particular player on the server.
+    /// Reloads (resends) all commands for a particular player on the server.
     ///
     /// # Arguments
     /// - `player`: The player for which the commands will be reloaded.

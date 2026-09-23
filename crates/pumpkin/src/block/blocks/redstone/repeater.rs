@@ -106,7 +106,7 @@ impl BlockBehaviour for RepeaterBlock {
 
         let state = args.world.get_block_state(args.position);
         let props = RepeaterProperties::from_state_id(state.id, args.block);
-        self.on_use(props, args.world, *args.position, args.block);
+        Self::on_use(props, args.world, *args.position, args.block);
 
         BlockActionResult::Success
     }
@@ -190,7 +190,6 @@ impl RedstoneGateBlock<RepeaterProperties> for RepeaterBlock {
     }
 
     fn update_powered(&self, world: &World, pos: BlockPos, state: &BlockState, block: &Block) {
-        // Note: is_locked is assumed to remain an async fn or return a future
         if self.is_locked(world, pos, state.id, block) {
             return;
         }
@@ -226,13 +225,7 @@ impl RedstoneGateBlock<RepeaterProperties> for RepeaterBlock {
 }
 
 impl RepeaterBlock {
-    fn on_use(
-        &self,
-        props: RepeaterProperties,
-        world: &Arc<World>,
-        block_pos: BlockPos,
-        block: &Block,
-    ) {
+    fn on_use(props: RepeaterProperties, world: &Arc<World>, block_pos: BlockPos, block: &Block) {
         let mut props = props;
         props.delay = if props.delay == 4 { 1 } else { props.delay + 1 };
         let state = props.to_state_id(block);

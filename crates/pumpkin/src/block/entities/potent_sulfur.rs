@@ -200,7 +200,7 @@ impl PotentSulfurBlockEntity {
         }
 
         world
-            .raycast_collision(below_source, below_pos, async |_, _| true)
+            .raycast_collision(below_source, below_pos, |_, _| true)
             .is_none()
     }
 

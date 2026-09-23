@@ -1,4 +1,4 @@
-use std::{any::Any, pin::sync::Arc};
+use std::{any::Any, sync::Arc};
 
 use pumpkin_data::{item_stack::ItemStack, screen::WindowType};
 use pumpkin_world::{block::entities::PropertyDelegate, inventory::Inventory};
@@ -63,12 +63,12 @@ impl BeaconScreenHandler {
         }
 
         let mut handler = Self {
-            inventory: inventory.clone(),
+            inventory,
             behaviour: ScreenHandlerBehaviour::new(sync_id, Some(WindowType::Beacon)),
             _property_delegate: property_delegate.clone(),
         };
 
-        inventory.on_open();
+        handler.inventory.on_open();
 
         // Levels (index 0), primary effect (index 1), secondary effect (index 2)
         handler.add_property(ScreenProperty::new(property_delegate.clone(), 0));

@@ -6,7 +6,6 @@ use crate::world::World;
 use pumpkin_data::Block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
-use std::pin::Pin;
 use std::sync::Arc;
 
 const MAX_COOLDOWN: i32 = 20;
@@ -71,8 +70,6 @@ impl<S: Stepping, M: MoveToTargetPos> StepAndDestroyBlockGoal<S, M> {
         }
     }
 }
-
-pub type SteppingFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 
 pub trait Stepping: Send + Sync {
     fn tick_stepping(&self, _world: Arc<World>, _block_pos: BlockPos) {}
@@ -163,7 +160,7 @@ impl<S: Stepping + Send + Sync, M: MoveToTargetPos + Send + Sync> Goal
         if counter > 60 {
             // TODO: world.removeBlock HOW?
             // TODO: spawn particles
-            self.on_destroy_block(world.clone(), tweak_pos);
+            self.on_destroy_block(world, tweak_pos);
         }
 
         self.counter += 1;

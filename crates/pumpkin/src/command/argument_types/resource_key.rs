@@ -65,20 +65,16 @@ impl ArgumentType for ResourceKeyArgument {
     ) -> Suggestions {
         if self.0 == ADVANCEMENT_REGISTRY {
             let advancements = context.server().advancement_manager.get_advancements();
-            Box::pin(async move {
-                suggestions_builder
-                    .filter_and_suggest_iter(advancements.iter().map(ToString::to_string))
-                    .build()
-            })
+            suggestions_builder
+                .filter_and_suggest_iter(advancements.iter().map(ToString::to_string))
+                .build()
         } else if self.0 == BIOME_REGISTRY {
-            Box::pin(async move {
-                let biomes = pumpkin_data::biome::Biome::ALL
-                    .iter()
-                    .map(|biome| format!("minecraft:{}", biome.registry_id));
-                suggestions_builder.filter_and_suggest_iter(biomes).build()
-            })
+            let biomes = pumpkin_data::biome::Biome::ALL
+                .iter()
+                .map(|biome| format!("minecraft:{}", biome.registry_id));
+            suggestions_builder.filter_and_suggest_iter(biomes).build()
         } else {
-            Box::pin(async move { Suggestions::empty() })
+            Suggestions::empty()
         }
     }
 

@@ -15,10 +15,7 @@ use pumpkin_world::inventory::Inventory;
 
 use crate::{
     player::player_inventory::PlayerInventory,
-    screen_handler::{
-        InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, ScreenHandlerFuture,
-        offer_or_drop_stack,
-    },
+    screen_handler::{InventoryPlayer, ScreenHandler, ScreenHandlerBehaviour, offer_or_drop_stack},
     slot::{NormalSlot, Slot},
 };
 
@@ -32,11 +29,11 @@ pub struct MerchantScreenHandler {
     // Vanilla MerchantContainer stores the active offer XP as futureXp (MerchantContainer.java:100-123), exposed by MerchantMenu.getFutureTraderXp (MerchantMenu.java:71-73).
     future_trader_xp: i32,
     pub offers: Vec<pumpkin_protocol::java::client::play::MerchantOffer>,
-    pub on_trade: Option<Box<dyn Fn(usize) -> ScreenHandlerFuture<'static, ()> + Send + Sync>>,
+    pub on_trade: Option<Box<dyn Fn(usize) + Send + Sync>>,
     /// Vanilla `MerchantMenu.playTradeSound`, used only by quick-move trades.
     pub on_quick_move_trade: Option<Box<dyn Fn() + Send + Sync>>,
     pub on_trade_updated: Option<Box<dyn Fn(bool) + Send + Sync>>,
-    pub on_close: Option<Box<dyn Fn() -> ScreenHandlerFuture<'static, ()> + Send + Sync>>,
+    pub on_close: Option<Box<dyn Fn() + Send + Sync>>,
     pub validity_check: Option<MerchantValidityCheck>,
     result_taken: Arc<AtomicBool>,
 }
@@ -52,7 +49,7 @@ impl MerchantScreenHandler {
         let mut behaviour = ScreenHandlerBehaviour::new(sync_id, Some(WindowType::Merchant));
         behaviour.container_slots = 3;
         let mut handler = Self {
-            inventory: inventory.clone(),
+            inventory,
             behaviour,
             selected_offer: 0,
             active_offer: None,
@@ -66,13 +63,13 @@ impl MerchantScreenHandler {
             result_taken: result_taken.clone(),
         };
 
-        inventory.on_open();
+        handler.inventory.on_open();
 
         for i in 0..2 {
-            handler.add_slot(Arc::new(NormalSlot::new(inventory.clone(), i)));
+            handler.add_slot(Arc::new(NormalSlot::new(handler.inventory.clone(), i)));
         }
         handler.add_slot(Arc::new(MerchantResultSlot::new(
-            inventory.clone(),
+            handler.inventory.clone(),
             2,
             result_taken,
         )));
@@ -213,7 +210,7 @@ impl MerchantScreenHandler {
         self.offers[offer_index].increase_uses();
 
         if let Some(on_trade) = &self.on_trade {
-            on_trade(offer_index).await;
+            on_trade(offer_index);
         }
         player.increment_stat(
             StatisticCategory::Custom,
@@ -531,10 +528,7 @@ mod tests {
     use pumpkin_world::inventory::SimpleInventory;
     use std::sync::Mutex;
 
-    use crate::{
-        entity_equipment::EntityEquipment,
-        screen_handler::{InventoryPlayer, PlayerFuture},
-    };
+    use crate::{entity_equipment::EntityEquipment, screen_handler::InventoryPlayer};
 
     use super::*;
 
@@ -659,7 +653,7 @@ mod tests {
         )
     }
 
-    #[tokio::test]
+    #[test]
     fn selecting_bookshelf_trade_moves_payment_and_creates_result() {
         let (player_inventory, merchant_inventory) = inventories();
         player_inventory.set_stack(0, ItemStack::new(12, &Item::EMERALD));
@@ -680,7 +674,7 @@ mod tests {
     }
 
     // Vanilla clears futureXp when no valid, in-stock offer is selected (MerchantContainer.java:100-123).
-    #[tokio::test]
+    #[test]
     fn future_trader_xp_tracks_the_active_offer() {
         let (player_inventory, merchant_inventory) = inventories();
         merchant_inventory.set_stack(0, ItemStack::new(12, &Item::EMERALD));
@@ -699,7 +693,7 @@ mod tests {
         assert_eq!(handler.get_future_trader_xp(), 0);
     }
 
-    #[tokio::test]
+    #[test]
     fn taking_result_commits_payment_after_delivery() {
         let (player_inventory, merchant_inventory) = inventories();
         merchant_inventory.set_stack(0, ItemStack::new(12, &Item::EMERALD));
@@ -714,10 +708,7 @@ mod tests {
         handler.on_trade = Some(Box::new({
             let trade_count = trade_count.clone();
             move |_| {
-                let trade_count = trade_count.clone();
-                Box::pin(async move {
-                    trade_count.fetch_add(1, Ordering::Relaxed);
-                })
+                trade_count.fetch_add(1, Ordering::Relaxed);
             }
         }));
         handler.update_result_slot();
@@ -741,7 +732,7 @@ mod tests {
         assert_eq!(player.experience.load(Ordering::Relaxed), 0);
     }
 
-    #[tokio::test]
+    #[test]
     fn bedrock_result_request_commits_the_trade() {
         let (player_inventory, merchant_inventory) = inventories();
         merchant_inventory.set_stack(0, ItemStack::new(12, &Item::EMERALD));
@@ -756,10 +747,7 @@ mod tests {
         handler.on_trade = Some(Box::new({
             let trade_count = trade_count.clone();
             move |_| {
-                let trade_count = trade_count.clone();
-                Box::pin(async move {
-                    trade_count.fetch_add(1, Ordering::Relaxed);
-                })
+                trade_count.fetch_add(1, Ordering::Relaxed);
             }
         }));
         handler.update_result_slot();
@@ -773,7 +761,7 @@ mod tests {
         assert!(merchant_inventory.get_stack(2).is_empty());
     }
 
-    #[tokio::test]
+    #[test]
     fn selection_hint_zero_resolves_matching_offer() {
         let (player_inventory, merchant_inventory) = inventories();
         merchant_inventory.set_stack(0, ItemStack::new(64, &Item::PAPER));
@@ -791,10 +779,7 @@ mod tests {
         handler.on_trade = Some(Box::new({
             let traded_offer = traded_offer.clone();
             move |offer_index| {
-                let traded_offer = traded_offer.clone();
-                Box::pin(async move {
-                    traded_offer.store(offer_index, Ordering::Relaxed);
-                })
+                traded_offer.store(offer_index, Ordering::Relaxed);
             }
         }));
         handler.update_result_slot();
@@ -817,7 +802,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[test]
     fn pickup_all_does_not_take_merchant_inputs() {
         let (player_inventory, merchant_inventory) = inventories();
         merchant_inventory.set_stack(0, ItemStack::new(9, &Item::EMERALD));
@@ -850,7 +835,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[test]
     fn invalid_payment_does_not_notify_the_merchant() {
         let (player_inventory, merchant_inventory) = inventories();
         merchant_inventory.set_stack(0, ItemStack::new(8, &Item::EMERALD));
@@ -865,10 +850,7 @@ mod tests {
         handler.on_trade = Some(Box::new({
             let trade_count = trade_count.clone();
             move |_| {
-                let trade_count = trade_count.clone();
-                Box::pin(async move {
-                    trade_count.fetch_add(1, Ordering::Relaxed);
-                })
+                trade_count.fetch_add(1, Ordering::Relaxed);
             }
         }));
 
@@ -888,7 +870,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[test]
     fn full_inventory_does_not_commit_quick_moved_trade() {
         let (player_inventory, merchant_inventory) = inventories();
         player_inventory
@@ -914,7 +896,7 @@ mod tests {
         assert_eq!(player.traded.load(Ordering::Relaxed), 0);
     }
 
-    #[tokio::test]
+    #[test]
     fn quick_move_repeats_while_payment_and_stock_remain() {
         let (player_inventory, merchant_inventory) = inventories();
         merchant_inventory.set_stack(0, ItemStack::new(64, &Item::EMERALD));
@@ -935,7 +917,7 @@ mod tests {
         assert_eq!(player_inventory.get_stack(8).item_count, 7);
     }
 
-    #[tokio::test]
+    #[test]
     fn swapped_payment_slots_are_accepted_and_consumed() {
         let (player_inventory, merchant_inventory) = inventories();
         let mut offer = bookshelf_offer();

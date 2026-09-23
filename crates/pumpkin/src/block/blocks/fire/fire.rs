@@ -237,7 +237,7 @@ impl BlockBehaviour for FireBlock {
     }
 
     fn on_entity_collision(&self, args: OnEntityCollisionArgs<'_>) {
-        FireBlockBase::apply_fire_collision(args, false)
+        FireBlockBase::apply_fire_collision(&args, false);
     }
 
     fn get_state_for_neighbor_update(

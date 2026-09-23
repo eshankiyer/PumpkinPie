@@ -81,11 +81,7 @@ fn ban_ip(
         )));
     };
 
-    let mut banned_ips = server
-        .data
-        .banned_ip_list
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut banned_ips = server.data.banned_ip_list.write().unwrap();
 
     if banned_ips.get_entry(&target_ip).is_some() {
         return Err(CommandError::CommandFailed(TextComponent::translate_cross(
@@ -133,14 +129,12 @@ fn ban_ip(
 
     let count = affected.len();
     for target in affected {
-        target.kick(
-            DisconnectReason::Kicked,
-            TextComponent::translate_cross(
-                translation::java::MULTIPLAYER_DISCONNECT_IP_BANNED,
-                translation::java::MULTIPLAYER_DISCONNECT_IP_BANNED,
-                [],
-            ),
+        let kick_msg = TextComponent::translate_cross(
+            translation::java::MULTIPLAYER_DISCONNECT_IP_BANNED,
+            translation::java::MULTIPLAYER_DISCONNECT_IP_BANNED,
+            [],
         );
+        target.kick(DisconnectReason::Kicked, &kick_msg);
     }
 
     Ok(count as i32)

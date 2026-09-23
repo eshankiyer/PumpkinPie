@@ -1103,7 +1103,7 @@ macro_rules! make_operation_executor {
         struct $name;
         impl CommandExecutor for $name {
             fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
-                Box::pin(apply_operation(context, $op))
+                apply_operation(context, $op)
             }
         }
     };

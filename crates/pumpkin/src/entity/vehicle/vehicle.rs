@@ -42,13 +42,9 @@ impl VehicleEntity {
                 self.entity.entity_id,
             );
         if let Some(server) = self.entity.world.load().server.upgrade() {
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    server
-                        .plugin_manager
-                        .fire_blocking(&server, &mut update_event);
-                });
-            });
+            server
+                .plugin_manager
+                .fire_blocking(&server, &mut update_event);
         }
 
         // `VehicleEntity.hurtServer` marks a damaged vehicle (`VehicleEntity.java:44-48`),
@@ -71,7 +67,7 @@ impl VehicleEntity {
         }
     }
 
-    pub async fn move_vehicle(
+    pub fn move_vehicle(
         &self,
         from: pumpkin_util::math::vector3::Vector3<f64>,
         to: pumpkin_util::math::vector3::Vector3<f64>,
@@ -89,7 +85,7 @@ impl VehicleEntity {
         }
     }
 
-    pub async fn collide_entity(&self, collided_entity_id: i32) {
+    pub fn collide_entity(&self, collided_entity_id: i32) {
         let mut base_event =
             crate::plugin::api::events::vehicle::vehicle_collision::VehicleCollisionEvent::new(
                 self.entity.entity_id,
@@ -108,7 +104,7 @@ impl VehicleEntity {
         }
     }
 
-    pub async fn collide_block(&self, block_pos: pumpkin_util::math::position::BlockPos) {
+    pub fn collide_block(&self, block_pos: pumpkin_util::math::position::BlockPos) {
         let mut base_event =
             crate::plugin::api::events::vehicle::vehicle_collision::VehicleCollisionEvent::new(
                 self.entity.entity_id,

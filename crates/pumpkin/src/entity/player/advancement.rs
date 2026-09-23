@@ -25,7 +25,6 @@ use std::fs::{create_dir_all, read, write};
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::task::spawn_blocking;
 use tracing::{error, warn};
 use uuid::Uuid;
 
@@ -256,7 +255,7 @@ impl PlayerAdvancement {
     }
 
     ///reload the advancements from the file
-    pub async fn reload(&mut self) -> Result<(), AdvancementDataError> {
+    pub fn reload(&mut self) -> Result<(), AdvancementDataError> {
         //self.stopListening(); TODO
         self.progress.clear();
         self.visible.clear();
@@ -273,19 +272,14 @@ impl PlayerAdvancement {
             return Ok(());
         }
         let json = to_string_pretty(self).map_err(AdvancementDataError::Json)?;
-        let path = self.path.clone();
-        spawn_blocking(move || {
-            let Some(parent) = path.parent() else {
-                return Ok(());
-            };
-            if let Err(e) = create_dir_all(parent) {
-                error!("Failed to create player advancement directory : {e}");
-                return Err(AdvancementDataError::Io(e));
-            }
-            write(path, json).map_err(AdvancementDataError::Io)
-        })
-        .await
-        .unwrap_or(Ok(()))
+        let Some(parent) = self.path.parent() else {
+            return Ok(());
+        };
+        if let Err(e) = create_dir_all(parent) {
+            error!("Failed to create player advancement directory : {e}");
+            return Err(AdvancementDataError::Io(e));
+        }
+        write(&self.path, json).map_err(AdvancementDataError::Io)
     }
 
     /// Loads the player's advancement progress from disk.
@@ -294,12 +288,7 @@ impl PlayerAdvancement {
             return Ok(());
         }
 
-        let path = self.path.clone();
-        let json = spawn_blocking(|| read(path).map_err(AdvancementDataError::Io))
-            .await
-            .unwrap_or(Err(AdvancementDataError::Io(std::io::Error::from(
-                std::io::ErrorKind::Other,
-            ))))?;
+        let json = read(&self.path).map_err(AdvancementDataError::Io)?;
 
         let loaded_data: HashMap<String, AdvancementProgress> =
             serde_json::from_slice(&json).map_err(AdvancementDataError::Json)?;
@@ -400,17 +389,13 @@ impl PlayerAdvancement {
                     })
                     .collect();
                 let first_packet = self.is_first_packet;
-                tokio::spawn(async move {
-                    player
-                        .send_client_packet(&CUpdateAdvancements::new(
-                            first_packet,
-                            added,
-                            parsed_progress,
-                            removed,
-                            show_advancement,
-                        ))
-                        .await;
-                });
+                player.try_send_client_packet(&CUpdateAdvancements::new(
+                    first_packet,
+                    added,
+                    parsed_progress,
+                    removed,
+                    show_advancement,
+                ));
             }
         }
         self.is_first_packet = false;
@@ -420,14 +405,12 @@ impl PlayerAdvancement {
     /// first, then the recipe keys via `awardRecipesByKey`
     /// (`AdvancementRewards.java:77-79`). Loot tables and the reward function are
     /// still unimplemented.
-    pub fn grant_reward(player: Arc<Player>, reward: &'static AdvancementReward) {
-        tokio::spawn(async move {
-            player.add_experience_points(reward.experience);
-            if !reward.recipes.is_empty() {
-                let ids: Vec<String> = reward.recipes.iter().map(|id| (*id).to_string()).collect();
-                player.award_recipes_by_key(&ids);
-            }
-        });
+    pub fn grant_reward(player: &Arc<Player>, reward: &'static AdvancementReward) {
+        player.add_experience_points(reward.experience);
+        if !reward.recipes.is_empty() {
+            let ids: Vec<String> = reward.recipes.iter().map(|id| (*id).to_string()).collect();
+            player.award_recipes_by_key(&ids);
+        }
     }
 
     /// award a criterion of an advancement to the player, updating its status to complete and granting rewards if applicable.
@@ -443,19 +426,15 @@ impl PlayerAdvancement {
             result = true;
             self.progress_changed.insert(advancement);
             if !was_done && progress.is_done() {
-                let player_c = player.clone();
-                let adv_id = advancement.id.to_string();
-                tokio::spawn(async move {
-                    if let Some(server) = player_c.world().server.upgrade() {
-                        let mut event =
-                            crate::plugin::api::events::player::player_advancement_done::PlayerAdvancementDoneEvent::new(
-                                player_c,
-                                adv_id,
-                            );
-                        server.plugin_manager.fire_blocking(&server, &mut event);
-                    }
-                });
-                Self::grant_reward(player.clone(), advancement.reward);
+                if let Some(server) = player.world().server.upgrade() {
+                    let mut event =
+                        crate::plugin::api::events::player::player_advancement_done::PlayerAdvancementDoneEvent::new(
+                            player.clone(),
+                            advancement.id.to_string(),
+                        );
+                    server.plugin_manager.fire_blocking(&server, &mut event);
+                }
+                Self::grant_reward(&player, advancement.reward);
                 if let Some(display) = advancement.display
                     && display.announce_to_chat
                     && player
@@ -465,24 +444,22 @@ impl PlayerAdvancement {
                         .game_rules
                         .show_advancement_messages
                 {
-                    tokio::spawn(async move {
-                        let player_name = player.get_display_name();
-                        let je_component = TextComponent::translate(
-                            display.frame_type.get_translation(),
-                            [player_name.clone(), advancement.name()],
-                        );
-                        let je_packet = CSystemChatMessage::new(&je_component, false);
+                    let player_name = player.get_display_name();
+                    let je_component = TextComponent::translate(
+                        display.frame_type.get_translation(),
+                        [player_name.clone(), advancement.name()],
+                    );
+                    let je_packet = CSystemChatMessage::new(&je_component, false);
 
-                        let be_packet = SText::translation(
-                            translation::bedrock::CHAT_TYPE_ACHIEVEMENT.to_string(),
-                            vec![
-                                player_name.0.to_bedrock_string(),
-                                display.get_title().0.to_bedrock_string(),
-                            ],
-                        );
+                    let be_packet = SText::translation(
+                        translation::bedrock::CHAT_TYPE_ACHIEVEMENT.to_string(),
+                        vec![
+                            player_name.0.to_bedrock_string(),
+                            display.get_title().0.to_bedrock_string(),
+                        ],
+                    );
 
-                        player.world().broadcast_editioned(&je_packet, &be_packet);
-                    });
+                    player.world().broadcast_editioned(&je_packet, &be_packet);
                 }
             }
         }
@@ -510,7 +487,7 @@ impl PlayerAdvancement {
     }
 
     /// set the selected advancement tab of the player
-    pub async fn set_selected_tab(&mut self, advancement: Option<&'static Advancement>) {
+    pub fn set_selected_tab(&mut self, advancement: Option<&'static Advancement>) {
         let old = self.last_selected_tab;
         if let Some(value) = advancement
             && value.is_root()
@@ -523,11 +500,9 @@ impl PlayerAdvancement {
         if old != self.last_selected_tab
             && let Some(player) = self.player.upgrade()
         {
-            player
-                .send_client_packet(&CSelectAdvancementsTab::new(
-                    self.last_selected_tab.map(|adv| adv.id.clone()),
-                ))
-                .await;
+            player.try_send_client_packet(&CSelectAdvancementsTab::new(
+                self.last_selected_tab.map(|adv| adv.id.clone()),
+            ));
         }
     }
 }
@@ -627,8 +602,8 @@ mod tests {
         assert!(!pa.progress.get_mut_or_start_progress(adv).is_done());
     }
 
-    #[tokio::test]
-    async fn save_advancement_progress() {
+    #[test]
+    fn save_advancement_progress() {
         let temp_dir = tempdir().unwrap();
         let manager = Arc::new(AdvancementManager::new(temp_dir.path(), true));
         let id = Uuid::new_v4();
@@ -654,8 +629,8 @@ mod tests {
             serde_json::from_str(&content).expect("Saved content should be valid JSON");
     }
 
-    #[tokio::test]
-    async fn save_disabled() {
+    #[test]
+    fn save_disabled() {
         let temp_dir = tempdir().unwrap();
         let manager = Arc::new(AdvancementManager::new(temp_dir.path(), false));
         let id = Uuid::new_v4();
@@ -679,8 +654,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn load_nonexistent_file() {
+    #[test]
+    fn load_nonexistent_file() {
         let temp_dir = tempdir().unwrap();
         let manager = Arc::new(AdvancementManager::new(temp_dir.path(), true));
         let id = Uuid::new_v4();
@@ -694,8 +669,8 @@ mod tests {
         assert!(pa.progress.is_empty(), "Advancements should remain empty");
     }
 
-    #[tokio::test]
-    async fn load_advancement_progress() {
+    #[test]
+    fn load_advancement_progress() {
         let temp_dir = tempdir().unwrap();
         let manager = Arc::new(AdvancementManager::new(temp_dir.path(), true));
 
@@ -720,8 +695,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn save_load_roundtrip() {
+    #[test]
+    fn save_load_roundtrip() {
         let temp_dir = tempdir().unwrap();
 
         // Create and save advancements
@@ -754,8 +729,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn load_invalid_advancement_id() {
+    #[test]
+    fn load_invalid_advancement_id() {
         let temp_dir = tempdir().unwrap();
         let manager = Arc::new(AdvancementManager::new(temp_dir.path(), true));
 
@@ -788,8 +763,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn save_multiple_advancements() {
+    #[test]
+    fn save_multiple_advancements() {
         let temp_dir = tempdir().unwrap();
         let manager = Arc::new(AdvancementManager::new(temp_dir.path(), true));
         let id = Uuid::new_v4();
@@ -817,8 +792,8 @@ mod tests {
         assert_eq!(saved_data.len(), 2, "Should have saved both advancements");
     }
 
-    #[tokio::test]
-    async fn ignore_loading() {
+    #[test]
+    fn ignore_loading() {
         let temp_dir = tempdir().unwrap();
         let manager = Arc::new(AdvancementManager::new(temp_dir.path(), false));
 

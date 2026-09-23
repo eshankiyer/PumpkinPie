@@ -106,6 +106,7 @@ impl JavaClient {
             || !world
                 .worldborder
                 .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .contains_block(position.0.x, position.0.z)
         {
             return Ok(());
@@ -167,12 +168,12 @@ impl JavaClient {
 
         // Code based on the java class ServerPlayerInteractionManager
         if !(sneaking && (!held_item_empty || !off_hand_item_empty)) {
-            let result = self.call_use_item_on(
+            let result = Self::call_use_item_on(
                 player,
                 hand,
                 &position,
                 &cursor_pos,
-                &face,
+                face,
                 &mut item,
                 &equipment_slot,
                 &world,
@@ -207,7 +208,11 @@ impl JavaClient {
         // to the item (`ItemStack.java:357-365`); `ServerPlayerGameMode.useItemOn` reaches this
         // fallback after block interaction (`ServerPlayerGameMode.java:386-395`).
         if player.gamemode.load() == GameMode::Adventure
-            && !player.abilities.lock().allow_modify_world
+            && !player
+                .abilities
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .allow_modify_world
             && !item.can_place_on_block_in_adventure_mode(block, world.get_block_state(&position))
         {
             return Ok(());
@@ -258,12 +263,11 @@ impl JavaClient {
 
     #[expect(clippy::too_many_arguments)]
     fn call_use_item_on(
-        &self,
         player: &Arc<Player>,
         hand: Hand,
         position: &BlockPos,
         cursor_pos: &Vector3<f32>,
-        face: &BlockDirection,
+        face: BlockDirection,
         held_item: &mut ItemStack,
         equipment_slot: &EquipmentSlot,
         world: &Arc<World>,
@@ -274,7 +278,10 @@ impl JavaClient {
             block,
             player,
             position,
-            &BlockHitResult { face, cursor_pos },
+            &BlockHitResult {
+                face: &face,
+                cursor_pos,
+            },
             held_item,
             equipment_slot,
             server,
@@ -293,7 +300,10 @@ impl JavaClient {
                 block,
                 player,
                 position,
-                &BlockHitResult { face, cursor_pos },
+                &BlockHitResult {
+                    face: &face,
+                    cursor_pos,
+                },
                 server,
                 world,
             );

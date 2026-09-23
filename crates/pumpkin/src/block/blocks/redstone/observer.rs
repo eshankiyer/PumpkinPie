@@ -47,7 +47,7 @@ impl BlockBehaviour for ObserverBlock {
                 .schedule_block_tick(args.block, *args.position, 2, TickPriority::Normal);
         }
 
-        Self::update_neighbors(args.world, args.block, args.position, &props);
+        Self::update_neighbors(args.world, args.block, args.position, props);
     }
 
     fn placed(&self, args: PlacedArgs<'_>) {
@@ -69,7 +69,7 @@ impl BlockBehaviour for ObserverBlock {
                 props.to_state_id(args.block),
                 BlockFlags::NOTIFY_LISTENERS,
             );
-            Self::update_neighbors(args.world, args.block, args.position, &props);
+            Self::update_neighbors(args.world, args.block, args.position, props);
         }
     }
 
@@ -119,7 +119,7 @@ impl BlockBehaviour for ObserverBlock {
                 .is_block_tick_scheduled(args.position, &Block::OBSERVER)
         {
             props.powered = false;
-            Self::update_neighbors(args.world, args.block, args.position, &props);
+            Self::update_neighbors(args.world, args.block, args.position, props);
         }
     }
 }
@@ -129,7 +129,7 @@ impl ObserverBlock {
         world: &Arc<World>,
         block: &Block,
         block_pos: &BlockPos,
-        props: &ObserverLikeProperties,
+        props: ObserverLikeProperties,
     ) {
         let facing = props.facing.to_block_direction();
         let opposite_facing_pos = block_pos.offset(facing.opposite().to_offset());

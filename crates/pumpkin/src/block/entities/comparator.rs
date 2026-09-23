@@ -1,4 +1,4 @@
-use std::pin::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;

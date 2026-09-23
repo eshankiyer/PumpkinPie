@@ -117,9 +117,7 @@ impl FireBlockBase {
     }
 
     /// Shared fire collision behavior used by `fire` and `soul_fire`.
-    #[must_use]
-    #[allow(clippy::needless_pass_by_value)]
-    pub fn apply_fire_collision(args: OnEntityCollisionArgs<'_>, extra_damage_for_living: bool) {
+    pub fn apply_fire_collision(args: &OnEntityCollisionArgs<'_>, extra_damage_for_living: bool) {
         let base_entity = args.entity.get_entity();
         if !base_entity.entity_type.fire_immune && !base_entity.fire_immune.load(Ordering::Relaxed)
         {

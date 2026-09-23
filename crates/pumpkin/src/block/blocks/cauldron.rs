@@ -68,6 +68,14 @@ fn fire_cauldron_change(
     !event.cancelled
 }
 
+/// Gives the player one `item` (the filled/emptied container), dropping it when the
+/// inventory has no room.
+fn give_item_or_drop(player: &crate::entity::player::Player, item: &'static Item) {
+    player
+        .inventory
+        .offer_or_drop_stack(ItemStack::new(1, item), player);
+}
+
 impl BlockBehaviour for CauldronBlock {
     fn on_entity_collision(&self, args: OnEntityCollisionArgs<'_>) {
         let entity = args.entity.get_entity();
@@ -118,9 +126,7 @@ impl BlockBehaviour for CauldronBlock {
                     &args.position.to_f64(),
                 );
                 args.item_stack.decrement_unless_creative(gamemode, 1);
-                args.player
-                    .inventory
-                    .offer_or_drop_stack(ItemStack::new(1, &Item::BUCKET), args.player.as_ref());
+                give_item_or_drop(args.player, &Item::BUCKET);
                 return BlockActionResult::Success;
             } else if item_id == Item::LAVA_BUCKET.id {
                 args.world.set_block_state(
@@ -134,9 +140,7 @@ impl BlockBehaviour for CauldronBlock {
                     &args.position.to_f64(),
                 );
                 args.item_stack.decrement_unless_creative(gamemode, 1);
-                args.player
-                    .inventory
-                    .offer_or_drop_stack(ItemStack::new(1, &Item::BUCKET), args.player.as_ref());
+                give_item_or_drop(args.player, &Item::BUCKET);
                 return BlockActionResult::Success;
             } else if item_id == Item::POWDER_SNOW_BUCKET.id {
                 let state_id = Block::POWDER_SNOW_CAULDRON
@@ -150,9 +154,7 @@ impl BlockBehaviour for CauldronBlock {
                     &args.position.to_f64(),
                 );
                 args.item_stack.decrement_unless_creative(gamemode, 1);
-                args.player
-                    .inventory
-                    .offer_or_drop_stack(ItemStack::new(1, &Item::BUCKET), args.player.as_ref());
+                give_item_or_drop(args.player, &Item::BUCKET);
                 return BlockActionResult::Success;
             } else if item_id == Item::POTION.id {
                 let state_id = Block::WATER_CAULDRON
@@ -166,10 +168,7 @@ impl BlockBehaviour for CauldronBlock {
                     &args.position.to_f64(),
                 );
                 args.item_stack.decrement_unless_creative(gamemode, 1);
-                args.player.inventory.offer_or_drop_stack(
-                    ItemStack::new(1, &Item::GLASS_BOTTLE),
-                    args.player.as_ref(),
-                );
+                give_item_or_drop(args.player, &Item::GLASS_BOTTLE);
                 return BlockActionResult::Success;
             }
         }
@@ -209,9 +208,7 @@ impl BlockBehaviour for CauldronBlock {
                 args.world
                     .play_sound(sound, SoundCategory::Blocks, &args.position.to_f64());
                 args.item_stack.decrement_unless_creative(gamemode, 1);
-                args.player
-                    .inventory
-                    .offer_or_drop_stack(ItemStack::new(1, result_item), args.player.as_ref());
+                give_item_or_drop(args.player, result_item);
                 return BlockActionResult::Success;
             }
         }
@@ -236,10 +233,7 @@ impl BlockBehaviour for CauldronBlock {
                     &args.position.to_f64(),
                 );
                 args.item_stack.decrement_unless_creative(gamemode, 1);
-                args.player.inventory.offer_or_drop_stack(
-                    ItemStack::new(1, &Item::GLASS_BOTTLE),
-                    args.player.as_ref(),
-                );
+                give_item_or_drop(args.player, &Item::GLASS_BOTTLE);
                 return BlockActionResult::Success;
             }
         }

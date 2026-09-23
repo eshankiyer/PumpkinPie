@@ -55,7 +55,7 @@ impl TeleportTowardsPlayerGoal {
 
         // The target conditions are evaluated per candidate so that a nearer but invalid player
         // (a spectator or an invulnerable creative player) does not hide a valid one behind it.
-        // The predicate is async, so candidates are gathered first and tested in distance order.
+        // Candidates are gathered first and tested in distance order.
         let mut candidates = world.get_nearby_players(pos, follow_range);
         candidates.sort_by(|a, b| {
             a.get_entity()

@@ -106,7 +106,7 @@ impl LightningBoltEntity {
 
         let pos = self.entity.block_pos.load();
 
-        let try_place = |p: BlockPos| async move {
+        let try_place = |p: BlockPos| {
             if world.get_block_state(&p).is_air() && FireBlockBase::can_place_at(world, &p) {
                 let fire_block = FireBlockBase::get_fire_type(world, &p);
                 world.set_block_state(&p, fire_block.default_state.id, BlockFlags::NOTIFY_ALL);
@@ -114,14 +114,14 @@ impl LightningBoltEntity {
             }
         };
 
-        try_place(pos).await;
+        try_place(pos);
 
         for _ in 0..additional_sources {
             let dx = rand::rng().random_range(-1..=1);
             let dy = rand::rng().random_range(-1..=1);
             let dz = rand::rng().random_range(-1..=1);
             let nearby_pos = pos.offset(Vector3::new(dx, dy, dz));
-            try_place(nearby_pos).await;
+            try_place(nearby_pos);
         }
     }
 
@@ -262,10 +262,6 @@ impl EntityBase for LightningBoltEntity {
             );
 
             let entities = world.get_all_at_box(&damage_box);
-            let mut hit_guard = self
-                .hit_entities
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             for hit_entity in entities {
                 if hit_entity.get_entity().entity_id == entity.entity_id {
@@ -273,7 +269,11 @@ impl EntityBase for LightningBoltEntity {
                 }
                 let hit_id = hit_entity.get_entity().entity_id;
                 hit_entity.on_lightning_strike(hit_entity.as_ref(), self);
-                hit_guard.insert(hit_id);
+                // Lock only around the insert: `on_lightning_strike` may re-enter this bolt.
+                self.hit_entities
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(hit_id);
             }
         }
     }

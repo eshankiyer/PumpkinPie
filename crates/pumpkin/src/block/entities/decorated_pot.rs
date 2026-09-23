@@ -8,7 +8,7 @@ use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::{borrow::Cow, pin::Pin};
+use std::borrow::Cow;
 
 /// `DecoratedPotBlockEntity.WobbleStyle` (`DecoratedPotBlockEntity.java:177-186`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,8 +119,8 @@ impl DecoratedPotBlockEntity {
     pub const fn new(position: BlockPos) -> Self {
         Self {
             position,
-            sherds: Mutex::const_new(None),
-            item: Mutex::const_new(None),
+            sherds: Mutex::new(None),
+            item: Mutex::new(None),
         }
     }
 
@@ -270,7 +270,7 @@ mod tests {
 
     /// `DecoratedPotBlock.useItemOn` (`DecoratedPotBlock.java:110-115`) rejects mismatched
     /// item components.
-    #[tokio::test]
+    #[test]
     fn insertion_requires_matching_components() {
         let pot = DecoratedPotBlockEntity::new(BlockPos::new(0, 0, 0));
         let mut plain = ItemStack::new(1, &Item::COBBLESTONE);
@@ -283,7 +283,7 @@ mod tests {
 
     /// `DecoratedPotBlock.useItemOn` (`DecoratedPotBlock.java:111-112`) uses the item's max
     /// stack size when deciding whether another item fits.
-    #[tokio::test]
+    #[test]
     fn insertion_uses_the_item_max_stack_size() {
         let pot = DecoratedPotBlockEntity::new(BlockPos::new(0, 0, 0));
         let mut pearls = ItemStack::new(16, &Item::ENDER_PEARL);

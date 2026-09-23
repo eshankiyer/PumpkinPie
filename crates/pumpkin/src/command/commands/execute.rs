@@ -48,367 +48,316 @@ static ERROR_FUNCTION_INSTANTIATION_FAILURE: CommandErrorType<2> = CommandErrorT
     pumpkin_data::translation::java::COMMANDS_EXECUTE_FUNCTION_INSTANTIATIONFAILURE,
 );
 
-fn execute_as_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
-        let mut sources = Vec::new();
-        for target in targets {
-            let mut source = context.source.as_ref().clone();
-            let display_name = target.get_display_name();
-            let name = target.get_name().get_text();
-            source.entity = Some(target.clone());
-            source.name = name;
-            source.display_name = display_name;
-            sources.push(Arc::new(source));
-        }
-        Ok(sources)
-    })
-}
-
-fn execute_at_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
-        let mut sources = Vec::new();
-        for target in targets {
-            let entity = target.get_entity();
-            let mut source = context.source.as_ref().clone();
-            source.position = entity.pos.load();
-            source.rotation = Vector2::new(entity.yaw.load(), entity.pitch.load());
-            source.world = Some(entity.world.load().clone());
-            sources.push(Arc::new(source));
-        }
-        Ok(sources)
-    })
-}
-
-fn execute_in_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let dimension_key = ResourceKeyArgument::get_registry_key(
-            context,
-            "dimension",
-            &Identifier::vanilla_static("dimension"),
-            &ERROR_INVALID_DIMENSION,
-        )?;
-        let dimension_name = dimension_key.identifier.to_string();
-        let server = context.server();
-        let worlds = server.worlds.load();
-        let target_world = worlds
-            .iter()
-            .find(|w| w.dimension.minecraft_name == dimension_name);
-
-        target_world.map_or_else(
-            || {
-                Err(ERROR_INVALID_DIMENSION
-                    .create_without_context(TextComponent::text(dimension_name)))
-            },
-            |target_world| {
-                let mut source = context.source.as_ref().clone();
-                source.world = Some(target_world.clone());
-                Ok(vec![Arc::new(source)])
-            },
-        )
-    })
-}
-
-fn execute_positioned_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let pos = Vec3ArgumentType::get_vector3(context, "pos")?;
+fn execute_as_modifier(context: &CommandContext) -> crate::command::node::RedirectModifierResult {
+    let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
+    let mut sources = Vec::new();
+    for target in targets {
         let mut source = context.source.as_ref().clone();
-        source.position = pos;
-        Ok(vec![Arc::new(source)])
-    })
+        let display_name = target.get_display_name();
+        let name = target.get_name().get_text();
+        source.entity = Some(target.clone());
+        source.name = name;
+        source.display_name = display_name;
+        sources.push(Arc::new(source));
+    }
+    Ok(sources)
 }
 
-fn execute_positioned_as_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
-        let mut sources = Vec::new();
-        for target in targets {
+fn execute_at_modifier(context: &CommandContext) -> crate::command::node::RedirectModifierResult {
+    let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
+    let mut sources = Vec::new();
+    for target in targets {
+        let entity = target.get_entity();
+        let mut source = context.source.as_ref().clone();
+        source.position = entity.pos.load();
+        source.rotation = Vector2::new(entity.yaw.load(), entity.pitch.load());
+        source.world = Some(entity.world.load().clone());
+        sources.push(Arc::new(source));
+    }
+    Ok(sources)
+}
+
+fn execute_in_modifier(context: &CommandContext) -> crate::command::node::RedirectModifierResult {
+    let dimension_key = ResourceKeyArgument::get_registry_key(
+        context,
+        "dimension",
+        &Identifier::vanilla_static("dimension"),
+        &ERROR_INVALID_DIMENSION,
+    )?;
+    let dimension_name = dimension_key.identifier.to_string();
+    let server = context.server();
+    let worlds = server.worlds.load();
+    let target_world = worlds
+        .iter()
+        .find(|w| w.dimension.minecraft_name == dimension_name);
+
+    target_world.map_or_else(
+        || Err(ERROR_INVALID_DIMENSION.create_without_context(TextComponent::text(dimension_name))),
+        |target_world| {
             let mut source = context.source.as_ref().clone();
-            source.position = target.get_entity().pos.load();
-            sources.push(Arc::new(source));
-        }
-        Ok(sources)
-    })
+            source.world = Some(target_world.clone());
+            Ok(vec![Arc::new(source)])
+        },
+    )
+}
+
+fn execute_positioned_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
+    let pos = Vec3ArgumentType::get_vector3(context, "pos")?;
+    let mut source = context.source.as_ref().clone();
+    source.position = pos;
+    Ok(vec![Arc::new(source)])
+}
+
+fn execute_positioned_as_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
+    let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
+    let mut sources = Vec::new();
+    for target in targets {
+        let mut source = context.source.as_ref().clone();
+        source.position = target.get_entity().pos.load();
+        sources.push(Arc::new(source));
+    }
+    Ok(sources)
 }
 
 /// Ported from vanilla `ExecuteCommand.executeOver`
 /// (`net/minecraft/server/commands/ExecuteCommand.java:192-203`): moves the source
 /// to the Y of the given heightmap type at the source's current X/Z, erroring when
 /// the containing chunk is not loaded.
-fn execute_over_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let heightmap_type = HeightmapTypeArgumentType::get(context, "heightmap")?;
-        let world = context.source.world();
-        let x = context.source.position.x.floor() as i32;
-        let z = context.source.position.z.floor() as i32;
-        // Vanilla throws `BlockPosArgument.ERROR_NOT_LOADED` from `level.hasChunk`
-        // (`net/minecraft/server/commands/ExecuteCommand.java:197-199`).
-        if !world.is_loaded(&BlockPos::new(x, world.min_y, z)) {
-            return Err(NOT_LOADED_ERROR_TYPE.create_without_context());
-        }
-        let height = world.get_heightmap_height(heightmap_type, x, z);
+fn execute_over_modifier(context: &CommandContext) -> crate::command::node::RedirectModifierResult {
+    let heightmap_type = HeightmapTypeArgumentType::get(context, "heightmap")?;
+    let world = context.source.world();
+    let x = context.source.position.x.floor() as i32;
+    let z = context.source.position.z.floor() as i32;
+    // Vanilla throws `BlockPosArgument.ERROR_NOT_LOADED` from `level.hasChunk`
+    // (`net/minecraft/server/commands/ExecuteCommand.java:197-199`).
+    if !world.is_loaded(&BlockPos::new(x, world.min_y, z)) {
+        return Err(NOT_LOADED_ERROR_TYPE.create_without_context());
+    }
+    let height = world.get_heightmap_height(heightmap_type, x, z);
+    let mut source = context.source.as_ref().clone();
+    source.position.y = f64::from(height);
+    Ok(vec![Arc::new(source)])
+}
+
+fn execute_rotated_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
+    let rot_coords = RotationArgumentType::get(context, "rotation")?;
+    let rot = rot_coords.rotation(&context.source);
+    let mut source = context.source.as_ref().clone();
+    source.rotation = rot;
+    Ok(vec![Arc::new(source)])
+}
+
+fn execute_rotated_as_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
+    let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
+    let mut sources = Vec::new();
+    for target in targets {
+        let entity = target.get_entity();
         let mut source = context.source.as_ref().clone();
-        source.position.y = f64::from(height);
-        Ok(vec![Arc::new(source)])
-    })
+        source.rotation = Vector2::new(entity.yaw.load(), entity.pitch.load());
+        sources.push(Arc::new(source));
+    }
+    Ok(sources)
 }
 
-fn execute_rotated_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let rot_coords = RotationArgumentType::get(context, "rotation")?;
-        let rot = rot_coords.rotation(&context.source);
-        let mut source = context.source.as_ref().clone();
-        source.rotation = rot;
-        Ok(vec![Arc::new(source)])
-    })
+fn execute_if_entity_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
+    let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
+    if targets.is_empty() {
+        Ok(vec![])
+    } else {
+        Ok(vec![context.source.clone()])
+    }
 }
 
-fn execute_rotated_as_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
-        let mut sources = Vec::new();
-        for target in targets {
-            let entity = target.get_entity();
-            let mut source = context.source.as_ref().clone();
-            source.rotation = Vector2::new(entity.yaw.load(), entity.pitch.load());
-            sources.push(Arc::new(source));
-        }
-        Ok(sources)
-    })
+fn execute_unless_entity_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
+    let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
+    if targets.is_empty() {
+        Ok(vec![context.source.clone()])
+    } else {
+        Ok(vec![])
+    }
 }
 
-fn execute_if_entity_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
-        if targets.is_empty() {
-            Ok(vec![])
-        } else {
-            Ok(vec![context.source.clone()])
-        }
-    })
+fn execute_align_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
+    let axes = SwizzleArgumentType::get(context, "axes")?;
+    let mut source = context.source.as_ref().clone();
+
+    if axes.contains(Axis::X) {
+        source.position.x = source.position.x.floor();
+    }
+    if axes.contains(Axis::Y) {
+        source.position.y = source.position.y.floor();
+    }
+    if axes.contains(Axis::Z) {
+        source.position.z = source.position.z.floor();
+    }
+
+    Ok(vec![Arc::new(source)])
 }
 
-fn execute_unless_entity_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
-        if targets.is_empty() {
-            Ok(vec![context.source.clone()])
-        } else {
-            Ok(vec![])
-        }
-    })
+fn execute_anchored_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
+    let anchor = EntityAnchorArgumentType::get(context, "anchor")?;
+    let mut source = context.source.as_ref().clone();
+    source.entity_anchor = anchor;
+    Ok(vec![Arc::new(source)])
 }
 
-fn execute_align_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let axes = SwizzleArgumentType::get(context, "axes")?;
-        let mut source = context.source.as_ref().clone();
+fn execute_facing_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
+    let pos = Vec3ArgumentType::get_vector3(context, "pos")?;
+    let mut source = context.source.as_ref().clone();
 
-        if axes.contains(Axis::X) {
-            source.position.x = source.position.x.floor();
-        }
-        if axes.contains(Axis::Y) {
-            source.position.y = source.position.y.floor();
-        }
-        if axes.contains(Axis::Z) {
-            source.position.z = source.position.z.floor();
-        }
+    let dx = pos.x - source.position.x;
+    let dy = pos.y - source.position.y;
+    let dz = pos.z - source.position.z;
 
-        Ok(vec![Arc::new(source)])
-    })
+    let xz_dist = dx.hypot(dz);
+    let yaw = (dz.atan2(dx).to_degrees() as f32) - 90.0;
+    let pitch = -(dy.atan2(xz_dist).to_degrees() as f32);
+
+    source.rotation = Vector2::new(yaw, pitch);
+    Ok(vec![Arc::new(source)])
 }
 
-fn execute_anchored_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let anchor = EntityAnchorArgumentType::get(context, "anchor")?;
-        let mut source = context.source.as_ref().clone();
-        source.entity_anchor = anchor;
-        Ok(vec![Arc::new(source)])
-    })
-}
+fn execute_facing_entity_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
+    let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
+    let anchor = EntityAnchorArgumentType::get(context, "anchor")?;
+    let mut sources = Vec::new();
 
-fn execute_facing_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let pos = Vec3ArgumentType::get_vector3(context, "pos")?;
+    for target in targets {
+        let target_pos = anchor.position_at_entity(target.get_entity());
         let mut source = context.source.as_ref().clone();
 
-        let dx = pos.x - source.position.x;
-        let dy = pos.y - source.position.y;
-        let dz = pos.z - source.position.z;
+        let dx = target_pos.x - source.position.x;
+        let dy = target_pos.y - source.position.y;
+        let dz = target_pos.z - source.position.z;
 
         let xz_dist = dx.hypot(dz);
         let yaw = (dz.atan2(dx).to_degrees() as f32) - 90.0;
         let pitch = -(dy.atan2(xz_dist).to_degrees() as f32);
 
         source.rotation = Vector2::new(yaw, pitch);
-        Ok(vec![Arc::new(source)])
-    })
+        sources.push(Arc::new(source));
+    }
+    Ok(sources)
 }
 
-fn execute_facing_entity_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let targets = EntityArgumentType::get_optional_entities(context, "targets")?;
-        let anchor = EntityAnchorArgumentType::get(context, "anchor")?;
-        let mut sources = Vec::new();
+fn execute_if_block_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
+    let pos = BlockPosArgumentType::get_block_pos(context, "pos")?;
+    let expected_state = BlockArgumentType::get(context, "block")?;
 
-        for target in targets {
-            let target_pos = anchor.position_at_entity(target.get_entity());
-            let mut source = context.source.as_ref().clone();
-
-            let dx = target_pos.x - source.position.x;
-            let dy = target_pos.y - source.position.y;
-            let dz = target_pos.z - source.position.z;
-
-            let xz_dist = dx.hypot(dz);
-            let yaw = (dz.atan2(dx).to_degrees() as f32) - 90.0;
-            let pitch = -(dy.atan2(xz_dist).to_degrees() as f32);
-
-            source.rotation = Vector2::new(yaw, pitch);
-            sources.push(Arc::new(source));
-        }
-        Ok(sources)
-    })
-}
-
-fn execute_if_block_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let pos = BlockPosArgumentType::get_block_pos(context, "pos")?;
-        let expected_state = BlockArgumentType::get(context, "block")?;
-
-        if let Some(ref world) = context.source.world {
-            let state = world.get_block_state(&pos);
-            if state == expected_state {
-                return Ok(vec![context.source.clone()]);
-            }
-        }
-        Ok(vec![])
-    })
-}
-
-fn execute_unless_block_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let pos = BlockPosArgumentType::get_block_pos(context, "pos")?;
-        let expected_state = BlockArgumentType::get(context, "block")?;
-
-        if let Some(ref world) = context.source.world {
-            let state = world.get_block_state(&pos);
-            if state != expected_state {
-                return Ok(vec![context.source.clone()]);
-            }
-        } else {
+    if let Some(ref world) = context.source.world {
+        let state = world.get_block_state(&pos);
+        if state == expected_state {
             return Ok(vec![context.source.clone()]);
         }
-        Ok(vec![])
-    })
+    }
+    Ok(vec![])
 }
 
-fn execute_if_loaded_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let pos = BlockPosArgumentType::get_block_pos(context, "pos")?;
+fn execute_unless_block_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
+    let pos = BlockPosArgumentType::get_block_pos(context, "pos")?;
+    let expected_state = BlockArgumentType::get(context, "block")?;
 
-        if let Some(ref world) = context.source.world
-            && world.is_loaded(&pos)
-        {
+    if let Some(ref world) = context.source.world {
+        let state = world.get_block_state(&pos);
+        if state != expected_state {
             return Ok(vec![context.source.clone()]);
         }
-        Ok(vec![])
-    })
+    } else {
+        return Ok(vec![context.source.clone()]);
+    }
+    Ok(vec![])
 }
 
-fn execute_unless_loaded_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let pos = BlockPosArgumentType::get_block_pos(context, "pos")?;
+fn execute_if_loaded_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
+    let pos = BlockPosArgumentType::get_block_pos(context, "pos")?;
 
-        if let Some(ref world) = context.source.world {
-            if !world.is_loaded(&pos) {
-                return Ok(vec![context.source.clone()]);
-            }
-        } else {
-            return Ok(vec![context.source.clone()]);
-        }
-        Ok(vec![])
-    })
+    if let Some(ref world) = context.source.world
+        && world.is_loaded(&pos)
+    {
+        return Ok(vec![context.source.clone()]);
+    }
+    Ok(vec![])
 }
 
-fn execute_if_dimension_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let dimension_key = ResourceKeyArgument::get_registry_key(
-            context,
-            "dimension",
-            &Identifier::vanilla_static("dimension"),
-            &ERROR_INVALID_DIMENSION,
-        )?;
-        let dimension_name = dimension_key.identifier.to_string();
+fn execute_unless_loaded_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
+    let pos = BlockPosArgumentType::get_block_pos(context, "pos")?;
 
-        if let Some(ref world) = context.source.world
-            && world.dimension.minecraft_name == dimension_name
-        {
+    if let Some(ref world) = context.source.world {
+        if !world.is_loaded(&pos) {
             return Ok(vec![context.source.clone()]);
         }
-        Ok(vec![])
-    })
+    } else {
+        return Ok(vec![context.source.clone()]);
+    }
+    Ok(vec![])
 }
 
-fn execute_unless_dimension_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let dimension_key = ResourceKeyArgument::get_registry_key(
-            context,
-            "dimension",
-            &Identifier::vanilla_static("dimension"),
-            &ERROR_INVALID_DIMENSION,
-        )?;
-        let dimension_name = dimension_key.identifier.to_string();
+fn execute_if_dimension_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
+    let dimension_key = ResourceKeyArgument::get_registry_key(
+        context,
+        "dimension",
+        &Identifier::vanilla_static("dimension"),
+        &ERROR_INVALID_DIMENSION,
+    )?;
+    let dimension_name = dimension_key.identifier.to_string();
 
-        if let Some(ref world) = context.source.world {
-            if world.dimension.minecraft_name != dimension_name {
-                return Ok(vec![context.source.clone()]);
-            }
-        } else {
+    if let Some(ref world) = context.source.world
+        && world.dimension.minecraft_name == dimension_name
+    {
+        return Ok(vec![context.source.clone()]);
+    }
+    Ok(vec![])
+}
+
+fn execute_unless_dimension_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
+    let dimension_key = ResourceKeyArgument::get_registry_key(
+        context,
+        "dimension",
+        &Identifier::vanilla_static("dimension"),
+        &ERROR_INVALID_DIMENSION,
+    )?;
+    let dimension_name = dimension_key.identifier.to_string();
+
+    if let Some(ref world) = context.source.world {
+        if world.dimension.minecraft_name != dimension_name {
             return Ok(vec![context.source.clone()]);
         }
-        Ok(vec![])
-    })
+    } else {
+        return Ok(vec![context.source.clone()]);
+    }
+    Ok(vec![])
 }
 
 fn map_function_condition_error(error: ExecuteFunctionError) -> CommandSyntaxError {
@@ -430,54 +379,50 @@ const fn function_condition_matches(executed_count: usize, expected: bool) -> bo
 
 /// Implements the function branch of vanilla `ExecuteCommand.scheduleFunctionConditionsAndTest`
 /// (`ExecuteCommand.java:652-657,1057-1113`) using the existing datapack function executor.
-fn execute_function_modifier<'a>(
-    context: &'a CommandContext,
+fn execute_function_modifier(
+    context: &CommandContext,
     expected: bool,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let name = StringArgumentType::get(context, "name")?;
-        let executed_count = context
-            .server()
-            .datapack_manager
-            .execute_function(context.server(), &context.source, name, None)
-            .map_err(map_function_condition_error)?;
+) -> crate::command::node::RedirectModifierResult {
+    let name = StringArgumentType::get(context, "name")?;
+    let executed_count = context
+        .server()
+        .datapack_manager
+        .execute_function(context.server(), &context.source, name, None)
+        .map_err(map_function_condition_error)?;
 
-        if function_condition_matches(executed_count, expected) {
-            Ok(vec![context.source.clone()])
-        } else {
-            Ok(vec![])
-        }
-    })
+    if function_condition_matches(executed_count, expected) {
+        Ok(vec![context.source.clone()])
+    } else {
+        Ok(vec![])
+    }
 }
 
-fn execute_if_function_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
+fn execute_if_function_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
     execute_function_modifier(context, true)
 }
 
-fn execute_unless_function_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
+fn execute_unless_function_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
     execute_function_modifier(context, false)
 }
 
-fn execute_summon_modifier<'a>(
-    context: &'a CommandContext,
-) -> crate::command::node::RedirectModifierResult<'a> {
-    Box::pin(async move {
-        let entity_type = ResourceArgument::get_summonable_entity_type(context, "entity_type")?;
-        let entity = from_type(
-            entity_type,
-            context.source.position,
-            context.source.world(),
-            Uuid::new_v4(),
-        );
-        context.source.world().spawn_entity(entity.clone());
-        let mut source = context.source.as_ref().clone();
-        source.entity = Some(entity);
-        Ok(vec![Arc::new(source)])
-    })
+fn execute_summon_modifier(
+    context: &CommandContext,
+) -> crate::command::node::RedirectModifierResult {
+    let entity_type = ResourceArgument::get_summonable_entity_type(context, "entity_type")?;
+    let entity = from_type(
+        entity_type,
+        context.source.position,
+        context.source.world(),
+        Uuid::new_v4(),
+    );
+    context.source.world().spawn_entity(entity.clone());
+    let mut source = context.source.as_ref().clone();
+    source.entity = Some(entity);
+    Ok(vec![Arc::new(source)])
 }
 
 #[allow(clippy::too_many_lines)]

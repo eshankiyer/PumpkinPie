@@ -1,7 +1,4 @@
-use std::{
-    pin::Pin,
-    sync::{Arc, atomic::Ordering},
-};
+use std::sync::{Arc, atomic::Ordering};
 
 use pumpkin_util::math::{position::BlockPos, vector3::Vector3};
 
@@ -13,22 +10,14 @@ use crate::{
 pub use pumpkin_world::block::viewer::ViewerCountTracker;
 
 pub trait ViewerCountTrackerExt {
-    fn update_viewer_count<'a, T>(
-        &'a self,
-        entity: &'a T,
-        world: &'a Arc<World>,
-        position: &'a BlockPos,
-    ) where
+    fn update_viewer_count<T>(&self, entity: &T, world: &Arc<World>, position: &BlockPos)
+    where
         T: BlockEntity + ViewerCountListener + 'static;
 }
 
 impl ViewerCountTrackerExt for ViewerCountTracker {
-    fn update_viewer_count<'a, T>(
-        &'a self,
-        entity: &'a T,
-        world: &'a Arc<World>,
-        position: &'a BlockPos,
-    ) where
+    fn update_viewer_count<T>(&self, entity: &T, world: &Arc<World>, position: &BlockPos)
+    where
         T: BlockEntity + ViewerCountListener + 'static,
     {
         let current = self.current.load(Ordering::Relaxed);
@@ -71,8 +60,6 @@ impl ViewerCountTrackerExt for ViewerCountTracker {
         }
     }
 }
-
-pub type ViewerFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 pub trait ViewerCountListener: Send + Sync {
     fn on_container_open(&self, _world: &Arc<World>, _position: &BlockPos) {}

@@ -54,7 +54,7 @@ impl BlockBehaviour for BambooBlock {
     }
 
     fn perform_bonemeal(&self, args: crate::block::BonemealArgs<'_>) {
-        bone_meal(Arc::clone(args.world), args.position);
+        bone_meal(args.world, args.position);
     }
 
     fn on_place(&self, args: OnPlaceArgs<'_>) -> BlockStateId {
@@ -140,11 +140,11 @@ impl BlockBehaviour for BambooBlock {
         {
             return;
         }
-        update_leaves_and_grow(args.world.clone(), args.position);
+        update_leaves_and_grow(args.world, args.position);
     }
 }
 
-fn update_leaves_and_grow(world: Arc<World>, position: &BlockPos) {
+fn update_leaves_and_grow(world: &Arc<World>, position: &BlockPos) {
     let above_pos = position.up();
     let below_pos = position.down();
     let two_below_pos = position.down_height(2);
@@ -239,12 +239,12 @@ fn count_bamboo_above(world: &World, pos: &BlockPos) -> usize {
     bamboo_count
 }
 
-fn bone_meal(world: Arc<World>, position: &BlockPos) {
-    let bamboo_below = count_bamboo_below(&world, position);
+fn bone_meal(world: &Arc<World>, position: &BlockPos) {
+    let bamboo_below = count_bamboo_below(world, position);
 
     let growth_amount = rand::rng().random_range(1..=2);
 
-    for (bamboo_above, _) in (count_bamboo_above(&world, position)..).zip(0..growth_amount) {
+    for (bamboo_above, _) in (count_bamboo_above(world, position)..).zip(0..growth_amount) {
         let current_total_height = bamboo_above + bamboo_below + 1;
 
         // `next_pos` is the topmost bamboo of the stalk, so the free space we grow into is the
@@ -264,7 +264,7 @@ fn bone_meal(world: Arc<World>, position: &BlockPos) {
             return;
         }
 
-        update_leaves_and_grow(Arc::clone(&world), &next_pos);
+        update_leaves_and_grow(world, &next_pos);
     }
 }
 

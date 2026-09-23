@@ -13,7 +13,6 @@ use crate::command::suggestion::suggestions::SuggestionsBuilder;
 use crate::entity::EntityBase;
 use crate::entity::player::Player;
 use crate::entity::player::advancement::PlayerAdvancement;
-use futures::future::join_all;
 use pumpkin_data::advancement_data::AdvancementNode;
 use pumpkin_data::{ADVANCEMENT_TREE, Advancement, translation};
 use pumpkin_util::PermissionLvl;
@@ -142,15 +141,12 @@ impl Action {
     /// Returns the number of advancements successfully modified. An advancement is counted as
     /// successful if [`perform_single_inner`] returns `true`
     fn perform(
-        &self,
+        self,
         player: &Arc<Player>,
         advancements: &[&'static Advancement],
         show_advancement: bool,
     ) -> i32 {
-        let mut guard = player
-            .advancements
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut guard = player.advancements.blocking_lock();
         if !show_advancement {
             guard.flush_dirty(player, true);
         }
@@ -165,15 +161,12 @@ impl Action {
     }
 
     fn perform_criterion(
-        &self,
+        self,
         player: &Arc<Player>,
         advancement: &'static Advancement,
         criterion: &str,
     ) -> bool {
-        let mut guard = player
-            .advancements
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut guard = player.advancements.blocking_lock();
         match self {
             Self::Grant => guard.award(advancement, criterion),
             Self::Revoke => guard.revoke(advancement, criterion),
@@ -268,7 +261,7 @@ fn add_children(parent: &AdvancementNode, output: &mut Vec<&Advancement>) {
 
 #[inline]
 fn perform_and_show(
-    context: Arc<CommandSource>,
+    context: &CommandSource,
     players: &[Arc<Player>],
     action: Action,
     advancements: &[&'static Advancement],
@@ -280,20 +273,20 @@ fn perform_and_show(
 ///
 /// This function iterates through each player and applies the specified action to all provided
 /// advancements. It automatically handles error messaging based on the number of players and
-/// advancements involved, as well as the number of successful operations.
+/// advancements involved.
 ///
 /// # Arguments
 ///
-/// * `context` - The command source context used to send feedback messages to the command executor
-/// * `targets` - Slice of players who will be affected by the action
+/// * `context` - The command source context for sending feedback
+/// * `targets` - The players to apply the action to
 /// * `action` - The action to perform on each advancement (Grant or Revoke)
-/// * `advancements` - Slice of advancements to apply the action to
-/// * `show_advancement` - Whether to show advancement notifications to players (currently unused)
+/// * `advancements` - A slice of advancements to apply the action to
+/// * `show_advancement` - Whether to show advancement notifications to players
 ///
 /// # Returns
 ///
-/// Returns `Ok(i)` with the total count of successful operations if at least one advancement
-/// was successfully modified for at least one player.
+/// Returns `Ok(count)` with the total number of advancements successfully granted/revoked across
+/// all players.
 ///
 /// Returns `Err` with an appropriate localized error message if no operations succeeded. The
 /// error message varies based on:
@@ -301,7 +294,7 @@ fn perform_and_show(
 /// - Whether one or many advancements were involved
 /// - The type of action (Grant or Revoke)
 fn perform(
-    context: Arc<CommandSource>,
+    context: &CommandSource,
     targets: &[Arc<Player>],
     action: Action,
     advancements: &[&'static Advancement],
@@ -409,22 +402,18 @@ fn perform(
 /// - The criterion doesn't exist in the advancement
 /// - No operations succeeded
 pub fn perform_criterion(
-    context: Arc<CommandSource>,
+    context: &CommandSource,
     targets: &[Arc<Player>],
     action: Action,
     advancement: &'static Advancement,
     criterion: &str,
 ) -> Result<i32, CommandSyntaxError> {
     if advancement.criteria.contains(&criterion) {
-        let count = join_all(
-            targets
-                .iter()
-                .map(|player| action.perform_criterion(player, advancement, criterion)),
-        )
-        .await
-        .into_iter()
-        .filter(|&success| success)
-        .count() as i32;
+        let count = targets
+            .iter()
+            .map(|player| action.perform_criterion(player, advancement, criterion))
+            .filter(|&success| success)
+            .count() as i32;
         if count == 0 {
             if let [first_player] = targets {
                 Err(match action {
@@ -471,10 +460,12 @@ pub fn perform_criterion(
             Ok(count)
         }
     } else {
-        Err(ERROR_CRITERION_NOT_FOUND.create_without_context(
-            advancement.name(),
-            TextComponent::text(criterion.to_owned()),
-        ))
+        Err(
+            ERROR_CRITERION_NOT_FOUND.create_without_context_args_slice(&[
+                advancement.name(),
+                TextComponent::text(criterion.to_owned()),
+            ]),
+        )
     }
 }
 
@@ -486,15 +477,13 @@ struct OnlyAdvancementCriterionExecutor {
 impl CommandExecutor for OnlyAdvancementCriterionExecutor {
     fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
         let action = self.action;
-        Box::pin(async move {
-            perform_criterion(
-                context.source.clone(),
-                &EntityArgumentType::get_players(context, ARG_TARGETS)?,
-                action,
-                ResourceKeyArgument::get_advancement(context, ARG_ADVANCEMENT)?,
-                StringArgumentType::get(context, ARG_CRITERION)?,
-            )
-        })
+        perform_criterion(
+            &context.source,
+            &EntityArgumentType::get_players(context, ARG_TARGETS)?,
+            action,
+            ResourceKeyArgument::get_advancement(context, ARG_ADVANCEMENT)?,
+            StringArgumentType::get(context, ARG_CRITERION)?,
+        )
     }
 }
 
@@ -508,17 +497,15 @@ impl CommandExecutor for AdvancementExecutor {
     fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
         let action = self.action;
         let mode = self.mode;
-        Box::pin(async move {
-            perform_and_show(
-                context.source.clone(),
-                &EntityArgumentType::get_players(context, ARG_TARGETS)?,
-                action,
-                &get_advancements(
-                    ResourceKeyArgument::get_advancement(context, ARG_ADVANCEMENT)?,
-                    mode,
-                ),
-            )
-        })
+        perform_and_show(
+            &context.source,
+            &EntityArgumentType::get_players(context, ARG_TARGETS)?,
+            action,
+            &get_advancements(
+                ResourceKeyArgument::get_advancement(context, ARG_ADVANCEMENT)?,
+                mode,
+            ),
+        )
     }
 }
 
@@ -537,7 +524,7 @@ impl SuggestionProvider for CriterionSuggestionProvider {
             .into_iter()
             .flatten()
             .map(ToString::to_string);
-        Box::pin(async move { builder.filter_and_suggest_iter(suggestion).build() })
+        builder.filter_and_suggest_iter(suggestion).build()
     }
 }
 
@@ -549,15 +536,13 @@ struct EveryAdvancementExecutor {
 impl CommandExecutor for EveryAdvancementExecutor {
     fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
         let action = self.action;
-        Box::pin(async move {
-            perform(
-                context.source.clone(),
-                &EntityArgumentType::get_players(context, ARG_TARGETS)?,
-                action,
-                &Advancement::get_advancements_list(),
-                false,
-            )
-        })
+        perform(
+            &context.source,
+            &EntityArgumentType::get_players(context, ARG_TARGETS)?,
+            action,
+            &Advancement::get_advancements_list(),
+            false,
+        )
     }
 }
 

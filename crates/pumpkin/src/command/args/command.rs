@@ -27,27 +27,21 @@ impl GetClientSideArgParser for CommandTreeArgumentConsumer {
 }
 
 impl ArgumentConsumer for CommandTreeArgumentConsumer {
-    fn consume<'a, 'b>(
+    fn consume<'a>(
         &'a self,
         _sender: &'a CommandSender,
         server: &'a Server,
-        args: &'b mut RawArgs<'a>,
+        args: &mut RawArgs<'a>,
     ) -> ConsumeResult<'a> {
-        let s_opt: Option<&'a str> = args.pop().map(|arg| arg.value);
+        let s = args.pop().map(|arg| arg.value)?;
 
-        let Some(s) = s_opt else {
-            return Box::pin(async move { None });
-        };
+        let dispatcher = server.command_dispatcher.load();
 
-        Box::pin(async move {
-            let dispatcher = server.command_dispatcher.load();
-
-            dispatcher
-                .fallback_dispatcher
-                .get_tree(s)
-                .ok()
-                .map(|tree| Arg::CommandTree(tree.clone()))
-        })
+        dispatcher
+            .fallback_dispatcher
+            .get_tree(s)
+            .ok()
+            .map(|tree| Arg::CommandTree(tree.clone()))
     }
 
     fn suggest(&self, _sender: &CommandSender, server: &Server, input: &str) -> SuggestResult {

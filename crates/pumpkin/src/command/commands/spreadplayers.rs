@@ -93,12 +93,16 @@ impl Pile {
     fn surface_y(&self, world: &World) -> Option<i32> {
         let block_x = self.x.floor() as i32;
         let block_z = self.z.floor() as i32;
-        let top = world
-            .get_heightmap_height_async(ChunkHeightmapType::WorldSurface, block_x, block_z)
-            .await;
+        // The target column may lie in an unloaded chunk (vanilla `getHeight` loads it), so
+        // use the chunk-fetching variants rather than the loaded-only sync readers.
+        let top = futures::executor::block_on(world.get_heightmap_height_async(
+            ChunkHeightmapType::WorldSurface,
+            block_x,
+            block_z,
+        ));
 
         let ground = pumpkin_util::math::position::BlockPos(Vector3::new(block_x, top, block_z));
-        let state = world.get_block_state_async(&ground).await;
+        let state = futures::executor::block_on(world.get_block_state_async(&ground));
         // `SpreadPlayersCommand.Position.isSafe` (`SpreadPlayersCommand.java:364-368`) rejects
         // both liquid ground and blocks in `BlockTags.FIRE` before teleporting an entity.
         if !is_safe_ground(state) {
@@ -282,12 +286,12 @@ impl CommandExecutor for SpreadPlayersExecutor {
         for (index, target) in targets.iter().enumerate() {
             let pile = piles[index % pile_count];
             let y = surface_ys[index % pile_count];
-            target.clone().teleport(
+            futures::executor::block_on(target.clone().teleport(
                 Vector3::new(pile.x.floor() + 0.5, f64::from(y), pile.z.floor() + 0.5),
                 None,
                 None,
                 world.clone(),
-            );
+            ));
         }
 
         let average_distance = average_min_distance(&piles);

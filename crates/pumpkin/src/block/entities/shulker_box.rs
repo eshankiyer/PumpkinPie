@@ -135,8 +135,9 @@ impl BlockEntity for ShulkerBoxBlockEntity {
         // `ShulkerBoxBlockEntity.saveAdditional` (`ShulkerBoxBlockEntity.java:208-212`)
         // does not expose item contents while a loot table is still pending.
         if !self.has_pending_loot_table() {
-            let items = futures::executor::block_on(self.items.read());
-            sync_write_items_to_nbt(items.as_slice(), &mut nbt);
+            if let Ok(items) = self.items.try_read() {
+                sync_write_items_to_nbt(items.as_slice(), &mut nbt);
+            }
         }
         Some(nbt)
     }
@@ -403,7 +404,7 @@ mod tests {
         assert_eq!(entity.get_animation_status(), AnimationStatus::Closed);
     }
 
-    #[tokio::test]
+    #[test]
     fn deferred_loot_table_round_trips_without_item_payload() {
         // `ShulkerBoxBlockEntity.loadFromTag`/`saveAdditional`
         // (`ShulkerBoxBlockEntity.java:202-219,208-212`) preserve deferred loot instead of

@@ -136,16 +136,22 @@ impl BlockBehaviour for PistonBlock {
         try_move(args.world, args.block, args.position);
     }
 
-    #[expect(clippy::too_many_lines)]
     fn on_synced_block_event(&self, args: OnSyncedBlockEventArgs<'_>) -> bool {
-        let (block, world, pos, r#type, data) = (
-            args.block,
-            args.world,
-            args.position,
-            args.r#type,
-            args.data,
-        );
+        let block_id = args.block.id;
+        let block = Block::from_id(block_id);
+        Self::handle_synced_block_event(block, args.world, args.position, args.r#type, args.data)
+    }
+}
 
+impl PistonBlock {
+    #[expect(clippy::too_many_lines)]
+    fn handle_synced_block_event(
+        block: &Block,
+        world: &Arc<World>,
+        pos: &BlockPos,
+        r#type: u8,
+        data: u8,
+    ) -> bool {
         let state = world.get_block_state(pos);
         let mut props = PistonProps::from_state_id(state.id, block);
         let dir = props.facing.to_block_direction();
@@ -218,7 +224,7 @@ impl BlockBehaviour for PistonBlock {
         if let Some(block_entity) = world.get_block_entity(&extended_pos)
             && let Some(piston) = block_entity.as_any().downcast_ref::<PistonBlockEntity>()
         {
-            piston.finish(world.clone());
+            piston.finish(world);
         }
 
         let mut props = MovingPistonLikeProperties::default(&Block::MOVING_PISTON);
@@ -260,7 +266,7 @@ impl BlockBehaviour for PistonBlock {
                 && piston.facing == dir
                 && piston.extending
             {
-                piston.finish(world.clone());
+                piston.finish(world);
                 true
             } else {
                 false

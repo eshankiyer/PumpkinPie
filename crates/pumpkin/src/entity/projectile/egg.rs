@@ -117,14 +117,11 @@ impl EntityBase for EggEntity {
         // `ThrownEgg.onHitEntity`: a zero-damage hurt still flinches the target, plays its
         // hurt sound and makes it retaliate, which is why an egg annoys a mob it hits.
         if let crate::entity::projectile::ProjectileHit::Entity { ref entity, .. } = hit {
-            let entity_clone = entity.clone();
-            tokio::spawn(async move {
-                entity_clone.damage(
-                    entity_clone.as_ref(),
-                    0.0,
-                    pumpkin_data::damage::DamageType::THROWN,
-                );
-            });
+            entity.damage(
+                entity.as_ref(),
+                0.0,
+                pumpkin_data::damage::DamageType::THROWN,
+            );
         }
 
         // Decide spawn count per probabilities:
@@ -157,11 +154,7 @@ impl EntityBase for EggEntity {
             }
         }
 
-        // Spawn chickens in a separate task to prevent stack overflow
         if hatching && to_spawn > 0 {
-            let world_clone = world.clone();
-            let spawn_pos_clone = spawn_pos;
-
             let variant_name = {
                 let stack = self
                     .item_stack
@@ -172,22 +165,19 @@ impl EntityBase for EggEntity {
                     .map(|comp| comp.value.clone())
             };
 
-            tokio::spawn(async move {
-                for _ in 0..to_spawn {
-                    let mob =
-                        from_type(hatching_type, spawn_pos_clone, &world_clone, Uuid::new_v4());
+            for _ in 0..to_spawn {
+                let mob = from_type(hatching_type, spawn_pos, &world, Uuid::new_v4());
 
-                    let yaw = rand::random::<f32>() * 360.0;
-                    let new_entity = mob.get_entity();
-                    new_entity.set_rotation(yaw, 0.0);
-                    new_entity.set_age(-24000);
-                    if let Some(name) = &variant_name {
-                        mob.set_variant_name(name);
-                    }
-
-                    world_clone.spawn_entity(mob);
+                let yaw = rand::random::<f32>() * 360.0;
+                let new_entity = mob.get_entity();
+                new_entity.set_rotation(yaw, 0.0);
+                new_entity.set_age(-24000);
+                if let Some(name) = &variant_name {
+                    mob.set_variant_name(name);
                 }
-            });
+
+                world.spawn_entity(mob);
+            }
         }
     }
 

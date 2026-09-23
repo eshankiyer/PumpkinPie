@@ -143,13 +143,9 @@ impl ArrowEntity {
                 Some(shooter.entity_id),
             );
         if let Some(server) = entity.world.load().server.upgrade() {
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    server
-                        .plugin_manager
-                        .fire_blocking(&server, &mut launch_event);
-                });
-            });
+            server
+                .plugin_manager
+                .fire_blocking(&server, &mut launch_event);
         }
 
         Self {

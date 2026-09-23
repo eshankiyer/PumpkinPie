@@ -104,16 +104,6 @@ struct DispenseContext<'a> {
     facing: Facing,
 }
 
-impl<'a> DispenseContext<'a> {
-    const fn new(args: &OnScheduledTickArgs<'a>, facing: Facing) -> Self {
-        Self {
-            world: args.world,
-            position: args.position,
-            facing,
-        }
-    }
-}
-
 fn triangle<R: Rng>(rng: &mut R, min: f64, max: f64) -> f64 {
     (rng.random::<f64>() - rng.random::<f64>()).mul_add(max, min)
 }
@@ -203,7 +193,11 @@ impl BlockBehaviour for DispenserBlock {
                     args.world.get_block_state(args.position).id,
                     args.block,
                 );
-                let ctx = DispenseContext::new(&args, props.facing);
+                let ctx = DispenseContext {
+                    world: args.world,
+                    position: args.position,
+                    facing: props.facing,
+                };
                 Self::dispense(&ctx, dispenser, &mut item);
                 dispenser.set_stack(slot_index, item);
             } else {
@@ -975,7 +969,7 @@ impl DispenserBlock {
             primed
         } else {
             Ignition::ignite_block(
-                |world: Arc<World>, pos: BlockPos, new_state_id: BlockStateId| async move {
+                |world: Arc<World>, pos: BlockPos, new_state_id: BlockStateId| {
                     world.set_block_state(&pos, new_state_id, BlockFlags::NOTIFY_ALL);
                 },
                 ctx.world,

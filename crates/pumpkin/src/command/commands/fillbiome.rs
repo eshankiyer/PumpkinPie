@@ -95,9 +95,8 @@ impl CommandExecutor for FillBiomeExecutor {
         let mut changed_count = 0;
 
         for (chunk_pos, mods) in chunk_modifications {
-            let (has_replaced, count) = world
-                .level
-                .get_or_fetch_chunk(chunk_pos, |chunk| {
+            let (has_replaced, count) =
+                futures::executor::block_on(world.level.get_or_fetch_chunk(chunk_pos, |chunk| {
                     let mut local_count = 0;
                     let mut modified = false;
                     for &(rel_x, rel_y, rel_z) in &mods {
@@ -132,15 +131,15 @@ impl CommandExecutor for FillBiomeExecutor {
                         }
                     }
                     (modified, local_count)
-                })
-                .await;
+                }));
 
             if has_replaced {
                 changed_count += count;
-                let chunk = world
-                    .level
-                    .get_or_fetch_chunk(chunk_pos, std::clone::Clone::clone)
-                    .await;
+                let chunk = futures::executor::block_on(
+                    world
+                        .level
+                        .get_or_fetch_chunk(chunk_pos, std::clone::Clone::clone),
+                );
                 world.broadcast_to_chunk_except(chunk_pos, &[], &CChunkData(&chunk));
             }
         }

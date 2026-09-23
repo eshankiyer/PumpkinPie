@@ -23,11 +23,9 @@ impl ArgumentType for TemplateNameArgumentType {
         builder: SuggestionsBuilder,
     ) -> Suggestions {
         let names = pumpkin_world::generation::structure::template::all_template_names();
-        Box::pin(async move {
-            builder
-                .filter_and_suggest_iter(names.iter().map(|n| format!("minecraft:{n}")))
-                .build()
-        })
+        builder
+            .filter_and_suggest_iter(names.iter().map(|n| format!("minecraft:{n}")))
+            .build()
     }
 
     fn client_side_parser(&'_ self) -> JavaClientArgumentType {

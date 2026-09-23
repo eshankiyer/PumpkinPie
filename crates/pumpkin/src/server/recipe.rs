@@ -1,7 +1,8 @@
+use std::sync::RwLock;
+
 use pumpkin_inventory::crafting::recipe_provider::RecipeProvider;
 pub use pumpkin_protocol::codec::recipe::DynamicRecipe;
 use pumpkin_protocol::codec::recipe::{OwnedCookingRecipeType, OwnedCraftingRecipe};
-use tokio::sync::RwLock;
 
 pub struct RecipeManager {
     dynamic_recipes: RwLock<Vec<DynamicRecipe>>,
@@ -15,44 +16,62 @@ impl Default for RecipeManager {
 
 impl RecipeManager {
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             dynamic_recipes: RwLock::new(Vec::new()),
         }
     }
 
     pub fn add_recipe(&self, recipe: DynamicRecipe) {
-        let mut recipes = self.dynamic_recipes.write().await;
+        let mut recipes = self
+            .dynamic_recipes
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         recipes.push(recipe);
     }
 
     pub fn add_recipes(&self, new_recipes: impl IntoIterator<Item = DynamicRecipe>) {
-        let mut recipes = self.dynamic_recipes.write().await;
+        let mut recipes = self
+            .dynamic_recipes
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         recipes.extend(new_recipes);
     }
 
     pub fn set_recipes(&self, new_recipes: Vec<DynamicRecipe>) {
-        let mut recipes = self.dynamic_recipes.write().await;
+        let mut recipes = self
+            .dynamic_recipes
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         *recipes = new_recipes;
     }
 
-    pub async fn clear(&self) {
-        let mut recipes = self.dynamic_recipes.write().await;
+    pub fn clear(&self) {
+        let mut recipes = self
+            .dynamic_recipes
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         recipes.clear();
     }
 
     pub fn get_dynamic_recipes_internal(&self) -> Vec<DynamicRecipe> {
-        self.dynamic_recipes.read().await.clone()
+        self.dynamic_recipes
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 
     // RecipeManager.java:175-177 exposes every loaded recipe to server callers; combine the
     // generated vanilla registry with datapack/plugin recipes for the live recipe command.
-    pub async fn get_recipe_ids(&self) -> Vec<String> {
+    pub fn get_recipe_ids(&self) -> Vec<String> {
         let registry = crate::data::recipe_book::registry();
         let mut ids = (0..registry.len())
             .map(|index| registry.id_of(index).to_owned())
             .collect::<Vec<_>>();
-        let dynamic = self.dynamic_recipes.read().await;
+        let dynamic = self
+            .dynamic_recipes
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         ids.extend(dynamic.iter().map(dynamic_recipe_id));
         ids
     }
@@ -85,7 +104,10 @@ fn dynamic_recipe_id(recipe: &DynamicRecipe) -> String {
 
 impl RecipeProvider for RecipeManager {
     fn get_dynamic_recipes(&self) -> Vec<DynamicRecipe> {
-        self.dynamic_recipes.read().await.clone()
+        self.dynamic_recipes
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
     }
 }
 
@@ -95,8 +117,8 @@ mod tests {
     use pumpkin_data::recipes::RecipeCategoryTypes;
     use pumpkin_protocol::codec::recipe::{OwnedRecipeIngredient, OwnedRecipeResult};
 
-    #[tokio::test]
-    async fn recipe_ids_include_generated_and_dynamic_recipes() {
+    #[test]
+    fn recipe_ids_include_generated_and_dynamic_recipes() {
         // RecipeManager.java:175-177 requires the query to include both recipe sources.
         let manager = RecipeManager::new();
         manager.add_recipe(DynamicRecipe::Crafting(OwnedCraftingRecipe::Shapeless {
@@ -110,7 +132,7 @@ mod tests {
             },
         }));
 
-        let ids = manager.get_recipe_ids().await;
+        let ids = manager.get_recipe_ids();
         assert!(ids.iter().any(|id| id == "example:custom_recipe"));
         assert!(
             ids.iter()

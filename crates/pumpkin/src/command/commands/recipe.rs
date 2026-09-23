@@ -5,14 +5,13 @@ use crate::command::context::command_context::CommandContext;
 use crate::command::errors::error_types::CommandErrorType;
 use crate::command::node::dispatcher::CommandDispatcher;
 use crate::command::node::{CommandExecutor, CommandExecutorResult};
-use crate::command::suggestion::provider::SuggestionProvider;
-use crate::command::suggestion::suggestions::{Suggestions, SuggestionsBuilder};
+use crate::command::suggestion::provider::{SuggestionProvider, SuggestionProviderResult};
+use crate::command::suggestion::suggestions::SuggestionsBuilder;
 use crate::entity::EntityBase;
 use pumpkin_data::translation;
 use pumpkin_util::PermissionLvl;
 use pumpkin_util::permission::{Permission, PermissionDefault, PermissionRegistry};
 use pumpkin_util::text::TextComponent;
-use std::future::Future;
 
 const DESCRIPTION: &str = "Gives or takes player recipes.";
 const PERMISSION: &str = "minecraft:command.recipe";
@@ -23,19 +22,19 @@ static ERROR_RECIPE_NOT_FOUND: CommandErrorType<1> =
 struct RecipeSuggestionProvider;
 
 impl SuggestionProvider for RecipeSuggestionProvider {
-    fn suggest(&self, context: &CommandContext, mut builder: SuggestionsBuilder) -> Suggestions {
-        let server = context.source.server.clone();
-
-        Box::pin(async move {
-            builder = builder.suggest("*");
-            if let Some(server) = server {
-                let recipes = server.recipe_manager.get_recipe_ids().await;
-                for id in recipes {
-                    builder = builder.suggest(id);
-                }
+    fn suggest(
+        &self,
+        context: &CommandContext,
+        mut builder: SuggestionsBuilder,
+    ) -> SuggestionProviderResult {
+        builder = builder.suggest("*");
+        if let Some(server) = &context.source.server {
+            let recipes = server.recipe_manager.get_recipe_ids();
+            for id in recipes {
+                builder = builder.suggest(id);
             }
-            builder.build()
-        })
+        }
+        builder.build()
     }
 }
 
@@ -53,7 +52,7 @@ impl CommandExecutor for RecipeGiveExecutor {
 
         // RecipeManager.java:175-177 enumerates the complete recipe map; use the same full
         // set for `/recipe give`, including generated vanilla recipes.
-        let all_recipes = server.recipe_manager.get_recipe_ids().await;
+        let all_recipes = server.recipe_manager.get_recipe_ids();
 
         let is_all = recipe_str == "*";
         let matching_recipes = if is_all {
@@ -125,7 +124,7 @@ impl CommandExecutor for RecipeTakeExecutor {
 
         // RecipeManager.java:175-177 enumerates the complete recipe map; `/recipe take`
         // must be able to remove generated vanilla recipes as well as dynamic recipes.
-        let all_recipes = server.recipe_manager.get_recipe_ids().await;
+        let all_recipes = server.recipe_manager.get_recipe_ids();
 
         let is_all = recipe_str == "*";
 

@@ -1,5 +1,4 @@
 use std::any::Any;
-use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
@@ -12,7 +11,6 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::statistic::StatisticCategory;
 use pumpkin_util::GameMode;
-use pumpkin_world::inventory::Inventory;
 
 pub struct BowItem;
 
@@ -25,7 +23,7 @@ impl ItemMetadata for BowItem {
 impl ItemBehaviour for BowItem {
     fn normal_use(&self, _item: &Item, player: &Player) {
         // Check if player has arrows (or is in creative mode)
-        let has_arrows = self.has_arrows(player);
+        let has_arrows = Self::has_arrows(player);
         let gamemode = player.gamemode.load();
 
         if !has_arrows && gamemode != GameMode::Creative {
@@ -83,12 +81,13 @@ impl BowItem {
             return;
         }
 
-        let projectile = if let Some(slot) = arrow_slot {
-            let stack = player.inventory().get_stack(slot);
-            stack.copy_with_count(1)
-        } else {
-            ItemStack::new(1, &Item::ARROW)
-        };
+        let projectile = arrow_slot.map_or_else(
+            || ItemStack::new(1, &Item::ARROW),
+            |slot| {
+                let stack = player.inventory.get_slot(slot);
+                stack.copy_with_count(1)
+            },
+        );
         let infinite_projectile = projectile.item.id == Item::ARROW.id;
 
         // Calculate power and fire
@@ -106,7 +105,7 @@ impl BowItem {
                 .any(|(e, _)| **e == pumpkin_data::Enchantment::INFINITY);
         }
 
-        Self::fire_arrow(player, power, projectile);
+        Self::fire_arrow(player, power, &projectile);
 
         // Consume arrow (if not creative and no Infinity)
         if let Some(slot) = arrow_slot
@@ -121,7 +120,7 @@ impl BowItem {
     }
 
     /// Check if player has arrows in their inventory
-    fn has_arrows(&self, player: &Player) -> bool {
+    fn has_arrows(player: &Player) -> bool {
         player.find_arrow().is_some()
     }
 
@@ -137,7 +136,7 @@ impl BowItem {
     }
 
     /// Fire an arrow from the bow
-    pub fn fire_arrow(player: &Player, power: f32, projectile: ItemStack) {
+    pub fn fire_arrow(player: &Player, power: f32, projectile: &ItemStack) {
         if power < 0.1 {
             return; // Not enough charge
         }
@@ -160,7 +159,7 @@ impl BowItem {
             ArrowPickup::Allowed
         };
 
-        let arrow = ArrowEntity::new_shot(arrow_entity, player.get_entity(), &projectile, pickup);
+        let arrow = ArrowEntity::new_shot(arrow_entity, player.get_entity(), projectile, pickup);
 
         // Read enchantments of the held item (bow)
         let stack = player.inventory().held_item();

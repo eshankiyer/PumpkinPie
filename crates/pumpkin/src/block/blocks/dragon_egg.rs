@@ -1,8 +1,7 @@
 use crate::block::blocks::falling::FallingBlock;
 use crate::block::registry::BlockActionResult;
 use crate::block::{
-    AttackArgs, BlockBehaviour, BlockFuture, GetStateForNeighborUpdateArgs, NormalUseArgs,
-    PlacedArgs,
+    AttackArgs, BlockBehaviour, GetStateForNeighborUpdateArgs, NormalUseArgs, PlacedArgs,
 };
 use crate::world::World;
 use pumpkin_data::BlockStateId;
@@ -53,8 +52,8 @@ impl DragonEggBlock {
                     state_id,
                     pumpkin_world::world::BlockFlags::NOTIFY_LISTENERS,
                 );
-                // The destination write yields to the async world pipeline. Do not erase a
-                // replacement that arrived at the source while that write was in flight.
+                // The destination write runs neighbor callbacks. Do not erase a replacement
+                // that one of them placed at the source during that write.
                 if world.get_block_state(pos).id != state_id {
                     return;
                 }
@@ -70,10 +69,8 @@ impl DragonEggBlock {
 }
 
 impl BlockBehaviour for DragonEggBlock {
-    fn attack<'a>(&'a self, args: AttackArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            self.teleport(args.world, args.position, args.state.id);
-        })
+    fn attack(&self, args: AttackArgs<'_>) {
+        self.teleport(args.world, args.position, args.state.id);
     }
 
     fn placed(&self, args: PlacedArgs<'_>) {

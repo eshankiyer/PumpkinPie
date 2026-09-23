@@ -242,18 +242,16 @@ impl Player {
                 }
 
                 if !self.has_advancement(Advancement::STORY_ENCHANT_ITEM) {
-                    let mut has_enchanted = false;
-                    let main_inv = self
-                        .inventory()
-                        .main_inventory
-                        .read()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    for stack in main_inv.iter() {
-                        if !stack.is_empty() && stack.has_enchantments() {
-                            has_enchanted = true;
-                            break;
-                        }
-                    }
+                    let has_enchanted = {
+                        let main_inv = self
+                            .inventory()
+                            .main_inventory
+                            .read()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        main_inv
+                            .iter()
+                            .any(|stack| !stack.is_empty() && stack.has_enchantments())
+                    };
                     if has_enchanted {
                         self.trigger_advancement_criterion(
                             Advancement::STORY_ENCHANT_ITEM,

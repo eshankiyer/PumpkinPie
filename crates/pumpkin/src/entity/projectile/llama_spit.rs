@@ -101,18 +101,14 @@ impl EntityBase for LlamaSpitEntity {
             else {
                 return;
             };
-            let entity_clone = entity.clone();
-
-            tokio::spawn(async move {
-                let _ = entity_clone.damage_with_context(
-                    entity_clone.as_ref(),
-                    1.0,
-                    DamageType::SPIT,
-                    Some(hit_pos),
-                    Some(owner.as_ref()),
-                    None,
-                );
-            });
+            let _ = entity.damage_with_context(
+                entity.as_ref(),
+                1.0,
+                DamageType::SPIT,
+                Some(hit_pos),
+                Some(owner.as_ref()),
+                None,
+            );
         }
     }
 }

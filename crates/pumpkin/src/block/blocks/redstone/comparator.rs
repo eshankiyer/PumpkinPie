@@ -215,19 +215,17 @@ impl RedstoneGateBlock<ComparatorLikeProperties> for ComparatorBlock {
             let itemframe_level =
                 Self::get_attached_itemframe_level(world, facing, deeper_source_pos);
 
-            // This is the correct way to handle the async call within the Option
-            let block_level = if let Some(pumpkin_block) =
-                world.block_registry.get_pumpkin_block(deeper_block.id)
-            {
-                pumpkin_block.get_comparator_output(GetComparatorOutputArgs {
-                    world,
-                    block: deeper_block,
-                    state: deeper_state,
-                    position: &deeper_source_pos,
-                })
-            } else {
-                None
-            };
+            let block_level = world
+                .block_registry
+                .get_pumpkin_block(deeper_block.id)
+                .and_then(|pumpkin_block| {
+                    pumpkin_block.get_comparator_output(GetComparatorOutputArgs {
+                        world,
+                        block: deeper_block,
+                        state: deeper_state,
+                        position: &deeper_source_pos,
+                    })
+                });
 
             if let Some(level) = itemframe_level.max(block_level) {
                 return level;

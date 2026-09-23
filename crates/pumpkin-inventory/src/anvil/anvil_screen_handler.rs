@@ -610,7 +610,7 @@ mod tests {
         AnvilScreenHandler::new(0, &player_inventory, inventory)
     }
 
-    #[tokio::test]
+    #[test]
     fn result_slot_never_accepts_items() {
         // `AnvilMenu.java:66-68` (`ItemCombinerMenu`'s result slot): `mayPlace` is always
         // `false`, matched by `AnvilResultSlot::can_insert`.

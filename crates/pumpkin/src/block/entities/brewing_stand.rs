@@ -1,5 +1,4 @@
 use std::any::Any;
-use std::future::Future;
 use std::sync::{
     Arc, Mutex as StdMutex,
     atomic::AtomicI32,
@@ -267,91 +266,66 @@ impl pumpkin_world::inventory::Inventory for BrewingStandBlockEntity {
         Self::INVENTORY_SIZE
     }
 
-    fn is_empty(&self) -> pumpkin_world::inventory::InventoryFuture<'_, bool> {
-        Box::pin(async move {
-            let items = self
-                .items
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            for slot in items.iter() {
-                if !slot.is_empty() {
-                    return false;
-                }
+    fn is_empty(&self) -> bool {
+        let items = self
+            .items
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for slot in items.iter() {
+            if !slot.is_empty() {
+                return false;
             }
-            true
-        })
+        }
+        true
     }
 
-    fn get_stack(&self, slot: usize) -> pumpkin_world::inventory::InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            let items = self
-                .items
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            items[slot].clone()
-        })
+    fn get_stack(&self, slot: usize) -> ItemStack {
+        let items = self
+            .items
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        items[slot].clone()
     }
 
-    fn remove_stack(
-        &self,
-        slot: usize,
-    ) -> pumpkin_world::inventory::InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            let mut items = self
-                .items
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let removed = std::mem::replace(&mut items[slot], ItemStack::EMPTY.clone());
-            self.mark_dirty();
-            removed
-        })
+    fn remove_stack(&self, slot: usize) -> ItemStack {
+        let mut items = self
+            .items
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let removed = std::mem::replace(&mut items[slot], ItemStack::EMPTY.clone());
+        self.mark_dirty();
+        removed
     }
 
-    fn remove_stack_specific(
-        &self,
-        slot: usize,
-        amount: u8,
-    ) -> pumpkin_world::inventory::InventoryFuture<'_, ItemStack> {
-        Box::pin(async move {
-            let mut items = self
-                .items
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let taken = if items[slot].item_count <= amount {
-                std::mem::replace(&mut items[slot], ItemStack::EMPTY.clone())
-            } else {
-                let mut taken = items[slot].clone();
-                taken.item_count = amount;
-                items[slot].item_count -= amount;
-                taken
-            };
-            self.mark_dirty();
+    fn remove_stack_specific(&self, slot: usize, amount: u8) -> ItemStack {
+        let mut items = self
+            .items
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let taken = if items[slot].item_count <= amount {
+            std::mem::replace(&mut items[slot], ItemStack::EMPTY.clone())
+        } else {
+            let mut taken = items[slot].clone();
+            taken.item_count = amount;
+            items[slot].item_count -= amount;
             taken
-        })
+        };
+        self.mark_dirty();
+        taken
     }
 
-    fn set_stack(
-        &self,
-        slot: usize,
-        stack: ItemStack,
-    ) -> pumpkin_world::inventory::InventoryFuture<'_, ()> {
-        Box::pin(async move {
-            let mut items = self
-                .items
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            items[slot] = stack;
-            self.mark_dirty();
-        })
+    fn set_stack(&self, slot: usize, stack: ItemStack) {
+        let mut items = self
+            .items
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        items[slot] = stack;
+        self.mark_dirty();
     }
 
-    fn on_open(&self) -> pumpkin_world::inventory::InventoryFuture<'_, ()> {
-        Box::pin(async move {})
-    }
+    fn on_open(&self) {}
 
-    fn on_close(&self) -> pumpkin_world::inventory::InventoryFuture<'_, ()> {
-        Box::pin(async move {})
-    }
+    fn on_close(&self) {}
 
     fn mark_dirty(&self) {
         self.dirty.store(true, Ordering::Relaxed);
@@ -362,20 +336,14 @@ impl pumpkin_world::inventory::Inventory for BrewingStandBlockEntity {
     }
 
     /// Port of `BrewingStandBlockEntity.canPlaceItem` (`BrewingStandBlockEntity.java:217-226`).
-    fn can_place_item<'a>(
-        &'a self,
-        slot: usize,
-        stack: &'a ItemStack,
-    ) -> pumpkin_world::inventory::InventoryFuture<'a, bool> {
-        Box::pin(async move {
-            self.is_valid_slot_for(slot, stack)
-                && (slot > 2
-                    || self
-                        .items
-                        .read()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)[slot]
-                        .is_empty())
-        })
+    fn can_place_item(&self, slot: usize, stack: &ItemStack) -> bool {
+        self.is_valid_slot_for(slot, stack)
+            && (slot > 2
+                || self
+                    .items
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)[slot]
+                    .is_empty())
     }
 
     fn slots_for_face(&self, direction: pumpkin_data::BlockDirection) -> Vec<usize> {
@@ -386,33 +354,24 @@ impl pumpkin_world::inventory::Inventory for BrewingStandBlockEntity {
         }
     }
 
-    fn can_insert_through_face<'a>(
-        &'a self,
+    fn can_insert_through_face(
+        &self,
         slot: usize,
-        stack: &'a ItemStack,
+        stack: &ItemStack,
         _direction: pumpkin_data::BlockDirection,
-    ) -> pumpkin_world::inventory::InventoryFuture<'a, bool> {
-        Box::pin(async move {
-            // Vanilla's `canPlaceItem` additionally refuses to top up an occupied bottle
-            // slot; that part needs to read the slot, so it cannot live in the sync
-            // `is_valid_slot_for`.
-            self.is_valid_slot_for(slot, stack)
-                && (slot > 2
-                    || self
-                        .items
-                        .read()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)[slot]
-                        .is_empty())
-        })
+    ) -> bool {
+        // Vanilla's `canPlaceItem` additionally refuses to top up an occupied bottle
+        // slot; that part needs to read the slot, so it cannot live in `is_valid_slot_for`.
+        self.can_place_item(slot, stack)
     }
 
-    fn can_extract_through_face<'a>(
-        &'a self,
+    fn can_extract_through_face(
+        &self,
         slot: usize,
-        stack: &'a ItemStack,
+        stack: &ItemStack,
         _direction: pumpkin_data::BlockDirection,
-    ) -> pumpkin_world::inventory::InventoryFuture<'a, bool> {
-        Box::pin(async move { slot != 3 || stack.get_item().id == Item::GLASS_BOTTLE.id })
+    ) -> bool {
+        slot != 3 || stack.get_item().id == Item::GLASS_BOTTLE.id
     }
 
     fn is_valid_slot_for(&self, slot: usize, stack: &ItemStack) -> bool {
@@ -483,7 +442,10 @@ impl crate::block::entities::BlockEntity for BrewingStandBlockEntity {
         }
 
         // Load inventory items from NBT
-        let items = entity.items.get_mut();
+        let items = entity
+            .items
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         sync_read_items_from_nbt(nbt, items);
 
         // If there's an ingredient in slot 3, remember its base item for matching
@@ -531,8 +493,9 @@ impl crate::block::entities::BlockEntity for BrewingStandBlockEntity {
         let mut nbt = NbtCompound::new();
         nbt.put_short("BrewTime", self.brew_time.load(Ordering::Relaxed) as i16);
         nbt.put_byte("Fuel", self.fuel.load(Ordering::Relaxed) as i8);
-        let items = futures::executor::block_on(self.items.read());
-        sync_write_items_to_nbt(items.as_slice(), &mut nbt);
+        if let Ok(items) = self.items.try_read() {
+            sync_write_items_to_nbt(items.as_slice(), &mut nbt);
+        }
         Some(nbt)
     }
 

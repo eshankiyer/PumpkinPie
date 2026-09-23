@@ -1,7 +1,6 @@
 use pumpkin_protocol::bedrock::client::PackIdVersion;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use tokio::sync::Mutex;
 use wasmtime::component::Resource;
 
 use crate::plugin::api::gui::PluginScreenHandler;
@@ -1093,7 +1092,7 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
     ) -> wasmtime::Result<()> {
         let player = player_from_resource(self, &player)?;
         let stack = if let Some(stack_res) = stack {
-            self.get_item_stack(&stack_res)?.lock().clone()
+            self.get_item_stack(&stack_res)?.lock().await.clone()
         } else {
             pumpkin_data::item_stack::ItemStack::EMPTY.clone()
         };
@@ -1122,7 +1121,7 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
     ) -> wasmtime::Result<()> {
         let player = player_from_resource(self, &player)?;
         let stack = if let Some(stack_res) = stack {
-            self.get_item_stack(&stack_res)?.lock().clone()
+            self.get_item_stack(&stack_res)?.lock().await.clone()
         } else {
             pumpkin_data::item_stack::ItemStack::EMPTY.clone()
         };
@@ -1178,7 +1177,7 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
     ) -> wasmtime::Result<()> {
         let player = player_from_resource(self, &player)?;
         let stack = if let Some(stack_res) = stack {
-            self.get_item_stack(&stack_res)?.lock().clone()
+            self.get_item_stack(&stack_res)?.lock().await.clone()
         } else {
             pumpkin_data::item_stack::ItemStack::EMPTY.clone()
         };
@@ -1187,14 +1186,26 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
         ec.set_stack(slot as usize, stack.clone());
 
         // If the player currently has their ender chest screen open, sync slot
-        let screen_handler_arc = player.current_screen_handler.lock().clone();
-        let handler = screen_handler_arc.lock();
-        if let Some(generic) = handler
-            .as_any()
-            .downcast_ref::<GenericContainerScreenHandler>()
-            && generic.inventory.as_any().is::<EnderChestInventory>()
-        {
-            let sync_id = handler.sync_id();
+        let sync_id = {
+            let screen_handler_arc = player
+                .current_screen_handler
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            let handler = screen_handler_arc
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(generic) = handler
+                .as_any()
+                .downcast_ref::<GenericContainerScreenHandler>()
+                && generic.inventory.as_any().is::<EnderChestInventory>()
+            {
+                Some(handler.sync_id())
+            } else {
+                None
+            }
+        };
+        if let Some(sync_id) = sync_id {
             let stack_serializer = ItemStackSerializer::from(stack);
             let packet = CSetContainerSlot::new(sync_id as i8, 0, slot as i16, &stack_serializer);
             player.send_client_packet(&packet).await;
@@ -1209,14 +1220,26 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
         ec.clear();
 
         // If the player currently has their ender chest screen open, sync all slots
-        let screen_handler_arc = player.current_screen_handler.lock().clone();
-        let handler = screen_handler_arc.lock();
-        if let Some(generic) = handler
-            .as_any()
-            .downcast_ref::<GenericContainerScreenHandler>()
-            && generic.inventory.as_any().is::<EnderChestInventory>()
-        {
-            let sync_id = handler.sync_id();
+        let sync_id = {
+            let screen_handler_arc = player
+                .current_screen_handler
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            let handler = screen_handler_arc
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if let Some(generic) = handler
+                .as_any()
+                .downcast_ref::<GenericContainerScreenHandler>()
+                && generic.inventory.as_any().is::<EnderChestInventory>()
+            {
+                Some(handler.sync_id())
+            } else {
+                None
+            }
+        };
+        if let Some(sync_id) = sync_id {
             let empty_serializer =
                 ItemStackSerializer::from(pumpkin_data::item_stack::ItemStack::EMPTY.clone());
             for slot in 0..27 {
@@ -1513,13 +1536,10 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
     ) -> wasmtime::Result<bool> {
         let player = player_from_resource(self, &player)?;
         let effect_type = super::status_effect::from_wasm_status_effect_type(effect);
-        if let Some(status_effect) =
+        Ok(
             pumpkin_data::effect::StatusEffect::from_name(effect_type.to_name())
-        {
-            Ok(player.has_effect(status_effect))
-        } else {
-            Ok(false)
-        }
+                .is_some_and(|status_effect| player.has_effect(status_effect)),
+        )
     }
 
     async fn get_effect(
@@ -2142,7 +2162,9 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
     ) -> wasmtime::Result<()> {
         let player = player_from_resource(self, &player)?;
         let world = world_from_resource(self, &world);
-        player.teleport(from_wasm_position(position), yaw, pitch, world);
+        player
+            .teleport(from_wasm_position(position), yaw, pitch, world)
+            .await;
         Ok(())
     }
 
@@ -2178,11 +2200,13 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
             .resource_table
             .get::<GuiResource>(&Resource::new_own(gui.rep()))
             .map_err(|_| wasmtime::Error::msg("invalid gui resource handle"))?;
-        let gui = gui_res.provider.lock();
+        let gui = gui_res.provider.lock().await;
 
         player.increment_screen_handler_sync_id();
         let sync_id = player.screen_handler_sync_id.load(Ordering::Relaxed);
-        let screen_handler = Arc::new(Mutex::new(PluginScreenHandler::new(
+        let screen_handler: Arc<
+            std::sync::Mutex<dyn pumpkin_inventory::screen_handler::ScreenHandler>,
+        > = Arc::new(std::sync::Mutex::new(PluginScreenHandler::new(
             sync_id,
             gui.window_type,
             &gui.inventory,
@@ -2190,7 +2214,7 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
             gui.allow_put_items,
         )));
 
-        player.open_handled_screen_direct(screen_handler, gui.title.clone());
+        player.open_handled_screen_direct(screen_handler, &gui.title);
         Ok(())
     }
 
@@ -2430,7 +2454,10 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
     async fn set_flying(&mut self, player: Resource<Player>, flying: bool) -> wasmtime::Result<()> {
         let player = player_from_resource(self, &player)?;
         {
-            let mut abilities = player.abilities.lock();
+            let mut abilities = player
+                .abilities
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             abilities.flying = flying;
         };
         player.send_abilities_update();
@@ -2442,7 +2469,10 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
         player: Resource<Player>,
     ) -> wasmtime::Result<pumpkin::plugin::player::PlayerAbilities> {
         let player = player_from_resource(self, &player)?;
-        let abilities = player.abilities.lock();
+        let abilities = player
+            .abilities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         Ok(pumpkin::plugin::player::PlayerAbilities {
             invulnerable: abilities.invulnerable,
             flying: abilities.flying,
@@ -2461,7 +2491,10 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
     ) -> wasmtime::Result<()> {
         let player = player_from_resource(self, &player)?;
         {
-            let mut a = player.abilities.lock();
+            let mut a = player
+                .abilities
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             a.invulnerable = abilities.invulnerable;
             a.flying = abilities.flying;
             a.allow_flying = abilities.allow_flying;
@@ -2592,7 +2625,7 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
         else {
             return Ok(None);
         };
-        let guard = player.advancements.lock();
+        let guard = player.advancements.lock().await;
         let progress = guard.progress.map.get(advancement).map_or_else(
             || pumpkin::plugin::advancement::AdvancementProgress {
                 advancement_id: advancement.id.to_string(),
@@ -2634,7 +2667,7 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
         else {
             return Ok(false);
         };
-        let mut guard = player.advancements.lock();
+        let mut guard = player.advancements.lock().await;
         let awarded = guard.award(advancement, &criterion);
         if awarded {
             guard.flush_dirty(&player, true);
@@ -2656,7 +2689,7 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
         else {
             return Ok(false);
         };
-        let mut guard = player.advancements.lock();
+        let mut guard = player.advancements.lock().await;
         let revoked = guard.revoke(advancement, &criterion);
         if revoked {
             guard.flush_dirty(&player, true);
@@ -2677,7 +2710,7 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
         else {
             return Ok(false);
         };
-        let mut guard = player.advancements.lock();
+        let mut guard = player.advancements.lock().await;
         let progress = guard.progress.get_mut_or_start_progress(advancement);
         if progress.is_done() {
             return Ok(false);
@@ -2708,7 +2741,7 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
         else {
             return Ok(false);
         };
-        let mut guard = player.advancements.lock();
+        let mut guard = player.advancements.lock().await;
         let progress = guard.progress.get_mut_or_start_progress(advancement);
         if !progress.has_progress() {
             return Ok(false);
@@ -2739,7 +2772,7 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
         else {
             return Ok(false);
         };
-        let guard = player.advancements.lock();
+        let guard = player.advancements.lock().await;
         let done = guard
             .progress
             .map
@@ -2753,7 +2786,7 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
         player: Resource<Player>,
     ) -> wasmtime::Result<Vec<String>> {
         let player = player_from_resource(self, &player)?;
-        let guard = player.advancements.lock();
+        let guard = player.advancements.lock().await;
         let list = guard
             .progress
             .map
@@ -2769,7 +2802,7 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
         player: Resource<Player>,
     ) -> wasmtime::Result<Option<String>> {
         let player = player_from_resource(self, &player)?;
-        let guard = player.advancements.lock();
+        let guard = player.advancements.lock().await;
         Ok(guard.last_selected_tab.map(|adv| adv.id.to_string()))
     }
 
@@ -2782,7 +2815,7 @@ impl pumpkin::plugin::player::HostPlayer for PluginHostState {
         let target_adv = tab_id.as_deref().and_then(
             crate::plugin::loader::wasm::wasm_host::wit::v0_1::advancement::find_advancement,
         );
-        let mut guard = player.advancements.lock();
+        let mut guard = player.advancements.lock().await;
         guard.set_selected_tab(target_adv).await;
         Ok(())
     }
@@ -3294,7 +3327,10 @@ impl pumpkin::plugin::player::HostBedrockPlayer for PluginHostState {
             .clone();
 
         let ability = from_wasm_bedrock_ability(ability);
-        let abilities = player.abilities.lock();
+        let abilities = player
+            .abilities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         match ability {
             pumpkin_protocol::bedrock::client::update_abilities::Ability::Build
@@ -3334,7 +3370,10 @@ impl pumpkin::plugin::player::HostBedrockPlayer for PluginHostState {
 
         let ability = from_wasm_bedrock_ability(ability);
         {
-            let mut abilities = player.abilities.lock();
+            let mut abilities = player
+                .abilities
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             match ability {
                 pumpkin_protocol::bedrock::client::update_abilities::Ability::Build
                 | pumpkin_protocol::bedrock::client::update_abilities::Ability::Mine => {

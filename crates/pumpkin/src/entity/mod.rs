@@ -29,7 +29,7 @@ use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::tracked_data::{self, TrackedId};
 use pumpkin_data::{Block, BlockDirection};
 use pumpkin_data::{
-    block_properties::{Facing, HorizontalFacing},
+    block_properties::{Facing, HorizontalFacing, blocks_movement},
     damage::DamageType,
     entity::{EntityPose, EntityType, MobCategory},
     sound::{Sound, SoundCategory},
@@ -149,6 +149,10 @@ pub const fn equipment_break_status(slot: &EquipmentSlot) -> EntityStatus {
 pub type EntityBaseFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 pub type TeleportFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+
+/// Sentinel for `Entity::last_biome_update_pos` meaning "biome not resolved yet"; no entity can
+/// stand at this position, so the per-tick biome refresh always retries.
+const UNRESOLVED_BIOME_POS: BlockPos = BlockPos(Vector3::new(i32::MIN, i32::MIN, i32::MIN));
 
 /// Vanilla `Entity.calculateViewVector` for `getHeadLookAngle` uses head yaw and pitch
 /// (`Entity.java:2571-2573`).
@@ -539,7 +543,7 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
     }
 
     fn tick_in_void(&self, _dyn_self: &dyn EntityBase) {
-        self.get_entity().remove()
+        self.get_entity().remove();
     }
 
     /// Returns if damage was successful or not
@@ -744,11 +748,9 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
             let version = client.version.load();
             let is_mob = entity.entity_type.mob || self.get_mob().is_some();
             if version < JavaMinecraftVersion::V_1_19 && is_mob {
-                let metadata = if let Some(mob) = self.get_mob() {
-                    mob.mob_java_spawn_metadata(version)
-                } else {
-                    None
-                };
+                let metadata = self
+                    .get_mob()
+                    .and_then(|mob| mob.mob_java_spawn_metadata(version));
                 let spawn_packet = entity.create_spawn_living_packet(metadata.clone());
                 if let Ok(data) = client.serialize_packet(&spawn_packet) {
                     client.enqueue_packet(data).await;
@@ -818,12 +820,10 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
                     .collect::<Vec<_>>()
             };
             if !properties.is_empty() {
-                player
-                    .send_client_packet(&CUpdateAttributes::new(
-                        entity.entity_id.into(),
-                        properties,
-                    ))
-                    .await;
+                player.try_send_client_packet(&CUpdateAttributes::new(
+                    entity.entity_id.into(),
+                    properties,
+                ));
             }
 
             let equipment = {
@@ -844,9 +844,10 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
                     .collect::<Vec<_>>()
             };
             if !equipment.is_empty() {
-                player
-                    .send_client_packet(&CSetEquipment::new(entity.entity_id.into(), equipment))
-                    .await;
+                player.try_send_client_packet(&CSetEquipment::new(
+                    entity.entity_id.into(),
+                    equipment,
+                ));
             }
         }
 
@@ -876,6 +877,7 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
     }
 
     /// Called when a player right-clicks this entity with an item.
+    /// Called when a player right-clicks this entity with an item.
     /// Returns true if the interaction was handled.
     fn interact(&self, _player: &Arc<Player>, _item_stack: &mut ItemStack) -> bool {
         false
@@ -896,11 +898,7 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
             ticks as f32 / 20.0,
         );
         if let Some(server) = entity.world.load().server.upgrade() {
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    server.plugin_manager.fire_blocking(&server, &mut event);
-                });
-            });
+            server.plugin_manager.fire_blocking(&server, &mut event);
             if event.cancelled {
                 return;
             }
@@ -988,8 +986,8 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
             iron_golem.mob_entity.set_target(Some(entity.clone()));
         }
 
-        if self_entity.no_clip.load(Ordering::Relaxed)
-            || other_entity.no_clip.load(Ordering::Relaxed)
+        if self_entity.no_physics.load(Ordering::Relaxed)
+            || other_entity.no_physics.load(Ordering::Relaxed)
         {
             return;
         }
@@ -1001,29 +999,10 @@ pub trait EntityBase: Send + Sync + NBTStorage + std::any::Any {
             return;
         }
 
+        if self_entity.has_passenger(other_entity.entity_id)
+            || other_entity.has_passenger(self_entity.entity_id)
         {
-            let passengers = self_entity
-                .passengers
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if passengers
-                .iter()
-                .any(|p| p.get_entity().entity_id == other_entity.entity_id)
-            {
-                return;
-            }
-        }
-        {
-            let passengers = other_entity
-                .passengers
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if passengers
-                .iter()
-                .any(|p| p.get_entity().entity_id == self_entity.entity_id)
-            {
-                return;
-            }
+            return;
         }
 
         let mut dx = other_entity.pos.load().x - self_entity.pos.load().x;
@@ -1962,7 +1941,7 @@ pub struct Entity {
     /// Whether this entity is invulnerable to all damage
     pub invulnerable: AtomicBool,
     /// List of damage types this entity is immune to
-    pub damage_immunities: Mutex<Vec<DamageType>>,
+    pub damage_immunities: std::sync::Mutex<Vec<DamageType>>,
     // Whether the entity is immune to fire (to disable visual fire and fire damage)
     pub fire_immune: AtomicBool,
     pub fire_ticks: AtomicI32,
@@ -1976,9 +1955,9 @@ pub struct Entity {
     pub was_in_powder_snow: AtomicBool,
     pub removal_reason: AtomicCell<Option<RemovalReason>>,
     // The passengers that entity has
-    pub passengers: Mutex<Vec<Arc<dyn EntityBase>>>,
+    pub passengers: std::sync::Mutex<Vec<Arc<dyn EntityBase>>>,
     /// The vehicle that entity is in
-    pub vehicle: Mutex<Option<Arc<dyn EntityBase>>>,
+    pub vehicle: std::sync::Mutex<Option<Arc<dyn EntityBase>>>,
     /// The entity this entity is attached/leashed to (if any)
     pub leashed_to: Mutex<Option<Arc<dyn EntityBase>>>,
     /// Vanilla `Mob.persistenceRequired`. Kept on the shared entity because
@@ -2010,7 +1989,7 @@ pub struct Entity {
     pub has_no_gravity: AtomicBool,
     /// Scoreboard tags attached to this entity, managed with `/tag`.
     /// Vanilla allows at most [`MAX_SCOREBOARD_TAGS`] tags per entity.
-    pub scoreboard_tags: Mutex<HashSet<String>>,
+    pub scoreboard_tags: std::sync::Mutex<HashSet<String>>,
     /// The data send in the Entity Spawn packet
     pub data: AtomicI32,
     /// Stores entity boolean flags (on fire, sneaking, invisible, glowing, etc.)
@@ -2019,8 +1998,8 @@ pub struct Entity {
     pub bedrock_flags: std::sync::atomic::AtomicI64,
     /// Stores more Bedrock-specific entity boolean flags (bit 0-63)
     pub bedrock_flags_two: std::sync::atomic::AtomicI64,
-    /// If true, the entity cannot collide with anything (e.g. spectator)
-    pub no_clip: AtomicBool,
+    /// If true, the entity bypasses physics, collisions, and block effects (e.g. spectator, markers, display entities)
+    pub no_physics: AtomicBool,
     /// Multiplies movement for one tick before being reset
     pub movement_multiplier: AtomicCell<Vector3<f64>>,
     /// Vanilla `Entity.pistonDeltas`/`pistonDeltasGameTime` (`Entity.java:1103-1119`).
@@ -2065,7 +2044,7 @@ pub struct Entity {
     /// [`Entity::send_tracked_data_to`].
     pub tracked_data_snapshot: std::sync::Mutex<Vec<TrackedDataEntry>>,
     /// Persistent custom data container for plugins (matching Bukkit's `PersistentDataHolder`)
-    pub custom_data: Mutex<NbtCompound>,
+    pub custom_data: std::sync::Mutex<NbtCompound>,
 }
 
 /// Adds the given tracked-data values to a snapshot, replacing any earlier value
@@ -2143,12 +2122,10 @@ fn send_pairing_ride_and_leash_data(entity: &Entity, player: &Player) {
             .iter()
             .map(|passenger| VarInt(passenger.get_entity().entity_id))
             .collect::<Vec<_>>();
-        player
-            .send_client_packet(&CSetPassengers::new(
-                VarInt(entity.entity_id),
-                &passenger_ids,
-            ))
-            .await;
+        player.try_send_client_packet(&CSetPassengers::new(
+            VarInt(entity.entity_id),
+            &passenger_ids,
+        ));
     }
 
     let vehicle = entity
@@ -2167,12 +2144,10 @@ fn send_pairing_ride_and_leash_data(entity: &Entity, player: &Player) {
             .iter()
             .map(|passenger| VarInt(passenger.get_entity().entity_id))
             .collect::<Vec<_>>();
-        player
-            .send_client_packet(&CSetPassengers::new(
-                VarInt(vehicle_entity.entity_id),
-                &passenger_ids,
-            ))
-            .await;
+        player.try_send_client_packet(&CSetPassengers::new(
+            VarInt(vehicle_entity.entity_id),
+            &passenger_ids,
+        ));
     }
 
     let leash_holder = entity
@@ -2181,13 +2156,11 @@ fn send_pairing_ride_and_leash_data(entity: &Entity, player: &Player) {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone();
     if let Some(leash_holder) = leash_holder {
-        player
-            .send_client_packet(&CSetEntityLink::new(
-                entity.entity_id,
-                leash_holder.get_entity().entity_id,
-                true,
-            ))
-            .await;
+        player.try_send_client_packet(&CSetEntityLink::new(
+            entity.entity_id,
+            leash_holder.get_entity().entity_id,
+            true,
+        ));
     }
 }
 
@@ -2267,6 +2240,16 @@ impl Entity {
             fixed: false,
         };
 
+        // Resolve the spawn biome eagerly. If the chunk is not readable yet, fall back to plains
+        // and leave `last_biome_update_pos` on an unreachable sentinel so `tick` retries instead
+        // of caching the substituted biome for this position.
+        let spawn_block_pos = BlockPos::new(floor_x, floor_y, floor_z);
+        let (current_biome, last_biome_update_pos) =
+            match world.level.get_rough_biome(&spawn_block_pos) {
+                Some(biome) => (biome, spawn_block_pos),
+                None => (&Biome::PLAINS, UNRESOLVED_BIOME_POS),
+            };
+
         Self {
             entity_id,
             entity_uuid,
@@ -2324,7 +2307,7 @@ impl Entity {
             entity_dimension: AtomicCell::new(bounding_box_size),
             base_dimension: AtomicCell::new(bounding_box_size),
             invulnerable: AtomicBool::new(false),
-            damage_immunities: Mutex::new(Vec::new()),
+            damage_immunities: std::sync::Mutex::new(Vec::new()),
             data: AtomicI32::new(0),
             flags: std::sync::atomic::AtomicI8::new(0),
             bedrock_flags: std::sync::atomic::AtomicI64::new(0),
@@ -2346,16 +2329,16 @@ impl Entity {
 
             riding_cooldown: AtomicI32::new(0),
             age: AtomicI32::new(0),
-            current_biome: ArcSwap::new(Arc::new(&Biome::PLAINS)),
-            last_biome_update_pos: AtomicCell::new(BlockPos::new(floor_x, floor_y, floor_z)),
+            current_biome: ArcSwap::new(Arc::new(current_biome)),
+            last_biome_update_pos: AtomicCell::new(last_biome_update_pos),
             portal_cooldown: AtomicU32::new(0),
             portal_manager: Mutex::new(None),
             custom_name: ArcSwap::new(Arc::new(None)),
             custom_name_visible: AtomicBool::new(false),
             silent: AtomicBool::new(false),
             has_no_gravity: AtomicBool::new(false),
-            scoreboard_tags: Mutex::new(HashSet::new()),
-            no_clip: AtomicBool::new(false),
+            scoreboard_tags: std::sync::Mutex::new(HashSet::new()),
+            no_physics: AtomicBool::new(false),
             movement_multiplier: AtomicCell::new(Vector3::default()),
             piston_movement: std::sync::Mutex::new((i64::MIN, Vector3::default())),
             hurt_marked: AtomicBool::new(false),
@@ -2418,6 +2401,14 @@ impl Entity {
     /// Updates the world reference for this entity.
     /// Called when the entity changes dimensions (e.g., through a nether portal).
     pub fn set_world(&self, world: Arc<World>) {
+        let block_pos = self.block_pos.load();
+        if let Some(biome) = world.level.get_rough_biome(&block_pos) {
+            self.current_biome.store(Arc::new(biome));
+            self.last_biome_update_pos.store(block_pos);
+        } else {
+            // Force `tick` to re-resolve once the destination chunk is readable.
+            self.last_biome_update_pos.store(UNRESOLVED_BIOME_POS);
+        }
         self.world.store(world);
     }
 
@@ -2652,7 +2643,7 @@ impl Entity {
         let velocity = self.velocity.load();
         self.last_sent_velocity.store(velocity);
         let chunk_pos = self.chunk_pos.load();
-        self.world.load().broadcast_to_chunk_editioned_sync(
+        self.world.load().broadcast_to_chunk_editioned(
             chunk_pos,
             &CEntityVelocity::new(self.entity_id.into(), velocity),
             &CSetActorMotion {
@@ -2773,7 +2764,14 @@ impl Entity {
                 || floor_z != block_pos_vec.z
             {
                 let new_block_pos = Vector3::new(floor_x, floor_y, floor_z);
-                self.block_pos.store(BlockPos(new_block_pos));
+                let new_bp = BlockPos(new_block_pos);
+                self.block_pos.store(new_bp);
+
+                let world = self.world.load();
+                if let Some(biome) = world.level.get_rough_biome(&new_bp) {
+                    self.current_biome.store(Arc::new(biome));
+                    self.last_biome_update_pos.store(new_bp);
+                }
 
                 let chunk_pos = self.chunk_pos.load();
                 if get_section_cord(floor_x) != chunk_pos.x
@@ -3225,7 +3223,13 @@ impl Entity {
         */
     }
 
-    fn tick_block_collisions(&self, caller: &Arc<dyn EntityBase>, server: &Server) -> bool {
+    pub fn tick_block_collisions(&self, caller: &Arc<dyn EntityBase>, server: &Server) -> bool {
+        // `Entity.checkInsideBlocks` bails out for entities that are not affected by blocks
+        // (`Entity.isAffectedByBlocks`: `!isRemoved() && !noPhysics`).
+        if !self.is_affected_by_blocks() {
+            return false;
+        }
+
         // `Entity.applyEffectsFromBlocks` invokes the block's step hook before inside-block
         // effects (`Entity.java:904-914`). LivingEntity has a later, shared step path; non-living
         // entities reach this live collision path instead.
@@ -3408,7 +3412,7 @@ impl Entity {
                 self.on_ground.load(Relaxed),
             );
             if self.entity_type == &EntityType::PLAYER {
-                self.world.load().broadcast_to_chunk_editioned_sync(
+                self.world.load().broadcast_to_chunk_editioned(
                     chunk_pos,
                     &je_packet,
                     &CMovePlayer::new(
@@ -3435,7 +3439,7 @@ impl Entity {
                 if self.on_ground.load(Relaxed) {
                     flags |= MOVE_ACTOR_DELTA_FLAG_ON_GROUND;
                 }
-                self.world.load().broadcast_to_chunk_editioned_sync(
+                self.world.load().broadcast_to_chunk_editioned(
                     chunk_pos,
                     &je_packet,
                     &CMoveActorDelta::new(
@@ -3457,7 +3461,7 @@ impl Entity {
                 self.on_ground.load(Relaxed),
             );
             if self.entity_type == &EntityType::PLAYER {
-                self.world.load().broadcast_to_chunk_editioned_sync(
+                self.world.load().broadcast_to_chunk_editioned(
                     chunk_pos,
                     &je_packet,
                     &CMovePlayer::new(
@@ -3482,7 +3486,7 @@ impl Entity {
                     flags |= MOVE_ACTOR_DELTA_FLAG_ON_GROUND;
                 }
 
-                self.world.load().broadcast_to_chunk_editioned_sync(
+                self.world.load().broadcast_to_chunk_editioned(
                     chunk_pos,
                     &je_packet,
                     &CMoveActorDelta::new(
@@ -3505,7 +3509,7 @@ impl Entity {
                 self.on_ground.load(Relaxed),
             );
             if self.entity_type == &EntityType::PLAYER {
-                self.world.load().broadcast_to_chunk_editioned_sync(
+                self.world.load().broadcast_to_chunk_editioned(
                     chunk_pos,
                     &je_packet,
                     &CMovePlayer::new(
@@ -3529,7 +3533,7 @@ impl Entity {
                 if self.on_ground.load(Relaxed) {
                     flags |= MOVE_ACTOR_DELTA_FLAG_ON_GROUND;
                 }
-                self.world.load().broadcast_to_chunk_editioned_sync(
+                self.world.load().broadcast_to_chunk_editioned(
                     chunk_pos,
                     &je_packet,
                     &CMoveActorDelta::new(
@@ -3657,7 +3661,7 @@ impl Entity {
         );
 
         if self.entity_type == &EntityType::PLAYER {
-            self.world.load().broadcast_to_chunk_editioned_sync(
+            self.world.load().broadcast_to_chunk_editioned(
                 chunk_pos,
                 &je_packet,
                 &CMovePlayer::new(
@@ -3682,7 +3686,7 @@ impl Entity {
                 flags |= MOVE_ACTOR_DELTA_FLAG_ON_GROUND;
             }
 
-            self.world.load().broadcast_to_chunk_editioned_sync(
+            self.world.load().broadcast_to_chunk_editioned(
                 chunk_pos,
                 &je_packet,
                 &CMoveActorDelta::new(
@@ -4154,7 +4158,7 @@ impl Entity {
     /// Player movement is handled by the player packet path, so `move_entity`
     /// deliberately skips players; vanilla uses this path for Riptide's lift.
     pub fn move_self_with_collisions(&self, caller: &dyn EntityBase, motion: Vector3<f64>) {
-        if self.no_clip.load(Ordering::Relaxed) {
+        if self.no_physics.load(Ordering::Relaxed) {
             self.move_pos(motion);
             self.sync_passenger_positions();
             return;
@@ -4168,14 +4172,17 @@ impl Entity {
     // Move by a delta, adjust for collisions, and send
 
     // Does not send movement. That must be done separately
-    pub fn move_entity<'a>(&'a self, caller: &'a Arc<dyn EntityBase>, mut motion: Vector3<f64>) {
+    pub fn move_entity(&self, caller: &Arc<dyn EntityBase>, mut motion: Vector3<f64>) {
         if caller.get_player().is_some() {
             return;
         }
 
-        if self.no_clip.load(Ordering::Relaxed) {
+        if self.no_physics.load(Ordering::Relaxed) {
             self.move_pos(motion);
             self.sync_passenger_positions();
+            // Vanilla `Entity.move`'s `noPhysics` branch clears the collision flags
+            // (`Entity.java:738-744`).
+            self.horizontal_collision.store(false, Ordering::Relaxed);
 
             return;
         }
@@ -4344,41 +4351,78 @@ impl Entity {
                 self.portal_cooldown
                     .store(self.get_dimension_changing_delay(), Ordering::Relaxed);
 
-                let transition = portal_processor.portal_type.get_portal_destination(
-                    &self.world.load(),
-                    portal_processor.destination_world.clone(),
-                    caller,
-                    portal_processor.entry_position,
-                    portal_processor.source_portal.clone(),
-                );
+                // The destination search can generate chunks, so it runs off the tick thread
+                // (on the chunk-generation pool when there is one) and the teleport follows
+                // asynchronously.
+                let caller_clone = caller.clone();
+                let world_clone = self.world.load_full();
+                let portal_type = portal_processor.portal_type;
+                let dest_world_opt = portal_processor.destination_world.clone();
+                let entry_pos = portal_processor.entry_position;
+                let src_portal = portal_processor.source_portal.clone();
 
                 drop(portal_processor);
 
-                if let Some(transition) = transition {
-                    let dest_world = transition.new_world.clone();
-                    let yaw = transition.yaw;
-                    let pitch = transition.pitch;
-                    let teleport_pos = transition.position;
+                tokio::spawn(async move {
+                    let world_for_dest = world_clone.clone();
+                    let caller_for_dest = caller_clone.clone();
+                    let gen_pool = world_for_dest.level.gen_pool.clone();
+                    let transition = if let Some(pool) = gen_pool {
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        pool.spawn(move || {
+                            let dest = portal_type.get_portal_destination(
+                                &world_for_dest,
+                                dest_world_opt,
+                                &caller_for_dest,
+                                entry_pos,
+                                src_portal.as_ref(),
+                            );
+                            let _ = tx.send(dest);
+                        });
+                        rx.await.ok().flatten()
+                    } else {
+                        portal_type.get_portal_destination(
+                            &world_for_dest,
+                            dest_world_opt,
+                            &caller_for_dest,
+                            entry_pos,
+                            src_portal.as_ref(),
+                        )
+                    };
 
-                    // `Entity.handlePortal` checks `canTeleport` before changing dimensions
-                    // (`Entity.java:2617-2620`).
-                    let from_world = self.world.load();
-                    if self.can_teleport(&from_world, &dest_world) {
-                        caller
-                            .clone()
-                            .teleport(teleport_pos, yaw, pitch, dest_world.clone());
+                    if let Some(transition) = transition {
+                        let dest_world = transition.new_world.clone();
+                        let yaw = transition.yaw;
+                        let pitch = transition.pitch;
+                        let teleport_pos = transition.position;
+
+                        // `Entity.handlePortal` checks `canTeleport` before changing dimensions
+                        // (`Entity.java:2617-2620`).
+                        if !caller_clone
+                            .get_entity()
+                            .can_teleport(&world_clone, &dest_world)
+                        {
+                            return;
+                        }
+
+                        let yaw_delta = yaw.map(|y| y - caller_clone.get_entity().yaw.load());
+                        let vehicle = caller_clone.clone();
+
+                        // Teleport the main entity
+                        caller_clone
+                            .teleport(teleport_pos, yaw, pitch, dest_world.clone())
+                            .await;
 
                         // Teleport all passengers recursively along with the vehicle
-                        let yaw_delta = yaw.map(|y| y - self.yaw.load());
                         Self::teleport_passengers_recursive(
-                            self,
+                            vehicle.get_entity(),
                             teleport_pos,
                             yaw_delta,
                             &dest_world,
                         )
                         .await;
                     }
-                }
+                });
             } else if portal_processor.portal_time == 0 {
                 should_remove = true;
             }
@@ -4441,7 +4485,9 @@ impl Entity {
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .clone();
 
-                passenger.teleport(position, passenger_yaw, None, dest_world.clone());
+                passenger
+                    .teleport(position, passenger_yaw, None, dest_world.clone())
+                    .await;
 
                 // Recursively teleport nested passengers
                 for nested in nested_passengers {
@@ -4800,7 +4846,6 @@ impl Entity {
         ));
     }
 
-    #[expect(clippy::unused_async)]
     pub fn set_sneaking(&self, sneaking: bool) {
         //assert!(self.sneaking.load(Relaxed) != sneaking);
         self.sneaking.store(sneaking, Relaxed);
@@ -4829,8 +4874,6 @@ impl Entity {
     }
 
     /// Sets whether the entity is invisible and sends updated metadata.
-    #[expect(clippy::unused_async)]
-    #[allow(clippy::unused_async_trait_impl)]
     pub fn set_invisible(&self, invisible: bool) {
         if self.invisible.load(Ordering::Relaxed) != invisible {
             self.invisible.store(invisible, Relaxed);
@@ -4840,8 +4883,6 @@ impl Entity {
 
     /// Sets effect-derived glow while preserving the persisted tag's effective glow
     /// (`Entity.java:2729-2734`).
-    #[expect(clippy::unused_async)]
-    #[allow(clippy::unused_async_trait_impl)]
     pub fn set_glowing(&self, glowing: bool) {
         self.glowing_effect.store(glowing, Ordering::Relaxed);
         let new_glowing = effective_glowing(glowing, self.glowing_tag.load(Ordering::Relaxed));
@@ -4854,7 +4895,6 @@ impl Entity {
     /// Vanilla reads `Glowing` through `setGlowingTag` during entity loading
     /// (`Entity.java:2175-2175`) and combines it with the effective glowing flag
     /// (`Entity.java:2729-2732`).
-    #[expect(clippy::unused_async)]
     pub fn set_glowing_tag(&self, glowing: bool) {
         self.glowing_tag.store(glowing, Ordering::Relaxed);
         let new_glowing = effective_glowing(glowing, self.glowing_effect.load(Ordering::Relaxed));
@@ -4864,8 +4904,6 @@ impl Entity {
     }
 
     /// Sets whether the entity is on fire for visual and damage purposes. This is separate from `fire_ticks` which tracks the damage aspect of being on fire.
-    #[expect(clippy::unused_async)]
-    #[allow(clippy::unused_async_trait_impl)]
     pub fn set_on_fire(&self, on_fire: bool) {
         if self.has_visual_fire.load(Ordering::Relaxed) != on_fire {
             self.has_visual_fire.store(on_fire, Ordering::Relaxed);
@@ -4978,7 +5016,6 @@ impl Entity {
         ]
     }
 
-    #[expect(clippy::unused_async)]
     pub fn set_sprinting(&self, sprinting: bool) {
         //assert!(self.sprinting.load(Relaxed) != sprinting);
         self.sprinting.store(sprinting, Relaxed);
@@ -5058,7 +5095,6 @@ impl Entity {
         !self.on_ground.load(Relaxed)
     }
 
-    #[expect(clippy::unused_async)]
     pub fn set_fall_flying(&self, fall_flying: bool) {
         assert_ne!(self.fall_flying.load(Relaxed), fall_flying);
         self.fall_flying.store(fall_flying, Relaxed);
@@ -5330,13 +5366,9 @@ impl Entity {
                 (pose as u8).to_string(),
             );
         if let Some(server) = self.world.load().server.upgrade() {
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    server
-                        .plugin_manager
-                        .fire_blocking(&server, &mut pose_event);
-                });
-            });
+            server
+                .plugin_manager
+                .fire_blocking(&server, &mut pose_event);
             if pose_event.cancelled {
                 return;
             }
@@ -5530,6 +5562,45 @@ impl Entity {
         !self.is_removed()
     }
 
+    #[must_use]
+    pub fn is_affected_by_blocks(&self) -> bool {
+        !self.is_removed() && !self.no_physics.load(Ordering::Relaxed)
+    }
+
+    #[must_use]
+    pub fn is_in_wall(&self) -> bool {
+        if self.no_physics.load(Ordering::Relaxed) {
+            return false;
+        }
+
+        let eye_pos = self.get_eye_pos();
+        let half_width = (f64::from(self.entity_dimension.load().width) * 0.8) / 2.0;
+        let eye_bb = BoundingBox::new(
+            Vector3::new(eye_pos.x - half_width, eye_pos.y, eye_pos.z - half_width),
+            Vector3::new(
+                eye_pos.x + half_width,
+                eye_pos.y + 1.0e-6,
+                eye_pos.z + half_width,
+            ),
+        );
+        let min = eye_bb.min_block_pos();
+        let max = eye_bb.max_block_pos();
+        let world = self.world.load();
+
+        for pos in BlockPos::iterate(min, max) {
+            let (block, state) = world.get_block_and_state(&pos);
+            if state.is_air() {
+                continue;
+            }
+
+            if blocks_movement(state, block.id) && state.is_full_cube() {
+                return true;
+            }
+        }
+
+        false
+    }
+
     pub const LEASH_SNAP_DISTANCE: f64 = 12.0;
     pub const LEASH_ELASTIC_DISTANCE: f64 = 6.0;
 
@@ -5652,7 +5723,7 @@ impl Entity {
             },
         };
 
-        self.world.load().broadcast_to_chunk_editioned_sync(
+        self.world.load().broadcast_to_chunk_editioned(
             self.chunk_pos.load(),
             &je_packet,
             &be_packet,
@@ -5691,7 +5762,7 @@ impl Entity {
             },
         };
 
-        self.world.load().broadcast_to_chunk_editioned_sync(
+        self.world.load().broadcast_to_chunk_editioned(
             self.chunk_pos.load(),
             &je_packet,
             &be_packet,
@@ -5878,6 +5949,21 @@ impl Entity {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         vehicle.is_some()
+    }
+
+    pub fn get_vehicle(&self) -> Option<Arc<dyn EntityBase>> {
+        self.vehicle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    pub fn has_passenger(&self, id: i32) -> bool {
+        self.passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .any(|passenger| passenger.get_entity().entity_id == id)
     }
 
     /// Admission for Pumpkin's ordinary player-initiated mount interactions.
@@ -6846,7 +6932,12 @@ impl EntityBase for Entity {
         if let Some(vehicle) = vehicle
             && vehicle.get_entity().is_removed()
         {
-            vehicle.get_entity().remove_passenger(self.entity_id).await;
+            // `remove_passenger` fires plugin events and sends packets asynchronously, so it
+            // cannot run inline in this synchronous tick.
+            let passenger_id = self.entity_id;
+            tokio::spawn(async move {
+                vehicle.get_entity().remove_passenger(passenger_id).await;
+            });
         }
 
         self.tick_portal(caller);
@@ -6945,8 +7036,6 @@ impl EntityBase for Entity {
     }
 }
 
-pub type NbtFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-
 pub trait NBTStorage: Send + Sync {
     fn write_nbt(&self, _nbt: &mut NbtCompound) {}
 
@@ -6956,8 +7045,6 @@ pub trait NBTStorage: Send + Sync {
 
     fn read_nbt_non_mut(&self, _nbt: &NbtCompound) {}
 }
-
-pub type NBTInitFuture<'a, T> = Pin<Box<dyn Future<Output = Option<T>> + Send + 'a>>;
 
 pub trait NBTStorageInit: Send + Sync + Sized {
     fn create_from_nbt<'a>(_nbt: &'a mut NbtCompound) -> Option<Self>

@@ -44,7 +44,7 @@ fn is_dead_coral(block: &Block) -> bool {
         || block == &Block::DEAD_TUBE_CORAL_FAN
         || block == &Block::DEAD_TUBE_CORAL_WALL_FAN
 }
-fn try_schedule_die_tick(block: &Block, world: &Arc<World>, pos: &BlockPos) {
+pub fn try_schedule_die_tick(block: &Block, world: &Arc<World>, pos: &BlockPos) {
     let tick_delay = 60 + rand::rng().random_range(0..40);
     world.schedule_block_tick(
         block,

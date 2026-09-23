@@ -28,7 +28,7 @@ impl BegGoal {
         item.id == Item::BONE.id || item.has_tag(&tag::Item::MINECRAFT_WOLF_FOOD)
     }
 
-    fn player_holding_interesting(&self, player: &Player) -> bool {
+    fn player_holding_interesting(player: &Player) -> bool {
         let main_stack = player.inventory().held_item();
         if main_stack.item_count > 0 && Self::is_interesting_item(main_stack.item) {
             return true;
@@ -71,7 +71,7 @@ impl Goal for BegGoal {
             return false;
         };
 
-        if !self.player_holding_interesting(&player) {
+        if !Self::player_holding_interesting(&player) {
             return false;
         }
 
@@ -92,7 +92,7 @@ impl Goal for BegGoal {
             return false;
         }
 
-        self.look_time > 0 && self.player_holding_interesting(player)
+        self.look_time > 0 && Self::player_holding_interesting(player)
     }
 
     fn start(&mut self, mob: &dyn Mob) {

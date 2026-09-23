@@ -124,9 +124,7 @@ impl BlockBehaviour for DetectorRailBlock {
     }
 
     fn get_weak_redstone_power(&self, args: GetRedstonePowerArgs<'_>) -> u8 {
-        Box::pin(
-            async move { own_signal(RailProperties::new(args.state.id, args.block).is_powered()) },
-        )
+        own_signal(RailProperties::new(args.state.id, args.block).is_powered())
     }
 
     fn get_strong_redstone_power(&self, args: GetRedstonePowerArgs<'_>) -> u8 {

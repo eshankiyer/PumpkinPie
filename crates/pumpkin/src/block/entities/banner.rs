@@ -86,8 +86,8 @@ impl BannerBlockEntity {
     pub const fn new(position: BlockPos) -> Self {
         Self {
             position,
-            custom_name: Mutex::const_new(None),
-            patterns: Mutex::const_new(None),
+            custom_name: Mutex::new(None),
+            patterns: Mutex::new(None),
         }
     }
 }

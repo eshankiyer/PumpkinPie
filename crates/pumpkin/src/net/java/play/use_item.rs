@@ -16,7 +16,7 @@ impl JavaClient {
         self.update_sequence(player, use_item.sequence.0);
         let inventory = player.inventory();
         let Ok(hand) = Hand::from_packet_id(use_item.hand.0) else {
-            self.kick(TextComponent::text("InvalidHand"));
+            self.kick(TextComponent::text("InvalidHand")).await;
             return;
         };
 
@@ -67,7 +67,7 @@ impl JavaClient {
                 &(Vector3::rotation_vector(f64::from(use_item.pitch), f64::from(use_item.yaw))
                     * 4.5),
             ),
-            async |pos, world| {
+            |pos, world| {
                 let block = world.get_block(pos);
                 block != &Block::AIR && block != &Block::WATER && block != &Block::LAVA
             },
@@ -84,7 +84,7 @@ impl JavaClient {
             PlayerInteractEvent::new(player, InteractAction::RightClickAir, &Block::AIR, None)
         };
         let (item_for_use, stack_for_use) = (item_in_hand.item, item_in_hand.clone());
-        self.prepare_hand_item_for_use(player, hand, &mut item_in_hand);
+        Self::prepare_hand_item_for_use(player, hand, &mut item_in_hand);
 
         if !self
             .should_continue_use_after_fish_event(server, player, hand, item_for_use)
@@ -102,7 +102,7 @@ impl JavaClient {
         }}
     }
 
-    fn prepare_hand_item_for_use(&self, player: &Arc<Player>, hand: Hand, held: &mut ItemStack) {
+    fn prepare_hand_item_for_use(player: &Arc<Player>, hand: Hand, held: &mut ItemStack) {
         let inventory = player.inventory();
 
         // Vanilla `Item.use` starts consumables, shields, and kinetic weapons
@@ -114,7 +114,11 @@ impl JavaClient {
         {
             // If its food we want to make sure we can actually consume it
             if let Some(food) = held.get_data_component::<FoodImpl>() {
-                if player.abilities.lock().invulnerable
+                if player
+                    .abilities
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .invulnerable
                     || food.can_always_eat
                     || player.hunger_manager.level.load() < 20
                 {
@@ -136,7 +140,11 @@ impl JavaClient {
         if let Some(slot) = equipment_slot {
             // The equipment lock has to be released before touching the hand again:
             // the off hand lives in the same map, so holding it here would deadlock.
-            let current_equipped = inventory.entity_equipment.lock().get(&slot);
+            let current_equipped = inventory
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(&slot);
             if current_equipped.are_items_and_components_equal(held) {
                 return;
             }
@@ -150,7 +158,11 @@ impl JavaClient {
             } else {
                 std::mem::replace(held, current_equipped)
             };
-            inventory.entity_equipment.lock().put(&slot, equipped);
+            inventory
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .put(&slot, equipped);
             inventory.set_stack_in_hand(hand, held.clone());
         }
     }

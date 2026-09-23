@@ -239,7 +239,7 @@ pub struct CommandDispatcher {
 
 /// Stores registered [`CommandTree`]s and dispatches commands to them.
 impl CommandDispatcher {
-    pub fn handle_command<'a>(&'a self, sender: &CommandSender, server: &'a Server, cmd: &'a str) {
+    pub fn handle_command(&self, sender: &CommandSender, server: &Server, cmd: &str) {
         let result = self.dispatch(sender, server, cmd);
         sender.set_success_count(u32::from(result.is_ok()));
 

@@ -52,7 +52,7 @@ pub struct InteractionEntity {
 
 impl InteractionEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
-        entity.no_clip.store(true, Ordering::Relaxed);
+        entity.no_physics.store(true, Ordering::Relaxed);
         let width = 1.0;
         let height = 1.0;
         let dimensions = EntityDimensions::new(width, height, height * 0.85);
@@ -335,14 +335,7 @@ impl EntityBase for InteractionEntity {
             .or(cause)
             .and_then(|e| e.cast_any().downcast_ref::<Player>());
         if let Some(player) = player {
-            let timestamp = self
-                .entity
-                .world
-                .load()
-                .level_time
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .world_age as i64;
+            let timestamp = self.entity.world.load().get_world_age();
             *self
                 .attack
                 .lock()
@@ -355,14 +348,7 @@ impl EntityBase for InteractionEntity {
     }
 
     fn interact(&self, player: &Arc<Player>, _item_stack: &mut ItemStack) -> bool {
-        let timestamp = self
-            .entity
-            .world
-            .load()
-            .level_time
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .world_age as i64;
+        let timestamp = self.entity.world.load().get_world_age();
         *self
             .interaction
             .lock()

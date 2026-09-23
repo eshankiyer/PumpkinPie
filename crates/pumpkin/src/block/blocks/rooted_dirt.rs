@@ -16,10 +16,12 @@ impl BlockBehaviour for RootedDirtBlock {
     }
 
     fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
-        args.world.set_block_state(
-            &args.position.down(),
-            Block::HANGING_ROOTS.default_state.id,
-            BlockFlags::NOTIFY_ALL,
-        );
+        {
+            args.world.set_block_state(
+                &args.position.down(),
+                Block::HANGING_ROOTS.default_state.id,
+                BlockFlags::NOTIFY_ALL,
+            );
+        }
     }
 }

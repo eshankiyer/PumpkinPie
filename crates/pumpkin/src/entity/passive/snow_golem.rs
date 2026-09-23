@@ -115,7 +115,7 @@ impl SnowGolemEntity {
     /// `rangedAttackUncertainty` 12.
     pub fn throw_snowball(&self, target: &Arc<dyn EntityBase>) {
         let entity = self.get_entity();
-        let world = entity.world.load();
+        let world = entity.world.load_full();
 
         let snowball_entity = Entity::new(world.clone(), entity.pos.load(), &EntityType::SNOWBALL);
         let snowball = SnowballEntity::new_shot(snowball_entity, entity);

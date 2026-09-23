@@ -18,12 +18,9 @@
 //! - Marking the slot as changed (dirty)
 //! - Callbacks for slot interaction events
 
-use std::{
-    pin::Pin,
-    sync::{
-        Arc,
-        atomic::{AtomicU8, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicU8, Ordering},
 };
 
 use crate::screen_handler::InventoryPlayer;
@@ -34,9 +31,6 @@ use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::tag::Taggable;
 use pumpkin_world::inventory::Inventory;
-
-/// Type alias for async slot operations.
-pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 fn clone_stack_for_creative(stack: &ItemStack) -> ItemStack {
     // `Slot.safeClone` (`Slot.java:125-128`) returns no stack for an empty slot and otherwise
@@ -415,15 +409,12 @@ impl Slot for ArmorSlot {
     }
 
     fn can_take_items(&self, player: &dyn InventoryPlayer) -> bool {
-        let is_creative = player.is_creative();
-        Box::pin(async move {
-            if is_creative {
-                return true;
-            }
-            self.get_cloned_stack()
-                .get_enchantment_level(&Enchantment::BINDING_CURSE)
-                <= 0
-        })
+        if player.is_creative() {
+            return true;
+        }
+        self.get_cloned_stack()
+            .get_enchantment_level(&Enchantment::BINDING_CURSE)
+            <= 0
     }
 }
 
@@ -530,8 +521,7 @@ impl Slot for PredicateSlot {
     }
 
     fn can_insert(&self, stack: &ItemStack) -> bool {
-        let may_place = self.may_place;
-        Box::pin(async move { may_place(stack) })
+        (self.may_place)(stack)
     }
 
     fn mark_dirty(&self) {

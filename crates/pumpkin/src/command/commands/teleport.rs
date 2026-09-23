@@ -88,11 +88,11 @@ impl CommandExecutor for EntitiesToEntityExecutor {
         let targets = EntitiesArgumentConsumer::find_arg(args, ARG_TARGETS)?;
 
         let destination = EntityArgumentConsumer::find_arg(args, ARG_DESTINATION)?;
-        let destination = destination.get_entity();
-        let pos = destination.pos.load();
-        let yaw = destination.yaw.load();
-        let pitch = destination.pitch.load();
-        let world = destination.world.load_full();
+        let destination_entity = destination.get_entity();
+        let pos = destination_entity.pos.load();
+        let yaw = destination_entity.yaw.load();
+        let pitch = destination_entity.pitch.load();
+        let world = destination_entity.world.load_full();
         if !World::is_valid(BlockPos(pos.floor_to_i32())) {
             return Err(CommandError::CommandFailed(TextComponent::translate_cross(
                 translation::java::COMMANDS_TELEPORT_INVALIDPOSITION,
@@ -101,9 +101,12 @@ impl CommandExecutor for EntitiesToEntityExecutor {
             )));
         }
         for target in targets {
-            target
-                .clone()
-                .teleport(pos, Some(yaw), Some(pitch), world.clone());
+            futures::executor::block_on(target.clone().teleport(
+                pos,
+                Some(yaw),
+                Some(pitch),
+                world.clone(),
+            ));
         }
 
         let (key, target_arg) = success_key_and_arg(
@@ -114,7 +117,7 @@ impl CommandExecutor for EntitiesToEntityExecutor {
         sender.send_message(TextComponent::translate_cross(
             key,
             translation::bedrock::COMMANDS_TP_SUCCESSVICTIM,
-            [target_arg, destination.get_display_name()],
+            [target_arg, destination_entity.get_display_name()],
         ));
 
         Ok(targets.len() as i32)
@@ -145,9 +148,12 @@ impl CommandExecutor for EntitiesToPosFacingPosExecutor {
         let world = resolve_sender_world(sender, server)?;
 
         for target in targets {
-            target
-                .clone()
-                .teleport(pos, Some(yaw), Some(pitch), world.clone());
+            futures::executor::block_on(target.clone().teleport(
+                pos,
+                Some(yaw),
+                Some(pitch),
+                world.clone(),
+            ));
         }
 
         let (key, target_arg) = success_key_and_arg(
@@ -194,9 +200,12 @@ impl CommandExecutor for EntitiesToPosFacingEntityExecutor {
         let world = resolve_sender_world(sender, server)?;
 
         for target in targets {
-            target
-                .clone()
-                .teleport(pos, Some(yaw), Some(pitch), world.clone());
+            futures::executor::block_on(target.clone().teleport(
+                pos,
+                Some(yaw),
+                Some(pitch),
+                world.clone(),
+            ));
         }
 
         let (key, target_arg) = success_key_and_arg(
@@ -244,9 +253,12 @@ impl CommandExecutor for EntitiesToPosWithRotationExecutor {
         let world = resolve_sender_world(sender, server)?;
 
         for target in targets {
-            target
-                .clone()
-                .teleport(pos, Some(yaw), Some(pitch), world.clone());
+            futures::executor::block_on(target.clone().teleport(
+                pos,
+                Some(yaw),
+                Some(pitch),
+                world.clone(),
+            ));
         }
 
         let (key, target_arg) = success_key_and_arg(
@@ -292,9 +304,12 @@ impl CommandExecutor for EntitiesToPosExecutor {
         for target in targets {
             let yaw = target.get_entity().yaw.load();
             let pitch = target.get_entity().pitch.load();
-            target
-                .clone()
-                .teleport(pos, Some(yaw), Some(pitch), world.clone());
+            futures::executor::block_on(target.clone().teleport(
+                pos,
+                Some(yaw),
+                Some(pitch),
+                world.clone(),
+            ));
         }
 
         let (key, target_arg) = success_key_and_arg(
@@ -327,11 +342,11 @@ impl CommandExecutor for SelfToEntityExecutor {
         args: &ConsumedArgs,
     ) -> CommandResult {
         let destination = EntityArgumentConsumer::find_arg(args, ARG_DESTINATION)?;
-        let destination = destination.get_entity();
-        let pos = destination.pos.load();
-        let yaw = destination.yaw.load();
-        let pitch = destination.pitch.load();
-        let world = destination.world.load_full();
+        let destination_entity = destination.get_entity();
+        let pos = destination_entity.pos.load();
+        let yaw = destination_entity.yaw.load();
+        let pitch = destination_entity.pitch.load();
+        let world = destination_entity.world.load_full();
 
         match sender {
             CommandSender::Player(player) => {
@@ -342,12 +357,20 @@ impl CommandExecutor for SelfToEntityExecutor {
                         [],
                     )));
                 }
-                player.clone().teleport(pos, Some(yaw), Some(pitch), world);
+                futures::executor::block_on(player.clone().teleport(
+                    pos,
+                    Some(yaw),
+                    Some(pitch),
+                    world,
+                ));
 
                 sender.send_message(TextComponent::translate_cross(
                     translation::java::COMMANDS_TELEPORT_SUCCESS_ENTITY_SINGLE,
                     translation::bedrock::COMMANDS_TP_SUCCESSVICTIM,
-                    [player.get_display_name(), destination.get_display_name()],
+                    [
+                        player.get_display_name(),
+                        destination_entity.get_display_name(),
+                    ],
                 ));
 
                 Ok(1)
@@ -360,6 +383,7 @@ impl CommandExecutor for SelfToEntityExecutor {
         }
     }
 }
+
 struct SelfToPosExecutor;
 
 impl CommandExecutor for SelfToPosExecutor {
@@ -381,9 +405,13 @@ impl CommandExecutor for SelfToPosExecutor {
                         [],
                     )));
                 }
-                player
-                    .clone()
-                    .teleport(pos, Some(yaw), Some(pitch), player.world().clone());
+                let player_world = player.world();
+                futures::executor::block_on(player.clone().teleport(
+                    pos,
+                    Some(yaw),
+                    Some(pitch),
+                    player_world,
+                ));
 
                 sender.send_message(TextComponent::translate_cross(
                     translation::java::COMMANDS_TELEPORT_SUCCESS_LOCATION_SINGLE,

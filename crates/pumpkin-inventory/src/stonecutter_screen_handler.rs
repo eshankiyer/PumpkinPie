@@ -358,7 +358,7 @@ mod tests {
         StonecutterScreenHandler::new(0, &player_inventory)
     }
 
-    #[tokio::test]
+    #[test]
     fn selecting_a_valid_recipe_refreshes_the_output() {
         let handler = handler();
         let input = ItemStack::new(1, &Item::STONE);
@@ -379,7 +379,7 @@ mod tests {
         assert_eq!(handler.get_behaviour().properties[0].get(), 0);
     }
 
-    #[tokio::test]
+    #[test]
     fn invalid_recipe_selection_preserves_the_current_output() {
         let handler = handler();
         handler
@@ -397,7 +397,7 @@ mod tests {
         assert_eq!(output_after.item_count, output_before.item_count);
     }
 
-    #[tokio::test]
+    #[test]
     fn output_refresh_clears_selection_when_input_is_depleted() {
         let handler = handler();
         handler
@@ -418,7 +418,7 @@ mod tests {
         assert!(output.is_empty());
     }
 
-    #[tokio::test]
+    #[test]
     fn changing_input_item_clears_the_selected_recipe() {
         let handler = handler();
         handler

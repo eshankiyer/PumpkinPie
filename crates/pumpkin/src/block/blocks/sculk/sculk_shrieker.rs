@@ -14,9 +14,7 @@ use crate::block::{
 use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::entity::player::Player;
 use crate::world::World;
-use crate::world::game_event::{
-    GameEventContext, GameEventFuture, GameEventListener, PositionSource,
-};
+use crate::world::game_event::{GameEventContext, GameEventListener, PositionSource};
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::{
     BlockId, BlockStateId,
@@ -76,55 +74,53 @@ impl GameEventListener for ShriekerListener {
         LISTENER_RADIUS
     }
 
-    fn handle_game_event<'a>(
-        &'a self,
-        world: &'a Arc<World>,
-        event: &'a GameEvent,
-        context: &'a GameEventContext,
+    fn handle_game_event(
+        &self,
+        world: &Arc<World>,
+        event: &GameEvent,
+        context: &GameEventContext,
         source_position: Vector3<f64>,
-    ) -> GameEventFuture<'a> {
-        Box::pin(async move {
-            if !shrieker_can_listen(event) {
-                return false;
-            }
-            let (block, state) = world.get_block_and_state(&self.pos);
-            if block.id != BlockId::SCULK_SHRIEKER {
-                return false;
-            }
-            // `canReceiveVibration` (lines 198-201).
-            if SculkShriekerLikeProperties::from_state_id(state.id, block).shrieking {
-                return false;
-            }
-            let Some(entity) = context.source_entity.as_ref() else {
-                return false;
-            };
-            let Some(player) = try_get_player(world, entity.as_ref()) else {
-                return false;
-            };
+    ) -> bool {
+        if !shrieker_can_listen(event) {
+            return false;
+        }
+        let (block, state) = world.get_block_and_state(&self.pos);
+        if block.id != BlockId::SCULK_SHRIEKER {
+            return false;
+        }
+        // `canReceiveVibration` (lines 198-201).
+        if SculkShriekerLikeProperties::from_state_id(state.id, block).shrieking {
+            return false;
+        }
+        let Some(entity) = context.source_entity.as_ref() else {
+            return false;
+        };
+        let Some(player) = try_get_player(world, entity.as_ref()) else {
+            return false;
+        };
 
-            let Some(block_entity) = world.get_block_entity(&self.pos) else {
-                return false;
-            };
-            let Some(shrieker) = block_entity
-                .as_any()
-                .downcast_ref::<SculkShriekerBlockEntity>()
-            else {
-                return false;
-            };
-            // `VibrationSystem.Listener.handleGameEvent` rejects a new event while a prior
-            // vibration is travelling (`VibrationSystem.java:210-218`).
-            if shrieker.has_current_vibration() {
-                return false;
-            }
-            // `onReceiveVibration` is invoked by the block entity's vibration ticker after travel
-            // time, rather than directly from event dispatch (`VibrationSystem.java:342-361`).
-            shrieker.queue_vibration(
-                source_position,
-                player.living_entity.entity.entity_uuid,
-                event,
-            );
-            true
-        })
+        let Some(block_entity) = world.get_block_entity(&self.pos) else {
+            return false;
+        };
+        let Some(shrieker) = block_entity
+            .as_any()
+            .downcast_ref::<SculkShriekerBlockEntity>()
+        else {
+            return false;
+        };
+        // `VibrationSystem.Listener.handleGameEvent` rejects a new event while a prior
+        // vibration is travelling (`VibrationSystem.java:210-218`).
+        if shrieker.has_current_vibration() {
+            return false;
+        }
+        // `onReceiveVibration` is invoked by the block entity's vibration ticker after travel
+        // time, rather than directly from event dispatch (`VibrationSystem.java:342-361`).
+        shrieker.queue_vibration(
+            source_position,
+            player.living_entity.entity.entity_uuid,
+            event,
+        );
+        true
     }
 }
 

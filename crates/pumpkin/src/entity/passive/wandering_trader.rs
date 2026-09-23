@@ -340,14 +340,14 @@ impl WanderingTraderEntity {
         self.update_trades();
     }
 
-    pub async fn open_trading_screen(&self, player: &Arc<Player>) {
+    pub fn open_trading_screen(&self, player: &Arc<Player>) {
         if let Some(sync_id) = player.open_handled_screen(self, None) {
             let offers = self
                 .offers
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone();
-            self.send_trade_offers(player, sync_id, offers).await;
+            self.send_trade_offers(player, sync_id, offers);
         }
     }
 
@@ -436,7 +436,7 @@ impl WanderingTraderEntity {
         data
     }
 
-    async fn send_trade_offers(
+    fn send_trade_offers(
         &self,
         player: &Player,
         sync_id: u8,
@@ -467,10 +467,7 @@ impl WanderingTraderEntity {
             using_economy_trade: true,
             data: Self::bedrock_trade_data(&offers),
         };
-        player
-            .client
-            .enqueue_packet_editioned(&java, &bedrock)
-            .await;
+        player.client.try_enqueue_packet_editioned(&java, &bedrock);
     }
 
     /// Vanilla `AbstractVillager.stillValid` (`AbstractVillager.java:304-306`): the menu
@@ -608,26 +605,19 @@ impl ScreenHandlerFactory for WanderingTraderEntity {
 
         let close_weak = self_weak.clone();
         handler.on_close = Some(Box::new(move || {
-            let close_weak = close_weak.clone();
-            Box::pin(async move {
-                if let Some(trader) = close_weak.upgrade() {
-                    *trader
-                        .trading_player
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-                }
-            })
+            if let Some(trader) = close_weak.upgrade() {
+                *trader
+                    .trading_player
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            }
         }));
 
         let world = self.get_entity().world.load_full();
         handler.on_trade = Some(Box::new(move |offer_index| {
-            let self_weak = self_weak.clone();
-            let world = world.clone();
-            Box::pin(async move {
-                if let Some(trader) = self_weak.upgrade() {
-                    trader.complete_trade(offer_index, &world);
-                }
-            })
+            if let Some(trader) = self_weak.upgrade() {
+                trader.complete_trade(offer_index, &world);
+            }
         }));
 
         let sound_weak = self.self_weak.lock().unwrap().clone().unwrap();
@@ -650,123 +640,118 @@ impl ScreenHandlerFactory for WanderingTraderEntity {
 }
 
 impl NBTStorage for WanderingTraderEntity {
-    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> crate::entity::NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.write_nbt(nbt);
-            nbt.put_int("DespawnDelay", self.despawn_delay.load(Ordering::Relaxed));
-            if let Some(target) = self.wander_target.load() {
-                nbt.put(
-                    "wander_target",
-                    NbtTag::IntArray(vec![target.0.x, target.0.y, target.0.z]),
-                );
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.mob_entity.living_entity.write_nbt(nbt);
+        nbt.put_int("DespawnDelay", self.despawn_delay.load(Ordering::Relaxed));
+        if let Some(target) = self.wander_target.load() {
+            nbt.put(
+                "wander_target",
+                NbtTag::IntArray(vec![target.0.x, target.0.y, target.0.z]),
+            );
+        }
+
+        let offers = self
+            .offers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut recipes = Vec::new();
+        for offer in offers.iter() {
+            let mut recipe = NbtCompound::new();
+
+            let mut buy = NbtCompound::new();
+            offer.base_cost_a.0.write_item_stack(&mut buy);
+            recipe.put_compound("buy", buy);
+
+            if let Some(cost_b) = &offer.cost_b
+                && !cost_b.0.is_empty()
+            {
+                let mut buy_b = NbtCompound::new();
+                cost_b.0.write_item_stack(&mut buy_b);
+                recipe.put_compound("buyB", buy_b);
             }
 
-            let offers = self
+            let mut sell_item = NbtCompound::new();
+            offer.output.0.write_item_stack(&mut sell_item);
+            recipe.put_compound("sell", sell_item);
+
+            recipe.put_int("uses", offer.uses);
+            recipe.put_int("maxUses", offer.max_uses);
+            recipe.put_bool("rewardExp", offer.reward_exp);
+            recipe.put_int("xp", offer.xp);
+            recipe.put_float("priceMultiplier", offer.price_multiplier);
+            recipe.put_int("specialPrice", offer.special_price);
+            recipe.put_int("demand", offer.demand);
+
+            recipes.push(pumpkin_nbt::tag::NbtTag::Compound(recipe));
+        }
+        let mut offers_compound = NbtCompound::new();
+        offers_compound.put("Recipes", pumpkin_nbt::tag::NbtTag::List(recipes));
+        nbt.put_compound("Offers", offers_compound);
+    }
+
+    fn read_nbt_non_mut(&self, nbt: &NbtCompound) {
+        self.mob_entity.living_entity.read_nbt_non_mut(nbt);
+        if let Some(delay) = nbt.get_int("DespawnDelay") {
+            self.despawn_delay.store(delay, Ordering::Relaxed);
+        }
+        self.wander_target
+            .store(nbt.get_int_array("wander_target").and_then(|values| {
+                let &[x, y, z] = values else {
+                    return None;
+                };
+                Some(BlockPos::new(x, y, z))
+            }));
+        // `WanderingTrader.readAdditionalSaveData` (`WanderingTrader.java:149`):
+        // `setAge(Math.max(0, getAge()))`.
+        if self.get_age() < 0 {
+            self.set_age(0);
+        }
+
+        if let Some(offers_compound) = nbt.get_compound("Offers")
+            && let Some(recipes) = offers_compound.get_list("Recipes")
+        {
+            let mut offers = self
                 .offers
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let mut recipes = Vec::new();
-            for offer in offers.iter() {
-                let mut recipe = NbtCompound::new();
+            offers.clear();
+            for tag in recipes {
+                if let Some(recipe) = tag.extract_compound() {
+                    let buy = recipe
+                        .get_compound("buy")
+                        .and_then(pumpkin_data::item_stack::ItemStack::read_item_stack);
+                    let buy_b = recipe
+                        .get_compound("buyB")
+                        .and_then(pumpkin_data::item_stack::ItemStack::read_item_stack);
+                    let sell_item = recipe
+                        .get_compound("sell")
+                        .and_then(pumpkin_data::item_stack::ItemStack::read_item_stack);
 
-                let mut buy = NbtCompound::new();
-                offer.base_cost_a.0.write_item_stack(&mut buy);
-                recipe.put_compound("buy", buy);
+                    if let (Some(buy), Some(sell_item)) = (buy, sell_item) {
+                        let uses = recipe.get_int("uses").unwrap_or(0);
+                        let max_uses = recipe.get_int("maxUses").unwrap_or(12);
+                        let reward_exp = recipe.get_bool("rewardExp").unwrap_or(true);
+                        let xp = recipe.get_int("xp").unwrap_or(2);
+                        let price_multiplier = recipe.get_float("priceMultiplier").unwrap_or(0.05);
+                        let special_price = recipe.get_int("specialPrice").unwrap_or(0);
+                        let demand = recipe.get_int("demand").unwrap_or(0);
 
-                if let Some(cost_b) = &offer.cost_b
-                    && !cost_b.0.is_empty()
-                {
-                    let mut buy_b = NbtCompound::new();
-                    cost_b.0.write_item_stack(&mut buy_b);
-                    recipe.put_compound("buyB", buy_b);
-                }
-
-                let mut sell_item = NbtCompound::new();
-                offer.output.0.write_item_stack(&mut sell_item);
-                recipe.put_compound("sell", sell_item);
-
-                recipe.put_int("uses", offer.uses);
-                recipe.put_int("maxUses", offer.max_uses);
-                recipe.put_bool("rewardExp", offer.reward_exp);
-                recipe.put_int("xp", offer.xp);
-                recipe.put_float("priceMultiplier", offer.price_multiplier);
-                recipe.put_int("specialPrice", offer.special_price);
-                recipe.put_int("demand", offer.demand);
-
-                recipes.push(pumpkin_nbt::tag::NbtTag::Compound(recipe));
-            }
-            let mut offers_compound = NbtCompound::new();
-            offers_compound.put("Recipes", pumpkin_nbt::tag::NbtTag::List(recipes));
-            nbt.put_compound("Offers", offers_compound);
-        })
-    }
-
-    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> crate::entity::NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.mob_entity.living_entity.read_nbt_non_mut(nbt);
-            if let Some(delay) = nbt.get_int("DespawnDelay") {
-                self.despawn_delay.store(delay, Ordering::Relaxed);
-            }
-            self.wander_target
-                .store(nbt.get_int_array("wander_target").and_then(|values| {
-                    let &[x, y, z] = values else {
-                        return None;
-                    };
-                    Some(BlockPos::new(x, y, z))
-                }));
-            // `WanderingTrader.readAdditionalSaveData` (`WanderingTrader.java:149`):
-            // `setAge(Math.max(0, getAge()))`.
-            if self.get_age() < 0 {
-                self.set_age(0);
-            }
-
-            if let Some(offers_compound) = nbt.get_compound("Offers")
-                && let Some(recipes) = offers_compound.get_list("Recipes")
-            {
-                let mut offers = self
-                    .offers
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                offers.clear();
-                for tag in recipes {
-                    if let Some(recipe) = tag.extract_compound() {
-                        let buy = recipe
-                            .get_compound("buy")
-                            .and_then(pumpkin_data::item_stack::ItemStack::read_item_stack);
-                        let buy_b = recipe
-                            .get_compound("buyB")
-                            .and_then(pumpkin_data::item_stack::ItemStack::read_item_stack);
-                        let sell_item = recipe
-                            .get_compound("sell")
-                            .and_then(pumpkin_data::item_stack::ItemStack::read_item_stack);
-
-                        if let (Some(buy), Some(sell_item)) = (buy, sell_item) {
-                            let uses = recipe.get_int("uses").unwrap_or(0);
-                            let max_uses = recipe.get_int("maxUses").unwrap_or(12);
-                            let reward_exp = recipe.get_bool("rewardExp").unwrap_or(true);
-                            let xp = recipe.get_int("xp").unwrap_or(2);
-                            let price_multiplier =
-                                recipe.get_float("priceMultiplier").unwrap_or(0.05);
-                            let special_price = recipe.get_int("specialPrice").unwrap_or(0);
-                            let demand = recipe.get_int("demand").unwrap_or(0);
-
-                            offers.push(pumpkin_protocol::java::client::play::MerchantOffer {
-                                base_cost_a: buy.into(),
-                                output: sell_item.into(),
-                                cost_b: buy_b.map(Into::into),
-                                reward_exp,
-                                uses,
-                                max_uses,
-                                xp,
-                                special_price,
-                                price_multiplier,
-                                demand,
-                            });
-                        }
+                        offers.push(pumpkin_protocol::java::client::play::MerchantOffer {
+                            base_cost_a: buy.into(),
+                            output: sell_item.into(),
+                            cost_b: buy_b.map(Into::into),
+                            reward_exp,
+                            uses,
+                            max_uses,
+                            xp,
+                            special_price,
+                            price_multiplier,
+                            demand,
+                        });
                     }
                 }
             }
-        })
+        }
     }
 }
 
@@ -1043,76 +1028,65 @@ impl Mob for WanderingTraderEntity {
 
     /// Vanilla `WanderingTrader::maybeDespawn` (`WanderingTrader.java:211-215`): decrements
     /// `despawnDelay` each tick while `!isTrading()`; discards the entity at 0.
-    fn mob_tick<'a>(
-        &'a self,
-        _caller: &'a Arc<dyn EntityBase>,
-    ) -> crate::entity::EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if self
-                .trading_player
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .is_some()
-            {
-                return;
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        if self
+            .trading_player
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+        {
+            return;
+        }
+        let delay = self.despawn_delay.load(Ordering::Relaxed);
+        if delay > 0 {
+            let new_delay = delay - 1;
+            self.despawn_delay.store(new_delay, Ordering::Relaxed);
+            if new_delay <= 0 {
+                let world = self.get_entity().world.load();
+                world.remove_entity(self);
             }
-            let delay = self.despawn_delay.load(Ordering::Relaxed);
-            if delay > 0 {
-                let new_delay = delay - 1;
-                self.despawn_delay.store(new_delay, Ordering::Relaxed);
-                if new_delay <= 0 {
-                    let world = self.get_entity().world.load();
-                    world.remove_entity(self);
-                }
-            }
-        })
+        }
     }
 
     /// Vanilla `WanderingTrader.mobInteract` (`WanderingTrader.java:107-127`).
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> crate::entity::EntityBaseFuture<'a, bool> {
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
         let player = player.clone();
-        Box::pin(async move {
-            if item_stack.item == &Item::VILLAGER_SPAWN_EGG
-                || !self.get_entity().is_alive()
-                || self.is_trading()
-                || self.is_baby()
-            {
-                return false;
-            }
+        if item_stack.item == &Item::VILLAGER_SPAWN_EGG
+            || !self.get_entity().is_alive()
+            || self.is_trading()
+            || self.is_baby()
+        {
+            return false;
+        }
 
-            player.increment_stat(
-                pumpkin_data::statistic::StatisticCategory::Custom,
-                pumpkin_data::statistic::CustomStatistic::TalkedToVillager as i32,
-                1,
-            );
+        player.increment_stat(
+            pumpkin_data::statistic::StatisticCategory::Custom,
+            pumpkin_data::statistic::CustomStatistic::TalkedToVillager as i32,
+            1,
+        );
 
-            let mut offers = self
+        let mut offers = self
+            .offers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if offers.is_empty() {
+            drop(offers);
+            self.update_trades();
+            offers = self
                 .offers
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if offers.is_empty() {
-                drop(offers);
-                self.update_trades();
-                offers = self
-                    .offers
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-            }
+        }
 
-            // Vanilla: `getOffers().isEmpty()` returns `CONSUME` (acknowledge, no menu).
-            if offers.is_empty() {
-                return true;
-            }
-            drop(offers);
+        // Vanilla: `getOffers().isEmpty()` returns `CONSUME` (acknowledge, no menu).
+        if offers.is_empty() {
+            return true;
+        }
+        drop(offers);
 
-            self.open_trading_screen(&player).await;
+        self.open_trading_screen(&player);
 
-            true
-        })
+        true
     }
 }
 

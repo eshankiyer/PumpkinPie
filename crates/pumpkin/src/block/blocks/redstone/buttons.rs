@@ -122,7 +122,7 @@ fn click_button(
             30
         };
         world.schedule_block_tick(block, *block_pos, delay, TickPriority::Normal);
-        ButtonBlock::update_neighbors(world, block_pos, &button_props);
+        ButtonBlock::update_neighbors(world, block_pos, button_props);
 
         // Vanilla `press` (ButtonBlock.java:94-100): click-on sound and a BLOCK_ACTIVATE
         // game event whose source is the pressing player (null for explosions,
@@ -203,7 +203,7 @@ impl BlockBehaviour for ButtonBlock {
             props.to_state_id(args.block),
             BlockFlags::NOTIFY_ALL,
         );
-        Self::update_neighbors(args.world, args.position, &props);
+        Self::update_neighbors(args.world, args.position, props);
 
         // Vanilla `checkPressed` (ButtonBlock.java:162-177): releasing plays the click-off
         // sound with no source and fires BLOCK_DEACTIVATE. Arrow-activatable buttons remain
@@ -277,7 +277,7 @@ impl BlockBehaviour for ButtonBlock {
         if !args.moved {
             let button_props = ButtonLikeProperties::from_state_id(args.old_state_id, args.block);
             if button_props.powered {
-                Self::update_neighbors(args.world, args.position, &button_props);
+                Self::update_neighbors(args.world, args.position, button_props);
             }
         }
     }
@@ -320,7 +320,7 @@ impl WallMountedBlock for ButtonBlock {
 }
 
 impl ButtonBlock {
-    fn update_neighbors(world: &Arc<World>, block_pos: &BlockPos, props: &ButtonLikeProperties) {
+    fn update_neighbors(world: &Arc<World>, block_pos: &BlockPos, props: ButtonLikeProperties) {
         let direction = props.get_direction().opposite();
         world.update_neighbors(block_pos, None);
         world.update_neighbors(&block_pos.offset(direction.to_offset()), None);

@@ -581,7 +581,7 @@ impl BlockRegistry {
         let base_entity = entity.get_entity();
         if base_entity.is_removed()
             || base_entity
-                .no_clip
+                .no_physics
                 .load(std::sync::atomic::Ordering::Relaxed)
             || entity.is_spectator()
         {
@@ -1113,7 +1113,7 @@ impl BlockRegistry {
         }
     }
 
-    pub async fn attack(
+    pub fn attack(
         &self,
         world: &Arc<World>,
         block: &Block,
@@ -1122,15 +1122,13 @@ impl BlockRegistry {
         player: &Arc<Player>,
     ) {
         if let Some(pumpkin_block) = self.get_pumpkin_block(block.id) {
-            pumpkin_block
-                .attack(AttackArgs {
-                    world,
-                    block,
-                    state,
-                    position,
-                    player,
-                })
-                .await;
+            pumpkin_block.attack(AttackArgs {
+                world,
+                block,
+                state,
+                position,
+                player,
+            });
         }
     }
 
@@ -1494,7 +1492,7 @@ impl BlockRegistry {
     #[expect(clippy::too_many_arguments)]
     pub fn get_state_for_neighbor_update(
         &self,
-        world: &Arc<World>,
+        world: &World,
         block: &Block,
         state_id: BlockStateId,
         position: &BlockPos,
@@ -1527,12 +1525,7 @@ impl BlockRegistry {
         for direction in BlockDirection::abstract_block_update_order() {
             let pos = position.offset(direction.to_offset());
 
-            Box::pin(world.replace_with_state_for_neighbor_update(
-                &pos,
-                direction.opposite(),
-                flags,
-            ))
-            .await;
+            world.replace_with_state_for_neighbor_update(&pos, direction.opposite(), flags);
         }
     }
 
@@ -1573,6 +1566,7 @@ impl BlockRegistry {
         })
     }
 
+    #[must_use]
     pub fn emits_redstone_power(
         &self,
         block: &Block,

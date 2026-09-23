@@ -185,36 +185,26 @@ impl ExperienceOrbEntity {
 }
 
 impl NBTStorage for ExperienceOrbEntity {
-    fn write_nbt<'a>(
-        &'a self,
-        nbt: &'a mut pumpkin_nbt::compound::NbtCompound,
-    ) -> super::NbtFuture<'a, ()> {
-        Box::pin(async move {
-            // Vanilla `ExperienceOrb.addAdditionalSaveData`. `Health` is not tracked here.
-            nbt.put_short("Age", self.orb_age.load(Ordering::Relaxed) as i16);
-            nbt.put_short("Value", self.amount.load(Ordering::Relaxed) as i16);
-            nbt.put_int("Count", self.count.load(Ordering::Relaxed) as i32);
-        })
+    fn write_nbt(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        // Vanilla `ExperienceOrb.addAdditionalSaveData`. `Health` is not tracked here.
+        nbt.put_short("Age", self.orb_age.load(Ordering::Relaxed) as i16);
+        nbt.put_short("Value", self.amount.load(Ordering::Relaxed) as i16);
+        nbt.put_int("Count", self.count.load(Ordering::Relaxed) as i32);
     }
 
-    fn read_nbt_non_mut<'a>(
-        &'a self,
-        nbt: &'a pumpkin_nbt::compound::NbtCompound,
-    ) -> super::NbtFuture<'a, ()> {
-        Box::pin(async move {
-            self.orb_age.store(
-                nbt.get_short("Age").unwrap_or(0).max(0) as u32,
-                Ordering::Relaxed,
-            );
-            self.amount.store(
-                nbt.get_short("Value").unwrap_or(0).max(0) as u32,
-                Ordering::Relaxed,
-            );
-            self.count.store(
-                nbt.get_int("Count").unwrap_or(1).max(1) as u32,
-                Ordering::Relaxed,
-            );
-        })
+    fn read_nbt_non_mut(&self, nbt: &pumpkin_nbt::compound::NbtCompound) {
+        self.orb_age.store(
+            nbt.get_short("Age").unwrap_or(0).max(0) as u32,
+            Ordering::Relaxed,
+        );
+        self.amount.store(
+            nbt.get_short("Value").unwrap_or(0).max(0) as u32,
+            Ordering::Relaxed,
+        );
+        self.count.store(
+            nbt.get_int("Count").unwrap_or(1).max(1) as u32,
+            Ordering::Relaxed,
+        );
     }
 }
 
@@ -299,12 +289,21 @@ impl EntityBase for ExperienceOrbEntity {
 
     fn on_player_collision(&self, player: &Arc<Player>) {
         if player.living_entity.health.load() > 0.0 {
-            let mut delay = player
-                .experience_pick_up_delay
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if *delay == 0 {
-                *delay = 2;
+            // Check and arm the pickup delay in a scope of its own: the std mutex must not
+            // stay held across mending/experience updates that may touch the player again.
+            let can_pickup = {
+                let mut delay = player
+                    .experience_pick_up_delay
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if *delay == 0 {
+                    *delay = 2;
+                    true
+                } else {
+                    false
+                }
+            };
+            if can_pickup {
                 player.living_entity.pickup(&self.entity, 1);
                 let remaining =
                     player.apply_mending_from_xp(self.amount.load(Ordering::Relaxed) as i32);

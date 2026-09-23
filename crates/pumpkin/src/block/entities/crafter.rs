@@ -12,11 +12,12 @@ use pumpkin_world::world::BlockFlags;
 use std::any::Any;
 use std::array::from_fn;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 pub struct CrafterBlockEntity {
     pub position: BlockPos,
-    pub items: std::sync::RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
+    pub items: RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
     pub crafting_ticks_remaining: AtomicI32,
     pub triggered: AtomicBool,
     pub disabled_slots: [AtomicBool; Self::INVENTORY_SIZE],
@@ -66,7 +67,7 @@ impl BlockEntity for CrafterBlockEntity {
 
         let crafter = Self {
             position,
-            items: std::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+            items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             crafting_ticks_remaining: AtomicI32::new(
                 nbt.get_int("crafting_ticks_remaining").unwrap_or(0),
             ),
@@ -75,7 +76,10 @@ impl BlockEntity for CrafterBlockEntity {
             dirty: AtomicBool::new(false),
         };
 
-        let mut items = futures::executor::block_on(crafter.items.write());
+        let mut items = crafter
+            .items
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         crafter.read_data(nbt, &mut *items);
         drop(items);
 
@@ -83,7 +87,11 @@ impl BlockEntity for CrafterBlockEntity {
         // still empty once items are loaded (slotCanBeDisabled gates both directions).
         for slot in 0..Self::INVENTORY_SIZE {
             if crafter.disabled_slots[slot].load(Ordering::Relaxed)
-                && !futures::executor::block_on(crafter.items.read())[slot].is_empty()
+                && !crafter
+                    .items
+                    .read()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)[slot]
+                    .is_empty()
             {
                 crafter.disabled_slots[slot].store(false, Ordering::Relaxed);
             }
@@ -139,8 +147,9 @@ impl BlockEntity for CrafterBlockEntity {
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
         let mut nbt = NbtCompound::new();
-        let items = futures::executor::block_on(self.items.read());
-        sync_write_items_to_nbt(items.as_slice(), &mut nbt);
+        if let Ok(items) = self.items.try_read() {
+            sync_write_items_to_nbt(items.as_slice(), &mut nbt);
+        }
         nbt.put_int(
             "crafting_ticks_remaining",
             self.crafting_ticks_remaining.load(Ordering::Relaxed),
@@ -211,7 +220,7 @@ impl CrafterBlockEntity {
     pub fn new(position: BlockPos) -> Self {
         Self {
             position,
-            items: std::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+            items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             crafting_ticks_remaining: AtomicI32::new(0),
             triggered: AtomicBool::new(false),
             disabled_slots: from_fn(|_| AtomicBool::new(false)),
@@ -400,7 +409,7 @@ mod tests {
 
     /// The crafter is a `CraftingContainer`, so `CrafterBlock.dispenseFrom` can look a
     /// recipe up straight out of its nine slots (`CrafterBlock.java:152-153`).
-    #[tokio::test]
+    #[test]
     fn crafter_contents_are_a_recipe_input() {
         let crafter = crafter();
         for slot in [0, 1, 3, 4] {
@@ -412,7 +421,7 @@ mod tests {
     }
 
     /// A disabled slot is an empty one, so it just shrinks the trimmed input.
-    #[tokio::test]
+    #[test]
     fn a_disabled_slot_does_not_block_a_match() {
         let crafter = crafter();
         crafter.set_slot_state(8, false);
@@ -423,7 +432,7 @@ mod tests {
         assert!(match_crafting_recipe(&crafter, None).is_some());
     }
 
-    #[tokio::test]
+    #[test]
     fn an_unmatched_grid_yields_no_recipe() {
         let crafter = crafter();
         crafter.set_stack(0, ItemStack::new(1, &Item::DIRT));

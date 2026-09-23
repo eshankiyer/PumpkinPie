@@ -41,6 +41,7 @@ impl CommandExecutor for TargetSelfExecutor {
         let Some(Arg::Simple(hostname)) = args.get(ARG_HOSTNAME) else {
             return Err(InvalidConsumption(Some(ARG_HOSTNAME.into())));
         };
+        let hostname = (*hostname).to_string();
 
         let port = match port_consumer().find_arg_default_name(args) {
             Err(_) => 25565,
@@ -56,12 +57,9 @@ impl CommandExecutor for TargetSelfExecutor {
             let name = &player.gameprofile.name;
             info!("[{name}: Transferring {name} to {hostname}:{port}]");
 
-            player
-                .enqueue_packet_editioned(
-                    &JavaCTransfer::new(hostname, VarInt(port)),
-                    &BedrockCTransfer::new(hostname.to_string(), port as u16, false),
-                )
-                .await;
+            let bedrock_packet = BedrockCTransfer::new(hostname.clone(), port as u16, false);
+            let java_packet = JavaCTransfer::new(&hostname, VarInt(port));
+            player.try_enqueue_packet_editioned(&java_packet, &bedrock_packet);
 
             Ok(1)
         } else {
@@ -82,7 +80,7 @@ impl CommandExecutor for TargetPlayerExecutor {
         let Some(Arg::Simple(hostname)) = args.get(ARG_HOSTNAME) else {
             return Err(InvalidConsumption(Some(ARG_HOSTNAME.into())));
         };
-        let hostname = *hostname;
+        let hostname = (*hostname).to_string();
 
         let port = match port_consumer().find_arg_default_name(args) {
             Err(_) => 25565,
@@ -107,11 +105,9 @@ impl CommandExecutor for TargetPlayerExecutor {
         }
 
         for p in players {
-            p.enqueue_packet_editioned(
-                &JavaCTransfer::new(hostname, VarInt(port)),
-                &BedrockCTransfer::new(hostname.to_string(), port as u16, false),
-            )
-            .await;
+            let bedrock_packet = BedrockCTransfer::new(hostname.clone(), port as u16, false);
+            let java_packet = JavaCTransfer::new(&hostname, VarInt(port));
+            p.try_enqueue_packet_editioned(&java_packet, &bedrock_packet);
 
             info!(
                 "[{sender}: Transferring {} to {hostname}:{port}]",
@@ -125,7 +121,7 @@ impl CommandExecutor for TargetPlayerExecutor {
                 "commands.transfer.success.single",
                 [
                     players[0].get_display_name(),
-                    TextComponent::text(hostname.to_owned()),
+                    TextComponent::text(hostname),
                     TextComponent::text(port.to_string()),
                 ],
             ));
@@ -135,7 +131,7 @@ impl CommandExecutor for TargetPlayerExecutor {
                 "commands.transfer.success.multiple",
                 [
                     TextComponent::text(players.len().to_string()),
-                    TextComponent::text(hostname.to_owned()),
+                    TextComponent::text(hostname),
                     TextComponent::text(port.to_string()),
                 ],
             ));

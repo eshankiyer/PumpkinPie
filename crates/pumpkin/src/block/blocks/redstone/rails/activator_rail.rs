@@ -215,24 +215,27 @@ impl ActivatorRailBlock {
             _ => return false,
         }
 
-        let next_pos = BlockPos::new(x, y, z);
-
-        if self.is_powered_by_other_rails_at(world, &next_pos, direction, distance, next_shape) {
+        if self.is_powered_at_position(
+            world,
+            &BlockPos::new(x, y, z),
+            direction,
+            distance,
+            next_shape,
+        ) {
             return true;
         }
 
-        if check_down {
-            let down_pos = BlockPos::new(x, y - 1, z);
-            if self.is_powered_by_other_rails_at(world, &down_pos, direction, distance, next_shape)
-            {
-                return true;
-            }
-        }
-
-        false
+        check_down
+            && self.is_powered_at_position(
+                world,
+                &BlockPos::new(x, y - 1, z),
+                direction,
+                distance,
+                next_shape,
+            )
     }
 
-    fn is_powered_by_other_rails_at(
+    fn is_powered_at_position(
         &self,
         world: &World,
         pos: &BlockPos,
@@ -281,8 +284,7 @@ impl ActivatorRailBlock {
             return true;
         }
 
-        Box::pin(self.is_powered_by_other_rails(world, pos, &rail_props, direction, distance + 1))
-            .await
+        self.is_powered_by_other_rails(world, pos, &rail_props, direction, distance + 1)
     }
 
     fn update_powered_state(&self, world: &Arc<World>, block: &Block, pos: &BlockPos) {
@@ -319,10 +321,8 @@ impl ActivatorRailBlock {
 
             if propagate {
                 let updated_rail_props = RailProperties::new(rail_props.to_state_id(block), block);
-                Box::pin(self.update_connected_rails(world, pos, &updated_rail_props, true, 0))
-                    .await;
-                Box::pin(self.update_connected_rails(world, pos, &updated_rail_props, false, 0))
-                    .await;
+                self.update_connected_rails(world, pos, &updated_rail_props, true, 0);
+                self.update_connected_rails(world, pos, &updated_rail_props, false, 0);
             }
         }
     }
@@ -448,8 +448,7 @@ impl ActivatorRailBlock {
         if shapes_compatible {
             self.update_powered_state_internal(world, block, pos, false);
 
-            Box::pin(self.update_connected_rails(world, pos, &rail_props, direction, distance + 1))
-                .await;
+            self.update_connected_rails(world, pos, &rail_props, direction, distance + 1);
         }
     }
 

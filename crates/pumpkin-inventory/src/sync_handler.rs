@@ -18,7 +18,7 @@
 //! and server stay in sync. If the client detects a desync, it can request a full
 //! resynchronization.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_protocol::{
@@ -30,7 +30,6 @@ use pumpkin_protocol::{
         CSetContainerContent, CSetContainerProperty, CSetContainerSlot, CSetCursorItem,
     },
 };
-use std::sync::Mutex;
 
 use crate::screen_handler::{InventoryPlayer, ScreenHandlerBehaviour};
 
@@ -90,7 +89,7 @@ impl SyncHandler {
         screen_handler: &ScreenHandlerBehaviour,
         stacks: &[ItemStack],
         cursor_stack: &ItemStack,
-        properties: Vec<i32>,
+        properties: &[i32],
         next_revision: u32,
     ) {
         if let Some(player) = self

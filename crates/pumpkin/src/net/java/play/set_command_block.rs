@@ -57,7 +57,8 @@ impl JavaClient {
             }
 
             let Ok(command_block_mode) = CommandBlockMode::try_from(command.mode) else {
-                self.kick(TextComponent::text("Invalid Command block mode"));
+                self.kick(TextComponent::text("Invalid Command block mode"))
+                    .await;
                 return;
             };
 
@@ -100,8 +101,14 @@ impl JavaClient {
                     .into(),
                 auto: command.is_automatic().into(),
                 dirty: old_command_block.dirty.load(Ordering::SeqCst).into(),
-                command: Mutex::new(cmd.to_string()),
-                last_output: old_command_block.last_output.lock().clone().into(),
+                command: std::sync::Mutex::new(cmd.to_string()),
+                last_output: std::sync::Mutex::new(
+                    old_command_block
+                        .last_output
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone(),
+                ),
                 track_output: command.track_output().into(),
                 success_count: AtomicU32::new(0),
                 // Preserve the command block's BaseCommandBlock name while replacing its

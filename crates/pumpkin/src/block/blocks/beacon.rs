@@ -3,6 +3,7 @@ use std::sync::Mutex;
 
 use crate::block::entities::BlockEntity;
 use pumpkin_data::translation;
+use pumpkin_inventory::beacon_screen_handler::create_beacon_handler;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::{
     InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
@@ -27,8 +28,6 @@ impl ScreenHandlerFactory for BeaconScreenFactory {
         player_inventory: &Arc<PlayerInventory>,
         _player: &dyn InventoryPlayer,
     ) -> Option<SharedScreenHandler> {
-        use pumpkin_inventory::beacon_screen_handler::create_beacon_handler;
-
         let concrete_handler =
             create_beacon_handler(sync_id, player_inventory, self.0.clone(), self.1.clone());
         let concrete_arc = Arc::new(Mutex::new(concrete_handler));

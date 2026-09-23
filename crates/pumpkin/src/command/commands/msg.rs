@@ -37,16 +37,15 @@ impl CommandExecutor for Executor {
         let player = sender.as_player().ok_or(CommandError::InvalidRequirement)?;
 
         for target in targets {
+            let msg_text = TextComponent::text(msg.clone());
             player.send_message(
-                &TextComponent::text(msg.clone()),
+                &msg_text,
                 MSG_COMMAND_OUTGOING,
                 &player.get_display_name(),
                 Some(&target.get_display_name()),
             );
-        }
-        for target in targets {
             target.send_message(
-                &TextComponent::text(msg.clone()),
+                &msg_text,
                 MSG_COMMAND_INCOMING,
                 &player.get_display_name(),
                 Some(&target.get_display_name()),

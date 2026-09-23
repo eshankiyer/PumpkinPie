@@ -248,7 +248,7 @@ mod tests {
     use pumpkin_nbt::compound::NbtCompound;
     use pumpkin_world::inventory::Inventory;
 
-    #[tokio::test]
+    #[test]
     fn deferred_mineshaft_loot_is_preserved_until_unpacked() {
         let inventory = std::sync::Arc::new(MinecartInventory::new(27));
         let mut source = NbtCompound::new();
@@ -277,7 +277,7 @@ mod tests {
         assert!(unpacked.get_list("Items").is_some());
     }
 
-    #[tokio::test]
+    #[test]
     fn chest_minecart_items_round_trip_through_nbt() {
         let inventory = MinecartInventory::new(27);
         inventory.set_stack(8, ItemStack::new(3, &Item::POWERED_RAIL));

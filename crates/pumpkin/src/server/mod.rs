@@ -46,6 +46,7 @@ use pumpkin_world::world_info::anvil::{
 };
 use pumpkin_world::world_info::{LevelData, WorldInfoError, WorldInfoReader, WorldInfoWriter};
 use rand::seq::{IndexedRandom, SliceRandom};
+use rayon::prelude::*;
 use rsa::RsaPublicKey;
 use std::collections::HashSet;
 use std::fs;
@@ -54,7 +55,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU32};
 use std::{future::Future, sync::atomic::Ordering, time::Duration};
 use tokio::sync::{Mutex, OnceCell};
-use tokio::task::{JoinHandle, JoinSet};
+use tokio::task::JoinHandle;
 use tokio_util::task::TaskTracker;
 
 mod connection_cache;
@@ -122,13 +123,13 @@ pub struct Server {
     /// Pulled from Mojang API on startup
     pub mojang_public_keys: ArcSwap<Vec<RsaPublicKey>>,
     /// The server's custom bossbars
-    pub bossbars: Mutex<CustomBossbars>,
+    pub bossbars: std::sync::Mutex<CustomBossbars>,
     /// The server's named stopwatches (`Stopwatches.java`), driven by the /stopwatch command
-    pub stopwatches: Mutex<Stopwatches>,
+    pub stopwatches: std::sync::Mutex<Stopwatches>,
     /// Manages all maps on the server
     pub map_manager: MapManager,
     /// The default gamemode when a player joins the server (reset every restart)
-    pub defaultgamemode: Mutex<DefaultGamemode>,
+    pub defaultgamemode: std::sync::Mutex<DefaultGamemode>,
     /// Manages player data storage
     pub player_data_storage: ServerPlayerData,
     // Manages player advancement
@@ -138,7 +139,7 @@ pub struct Server {
     /// Manages the server's tick rate, freezing, and sprinting
     pub tick_rate_manager: Arc<ServerTickRateManager>,
     /// Stores the duration of the last 100 ticks for performance analysis
-    pub tick_times_nanos: Mutex<[i64; 100]>,
+    pub tick_times_nanos: std::sync::Mutex<[i64; 100]>,
     /// Aggregated tick times for efficient rolling average calculation
     pub aggregated_tick_times_nanos: AtomicI64,
     /// Total number of ticks processed by the server
@@ -152,13 +153,13 @@ pub struct Server {
     /// Manages scheduled tasks (e.g. from plugins)
     pub task_scheduler: Arc<TaskScheduler>,
     tasks: TaskTracker,
-    runtime: tokio::runtime::Handle,
+    pub runtime: tokio::runtime::Handle,
 
     // world stuff which maybe should be put into a struct
     pub level_info: Arc<ArcSwap<LevelData>>,
     world_info_writer: Arc<dyn WorldInfoWriter>,
     /// Single global scoreboard shared across all dimensions.
-    pub scoreboard: Arc<tokio::sync::Mutex<Scoreboard>>,
+    pub scoreboard: Arc<std::sync::Mutex<Scoreboard>>,
 }
 
 impl Server {
@@ -243,14 +244,14 @@ impl Server {
         let scoreboard_data = level_info.load().scoreboard_data.clone();
         let mut sb = Scoreboard::default();
         sb.load_from_data(&scoreboard_data);
-        let scoreboard: Arc<tokio::sync::Mutex<Scoreboard>> = Arc::new(tokio::sync::Mutex::new(sb));
+        let scoreboard: Arc<std::sync::Mutex<Scoreboard>> = Arc::new(std::sync::Mutex::new(sb));
 
         let listing = Mutex::new(CachedStatus::new(
             &basic_config,
             &advanced_config.networking.java.motd,
             advanced_config.networking.java.max_players,
         ));
-        let defaultgamemode = Mutex::new(DefaultGamemode {
+        let defaultgamemode = std::sync::Mutex::new(DefaultGamemode {
             gamemode: basic_config.default_gamemode,
         });
         let players_dir = world_path.join("players");
@@ -314,15 +315,15 @@ impl Server {
             bedrock_private_key: OnceCell::new(),
             listing,
             branding: CachedBranding::new(),
-            bossbars: Mutex::new(CustomBossbars::new()),
-            stopwatches: Mutex::new(Stopwatches::default()),
+            bossbars: std::sync::Mutex::new(CustomBossbars::new()),
+            stopwatches: std::sync::Mutex::new(Stopwatches::default()),
             map_manager: MapManager::new(),
             defaultgamemode,
             player_data_storage,
             advancement_manager,
             white_list,
             tick_rate_manager,
-            tick_times_nanos: Mutex::new([0; 100]),
+            tick_times_nanos: std::sync::Mutex::new([0; 100]),
             aggregated_tick_times_nanos: AtomicI64::new(0),
             tick_count: AtomicI32::new(0),
             debug_profiler: debug_profiler::DebugProfiler::new(),
@@ -526,16 +527,10 @@ impl Server {
             .datapack_manager
             .load_all(&world_path, &enabled_packs, &server.recipe_manager);
 
-        let server_for_load = server.clone();
-        tokio::spawn(async move {
-            let source = crate::command::CommandSender::Console.into_source(&server_for_load);
-            let _ = server_for_load.datapack_manager.execute_function(
-                &server_for_load,
-                &source,
-                "#minecraft:load",
-                None,
-            );
-        });
+        let source = crate::command::CommandSender::Console.into_source(&server);
+        let _ = server
+            .datapack_manager
+            .execute_function(&server, &source, "#minecraft:load", None);
 
         server
     }
@@ -605,10 +600,7 @@ impl Server {
             });
             let mut event =
                 crate::plugin::api::events::world::world_init::WorldInitEvent::new(world.clone());
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current()
-                    .block_on(server.plugin_manager.fire(&server, &mut event));
-            });
+            server.plugin_manager.fire_blocking(&server, &mut event);
             world
         })
         .await
@@ -676,7 +668,7 @@ impl Server {
                     &dynamic_recipes,
                 );
                 if let Ok(data) = java_client.serialize_packet(&add_packet) {
-                    java_client.send_packet_now(data).await;
+                    java_client.try_enqueue_packet(data);
                 }
             }
         }
@@ -703,7 +695,7 @@ impl Server {
         }
 
         for world in self.worlds.load().iter() {
-            world.save();
+            world.save().await;
         }
 
         Ok(())
@@ -740,7 +732,11 @@ impl Server {
         profile: GameProfile,
         config: Option<PlayerConfig>,
     ) -> Option<(Arc<Player>, Arc<World>)> {
-        let gamemode = self.defaultgamemode.lock().gamemode;
+        let gamemode = self
+            .defaultgamemode
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .gamemode;
 
         let first_world = self.worlds.load().first().cloned()?;
 
@@ -769,7 +765,8 @@ impl Server {
             config.clone().unwrap_or_default(),
             world.clone(),
             gamemode,
-        );
+        )
+        .await;
 
         if let Some(mut nbt_data) = nbt {
             player.read_nbt(&mut nbt_data);
@@ -781,7 +778,10 @@ impl Server {
         // Wrap in Arc after data is loaded
         let player = Arc::new(player);
         {
-            let mut advancements = player.advancements.lock();
+            let mut advancements = player
+                .advancements
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Err(e) = advancements.load() {
                 warn!("Error loading player {}: {e}", player.gameprofile.id);
             }
@@ -796,14 +796,20 @@ impl Server {
                 if world
                     .add_player(&player)
                     .is_ok() {
-                    let mut user_cache = self.data.user_cache.write().await;
-                    user_cache.upsert(player.gameprofile.id, player.gameprofile.name.clone());
+                    {
+                        let mut user_cache = self
+                            .data
+                            .user_cache
+                            .write()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        user_cache.upsert(player.gameprofile.id, player.gameprofile.name.clone());
+                    };
 
                     // TODO: Config if we want increase online
                     if let Some(config) = config {
                         // TODO: Config so we can also just ignore this hehe
                         if config.server_listing {
-                            self.listing.lock().add_player(&player);
+                            self.listing.lock().await.add_player(&player);
                         }
                     }
 
@@ -814,7 +820,7 @@ impl Server {
             }
 
             'cancelled: {
-                player.kick(DisconnectReason::Kicked, event.kick_message);
+                player.kick(DisconnectReason::Kicked, &event.kick_message);
                 None
             }
         }}
@@ -827,7 +833,7 @@ impl Server {
             1,
         );
         // TODO: Config if we want decrease online
-        self.listing.lock().remove_player(player);
+        self.listing.lock().await.remove_player(player);
     }
 
     pub async fn shutdown(&self) {
@@ -844,10 +850,18 @@ impl Server {
             .find(|world| world.dimension == Dimension::OVERWORLD)
         {
             let day_time = overworld.get_time_of_day();
-            let weather = overworld.weather.lock().clone();
+            let weather = overworld
+                .weather
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
             // Vanilla `WorldBorder.Settings(WorldBorder)` (`WorldBorder.java:475-487`);
             // `write_world_info` puts these in `data/minecraft/world_border.dat`.
-            let border = overworld.worldborder.lock().to_settings();
+            let border = overworld
+                .worldborder
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .to_settings();
             self.level_info.rcu(|level_info| {
                 let mut snapshot = (**level_info).clone();
                 snapshot.day_time = day_time;
@@ -874,7 +888,10 @@ impl Server {
 
         // Save scoreboard into the shared LevelData
         let sb_data = {
-            let sb = self.scoreboard.lock();
+            let sb = self
+                .scoreboard
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             sb.to_data()
         };
         let mut level_data = self.level_info.load().as_ref().clone();
@@ -914,8 +931,14 @@ impl Server {
         let packet = CTabList::new(header, footer);
         for world in self.worlds.load().iter() {
             for player in world.players.load().iter() {
-                *player.tab_list_header.lock() = header.clone();
-                *player.tab_list_footer.lock() = footer.clone();
+                *player
+                    .tab_list_header
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = header.clone();
+                *player
+                    .tab_list_footer
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = footer.clone();
             }
             world.broadcast_packet_all(&packet);
         }
@@ -928,17 +951,13 @@ impl Server {
         chat_type: u8,
         target_name: Option<&TextComponent>,
     ) {
-        send_cancellable! {{
-            self;
-            ServerBroadcastEvent::new(message.clone(), sender_name.clone());
-
-            'after: {
-                for world in self.worlds.load().iter() {
-                    world
-                        .broadcast_message(&event.message, &event.sender, chat_type, target_name);
-                }
+        let mut event = ServerBroadcastEvent::new(message.clone(), sender_name.clone());
+        self.plugin_manager.fire_blocking(self, &mut event);
+        if !event.cancelled {
+            for world in self.worlds.load().iter() {
+                world.broadcast_message(&event.message, &event.sender, chat_type, target_name);
             }
-        }}
+        }
     }
 
     /// Gets the current difficulty of the server.
@@ -1192,40 +1211,33 @@ impl Server {
             world.flush_synced_block_events();
         }
 
-        let mut set = JoinSet::new();
+        let mut all_players = Vec::new();
         for world in worlds.iter() {
             let players = world.players.load();
-            for player in players.iter() {
-                let player_clone = player.clone();
-                let server_clone = self.clone();
-                set.spawn(async move {
-                    player_clone.tick(&server_clone);
-                });
-            }
+            all_players.extend(players.iter().cloned());
         }
-        set.join_all().await;
+
+        let handle = self.runtime.clone();
+        all_players.par_iter().for_each(|player| {
+            let _guard = handle.enter();
+            player.tick(self);
+        });
     }
+
     /// Ticks the game logic for all worlds. This is the part that is affected by `/tick freeze`.
     pub fn tick_worlds(self: &Arc<Self>) {
         self.task_scheduler.tick(self);
 
-        let mut set = JoinSet::new();
+        let worlds = self.worlds.load();
+        let handle = self.runtime.clone();
 
-        for world in self.worlds.load().iter() {
-            let world = world.clone();
-            let server = self.clone();
-
-            set.spawn(async move {
-                world.tick(server);
-            });
-        }
-
-        set.join_all().await;
+        worlds.par_iter().for_each(|world| {
+            let _guard = handle.enter();
+            world.tick(self);
+        });
 
         // Global tasks
-        if let Err(e) = self.player_data_storage.tick(self) {
-            error!("Error ticking player data: {e}");
-        }
+        self.player_data_storage.tick(self);
     }
 
     /// Updates the tick time statistics with the duration of the last tick.
@@ -1233,7 +1245,10 @@ impl Server {
         let tick_count = self.tick_count.fetch_add(1, Ordering::Relaxed);
         let index = (tick_count % 100) as usize;
 
-        let mut tick_times = self.tick_times_nanos.lock();
+        let mut tick_times = self
+            .tick_times_nanos
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let old_time = tick_times[index];
         tick_times[index] = tick_duration_nanos;
         drop(tick_times);
@@ -1295,7 +1310,10 @@ impl Server {
 
     /// Returns a copy of the last 100 tick times.
     pub fn get_tick_times_nanos_copy(&self) -> [i64; 100] {
-        *self.tick_times_nanos.lock()
+        *self
+            .tick_times_nanos
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     #[allow(clippy::too_many_lines, clippy::option_if_let_else)]

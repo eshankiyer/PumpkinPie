@@ -69,7 +69,7 @@ impl BlockBehaviour for TripwireBlock {
             BlockDirection::South,
             BlockDirection::West,
         ]
-        .map(async |dir| {
+        .map(|dir| {
             let current_pos = args.position.offset(dir.to_offset());
             let state_id = args.world.get_block_state_id(&current_pos);
             Self::should_connect_to(state_id, dir)
@@ -77,10 +77,10 @@ impl BlockBehaviour for TripwireBlock {
 
         let mut props = TripwireProperties::from_state_id(args.block.default_state.id, args.block);
 
-        props.north = connect_north.await;
-        props.south = connect_south.await;
-        props.west = connect_west.await;
-        props.east = connect_east.await;
+        props.north = connect_north;
+        props.south = connect_south;
+        props.west = connect_west;
+        props.east = connect_east;
 
         props.to_state_id(args.block)
     }

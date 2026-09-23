@@ -16,12 +16,13 @@ use pumpkin_world::inventory::{Clearable, Inventory, sync_write_items_to_nbt};
 use std::any::Any;
 use std::array::from_fn;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::sync::atomic::Ordering;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64};
 
 pub struct HopperBlockEntity {
     pub position: BlockPos,
-    pub items: std::sync::RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
+    pub items: RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
     pub dirty: AtomicBool,
     pub facing: FacingHopper,
     pub cooldown_time: AtomicI32,
@@ -92,14 +93,20 @@ impl BlockEntity for HopperBlockEntity {
     {
         let mut hopper = Self {
             position,
-            items: std::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+            items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             dirty: AtomicBool::new(false),
             facing: FacingHopper::Down,
             cooldown_time: AtomicI32::from(nbt.get_int("TransferCooldown").unwrap_or(-1)),
             ticked_game_time: AtomicI64::new(0),
         };
 
-        pumpkin_world::inventory::sync_read_items_from_nbt(nbt, hopper.items.get_mut());
+        pumpkin_world::inventory::sync_read_items_from_nbt(
+            nbt,
+            hopper
+                .items
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
 
         hopper
     }
@@ -151,8 +158,9 @@ impl BlockEntity for HopperBlockEntity {
             "TransferCooldown",
             NbtTag::Int(self.cooldown_time.load(Ordering::Relaxed)),
         );
-        let items = futures::executor::block_on(self.items.read());
-        sync_write_items_to_nbt(items.as_slice(), &mut nbt);
+        if let Ok(items) = self.items.try_read() {
+            sync_write_items_to_nbt(items.as_slice(), &mut nbt);
+        }
         Some(nbt)
     }
 
@@ -257,7 +265,7 @@ impl HopperBlockEntity {
     pub fn new(position: BlockPos, facing: FacingHopper) -> Self {
         Self {
             position,
-            items: std::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+            items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             dirty: AtomicBool::new(false),
             facing,
             cooldown_time: AtomicI32::new(-1),

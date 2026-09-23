@@ -3,6 +3,7 @@ use std::sync::atomic::Ordering::Relaxed;
 
 use super::{Controls, Goal};
 use crate::entity::EntityBase;
+
 use crate::entity::ai::goal::track_target::TrackTargetGoal;
 use crate::entity::ai::target_predicate::TargetPredicate;
 use crate::entity::mob::Mob;

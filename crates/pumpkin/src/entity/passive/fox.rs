@@ -17,7 +17,7 @@ use rand::{RngExt, rng};
 use uuid::Uuid;
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, NBTStorage,
     ageable::{AgeableData, AgeableMob},
     ai::goal::{
         active_target::ActiveTargetGoal, avoid_entity::AvoidEntityGoal, breed::BreedGoal,
@@ -342,9 +342,7 @@ impl FoxEntity {
                 false,
                 Some(
                     |target: crate::entity::ai::target_predicate::TargetData,
-                     _world: Arc<World>| async move {
-                        target.age < 0 && !target.in_water
-                    },
+                     _world: Arc<World>| { target.age < 0 && !target.in_water },
                 ),
             )),
         );
@@ -626,27 +624,22 @@ impl Mob for FoxEntity {
     /// `Mob::mob_try_pick_up_items` decrements by the returned count and leaves the rest as a
     /// live `ItemEntity`, which is the same end state. The `spitOutItem` call is unreachable
     /// because `can_hold_item` only accepts a pickup with an empty hand.
-    fn on_item_pickup<'a>(
-        &'a self,
-        stack: &'a ItemStack,
-    ) -> crate::entity::EntityBaseFuture<'a, u8> {
-        Box::pin(async move {
-            if !self.can_hold_item() {
-                return 0;
-            }
-            let mut pending = self
-                .pending_pickup
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if pending.is_some() {
-                return 0;
-            }
-            let mut single = stack.clone();
-            single.item_count = 1;
-            *pending = Some(single);
-            self.holding_item.store(true, Relaxed);
-            1
-        })
+    fn on_item_pickup(&self, stack: &ItemStack) -> u8 {
+        if !self.can_hold_item() {
+            return 0;
+        }
+        let mut pending = self
+            .pending_pickup
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if pending.is_some() {
+            return 0;
+        }
+        let mut single = stack.clone();
+        single.item_count = 1;
+        *pending = Some(single);
+        self.holding_item.store(true, Relaxed);
+        1
     }
 
     fn mob_set_variant_name(&self, name: &str) {

@@ -15,7 +15,6 @@ use crate::command::node::tree::{NodeIdClassification, ROOT_NODE_ID, Tree};
 use crate::command::string_reader::StringReader;
 use crate::command::suggestion::suggestions::{Suggestions, SuggestionsBuilder};
 use crate::command::tree::Command;
-use futures::future;
 use pumpkin_data::translation::java::COMMAND_CONTEXT_HERE;
 use pumpkin_protocol::java::client::play::CommandSuggestion;
 use pumpkin_util::text::TextComponent;
@@ -23,7 +22,6 @@ use pumpkin_util::text::click::ClickEvent;
 use pumpkin_util::text::color::{Color, NamedColor};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeMap;
-use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
 use tracing::warn;
 
@@ -430,8 +428,7 @@ impl CommandDispatcher {
                     };
                     let child_context =
                         CommandContextBuilder::new(self, source, redirect, reader.cursor());
-                    let parsed =
-                        Box::pin(self.parse_nodes(redirect, &mut reader, &child_context)).await;
+                    let parsed = self.parse_nodes(redirect, &mut reader, &child_context);
                     context.with_child(parsed.context);
                     return ParsingResult {
                         context,
@@ -439,7 +436,7 @@ impl CommandDispatcher {
                         reader: parsed.reader,
                     };
                 }
-                let parsed = Box::pin(self.parse_nodes(child, &mut reader, &context)).await;
+                let parsed = self.parse_nodes(child, &mut reader, &context);
                 potentials.push(parsed);
             } else {
                 potentials.push(ParsingResult {
@@ -575,11 +572,12 @@ impl CommandDispatcher {
         }
     }
 
-    /// Returns a new [`Suggestions`] structure in the future
+    /// Returns a new [`Suggestions`] structure
     /// from the given parsing result, which was a command that was parsed,
     /// assuming the cursor is at the end.
     ///
     /// This is useful to tell the client on what suggestions are there next.
+    #[must_use]
     pub fn get_completion_suggestions_at_end(
         &self,
         parsing_result: ParsingResult<'_>,
@@ -588,10 +586,11 @@ impl CommandDispatcher {
         self.get_completion_suggestions(parsing_result, length)
     }
 
-    /// Returns a new [`Suggestions`] structure in the future
+    /// Returns a new [`Suggestions`] structure
     /// from the given parsing result, which was a command that was parsed.
     ///
     /// This is useful to tell the client on what suggestions are there next.
+    #[must_use]
     pub fn get_completion_suggestions(
         &self,
         parsing_result: ParsingResult<'_>,
@@ -611,72 +610,56 @@ impl CommandDispatcher {
         let truncated_input = &full_input[0..cursor.min(full_input.len())];
 
         let children = self.tree.get_children(parent);
-        let capacity = children.len();
-        let mut futures = Vec::with_capacity(capacity);
-
         let context = context.build(truncated_input);
-        let mut provided_suggestions = Vec::new();
+        let mut suggestions = Vec::with_capacity(children.len());
 
         for child in children {
             let builder = SuggestionsBuilder::new(truncated_input, start);
 
-            let future: Option<Pin<Box<dyn Future<Output = Suggestions> + Send>>> =
-                match self.tree.classify_id(child) {
-                    NodeIdClassification::Root => Some(Box::pin(async { Suggestions::empty() })),
-                    NodeIdClassification::Literal(literal_node_id) => Some(Box::pin(async move {
-                        let node = &self.tree[literal_node_id];
-                        if node
-                            .meta
-                            .literal_lowercase
-                            .starts_with(builder.remaining_lowercase())
-                        {
-                            builder.suggest(&*node.meta.literal).build()
-                        } else {
-                            Suggestions::empty()
-                        }
-                    })),
-                    NodeIdClassification::Command(command_node_id) => Some(Box::pin(async move {
-                        let node = &self.tree[command_node_id];
-                        if node
-                            .meta
-                            .literal_lowercase
-                            .starts_with(builder.remaining_lowercase())
-                        {
-                            builder.suggest(&*node.meta.literal).build()
-                        } else {
-                            Suggestions::empty()
-                        }
-                    })),
-                    NodeIdClassification::Argument(argument_node_id) => {
-                        let node = &self.tree[argument_node_id];
-                        if let Some(provider) = &node.meta.suggestion_provider {
-                            // For custom suggestions sent by the server, we simply
-                            // wait instead of adding the future to join.
-                            provided_suggestions.push(provider.suggest(&context, builder));
-                        } else {
-                            provided_suggestions
-                                .push(node.meta.argument_type.list_suggestions(&context, builder));
-                        }
-                        None
+            match self.tree.classify_id(child) {
+                NodeIdClassification::Root => {}
+                NodeIdClassification::Literal(literal_node_id) => {
+                    let node = &self.tree[literal_node_id];
+                    if node
+                        .meta
+                        .literal_lowercase
+                        .starts_with(builder.remaining_lowercase())
+                    {
+                        suggestions.push(builder.suggest(&*node.meta.literal).build());
                     }
-                };
-
-            if let Some(future) = future {
-                futures.push(future);
+                }
+                NodeIdClassification::Command(command_node_id) => {
+                    let node = &self.tree[command_node_id];
+                    if node
+                        .meta
+                        .literal_lowercase
+                        .starts_with(builder.remaining_lowercase())
+                    {
+                        suggestions.push(builder.suggest(&*node.meta.literal).build());
+                    }
+                }
+                NodeIdClassification::Argument(argument_node_id) => {
+                    let node = &self.tree[argument_node_id];
+                    if let Some(provider) = &node.meta.suggestion_provider {
+                        suggestions.push(provider.suggest(&context, builder));
+                    } else {
+                        suggestions
+                            .push(node.meta.argument_type.list_suggestions(&context, builder));
+                    }
+                }
             }
         }
 
-        let mut suggestions = future::join_all(futures).await;
-        suggestions.append(&mut provided_suggestions);
         Suggestions::merge(full_input, suggestions)
     }
 
-    /// Gets all the suggestions in the future as a [`Vec`] of [`CommandSuggestion`].
+    /// Gets all the suggestions as a [`Vec`] of [`CommandSuggestion`].
     ///
     /// # Panics
     ///
     /// This function currently panics if the source provided was a dummy source.
     /// This is subject to change in the future.
+    #[must_use]
     pub fn suggest(&self, input: &str, source: &CommandSource) -> Vec<CommandSuggestion> {
         self.suggest_with_range(input, source)
             .suggestions
@@ -688,25 +671,20 @@ impl CommandDispatcher {
             .collect()
     }
 
+    #[must_use]
     pub fn suggest_with_range(&self, input: &str, source: &CommandSource) -> Suggestions {
         // Never suggest arguments for a command that has been turned off.
         if self.is_disabled(Self::command_name(input)) {
             return Suggestions::empty();
         }
 
-        let future1 = async move {
-            let parsed = self.parse_input(input, source);
-            self.get_completion_suggestions_at_end(parsed)
-        };
+        let parsed = self.parse_input(input, source);
+        let s1 = self.get_completion_suggestions_at_end(parsed);
+        let s2 = self
+            .fallback_dispatcher
+            .find_suggestions(&source.output, source.server(), input);
 
-        let future2 = async move {
-            self.fallback_dispatcher
-                .find_suggestions(&source.output, source.server(), input)
-        };
-
-        let (a, b) = future::join(future1, future2).await;
-        let suggestions = <[Suggestions; 2]>::from((a, b));
-        Suggestions::merge(input, suggestions)
+        Suggestions::merge(input, vec![s1, s2])
     }
 
     /// Gets all the commands usable in this dispatcher, sorted.
@@ -830,6 +808,7 @@ impl CommandDispatcher {
 
     /// Gets the description and usage of commands from a specific plugin.
     /// Only returns commands that the source has permission to use.
+    #[must_use]
     pub fn get_all_permitted_commands_usage_by_plugin(
         &self,
         source: &CommandSource,
@@ -868,6 +847,7 @@ impl CommandDispatcher {
     ///
     /// The key is the command identifier,
     /// and the value is a tuple of `(description, usage)`.
+    #[must_use]
     pub fn get_permitted_command_usage(
         &self,
         source: &CommandSource,
@@ -903,6 +883,7 @@ impl CommandDispatcher {
     }
 
     /// Returns the usage of the given command node.
+    #[must_use]
     pub fn get_usage_of_command(
         &self,
         command_node: CommandNodeId,
@@ -918,6 +899,7 @@ impl CommandDispatcher {
     }
 
     /// Returns the usage of each child of the given node (permitted for the given source).
+    #[must_use]
     pub fn get_usage_of_children(
         &self,
         node: NodeId,
@@ -936,6 +918,7 @@ impl CommandDispatcher {
     }
 
     /// Returns the usage of each command (permitted for the given source).
+    #[must_use]
     pub fn get_usage_of_commands(
         &self,
         source: &CommandSource,
@@ -1076,7 +1059,7 @@ mod test {
     };
     use std::sync::Arc;
 
-    #[tokio::test]
+    #[test]
     fn unknown_command() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher.register(
@@ -1087,11 +1070,10 @@ mod test {
         assert!(result.is_err_and(|error| error.error_type == &DISPATCHER_UNKNOWN_COMMAND));
     }
 
-    #[tokio::test]
+    #[test]
     fn simple_command() {
         let mut dispatcher = CommandDispatcher::new();
-        let executor: for<'c> fn(&'c CommandContext) -> CommandExecutorResult<'c> =
-            |_| Box::pin(async move { Ok(1) });
+        let executor: fn(&CommandContext) -> CommandExecutorResult = |_| Ok(1);
         dispatcher
             .register(CommandArgumentBuilder::new("simple", "A simple command").executes(executor));
         let source = CommandSource::dummy();
@@ -1099,14 +1081,13 @@ mod test {
         assert_eq!(result, Ok(1));
     }
 
-    #[tokio::test]
+    #[test]
     fn disabled_command_cannot_be_executed_directly() {
         // Guards the `/execute run <command>` bypass: a disabled command must be
         // rejected even when reached through `execute_input` rather than
         // `handle_command`.
         let mut dispatcher = CommandDispatcher::new();
-        let executor: for<'c> fn(&'c CommandContext) -> CommandExecutorResult<'c> =
-            |_| Box::pin(async move { Ok(1) });
+        let executor: fn(&CommandContext) -> CommandExecutorResult = |_| Ok(1);
         dispatcher
             .register(CommandArgumentBuilder::new("simple", "A simple command").executes(executor));
         dispatcher.disable_command("simple");
@@ -1116,7 +1097,7 @@ mod test {
         assert!(result.is_err_and(|error| error.error_type == &DISPATCHER_UNKNOWN_COMMAND));
     }
 
-    #[tokio::test]
+    #[test]
     fn arithmetic_command() {
         enum Operation {
             Add,
@@ -1189,11 +1170,10 @@ mod test {
         assert_eq!(dispatcher.execute_input("arithmetic 9 / 2", &source), Ok(4));
     }
 
-    #[tokio::test]
+    #[test]
     fn alias_simple() {
         let mut dispatcher = CommandDispatcher::new();
-        let executor: for<'c> fn(&'c CommandContext) -> CommandExecutorResult<'c> =
-            |_| Box::pin(async move { Ok(1) });
+        let executor: fn(&CommandContext) -> CommandExecutorResult = |_| Ok(1);
         dispatcher.register(CommandArgumentBuilder::new("a", "A command").executes(executor));
         // Note that we CANNOT use redirect here as node itself needs to execute the command,
         // not its 'children'.
@@ -1203,7 +1183,7 @@ mod test {
         assert_eq!(dispatcher.execute_input("b", &source), Ok(1));
     }
 
-    #[tokio::test]
+    #[test]
     fn alias_complex() {
         struct Executor;
         impl CommandExecutor for Executor {
@@ -1226,7 +1206,7 @@ mod test {
 
     /// A redirect modifier which yields no sources must stop the redirected
     /// command from running at all. This is what gates `execute if ...`.
-    #[tokio::test]
+    #[test]
     fn conditional_redirect_gates_execution() {
         fn satisfied(context: &CommandContext) -> RedirectModifierResult {
             Ok(vec![context.source.clone()])
@@ -1236,8 +1216,7 @@ mod test {
             Ok(vec![])
         }
 
-        let executor: for<'c> fn(&'c CommandContext) -> CommandExecutorResult<'c> =
-            |_| Box::pin(async move { Ok(1) });
+        let executor: fn(&CommandContext) -> CommandExecutorResult = |_| Ok(1);
 
         let mut dispatcher = CommandDispatcher::new();
         dispatcher.register(CommandArgumentBuilder::new("target", "A command").executes(executor));
@@ -1258,7 +1237,7 @@ mod test {
         assert_eq!(dispatcher.execute_input("gate shut target", &source), Ok(0));
     }
 
-    #[tokio::test]
+    #[test]
     fn recurse() {
         struct Executor;
         impl CommandExecutor for Executor {
@@ -1298,11 +1277,10 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[test]
     fn double_slash_command_execution() {
         let mut dispatcher = CommandDispatcher::new();
-        let executor: for<'c> fn(&'c CommandContext) -> CommandExecutorResult<'c> =
-            |_| Box::pin(async move { Ok(42) });
+        let executor: fn(&CommandContext) -> CommandExecutorResult = |_| Ok(42);
 
         dispatcher.register(
             CommandArgumentBuilder::new("//set", "WorldEdit set command").executes(executor),

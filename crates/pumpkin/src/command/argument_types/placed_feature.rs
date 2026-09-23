@@ -23,11 +23,9 @@ impl ArgumentType for PlacedFeatureNameArgumentType {
         builder: SuggestionsBuilder,
     ) -> Suggestions {
         let names = pumpkin_world::generation::feature::placed_features::all_placed_feature_names();
-        Box::pin(async move {
-            builder
-                .filter_and_suggest_iter(names.iter().copied())
-                .build()
-        })
+        builder
+            .filter_and_suggest_iter(names.iter().copied())
+            .build()
     }
 
     fn client_side_parser(&'_ self) -> JavaClientArgumentType {

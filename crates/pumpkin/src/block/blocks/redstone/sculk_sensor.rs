@@ -13,8 +13,7 @@ use crate::entity::boss::ender_dragon::Vector3Ext;
 use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::world::World;
 use crate::world::game_event::{
-    GameEventContext, GameEventFuture, GameEventListener, PositionSource,
-    redstone_strength_for_distance,
+    GameEventContext, GameEventListener, PositionSource, redstone_strength_for_distance,
 };
 use pumpkin_data::block_properties::{
     BlockProperties, CalibratedSculkSensorLikeProperties, HorizontalFacing,
@@ -102,50 +101,47 @@ impl GameEventListener for SculkSensorListener {
         self.radius
     }
 
-    fn handle_game_event<'a>(
-        &'a self,
-        world: &'a Arc<World>,
-        event: &'a GameEvent,
-        context: &'a GameEventContext,
+    fn handle_game_event(
+        &self,
+        world: &Arc<World>,
+        event: &GameEvent,
+        context: &GameEventContext,
         source_position: Vector3<f64>,
-    ) -> GameEventFuture<'a> {
-        Box::pin(async move {
-            let (block, _) = world.get_block_and_state(&self.pos);
-            if block.id != BlockId::SCULK_SENSOR && block.id != BlockId::CALIBRATED_SCULK_SENSOR {
-                return false;
-            }
+    ) -> bool {
+        let (block, _) = world.get_block_and_state(&self.pos);
+        if block.id != BlockId::SCULK_SENSOR && block.id != BlockId::CALIBRATED_SCULK_SENSOR {
+            return false;
+        }
 
-            // SculkSensorBlockEntity.VibrationUser.canReceiveVibration: a block_destroy
-            // or block_place at the sensor's own position is ignored (the sensor's own
-            // placement/removal must not self-trigger it).
-            let event_pos = BlockPos::new(
-                source_position.x.floor() as i32,
-                source_position.y.floor() as i32,
-                source_position.z.floor() as i32,
-            );
-            if event_pos == self.pos
-                && matches!(event, GameEvent::BlockDestroy | GameEvent::BlockPlace)
-            {
-                return false;
-            }
+        // SculkSensorBlockEntity.VibrationUser.canReceiveVibration: a block_destroy
+        // or block_place at the sensor's own position is ignored (the sensor's own
+        // placement/removal must not self-trigger it).
+        let event_pos = BlockPos::new(
+            source_position.x.floor() as i32,
+            source_position.y.floor() as i32,
+            source_position.z.floor() as i32,
+        );
+        if event_pos == self.pos && matches!(event, GameEvent::BlockDestroy | GameEvent::BlockPlace)
+        {
+            return false;
+        }
 
-            let listener_pos = PositionSource::Block(self.pos)
-                .get_position(world)
-                .expect("block position source always resolves");
-            let distance = (listener_pos - source_position).length() as f32;
-            let power = redstone_strength_for_distance(distance, self.radius);
-            let frequency = crate::world::game_event::vibration_frequency(event);
-            // Vanilla `SculkSensorBlockEntity.VibrationUser.canReceiveVibration`
-            // (`SculkSensorBlockEntity.java:102-107`) rejects events with no vibration
-            // frequency before delegating to the sensor activation check.
-            if frequency == 0 {
-                return false;
-            }
+        let listener_pos = PositionSource::Block(self.pos)
+            .get_position(world)
+            .expect("block position source always resolves");
+        let distance = (listener_pos - source_position).length() as f32;
+        let power = redstone_strength_for_distance(distance, self.radius);
+        let frequency = crate::world::game_event::vibration_frequency(event);
+        // Vanilla `SculkSensorBlockEntity.VibrationUser.canReceiveVibration`
+        // (`SculkSensorBlockEntity.java:102-107`) rejects events with no vibration
+        // frequency before delegating to the sensor activation check.
+        if frequency == 0 {
+            return false;
+        }
 
-            let _ = context;
-            SculkSensorBlock::trigger(world, &self.pos, block, power, frequency);
-            true
-        })
+        let _ = context;
+        SculkSensorBlock::trigger(world, &self.pos, block, power, frequency);
+        true
     }
 }
 

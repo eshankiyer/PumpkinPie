@@ -322,7 +322,6 @@ impl FishingBobberEntity {
                 if let Some(owner) = world.get_player_by_id(self.owner_id) {
                     let held = owner.inventory.held_item();
                     reduction += held
-                        .await
                         .get_enchantment_level(&pumpkin_data::Enchantment::LURE)
                         .max(0)
                         * 20;

@@ -22,7 +22,7 @@ use crate::entity::ai::goal::non_tame_random_target::baby_turtle_on_land;
 use crate::entity::ai::goal::ranged_trident_attack::DrownedTridentAttackGoal;
 use crate::entity::mob::zombie::ZombieEntityBase;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal, destroy_egg::DestroyEggGoal,
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal, revenge::RevengeGoal,
@@ -320,52 +320,45 @@ impl Mob for DrownedEntity {
         self.searching_for_land.store(searching, Relaxed);
     }
 
-    fn mob_tick<'a>(
-        &'a self,
-        _caller: &'a Arc<dyn crate::entity::EntityBase>,
-    ) -> crate::entity::EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let target = self.entity.mob_entity.get_target();
-            let living = &self.entity.mob_entity.living_entity;
-            let entity = &living.entity;
-            let pos = entity.pos.load();
-            self.target_in_water.store(
-                target
-                    .as_ref()
-                    .is_some_and(|target| target.get_entity().touching_water.load(Relaxed)),
-                Relaxed,
-            );
-            self.target_is_above.store(
-                target
-                    .as_ref()
-                    .is_some_and(|target| target.get_entity().pos.load().y > pos.y),
-                Relaxed,
-            );
-        })
+    fn mob_tick(&self, _caller: &Arc<dyn crate::entity::EntityBase>) {
+        let target = self.entity.mob_entity.get_target();
+        let living = &self.entity.mob_entity.living_entity;
+        let entity = &living.entity;
+        let pos = entity.pos.load();
+        self.target_in_water.store(
+            target
+                .as_ref()
+                .is_some_and(|target| target.get_entity().touching_water.load(Relaxed)),
+            Relaxed,
+        );
+        self.target_is_above.store(
+            target
+                .as_ref()
+                .is_some_and(|target| target.get_entity().pos.load().y > pos.y),
+            Relaxed,
+        );
     }
 
-    fn update_swimming(&self) -> crate::entity::EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            let entity = &self.entity.mob_entity.living_entity.entity;
-            let target = self.entity.mob_entity.get_target();
-            let position = entity.pos.load();
-            self.target_in_water.store(
-                target
-                    .as_ref()
-                    .is_some_and(|target| target.get_entity().touching_water.load(Relaxed)),
-                Relaxed,
-            );
-            self.target_is_above.store(
-                target
-                    .as_ref()
-                    .is_some_and(|target| target.get_entity().pos.load().y > position.y),
-                Relaxed,
-            );
+    fn update_swimming(&self) {
+        let entity = &self.entity.mob_entity.living_entity.entity;
+        let target = self.entity.mob_entity.get_target();
+        let position = entity.pos.load();
+        self.target_in_water.store(
+            target
+                .as_ref()
+                .is_some_and(|target| target.get_entity().touching_water.load(Relaxed)),
+            Relaxed,
+        );
+        self.target_is_above.store(
+            target
+                .as_ref()
+                .is_some_and(|target| target.get_entity().pos.load().y > position.y),
+            Relaxed,
+        );
 
-            let underwater =
-                entity.touching_water.load(Relaxed) && entity.was_eye_in_water.load(Relaxed);
-            entity.set_swimming(!entity.no_ai.load(Relaxed) && underwater && self.wants_to_swim());
-        })
+        let underwater =
+            entity.touching_water.load(Relaxed) && entity.was_eye_in_water.load(Relaxed);
+        entity.set_swimming(!entity.no_ai.load(Relaxed) && underwater && self.wants_to_swim());
     }
 
     fn custom_travel(&self, caller: &Arc<dyn EntityBase>) -> bool {

@@ -8,7 +8,6 @@ use crate::command::context::command_source::CommandSource;
 use crate::command::errors::command_syntax_error::CommandSyntaxError;
 use crate::entity::EntityBase;
 use crate::entity::player::Player;
-use crate::entity::player::advancement::AdvancementProgress;
 use crate::world::World;
 use pumpkin_data::Advancement;
 use pumpkin_data::entity::EntityType;
@@ -558,14 +557,18 @@ impl EntitySelectorPredicate {
                 let has_tag = entity
                     .get_entity()
                     .scoreboard_tags
-                    .blocking_lock()
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .contains(expected_tag);
                 has_tag ^ invert
             }
             Self::Team(expected_team, invert) => {
                 let actual_name = entity_actual_name(entity);
                 let world = entity.get_entity().world.load();
-                let scoreboard = world.scoreboard.blocking_lock();
+                let scoreboard = world
+                    .scoreboard
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let has_team = scoreboard.get_teams().iter().any(|(name, team)| {
                     name == expected_team && team.players.contains(&actual_name)
                 });
@@ -574,7 +577,10 @@ impl EntitySelectorPredicate {
             Self::Scores(scores_map) => {
                 let actual_name = entity_actual_name(entity);
                 let world = entity.get_entity().world.load();
-                let scoreboard = world.scoreboard.blocking_lock();
+                let scoreboard = world
+                    .scoreboard
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let entity_scores = scoreboard.get_scores().get(&actual_name);
                 for (objective, bounds) in scores_map {
                     let score_val = entity_scores
@@ -590,11 +596,9 @@ impl EntitySelectorPredicate {
                 let Some(player) = entity.get_player() else {
                     return false;
                 };
-                let adv_mgr = player.advancements.blocking_lock();
                 for (adv_id, expected_done) in advancements_map {
                     if let Some(advancement) = Advancement::from_name(adv_id) {
-                        let progress = adv_mgr.progress.map.get(advancement);
-                        let is_done = progress.is_some_and(AdvancementProgress::is_done);
+                        let is_done = player.has_advancement(advancement);
                         if is_done != *expected_done {
                             return false;
                         }
@@ -606,8 +610,7 @@ impl EntitySelectorPredicate {
             }
             Self::Nbt(expected_nbt, invert) => {
                 let mut actual_nbt = NbtCompound::default();
-                // write_nbt is asynchronous, so we can poll it synchronously because it does not do IO.
-                futures::executor::block_on(entity.write_nbt(&mut actual_nbt));
+                entity.write_nbt(&mut actual_nbt);
                 matches_nbt_compound(expected_nbt, &actual_nbt) ^ invert
             }
             Self::Predicate(_predicate_id, invert) => {

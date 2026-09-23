@@ -1,4 +1,4 @@
-use std::pin::sync::Arc;
+use std::sync::Arc;
 
 use crate::{
     block::blocks::campfire::CampfireBlock,
@@ -625,7 +625,7 @@ impl ItemBehaviour for EmptyBucketItem {
         let world = player.world();
         let (start_pos, end_pos) = get_start_and_end_pos(player);
 
-        let checker = async |pos: &BlockPos, world_inner: &Arc<World>| {
+        let checker = |pos: &BlockPos, world_inner: &Arc<World>| {
             let state_id = world_inner.get_block_state_id(pos);
 
             let block = Block::from_state_id(state_id);
@@ -786,7 +786,7 @@ impl ItemBehaviour for FilledBucketItem {
         };
 
         let (start_pos, end_pos) = get_start_and_end_pos(player);
-        let checker = async |pos: &BlockPos, world_inner: &Arc<World>| {
+        let checker = |pos: &BlockPos, world_inner: &Arc<World>| {
             let state_id = world_inner.get_block_state_id(pos);
             if Fluid::from_state_id(state_id).is_some() {
                 return false;

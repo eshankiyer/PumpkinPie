@@ -241,7 +241,7 @@ impl JavaClient {
             std::time::Duration::from_secs(keep_alive_time.saturating_mul(2).max(1));
 
         // Skip the immediate first tick so we don't send a keep-alive the exact millisecond they join
-        keep_alive_interval.tick();
+        keep_alive_interval.tick().await;
 
         loop {
             tokio::select! {
@@ -258,7 +258,7 @@ impl JavaClient {
                       || (self.last_packet_time.load().elapsed() > timeout_duration);
 
                     if has_timed_out {
-                        self.kick(pumpkin_macros::translate_cross!(translation::java::DISCONNECT_TIMEOUT, translation::bedrock::DISCONNECT_TIMEOUT));
+                        self.kick(pumpkin_macros::translate_cross!(translation::java::DISCONNECT_TIMEOUT, translation::bedrock::DISCONNECT_TIMEOUT)).await;
                         break;
                     }
 
@@ -307,7 +307,8 @@ impl JavaClient {
                                 .packet_limiter
                                 .kick_message
                                 .clone(),
-                        ));
+                        ))
+                        .await;
                         break;
                     }
 
@@ -316,11 +317,12 @@ impl JavaClient {
                         Err(e) => {
                             if e.is_kick() {
                                 if let Some(kick_reason) = e.client_kick_reason() {
-                                    self.kick(TextComponent::text(kick_reason));
+                                    self.kick(TextComponent::text(kick_reason)).await;
                                 } else {
                                     self.kick(TextComponent::text(format!(
                                         "Error while handling incoming packet {e}"
-                                    )));
+                                    )))
+                                    .await;
                                 }
                             }
                             error!(
@@ -504,13 +506,42 @@ impl JavaClient {
                         if !matches!(err, PacketDecodeError::ConnectionClosed) {
                             debug!("Failed to decode packet from client {}: {}", self.id, err);
                             let text = format!("Error while reading incoming packet {err}");
-                            self.kick(TextComponent::text(text));
+                            self.kick(TextComponent::text(text)).await;
                         }
                         None
                     }
                 }
             }
         }
+    }
+
+    pub fn try_kick(&self, reason: &TextComponent) {
+        match self.connection_state.load() {
+            ConnectionState::Login => {
+                let packet = CLoginDisconnect::new(
+                    serde_json::to_string(&reason.0).unwrap_or_else(|_| String::new()),
+                );
+                if let Ok(data) = self.serialize_packet(&packet) {
+                    self.try_enqueue_packet(data);
+                }
+            }
+            ConnectionState::Config => {
+                let reason_text = reason.clone().get_text();
+                let packet = CConfigDisconnect::new(&reason_text);
+                if let Ok(data) = self.serialize_packet(&packet) {
+                    self.try_enqueue_packet(data);
+                }
+            }
+            ConnectionState::Play => {
+                let packet = CPlayDisconnect::new(reason);
+                if let Ok(data) = self.serialize_packet(&packet) {
+                    self.try_enqueue_packet(data);
+                }
+            }
+            _ => {}
+        }
+        debug!("Closing connection for {}", self.id);
+        self.close();
     }
 
     pub async fn kick(&self, reason: TextComponent) {
@@ -781,7 +812,7 @@ impl JavaClient {
             id if id == SChangeGameMode::to_id(version) => {
                 self.handle_change_game_mode(
                     player,
-                    SChangeGameMode::read(&mut payload, &version)?,
+                    &SChangeGameMode::read(&mut payload, &version)?,
                 );
             }
             id if id == SChatAck::to_id(version) => {
@@ -840,7 +871,7 @@ impl JavaClient {
                     .await;
             }
             id if id == SPaddleBoat::to_id(version) => {
-                self.handle_paddle_boat(player, SPaddleBoat::read(&mut payload, &version)?);
+                self.handle_paddle_boat(player, &SPaddleBoat::read(&mut payload, &version)?);
             }
             id if id == SInteract::to_id(version) => {
                 self.handle_interact(player, SInteract::read(&mut payload, &version)?, server)
@@ -993,7 +1024,7 @@ impl JavaClient {
                 player.on_slot_click(SClickSlot::read(&mut payload, &version)?, server);
             }
             id if id == SContainerButtonClick::to_id(version) => {
-                player.on_container_button_click(SContainerButtonClick::read(
+                player.on_container_button_click(&SContainerButtonClick::read(
                     &mut payload,
                     &version,
                 )?);
@@ -1022,7 +1053,7 @@ impl JavaClient {
                     .await;
             }
             id if id == SEditBook::to_id(version) => {
-                self.handle_edit_book(player, SEditBook::read(&mut payload, &version)?);
+                self.handle_edit_book(player, &SEditBook::read(&mut payload, &version)?);
             }
             id if id == SUseItemOn::to_id(version) => {
                 self.handle_use_item_on(player, SUseItemOn::read(&mut payload, &version)?, server)

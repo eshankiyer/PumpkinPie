@@ -1,7 +1,6 @@
-use crate::command::CommandResult;
 use crate::{
     command::{
-        CommandError, CommandExecutor, CommandSender,
+        CommandError, CommandExecutor, CommandResult, CommandSender,
         args::{
             Arg, ConsumedArgs,
             gameprofile::{GameProfileSuggestionMode, GameProfilesArgumentConsumer},
@@ -92,11 +91,7 @@ fn ban_profile(
     profile: &GameProfile,
     reason: Option<String>,
 ) -> bool {
-    let mut banned_players = server
-        .data
-        .banned_player_list
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut banned_players = server.data.banned_player_list.write().unwrap();
 
     let reason = reason.unwrap_or_else(|| "Banned by an operator.".to_string());
 
@@ -133,14 +128,12 @@ fn ban_profile(
     ));
 
     if let Some(player) = server.get_player_by_uuid(profile.id) {
-        player.kick(
-            DisconnectReason::Kicked,
-            TextComponent::translate_cross(
-                translation::java::MULTIPLAYER_DISCONNECT_BANNED,
-                translation::bedrock::DISCONNECTIONSCREEN_TITLE_BANNEDBYHOST,
-                [],
-            ),
+        let kick_msg = TextComponent::translate_cross(
+            translation::java::MULTIPLAYER_DISCONNECT_BANNED,
+            translation::bedrock::DISCONNECTIONSCREEN_TITLE_BANNEDBYHOST,
+            [],
         );
+        player.kick(DisconnectReason::Kicked, &kick_msg);
     }
 
     true

@@ -6,18 +6,12 @@ use tracing::error;
 
 use crate::command::argument_builder::{ArgumentBuilder, command};
 use crate::command::context::command_context::CommandContext;
-use crate::command::errors::error_types::CommandErrorType;
 use crate::command::node::dispatcher::CommandDispatcher;
 use crate::command::node::{CommandExecutor, CommandExecutorResult};
 
 const DESCRIPTION: &str = "Saves the server to disk.";
 
 const PERMISSION: &str = "minecraft:command.save-all";
-
-const SAVE_FAILED_ERROR_TYPE: CommandErrorType<0> = CommandErrorType::new(
-    translation::java::COMMANDS_SAVE_FAILED,
-    translation::bedrock::COMMANDS_SAVE_FAILED,
-);
 
 struct SaveAllExecutor;
 
@@ -33,20 +27,23 @@ impl CommandExecutor for SaveAllExecutor {
         );
 
         let server = context.server();
-
-        if let Err(err) = server.save_all().await {
+        if let Err(err) = futures::executor::block_on(server.save_all()) {
             error!("Failed to save server data: {err}");
-            return Err(SAVE_FAILED_ERROR_TYPE.create_without_context());
-        }
-
-        context.source.send_feedback(
-            TextComponent::translate_cross(
-                translation::java::COMMANDS_SAVE_SUCCESS,
-                translation::bedrock::COMMANDS_SAVE_SUCCESS,
+            context.source.send_error(TextComponent::translate_cross(
+                translation::java::COMMANDS_SAVE_FAILED,
+                translation::bedrock::COMMANDS_SAVE_FAILED,
                 [],
-            ),
-            true,
-        );
+            ));
+        } else {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    translation::java::COMMANDS_SAVE_SUCCESS,
+                    translation::bedrock::COMMANDS_SAVE_SUCCESS,
+                    [],
+                ),
+                true,
+            );
+        }
 
         Ok(1)
     }

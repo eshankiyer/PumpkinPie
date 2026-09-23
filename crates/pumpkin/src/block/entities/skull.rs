@@ -95,9 +95,9 @@ impl SkullBlockEntity {
     pub const fn new(position: BlockPos) -> Self {
         Self {
             position,
-            note_block_sound: Mutex::const_new(None),
-            profile: Mutex::const_new(None),
-            custom_name: Mutex::const_new(None),
+            note_block_sound: Mutex::new(None),
+            profile: Mutex::new(None),
+            custom_name: Mutex::new(None),
         }
     }
 }
@@ -113,15 +113,15 @@ mod tests {
     fn custom_name_round_trips_through_nbt() {
         let pos = BlockPos::new(3, 70, 5);
         let entity = SkullBlockEntity::new(pos);
-        *futures::executor::block_on(entity.custom_name.lock()) =
+        *entity.custom_name.lock().unwrap() =
             Some("{\"text\":\"Steve\"}".to_string());
 
         let mut nbt = NbtCompound::new();
-        futures::executor::block_on(entity.write_nbt(&mut nbt));
+        entity.write_nbt(&mut nbt);
         let loaded = SkullBlockEntity::from_nbt(&nbt, pos);
 
         assert_eq!(
-            *futures::executor::block_on(loaded.custom_name.lock()),
+            *loaded.custom_name.lock().unwrap(),
             Some("{\"text\":\"Steve\"}".to_string())
         );
     }
@@ -130,7 +130,7 @@ mod tests {
     fn absent_custom_name_stays_absent() {
         let entity = SkullBlockEntity::new(BlockPos::new(0, 0, 0));
         let mut nbt = NbtCompound::new();
-        futures::executor::block_on(entity.write_nbt(&mut nbt));
+        entity.write_nbt(&mut nbt);
         assert!(nbt.get_string("custom_name").is_none());
     }
 }

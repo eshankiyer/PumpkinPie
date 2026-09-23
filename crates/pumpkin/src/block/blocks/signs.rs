@@ -507,12 +507,13 @@ impl BlockBehaviour for SignBlock {
         // `SignItem.updateCustomBlockEntityTag` opens the editor only when its superclass
         // did not load typed data (`SignItem.java:23-35`; `BlockItem.java:148-170`).
         if should_open_text_editor(args.custom_data_applied) {
-            match args.player.client.as_ref() {
-                crate::net::ClientPlatform::Java(java) => {
-                    java.send_sign_packet(*args.position, true).await;
+            let client = args.player.client.clone();
+            let pos = *args.position;
+            tokio::spawn(async move {
+                if let crate::net::ClientPlatform::Java(java) = client.as_ref() {
+                    java.send_sign_packet(pos, true).await;
                 }
-                crate::net::ClientPlatform::Bedrock(_bedrock) => {}
-            }
+            });
         }
     }
 
@@ -605,36 +606,39 @@ impl BlockBehaviour for SignBlock {
             Some(BlockDirection::Down)
         };
 
-        Box::pin(async move {
-            if let Some(dir) = support_dir {
-                // Only check if the neighbor that changed is our support neighbor
-                if args.direction == dir {
-                    let support_pos = args.position.offset(dir.to_offset());
-                    let (support_block, support_state) =
-                        args.world.get_block_and_state(&support_pos);
+        // Vanilla `updateShape` only re-checks survival when the changed neighbour is the
+        // support neighbour (e.g. `StandingSignBlock.java:51`, `WallSignBlock.java:75`).
+        if let Some(dir) = support_dir
+            && args.direction == dir
+        {
+            let support_pos = args.position.offset(dir.to_offset());
+            let support_state = args.world.get_block_state(&support_pos);
 
-                    // Permissive support check
-                    let is_leaf =
-                        support_block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_LEAVES);
-                    let is_sign = support_block.has_tag(&pumpkin_data::tag::Block::MINECRAFT_SIGNS);
+            let is_leaf = args
+                .world
+                .get_block(&support_pos)
+                .has_tag(&pumpkin_data::tag::Block::MINECRAFT_LEAVES);
 
-                    let is_valid = match dir {
-                        BlockDirection::Up => {
-                            support_state.is_side_solid(BlockDirection::Down) || is_leaf || is_sign
-                        }
-                        BlockDirection::Down => {
-                            support_state.is_center_solid(BlockDirection::Up) || is_leaf || is_sign
-                        }
-                        _ => support_state.is_side_solid(dir.opposite()) || is_leaf || is_sign,
-                    };
+            let is_sign = args
+                .world
+                .get_block(&support_pos)
+                .has_tag(&pumpkin_data::tag::Block::MINECRAFT_ALL_SIGNS);
 
-                    if !is_valid {
-                        return BlockStateId::AIR; // Return AIR to break the block
-                    }
+            let is_valid = match dir {
+                BlockDirection::Up => {
+                    support_state.is_center_solid(BlockDirection::Down) || is_leaf || is_sign
                 }
+                BlockDirection::Down => {
+                    support_state.is_center_solid(BlockDirection::Up) || is_leaf || is_sign
+                }
+                _ => support_state.is_side_solid(dir.opposite()) || is_leaf || is_sign,
+            };
+
+            if !is_valid {
+                return BlockStateId::AIR;
             }
-            args.state_id
-        })
+        }
+        args.state_id
     }
 
     /// Mirrors `SignBlock.useWithoutItem` and `hasEditableText` from
@@ -711,13 +715,13 @@ impl BlockBehaviour for SignBlock {
 
         *currently_editing = Some(args.player.gameprofile.id);
         drop(currently_editing);
-        match args.player.client.as_ref() {
-            ClientPlatform::Java(java) => {
-                java.send_sign_packet(*args.position, is_facing_front_text)
-                    .await;
+        let client = args.player.client.clone();
+        let pos = *args.position;
+        tokio::spawn(async move {
+            if let ClientPlatform::Java(java) = client.as_ref() {
+                java.send_sign_packet(pos, is_facing_front_text).await;
             }
-            ClientPlatform::Bedrock(_bedrock) => {}
-        }
+        });
 
         BlockActionResult::SuccessServer
     }

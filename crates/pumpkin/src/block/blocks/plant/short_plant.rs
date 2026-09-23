@@ -26,21 +26,23 @@ impl BlockBehaviour for ShortPlantBlock {
     }
 
     fn perform_bonemeal(&self, args: crate::block::BonemealArgs<'_>) {
-        let grown = if args.block == &Block::FERN {
-            &Block::LARGE_FERN
-        } else {
-            &Block::TALL_GRASS
-        };
-        let lower = grown.default_state.id;
-        args.world
-            .set_block_state(args.position, lower, BlockFlags::NOTIFY_LISTENERS);
-        let mut props = TallSeagrassLikeProperties::from_state_id(lower, grown);
-        props.half = DoubleBlockHalf::Upper;
-        args.world.set_block_state(
-            &args.position.up(),
-            props.to_state_id(grown),
-            BlockFlags::NOTIFY_LISTENERS,
-        );
+        {
+            let grown = if args.block == &Block::FERN {
+                &Block::LARGE_FERN
+            } else {
+                &Block::TALL_GRASS
+            };
+            let lower = grown.default_state.id;
+            args.world
+                .set_block_state(args.position, lower, BlockFlags::NOTIFY_LISTENERS);
+            let mut props = TallSeagrassLikeProperties::from_state_id(lower, grown);
+            props.half = DoubleBlockHalf::Upper;
+            args.world.set_block_state(
+                &args.position.up(),
+                props.to_state_id(grown),
+                BlockFlags::NOTIFY_LISTENERS,
+            );
+        }
     }
 
     fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {

@@ -28,7 +28,7 @@ impl MobEffect for WindChargedMobEffect {
 
         world.play_sound(
             Sound::EntityBreezeWindBurst,
-            SoundCategory::Neutral,
+            SoundCategory::Hostile,
             &center,
         );
     }

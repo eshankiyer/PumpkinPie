@@ -1,5 +1,4 @@
 use std::any::Any;
-use std::future::Future;
 
 use crate::entity::player::Player;
 use crate::item::{ItemBehaviour, ItemMetadata};

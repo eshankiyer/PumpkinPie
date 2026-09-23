@@ -1,7 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::fmt;
-use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -64,7 +63,7 @@ pub fn set_broadcast_console_to_ops(value: bool) {
 pub enum CommandSender {
     /// A remote console connection via the RCON protocol.
     ///
-    /// Stores an asynchronous buffer to capture command output
+    /// Stores an buffer to capture command output
     /// so it can be sent back over the network to the RCON client.
     Rcon(Arc<std::sync::Mutex<Vec<String>>>),
     /// The local server terminal/console.
@@ -437,7 +436,7 @@ const fn command_block_y_rot(facing: Facing) -> f32 {
 ///
 /// If the command **fails**, an [`Err`] is returned, containing the [`CommandError`]
 /// that led to this result.
-pub type CommandResult<'a> = Pin<Box<dyn Future<Output = Result<i32, CommandError>> + Send + 'a>>;
+pub type CommandResult = Result<i32, CommandError>;
 
 pub trait CommandExecutor: Sync + Send {
     fn execute(

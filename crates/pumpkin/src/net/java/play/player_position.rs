@@ -132,7 +132,12 @@ impl JavaClient {
             return;
         }
         // Ignore movement packets while awaiting a teleport confirmation (vanilla behavior)
-        if player.awaiting_teleport.lock().is_some() {
+        if player
+            .awaiting_teleport
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+        {
             return;
         }
         // y = feet Y
@@ -142,7 +147,8 @@ impl JavaClient {
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_PLAYER_MOVEMENT,
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_PLAYER_MOVEMENT,
                 [],
-            ));
+            ))
+            .await;
             return;
         }
         let position = Vector3::new(
@@ -152,7 +158,11 @@ impl JavaClient {
         );
         let entity = player.get_entity();
         let last_pos = entity.pos.load();
-        let flying = player.abilities.lock().flying;
+        let flying = player
+            .abilities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .flying;
         let position =
             Self::maybe_back_off_from_edge(player, &player.world(), position, last_pos, flying);
         let (player_movement_check, elytra_movement_check) = {
@@ -200,8 +210,7 @@ impl JavaClient {
                 let cm = (distance * 100.0) as i32;
                 if cm > 0 {
                     let stat = player.get_movement_statistic();
-                    player
-                        .increment_stat(StatisticCategory::Custom, stat as i32, cm);
+                    player.increment_stat(StatisticCategory::Custom, stat as i32, cm);
                 }
 
                 let height_difference = pos.y - last_pos.y;
@@ -232,7 +241,7 @@ impl JavaClient {
                 // TODO: Warn when player moves to quickly
                 if !Self::sync_position(player, world, pos, last_pos, entity.yaw.load(), entity.pitch.load(), packet.collision & FLAG_ON_GROUND != 0) {
                     // Send the new position to all other players.
-                    world.broadcast_packet_except_editioned_sync(
+                    world.broadcast_packet_except_editioned(
                         &[player.gameprofile.id],
                         &CUpdateEntityPos::new(
                             player.entity_id().into(),
@@ -305,7 +314,12 @@ impl JavaClient {
             return;
         }
         // Ignore movement packets while awaiting a teleport confirmation (vanilla behavior)
-        if player.awaiting_teleport.lock().is_some() {
+        if player
+            .awaiting_teleport
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+        {
             return;
         }
         // y = feet Y
@@ -315,7 +329,8 @@ impl JavaClient {
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_PLAYER_MOVEMENT,
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_PLAYER_MOVEMENT,
                 [],
-            ));
+            ))
+            .await;
             return;
         }
 
@@ -326,7 +341,11 @@ impl JavaClient {
         );
         let entity = player.get_entity();
         let last_pos = entity.pos.load();
-        let flying = player.abilities.lock().flying;
+        let flying = player
+            .abilities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .flying;
         let position =
             Self::maybe_back_off_from_edge(player, &player.world(), position, last_pos, flying);
         let (player_movement_check, elytra_movement_check) = {
@@ -373,8 +392,7 @@ impl JavaClient {
                 let cm = (distance * 100.0) as i32;
                 if cm > 0 {
                     let stat = player.get_movement_statistic();
-                    player
-                        .increment_stat(StatisticCategory::Custom, stat as i32, cm);
+                    player.increment_stat(StatisticCategory::Custom, stat as i32, cm);
                 }
 
                 let height_difference = pos.y - last_pos.y;
@@ -419,7 +437,7 @@ impl JavaClient {
                     sync_position(player, &world, pos, last_pos, yaw, pitch, (packet.collision & FLAG_ON_GROUND) != 0)
                 {
                     // Send the new position to all other players.
-                    world.broadcast_packet_except_editioned_sync(
+                    world.broadcast_packet_except_editioned(
                         &[player.gameprofile.id],
                         &CUpdateEntityPosRot::new(
                             entity_id.into(),
@@ -488,7 +506,11 @@ impl JavaClient {
 
     pub async fn force_tp(&self, player: &Arc<Player>, position: Vector3<f64>) {
         let teleport_id = player.teleport_id_count.fetch_add(1, Ordering::Relaxed) + 1;
-        *player.awaiting_teleport.lock() = Some((teleport_id.into(), position));
+        *player
+            .awaiting_teleport
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((teleport_id.into(), position));
         self.enqueue_client_packet(&CPlayerPosition::new(
             teleport_id.into(),
             player.get_entity().pos.load(),

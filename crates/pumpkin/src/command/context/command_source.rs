@@ -54,7 +54,6 @@ impl ResultValueTaker {
     }
 
     /// Calls all the contained callbacks of this taker with the returned result.
-    #[must_use]
     pub fn call(&self, return_value: ReturnValue) {
         for callback in &self.0 {
             callback.call(return_value);
@@ -488,10 +487,7 @@ impl CommandSource {
     /// - this source does not have a reference to the server (i.e. this is a dummy [`CommandSource`].)
     #[must_use]
     pub fn has_permission_from_option(&self, permission: Option<&str>) -> bool {
-        match permission {
-            None => true,
-            Some(permission) => self.has_permission(permission),
-        }
+        permission.is_none_or(|permission| self.has_permission(permission))
     }
 }
 

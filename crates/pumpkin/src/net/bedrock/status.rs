@@ -170,7 +170,7 @@ impl IceSocket {
     }
 
     pub async fn recv_from(&self, buffer: &mut [u8]) -> Result<(usize, SocketAddr), Error> {
-        let (packet, address) = self.packets.lock().recv().await.ok_or_else(|| {
+        let (packet, address) = self.packets.lock().await.recv().await.ok_or_else(|| {
             Error::new(std::io::ErrorKind::BrokenPipe, "Bedrock UDP socket closed")
         })?;
         let length = buffer.len().min(packet.len());
@@ -210,11 +210,16 @@ pub async fn handle_packet(
     let players = server
         .get_status()
         .lock()
+        .await
         .status_response
         .players
         .as_ref()
         .map_or(0, |players| players.online) as i32;
-    let game_mode = server.defaultgamemode.lock().gamemode;
+    let game_mode = server
+        .defaultgamemode
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .gamemode;
     let info = ServerInfo {
         motd: &server.advanced_config.networking.bedrock.motd,
         protocol: CURRENT_BEDROCK_MC_PROTOCOL,

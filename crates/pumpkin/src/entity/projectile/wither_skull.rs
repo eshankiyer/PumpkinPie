@@ -254,7 +254,7 @@ impl EntityBase for WitherSkullEntity {
                         blend: true,
                     };
                     if let Some(player) = entity.get_player() {
-                        player.send_effect(effect.clone());
+                        player.send_effect(&effect);
                     }
                     living.add_effect(effect);
                 }

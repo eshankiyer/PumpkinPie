@@ -91,7 +91,7 @@ impl ItemBehaviour for BoatItem {
         let (start_pos, end_pos) = self.get_start_and_end_pos(player);
 
         // Vanilla: raycast with FluidHandling.ANY - stops on water/lava surface or solid blocks
-        let checker = async |pos: &BlockPos, world_inner: &Arc<World>| {
+        let checker = |pos: &BlockPos, world_inner: &Arc<World>| {
             let state_id = world_inner.get_block_state_id(pos);
 
             // Air doesn't stop the raycast

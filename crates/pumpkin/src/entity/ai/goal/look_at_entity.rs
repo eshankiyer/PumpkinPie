@@ -97,18 +97,15 @@ impl LookAtEntityGoal {
         target_predicate.base_max_distance = range as f64; // TODO
         if target_type == Some(&EntityType::PLAYER) {
             target_predicate.set_predicate(move |target: TargetData, world: Arc<World>| {
-                let mob_weak = mob_weak.clone();
-                async move {
-                    if let Some(mob_arc) = mob_weak.upgrade() {
-                        let Some(target_entity) = world.get_entity_by_id(target.entity_id) else {
-                            return false;
-                        };
-                        let predicate = EntityPredicate::Rides(mob_arc.get_entity());
-                        predicate.test(target_entity.get_entity())
-                    } else {
-                        // MobEntity is destroyed
-                        false
-                    }
+                if let Some(mob_arc) = mob_weak.upgrade() {
+                    let Some(target_entity) = world.get_entity_by_id(target.entity_id) else {
+                        return false;
+                    };
+                    let predicate = EntityPredicate::Rides(mob_arc.get_entity());
+                    predicate.test(target_entity.get_entity())
+                } else {
+                    // MobEntity is destroyed
+                    false
                 }
             });
         }

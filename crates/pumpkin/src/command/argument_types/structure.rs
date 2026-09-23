@@ -22,11 +22,9 @@ impl ArgumentType for StructureNameArgumentType {
         builder: SuggestionsBuilder,
     ) -> Suggestions {
         let names = pumpkin_world::generation::structure::template::all_structure_names();
-        Box::pin(async move {
-            builder
-                .filter_and_suggest_iter(names.iter().copied())
-                .build()
-        })
+        builder
+            .filter_and_suggest_iter(names.iter().copied())
+            .build()
     }
 
     fn client_side_parser(&'_ self) -> JavaClientArgumentType {

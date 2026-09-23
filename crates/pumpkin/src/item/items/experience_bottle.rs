@@ -1,4 +1,3 @@
-use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::entity::Entity;
@@ -27,62 +26,55 @@ const POWER: f32 = 0.7;
 const DIVERGENCE: f32 = 1.0;
 
 impl ItemBehaviour for ExperienceBottleItem {
-    fn normal_use<'a>(
-        &'a self,
-        item: &'a Item,
-        player: &'a Player,
-    ) -> Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let position = player.position();
-            let world = player.world();
-            world.play_sound_fine(
-                Sound::EntityExperienceBottleThrow,
-                pumpkin_data::sound::SoundCategory::Neutral,
-                &position,
-                0.5,
-                super::throw_sound_pitch(rand::random()),
-            );
-            let entity = Entity::new(
-                world.clone(),
-                position,
-                &pumpkin_data::entity::EntityType::EXPERIENCE_BOTTLE,
-            );
-            let bottle = ExperienceBottleEntity::new_shot(entity, player.get_entity());
-            let (yaw, pitch) = player.rotation();
-            bottle.thrown.set_velocity_from(
-                player.get_entity(),
-                pitch,
-                yaw,
-                Y_OFFSET,
-                POWER,
-                DIVERGENCE,
-            );
-            world.spawn_entity(Arc::new(bottle));
+    fn normal_use(&self, item: &Item, player: &Player) {
+        let position = player.position();
+        let world = player.world();
+        world.play_sound_fine(
+            Sound::EntityExperienceBottleThrow,
+            pumpkin_data::sound::SoundCategory::Neutral,
+            &position,
+            0.5,
+            super::throw_sound_pitch(rand::random()),
+        );
+        let entity = Entity::new(
+            world.clone(),
+            position,
+            &pumpkin_data::entity::EntityType::EXPERIENCE_BOTTLE,
+        );
+        let bottle = ExperienceBottleEntity::new_shot(entity, player.get_entity());
+        let (yaw, pitch) = player.rotation();
+        bottle.thrown.set_velocity_from(
+            player.get_entity(),
+            pitch,
+            yaw,
+            Y_OFFSET,
+            POWER,
+            DIVERGENCE,
+        );
+        world.spawn_entity(Arc::new(bottle));
 
-            // `ExperienceBottleItem.use` awards ITEM_USED before consuming the stack
-            // (`ExperienceBottleItem.java:22-40`).
-            player.increment_stat(StatisticCategory::Used, item.id as i32, 1);
+        // `ExperienceBottleItem.use` awards ITEM_USED before consuming the stack
+        // (`ExperienceBottleItem.java:22-40`).
+        player.increment_stat(StatisticCategory::Used, item.id as i32, 1);
 
-            let mut main_hand = player.inventory.held_item();
-            let consumed =
-                if !main_hand.is_empty() && main_hand.item.id == Item::EXPERIENCE_BOTTLE.id {
-                    main_hand.decrement_unless_creative(player.gamemode.load(), 1);
-                    player.inventory.set_held_item(main_hand);
-                    true
-                } else {
-                    false
-                };
+        let mut main_hand = player.inventory.held_item();
+        let consumed = if !main_hand.is_empty() && main_hand.item.id == Item::EXPERIENCE_BOTTLE.id {
+            main_hand.decrement_unless_creative(player.gamemode.load(), 1);
+            player.inventory.set_held_item(main_hand);
+            true
+        } else {
+            false
+        };
 
-            if !consumed {
-                let mut off_hand = player.inventory.off_hand_item();
-                if !off_hand.is_empty() && off_hand.item.id == Item::EXPERIENCE_BOTTLE.id {
-                    off_hand.decrement_unless_creative(player.gamemode.load(), 1);
-                    player
-                        .inventory
-                        .set_stack_in_hand(pumpkin_util::Hand::Left, off_hand);
-                }
+        if !consumed {
+            let mut off_hand = player.inventory.off_hand_item();
+            if !off_hand.is_empty() && off_hand.item.id == Item::EXPERIENCE_BOTTLE.id {
+                off_hand.decrement_unless_creative(player.gamemode.load(), 1);
+                player
+                    .inventory
+                    .set_stack_in_hand(pumpkin_util::Hand::Left, off_hand);
             }
-        })
+        }
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

@@ -28,11 +28,7 @@ const DESCRIPTION: &str = "Manage server whitelists.";
 const ARG_TARGETS: &str = "targets";
 
 fn kick_non_whitelisted_players(server: &Server) {
-    let whitelist = server
-        .data
-        .whitelist_config
-        .read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let whitelist = server.data.whitelist_config.read().unwrap();
     if server.basic_config.enforce_whitelist && server.white_list.load(Ordering::Relaxed) {
         for player in server.get_all_players() {
             if whitelist.is_whitelisted(&player.gameprofile) {
@@ -40,7 +36,7 @@ fn kick_non_whitelisted_players(server: &Server) {
             }
             player.kick(
                 DisconnectReason::Kicked,
-                pumpkin_macros::translate_cross!(
+                &pumpkin_macros::translate_cross!(
                     translation::java::MULTIPLAYER_DISCONNECT_NOT_WHITELISTED,
                     translation::bedrock::DISCONNECT_KICKED
                 ),
@@ -113,12 +109,8 @@ impl CommandExecutor for ListExecutor {
         server: &crate::server::Server,
         _args: &ConsumedArgs,
     ) -> CommandResult {
-        let whitelist = &server
-            .data
-            .whitelist_config
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .whitelist;
+        let whitelist_guard = server.data.whitelist_config.read().unwrap();
+        let whitelist = &whitelist_guard.whitelist;
         if whitelist.is_empty() {
             sender.send_message(pumpkin_macros::translate_cross!(
                 translation::java::COMMANDS_WHITELIST_NONE,
@@ -155,11 +147,7 @@ impl CommandExecutor for ReloadExecutor {
         server: &crate::server::Server,
         _args: &ConsumedArgs,
     ) -> CommandResult {
-        *server
-            .data
-            .whitelist_config
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = WhitelistConfig::load();
+        *server.data.whitelist_config.write().unwrap() = WhitelistConfig::load();
         kick_non_whitelisted_players(server);
         sender.send_message(pumpkin_macros::translate_cross!(
             translation::java::COMMANDS_WHITELIST_RELOADED,
@@ -178,15 +166,11 @@ impl CommandExecutor for AddExecutor {
         server: &crate::server::Server,
         args: &ConsumedArgs,
     ) -> CommandResult {
-        let Some(Arg::GameProfiles(targets)) = args.get(&ARG_TARGETS) else {
+        let Some(Arg::GameProfiles(targets)) = args.get(ARG_TARGETS) else {
             return Err(CommandError::InvalidConsumption(Some(ARG_TARGETS.into())));
         };
 
-        let mut whitelist = server
-            .data
-            .whitelist_config
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut whitelist = server.data.whitelist_config.write().unwrap();
         let mut successes: i32 = 0;
         for profile in targets {
             if let Some(existing_entry) = whitelist
@@ -234,15 +218,11 @@ impl CommandExecutor for RemoveExecutor {
         server: &crate::server::Server,
         args: &ConsumedArgs,
     ) -> CommandResult {
-        let Some(Arg::GameProfiles(targets)) = args.get(&ARG_TARGETS) else {
+        let Some(Arg::GameProfiles(targets)) = args.get(ARG_TARGETS) else {
             return Err(CommandError::InvalidConsumption(Some(ARG_TARGETS.into())));
         };
 
-        let mut whitelist = server
-            .data
-            .whitelist_config
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut whitelist = server.data.whitelist_config.write().unwrap();
         let mut successes: i32 = 0;
         for player in targets {
             let i = whitelist

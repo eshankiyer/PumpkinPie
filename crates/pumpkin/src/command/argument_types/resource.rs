@@ -68,16 +68,14 @@ impl ArgumentType for ResourceArgument {
         suggestions_builder: SuggestionsBuilder,
     ) -> Suggestions {
         if self.0 == ENTITY_TYPE_REGISTRY {
-            Box::pin(async move {
-                let entity_types = EntityType::ALL
-                    .iter()
-                    .map(|entity_type| format!("minecraft:{}", entity_type.resource_name));
-                suggestions_builder
-                    .filter_and_suggest_iter(entity_types)
-                    .build()
-            })
+            let entity_types = EntityType::ALL
+                .iter()
+                .map(|entity_type| format!("minecraft:{}", entity_type.resource_name));
+            suggestions_builder
+                .filter_and_suggest_iter(entity_types)
+                .build()
         } else {
-            Box::pin(async move { Suggestions::empty() })
+            Suggestions::empty()
         }
     }
 

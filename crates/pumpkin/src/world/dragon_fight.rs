@@ -4,9 +4,7 @@
 //! Matches vanilla `EnderDragonFight` behaviour as closely as `PumpkinMC`'s
 //! current API allows.
 
-use std::sync::Arc;
-
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tracing::{debug, info};
 use uuid::Uuid;
 
@@ -471,7 +469,7 @@ impl DragonFight {
         // Tear down the active portal (replace END_PORTAL/BEDROCK with END_STONE)
         // so the podium resets, matching vanilla.
         if let Some(loc) = self.portal_location {
-            self.clear_portal_blocks(world, loc);
+            Self::clear_portal_blocks(world, loc);
         }
 
         self.respawn_stage = Some(DragonRespawnStage::Start);
@@ -482,7 +480,7 @@ impl DragonFight {
 
     /// Replace the bedrock/portal blocks of the current podium with end-stone,
     /// matching the vanilla portal-reset done during respawn.
-    fn clear_portal_blocks(&self, world: &Arc<World>, loc: BlockPos) {
+    fn clear_portal_blocks(world: &Arc<World>, loc: BlockPos) {
         // The podium is 7×6×7 centred on loc; just scan a generous volume.
         for dy in -1i32..=5 {
             for dx in -4i32..=4 {

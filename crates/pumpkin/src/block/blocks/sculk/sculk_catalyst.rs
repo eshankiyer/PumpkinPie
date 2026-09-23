@@ -10,9 +10,7 @@ use crate::block::{
 };
 use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::world::World;
-use crate::world::game_event::{
-    GameEventContext, GameEventFuture, GameEventListener, PositionSource,
-};
+use crate::world::game_event::{GameEventContext, GameEventListener, PositionSource};
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::{
@@ -128,56 +126,54 @@ impl GameEventListener for CatalystListener {
     /// flag that `shouldDropExperience()` gates the orb on in the death path
     /// (`LivingEntity.java:278,1527,1680`). Without that the death would pay out twice,
     /// once as an orb and once as sculk charge.
-    fn handle_game_event<'a>(
-        &'a self,
-        world: &'a Arc<World>,
-        event: &'a GameEvent,
-        context: &'a GameEventContext,
+    fn handle_game_event(
+        &self,
+        world: &Arc<World>,
+        event: &GameEvent,
+        context: &GameEventContext,
         source_position: Vector3<f64>,
-    ) -> GameEventFuture<'a> {
-        Box::pin(async move {
-            if !matches!(event, GameEvent::EntityDie) {
-                return false;
-            }
-            let Some(source_entity) = context.source_entity.as_ref() else {
-                return false;
-            };
-            let Some(living) = source_entity.get_living_entity() else {
-                return false;
-            };
+    ) -> bool {
+        if !matches!(event, GameEvent::EntityDie) {
+            return false;
+        }
+        let Some(source_entity) = context.source_entity.as_ref() else {
+            return false;
+        };
+        let Some(living) = source_entity.get_living_entity() else {
+            return false;
+        };
 
-            let experience_would_drop = source_entity.get_experience_reward(None);
-            if experience_would_drop > 0 {
-                // Claim the drop before the death path reaches its orb spawn.
-                living
-                    .skip_drop_experience
-                    .store(true, std::sync::atomic::Ordering::Relaxed);
-                // `BlockPos.containing(sourcePosition.relative(Direction.UP, 0.5))`.
-                let cursor_pos = BlockPos::floored(
-                    source_position.x,
-                    source_position.y + 0.5,
-                    source_position.z,
-                );
-                if let Some(block_entity) = world.get_block_entity(&self.pos)
-                    && let Some(catalyst) = block_entity
-                        .as_any()
-                        .downcast_ref::<SculkCatalystBlockEntity>()
-                {
-                    #[allow(clippy::cast_possible_wrap)]
-                    catalyst
-                        .spreader
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .add_cursors(
-                            cursor_pos,
-                            experience_would_drop.min(i32::MAX as u32) as i32,
-                        );
-                }
+        let experience_would_drop = source_entity.get_experience_reward(None);
+        if experience_would_drop > 0 {
+            // Claim the drop before the death path reaches its orb spawn.
+            living
+                .skip_drop_experience
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            // `BlockPos.containing(sourcePosition.relative(Direction.UP, 0.5))`.
+            let cursor_pos = BlockPos::floored(
+                source_position.x,
+                source_position.y + 0.5,
+                source_position.z,
+            );
+            if let Some(block_entity) = world.get_block_entity(&self.pos)
+                && let Some(catalyst) = block_entity
+                    .as_any()
+                    .downcast_ref::<SculkCatalystBlockEntity>()
+            {
+                #[allow(clippy::cast_possible_wrap)]
+                catalyst
+                    .spreader
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .add_cursors(
+                        cursor_pos,
+                        experience_would_drop.min(i32::MAX as u32) as i32,
+                    );
             }
+        }
 
-            bloom(world, self.pos);
-            true
-        })
+        bloom(world, self.pos);
+        true
     }
 }
 

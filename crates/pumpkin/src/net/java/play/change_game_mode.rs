@@ -2,7 +2,11 @@
 use super::*;
 
 impl JavaClient {
-    pub fn handle_change_game_mode(&self, player: &Arc<Player>, change_game_mode: SChangeGameMode) {
+    pub fn handle_change_game_mode(
+        &self,
+        player: &Arc<Player>,
+        change_game_mode: &SChangeGameMode,
+    ) {
         if player.permission_lvl.load() >= PermissionLvl::Two {
             player.set_gamemode(change_game_mode.game_mode);
             let gamemode_string = format!("gameMode.{}", change_game_mode.game_mode.name());

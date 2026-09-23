@@ -33,14 +33,12 @@ pub(crate) fn can_entity_walk_on_powder_snow(entity: &dyn EntityBase) -> bool {
         return false;
     };
 
-    let equipment = living
-        .entity_equipment
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    equipment
-        .equipment
-        .get(&EquipmentSlot::FEET)
-        .is_some_and(|boots| boots.item == &Item::LEATHER_BOOTS)
+    living.entity_equipment.try_lock().is_ok_and(|equipment| {
+        equipment
+            .equipment
+            .get(&EquipmentSlot::FEET)
+            .is_some_and(|boots| boots.item == &Item::LEATHER_BOOTS)
+    })
 }
 
 fn is_entity_above_block(entity: &crate::entity::Entity, position: &BlockPos) -> bool {

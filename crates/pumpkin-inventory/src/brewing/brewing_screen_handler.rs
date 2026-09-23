@@ -10,7 +10,7 @@
 //! - Brew time (0-400): Progress of the current brewing operation
 //! - Fuel time (0-20): Amount of fuel remaining
 
-use std::{any::Any, pin::sync::Arc};
+use std::{any::Any, sync::Arc};
 
 use pumpkin_data::tag::Taggable;
 use pumpkin_data::{screen::WindowType, tag};
@@ -48,9 +48,9 @@ impl BrewingScreenHandler {
     /// - `property_delegate` - Delegate for accessing brew time and fuel properties
     pub fn new(
         sync_id: u8,
-        player_inventory: Arc<PlayerInventory>,
+        player_inventory: &Arc<PlayerInventory>,
         inventory: Arc<dyn Inventory>,
-        property_delegate: Arc<dyn PropertyDelegate>,
+        property_delegate: &Arc<dyn PropertyDelegate>,
     ) -> Self {
         struct BrewingScreenListener;
         impl crate::screen_handler::ScreenHandlerListener for BrewingScreenListener {
@@ -122,7 +122,7 @@ impl ScreenHandler for BrewingScreenHandler {
     }
 
     fn on_closed(&mut self, player: &dyn crate::screen_handler::InventoryPlayer) {
-        self.default_on_closed(player)
+        self.default_on_closed(player);
     }
 
     /// Quick move logic for brewing stand.
@@ -193,10 +193,10 @@ impl ScreenHandler for BrewingScreenHandler {
 /// Factory function used by the server when a player opens a brewing stand.
 pub fn create_brewing(
     sync_id: u8,
-    player_inventory: Arc<PlayerInventory>,
+    player_inventory: &Arc<PlayerInventory>,
     inventory: Arc<dyn Inventory>,
-    property_delegate: Arc<dyn PropertyDelegate>,
-) -> Option<impl ScreenHandler> {
+    property_delegate: &Arc<dyn PropertyDelegate>,
+) -> Option<BrewingScreenHandler> {
     let handler =
         BrewingScreenHandler::new(sync_id, player_inventory, inventory, property_delegate);
     Some(handler)

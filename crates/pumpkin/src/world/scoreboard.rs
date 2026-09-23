@@ -168,7 +168,6 @@ pub const fn named_color_to_str(color: NamedColor) -> &'static str {
     }
 }
 
-#[allow(async_fn_in_trait)]
 pub trait ScoreboardTarget: Send + Sync {
     fn send_editioned<J: ClientPacket + Sync, B: BClientPacket + Sync>(
         &self,
@@ -226,11 +225,11 @@ impl ScoreboardTarget for Player {
         je_packet: &J,
         be_packet: &B,
     ) {
-        Self::send_editioned(self, je_packet, be_packet);
+        self.try_enqueue_packet_editioned(je_packet, be_packet);
     }
 
     fn send_je<J: ClientPacket + Sync>(&self, je_packet: &J) {
-        Self::send_client_packet(self, je_packet).await;
+        self.try_send_client_packet(je_packet);
     }
 }
 
@@ -240,11 +239,11 @@ impl ScoreboardTarget for std::sync::Arc<Player> {
         je_packet: &J,
         be_packet: &B,
     ) {
-        Player::send_editioned(self, je_packet, be_packet);
+        self.try_enqueue_packet_editioned(je_packet, be_packet);
     }
 
     fn send_je<J: ClientPacket + Sync>(&self, je_packet: &J) {
-        Player::send_client_packet(self, je_packet).await;
+        self.try_send_client_packet(je_packet);
     }
 }
 
@@ -833,7 +832,7 @@ impl Scoreboard {
                 criteria_name: "dummy".to_string(),
                 sort_order: VarInt(0),
             };
-            player.send_editioned(&je_update, &be_update);
+            player.try_enqueue_packet_editioned(&je_update, &be_update);
         }
 
         for (slot, objective_name) in &self.display_slots {
@@ -854,7 +853,7 @@ impl Scoreboard {
                 criteria_name: "dummy".to_string(),
                 sort_order: VarInt(0),
             };
-            player.send_editioned(&je_display, &be_display);
+            player.try_enqueue_packet_editioned(&je_display, &be_display);
         }
 
         for objective_scores in self.scores.values() {
@@ -877,7 +876,7 @@ impl Scoreboard {
                         custom_name: score.entity_name.clone(),
                     }],
                 };
-                player.send_editioned(&je_packet, &be_packet);
+                player.try_enqueue_packet_editioned(&je_packet, &be_packet);
             }
         }
 
@@ -897,7 +896,7 @@ impl Scoreboard {
                 parameters: Some(parameters),
                 players: team.players.clone().into(),
             };
-            player.send_client_packet(&je_packet).await;
+            player.try_send_client_packet(&je_packet);
         }
     }
 
@@ -1660,7 +1659,7 @@ impl BedrockScoreboard {
                 BedrockSortOrder::Descending => 1,
             }),
         };
-        player.send_editioned(
+        player.try_enqueue_packet_editioned(
             &pumpkin_protocol::java::client::play::CUpdateObjectives::new(
                 objective.name.clone(),
                 pumpkin_protocol::java::client::play::Mode::Add,
@@ -1685,7 +1684,7 @@ impl BedrockScoreboard {
                 BedrockSortOrder::Descending => 1,
             }),
         };
-        player.send_editioned(
+        player.try_enqueue_packet_editioned(
             &pumpkin_protocol::java::client::play::CUpdateObjectives::new(
                 objective.name.clone(),
                 pumpkin_protocol::java::client::play::Mode::Update,
@@ -1703,7 +1702,7 @@ impl BedrockScoreboard {
         let be_remove = BRemoveObjective {
             objective_name: name.to_string(),
         };
-        player.send_editioned(
+        player.try_enqueue_packet_editioned(
             &pumpkin_protocol::java::client::play::CUpdateObjectives::new(
                 name.to_string(),
                 pumpkin_protocol::java::client::play::Mode::Remove,
@@ -1736,7 +1735,7 @@ impl BedrockScoreboard {
             criteria_name: "dummy".to_string(),
             sort_order: VarInt(0),
         };
-        player.send_editioned(
+        player.try_enqueue_packet_editioned(
             &pumpkin_protocol::java::client::play::CDisplayObjective::new(
                 match slot {
                     BedrockDisplaySlot::PlayerList => ScoreboardDisplaySlot::List,
@@ -1777,7 +1776,7 @@ impl BedrockScoreboard {
             action: VarInt(0),
             entries: vec![],
         };
-        player.send_editioned(
+        player.try_enqueue_packet_editioned(
             &pumpkin_protocol::java::client::play::CUpdateScore::new(
                 score.entity_name.clone(),
                 score.objective_name.clone(),
@@ -1816,7 +1815,7 @@ impl BedrockScoreboard {
             action: VarInt(1),
             entries: vec![],
         };
-        player.send_editioned(
+        player.try_enqueue_packet_editioned(
             &pumpkin_protocol::java::client::play::CResetScore::new(
                 entity_name.to_string(),
                 Some(objective_name.to_string()),
@@ -1832,7 +1831,7 @@ impl BedrockScoreboard {
             action: VarInt(1),
             entries: vec![],
         };
-        player.send_editioned(
+        player.try_enqueue_packet_editioned(
             &pumpkin_protocol::java::client::play::CResetScore::new(entity_name.to_string(), None),
             &be_score,
         );
@@ -1851,7 +1850,7 @@ impl BedrockScoreboard {
                     BedrockSortOrder::Descending => 1,
                 }),
             };
-            player.send_editioned(
+            player.try_enqueue_packet_editioned(
                 &pumpkin_protocol::java::client::play::CUpdateObjectives::new(
                     objective.name.clone(),
                     pumpkin_protocol::java::client::play::Mode::Add,
@@ -1875,7 +1874,7 @@ impl BedrockScoreboard {
                 criteria_name: "dummy".to_string(),
                 sort_order: VarInt(0),
             };
-            player.send_editioned(
+            player.try_enqueue_packet_editioned(
                 &pumpkin_protocol::java::client::play::CDisplayObjective::new(
                     match slot {
                         BedrockDisplaySlot::PlayerList => ScoreboardDisplaySlot::List,
@@ -1900,7 +1899,7 @@ impl BedrockScoreboard {
                 action: VarInt(0),
                 entries: vec![],
             };
-            player.send_editioned(
+            player.try_enqueue_packet_editioned(
                 &pumpkin_protocol::java::client::play::CUpdateScore::new(
                     score.entity_name,
                     score.objective_name,

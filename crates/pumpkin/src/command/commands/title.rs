@@ -37,13 +37,13 @@ impl CommandExecutor for ClearOrResetExecutor {
         _server: &crate::server::Server,
         args: &ConsumedArgs,
     ) -> CommandResult {
-        let Some(Arg::Players(targets)) = args.get(&ARG_TARGETS) else {
+        let Some(Arg::Players(targets)) = args.get(ARG_TARGETS) else {
             return Err(CommandError::InvalidConsumption(Some(ARG_TARGETS.into())));
         };
         let reset = self.0;
 
         for target in targets {
-            target.send_client_packet(&CClearTitle::new(reset)).await;
+            target.try_send_client_packet(&CClearTitle::new(reset));
         }
         sender.send_message(if targets.len() == 1 {
             let text = if reset {
@@ -78,22 +78,22 @@ impl CommandExecutor for TitleExecutor {
         _server: &crate::server::Server,
         args: &ConsumedArgs,
     ) -> CommandResult {
-        let Some(Arg::Players(targets)) = args.get(&ARG_TARGETS) else {
+        let Some(Arg::Players(targets)) = args.get(ARG_TARGETS) else {
             return Err(CommandError::InvalidConsumption(Some(ARG_TARGETS.into())));
         };
 
         let text = TextComponentArgConsumer::find_arg(args, ARG_TITLE)?;
 
-        let mode = &self.0;
+        let mode = self.0;
 
         for target in targets {
-            target.show_title(&text, mode);
+            target.show_title(&text, &mode);
         }
 
         let mode_name = format!("{mode:?}").to_lowercase();
         sender.send_message(if targets.len() == 1 {
             TextComponent::translate_cross(
-                format!("commands.title.show.{mode_name}.single").clone(),
+                format!("commands.title.show.{mode_name}.single"),
                 format!("commands.title.show.{mode_name}.single"),
                 [targets[0].get_display_name()],
             )
@@ -118,7 +118,7 @@ impl CommandExecutor for TimesTitleExecutor {
         _server: &crate::server::Server,
         args: &ConsumedArgs,
     ) -> CommandResult {
-        let Some(Arg::Players(targets)) = args.get(&ARG_TARGETS) else {
+        let Some(Arg::Players(targets)) = args.get(ARG_TARGETS) else {
             return Err(CommandError::InvalidConsumption(Some(ARG_TARGETS.into())));
         };
 

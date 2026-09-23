@@ -14,7 +14,10 @@ impl BedrockClient {
         let result = 0u8;
 
         if packet.actions.is_empty() && packet.legacy_request_id.0 != 0 {
-            let mut player_screen_handler = player.player_screen_handler.lock();
+            let mut player_screen_handler = player
+                .player_screen_handler
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             for legacy_slot in &packet.legacy_set_item_slots {
                 let mapped_window_id = match legacy_slot.container_id {
                     28 | 29 => 0,    // HotBar or Inventory
@@ -56,6 +59,7 @@ impl BedrockClient {
                 }
             }
             player_screen_handler.send_content_updates();
+            drop(player_screen_handler);
         }
 
         for action in &packet.actions {
@@ -73,7 +77,10 @@ impl BedrockClient {
                 {
                     let item_stack = descriptor_to_stack(&action.new_item);
 
-                    let mut player_screen_handler = player.player_screen_handler.lock();
+                    let mut player_screen_handler = player
+                        .player_screen_handler
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
 
                     let is_armor_equipped = player_screen_handler
                         .get_slot(screen_slot)
@@ -106,6 +113,7 @@ impl BedrockClient {
                         .set_stack(item_stack.clone());
                     player_screen_handler.set_received_stack(screen_slot, item_stack);
                     player_screen_handler.send_content_updates();
+                    drop(player_screen_handler);
 
                     inventory_updated = true;
                 }
@@ -113,16 +121,17 @@ impl BedrockClient {
         }
 
         if inventory_updated {
+            let slots = player
+                .inventory()
+                .main_inventory
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .map(NetworkItemStackDescriptor::from)
+                .collect();
             self.enqueue_client_packet(&CInventoryContent {
                 container_id: VarUInt(0),
-                slots: player
-                    .inventory()
-                    .main_inventory
-                    .read()
-                    .await
-                    .iter()
-                    .map(NetworkItemStackDescriptor::from)
-                    .collect(),
+                slots,
                 full_container_name: FullContainerName {
                     container_name: ContainerName::Inventory,
                     dynamic_id: None,
@@ -169,6 +178,7 @@ impl BedrockClient {
                         || !world
                             .worldborder
                             .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
                             .contains_block(data.block_position.0.x, data.block_position.0.z)
                     {
                         return;
@@ -320,7 +330,11 @@ impl BedrockClient {
                                 || held.get_data_component::<KineticWeaponImpl>().is_some()
                             {
                                 if let Some(food) = held.get_data_component::<FoodImpl>() {
-                                    if player.abilities.lock().invulnerable
+                                    if player
+                                        .abilities
+                                        .lock()
+                                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                        .invulnerable
                                         || food.can_always_eat
                                         || player.hunger_manager.level.load() < 20
                                     {
@@ -339,12 +353,23 @@ impl BedrockClient {
                                 }
                             }
                             if let Some(equippable) = held.get_data_component::<EquippableImpl>() {
-                                let inventory = player.inventory();
-                                let mut equipment_guard = inventory.entity_equipment.lock();
-                                let current_equipped = equipment_guard.get(equippable.slot);
-                                if !current_equipped.are_items_and_components_equal(&held) {
+                                let should_change = {
+                                    let inventory = player.inventory();
+                                    let equipment_guard = inventory
+                                        .entity_equipment
+                                        .lock()
+                                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                                    let current_equipped = equipment_guard.get(equippable.slot);
+                                    !current_equipped.are_items_and_components_equal(&held)
+                                };
+                                if should_change {
                                     player.enqueue_equipment_change(equippable.slot, &held);
 
+                                    let inventory = player.inventory();
+                                    let mut equipment_guard = inventory
+                                        .entity_equipment
+                                        .lock()
+                                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                                     let equip_item = equipment_guard
                                         .equipment
                                         .entry(equippable.slot.clone())
@@ -357,6 +382,7 @@ impl BedrockClient {
                                         held = equip_item.clone();
                                         *equip_item = old_held;
                                     }
+                                    drop(equipment_guard);
                                     player.inventory().set_held_item(held.clone());
                                 }
                             }
@@ -409,7 +435,12 @@ impl BedrockClient {
                 }
             }
             TransactionData::ReleaseItem(_data) => {
-                let item_in_use = player.living_entity.item_in_use.lock().clone();
+                let item_in_use = player
+                    .living_entity
+                    .item_in_use
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone();
                 if let Some(stack) = item_in_use {
                     let Some(server) = player.world().server.upgrade() else {
                         return;

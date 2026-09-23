@@ -180,60 +180,58 @@ impl Mob for PigEntity {
 
     fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
         use super::animal::Animal;
-        Box::pin(async move {
-            let has_food = self.is_food(item_stack);
-            let is_saddled = {
-                let equipment = self
-                    .mob_entity
-                    .living_entity
-                    .entity_equipment
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                let saddle = equipment.get(&EquipmentSlot::SADDLE);
-                self.get_entity().is_alive()
-                    && !self.is_baby()
-                    && super::equine::is_valid_saddle_item(&saddle, self.get_entity().entity_type)
-            };
-            if !has_food
-                && is_saddled
-                && self
-                    .get_entity()
-                    .passengers
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .is_empty()
-                && !player.get_entity().is_sneaking()
-            {
-                super::equine::mount_player(&self.mob_entity, player);
-                return true;
-            }
+        let has_food = self.is_food(item_stack);
+        let is_saddled = {
+            let equipment = self
+                .mob_entity
+                .living_entity
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let saddle = equipment.get(&EquipmentSlot::SADDLE);
+            self.get_entity().is_alive()
+                && !self.is_baby()
+                && super::equine::is_valid_saddle_item(&saddle, self.get_entity().entity_type)
+        };
+        if !has_food
+            && is_saddled
+            && self
+                .get_entity()
+                .passengers
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty()
+            && !player.get_entity().is_sneaking()
+        {
+            super::equine::mount_player(&self.mob_entity, player);
+            return true;
+        }
 
-            if self.animal_interact(player, item_stack, Sound::EntityPigAmbient) {
-                return true;
-            }
+        if self.animal_interact(player, item_stack, Sound::EntityPigAmbient) {
+            return true;
+        }
 
-            let can_equip = {
-                let equipment = self
-                    .mob_entity
-                    .living_entity
-                    .entity_equipment
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                let saddle = equipment.get(&EquipmentSlot::SADDLE);
-                saddle.is_empty()
-                    && self.get_entity().is_alive()
-                    && !self.is_baby()
-                    && super::equine::saddle_equip_on_interact(
-                        item_stack,
-                        self.get_entity().entity_type,
-                    )
-            };
-            if can_equip {
-                super::equine::equip_saddle_item(&self.mob_entity, player, item_stack);
-                return true;
-            }
-            false
-        })
+        let can_equip = {
+            let equipment = self
+                .mob_entity
+                .living_entity
+                .entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let saddle = equipment.get(&EquipmentSlot::SADDLE);
+            saddle.is_empty()
+                && self.get_entity().is_alive()
+                && !self.is_baby()
+                && super::equine::saddle_equip_on_interact(
+                    item_stack,
+                    self.get_entity().entity_type,
+                )
+        };
+        if can_equip {
+            super::equine::equip_saddle_item(&self.mob_entity, player, item_stack);
+            return true;
+        }
+        false
     }
 }
 

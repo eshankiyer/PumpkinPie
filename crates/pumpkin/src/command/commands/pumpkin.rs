@@ -111,9 +111,7 @@ impl CommandExecutor for Executor {
         _server: &crate::server::Server,
         _args: &ConsumedArgs,
     ) -> CommandResult {
-        let contributors = tokio::task::spawn_blocking(fetch_all_contributors_cached)
-            .await
-            .unwrap_or_default();
+        let contributors = fetch_all_contributors_cached();
         let contributor_names = contributors
             .iter()
             .map(|c| c.login.as_str())

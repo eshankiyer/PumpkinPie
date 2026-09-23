@@ -134,7 +134,7 @@ impl OcelotEntity {
                     false,
                     Some(
                         |target: crate::entity::ai::target_predicate::TargetData,
-                         _world: Arc<World>| async move {
+                         _world: Arc<World>| {
                             target.age < 0 && !target.in_water
                         },
                     ),

@@ -34,26 +34,28 @@ impl BlockBehaviour for DryVegetationBlock {
     }
 
     fn perform_bonemeal(&self, args: crate::block::BonemealArgs<'_>) {
-        if args.block == &Block::SHORT_DRY_GRASS {
-            args.world.set_block_state(
-                args.position,
-                Block::TALL_DRY_GRASS.default_state.id,
-                BlockFlags::NOTIFY_ALL,
-            );
-            return;
-        }
+        {
+            if args.block == &Block::SHORT_DRY_GRASS {
+                args.world.set_block_state(
+                    args.position,
+                    Block::TALL_DRY_GRASS.default_state.id,
+                    BlockFlags::NOTIFY_ALL,
+                );
+                return;
+            }
 
-        let mut directions = horizontal_directions();
-        directions.shuffle(&mut rand::rng());
-        if let Some(position) = directions.into_iter().find_map(|direction| {
-            let position = args.position.offset(direction.to_offset());
-            can_spread_to(args.world, position).then_some(position)
-        }) {
-            args.world.set_block_state(
-                &position,
-                Block::SHORT_DRY_GRASS.default_state.id,
-                BlockFlags::NOTIFY_ALL,
-            );
+            let mut directions = horizontal_directions();
+            directions.shuffle(&mut rand::rng());
+            if let Some(position) = directions.into_iter().find_map(|direction| {
+                let position = args.position.offset(direction.to_offset());
+                can_spread_to(args.world, position).then_some(position)
+            }) {
+                args.world.set_block_state(
+                    &position,
+                    Block::SHORT_DRY_GRASS.default_state.id,
+                    BlockFlags::NOTIFY_ALL,
+                );
+            }
         }
     }
 

@@ -959,13 +959,13 @@ mod tests {
     fn structure_flags_round_trip_with_vanilla_lowercase_keys() {
         let pos = BlockPos::new(0, 64, 0);
         let entity = StructureBlockBlockEntity::new(pos);
-        *futures::executor::block_on(entity.show_air.lock()) = true;
-        *futures::executor::block_on(entity.show_bounding_box.lock()) = false;
-        *futures::executor::block_on(entity.powered.lock()) = true;
-        *futures::executor::block_on(entity.strict.lock()) = true;
+        *entity.show_air.lock().unwrap() = true;
+        *entity.show_bounding_box.lock().unwrap() = false;
+        *entity.powered.lock().unwrap() = true;
+        *entity.strict.lock().unwrap() = true;
 
         let mut nbt = NbtCompound::new();
-        futures::executor::block_on(entity.write_nbt(&mut nbt));
+        entity.write_nbt(&mut nbt);
 
         assert_eq!(nbt.get_bool("showair"), Some(true));
         assert_eq!(nbt.get_bool("showboundingbox"), Some(false));
@@ -974,12 +974,10 @@ mod tests {
         assert!(nbt.get_bool("showAir").is_none());
 
         let loaded = StructureBlockBlockEntity::from_nbt(&nbt, pos);
-        assert!(*futures::executor::block_on(loaded.show_air.lock()));
-        assert!(!*futures::executor::block_on(
-            loaded.show_bounding_box.lock()
-        ));
-        assert!(*futures::executor::block_on(loaded.powered.lock()));
-        assert!(*futures::executor::block_on(loaded.strict.lock()));
+        assert!(*loaded.show_air.lock().unwrap());
+        assert!(!*loaded.show_bounding_box.lock().unwrap());
+        assert!(*loaded.powered.lock().unwrap());
+        assert!(*loaded.strict.lock().unwrap());
     }
 
     #[test]
@@ -987,7 +985,7 @@ mod tests {
         // `ServerGamePacketListenerImpl.handleSetStructureBlock` applies these fields before
         // the action (`ServerGamePacketListenerImpl.java:830-844`).
         let entity = StructureBlockBlockEntity::new(BlockPos::new(3, 64, -2));
-        futures::executor::block_on(async {
+        {
             entity.set_structure_name("minecraft:test");
             entity.set_structure_pos(BlockPos::new(-4, 5, 6));
             entity.set_structure_size(Vector3::new(7, 8, 9));
@@ -1073,7 +1071,7 @@ mod tests {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
             );
-        });
+        }
     }
 
     #[test]
@@ -1082,10 +1080,8 @@ mod tests {
         nbt.put_bool("showAir", true);
         nbt.put_bool("showBoundingBox", false);
         let loaded = StructureBlockBlockEntity::from_nbt(&nbt, BlockPos::new(0, 0, 0));
-        assert!(*futures::executor::block_on(loaded.show_air.lock()));
-        assert!(!*futures::executor::block_on(
-            loaded.show_bounding_box.lock()
-        ));
+        assert!(*loaded.show_air.lock().unwrap());
+        assert!(!*loaded.show_bounding_box.lock().unwrap());
     }
 
     #[test]

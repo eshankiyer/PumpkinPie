@@ -27,11 +27,7 @@ impl CommandExecutor for Executor {
         server: &crate::server::Server,
         args: &ConsumedArgs,
     ) -> CommandResult {
-        let mut config = server
-            .data
-            .operator_config
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut config = server.data.operator_config.write().unwrap();
 
         let Some(Arg::GameProfiles(targets)) = args.get(&ARG_TARGETS) else {
             return Err(InvalidConsumption(Some(ARG_TARGETS.into())));
@@ -43,10 +39,12 @@ impl CommandExecutor for Executor {
                 config.ops.remove(op_index);
                 succeeded_deops += 1;
 
-                if let Some(player) = server.get_player_by_uuid(profile.id) {
-                    let command_dispatcher = server.command_dispatcher.load();
+                if let Some(player) = server.get_player_by_uuid(profile.id)
+                    && let Some(server_arc) = player.world().server.upgrade()
+                {
+                    let command_dispatcher = server_arc.command_dispatcher.load();
                     player.set_permission_lvl(
-                        server,
+                        &server_arc,
                         pumpkin_util::PermissionLvl::Zero,
                         &command_dispatcher,
                     );

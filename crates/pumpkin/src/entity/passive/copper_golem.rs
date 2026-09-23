@@ -27,7 +27,7 @@ use uuid::Uuid;
 use crate::block::entities::copper_golem_statue::CopperGolemStatueBlockEntity;
 use crate::entity::player::Player;
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         interact_with_door::InteractWithDoorGoal, look_at_entity::LookAtEntityGoal,
         transport_items::TransportItemsGoal, wander_around::WanderAroundGoal,
@@ -537,28 +537,17 @@ impl Mob for CopperGolemEntity {
         self.set_state(CopperGolemState::Idle);
     }
 
-    fn mob_tick<'a>(
-        &'a self,
-        _caller: &'a Arc<dyn EntityBase>,
-    ) -> crate::entity::EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            let world = self.mob_entity.living_entity.entity.world.load();
-            self.update_weathering(&world);
-        })
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        let world = self.mob_entity.living_entity.entity.world.load();
+        self.update_weathering(&world);
     }
 
-    fn mob_interact<'a>(
-        &'a self,
-        player: &'a Arc<Player>,
-        item_stack: &'a mut ItemStack,
-    ) -> crate::entity::EntityBaseFuture<'a, bool> {
-        Box::pin(async move {
-            if self.golem_interact(player, item_stack) {
-                return true;
-            }
-            self.get_mob_entity()
-                .mob_interact(player, item_stack, self.can_be_leashed())
-        })
+    fn mob_interact(&self, player: &Arc<Player>, item_stack: &mut ItemStack) -> bool {
+        if self.golem_interact(player, item_stack) {
+            return true;
+        }
+        self.get_mob_entity()
+            .mob_interact(player, item_stack, self.can_be_leashed())
     }
 }
 

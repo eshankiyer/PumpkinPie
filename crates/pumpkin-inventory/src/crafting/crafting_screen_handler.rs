@@ -15,8 +15,8 @@
 //! - Special recipes (like decorated pots)
 
 use std::any::Any;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, Mutex};
 
 use super::recipe_provider::{GenericRecipe, RecipeProvider};
 use super::recipes::{RecipeFinderScreenHandler, RecipeInputInventory};
@@ -45,7 +45,6 @@ use pumpkin_data::tag;
 use pumpkin_data::tag::Taggable;
 use pumpkin_protocol::codec::recipe::{DynamicRecipe, OwnedCraftingRecipe};
 use pumpkin_world::inventory::Inventory;
-use std::sync::Mutex;
 
 /// The result slot in a crafting screen.
 pub struct ResultSlot {
@@ -1431,7 +1430,7 @@ mod crafting_menu_tests {
     use crate::{build_equipment_slots, entity_equipment::EntityEquipment};
     use std::sync::Mutex as TokioMutex;
 
-    #[tokio::test]
+    #[test]
     fn pickup_all_excludes_the_result_slot() {
         // `CraftingMenu.canTakeItemForPickAll` excludes `resultSlots`
         // (`CraftingMenu.java:155-158`) while allowing the crafting-grid slots.
@@ -1489,12 +1488,12 @@ mod tests {
         .is_some()
     }
 
-    #[tokio::test]
+    #[test]
     fn transmute_matches_one_input_and_one_material() {
         assert!(matches_transmute(&[&Item::SHULKER_BOX, &Item::BLACK_DYE]));
     }
 
-    #[tokio::test]
+    #[test]
     fn transmute_rejects_two_material_stacks() {
         assert!(!matches_transmute(&[
             &Item::SHULKER_BOX,
@@ -1503,7 +1502,7 @@ mod tests {
         ]));
     }
 
-    #[tokio::test]
+    #[test]
     fn transmute_rejects_duplicate_input_stacks() {
         assert!(!matches_transmute(&[
             &Item::SHULKER_BOX,
@@ -1511,7 +1510,7 @@ mod tests {
         ]));
     }
 
-    #[tokio::test]
+    #[test]
     fn transmute_preserves_the_input_component_patch() {
         let inventory = CraftingInventory::new(3, 3);
         let mut input = ItemStack::new(1, &Item::SHULKER_BOX);
@@ -1540,7 +1539,7 @@ mod tests {
         assert_eq!(output.get_damage(), 0);
     }
 
-    #[tokio::test]
+    #[test]
     fn decorated_pot_preserves_sherd_order_in_its_component() {
         let inventory = CraftingInventory::new(3, 3);
         for (slot, item) in [
@@ -1787,7 +1786,7 @@ mod match_crafting_recipe_tests {
         inventory
     }
 
-    #[tokio::test]
+    #[test]
     fn empty_grid_matches_nothing() {
         let inventory = grid(&[]);
         assert!(match_crafting_recipe(&inventory, None).is_none());
@@ -1795,7 +1794,7 @@ mod match_crafting_recipe_tests {
 
     /// A shaped recipe in the top-left corner: `CraftingInput.ofPositioned` trims the
     /// empty border, so the 2x2 pattern matches inside a 3x3 grid.
-    #[tokio::test]
+    #[test]
     fn shaped_recipe_matches_in_a_trimmed_corner() {
         let inventory = grid(&[
             (0, &Item::OAK_PLANKS),
@@ -1810,7 +1809,7 @@ mod match_crafting_recipe_tests {
     }
 
     /// The same four planks offset into the bottom-right corner must still match.
-    #[tokio::test]
+    #[test]
     fn shaped_recipe_matches_when_offset() {
         let inventory = grid(&[
             (4, &Item::OAK_PLANKS),
@@ -1823,14 +1822,14 @@ mod match_crafting_recipe_tests {
         assert_eq!(result.item_id, "minecraft:crafting_table");
     }
 
-    #[tokio::test]
+    #[test]
     fn an_uncraftable_ingredient_matches_nothing() {
         let inventory = grid(&[(0, &Item::DIRT), (1, &Item::DIRT)]);
         assert!(match_crafting_recipe(&inventory, None).is_none());
     }
 
     /// A one-slot shapeless recipe still matches after trimming to a 1x1 input.
-    #[tokio::test]
+    #[test]
     fn single_slot_recipe_matches() {
         let inventory = grid(&[(4, &Item::OAK_PLANKS)]);
         let result = match_crafting_recipe(&inventory, None).expect("one plank is a button");

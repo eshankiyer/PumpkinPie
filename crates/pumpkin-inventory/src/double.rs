@@ -8,7 +8,7 @@
 //! slots. Operations are delegated to the appropriate underlying inventory
 //! based on the slot index.
 
-use std::{any::Any, pin::sync::Arc};
+use std::{any::Any, sync::Arc};
 
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_world::inventory::{Clearable, Inventory};

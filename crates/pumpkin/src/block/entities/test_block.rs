@@ -135,7 +135,7 @@ impl TestBlockBlockEntity {
         }
     }
 
-    pub async fn get_mode(&self) -> TestBlockMode {
+    pub fn get_mode(&self) -> TestBlockMode {
         *self
             .mode
             .lock()
@@ -192,7 +192,7 @@ impl TestBlockBlockEntity {
     /// redstone signal back to zero.
     pub fn reset(&self, world: &Arc<World>) {
         self.triggered.store(false, Ordering::Relaxed);
-        if self.get_mode().await == TestBlockMode::Start {
+        if self.get_mode() == TestBlockMode::Start {
             self.set_powered(false);
             world.update_neighbors(&self.position, None);
         }
@@ -201,7 +201,7 @@ impl TestBlockBlockEntity {
     /// `trigger`: START powers the block and schedules its reset; LOG logs; every
     /// non-START mode records that it fired.
     pub fn trigger(&self, world: &Arc<World>) {
-        let mode = self.get_mode().await;
+        let mode = self.get_mode();
         if mode == TestBlockMode::Start {
             self.set_powered(true);
             world.update_neighbors(&self.position, None);
@@ -224,7 +224,7 @@ impl TestBlockBlockEntity {
         }
         tracing::info!(
             "Test {} (at {:?}): {}",
-            mode_to_value(self.get_mode().await),
+            mode_to_value(self.get_mode()),
             self.position.0,
             message
         );

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use crate::block::{GetComparatorOutputArgs, OnStateReplacedArgs, PlacedArgs};
 use crate::block::{
@@ -9,7 +10,9 @@ use crate::block::{
 use crate::block::entities::brewing_stand::BrewingStandBlockEntity;
 use pumpkin_data::translation;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
-use pumpkin_inventory::screen_handler::{ScreenHandlerFactory, SharedScreenHandler};
+use pumpkin_inventory::screen_handler::{
+    InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
+};
 use pumpkin_macros::pumpkin_block;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::Inventory;
@@ -24,16 +27,11 @@ impl ScreenHandlerFactory for BrewingScreenFactory {
         &self,
         sync_id: u8,
         player_inventory: &Arc<PlayerInventory>,
-        _player: &dyn pumpkin_inventory::screen_handler::InventoryPlayer,
+        _player: &dyn InventoryPlayer,
     ) -> Option<SharedScreenHandler> {
         let inventory = self.0.clone();
-        let property_delegate = self.1.clone();
-        let pi = player_inventory.clone();
-        Box::pin(async move {
-            // Delegate to pumpkin-inventory brewing creator
-            pumpkin_inventory::brewing::create_brewing(sync_id, pi, inventory, property_delegate)
-                .map(|handler| Arc::new(std::sync::Mutex::new(handler)) as SharedScreenHandler)
-        })
+        pumpkin_inventory::brewing::create_brewing(sync_id, player_inventory, inventory, &self.1)
+            .map(|handler| Arc::new(Mutex::new(handler)) as SharedScreenHandler)
     }
 
     fn get_display_name(&self) -> TextComponent {

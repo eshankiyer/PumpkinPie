@@ -186,7 +186,7 @@ pub fn register_llama_goals(
             true,
             Some(
                 |target: crate::entity::ai::target_predicate::TargetData,
-                 world: Arc<crate::world::World>| async move {
+                 world: Arc<crate::world::World>| {
                     let id = target.entity_id;
                     world
                         .get_entity_by_id(id)
@@ -422,7 +422,7 @@ impl LlamaEntity {
     /// `Llama.spit` (`Llama.java:340-365`), also reachable through [`RangedAttackMob`].
     pub fn spit(&self, target: &Arc<dyn EntityBase>) {
         let entity = self.get_entity();
-        let world = entity.world.load();
+        let world = entity.world.load_full();
 
         let spit_entity = Entity::new(world.clone(), entity.pos.load(), &EntityType::LLAMA_SPIT);
         let spit = LlamaSpitEntity::new_shot(spit_entity, entity);

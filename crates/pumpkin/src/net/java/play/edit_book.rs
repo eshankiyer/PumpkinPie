@@ -2,7 +2,7 @@
 use super::*;
 
 impl JavaClient {
-    pub fn handle_edit_book(&self, player: &Player, packet: SEditBook<'_>) {
+    pub fn handle_edit_book(&self, player: &Player, packet: &SEditBook<'_>) {
         let held_stack = player.inventory().held_item();
         if held_stack.item.id != Item::WRITABLE_BOOK.id {
             return;

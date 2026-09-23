@@ -5,7 +5,7 @@ use pumpkin_data::tag::{self, Taggable};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 use std::any::Any;
-use std::future::Future;
+use std::sync::RwLock;
 use std::{
     array::from_fn,
     sync::{
@@ -23,7 +23,7 @@ use pumpkin_world::inventory::{Clearable, Inventory, sync_write_items_to_nbt};
 
 pub struct ChiseledBookshelfBlockEntity {
     pub position: BlockPos,
-    pub items: std::sync::RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
+    pub items: RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
     pub last_interacted_slot: AtomicI8,
     pub dirty: AtomicBool,
 }
@@ -45,11 +45,17 @@ impl BlockEntity for ChiseledBookshelfBlockEntity {
     {
         let mut bookshelf = Self {
             position,
-            items: std::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+            items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             last_interacted_slot: AtomicI8::new(-1),
             dirty: AtomicBool::new(false),
         };
-        pumpkin_world::inventory::sync_read_items_from_nbt(nbt, bookshelf.items.get_mut());
+        pumpkin_world::inventory::sync_read_items_from_nbt(
+            nbt,
+            bookshelf
+                .items
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
         if let Some(slot) = nbt.get_int(LAST_INTERACTED_SLOT) {
             bookshelf
                 .last_interacted_slot
@@ -96,7 +102,7 @@ impl ChiseledBookshelfBlockEntity {
     pub fn new(position: BlockPos) -> Self {
         Self {
             position,
-            items: std::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+            items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             last_interacted_slot: AtomicI8::new(-1),
             dirty: AtomicBool::new(false),
         }
@@ -105,7 +111,7 @@ impl ChiseledBookshelfBlockEntity {
     pub fn update_state(
         &self,
         mut properties: ChiseledBookshelfLikeProperties,
-        world: Arc<World>,
+        world: &Arc<World>,
         slot: usize,
     ) {
         if (0..Self::INVENTORY_SIZE).contains(&slot) {
@@ -113,7 +119,11 @@ impl ChiseledBookshelfBlockEntity {
                 .store(slot as i8, Ordering::Relaxed);
             self.mark_dirty();
 
-            let occupied = !self.get_stack(slot).is_empty();
+            let occupied = !self
+                .items
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)[slot]
+                .is_empty();
             match slot {
                 0 => properties.slot_0_occupied = occupied,
                 1 => properties.slot_1_occupied = occupied,
@@ -135,6 +145,29 @@ impl ChiseledBookshelfBlockEntity {
                 slot, self.position
             );
         }
+    }
+
+    pub fn set_book(&self, slot: usize, stack: ItemStack) {
+        let mut items = self
+            .items
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        items[slot] = stack;
+        self.mark_dirty();
+    }
+
+    pub fn remove_book(&self, slot: usize, amount: u8) -> ItemStack {
+        let mut items = self
+            .items
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let res = if !items[slot].is_empty() && amount > 0 {
+            items[slot].split(amount)
+        } else {
+            ItemStack::EMPTY.clone()
+        };
+        self.mark_dirty();
+        res
     }
 }
 

@@ -60,10 +60,9 @@ impl PiglinAi {
     }
 
     pub fn is_wearing_safe_armor(target: &LivingEntity) -> bool {
-        let equipment = target
-            .entity_equipment
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Ok(equipment) = target.entity_equipment.try_lock() else {
+            return false;
+        };
         [
             EquipmentSlot::HEAD,
             EquipmentSlot::CHEST,

@@ -34,16 +34,16 @@ impl LightningRodBlock {
             props.powered = true;
             world.set_block_state(pos, props.to_state_id(block), BlockFlags::NOTIFY_ALL);
 
-            Self::update_neighbors(world, pos, &props);
+            Self::update_neighbors(world, pos, props);
 
             // In vanilla, it stays powered for 8 ticks (4 redstone ticks) before scheduled tick turns it off.
             world.schedule_block_tick(block, *pos, 8, TickPriority::Normal);
         }
     }
 
-    fn update_neighbors(world: &Arc<World>, pos: &BlockPos, props: &LightningRodLikeProperties) {
+    fn update_neighbors(world: &Arc<World>, pos: &BlockPos, props: LightningRodLikeProperties) {
         world.update_neighbors(pos, None);
-        Self::update_attached_neighbor(world, pos, props);
+        Self::update_attached_neighbor(world, pos, &props);
     }
 
     fn update_attached_neighbor(
@@ -113,7 +113,7 @@ impl BlockBehaviour for LightningRodBlock {
                 props.to_state_id(args.block),
                 BlockFlags::NOTIFY_ALL,
             );
-            Self::update_neighbors(args.world, args.position, &props);
+            Self::update_neighbors(args.world, args.position, props);
         }
     }
 

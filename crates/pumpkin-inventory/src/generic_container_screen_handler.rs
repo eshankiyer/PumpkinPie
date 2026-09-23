@@ -142,14 +142,14 @@ impl GenericContainerScreenHandler {
         columns: u8,
     ) -> Self {
         let mut handler = Self {
-            inventory: inventory.clone(),
+            inventory,
             rows,
             columns,
             behaviour: ScreenHandlerBehaviour::new(sync_id, Some(screen_type)),
         };
 
         // TODO: Add player entity as a parameter
-        inventory.on_open();
+        handler.inventory.on_open();
 
         handler.add_inventory_slots();
         let player_inventory: Arc<dyn Inventory> = player_inventory.clone();
@@ -270,10 +270,7 @@ mod tests {
     use pumpkin_world::inventory::SimpleInventory;
     use std::sync::Mutex;
 
-    use crate::{
-        entity_equipment::EntityEquipment,
-        screen_handler::{ContainerAccess, PlayerFuture},
-    };
+    use crate::{entity_equipment::EntityEquipment, screen_handler::ContainerAccess};
 
     use super::*;
 
@@ -355,7 +352,7 @@ mod tests {
     /// The container/player boundary must be `rows * columns`, not `rows * 9`.
     /// Vanilla uses `container.getContainerSize()`: `HopperMenu.java:45-48`,
     /// `ShulkerBoxMenu.java:46-50`, and the literal `9` of `DispenserMenu.java:51`.
-    #[tokio::test]
+    #[test]
     fn container_boundary_matches_container_size() {
         for (rows, columns, expected) in [
             (3u8, 9u8, 27i32),
@@ -414,7 +411,7 @@ mod tests {
 
     /// Regression: with the old `rows * 9` boundary a hopper treated player
     /// slots 5..9 as container slots, so shift-clicking them did nothing useful.
-    #[tokio::test]
+    #[test]
     fn hopper_quick_move_from_player_reaches_container() {
         let (mut handler, inventory, player) = handler_for(WindowType::Hopper, 1, 5);
         // First player slot of a 5-slot hopper screen is index 5.
@@ -432,7 +429,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[test]
     fn hopper_quick_move_from_container_reaches_player() {
         let (mut handler, inventory, player) = handler_for(WindowType::Hopper, 1, 5);
         inventory.set_stack(0, ItemStack::new(4, &Item::STONE));
@@ -450,7 +447,7 @@ mod tests {
 
     /// Regression: with the old boundary a 3x3 dispenser treated player slots
     /// 9..27 as container slots and shifted items into other player slots.
-    #[tokio::test]
+    #[test]
     fn dispenser_quick_move_from_player_reaches_container() {
         let (mut handler, inventory, player) = handler_for(WindowType::Generic3x3, 3, 3);
         let player_slot = 9;
@@ -462,7 +459,7 @@ mod tests {
         assert_eq!(inventory.get_stack(0).item_count, 7);
     }
 
-    #[tokio::test]
+    #[test]
     fn dispenser_quick_move_from_container_reaches_player() {
         let (mut handler, inventory, player) = handler_for(WindowType::Generic3x3, 3, 3);
         inventory.set_stack(8, ItemStack::new(7, &Item::STONE));
@@ -478,7 +475,7 @@ mod tests {
     }
 
     /// The 9-column chest shapes were already correct; prove the fix keeps them so.
-    #[tokio::test]
+    #[test]
     fn chest_quick_move_unchanged() {
         let (mut handler, inventory, player) = handler_for(WindowType::Generic9x3, 3, 9);
         let player_slot = 27;
@@ -495,7 +492,7 @@ mod tests {
     /// moving its items through `SClickSlot`. Vanilla invalidates the menu via
     /// `ChestMenu.stillValid` (`ChestMenu.java:70-72`) ->
     /// `Container.stillValidBlockEntity` (`Container.java:94-101`).
-    #[tokio::test]
+    #[test]
     fn chest_menu_is_invalid_once_the_player_walks_away() {
         let (handler, _inventory, mut player) = handler_for(WindowType::Generic9x3, 3, 9);
 
@@ -508,7 +505,7 @@ mod tests {
     /// A chest menu is block-entity backed, so vanilla applies no block-identity test -
     /// only the range check (`Container.java:94-101`). Swapping the block underneath
     /// must therefore not, by itself, invalidate the menu here.
-    #[tokio::test]
+    #[test]
     fn chest_menu_access_is_range_only() {
         let (handler, _inventory, mut player) = handler_for(WindowType::Generic9x3, 3, 9);
 
@@ -527,7 +524,7 @@ mod tests {
     /// (`ContainerLevelAccess.java:10-15`, `AbstractContainerMenu.java:93-95`). Menus
     /// opened by an entity (a minecart chest) have no block position and must not be
     /// closed by this check.
-    #[tokio::test]
+    #[test]
     fn menu_without_a_backing_position_stays_valid() {
         let (handler, _inventory, mut player) = handler_for(WindowType::Generic9x3, 3, 9);
 

@@ -29,10 +29,7 @@ impl CommandExecutor for BanListCommandExecutor {
         let data = &context.server().data;
 
         if self.players {
-            let lock = data
-                .banned_player_list
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let lock = data.banned_player_list.read().unwrap();
             for entry in &lock.banned_players {
                 entries.push(BanListEntry {
                     name: entry.name.clone(),
@@ -43,10 +40,7 @@ impl CommandExecutor for BanListCommandExecutor {
         }
 
         if self.ips {
-            let lock = data
-                .banned_ip_list
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let lock = data.banned_ip_list.read().unwrap();
             for entry in &lock.banned_ips {
                 entries.push(BanListEntry {
                     name: entry.ip.to_string(),

@@ -298,10 +298,7 @@ impl EndermanEntity {
                     origin,
                     new_pos,
                 );
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current()
-                    .block_on(server.plugin_manager.fire(&server, &mut event));
-            });
+            server.plugin_manager.fire_blocking(&server, &mut event);
             if event.cancelled {
                 return false;
             }
@@ -481,7 +478,7 @@ impl EndermanEntity {
         let player_eye_pos = Vector3::new(player_pos.x, player_eye_y, player_pos.z);
         let world = entity.world.load();
         world
-            .raycast(enderman_eye_pos, player_eye_pos, async |block_pos, w| {
+            .raycast(enderman_eye_pos, player_eye_pos, |block_pos, w| {
                 let state = w.get_block_state(block_pos);
                 state.is_solid()
             })
@@ -585,16 +582,14 @@ impl Mob for EndermanEntity {
 
     fn pre_damage(&self, damage_type: DamageType, _source: Option<&dyn EntityBase>) -> bool {
         let is_projectile = is_projectile_damage(damage_type);
-        Box::pin(async move {
-            if is_projectile {
-                for _ in 0..64 {
-                    if self.teleport_randomly() {
-                        return false;
-                    }
+        if is_projectile {
+            for _ in 0..64 {
+                if self.teleport_randomly() {
+                    return false;
                 }
             }
-            true
-        })
+        }
+        true
     }
 
     fn on_damage(&self, _damage_type: DamageType, source: Option<&dyn EntityBase>) {

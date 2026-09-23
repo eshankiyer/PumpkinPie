@@ -115,11 +115,11 @@ fn setworldspawn(
         current_info.spawn_y,
         current_info.spawn_z,
     );
-    let mut new_position = block_pos;
+    let new_position = block_pos;
     let previous_yaw = current_info.spawn_yaw;
     let previous_pitch = current_info.spawn_pitch;
-    let mut new_yaw = yaw;
-    let mut new_pitch = pitch;
+    let new_yaw = yaw;
+    let new_pitch = pitch;
     let mut event = SpawnChangeEvent::new(
         world.clone(),
         previous_position,
@@ -134,9 +134,6 @@ fn setworldspawn(
             .plugin_manager
             .fire_blocking(&server_arc, &mut event);
     }
-    new_position = event.new_position;
-    new_yaw = event.new_yaw;
-    new_pitch = event.new_pitch;
 
     let mut new_info = (**current_info).clone();
 

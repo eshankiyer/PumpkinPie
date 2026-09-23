@@ -21,6 +21,7 @@ pub enum EntityPredicate<'a> {
 }
 
 impl EntityPredicate<'_> {
+    #[must_use]
     pub fn test(&self, entity: &Entity) -> bool {
         match self {
             EntityPredicate::ValidEntity => entity.is_alive(),
@@ -53,13 +54,7 @@ impl EntityPredicate<'_> {
             EntityPredicate::Rides(target_entity) => {
                 let target: &Entity = target_entity;
 
-                let mut opt_vehicle_arc = {
-                    let vehicle_lock = entity
-                        .vehicle
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    vehicle_lock.clone()
-                };
+                let mut opt_vehicle_arc = entity.get_vehicle();
 
                 while let Some(vehicle_arc) = opt_vehicle_arc {
                     let vehicle_entity_base: &dyn EntityBase = &*vehicle_arc;
@@ -69,14 +64,7 @@ impl EntityPredicate<'_> {
                         return false;
                     }
 
-                    opt_vehicle_arc = {
-                        let vehicle_lock = vehicle_entity_base
-                            .get_entity()
-                            .vehicle
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        vehicle_lock.clone()
-                    }
+                    opt_vehicle_arc = vehicle_entity_base.get_entity().get_vehicle();
                 }
                 true
             }

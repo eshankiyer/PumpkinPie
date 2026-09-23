@@ -46,10 +46,10 @@ pub trait WallMountedBlock: Send + Sync {
         }
     }
 
-    fn can_place_at<'a>(
-        &'a self,
-        world: &'a dyn BlockAccessor,
-        pos: &'a BlockPos,
+    fn can_place_at(
+        &self,
+        world: &dyn BlockAccessor,
+        pos: &BlockPos,
         direction: BlockDirection,
     ) -> bool {
         let block_pos = pos.offset(direction.to_offset());

@@ -32,8 +32,10 @@ impl BlockBehaviour for CoralPlantBlock {
         props.to_state_id(args.block)
     }
     fn placed(&self, args: PlacedArgs<'_>) {
-        if !scan_for_water(args.world, args.position) && !is_dead_coral(args.block) {
-            try_schedule_die_tick(args.block, args.world, args.position);
+        {
+            if !scan_for_water(args.world, args.position) && !is_dead_coral(args.block) {
+                try_schedule_die_tick(args.block, args.world, args.position);
+            }
         }
     }
     fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
@@ -47,7 +49,7 @@ impl BlockBehaviour for CoralPlantBlock {
                 .set_block_state(args.position, dead_block_state_id, BlockFlags::empty());
         }
     }
-    fn can_place_at<'a>(&'a self, args: CanPlaceAtArgs<'a>) -> bool {
+    fn can_place_at(&self, args: CanPlaceAtArgs<'_>) -> bool {
         let support_block = args.block_accessor.get_block_state(&args.position.down());
         if support_block.is_center_solid(BlockDirection::Up) {
             return true;

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use crate::block::entities::{
     PropertyDelegate, furnace_like_block_entity::ExperienceContainer, smoker::SmokerBlockEntity,
@@ -16,7 +17,6 @@ use pumpkin_inventory::{
 };
 use pumpkin_macros::pumpkin_block;
 use pumpkin_world::inventory::Inventory;
-use std::sync::Mutex;
 
 use crate::{
     block::{

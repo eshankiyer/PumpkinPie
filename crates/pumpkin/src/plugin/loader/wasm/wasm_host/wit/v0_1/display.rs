@@ -137,62 +137,65 @@ impl HostDisplayEntity for PluginHostState {
         display: Resource<DisplayEntity>,
     ) -> wasmtime::Result<DisplayTransformation> {
         let display_res = self.get_display_entity_res(&display)?;
-        if let Some(d) = get_display_entity(display_res.provider.as_ref()) {
-            let translation = d.get_translation();
-            let scale = d.get_scale();
-            let left_rot = d.get_left_rotation();
-            let right_rot = d.get_right_rotation();
+        get_display_entity(display_res.provider.as_ref()).map_or_else(
+            || {
+                Ok(DisplayTransformation {
+                    translation: Vector3f {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    scale: Vector3f {
+                        x: 1.0,
+                        y: 1.0,
+                        z: 1.0,
+                    },
+                    left_rotation: Quaternionf {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                        w: 1.0,
+                    },
+                    right_rotation: Quaternionf {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                        w: 1.0,
+                    },
+                })
+            },
+            |d| {
+                let translation = d.get_translation();
+                let scale = d.get_scale();
+                let left_rot = d.get_left_rotation();
+                let right_rot = d.get_right_rotation();
 
-            Ok(DisplayTransformation {
-                translation: Vector3f {
-                    x: translation.x,
-                    y: translation.y,
-                    z: translation.z,
-                },
-                scale: Vector3f {
-                    x: scale.x,
-                    y: scale.y,
-                    z: scale.z,
-                },
-                left_rotation: Quaternionf {
-                    x: left_rot[0],
-                    y: left_rot[1],
-                    z: left_rot[2],
-                    w: left_rot[3],
-                },
-                right_rotation: Quaternionf {
-                    x: right_rot[0],
-                    y: right_rot[1],
-                    z: right_rot[2],
-                    w: right_rot[3],
-                },
-            })
-        } else {
-            Ok(DisplayTransformation {
-                translation: Vector3f {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                },
-                scale: Vector3f {
-                    x: 1.0,
-                    y: 1.0,
-                    z: 1.0,
-                },
-                left_rotation: Quaternionf {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                    w: 1.0,
-                },
-                right_rotation: Quaternionf {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                    w: 1.0,
-                },
-            })
-        }
+                Ok(DisplayTransformation {
+                    translation: Vector3f {
+                        x: translation.x,
+                        y: translation.y,
+                        z: translation.z,
+                    },
+                    scale: Vector3f {
+                        x: scale.x,
+                        y: scale.y,
+                        z: scale.z,
+                    },
+                    left_rotation: Quaternionf {
+                        x: left_rot[0],
+                        y: left_rot[1],
+                        z: left_rot[2],
+                        w: left_rot[3],
+                    },
+                    right_rotation: Quaternionf {
+                        x: right_rot[0],
+                        y: right_rot[1],
+                        z: right_rot[2],
+                        w: right_rot[3],
+                    },
+                })
+            },
+        )
     }
 
     async fn set_transformation(
@@ -323,11 +326,8 @@ impl HostDisplayEntity for PluginHostState {
 
     async fn get_view_range(&mut self, display: Resource<DisplayEntity>) -> wasmtime::Result<f32> {
         let display_res = self.get_display_entity_res(&display)?;
-        if let Some(d) = get_display_entity(display_res.provider.as_ref()) {
-            Ok(d.get_view_range())
-        } else {
-            Ok(1.0)
-        }
+        get_display_entity(display_res.provider.as_ref())
+            .map_or_else(|| Ok(1.0), |d| Ok(d.get_view_range()))
     }
 
     async fn set_view_range(
@@ -347,11 +347,8 @@ impl HostDisplayEntity for PluginHostState {
         display: Resource<DisplayEntity>,
     ) -> wasmtime::Result<f32> {
         let display_res = self.get_display_entity_res(&display)?;
-        if let Some(d) = get_display_entity(display_res.provider.as_ref()) {
-            Ok(d.get_shadow_radius())
-        } else {
-            Ok(0.0)
-        }
+        get_display_entity(display_res.provider.as_ref())
+            .map_or_else(|| Ok(0.0), |d| Ok(d.get_shadow_radius()))
     }
 
     async fn set_shadow_radius(
@@ -371,11 +368,8 @@ impl HostDisplayEntity for PluginHostState {
         display: Resource<DisplayEntity>,
     ) -> wasmtime::Result<f32> {
         let display_res = self.get_display_entity_res(&display)?;
-        if let Some(d) = get_display_entity(display_res.provider.as_ref()) {
-            Ok(d.get_shadow_strength())
-        } else {
-            Ok(1.0)
-        }
+        get_display_entity(display_res.provider.as_ref())
+            .map_or_else(|| Ok(1.0), |d| Ok(d.get_shadow_strength()))
     }
 
     async fn set_shadow_strength(
@@ -395,11 +389,8 @@ impl HostDisplayEntity for PluginHostState {
         display: Resource<DisplayEntity>,
     ) -> wasmtime::Result<f32> {
         let display_res = self.get_display_entity_res(&display)?;
-        if let Some(d) = get_display_entity(display_res.provider.as_ref()) {
-            Ok(d.get_display_width())
-        } else {
-            Ok(0.0)
-        }
+        get_display_entity(display_res.provider.as_ref())
+            .map_or_else(|| Ok(0.0), |d| Ok(d.get_display_width()))
     }
 
     async fn set_display_width(
@@ -419,11 +410,8 @@ impl HostDisplayEntity for PluginHostState {
         display: Resource<DisplayEntity>,
     ) -> wasmtime::Result<f32> {
         let display_res = self.get_display_entity_res(&display)?;
-        if let Some(d) = get_display_entity(display_res.provider.as_ref()) {
-            Ok(d.get_display_height())
-        } else {
-            Ok(0.0)
-        }
+        get_display_entity(display_res.provider.as_ref())
+            .map_or_else(|| Ok(0.0), |d| Ok(d.get_display_height()))
     }
 
     async fn set_display_height(
@@ -631,7 +619,7 @@ impl HostItemDisplayEntity for PluginHostState {
             .downcast_ref::<InternalItemDisplayEntity>()
         {
             let stack = if let Some(item_res_val) = item {
-                self.get_item_stack(&item_res_val)?.lock().clone()
+                self.get_item_stack(&item_res_val)?.lock().await.clone()
             } else {
                 pumpkin_data::item_stack::ItemStack::new(0, &pumpkin_data::item::Item::AIR)
             };
@@ -990,15 +978,11 @@ impl HostInteractionEntity for PluginHostState {
         interaction: Resource<InteractionEntity>,
     ) -> wasmtime::Result<f32> {
         let int_res = self.get_interaction_entity_res(&interaction)?;
-        if let Some(i) = int_res
+        int_res
             .provider
             .cast_any()
             .downcast_ref::<InternalInteractionEntity>()
-        {
-            Ok(i.get_width())
-        } else {
-            Ok(1.0)
-        }
+            .map_or_else(|| Ok(1.0), |i| Ok(i.get_width()))
     }
 
     async fn set_width(
@@ -1022,15 +1006,11 @@ impl HostInteractionEntity for PluginHostState {
         interaction: Resource<InteractionEntity>,
     ) -> wasmtime::Result<f32> {
         let int_res = self.get_interaction_entity_res(&interaction)?;
-        if let Some(i) = int_res
+        int_res
             .provider
             .cast_any()
             .downcast_ref::<InternalInteractionEntity>()
-        {
-            Ok(i.get_height())
-        } else {
-            Ok(1.0)
-        }
+            .map_or_else(|| Ok(1.0), |i| Ok(i.get_height()))
     }
 
     async fn set_height(
@@ -1082,16 +1062,17 @@ impl HostInteractionEntity for PluginHostState {
         interaction: Resource<InteractionEntity>,
     ) -> wasmtime::Result<Option<Uuid>> {
         let int_res = self.get_interaction_entity_res(&interaction)?;
-        if let Some(i) = int_res
+        int_res
             .provider
             .cast_any()
             .downcast_ref::<InternalInteractionEntity>()
-        {
-            let action = i.get_last_attacker();
-            Ok(action.map(|a| Uuid::to_wit(&a.player)))
-        } else {
-            Ok(None)
-        }
+            .map_or_else(
+                || Ok(None),
+                |i| {
+                    let action = i.get_last_attacker();
+                    Ok(action.map(|a| Uuid::to_wit(&a.player)))
+                },
+            )
     }
 
     async fn get_last_interaction(
@@ -1099,16 +1080,17 @@ impl HostInteractionEntity for PluginHostState {
         interaction: Resource<InteractionEntity>,
     ) -> wasmtime::Result<Option<Uuid>> {
         let int_res = self.get_interaction_entity_res(&interaction)?;
-        if let Some(i) = int_res
+        int_res
             .provider
             .cast_any()
             .downcast_ref::<InternalInteractionEntity>()
-        {
-            let action = i.get_target();
-            Ok(action.map(|a| Uuid::to_wit(&a.player)))
-        } else {
-            Ok(None)
-        }
+            .map_or_else(
+                || Ok(None),
+                |i| {
+                    let action = i.get_target();
+                    Ok(action.map(|a| Uuid::to_wit(&a.player)))
+                },
+            )
     }
 
     async fn drop(&mut self, rep: Resource<InteractionEntity>) -> wasmtime::Result<()> {

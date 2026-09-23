@@ -321,11 +321,7 @@ impl ShulkerEntity {
 
                 // Close the shulker and drop the current target after teleport.
                 self.set_raw_peek(0);
-                self.mob_entity
-                    .target
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .take();
+                self.mob_entity.set_target(None);
 
                 return true;
             }
@@ -505,11 +501,7 @@ impl Goal for ShulkerAttackGoal {
 
         // De-target if too far (>20 blocks)
         if dist_sq > 400.0 {
-            mob_entity
-                .target
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take();
+            mob_entity.set_target(None);
             return;
         }
 

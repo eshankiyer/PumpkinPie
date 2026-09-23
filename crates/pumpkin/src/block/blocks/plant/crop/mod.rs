@@ -157,7 +157,7 @@ pub const MIN_SURVIVE_LIGHT: u8 = 8;
 /// by the time of day and crops keep growing at night.
 pub const MIN_GROWTH_LIGHT: u8 = 9;
 
-pub fn get_available_moisture(world: &Arc<World>, pos: &BlockPos, block: &Block) -> f32 {
+pub fn get_available_moisture(world: &World, pos: &BlockPos, block: &Block) -> f32 {
     let mut moisture = 1.0;
     let down_pos = pos.down();
 

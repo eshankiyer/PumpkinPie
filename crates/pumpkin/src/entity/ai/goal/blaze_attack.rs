@@ -108,12 +108,7 @@ impl Goal for BlazeShootFireballGoal {
             return;
         };
 
-        let target = blaze
-            .entity
-            .target
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let target = blaze.entity.get_target();
         let Some(target) = target else {
             return;
         };

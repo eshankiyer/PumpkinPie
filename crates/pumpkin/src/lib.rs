@@ -1,9 +1,5 @@
 #![deny(clippy::unwrap_used)]
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
-// Several `BlockBehaviour` impls satisfy an `async fn` trait method without awaiting: the
-// async shape is the trait's, and rewriting each one to return `std::future::ready` to please
-// the lint would obscure that they implement the same interface as their awaiting siblings.
-#![allow(clippy::unused_async_trait_impl)]
 // Not warn event sending macros
 #![allow(unused_labels, deprecated)]
 
@@ -240,7 +236,7 @@ impl PumpkinServer {
         advanced_config: AdvancedConfiguration,
         vanilla_data: VanillaData,
     ) -> Self {
-        let server = Server::new(basic_config, advanced_config, vanilla_data);
+        let server = Server::new(basic_config, advanced_config, vanilla_data).await;
 
         let rcon = server.advanced_config.networking.rcon.clone();
 
@@ -250,7 +246,7 @@ impl PumpkinServer {
             );
             let rcon_server = server.clone();
             server.spawn_task(async move {
-                RCONServer::run(&rcon, rcon_server);
+                RCONServer::run(&rcon, rcon_server).await;
             });
         }
 
@@ -311,9 +307,15 @@ impl PumpkinServer {
         // Ticker
         {
             let ticker_server = server.clone();
-            server.spawn_task(async move {
-                Ticker::run(&ticker_server);
-            });
+            if let Err(err) = std::thread::Builder::new()
+                .name("Server-Ticker".into())
+                .spawn(move || {
+                    Ticker::run(&ticker_server);
+                })
+            {
+                error!("Failed to spawn Server-Ticker thread: {err}");
+                std::process::exit(1);
+            }
         };
 
         let (bedrock_status, ice_socket) = Self::bind_bedrock_status(&server).await;
@@ -494,7 +496,7 @@ impl PumpkinServer {
 
         let kick_message = TextComponent::text("Server stopped");
         for player in self.server.get_all_players() {
-            player.kick(DisconnectReason::Shutdown, kick_message.clone());
+            player.kick(DisconnectReason::Shutdown, &kick_message);
         }
 
         info!("Ending player tasks");
@@ -583,8 +585,8 @@ impl PumpkinServer {
                                         client.close();
                                         client.await_tasks().await;
                                     }
-                                    player.remove();
-                                    server_clone.remove_player(&player);
+                                    player.remove().await;
+                                    server_clone.remove_player(&player).await;
                                     if let Err(e) = server_clone.player_data_storage
                                         .handle_player_leave(&player)
                                         .await {
@@ -602,7 +604,7 @@ impl PumpkinServer {
                     }
                     Err(e) => {
                         error!("Failed to accept Java client connection: {e}");
-                        sleep(Duration::from_millis(50));
+                        sleep(Duration::from_millis(50)).await;
                     }
                 }
             },
@@ -633,7 +635,7 @@ impl PumpkinServer {
                         packet_limiter,
                     ));
                     client.start_outgoing_packet_task();
-                    bedrock_clients.lock().insert(client_addr, client.clone());
+                    bedrock_clients.lock().await.insert(client_addr, client.clone());
 
                     let packet_client = client.clone();
                     let packet_server = self.server.clone();
@@ -683,8 +685,8 @@ impl PumpkinServer {
                         client.progress_player_packets(&player, &server).await;
                         client.close().await;
                         client.await_tasks().await;
-                        player.remove();
-                        server.remove_player(&player);
+                        player.remove().await;
+                        server.remove_player(&player).await;
                         if let Err(error) = server
                             .player_data_storage
                             .handle_player_leave(&player)

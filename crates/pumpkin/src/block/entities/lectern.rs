@@ -3,12 +3,10 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
-use std::sync::Mutex;
 use std::{
     any::Any,
-    future::Future,
-    pin::sync::{
-        Arc,
+    sync::{
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
@@ -325,14 +323,14 @@ mod tests {
                 ),
             )],
         );
-        futures::executor::block_on(entity.set_stack(0, book));
+        entity.set_stack(0, book);
         assert!(entity.has_book());
-        assert_eq!(futures::executor::block_on(entity.comparator_output()), 1);
+        assert_eq!(entity.comparator_output(), 1);
 
         entity.page.store(1, Ordering::Relaxed);
-        assert_eq!(futures::executor::block_on(entity.comparator_output()), 15);
+        assert_eq!(entity.comparator_output(), 15);
 
-        futures::executor::block_on(entity.set_stack(
+        entity.set_stack(
             0,
             ItemStack::new_with_component(
                 1,
@@ -347,11 +345,11 @@ mod tests {
                     ),
                 )],
             ),
-        ));
-        assert_eq!(futures::executor::block_on(entity.comparator_output()), 15);
+        );
+        assert_eq!(entity.comparator_output(), 15);
 
-        futures::executor::block_on(entity.set_stack(0, ItemStack::new(1, &Item::STONE)));
+        entity.set_stack(0, ItemStack::new(1, &Item::STONE));
         assert!(!entity.has_book());
-        assert_eq!(futures::executor::block_on(entity.comparator_output()), 0);
+        assert_eq!(entity.comparator_output(), 0);
     }
 }

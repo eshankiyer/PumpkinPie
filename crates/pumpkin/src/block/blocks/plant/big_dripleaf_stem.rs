@@ -108,7 +108,6 @@ impl PlantBlockBase for BigDripleafStemBlock {
         can_plant_dripleaf_on_top(support_block)
     }
 
-    #[allow(clippy::unused_async_trait_impl)]
     fn get_state_for_neighbor_update(
         &self,
         block_accessor: &dyn BlockAccessor,

@@ -142,31 +142,36 @@ impl EntityBase for EnderPearlEntity {
             // Teleport position should be position of entity from last tick (tick before collision)
             let teleport_pos = entity.last_pos.load();
 
-            // In vanilla, teleport handles everything including sound
-            owner.clone().teleport(
-                teleport_pos,
-                Some(owner.get_entity().yaw.load()),
-                Some(owner.get_entity().pitch.load()),
-                world.clone(),
-            );
+            // In vanilla, teleport handles everything including sound. `teleport` still
+            // returns a future, so the teleport and everything vanilla does after it run as
+            // one task.
+            let world = entity.world.load_full();
+            let yaw = owner.get_entity().yaw.load();
+            let pitch = owner.get_entity().pitch.load();
+            tokio::spawn(async move {
+                owner
+                    .clone()
+                    .teleport(teleport_pos, Some(yaw), Some(pitch), world.clone())
+                    .await;
 
-            // Play teleport sound at new position
-            world.play_sound(
-                Sound::EntityPlayerTeleport,
-                SoundCategory::Players,
-                &teleport_pos,
-            );
+                // Play teleport sound at new position
+                world.play_sound(
+                    Sound::EntityPlayerTeleport,
+                    SoundCategory::Players,
+                    &teleport_pos,
+                );
 
-            if let Some(living) = owner.get_living_entity() {
-                living.fall_distance.store(0.0);
-            }
+                if let Some(living) = owner.get_living_entity() {
+                    living.fall_distance.store(0.0);
+                }
 
-            // Deal 5 damage to owner
-            owner.damage(
-                owner.as_ref(),
-                5.0,
-                pumpkin_data::damage::DamageType::ENDER_PEARL,
-            );
+                // Deal 5 damage to owner
+                owner.damage(
+                    owner.as_ref(),
+                    5.0,
+                    pumpkin_data::damage::DamageType::ENDER_PEARL,
+                );
+            });
         }
 
         world.send_entity_status(entity, EntityStatus::Death, Some(ActorEventID::Death));

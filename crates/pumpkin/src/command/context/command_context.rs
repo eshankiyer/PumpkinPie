@@ -166,15 +166,13 @@ impl CommandContext<'_> {
     ///
     /// struct Executor;
     /// impl CommandExecutor for Executor {
-    ///     fn execute<'a>(&'a self, context: &'a CommandContext) -> CommandExecutorResult<'a> {
-    ///         Box::pin(async move {
-    ///             // The `get_argument` method returns a `Result<&i32, CommandSyntaxError>`.
-    ///             // We apply the `?` operator first, propagating the `CommandSyntaxError` if contained.
-    ///             // Finally, we dereference the `&i32`, as `i32` implements Copy.
-    ///             let operand1: i32 = *context.get_argument("operand1")?;
-    ///             let operand2: i32 = *context.get_argument("operand2")?;
-    ///             Ok(operand1 + operand2)
-    ///         })
+    ///     fn execute(&self, context: &CommandContext) -> CommandExecutorResult {
+    ///         // The `get_argument` method returns a `Result<&i32, CommandSyntaxError>`.
+    ///         // We apply the `?` operator first, propagating the `CommandSyntaxError` if contained.
+    ///         // Finally, we dereference the `&i32`, as `i32` implements Copy.
+    ///         let operand1: i32 = *context.get_argument("operand1")?;
+    ///         let operand2: i32 = *context.get_argument("operand2")?;
+    ///         Ok(operand1 + operand2)
     ///     }
     /// }
     /// ```
@@ -306,10 +304,10 @@ impl<'a> ContextChain<'a> {
     ) -> Result<i32, CommandSyntaxError> {
         let context_to_use = executable.with_source(source.clone());
 
-        let mut result = match &executable.command {
-            None => panic!("Expected `executable` to be executable"),
-            Some(command) => command.execute(&context_to_use),
-        };
+        let mut result = executable.command.as_ref().map_or_else(
+            || panic!("Expected `executable` to be executable"),
+            |command| command.execute(&context_to_use),
+        );
 
         if let Ok(result) = result {
             result_consumer.on_command_completion(&context_to_use, ReturnValue::Success(result));
@@ -596,7 +594,6 @@ impl<'a> CommandContextBuilder<'a> {
 
 #[cfg(test)]
 mod test {
-    use std::pin::Pin;
     use std::sync::{Arc, Mutex};
 
     use crate::command::argument_builder::{ArgumentBuilder, CommandArgumentBuilder};
@@ -676,7 +673,7 @@ mod test {
         assert!(context.get_argument::<f32>("foo").is_err());
     }
 
-    #[tokio::test]
+    #[test]
     fn execute_single_command_chain() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher
@@ -691,7 +688,7 @@ mod test {
         assert_eq!(chain.execute_all(&source, &EmptyResultConsumer), Ok(10));
     }
 
-    #[tokio::test]
+    #[test]
     fn execute_redirected_command_chain() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher
@@ -709,13 +706,13 @@ mod test {
         assert_eq!(chain.execute_all(&source, &EmptyResultConsumer), Ok(10));
     }
 
-    #[tokio::test]
+    #[test]
     fn empty_modifier_reports_command_failure() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher.register(
             CommandArgumentBuilder::new("condition", "A failed condition").redirect_with_modifier(
                 Redirection::Root,
-                RedirectModifier::Custom(Arc::new(|_| Box::pin(async { Ok(vec![]) }))),
+                RedirectModifier::Custom(Arc::new(|_| Ok(vec![]))),
             ),
         );
         dispatcher
@@ -731,7 +728,7 @@ mod test {
         assert_eq!(*recorded.lock().unwrap(), vec![ReturnValue::Failure]);
     }
 
-    #[tokio::test]
+    #[test]
     fn single_stage_execution() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher
@@ -747,7 +744,7 @@ mod test {
         assert!(chain.next_stage().is_none());
     }
 
-    #[tokio::test]
+    #[test]
     fn multi_stage_execution() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher
@@ -779,7 +776,7 @@ mod test {
         assert!(chain3.next_stage().is_none());
     }
 
-    #[tokio::test]
+    #[test]
     fn missing_command() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher.register(CommandArgumentBuilder::new("foo", "A test command"));
@@ -800,7 +797,7 @@ mod test {
         }
     }
 
-    #[tokio::test]
+    #[test]
     fn multi_stage_modifier_execution() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher.register(
@@ -810,11 +807,9 @@ mod test {
             CommandArgumentBuilder::new("bar", "Another test command").redirect_with_modifier(
                 Redirection::Root,
                 RedirectModifier::Custom(Arc::new(|context| {
-                    Box::pin(async move {
-                        let mut new_source = context.source.as_ref().clone();
-                        new_source.position = Vector3::new(0f64, 10f64, 0f64);
-                        Ok(vec![Arc::new(new_source)])
-                    })
+                    let mut new_source = context.source.as_ref().clone();
+                    new_source.position = Vector3::new(0f64, 10f64, 0f64);
+                    Ok(vec![Arc::new(new_source)])
                 })),
             ),
         );
@@ -836,19 +831,17 @@ mod test {
     /// (`GameRules.java:52`) through a custom modifier.
     fn oversized_fork_modifier() -> RedirectModifier {
         RedirectModifier::Custom(Arc::new(|context| {
-            Box::pin(async move {
-                let sources = std::iter::repeat_n(
-                    Arc::new(context.source.as_ref().clone()),
-                    // Above the 65536 default, so the fork limit must trip.
-                    70_000,
-                )
-                .collect::<Vec<_>>();
-                Ok(sources)
-            })
+            let sources = std::iter::repeat_n(
+                Arc::new(context.source.as_ref().clone()),
+                // Above the 65536 default, so the fork limit must trip.
+                70_000,
+            )
+            .collect::<Vec<_>>();
+            Ok(sources)
         }))
     }
 
-    #[tokio::test]
+    #[test]
     fn fork_limit_stops_forked_chain_silently() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher
@@ -870,7 +863,7 @@ mod test {
         assert_eq!(chain.execute_all(&source, &EmptyResultConsumer), Ok(0));
     }
 
-    #[tokio::test]
+    #[test]
     fn fork_limit_errors_unforked_chain() {
         let mut dispatcher = CommandDispatcher::new();
         dispatcher

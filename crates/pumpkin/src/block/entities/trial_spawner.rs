@@ -630,7 +630,7 @@ impl TrialSpawnerBlockEntity {
                 .raycast(
                     self.position.to_centered_f64(),
                     player.eye_position(),
-                    async |block_pos, world| !world.get_block_state(block_pos).is_air(),
+                    |block_pos, world| !world.get_block_state(block_pos).is_air(),
                 )
                 .is_none()
             {
@@ -695,7 +695,6 @@ impl TrialSpawnerBlockEntity {
         }
     }
 
-    #[allow(clippy::unused_async)]
     fn has_mob_to_spawn(&self, config: &TrialSpawnerConfig) -> bool {
         if self.next_spawn_entity.lock().unwrap().is_some() {
             return true;
@@ -703,7 +702,6 @@ impl TrialSpawnerBlockEntity {
         !config.spawn_potentials.is_empty()
     }
 
-    #[allow(clippy::unused_async)]
     fn get_or_create_next_spawn_data(
         &self,
         config: &TrialSpawnerConfig,

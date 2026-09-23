@@ -46,7 +46,7 @@ pub trait RedstoneGateBlock<T: Send + Sync + BlockProperties + RedstoneGateBlock
         state.is_side_solid(BlockDirection::Up)
     }
 
-    fn get_weak_redstone_power<'a>(&'a self, args: GetRedstonePowerArgs<'a>) -> u8
+    fn get_weak_redstone_power(&self, args: GetRedstonePowerArgs<'_>) -> u8
     where
         Self: Send + Sync,
     {
@@ -58,7 +58,7 @@ pub trait RedstoneGateBlock<T: Send + Sync + BlockProperties + RedstoneGateBlock
         }
     }
 
-    fn get_strong_redstone_power<'a>(&'a self, args: GetRedstonePowerArgs<'a>) -> u8
+    fn get_strong_redstone_power(&self, args: GetRedstonePowerArgs<'_>) -> u8
     where
         Self: Send + Sync,
     {
@@ -67,7 +67,7 @@ pub trait RedstoneGateBlock<T: Send + Sync + BlockProperties + RedstoneGateBlock
 
     fn get_output_level(&self, world: &World, pos: BlockPos) -> u8;
 
-    fn on_neighbor_update<'a>(&'a self, args: OnNeighborUpdateArgs<'a>)
+    fn on_neighbor_update(&self, args: OnNeighborUpdateArgs<'_>)
     where
         Self: Send + Sync,
     {
@@ -89,26 +89,14 @@ pub trait RedstoneGateBlock<T: Send + Sync + BlockProperties + RedstoneGateBlock
 
     fn update_powered(&self, world: &World, pos: BlockPos, state: &BlockState, block: &Block);
 
-    fn has_power<'a>(
-        &'a self,
-        world: &'a World,
-        pos: BlockPos,
-        state: &'a BlockState,
-        block: &'a Block,
-    ) -> bool
+    fn has_power(&self, world: &World, pos: BlockPos, state: &BlockState, block: &Block) -> bool
     where
         Self: Send + Sync,
     {
         self.get_power(world, pos, state, block) > 0
     }
 
-    fn get_power<'a>(
-        &'a self,
-        world: &'a World,
-        pos: BlockPos,
-        state: &'a BlockState,
-        block: &'a Block,
-    ) -> u8
+    fn get_power(&self, world: &World, pos: BlockPos, state: &BlockState, block: &Block) -> u8
     where
         Self: Send + Sync,
     {
@@ -159,7 +147,7 @@ pub trait RedstoneGateBlock<T: Send + Sync + BlockProperties + RedstoneGateBlock
         props.to_state_id(block)
     }
 
-    fn player_placed<'a>(&'a self, args: PlayerPlacedArgs<'a>)
+    fn player_placed(&self, args: PlayerPlacedArgs<'_>)
     where
         Self: Send + Sync,
     {
@@ -175,7 +163,7 @@ pub trait RedstoneGateBlock<T: Send + Sync + BlockProperties + RedstoneGateBlock
         }
     }
 
-    fn on_state_replaced<'a>(&'a self, args: OnStateReplacedArgs<'a>)
+    fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>)
     where
         Self: Send + Sync,
     {
@@ -196,12 +184,12 @@ pub trait RedstoneGateBlock<T: Send + Sync + BlockProperties + RedstoneGateBlock
         );
     }
 
-    fn is_target_not_aligned<'a>(
-        &'a self,
-        world: &'a dyn BlockAccessor,
+    fn is_target_not_aligned(
+        &self,
+        world: &dyn BlockAccessor,
         pos: BlockPos,
-        state: &'a BlockState,
-        block: &'a Block,
+        state: &BlockState,
+        block: &Block,
     ) -> bool {
         let props = T::from_state_id(state.id, block);
         let facing = props.get_facing().opposite();
@@ -250,7 +238,12 @@ pub fn get_power<T: BlockProperties + RedstoneGateBlockProperties + Send>(
     }
 }
 
-fn get_power_on_side(world: &World, pos: &BlockPos, side: HorizontalFacing, only_gate: bool) -> u8 {
+pub fn get_power_on_side(
+    world: &World,
+    pos: &BlockPos,
+    side: HorizontalFacing,
+    only_gate: bool,
+) -> u8 {
     let side_pos = pos.offset(side.to_block_direction().to_offset());
     let (side_block, side_state) = world.get_block_and_state(&side_pos);
 

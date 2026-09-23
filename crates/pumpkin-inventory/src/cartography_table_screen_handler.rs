@@ -333,7 +333,7 @@ mod tests {
 
     /// `CartographyTableMenu.setupResultSlot` copies a map with count two when the second input
     /// is another map (`CartographyTableMenu.java:125-133`).
-    #[tokio::test]
+    #[test]
     fn map_copy_refreshes_the_result() {
         let handler = handler();
         let mut map = ItemStack::new(1, &Item::FILLED_MAP);
@@ -357,7 +357,7 @@ mod tests {
 
     /// `CartographyTableMenu.setupResultSlot` (`CartographyTableMenu.java:116-123`) marks
     /// paper and glass-pane results for `MapItem.onCraftedPostProcess`.
-    #[tokio::test]
+    #[test]
     fn map_transform_refreshes_the_result_with_post_processing() {
         let handler = handler();
         let mut map = ItemStack::new(1, &Item::FILLED_MAP);

@@ -5,7 +5,7 @@ use pumpkin_util::math::{boundingbox::BoundingBox, position::BlockPos};
 use pumpkin_world::{tick::TickPriority, world::BlockFlags};
 
 use crate::{
-    block::{OnEntityCollisionArgs, OnScheduledTickArgs, OnStateReplacedArgs},
+    block::{OnEntityCollisionArgs, OnStateReplacedArgs},
     world::World,
 };
 
@@ -30,14 +30,6 @@ pub(crate) trait PressurePlate {
         let output = self.get_redstone_output(args.block, args.state.id);
         if output == 0 {
             self.update_plate_state(args.world, args.position, args.block, args.state, output);
-        }
-    }
-
-    fn on_scheduled_tick_pp(&self, args: OnScheduledTickArgs<'_>) {
-        let state = args.world.get_block_state(args.position);
-        let output = self.get_redstone_output(args.block, state.id);
-        if output > 0 {
-            self.update_plate_state(args.world, args.position, args.block, state, output);
         }
     }
 

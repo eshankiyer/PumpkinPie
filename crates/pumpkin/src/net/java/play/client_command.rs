@@ -15,14 +15,22 @@ impl JavaClient {
                 player.world().clone().respawn_player(player, false).await;
 
                 {
-                    let screen_handler = player.current_screen_handler.lock();
-                    let mut screen_handler = screen_handler.lock();
+                    let screen_handler = player
+                        .current_screen_handler
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let mut screen_handler = screen_handler
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     screen_handler.sync_state();
                 };
 
                 // Restore abilities based on gamemode after respawn
                 {
-                    let mut abilities = player.abilities.lock();
+                    let mut abilities = player
+                        .abilities
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     abilities.set_for_gamemode(player.gamemode.load());
                 };
                 player.send_abilities_update();
@@ -35,7 +43,8 @@ impl JavaClient {
                 self.send_game_rule_values(player).await;
             }
             _ => {
-                self.kick(TextComponent::text("Invalid client status"));
+                self.kick(TextComponent::text("Invalid client status"))
+                    .await;
             }
         }
     }

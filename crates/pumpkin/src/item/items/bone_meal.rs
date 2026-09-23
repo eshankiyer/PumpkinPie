@@ -1,5 +1,4 @@
 use std::any::Any;
-use std::future::Future;
 use std::sync::Arc;
 
 use crate::block::blocks::coral::coral_fan::CoralWallFanLikeProperties;

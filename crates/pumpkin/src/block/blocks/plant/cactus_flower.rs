@@ -40,7 +40,6 @@ impl PlantBlockBase for CactusFlowerBlock {
         }
         false
     }
-    #[allow(clippy::unused_async_trait_impl)]
     fn get_state_for_neighbor_update(
         &self,
         block_accessor: &dyn BlockAccessor,

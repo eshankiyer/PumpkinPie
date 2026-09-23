@@ -44,7 +44,7 @@ impl CommandExecutor for Executor {
         };
 
         for target in targets {
-            target.kick(DisconnectReason::Kicked, reason.clone());
+            target.kick(DisconnectReason::Kicked, &reason);
 
             let feedback = if custom_reason.is_some() {
                 TextComponent::translate_cross(

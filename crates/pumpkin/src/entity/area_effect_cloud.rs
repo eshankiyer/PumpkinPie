@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::{
     entity::{Entity, EntityBase, NBTStorage},
@@ -11,7 +11,6 @@ use pumpkin_util::math::vector3::Vector3;
 
 type EffectEntry = (&'static StatusEffect, i32, u8, bool, bool, bool);
 use pumpkin_data::item_stack::ItemStack;
-use std::sync::Mutex;
 
 struct ParticleMeta<'a> {
     particle_id: pumpkin_protocol::codec::var_int::VarInt,
@@ -98,6 +97,9 @@ pub struct AreaEffectCloudEntity {
 impl AreaEffectCloudEntity {
     #[allow(clippy::new_ret_no_self)]
     pub fn new(entity: Entity) -> Arc<dyn EntityBase> {
+        entity
+            .no_physics
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         let cloud = Self {
             entity,
             item_stack: Mutex::new(ItemStack::new(0, &pumpkin_data::item::Item::GLASS_BOTTLE)),
@@ -169,6 +171,10 @@ impl AreaEffectCloudEntity {
     ) -> Arc<dyn EntityBase> {
         // AreaEffectCloud.java:77-80 clamps the tracked radius before it changes dimensions.
         let radius = radius_in.clamp(0.0, MAX_RADIUS);
+        // `AreaEffectCloud`'s constructor sets `noPhysics = true`.
+        entity
+            .no_physics
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         let cloud = Self {
             entity,
             item_stack: Mutex::new(item_stack),
@@ -508,19 +514,14 @@ impl EntityBase for AreaEffectCloudEntity {
             if dist_sq > radius_f * radius_f {
                 continue;
             }
-            // Apply effects inside a spawned task
-            let cand_for_spawn = cand_clone.clone();
-            let effs_for_spawn = effects.clone();
-            tokio::spawn(async move {
-                if let Some(living) = cand_for_spawn.get_living_entity() {
-                    crate::item::potion::PotionContents::apply_effects_to(
-                        living,
-                        effs_for_spawn,
-                        potion_duration_scale,
-                        crate::item::potion::PotionApplicationSource::AreaEffectCloud,
-                    );
-                }
-            });
+            if let Some(living) = cand_clone.get_living_entity() {
+                crate::item::potion::PotionContents::apply_effects_to(
+                    living,
+                    effects.clone(),
+                    potion_duration_scale,
+                    crate::item::potion::PotionApplicationSource::AreaEffectCloud,
+                );
+            }
 
             // Set reapplication delay for this entity
             let delay = *self

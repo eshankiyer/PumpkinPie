@@ -33,7 +33,7 @@ impl GoalSelector {
     }
 
     pub fn remove_goal<G: Goal + 'static>(&mut self, mob: &dyn Mob) {
-        let mut stopped = self.remove_goal_sync::<G>();
+        let mut stopped = self.remove_goals::<G>();
         for goal in &mut stopped {
             goal.stop(mob);
         }
@@ -42,7 +42,7 @@ impl GoalSelector {
     /// Removes every goal of type `G` without needing a `&dyn Mob`. The removed goals that were
     /// running are returned so the caller can `stop` them afterwards (vanilla
     /// `GoalSelector.removeGoal` stops the running wrapped goals, then `removeIf`s them).
-    pub fn remove_goal_sync<G: Goal + 'static>(&mut self) -> Vec<PrioritizedGoal> {
+    pub fn remove_goals<G: Goal + 'static>(&mut self) -> Vec<PrioritizedGoal> {
         self.remove_goal_by_type_id(TypeId::of::<G>())
     }
 

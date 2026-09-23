@@ -39,7 +39,11 @@ impl BlockBehaviour for WeightedPressurePlateBlock {
     }
 
     fn on_scheduled_tick(&self, args: OnScheduledTickArgs<'_>) {
-        self.on_scheduled_tick_pp(args);
+        let state = args.world.get_block_state(args.position);
+        let output = self.get_redstone_output(args.block, state.id);
+        if output > 0 {
+            self.update_plate_state(args.world, args.position, args.block, state, output);
+        }
     }
 
     fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
@@ -80,7 +84,6 @@ impl PressurePlate for WeightedPressurePlateBlock {
         props.power
     }
 
-    #[allow(clippy::unused_async_trait_impl)]
     fn calculate_redstone_output(&self, world: &World, block: &Block, pos: &BlockPos) -> u8 {
         // light = Gold
         // heavy = Iron

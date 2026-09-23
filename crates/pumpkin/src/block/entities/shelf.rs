@@ -8,6 +8,7 @@ use pumpkin_world::world::BlockFlags;
 use std::any::Any;
 use std::array::from_fn;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::world::World;
@@ -15,7 +16,7 @@ use crate::world::game_event::{GameEventContext, emit_game_event};
 
 pub struct ShelfBlockEntity {
     pub position: BlockPos,
-    pub items: std::sync::RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
+    pub items: RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
     /// `ShelfBlockEntity.alignItemsToBottom` (`ShelfBlockEntity.java:36`), saved and loaded
     /// under `align_items_to_bottom` (`ShelfBlockEntity.java:47,54`) and repeated in the
     /// update tag (`:66`) because the renderer reads it.
@@ -38,14 +39,20 @@ impl BlockEntity for ShelfBlockEntity {
     {
         let mut shelf = Self {
             position,
-            items: std::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+            items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             align_items_to_bottom: AtomicBool::new(
                 nbt.get_bool("align_items_to_bottom").unwrap_or(false),
             ),
             dirty: AtomicBool::new(false),
         };
 
-        pumpkin_world::inventory::sync_read_items_from_nbt(nbt, shelf.items.get_mut());
+        pumpkin_world::inventory::sync_read_items_from_nbt(
+            nbt,
+            shelf
+                .items
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
 
         shelf
     }
@@ -72,8 +79,9 @@ impl BlockEntity for ShelfBlockEntity {
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
         let mut nbt = NbtCompound::new();
-        let items = futures::executor::block_on(self.items.read());
-        sync_write_items_to_nbt(items.as_slice(), &mut nbt);
+        if let Ok(items) = self.items.try_read() {
+            sync_write_items_to_nbt(items.as_slice(), &mut nbt);
+        }
         nbt.put_bool(
             "align_items_to_bottom",
             self.align_items_to_bottom.load(Ordering::Relaxed),
@@ -94,7 +102,7 @@ impl ShelfBlockEntity {
     pub fn new(position: BlockPos) -> Self {
         Self {
             position,
-            items: std::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+            items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             align_items_to_bottom: AtomicBool::new(false),
             dirty: AtomicBool::new(false),
         }
@@ -239,7 +247,7 @@ mod tests {
         entity.align_items_to_bottom.store(true, Ordering::Relaxed);
 
         let mut nbt = NbtCompound::new();
-        futures::executor::block_on(entity.write_nbt(&mut nbt));
+        entity.write_nbt(&mut nbt);
         assert_eq!(nbt.get_bool("align_items_to_bottom"), Some(true));
 
         let loaded = ShelfBlockEntity::from_nbt(&nbt, pos);

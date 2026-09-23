@@ -14,8 +14,14 @@ impl JavaClient {
             return;
         }
 
-        let screen_handler = player.current_screen_handler.lock();
-        let mut screen_handler = screen_handler.lock();
+        let screen_handler = player
+            .current_screen_handler
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let mut screen_handler = screen_handler
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if !screen_handler.can_use(player.as_ref()) {
             return;
         }

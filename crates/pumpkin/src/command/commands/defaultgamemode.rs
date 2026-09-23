@@ -33,7 +33,8 @@ impl CommandExecutor for DefaultGamemodeExecutor {
         let mut successful_changes: i32 = 0;
         if server.basic_config.force_gamemode {
             for player in server.get_all_players() {
-                if player.set_gamemode(gamemode) {
+                if player.gamemode.load() != gamemode {
+                    player.set_gamemode(gamemode);
                     successful_changes += 1;
                 }
             }
@@ -53,11 +54,7 @@ impl CommandExecutor for DefaultGamemodeExecutor {
         ));
 
         //Change the default gamemode (not in configuration.toml)
-        server
-            .defaultgamemode
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .gamemode = gamemode;
+        server.defaultgamemode.lock().unwrap().gamemode = gamemode;
 
         Ok(successful_changes)
     }

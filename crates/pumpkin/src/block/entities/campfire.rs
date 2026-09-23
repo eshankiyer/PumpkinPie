@@ -332,7 +332,7 @@ mod tests {
     use pumpkin_util::math::position::BlockPos;
     use pumpkin_world::inventory::Inventory;
 
-    #[tokio::test]
+    #[test]
     fn chunk_data_contains_campfire_items() {
         // `CampfireBlockEntity.getUpdateTag` (`CampfireBlockEntity.java:159-163`) includes items.
         let campfire = CampfireBlockEntity::new(BlockPos::new(0, 64, 0));

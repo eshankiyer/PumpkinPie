@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use crate::block::entities::enchanting_table::EnchantingTableBlockEntity;
 use crate::block::registry::BlockActionResult;
@@ -14,7 +15,6 @@ use pumpkin_macros::pumpkin_block;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::{Inventory, SimpleInventory};
-use std::sync::Mutex;
 
 #[pumpkin_block("minecraft:enchanting_table")]
 pub struct EnchantingTableBlock;
@@ -56,10 +56,11 @@ impl BlockBehaviour for EnchantingTableBlock {
         // re-clamp its own `bookshelf_count` field.
         let bookshelf_count = bookshelf_count.min(15);
 
+        let seed = args.player.enchantment_seed();
         args.player.open_handled_screen(
             &EnchantingTableScreenFactory {
                 bookshelf_count,
-                seed: args.player.enchantment_seed(),
+                seed,
             },
             Some(*args.position),
         );

@@ -327,8 +327,8 @@ impl BeehiveBlockEntity {
     pub const fn new(position: BlockPos) -> Self {
         Self {
             position,
-            bees: Mutex::const_new(Vec::new()),
-            flower_pos: Mutex::const_new(None),
+            bees: Mutex::new(Vec::new()),
+            flower_pos: Mutex::new(None),
             dirty: AtomicBool::new(false),
         }
     }

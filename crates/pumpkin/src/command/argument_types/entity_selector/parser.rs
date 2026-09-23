@@ -615,7 +615,7 @@ impl EntitySelectorParserSuggestions {
 
     pub fn list_suggestions(
         context: &CommandContext<'_>,
-        suggestions_builder: SuggestionsBuilder,
+        suggestions_builder: &SuggestionsBuilder,
     ) -> Suggestions {
         let mut reader = StringReader::new(suggestions_builder.input.clone());
         reader.set_cursor(suggestions_builder.start);
@@ -626,7 +626,7 @@ impl EntitySelectorParserSuggestions {
 
         let _ = parser.parse();
 
-        parser.fill_suggestions(&suggestions_builder, |mut suggestions| {
+        parser.fill_suggestions(suggestions_builder, |mut suggestions| {
             for player in context.server().get_all_players() {
                 suggestions = suggestions.filter_and_suggest_one(player.gameprofile.name.clone());
             }

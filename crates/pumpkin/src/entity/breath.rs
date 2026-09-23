@@ -99,10 +99,7 @@ impl BreathManager {
                         player.entity_id(),
                         new_air,
                     );
-                    tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current()
-                            .block_on(server.plugin_manager.fire(&server, &mut event));
-                    });
+                    server.plugin_manager.fire_blocking(&server, &mut event);
                     if event.cancelled {
                         self.air_supply.store(prev, Ordering::Relaxed);
                         return;

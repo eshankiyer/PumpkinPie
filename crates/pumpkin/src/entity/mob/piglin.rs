@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use crate::entity::{
-    Entity, EntityBase, EntityBaseFuture, NBTStorage,
+    Entity, EntityBase, NBTStorage,
     ai::goal::{
         active_target::ActiveTargetGoal,
         avoid_entity::AvoidEntityGoal,
@@ -383,8 +383,7 @@ impl PiglinEntity {
                 true,
                 false,
                 Some(move |target: TargetData, world: Arc<World>| {
-                    let player_gate = player_gate.clone();
-                    async move { !player_gate() && player_not_wearing_gold(target, world) }
+                    !player_gate() && player_not_wearing_gold(target, world)
                 }),
             )),
         );
@@ -399,10 +398,7 @@ impl PiglinEntity {
                     10,
                     true,
                     false,
-                    Some(move |_target: TargetData, _world: Arc<World>| {
-                        let nemesis_gate = nemesis_gate.clone();
-                        async move { !nemesis_gate() }
-                    }),
+                    Some(move |_target: TargetData, _world: Arc<World>| !nemesis_gate()),
                 )),
             );
         }
@@ -425,15 +421,10 @@ impl PiglinEntity {
                 true,
                 false,
                 Some(move |target: TargetData, _world: Arc<World>| {
-                    let hunt_gate = is_baby.clone();
-                    let hunted = hunted_recently_ticks.clone();
-                    let cannot_hunt = cannot_hunt.clone();
-                    async move {
-                        !hunt_gate()
-                            && !cannot_hunt.load(Ordering::Relaxed)
-                            && target.age >= 0
-                            && hunted.load(Ordering::Relaxed) <= 0
-                    }
+                    !is_baby()
+                        && !cannot_hunt.load(Ordering::Relaxed)
+                        && target.age >= 0
+                        && hunted_recently_ticks.load(Ordering::Relaxed) <= 0
                 }),
             )),
         );
@@ -789,24 +780,19 @@ impl Mob for PiglinEntity {
     ///
     /// `body.take(itemEntity, 1)` -- the client-side pickup animation -- is not sent: the
     /// caller in `mob/mod.rs` owns the `ItemEntity` and does not offer a hook for it.
-    fn on_item_pickup<'a>(
-        &'a self,
-        stack: &'a ItemStack,
-    ) -> crate::entity::EntityBaseFuture<'a, u8> {
-        Box::pin(async move {
-            if stack.item.id != Item::GOLD_INGOT.id {
-                return 0;
-            }
-            let mut pending = self
-                .pending_offhand
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            if pending.is_some() {
-                return 0;
-            }
-            *pending = Some(ItemStack::new(1, &Item::GOLD_INGOT));
-            1
-        })
+    fn on_item_pickup(&self, stack: &ItemStack) -> u8 {
+        if stack.item.id != Item::GOLD_INGOT.id {
+            return 0;
+        }
+        let mut pending = self
+            .pending_offhand
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if pending.is_some() {
+            return 0;
+        }
+        *pending = Some(ItemStack::new(1, &Item::GOLD_INGOT));
+        1
     }
 
     /// `PiglinAi.mobInteract`/`canAdmire` (PiglinAi.java:539-554): a player directly

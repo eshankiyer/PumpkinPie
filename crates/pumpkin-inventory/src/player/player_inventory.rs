@@ -18,9 +18,8 @@ use pumpkin_util::Hand;
 use pumpkin_world::inventory::{Clearable, Inventory};
 use std::any::Any;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, AtomicU8, Ordering};
-use std::sync::{Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use tracing::warn;
 
 /// The player's inventory.
@@ -416,6 +415,40 @@ impl PlayerInventory {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         inv.swap(selected, slot);
+    }
+
+    /// Gets the item in the specified slot (synchronously).
+    pub fn get_slot(&self, slot: usize) -> ItemStack {
+        if slot < Self::MAIN_SIZE {
+            let inv = self
+                .main_inventory
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            inv[slot].clone()
+        } else if let Some(slot_type) = self.equipment_slots.get(&slot) {
+            self.entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(slot_type)
+        } else {
+            ItemStack::EMPTY.clone()
+        }
+    }
+
+    /// Sets the item in the specified slot (synchronously).
+    pub fn set_slot(&self, slot: usize, stack: ItemStack) {
+        if slot < Self::MAIN_SIZE {
+            let mut inv = self
+                .main_inventory
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            inv[slot] = stack;
+        } else if let Some(slot_type) = self.equipment_slots.get(&slot) {
+            self.entity_equipment
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .put(slot_type, stack);
+        }
     }
 
     /// Gives a stack to the player or drops it if inventory is full.

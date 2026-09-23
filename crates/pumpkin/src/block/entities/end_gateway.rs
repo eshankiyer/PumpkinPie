@@ -130,7 +130,7 @@ mod tests {
 
     fn write(entity: &EndGatewayBlockEntity) -> NbtCompound {
         let mut nbt = NbtCompound::new();
-        futures::executor::block_on(entity.write_nbt(&mut nbt));
+        entity.write_nbt(&mut nbt);
         nbt
     }
 
@@ -160,17 +160,17 @@ mod tests {
     fn gateway_state_round_trips_through_nbt() {
         let pos = BlockPos::new(0, 64, 0);
         let entity = EndGatewayBlockEntity::new(pos);
-        *futures::executor::block_on(entity.age.lock()) = 512;
-        *futures::executor::block_on(entity.exact_teleport.lock()) = true;
-        *futures::executor::block_on(entity.exit_portal.lock()) = Some(BlockPos::new(-7, 60, 9));
+        *entity.age.lock().unwrap() = 512;
+        *entity.exact_teleport.lock().unwrap() = true;
+        *entity.exit_portal.lock().unwrap() = Some(BlockPos::new(-7, 60, 9));
 
         let nbt = write(&entity);
         let loaded = EndGatewayBlockEntity::from_nbt(&nbt, pos);
 
-        assert_eq!(*futures::executor::block_on(loaded.age.lock()), 512);
-        assert!(*futures::executor::block_on(loaded.exact_teleport.lock()));
+        assert_eq!(*loaded.age.lock().unwrap(), 512);
+        assert!(*loaded.exact_teleport.lock().unwrap());
         assert_eq!(
-            *futures::executor::block_on(loaded.exit_portal.lock()),
+            *loaded.exit_portal.lock().unwrap(),
             Some(BlockPos::new(-7, 60, 9))
         );
     }

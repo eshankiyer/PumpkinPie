@@ -10,7 +10,7 @@
 
 use std::{
     any::Any,
-    pin::sync::{
+    sync::{
         Arc,
         atomic::{AtomicU8, Ordering},
     },

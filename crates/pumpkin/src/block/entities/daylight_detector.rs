@@ -70,9 +70,7 @@ impl DaylightDetectorBlockEntity {
         if power != props.power {
             props.power = power;
             let state = props.to_state_id(block);
-            world
-                .clone()
-                .set_block_state(block_pos, state, BlockFlags::NOTIFY_ALL);
+            world.set_block_state(block_pos, state, BlockFlags::NOTIFY_ALL);
         }
     }
 }

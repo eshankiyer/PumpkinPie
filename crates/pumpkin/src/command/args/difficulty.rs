@@ -38,10 +38,7 @@ impl ArgumentConsumer for DifficultyArgumentConsumer {
     ) -> ConsumeResult<'a> {
         let s_opt: Option<&'a str> = args.pop().map(|arg| arg.value);
 
-        let result: Option<Arg<'a>> =
-            s_opt.and_then(|s| Difficulty::from_str(s).map(Arg::Difficulty).ok());
-
-        Box::pin(async move { result })
+        s_opt.and_then(|s| Difficulty::from_str(s).map(Arg::Difficulty).ok())
     }
 
     fn suggest(&self, _sender: &CommandSender, _server: &Server, _input: &str) -> SuggestResult {

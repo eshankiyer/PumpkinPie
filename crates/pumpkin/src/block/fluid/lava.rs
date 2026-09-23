@@ -163,8 +163,7 @@ impl FluidBehaviour for FlowingLava {
     }
 
     fn on_scheduled_tick(&self, world: &Arc<World>, fluid: &Fluid, block_pos: &BlockPos) {
-        self.on_scheduled_tick_internal(world, fluid, block_pos)
-            .await;
+        self.on_scheduled_tick_internal(world, fluid, block_pos);
     }
 
     fn on_neighbor_update(
@@ -343,7 +342,6 @@ impl FlowingFluid for FlowingLava {
         }
 
         // Delegate quiescence, replacement and scheduling to the shared helper
-        self.apply_spread(world, fluid, pos, state_id, new_props)
-            .await;
+        self.apply_spread(world, fluid, pos, state_id, new_props);
     }
 }

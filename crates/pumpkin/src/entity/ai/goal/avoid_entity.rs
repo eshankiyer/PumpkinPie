@@ -13,7 +13,7 @@ const VERTICAL_RANGE: i32 = 7;
 /// Extra per-candidate gate beyond the base "alive, not spectator" check.
 ///
 /// E.g. vanilla Fox's `entity -> AVOID_PLAYERS.test(entity) && !this.trusts(entity) &&
-/// !this.isDefending()`. Plain `dyn Fn`, not the async `EntityPredicate`/`TargetPredicate`
+/// !this.isDefending()`. Plain `dyn Fn`, not the `EntityPredicate`/`TargetPredicate`
 /// machinery elsewhere in this crate, since every candidate check needed so far is a
 /// synchronously-readable flag/attribute check and `get_closest_player_where`/
 /// `get_closest_entity_where` already take sync closures.

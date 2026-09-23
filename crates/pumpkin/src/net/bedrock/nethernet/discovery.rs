@@ -103,11 +103,16 @@ impl NetherNetDiscovery {
         let players = server
             .get_status()
             .lock()
+            .await
             .status_response
             .players
             .as_ref()
             .map_or(0, |players| players.online);
-        let game_mode = server.defaultgamemode.lock().gamemode as u8;
+        let game_mode = server
+            .defaultgamemode
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .gamemode as u8;
         let response = encode_response(
             self.network_id,
             self.advertisement_id,
@@ -160,7 +165,7 @@ impl NetherNetDiscovery {
             "CONNECTREQUEST" => {
                 trace!(%address, sender_id, connection_id, "Accepted NetherNet LAN connection request");
                 let (candidate_sender, candidate_receiver) = mpsc::unbounded_channel();
-                self.candidates.lock().insert(key, candidate_sender);
+                self.candidates.lock().await.insert(key, candidate_sender);
 
                 let state = listener.state.clone();
                 let socket = self.socket.clone();
@@ -194,8 +199,8 @@ impl NetherNetDiscovery {
                         }
                         Err(error) => warn!("Failed to encode NetherNet LAN signal: {error}"),
                     }
-                    tokio::time::sleep(Duration::from_secs(30));
-                    candidates.lock().remove(&key);
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                    candidates.lock().await.remove(&key);
                 });
             }
             "CANDIDATEADD" => {
@@ -204,7 +209,7 @@ impl NetherNetDiscovery {
                         candidate: data.to_owned(),
                         ..Default::default()
                     });
-                if let Some(sender) = self.candidates.lock().get(&key) {
+                if let Some(sender) = self.candidates.lock().await.get(&key) {
                     let _ = sender.send(candidate);
                     trace!(%address, sender_id, connection_id, "Forwarded NetherNet LAN ICE candidate");
                 } else {

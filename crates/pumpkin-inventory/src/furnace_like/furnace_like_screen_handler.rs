@@ -16,7 +16,7 @@
 //! - Property 2: Progress arrow (cooking/smelt time)
 //! - Property 3: Maximum progress (typically 200 ticks for furnace)
 
-use std::{any::Any, pin::sync::Arc};
+use std::{any::Any, sync::Arc};
 
 use pumpkin_data::{
     fuels::is_fuel,
@@ -87,7 +87,7 @@ impl FurnaceLikeScreenHandler {
         sync_id: u8,
         player_inventory: &Arc<PlayerInventory>,
         inventory: Arc<dyn Inventory>,
-        property_delegate: Arc<dyn PropertyDelegate>,
+        property_delegate: &Arc<dyn PropertyDelegate>,
         experience_container: Arc<dyn ExperienceContainer>,
         window_type: WindowType,
     ) -> Self {
@@ -177,7 +177,7 @@ impl ScreenHandler for FurnaceLikeScreenHandler {
 
     fn on_closed(&mut self, player: &dyn InventoryPlayer) {
         self.default_on_closed(player);
-        // TODO: self.inventory.on_closed(player).await;
+        // TODO: self.inventory.on_closed(player);
     }
 
     /// Quick move logic for furnace-like containers.

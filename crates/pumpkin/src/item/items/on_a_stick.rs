@@ -1,5 +1,4 @@
 use std::any::Any;
-use std::future::Future;
 
 use crate::entity::EntityBase;
 use crate::entity::player::Player;

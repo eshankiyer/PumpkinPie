@@ -1,6 +1,6 @@
 use crate::block::{
-    AttackArgs, BlockBehaviour, BlockFuture, BlockMetadata, BrokenArgs, NormalUseArgs,
-    OnEntityStepArgs, RandomTickArgs, UseWithItemArgs, registry::BlockActionResult,
+    AttackArgs, BlockBehaviour, BlockMetadata, BrokenArgs, NormalUseArgs, OnEntityStepArgs,
+    RandomTickArgs, UseWithItemArgs, registry::BlockActionResult,
 };
 use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::world::World;
@@ -96,10 +96,8 @@ impl RedstoneOreBlock {
 }
 
 impl BlockBehaviour for RedstoneOreBlock {
-    fn attack<'a>(&'a self, args: AttackArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            Self::interact(args.world, args.position, args.block, args.state);
-        })
+    fn attack(&self, args: AttackArgs<'_>) {
+        Self::interact(args.world, args.position, args.block, args.state);
     }
 
     fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {

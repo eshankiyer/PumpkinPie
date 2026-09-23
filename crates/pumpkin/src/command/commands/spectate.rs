@@ -43,9 +43,7 @@ impl CommandExecutor for StopSpectateExecutor {
         }
 
         player.camera_target_id.store(None);
-        player
-            .send_client_packet(&CSetCamera::new(player.entity_id().into()))
-            .await;
+        player.try_send_client_packet(&CSetCamera::new(player.entity_id().into()));
 
         sender.send_message(TextComponent::translate_cross(
             translation::java::COMMANDS_SPECTATE_SUCCESS_STOPPED,
@@ -103,16 +101,11 @@ impl CommandExecutor for SpectateTargetSelfExecutor {
 
         let target_id = target_entity.entity_id;
         player.camera_target_id.store(Some(target_id));
-        player
-            .send_client_packet(&CSetCamera::new(target_id.into()))
-            .await;
-
         let pos = target_entity.pos.load();
         let yaw = target_entity.yaw.load();
         let pitch = target_entity.pitch.load();
-        player
-            .clone()
-            .teleport(pos, Some(yaw), Some(pitch), player_world);
+        player.try_send_client_packet(&CSetCamera::new(target_id.into()));
+        futures::executor::block_on(player.teleport(pos, Some(yaw), Some(pitch), player_world));
 
         let target_name = target.get_display_name();
         sender.send_message(TextComponent::translate_cross(
@@ -176,17 +169,17 @@ impl CommandExecutor for SpectateTargetOtherExecutor {
         for player in players {
             let target_id = target_entity.entity_id;
             player.camera_target_id.store(Some(target_id));
-            player
-                .send_client_packet(&CSetCamera::new(target_id.into()))
-                .await;
-
             let pos = target_entity.pos.load();
             let yaw = target_entity.yaw.load();
             let pitch = target_entity.pitch.load();
             let player_world = player.world();
-            player
-                .clone()
-                .teleport(pos, Some(yaw), Some(pitch), player_world);
+            player.try_send_client_packet(&CSetCamera::new(target_id.into()));
+            futures::executor::block_on(player.clone().teleport(
+                pos,
+                Some(yaw),
+                Some(pitch),
+                player_world,
+            ));
             succeeded += 1;
         }
 

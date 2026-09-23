@@ -10,14 +10,14 @@
 //! Ender chests track when players open and close them to properly
 //! manage the viewer count for animation purposes.
 
-use std::{any::Any, pin::sync::Arc};
+use std::any::Any;
+use std::sync::{Arc, Mutex, RwLock};
 
 use pumpkin_data::item_stack::ItemStack;
 use pumpkin_world::{
     block::viewer::ViewerCountTracker,
     inventory::{Clearable, Inventory},
 };
-use std::sync::{Mutex, RwLock};
 
 /// A player's ender chest inventory.
 ///
@@ -190,7 +190,7 @@ mod tests {
     use super::*;
     use pumpkin_data::item::Item;
 
-    #[tokio::test]
+    #[test]
     fn new_inventory() {
         let ec = EnderChestInventory::new();
         assert_eq!(ec.size(), 27);
@@ -198,7 +198,7 @@ mod tests {
         assert!(!ec.has_tracker());
     }
 
-    #[tokio::test]
+    #[test]
     fn set_and_get_stack() {
         let ec = EnderChestInventory::new();
         let stack = ItemStack::new(1, &Item::DIRT);
@@ -212,7 +212,7 @@ mod tests {
         assert!(ec.get_stack(100).is_empty());
     }
 
-    #[tokio::test]
+    #[test]
     fn remove_stack() {
         let ec = EnderChestInventory::new();
         let stack = ItemStack::new(5, &Item::DIAMOND);
@@ -228,7 +228,7 @@ mod tests {
         assert!(ec.is_empty());
     }
 
-    #[tokio::test]
+    #[test]
     fn clear_inventory() {
         let ec = EnderChestInventory::new();
         ec.set_stack(0, ItemStack::new(1, &Item::STONE));
@@ -239,7 +239,7 @@ mod tests {
         assert!(ec.is_empty());
     }
 
-    #[tokio::test]
+    #[test]
     fn tracker_lifecycle() {
         let ec = EnderChestInventory::new();
         let tracker1 = Arc::new(ViewerCountTracker::new());

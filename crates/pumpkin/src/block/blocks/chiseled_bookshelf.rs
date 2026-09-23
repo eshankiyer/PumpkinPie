@@ -51,7 +51,10 @@ impl BlockBehaviour for ChiseledBookshelfBlock {
         let bookshelf = block_entity
             .as_any()
             .downcast_ref::<ChiseledBookshelfBlockEntity>()?;
-        let items = futures::executor::block_on(bookshelf.items.read());
+        let items = bookshelf
+            .items
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let items = occupied_items(items.as_slice());
 
         Some(if items.is_empty() {
@@ -188,14 +191,14 @@ impl ChiseledBookshelfBlock {
             slot as usize,
             item.split_unless_creative(player.gamemode.load(), 1),
         );
-        entity.update_state(properties, world.clone(), slot as usize);
+        entity.update_state(properties, world, slot as usize);
 
         world.play_sound(sound, SoundCategory::Blocks, &position.to_centered_f64());
     }
 
     fn try_remove_book(
         world: &Arc<World>,
-        player: &Player,
+        player: &Arc<Player>,
         position: &BlockPos,
         entity: &ChiseledBookshelfBlockEntity,
         properties: ChiseledBookshelfLikeProperties,
@@ -213,7 +216,7 @@ impl ChiseledBookshelfBlock {
             // Drop the item on the ground if the player cannot hold it because of a full inventory
             player.drop_item(stack);
         }
-        entity.update_state(properties, world.clone(), slot as usize);
+        entity.update_state(properties, world, slot as usize);
 
         world.play_sound(sound, SoundCategory::Blocks, &position.to_centered_f64());
     }

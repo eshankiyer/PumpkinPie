@@ -102,29 +102,31 @@ impl BlockBehaviour for SculkVeinBlock {
     }
 
     fn use_with_item(&self, args: UseWithItemArgs<'_>) -> BlockActionResult {
-        if args.item_stack.item.id != Item::SCULK_VEIN.id {
-            return BlockActionResult::Pass;
+        {
+            if args.item_stack.item.id != Item::SCULK_VEIN.id {
+                return BlockActionResult::Pass;
+            }
+            let state = args.world.get_block_state(args.position);
+            let mut props = GlowLichenLikeProperties::from_state_id(state.id, args.block);
+
+            let (Some(accurate_dir), _) = get_attach_direction(
+                args.world.as_ref(),
+                args.position,
+                Some(args.player),
+                *args.hit.face,
+                true,
+            ) else {
+                return BlockActionResult::Fail;
+            };
+            set_face(&mut props, accurate_dir);
+
+            args.world.set_block_state(
+                args.position,
+                props.to_state_id(args.block),
+                BlockFlags::NOTIFY_ALL,
+            );
+            BlockActionResult::Consume
         }
-        let state = args.world.get_block_state(args.position);
-        let mut props = GlowLichenLikeProperties::from_state_id(state.id, args.block);
-
-        let (Some(accurate_dir), _) = get_attach_direction(
-            args.world.as_ref(),
-            args.position,
-            Some(args.player),
-            *args.hit.face,
-            true,
-        ) else {
-            return BlockActionResult::Fail;
-        };
-        set_face(&mut props, accurate_dir);
-
-        args.world.set_block_state(
-            args.position,
-            props.to_state_id(args.block),
-            BlockFlags::NOTIFY_ALL,
-        );
-        BlockActionResult::Consume
     }
 }
 

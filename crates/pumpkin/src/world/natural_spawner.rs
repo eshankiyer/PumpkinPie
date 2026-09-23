@@ -731,7 +731,7 @@ pub fn spawn_mobs_for_chunk_generation(
                     finalize_natural_spawn(&entity, group_size);
                     group_size += 1;
                     initialize_schooling_spawn(&entity, &mut schooling_leader, group_size, true);
-                    world.spawn_entity_non_save(&entity);
+                    world.spawn_entity_non_save(entity);
                     success = true;
                 }
 

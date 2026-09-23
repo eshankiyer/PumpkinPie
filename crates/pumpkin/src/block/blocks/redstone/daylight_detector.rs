@@ -29,15 +29,20 @@ impl BlockBehaviour for DaylightDetectorBlock {
     }
 
     fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
-        let player_abilities = args.player.abilities.lock();
-        if !player_abilities.await.allow_modify_world {
+        let allow_modify_world = args
+            .player
+            .abilities
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .allow_modify_world;
+        if !allow_modify_world {
             return BlockActionResult::Pass;
         }
 
         let state = args.world.get_block_state(args.position);
         let props = DaylightDetectorProperties::from_state_id(state.id, args.block);
 
-        let new_state = self.update_inverted(props, args.world, args.position, args.block);
+        let new_state = Self::update_inverted(props, args.world, args.position, args.block);
 
         // DaylightDetectorBlock.useWithoutItem, lines 80-84: notify vibration/game-event
         // listeners about the inverted state before recalculating its power.
@@ -62,7 +67,6 @@ impl BlockBehaviour for DaylightDetectorBlock {
 
     fn get_weak_redstone_power(&self, args: GetRedstonePowerArgs<'_>) -> u8 {
         let props = DaylightDetectorProperties::from_state_id(args.state.id, args.block);
-
         props.power
     }
 
@@ -73,13 +77,11 @@ impl BlockBehaviour for DaylightDetectorBlock {
 
 impl DaylightDetectorBlock {
     fn update_inverted(
-        &self,
-        props: DaylightDetectorProperties,
+        mut props: DaylightDetectorProperties,
         world: &Arc<World>,
         block_pos: &BlockPos,
         block: &Block,
     ) -> BlockStateId {
-        let mut props = props;
         props.inverted = !props.inverted;
 
         let state = props.to_state_id(block);

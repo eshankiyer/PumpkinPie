@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use crate::block::blocks::redstone::block_receives_redstone_power;
 use crate::block::{
@@ -26,7 +27,6 @@ use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::Inventory;
 use pumpkin_world::world::BlockFlags;
-use std::sync::Mutex;
 
 struct HopperBlockScreenFactory(Arc<dyn Inventory>);
 

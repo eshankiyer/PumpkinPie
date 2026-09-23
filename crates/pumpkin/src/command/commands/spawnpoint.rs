@@ -117,9 +117,8 @@ impl CommandExecutor for TargetsPosAngleExecutor {
 }
 
 fn set_spawnpoint(sender: &CommandSender, target: &Arc<Player>, pos: BlockPos, yaw: f32) {
-    let dimension = &target.world().dimension;
-
-    target.set_respawn_point(dimension.clone(), pos, yaw, 0.0, true);
+    let dimension = target.world().dimension.clone();
+    target.set_respawn_point(dimension, pos, yaw, 0.0, true);
 
     sender.send_message(TextComponent::translate_cross(
         translation::java::COMMANDS_SPAWNPOINT_SUCCESS_SINGLE,

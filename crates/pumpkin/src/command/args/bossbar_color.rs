@@ -23,33 +23,26 @@ impl GetClientSideArgParser for BossbarColorArgumentConsumer {
 }
 
 impl ArgumentConsumer for BossbarColorArgumentConsumer {
-    fn consume<'a, 'b>(
+    fn consume<'a>(
         &'a self,
         _sender: &'a CommandSender,
         _server: &'a Server,
-        args: &'b mut RawArgs<'a>,
+        args: &mut RawArgs<'a>,
     ) -> ConsumeResult<'a> {
         let s_opt: Option<&'a str> = args.pop().map(|arg| arg.value);
 
-        let result: Option<Arg<'a>> = s_opt.map_or_else(
-            || None,
-            |s| {
-                let color = match s {
-                    "blue" => Some(BossbarColor::Blue),
-                    "green" => Some(BossbarColor::Green),
-                    "pink" => Some(BossbarColor::Pink),
-                    "purple" => Some(BossbarColor::Purple),
-                    "red" => Some(BossbarColor::Red),
-                    "white" => Some(BossbarColor::White),
-                    "yellow" => Some(BossbarColor::Yellow),
-                    _ => None,
-                };
+        let color = match s_opt? {
+            "blue" => Some(BossbarColor::Blue),
+            "green" => Some(BossbarColor::Green),
+            "pink" => Some(BossbarColor::Pink),
+            "purple" => Some(BossbarColor::Purple),
+            "red" => Some(BossbarColor::Red),
+            "white" => Some(BossbarColor::White),
+            "yellow" => Some(BossbarColor::Yellow),
+            _ => None,
+        };
 
-                color.map(Arg::BossbarColor)
-            },
-        );
-
-        Box::pin(async move { result })
+        color.map(Arg::BossbarColor)
     }
 
     fn suggest(&self, _sender: &CommandSender, _server: &Server, _input: &str) -> SuggestResult {

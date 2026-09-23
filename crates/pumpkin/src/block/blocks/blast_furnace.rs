@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use crate::block::entities::{
     PropertyDelegate, blasting_furnace::BlastingFurnaceBlockEntity,
@@ -17,7 +18,6 @@ use pumpkin_inventory::{
 };
 use pumpkin_macros::pumpkin_block;
 use pumpkin_world::inventory::Inventory;
-use std::sync::Mutex;
 
 use crate::{
     block::{
@@ -58,7 +58,7 @@ impl ScreenHandlerFactory for BlastingFurnaceScreenFactory {
             sync_id,
             player_inventory,
             self.inventory.clone(),
-            self.property_delegate.clone(),
+            &self.property_delegate,
             self.experience_container.clone(),
             WindowType::BlastFurnace,
         );

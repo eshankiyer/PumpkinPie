@@ -29,7 +29,7 @@ impl CommandBlock {
         dir: Facing,
     ) -> Option<(BlockPos, CommandBlockLikeProperties)> {
         let target_pos = pos.offset(dir.to_block_direction().to_offset());
-        let block = world.get_block(&target_pos);
+        let (block, state_id) = world.get_block_and_state_id(&target_pos);
 
         let allowed_blocks = [
             Block::COMMAND_BLOCK.name,
@@ -40,7 +40,6 @@ impl CommandBlock {
             return None;
         }
 
-        let state_id = world.get_block_state_id(&target_pos);
         let props = CommandBlockLikeProperties::from_state_id(state_id, block);
 
         Some((target_pos, props))
@@ -121,8 +120,7 @@ impl CommandBlock {
         if command.is_empty() {
             command_entity.success_count.store(0, Ordering::Release);
         } else {
-            let source =
-                CommandSender::CommandBlock(command_entity, world.clone()).into_source(server);
+            let source = CommandSender::CommandBlock(command_entity, world).into_source(server);
 
             server
                 .command_dispatcher
@@ -131,7 +129,7 @@ impl CommandBlock {
         }
     }
 
-    fn chain_execute(server: &Arc<Server>, world: Arc<World>, start: BlockPos, direction: Facing) {
+    fn chain_execute(server: &Arc<Server>, world: &Arc<World>, start: BlockPos, direction: Facing) {
         let mut i = u16::MAX;
         let mut pos = start;
 
@@ -140,7 +138,7 @@ impl CommandBlock {
             if !command_blocks_work {
                 return;
             }
-            let block = world.get_block(&pos);
+            let (block, state_id) = world.get_block_and_state_id(&pos);
 
             if block.id != Block::CHAIN_COMMAND_BLOCK.id {
                 break;
@@ -157,16 +155,16 @@ impl CommandBlock {
             };
             let powered = command_entity.powered.load(Ordering::Relaxed);
             let auto = command_entity.auto.load(Ordering::Relaxed);
-            let state_id = world.get_block_state_id(&pos);
             let props = CommandBlockLikeProperties::from_state_id(state_id, block);
 
             if powered || auto {
-                let conditions_met = Self::conditions_met(&world, &pos, direction);
+                let conditions_met = Self::conditions_met(world, &pos, direction);
                 if conditions_met {
                     let command = command_entity
                         .command
                         .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone();
                     let Some(entity) = world.get_block_entity(&pos) else {
                         warn!("Command block entity disappeared during execution");
                         break;
@@ -284,22 +282,19 @@ impl BlockBehaviour for CommandBlock {
         }
         let should_execute = previous_condition_met;
         if should_execute {
-            Self::execute(
-                &server,
-                args.world.clone(),
-                block_entity.clone(),
-                &command_entity
-                    .command
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner),
-            );
+            let command = command_entity
+                .command
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            Self::execute(&server, args.world.clone(), block_entity.clone(), &command);
         } else if props.conditional {
             command_entity.success_count.store(0, Ordering::Release);
         }
 
         Self::chain_execute(
             &server,
-            args.world.clone(),
+            args.world,
             args.position
                 .offset(props.facing.to_block_direction().to_offset()),
             props.facing,

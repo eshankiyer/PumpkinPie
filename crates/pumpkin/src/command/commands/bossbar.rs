@@ -44,10 +44,7 @@ impl CommandSuggestionProvider for BossbarSuggestionProvider {
         _end: usize,
     ) -> CommandSuggestionResult {
         let mut builder = SuggestionsBuilder::new(input, start);
-        let bossbars = server
-            .bossbars
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let bossbars = server.bossbars.lock().unwrap();
         let remaining = builder.remaining_lowercase().to_string();
         for key in bossbars.custom_bossbars.keys() {
             if key.to_lowercase().starts_with(&remaining) {
@@ -90,24 +87,16 @@ impl CommandExecutor for AddExecutor {
 
         let text_component = TextComponentArgConsumer::find_arg(args, ARG_NAME)?;
 
-        if server
-            .bossbars
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .has_bossbar(&namespace)
-        {
+        if server.bossbars.lock().unwrap().has_bossbar(&namespace) {
             return Result::Err(CommandError::CommandFailed(TextComponent::translate_cross(
                 translation::java::COMMANDS_BOSSBAR_CREATE_FAILED,
                 translation::bedrock::COMMANDS_BOSSBAR_ADD_FAILURE_EXISTS,
-                [TextComponent::text(namespace.clone())],
+                [TextComponent::text(namespace)],
             )));
         }
 
         let bossbar = Bossbar::new(text_component);
-        let mut bossbars = server
-            .bossbars
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut bossbars = server.bossbars.lock().unwrap();
 
         bossbars.create_bossbar(namespace.clone(), bossbar.clone());
         let new_size = bossbars.get_bossbars_len();
@@ -116,7 +105,7 @@ impl CommandExecutor for AddExecutor {
         sender.send_message(TextComponent::translate_cross(
             translation::java::COMMANDS_BOSSBAR_CREATE_SUCCESS,
             translation::bedrock::COMMANDS_BOSSBAR_ADD_SUCCESS,
-            [bossbar_prefix(bossbar.title.clone(), namespace.clone())],
+            [bossbar_prefix(bossbar.title, namespace)],
         ));
 
         Ok(new_size as i32)
@@ -126,7 +115,6 @@ impl CommandExecutor for AddExecutor {
 struct GetExecutor(CommandValueGet);
 
 impl CommandExecutor for GetExecutor {
-    #[expect(clippy::too_many_lines)]
     fn execute(
         &self,
         sender: &CommandSender,
@@ -137,14 +125,9 @@ impl CommandExecutor for GetExecutor {
             .find_arg_default_name(args)?
             .to_string();
 
-        let Some(bossbar) = server
-            .bossbars
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get_bossbar(&namespace)
-        else {
+        let Some(bossbar) = server.bossbars.lock().unwrap().get_bossbar(&namespace) else {
             return Err(handle_bossbar_error(
-                BossbarUpdateError::InvalidResourceLocation(namespace.clone()),
+                BossbarUpdateError::InvalidResourceLocation(namespace),
             ));
         };
 
@@ -154,7 +137,7 @@ impl CommandExecutor for GetExecutor {
                     translation::java::COMMANDS_BOSSBAR_GET_MAX,
                     translation::bedrock::COMMANDS_BOSSBAR_GET_MAX,
                     [
-                        bossbar_prefix(bossbar.bossbar_data.title.clone(), namespace.clone()),
+                        bossbar_prefix(bossbar.bossbar_data.title.clone(), namespace),
                         TextComponent::text(bossbar.max.to_string()),
                     ],
                 ));
@@ -173,10 +156,7 @@ impl CommandExecutor for GetExecutor {
                     sender.send_message(TextComponent::translate_cross(
                         translation::java::COMMANDS_BOSSBAR_GET_PLAYERS_NONE,
                         translation::bedrock::COMMANDS_BOSSBAR_GET_PLAYERS_NONE,
-                        [bossbar_prefix(
-                            bossbar.bossbar_data.title.clone(),
-                            namespace.clone(),
-                        )],
+                        [bossbar_prefix(bossbar.bossbar_data.title, namespace)],
                     ));
                 } else {
                     sender.send_message(TextComponent::translate_cross(
@@ -187,7 +167,7 @@ impl CommandExecutor for GetExecutor {
                             translation::bedrock::COMMANDS_BOSSBAR_GET_PLAYERS
                         },
                         [
-                            bossbar_prefix(bossbar.bossbar_data.title.clone(), namespace.clone()),
+                            bossbar_prefix(bossbar.bossbar_data.title, namespace),
                             TextComponent::text(count.to_string()),
                             TextComponent::text(online_players.join(", ")),
                         ],
@@ -200,7 +180,7 @@ impl CommandExecutor for GetExecutor {
                     translation::java::COMMANDS_BOSSBAR_GET_VALUE,
                     translation::bedrock::COMMANDS_BOSSBAR_GET_VALUE,
                     [
-                        bossbar_prefix(bossbar.bossbar_data.title.clone(), namespace.clone()),
+                        bossbar_prefix(bossbar.bossbar_data.title.clone(), namespace),
                         TextComponent::text(bossbar.value.to_string()),
                     ],
                 ));
@@ -223,7 +203,7 @@ impl CommandExecutor for GetExecutor {
                     bedrock_key,
                     [bossbar_prefix(
                         bossbar.bossbar_data.title.clone(),
-                        namespace.clone(),
+                        namespace,
                     )],
                 ));
                 Ok(bossbar.visible as i32)
@@ -241,11 +221,7 @@ impl CommandExecutor for ListExecutor {
         server: &crate::server::Server,
         _args: &ConsumedArgs,
     ) -> CommandResult {
-        let bossbars = server
-            .bossbars
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get_all_bossbars();
+        let bossbars = server.bossbars.lock().unwrap().get_all_bossbars();
 
         if bossbars.is_empty() {
             sender.send_message(TextComponent::translate_cross(
@@ -298,12 +274,7 @@ impl CommandExecutor for RemoveExecutor {
             .find_arg_default_name(args)?
             .to_string();
 
-        let Some(bossbar) = server
-            .bossbars
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get_bossbar(&namespace)
-        else {
+        let Some(bossbar) = server.bossbars.lock().unwrap().get_bossbar(&namespace) else {
             return Err(handle_bossbar_error(
                 BossbarUpdateError::InvalidResourceLocation(namespace),
             ));
@@ -313,30 +284,20 @@ impl CommandExecutor for RemoveExecutor {
             translation::java::COMMANDS_BOSSBAR_REMOVE_SUCCESS,
             translation::bedrock::COMMANDS_BOSSBAR_REMOVE,
             [bossbar_prefix(
-                bossbar.bossbar_data.title.clone(),
+                bossbar.bossbar_data.title,
                 namespace.clone(),
             )],
         ));
 
-        let error = {
-            match server
-                .bossbars
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .remove_bossbar(server, namespace)
-            {
-                Ok(()) => {
-                    return Ok(server
-                        .bossbars
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .get_bossbars_len() as i32);
-                }
-                Err(error) => error,
-            }
-        };
-
-        Err(handle_bossbar_error(error))
+        let res = server
+            .bossbars
+            .lock()
+            .unwrap()
+            .remove_bossbar(server, namespace);
+        match res {
+            Ok(()) => Ok(server.bossbars.lock().unwrap().get_bossbars_len() as i32),
+            Err(error) => Err(handle_bossbar_error(error)),
+        }
     }
 }
 
@@ -354,12 +315,7 @@ impl CommandExecutor for SetExecutor {
             .find_arg_default_name(args)?
             .to_string();
 
-        let Some(bossbar) = server
-            .bossbars
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get_bossbar(&namespace)
-        else {
+        let Some(bossbar) = server.bossbars.lock().unwrap().get_bossbar(&namespace) else {
             return Err(handle_bossbar_error(
                 BossbarUpdateError::InvalidResourceLocation(namespace),
             ));
@@ -369,25 +325,17 @@ impl CommandExecutor for SetExecutor {
             CommandValueSet::Color => {
                 let color = BossbarColorArgumentConsumer.find_arg_default_name(args)?;
 
-                match server
+                server
                     .bossbars
                     .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .update_color(server, namespace.clone(), *color)
-                {
-                    Ok(()) => {}
-                    Err(err) => {
-                        return Err(handle_bossbar_error(err));
-                    }
-                }
+                    .unwrap()
+                    .update_color(server, &namespace, *color)
+                    .map_err(handle_bossbar_error)?;
 
                 sender.send_message(TextComponent::translate_cross(
                     translation::java::COMMANDS_BOSSBAR_SET_COLOR_SUCCESS,
                     translation::java::COMMANDS_BOSSBAR_SET_COLOR_SUCCESS,
-                    [bossbar_prefix(
-                        bossbar.bossbar_data.title.clone(),
-                        namespace,
-                    )],
+                    [bossbar_prefix(bossbar.bossbar_data.title, namespace)],
                 ));
 
                 Ok(0)
@@ -401,71 +349,54 @@ impl CommandExecutor for SetExecutor {
                     )));
                 };
 
-                match server
+                server
                     .bossbars
                     .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .unwrap()
                     .update_max(server, namespace.clone(), max_value)
-                {
-                    Ok(()) => {}
-                    Err(err) => {
-                        return Err(handle_bossbar_error(err));
-                    }
-                }
+                    .map_err(handle_bossbar_error)?;
 
                 sender.send_message(TextComponent::translate_cross(
                     translation::java::COMMANDS_BOSSBAR_SET_MAX_SUCCESS,
                     translation::java::COMMANDS_BOSSBAR_SET_MAX_SUCCESS,
                     [
-                        bossbar_prefix(bossbar.bossbar_data.title.clone(), namespace),
+                        bossbar_prefix(bossbar.bossbar_data.title, namespace),
                         TextComponent::text(max_value.to_string()),
                     ],
                 ));
 
-                Ok(max_value)
+                Ok(0)
             }
             CommandValueSet::Name => {
-                let text_component = TextComponentArgConsumer::find_arg(args, ARG_NAME)?;
-                match server
+                let name = TextComponentArgConsumer::find_arg(args, ARG_NAME)?;
+                server
                     .bossbars
                     .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .update_name(server, &namespace, text_component.clone())
-                {
-                    Ok(()) => {}
-                    Err(err) => {
-                        return Err(handle_bossbar_error(err));
-                    }
-                }
+                    .unwrap()
+                    .update_name(server, &namespace, &name)
+                    .map_err(handle_bossbar_error)?;
 
                 sender.send_message(TextComponent::translate_cross(
                     translation::java::COMMANDS_BOSSBAR_SET_NAME_SUCCESS,
                     translation::java::COMMANDS_BOSSBAR_SET_NAME_SUCCESS,
-                    [bossbar_prefix(text_component, namespace)],
+                    [bossbar_prefix(name, namespace)],
                 ));
 
                 Ok(0)
             }
             CommandValueSet::Players(has_players) => {
                 if !has_players {
-                    match server
+                    server
                         .bossbars
                         .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .update_players(server, namespace.clone(), vec![])
-                    {
-                        Ok(()) => {}
-                        Err(err) => {
-                            return Err(handle_bossbar_error(err));
-                        }
-                    }
+                        .unwrap()
+                        .set_players(server, namespace.clone(), vec![])
+                        .map_err(handle_bossbar_error)?;
+
                     sender.send_message(TextComponent::translate_cross(
                         translation::java::COMMANDS_BOSSBAR_SET_PLAYERS_SUCCESS_NONE,
                         translation::java::COMMANDS_BOSSBAR_SET_PLAYERS_SUCCESS_NONE,
-                        [bossbar_prefix(
-                            bossbar.bossbar_data.title.clone(),
-                            namespace,
-                        )],
+                        [bossbar_prefix(bossbar.bossbar_data.title, namespace)],
                     ));
 
                     return Ok(0);
@@ -476,17 +407,12 @@ impl CommandExecutor for SetExecutor {
                     targets.iter().map(|player| player.gameprofile.id).collect();
                 let count = players.len();
 
-                match server
+                server
                     .bossbars
                     .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .update_players(server, namespace.clone(), players)
-                {
-                    Ok(()) => {}
-                    Err(err) => {
-                        return Err(handle_bossbar_error(err));
-                    }
-                }
+                    .unwrap()
+                    .set_players(server, namespace.clone(), players)
+                    .map_err(handle_bossbar_error)?;
 
                 let player_names = targets
                     .iter()
@@ -498,7 +424,7 @@ impl CommandExecutor for SetExecutor {
                     translation::java::COMMANDS_BOSSBAR_SET_PLAYERS_SUCCESS_SOME,
                     translation::java::COMMANDS_BOSSBAR_SET_PLAYERS_SUCCESS_SOME,
                     [
-                        bossbar_prefix(bossbar.bossbar_data.title.clone(), namespace),
+                        bossbar_prefix(bossbar.bossbar_data.title, namespace),
                         TextComponent::text(count.to_string()),
                         TextComponent::text(player_names),
                     ],
@@ -508,24 +434,17 @@ impl CommandExecutor for SetExecutor {
             }
             CommandValueSet::Style => {
                 let style = BossbarStyleArgumentConsumer.find_arg_default_name(args)?;
-                match server
+                server
                     .bossbars
                     .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .update_division(server, namespace.clone(), *style)
-                {
-                    Ok(()) => {}
-                    Err(err) => {
-                        return Err(handle_bossbar_error(err));
-                    }
-                }
+                    .unwrap()
+                    .update_style(server, &namespace, *style)
+                    .map_err(handle_bossbar_error)?;
+
                 sender.send_message(TextComponent::translate_cross(
                     translation::java::COMMANDS_BOSSBAR_SET_STYLE_SUCCESS,
                     translation::java::COMMANDS_BOSSBAR_SET_STYLE_SUCCESS,
-                    [bossbar_prefix(
-                        bossbar.bossbar_data.title.clone(),
-                        namespace,
-                    )],
+                    [bossbar_prefix(bossbar.bossbar_data.title, namespace)],
                 ));
                 Ok(0)
             }
@@ -538,23 +457,18 @@ impl CommandExecutor for SetExecutor {
                     )));
                 };
 
-                match server
+                server
                     .bossbars
                     .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .unwrap()
                     .update_value(server, namespace.clone(), value)
-                {
-                    Ok(()) => {}
-                    Err(err) => {
-                        return Err(handle_bossbar_error(err));
-                    }
-                }
+                    .map_err(handle_bossbar_error)?;
 
                 sender.send_message(TextComponent::translate_cross(
                     translation::java::COMMANDS_BOSSBAR_SET_VALUE_SUCCESS,
                     translation::java::COMMANDS_BOSSBAR_SET_VALUE_SUCCESS,
                     [
-                        bossbar_prefix(bossbar.bossbar_data.title.clone(), namespace),
+                        bossbar_prefix(bossbar.bossbar_data.title, namespace),
                         TextComponent::text(value.to_string()),
                     ],
                 ));
@@ -564,17 +478,12 @@ impl CommandExecutor for SetExecutor {
             CommandValueSet::Visible => {
                 let visibility = BoolArgConsumer::find_arg(args, ARG_VISIBLE)?;
 
-                match server
+                server
                     .bossbars
                     .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .unwrap()
                     .update_visibility(server, namespace.clone(), visibility)
-                {
-                    Ok(()) => {}
-                    Err(err) => {
-                        return Err(handle_bossbar_error(err));
-                    }
-                }
+                    .map_err(handle_bossbar_error)?;
 
                 let state = if visibility {
                     translation::java::COMMANDS_BOSSBAR_SET_VISIBLE_SUCCESS_VISIBLE
@@ -585,10 +494,7 @@ impl CommandExecutor for SetExecutor {
                 sender.send_message(TextComponent::translate_cross(
                     state,
                     state,
-                    [bossbar_prefix(
-                        bossbar.bossbar_data.title.clone(),
-                        namespace,
-                    )],
+                    [bossbar_prefix(bossbar.bossbar_data.title, namespace)],
                 ));
 
                 Ok(0)

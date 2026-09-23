@@ -129,7 +129,7 @@ impl CreeperEntity {
         );
     }
 
-    fn explode(&self) {
+    pub fn explode(&self) {
         let entity = &self.mob_entity.living_entity.entity;
         let radius = self.explosion_radius.load(Ordering::Relaxed) as f32;
         let multiplier = if self.charged.load(Ordering::Relaxed) {

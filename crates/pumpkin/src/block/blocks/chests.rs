@@ -407,9 +407,6 @@ fn normal_use_chest_impl(
 
 // Vanilla ChestBlock.updateShape (ChestBlock.java:169-171): a waterlogged chest keeps
 // rescheduling its own water fluid tick whenever a neighbor changes.
-//
-// Synchronous: callers wrap the result in `std::future::ready` to satisfy the trait's
-// boxed-future return type.
 fn get_state_for_neighbor_update_chest_impl(
     args: &GetStateForNeighborUpdateArgs<'_>,
     copper: bool,
@@ -519,7 +516,7 @@ impl BlockBehaviour for ChestBlock {
     }
 
     fn placed(&self, args: PlacedArgs<'_>) {
-        Box::pin(placed_chest_impl(args, ChestBlockEntity::new, false))
+        placed_chest_impl(args, ChestBlockEntity::new, false);
     }
 
     fn player_placed(&self, args: PlayerPlacedArgs<'_>) {
@@ -527,28 +524,23 @@ impl BlockBehaviour for ChestBlock {
     }
 
     fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
-        Box::pin(normal_use_chest_impl(
-            args,
-            pumpkin_data::statistic::CustomStatistic::OpenChest,
-        ))
+        normal_use_chest_impl(args, pumpkin_data::statistic::CustomStatistic::OpenChest)
     }
 
     fn get_state_for_neighbor_update(
         &self,
         args: GetStateForNeighborUpdateArgs<'_>,
     ) -> BlockStateId {
-        Box::pin(std::future::ready(
-            get_state_for_neighbor_update_chest_impl(&args, false),
-        ))
+        get_state_for_neighbor_update_chest_impl(&args, false)
     }
 
     fn broken(&self, args: BrokenArgs<'_>) {
-        Box::pin(broken_chest_impl(args, false))
+        broken_chest_impl(args, false);
     }
 
     // ChestBlock.affectNeighborsAfterRemoval (ChestBlock.java:251-253) is a live removal hook.
     fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
-        Box::pin(on_state_replaced_chest_impl(args))
+        on_state_replaced_chest_impl(args);
     }
 
     fn get_comparator_output(&self, args: GetComparatorOutputArgs<'_>) -> Option<u8> {
@@ -604,7 +596,7 @@ impl BlockBehaviour for CopperChestBlock {
     }
 
     fn placed(&self, args: PlacedArgs<'_>) {
-        Box::pin(placed_chest_impl(args, ChestBlockEntity::new, true))
+        placed_chest_impl(args, ChestBlockEntity::new, true);
     }
 
     fn player_placed(&self, args: PlayerPlacedArgs<'_>) {
@@ -612,28 +604,23 @@ impl BlockBehaviour for CopperChestBlock {
     }
 
     fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
-        Box::pin(normal_use_chest_impl(
-            args,
-            pumpkin_data::statistic::CustomStatistic::OpenChest,
-        ))
+        normal_use_chest_impl(args, pumpkin_data::statistic::CustomStatistic::OpenChest)
     }
 
     fn get_state_for_neighbor_update(
         &self,
         args: GetStateForNeighborUpdateArgs<'_>,
     ) -> BlockStateId {
-        Box::pin(std::future::ready(
-            get_state_for_neighbor_update_chest_impl(&args, true),
-        ))
+        get_state_for_neighbor_update_chest_impl(&args, true)
     }
 
     fn broken(&self, args: BrokenArgs<'_>) {
-        Box::pin(broken_chest_impl(args, true))
+        broken_chest_impl(args, true);
     }
 
     // CopperChestBlock inherits ChestBlock.affectNeighborsAfterRemoval (ChestBlock.java:251-253).
     fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
-        Box::pin(on_state_replaced_chest_impl(args))
+        on_state_replaced_chest_impl(args);
     }
 
     fn random_tick(&self, args: RandomTickArgs<'_>) {
@@ -680,7 +667,7 @@ impl BlockBehaviour for TrappedChestBlock {
 
     fn placed(&self, args: PlacedArgs<'_>) {
         use crate::block::entities::trapped_chest::TrappedChestBlockEntity;
-        Box::pin(placed_chest_impl(args, TrappedChestBlockEntity::new, false))
+        placed_chest_impl(args, TrappedChestBlockEntity::new, false);
     }
 
     fn player_placed(&self, args: PlayerPlacedArgs<'_>) {
@@ -690,28 +677,26 @@ impl BlockBehaviour for TrappedChestBlock {
     fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
         // Vanilla TrappedChestBlock.getOpenChestStat (TrappedChestBlock.java:36-39):
         // trapped chests award TRIGGER_TRAPPED_CHEST, not the regular OPEN_CHEST stat.
-        Box::pin(normal_use_chest_impl(
+        normal_use_chest_impl(
             args,
             pumpkin_data::statistic::CustomStatistic::TriggerTrappedChest,
-        ))
+        )
     }
 
     fn get_state_for_neighbor_update(
         &self,
         args: GetStateForNeighborUpdateArgs<'_>,
     ) -> BlockStateId {
-        Box::pin(std::future::ready(
-            get_state_for_neighbor_update_chest_impl(&args, false),
-        ))
+        get_state_for_neighbor_update_chest_impl(&args, false)
     }
 
     fn broken(&self, args: BrokenArgs<'_>) {
-        Box::pin(broken_chest_impl(args, false))
+        broken_chest_impl(args, false);
     }
 
     // TrappedChestBlock inherits ChestBlock.affectNeighborsAfterRemoval (ChestBlock.java:251-253).
     fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
-        Box::pin(on_state_replaced_chest_impl(args))
+        on_state_replaced_chest_impl(args);
     }
 
     fn emits_redstone_power(&self, _args: EmitsRedstonePowerArgs<'_>) -> bool {

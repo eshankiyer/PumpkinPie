@@ -81,7 +81,7 @@ pub fn get_redstone_power(
     get_weak_power(block, state, world, pos, facing, true)
 }
 
-fn get_redstone_power_no_dust(
+pub fn get_redstone_power_no_dust(
     block: &Block,
     state: &BlockState,
     world: &World,
@@ -97,7 +97,7 @@ fn get_redstone_power_no_dust(
     get_weak_power(block, state, world, &pos, facing, false)
 }
 
-fn get_max_strong_power(world: &World, pos: &BlockPos, dust_power: bool) -> u8 {
+pub fn get_max_strong_power(world: &World, pos: &BlockPos, dust_power: bool) -> u8 {
     let mut max_power = 0;
     for side in BlockDirection::all() {
         let (block, state) = world.get_block_and_state(&pos.offset(side.to_offset()));
@@ -113,7 +113,7 @@ fn get_max_strong_power(world: &World, pos: &BlockPos, dust_power: bool) -> u8 {
     max_power
 }
 
-fn get_max_weak_power(world: &World, pos: &BlockPos, dust_power: bool) -> u8 {
+pub fn get_max_weak_power(world: &World, pos: &BlockPos, dust_power: bool) -> u8 {
     let mut max_power = 0;
     for side in BlockDirection::all() {
         let (block, state) = world.get_block_and_state(&pos.offset(side.to_offset()));

@@ -316,7 +316,7 @@ impl PluginManager {
                             if path.extension().is_some_and(|ext| ext == "wasm") {
                                 debug!("Detected change in plugin: {:?}", path);
                                 // Give it a small delay to ensure file is completely written
-                                tokio::time::sleep(Duration::from_millis(100));
+                                tokio::time::sleep(Duration::from_millis(100)).await;
 
                                 // We need to find if this plugin is already loaded to unload it first
                                 let plugin_name = {
@@ -619,7 +619,7 @@ impl PluginManager {
                     // Try to unload the plugin data
                     if let Some(data) = loader_data {
                         tokio::spawn(async move {
-                            loader_clone.unload(data).ok();
+                            loader_clone.unload(data).await.ok();
                         });
                     }
 
@@ -658,7 +658,7 @@ impl PluginManager {
         }
 
         let cache_path = path.join("permission_cache.json");
-        let mut cache = cache::PermissionCache::load(&cache_path);
+        let mut cache = cache::PermissionCache::load(&cache_path).await;
 
         let mut prepared_plugins = Vec::new();
 
@@ -682,7 +682,7 @@ impl PluginManager {
             let mut loader_found = false;
             for loader in loaders.iter() {
                 if loader.can_load(&path) {
-                    match loader.load(&path) {
+                    match loader.load(&path).await {
                         Ok((instance, metadata, loader_data)) => {
                             let plugin_override =
                                 server.advanced_config.plugins.overrides.get(&metadata.name);
@@ -863,7 +863,7 @@ impl PluginManager {
                     approved: true,
                 },
             );
-            let _ = cache.save(cache_path);
+            let _ = cache.save(cache_path).await;
             return (true, std::time::Duration::ZERO);
         }
 
@@ -876,7 +876,7 @@ impl PluginManager {
                     approved: allowed,
                 },
             );
-            let _ = cache.save(cache_path);
+            let _ = cache.save(cache_path).await;
         }
         (allowed, wait_time)
     }
@@ -895,7 +895,7 @@ impl PluginManager {
 
         for loader in self.loaders.read().await.iter() {
             if loader.can_load(path) {
-                let (instance, metadata, loader_data) = loader.load(path)?;
+                let (instance, metadata, loader_data) = loader.load(path).await?;
 
                 let plugin_override = server.advanced_config.plugins.overrides.get(&metadata.name);
 
@@ -928,7 +928,7 @@ impl PluginManager {
                 }
 
                 let cache_path = Path::new(PLUGIN_DIR).join("permission_cache.json");
-                let mut cache = cache::PermissionCache::load(&cache_path);
+                let mut cache = cache::PermissionCache::load(&cache_path).await;
 
                 let (allowed, _) = self
                     .check_permissions_cached(path, &metadata, &mut cache, &cache_path, server)
@@ -1064,7 +1064,7 @@ impl PluginManager {
 
         if plugin.loader.can_unload() {
             if let Some(data) = plugin.loader_data {
-                plugin.loader.unload(data)?;
+                plugin.loader.unload(data).await?;
             }
         } else {
             plugin.is_active = false;
@@ -1171,6 +1171,35 @@ impl PluginManager {
             if !handler.is_blocking() {
                 handler.handle_dyn(server, event).await;
             }
+        }
+    }
+
+    /// Fire an event to all registered handlers synchronously (blocking if handlers exist).
+    /// If no handlers are registered for this event, returns immediately without runtime overhead.
+    pub fn fire_blocking<E: Payload + Send + Sync + 'static>(
+        &self,
+        server: &Arc<Server>,
+        event: &mut E,
+    ) {
+        let handlers_map = self.handlers.load();
+        if handlers_map.is_empty() {
+            return;
+        }
+
+        let Some(handlers) = handlers_map.get(E::get_name_static()) else {
+            return;
+        };
+
+        if handlers.is_empty() {
+            return;
+        }
+
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::block_in_place(|| {
+                server.runtime.block_on(self.fire(server, event));
+            });
+        } else {
+            server.runtime.block_on(self.fire(server, event));
         }
     }
 

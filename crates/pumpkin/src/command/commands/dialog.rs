@@ -27,7 +27,7 @@ impl CommandExecutor for DialogClearExecutor {
         let count = targets.len();
         let packet = CPlayClearDialog::new();
         for player in &targets {
-            player.send_client_packet(&packet).await;
+            player.try_send_client_packet(&packet);
         }
 
         let msg = if count == 1 {
@@ -62,7 +62,7 @@ impl CommandExecutor for DialogShowExecutor {
                 let packet = CPlayShowDialog::new(IdOr::Value(dialog_nbt));
 
                 for player in &targets {
-                    player.send_client_packet(&packet).await;
+                    player.try_send_client_packet(&packet);
                 }
 
                 let msg = if count == 1 {

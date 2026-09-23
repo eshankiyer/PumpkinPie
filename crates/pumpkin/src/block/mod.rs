@@ -10,7 +10,6 @@ use crate::entity::experience_orb::ExperienceOrbEntity;
 use crate::entity::player::Player;
 use crate::world::World;
 use crate::world::loot::{LootContextParameters, LootTableExt};
-use std::pin::Pin;
 use std::sync::Arc;
 
 pub mod blocks;
@@ -42,8 +41,6 @@ pub trait BlockMetadata {
 pub trait FluidMetadata {
     fn ids() -> Box<[u16]>;
 }
-
-pub type BlockFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 pub(crate) fn stop_vertical_movement_after_fall(entity: &dyn EntityBase) {
     let entity = entity.get_entity();
@@ -304,9 +301,7 @@ pub trait BlockBehaviour: Send + Sync {
     fn perform_bonemeal(&self, _args: BonemealArgs<'_>) {}
 
     /// Called when a player starts punching this block (`BlockBehaviour.attack` in vanilla).
-    fn attack<'a>(&'a self, _args: AttackArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async {})
-    }
+    fn attack(&self, _args: AttackArgs<'_>) {}
 
     fn normal_use(&self, _args: NormalUseArgs<'_>) -> BlockActionResult {
         BlockActionResult::Pass

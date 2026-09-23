@@ -692,7 +692,7 @@ impl BlockBehaviour for WeatheringCopperStairBlock {
     }
 
     fn on_neighbor_update(&self, args: OnNeighborUpdateArgs<'_>) {
-        StairBlock.on_neighbor_update(args)
+        StairBlock.on_neighbor_update(args);
     }
 
     fn rotate(
@@ -763,7 +763,7 @@ impl BlockBehaviour for WeatheringCopperTrapDoorBlock {
     }
 
     fn on_neighbor_update(&self, args: OnNeighborUpdateArgs<'_>) {
-        TrapDoorBlock.on_neighbor_update(args)
+        TrapDoorBlock.on_neighbor_update(args);
     }
 
     fn random_tick(&self, args: RandomTickArgs<'_>) {
@@ -879,15 +879,15 @@ impl BlockBehaviour for WeatheringCopperDoorBlock {
     }
 
     fn placed(&self, args: PlacedArgs<'_>) {
-        DoorBlock.placed(args)
+        DoorBlock.placed(args);
     }
 
     fn broken(&self, args: BrokenArgs<'_>) {
-        DoorBlock.broken(args)
+        DoorBlock.broken(args);
     }
 
     fn on_neighbor_update(&self, args: OnNeighborUpdateArgs<'_>) {
-        DoorBlock.on_neighbor_update(args)
+        DoorBlock.on_neighbor_update(args);
     }
 
     fn get_state_for_neighbor_update(
@@ -898,7 +898,7 @@ impl BlockBehaviour for WeatheringCopperDoorBlock {
     }
 
     fn on_state_replaced(&self, args: OnStateReplacedArgs<'_>) {
-        DoorBlock.on_state_replaced(args)
+        DoorBlock.on_state_replaced(args);
     }
 
     fn random_tick(&self, args: RandomTickArgs<'_>) {

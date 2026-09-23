@@ -280,7 +280,7 @@ pub struct EnderDragonEntity {
 
 impl EnderDragonEntity {
     pub fn new(entity: Entity) -> Arc<Self> {
-        entity.no_clip.store(true, Ordering::Relaxed);
+        entity.no_physics.store(true, Ordering::Relaxed);
         let base_id = entity.entity_id;
         let dragon_uuid = entity.entity_uuid;
         let world = entity.world.load();
@@ -773,7 +773,7 @@ impl EnderDragonEntity {
     }
 
     fn tick_parts(&self) {
-        let history: tokio::sync::MutexGuard<'_, DragonFlightHistory> = self
+        let history = self
             .flight_history
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -817,7 +817,7 @@ impl EnderDragonEntity {
         {
             -1.0
         } else {
-            (p5.y - p0.y) as f64
+            p5.y - p0.y
         };
 
         let yaw_accel = *self
@@ -991,7 +991,7 @@ impl EnderDragonEntity {
             // Race: a concurrent damage/heal landing between the two loads above can skew
             // this delta (vanilla is single-threaded and has no such window). Clamped at
             // zero rather than restructured, since the two health loads can't be merged
-            // into one atomic op and this call already holds no lock across the `.await`.
+            // into one atomic op and this call holds no lock between them.
             let delta = (health_before - health_after).max(0.0);
 
             let phase_type: EnderDragonPhase = *self

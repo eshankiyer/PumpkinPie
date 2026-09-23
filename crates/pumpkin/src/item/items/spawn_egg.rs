@@ -121,7 +121,7 @@ impl ItemBehaviour for SpawnEggItem {
 
         // ClipContext.Fluid.SOURCE_ONLY: stop on any non-air block outline and on
         // full fluid source blocks, but pass through flowing fluid.
-        let checker = async |pos: &BlockPos, world_inner: &Arc<World>| {
+        let checker = |pos: &BlockPos, world_inner: &Arc<World>| {
             let state_id = world_inner.get_block_state_id(pos);
             let block = Block::from_state_id(state_id);
             if state_id == Block::AIR.default_state.id {

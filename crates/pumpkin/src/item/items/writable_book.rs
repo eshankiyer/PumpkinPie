@@ -1,5 +1,4 @@
 use std::any::Any;
-use std::future::Future;
 
 use crate::entity::player::Player;
 use crate::item::{ItemBehaviour, ItemMetadata};
@@ -22,14 +21,10 @@ impl ItemBehaviour for WritableBookItem {
     /// and awards the `ITEM_USED` statistic.
     fn normal_use(&self, item: &Item, player: &Player) {
         if item.id == Item::WRITABLE_BOOK.id {
-            player
-                .send_client_packet(&COpenBook::new(VarInt(0))) // 0 = main hand
-                .await;
+            player.try_send_client_packet(&COpenBook::new(VarInt(0))); // 0 = main hand
             player.increment_stat(StatisticCategory::Used, item.id as i32, 1);
         } else if item.id == Item::WRITTEN_BOOK.id {
-            player
-                .send_client_packet(&COpenBook::new(VarInt(0))) // 0 = main hand
-                .await;
+            player.try_send_client_packet(&COpenBook::new(VarInt(0))); // 0 = main hand
             player.world().play_sound(
                 Sound::ItemBookPageTurn,
                 SoundCategory::Players,

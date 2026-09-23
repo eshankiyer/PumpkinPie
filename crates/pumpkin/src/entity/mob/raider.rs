@@ -161,22 +161,12 @@ impl Goal for HoldGroundAttackGoal {
         if raider.has_active_raid() || !raider.is_patrolling() {
             return false;
         }
-        let target = mob
-            .get_mob_entity()
-            .target
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let target = mob.get_mob_entity().get_target().clone();
         target.is_some()
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
-        let target = mob
-            .get_mob_entity()
-            .target
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
+        let target = mob.get_mob_entity().get_target().clone();
         target.is_some()
     }
 
@@ -187,12 +177,7 @@ impl Goal for HoldGroundAttackGoal {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .stop();
 
-        let target = mob
-            .get_mob_entity()
-            .target
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let target = mob.get_mob_entity().get_target().clone();
         if let Some(target) = target {
             let entity = mob.get_entity();
             let world = entity.world.load();
@@ -204,11 +189,7 @@ impl Goal for HoldGroundAttackGoal {
                     && let Some(cand_mob) = cand.get_mob()
                     && cand_mob.as_raider().is_some()
                 {
-                    *cand_mob
-                        .get_mob_entity()
-                        .target
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(target.clone());
+                    cand_mob.get_mob_entity().set_target(Some(target.clone()));
                 }
             }
         }
@@ -219,12 +200,7 @@ impl Goal for HoldGroundAttackGoal {
     }
 
     fn tick(&mut self, mob: &dyn Mob) {
-        let target = mob
-            .get_mob_entity()
-            .target
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let target = mob.get_mob_entity().get_target().clone();
         if let Some(target) = target {
             let mob_pos = mob.get_entity().pos.load();
             let target_pos = target.get_entity().pos.load();
@@ -323,25 +299,15 @@ impl Goal for RaiderCelebrationGoal {
         let Some(raider) = mob.as_raider() else {
             return false;
         };
-        let target = mob
-            .get_mob_entity()
-            .target
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let target = mob.get_mob_entity().get_target().clone();
         target.is_none() && raider.is_celebrating()
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         let Some(raider) = mob.as_raider() else {
             return false;
         };
-        let target = mob
-            .get_mob_entity()
-            .target
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let target = mob.get_mob_entity().get_target().clone();
         target.is_none() && raider.is_celebrating()
     }
 
@@ -396,12 +362,7 @@ impl Goal for RaiderMoveThroughVillageGoal {
         if !raider.has_active_raid() {
             return false;
         }
-        let target = mob
-            .get_mob_entity()
-            .target
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let target = mob.get_mob_entity().get_target().clone();
         target.is_none()
     }
 

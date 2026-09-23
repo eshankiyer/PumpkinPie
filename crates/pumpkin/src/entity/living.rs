@@ -1120,14 +1120,11 @@ impl LivingEntity {
                     selected_slot: 0,
                     container_id: window_id,
                 };
-                self.entity
-                    .world
-                    .load()
-                    .broadcast_packet_except_editioned_sync(
-                        &[self.entity.entity_uuid],
-                        &je_packet,
-                        &be_packet,
-                    );
+                self.entity.world.load().broadcast_packet_except_editioned(
+                    &[self.entity.entity_uuid],
+                    &je_packet,
+                    &be_packet,
+                );
                 sent_editioned = true;
             }
         }
@@ -1210,20 +1207,16 @@ impl LivingEntity {
                 stack_amount as u8,
             );
         if let Some(server) = self.entity.world.load().server.upgrade() {
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    server
-                        .plugin_manager
-                        .fire_blocking(&server, &mut pickup_event);
-                });
-            });
+            server
+                .plugin_manager
+                .fire_blocking(&server, &mut pickup_event);
             if pickup_event.cancelled {
                 return;
             }
         }
 
         let chunk_pos = self.entity.chunk_pos.load();
-        self.entity.world.load().broadcast_to_chunk_editioned_sync(
+        self.entity.world.load().broadcast_to_chunk_editioned(
             chunk_pos,
             &CTakeItemEntity::new(
                 item.entity_id.into(),
@@ -1435,7 +1428,9 @@ impl LivingEntity {
                     continue;
                 }
 
-                player.attack(candidate.clone()).await;
+                // `Player::attack` is still an `async fn` for its network callers, but it awaits
+                // nothing that needs the tokio runtime, so it can be driven inline here.
+                futures::executor::block_on(player.attack(candidate.clone()));
                 self.auto_spin_attack_ticks.store(0, Ordering::Relaxed);
                 self.entity
                     .set_velocity(self.entity.velocity.load().multiply(-0.2, -0.2, -0.2));
@@ -1517,11 +1512,7 @@ impl LivingEntity {
                 additional_health,
             );
         if let Some(server) = self.entity.world.load().server.upgrade() {
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    server.plugin_manager.fire_blocking(&server, &mut event);
-                });
-            });
+            server.plugin_manager.fire_blocking(&server, &mut event);
             if event.cancelled {
                 return;
             }
@@ -2106,7 +2097,7 @@ impl LivingEntity {
         self.entity
             .world
             .load()
-            .broadcast_to_chunk_editioned_sync(chunk_pos, &je_packet, &be_packet);
+            .broadcast_to_chunk_editioned(chunk_pos, &je_packet, &be_packet);
     }
 
     /// `LivingEntity.updateEffectVisibility`, applied immediately on the server because Pumpkin
@@ -2304,16 +2295,14 @@ impl LivingEntity {
         )
     }
 
-    // Check if the entity is in water
+    /// Vanilla `Entity.isInWater`: the `wasTouchingWater` flag refreshed by the fluid pass.
     pub fn is_in_water(&self) -> bool {
-        let block_pos = self.entity.block_pos.load();
-        self.entity.world.load().get_block(&block_pos) == &Block::WATER
+        self.entity.touching_water.load(Ordering::Relaxed)
     }
 
-    // Check if the entity is in powder snow
+    /// Vanilla `Entity.isInPowderSnow` flag.
     pub fn is_in_powder_snow(&self) -> bool {
-        let block_pos = self.entity.block_pos.load();
-        self.entity.world.load().get_block(&block_pos) == &Block::POWDER_SNOW
+        self.entity.is_in_powder_snow.load(Ordering::Relaxed)
     }
 
     pub fn should_prevent_fall_damage(&self) -> bool {
@@ -3383,8 +3372,7 @@ impl LivingEntity {
         // `LivingEntity.causeFallDamage` reaches `Entity.causeFallDamage`
         // (`Entity.java:1574-1581`) through `super` before applying its own damage, and that is
         // what hurts whoever is riding the falling entity.
-        self.propagate_fall_to_passengers(fall_distance, damage_per_distance)
-            .await;
+        self.propagate_fall_to_passengers(fall_distance, damage_per_distance);
 
         let damage = caller.calculate_fall_damage(f64::from(fall_distance), damage_per_distance);
         if damage > 0 {
@@ -3415,31 +3403,18 @@ impl LivingEntity {
     /// Vanilla `Entity.propagateFallToPassengers` (`Entity.java:1583-1589`): a falling vehicle
     /// passes the same fall to everyone riding it, so a player who rides a horse off a cliff is
     /// hurt alongside the horse.
-    ///
-    /// Boxed because the recursion (vehicle -> passenger -> its own passengers) would otherwise
-    /// give the future an infinite type.
-    fn propagate_fall_to_passengers<'a>(
-        &'a self,
-        fall_distance: f32,
-        damage_per_distance: f32,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
-        Box::pin(async move {
-            let passengers = self
-                .entity
-                .passengers
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clone();
-            for passenger in passengers {
-                if let Some(living) = passenger.get_living_entity() {
-                    living.handle_fall_damage(
-                        passenger.as_ref(),
-                        fall_distance,
-                        damage_per_distance,
-                    );
-                }
+    fn propagate_fall_to_passengers(&self, fall_distance: f32, damage_per_distance: f32) {
+        let passengers = self
+            .entity
+            .passengers
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        for passenger in passengers {
+            if let Some(living) = passenger.get_living_entity() {
+                living.handle_fall_damage(passenger.as_ref(), fall_distance, damage_per_distance);
             }
-        })
+        }
     }
 
     /// Vanilla `LivingEntity.calculateFallDamage` (`LivingEntity.java:1845-1852`), including the
@@ -4111,10 +4086,9 @@ impl LivingEntity {
             }
 
             let below = position.down();
-            if world.get_block_state_async(&position).await.replaceable()
+            if world.get_block_state(&position).replaceable()
                 && world
-                    .get_block_state_async(&below)
-                    .await
+                    .get_block_state(&below)
                     .is_side_solid(BlockDirection::Up)
             {
                 positions.push(position);
@@ -4447,7 +4421,7 @@ impl LivingEntity {
     }
 
     /// Tries to use a totem of undying from the entity's hands. If successful, applies the totem effects and returns true.
-    async fn try_use_death_protector(&self, caller: &dyn EntityBase) -> bool {
+    fn try_use_death_protector(&self, caller: &dyn EntityBase) -> bool {
         for hand in Hand::all() {
             let mut stack = self.get_stack_in_hand(caller, hand);
 
@@ -4968,10 +4942,10 @@ impl LivingEntity {
                 .has_tag(&tag::EntityType::MINECRAFT_DISMOUNTS_UNDERWATER)
             && !self.entity.is_removed()
         {
-            vehicle
-                .get_entity()
-                .remove_passenger(self.entity.entity_id)
-                .await;
+            // `remove_passenger` is still an `async fn` but awaits nothing runtime-bound.
+            futures::executor::block_on(
+                vehicle.get_entity().remove_passenger(self.entity.entity_id),
+            );
         }
     }
 
@@ -5834,11 +5808,7 @@ impl EntityBase for LivingEntity {
             ticks as f32 / 20.0,
         );
         if let Some(server) = entity.world.load().server.upgrade() {
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    server.plugin_manager.fire_blocking(&server, &mut event);
-                });
-            });
+            server.plugin_manager.fire_blocking(&server, &mut event);
             if event.cancelled {
                 return;
             }
@@ -6294,7 +6264,7 @@ impl EntityBase for LivingEntity {
                     .downcast_ref::<crate::entity::player::Player>()
             {
                 let held = player.inventory().held_item();
-                let breach_level = held.await.get_enchantment_level(&Enchantment::BREACH);
+                let breach_level = held.get_enchantment_level(&Enchantment::BREACH);
                 if breach_level > 0 {
                     armor_fraction = breach_armor_fraction(armor_fraction, breach_level);
                 }
@@ -6723,7 +6693,7 @@ impl EntityBase for LivingEntity {
 
         // Check if the entity died and isn't protected by a death protection mechanic (ex. totem of undying)
         if clamped_health <= 0.0
-            && (bypasses_cooldown_protection || !self.try_use_death_protector(caller).await)
+            && (bypasses_cooldown_protection || !self.try_use_death_protector(caller))
         {
             let mut death_event =
                 crate::plugin::api::events::entity::entity_death::EntityDeathEvent::new(
@@ -6942,7 +6912,7 @@ impl EntityBase for LivingEntity {
                     );
                 }
 
-                self.apply_consumable_effects(caller, item).await;
+                self.apply_consumable_effects(caller, item);
 
                 if let Some(consumable) = item.get_data_component::<ConsumableImpl>() {
                     let world = self.entity.world.load();
@@ -7210,7 +7180,7 @@ const fn equipment_slot_for_hand(hand: Hand) -> EquipmentSlot {
 impl LivingEntity {
     /// Applies data-driven `apply_effects` consume effects after an item completes use.
     /// Vanilla: `Consumable.onConsume` invokes every configured effect server-side.
-    async fn apply_consumable_effects(&self, caller: &Arc<dyn EntityBase>, item: &ItemStack) {
+    fn apply_consumable_effects(&self, caller: &Arc<dyn EntityBase>, item: &ItemStack) {
         let Some(consumable) = item.get_data_component::<ConsumableImpl>() else {
             return;
         };
@@ -7294,7 +7264,7 @@ impl LivingEntity {
             let target_y = target_y.clamp(min_y, max_y);
 
             // `if (user.isPassenger()) user.stopRiding();`. Clone out of the lock first: holding
-            // the guard as the `if let` scrutinee would keep it alive across the `.await` below.
+            // the guard as the `if let` scrutinee would keep it alive across the dismount below.
             let vehicle = caller
                 .get_entity()
                 .vehicle
@@ -7302,10 +7272,13 @@ impl LivingEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .clone();
             if let Some(vehicle) = vehicle {
-                vehicle
-                    .get_entity()
-                    .remove_passenger_before_teleport(caller.get_entity().entity_id)
-                    .await;
+                // `remove_passenger_before_teleport` is still an `async fn` but awaits nothing
+                // runtime-bound, so it is driven inline.
+                futures::executor::block_on(
+                    vehicle
+                        .get_entity()
+                        .remove_passenger_before_teleport(caller.get_entity().entity_id),
+                );
                 // A plugin cancelled the dismount.
                 if caller.get_entity().has_vehicle() {
                     continue;

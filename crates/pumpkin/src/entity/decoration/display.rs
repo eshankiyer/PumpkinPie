@@ -70,7 +70,7 @@ pub struct DisplayEntity {
 
 impl DisplayEntity {
     pub fn new(entity: Entity) -> Self {
-        entity.no_clip.store(true, Ordering::Relaxed);
+        entity.no_physics.store(true, Ordering::Relaxed);
         Self {
             entity,
             interpolation_start_delta_ticks: AtomicI32::new(0),

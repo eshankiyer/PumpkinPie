@@ -1,5 +1,4 @@
 use std::any::Any;
-use std::future::Future;
 use std::sync::Arc;
 
 use crate::block::blocks::brushable_block::brush_sound;
@@ -44,7 +43,7 @@ impl ItemBehaviour for BrushItem {
         let world = player.world();
         let (start, end) = self.get_start_and_end_pos(player);
         if world
-            .raycast(start, end, async |pos, w| !w.get_block_state(pos).is_air())
+            .raycast(start, end, |pos, w| !w.get_block_state(pos).is_air())
             .is_none()
         {
             return;
@@ -69,7 +68,7 @@ impl ItemBehaviour for BrushItem {
         let world = player.world();
         let (start, end) = self.get_start_and_end_pos(player);
         let Some((position, face)) =
-            world.raycast(start, end, async |pos, w| !w.get_block_state(pos).is_air())
+            world.raycast(start, end, |pos, w| !w.get_block_state(pos).is_air())
         else {
             // `BrushItem.java:90-92`: losing the target stops the use.
             player.living_entity.clear_active_hand();
@@ -132,7 +131,7 @@ impl ItemBehaviour for BrushItem {
         };
 
         let game_time = world.get_world_age();
-        if brush_be.brush(&world, game_time, face).await {
+        if brush_be.brush(&world, game_time, face) {
             // `BrushItem.onUseTick` chooses OFFHAND when the active stack equals the
             // off-hand stack, otherwise MAINHAND (`BrushItem.java:80-87`).
             let off_hand = player.inventory().off_hand_item();

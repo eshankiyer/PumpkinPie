@@ -320,7 +320,7 @@ mod tests {
         assert!(!is_pattern_item(&ItemStack::new(1, &Item::WHITE_DYE)));
     }
 
-    #[tokio::test]
+    #[test]
     fn banner_slot_rejects_non_banner_items() {
         let handler = handler();
         let slot = handler.get_behaviour().slots[0].clone();
@@ -328,7 +328,7 @@ mod tests {
         assert!(slot.can_insert(&ItemStack::new(1, &Item::WHITE_BANNER)));
     }
 
-    #[tokio::test]
+    #[test]
     fn result_slot_never_accepts_items() {
         let handler = handler();
         let result_slot = handler.get_behaviour().slots[3].clone();

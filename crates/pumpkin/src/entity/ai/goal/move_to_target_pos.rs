@@ -1,6 +1,7 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use super::{Controls, Goal, to_goal_ticks};
+
 use crate::entity::ai::pathfinder::NavigatorGoal;
 use crate::entity::{ai::goal::ParentHandle, mob::Mob};
 use crate::world::World;
@@ -78,11 +79,11 @@ impl<M: MoveToTargetPos> MoveToTargetPosGoal<M> {
                             let world = mob.get_entity().world.load_full();
 
                             let can_target =
-                                if let Some(move_to_target_pos) = self.move_to_target_pos.get() {
-                                    move_to_target_pos.is_target_pos(world, block_pos_mut)
-                                } else {
-                                    false
-                                };
+                                self.move_to_target_pos
+                                    .get()
+                                    .is_some_and(|move_to_target_pos| {
+                                        move_to_target_pos.is_target_pos(world, block_pos_mut)
+                                    });
 
                             if mob
                                 .get_mob_entity()

@@ -155,6 +155,7 @@ impl ScreenHandler for LecternScreenHandler {
     }
 
     fn quick_move(&mut self, _player: &dyn InventoryPlayer, _slot_index: i32) -> ItemStack {
+        // The lectern screen has no player slots, so nothing can be shift-clicked.
         ItemStack::EMPTY.clone()
     }
 }

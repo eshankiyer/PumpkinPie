@@ -30,15 +30,15 @@ impl CommandExecutor for Executor {
         let category = SoundCategoryArgumentConsumer::find_arg(args, ARG_SOURCE);
         let sound = SoundArgumentConsumer::find_arg(args, ARG_SOUND);
 
+        let sound_name = sound
+            .as_ref()
+            .cloned()
+            .map(|s| format!("minecraft:{}", s.to_name()))
+            .ok();
+        let cat = category.as_ref().map(|s| **s).ok();
+
         for target in targets {
-            target.stop_sound(
-                sound
-                    .as_ref()
-                    .cloned()
-                    .map(|s| format!("minecraft:{}", s.to_name()))
-                    .ok(),
-                category.as_ref().map(|s| **s).ok(),
-            );
+            target.stop_sound(sound_name.clone(), cat);
         }
 
         let text = match (category, sound) {

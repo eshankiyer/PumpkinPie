@@ -5,7 +5,6 @@ use super::{
     ai::pathfinder::{NavigationKind, Navigator, NavigatorGoal},
     living::LivingEntity,
 };
-use crate::entity::EntityBaseFuture;
 use crate::entity::ai::brain::Brain;
 use crate::entity::ai::control::MoveControlTrait;
 use crate::entity::ai::control::look_control::LookControl;
@@ -47,7 +46,6 @@ use pumpkin_util::{Difficulty, GameMode};
 use rand::RngExt;
 use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, Ordering};
@@ -499,7 +497,7 @@ impl MobEntity {
             let world = entity.world.load_full();
             Arc::ptr_eq(&world, &target_entity.world.load_full())
                 && world
-                    .raycast_collision(from, to, async |block_pos, world| {
+                    .raycast_collision(from, to, |block_pos, world| {
                         !world.get_block_state(block_pos).collision_shapes.is_empty()
                     })
                     .is_none()
@@ -1579,12 +1577,7 @@ pub trait Mob: EntityBase + Send + Sync {
 
     /// Vanilla `HasCustomInventoryScreen.openCustomInventoryScreen` is dispatched by the
     /// ridden-vehicle inventory command (`ServerGamePacketListenerImpl.java:1734-1737`).
-    fn open_custom_inventory_screen<'a>(
-        &'a self,
-        _player: &'a Arc<crate::entity::player::Player>,
-    ) -> crate::entity::EntityBaseFuture<'a, ()> {
-        Box::pin(async {})
-    }
+    fn open_custom_inventory_screen(&self, _player: &Arc<crate::entity::player::Player>) {}
 
     /// Vanilla `Mob.canDispenserEquipIntoSlot` (`Mob.java:1117-1118`) lets a mob
     /// accept dispenser equipment only when its loot-pickup flag is enabled.
@@ -3775,15 +3768,13 @@ pub trait PathAwareEntity: Mob + Send + Sync {
         ) >= 0.0
     }
 
-    fn is_navigation<'a>(&'a self) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
-        Box::pin(async {
-            let navigator = self
-                .get_mob_entity()
-                .navigator
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            !navigator.is_idle()
-        })
+    fn is_navigation(&self) -> bool {
+        let navigator = self
+            .get_mob_entity()
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        !navigator.is_idle()
     }
 
     fn is_panicking(&self) -> bool {

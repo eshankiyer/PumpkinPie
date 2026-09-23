@@ -109,7 +109,7 @@ impl ItemEntity {
 
     /// Creates an `ItemEntity` for restoring from NBT without random velocity.
     /// The velocity and position will be set by `Entity::read_nbt_non_mut`.
-    pub fn new_for_restore(entity: Entity) -> Self {
+    pub fn new_empty(entity: Entity) -> Self {
         Self {
             entity,
             item_stack: Mutex::new(ItemStack::new(1, &pumpkin_data::item::Item::AIR)),
@@ -164,6 +164,11 @@ impl ItemEntity {
         self.never_pickup.store(true, Ordering::Relaxed);
         self.pickup_delay
             .store(INFINITE_PICKUP_DELAY, Ordering::Relaxed);
+    }
+
+    /// Remaining pickup delay in ticks (`INFINITE_PICKUP_DELAY` for never-pickup items).
+    pub fn get_pickup_delay(&self) -> i32 {
+        self.pickup_delay.load(Ordering::Relaxed)
     }
 
     /// Vanilla `ItemEntity.setPickUpDelay` (`ItemEntity.java:412-414`).
@@ -223,7 +228,7 @@ impl ItemEntity {
         self.pickup_delay.load(Ordering::Relaxed) > 0
     }
 
-    fn can_merge(&self) -> bool {
+    pub fn can_merge(&self) -> bool {
         let age = self.item_age.load(Ordering::Relaxed);
         if self.never_pickup.load(Ordering::Relaxed)
             || self.entity.removed.load(Ordering::Relaxed)
@@ -242,7 +247,7 @@ impl ItemEntity {
         item_stack.item_count < item_stack.get_max_stack_size()
     }
 
-    fn try_merge(&self) {
+    pub fn try_merge(&self) {
         let bounding_box = self.entity.bounding_box.load().expand(0.5, 0.0, 0.5);
 
         let world = self.entity.world.load();
@@ -448,19 +453,19 @@ impl ItemEntity {
         }
     }
 
-    fn update_no_clip_and_push_out(&self) {
+    fn update_no_physics_and_push_out(&self) {
         let entity = &self.entity;
         let pos = entity.pos.load();
         let bounding_box = entity.bounding_box.load();
 
-        let no_clip = !entity
+        let no_physics = !entity
             .world
             .load()
             .is_space_empty(bounding_box.expand(-1.0e-7, -1.0e-7, -1.0e-7));
 
-        entity.no_clip.store(no_clip, Ordering::Relaxed);
+        entity.no_physics.store(no_physics, Ordering::Relaxed);
 
-        if no_clip {
+        if no_physics {
             entity.push_out_of_blocks(Vector3::new(
                 pos.x,
                 f64::midpoint(bounding_box.min.y, bounding_box.max.y),
@@ -719,7 +724,7 @@ impl EntityBase for ItemEntity {
             .velocity
             .store(self.apply_fluid_drag_or_gravity(original_velo));
 
-        self.update_no_clip_and_push_out();
+        self.update_no_physics_and_push_out();
 
         let move_velo = entity.velocity.load(); // In case push_out_of_blocks modifies it
 
@@ -833,6 +838,8 @@ impl EntityBase for ItemEntity {
         };
 
         if inserted || player.is_creative() {
+            player.inventory_changed.store(true, Ordering::Relaxed);
+
             let (count_after, is_empty) = {
                 let stack = self
                     .item_stack
@@ -913,20 +920,24 @@ impl EntityBase for ItemEntity {
         Box::pin(async move {
             let entity = &self.entity;
             let runtime_id = entity.entity_id as u64;
-            let item_stack = self
-                .item_stack
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let packet = CAddItemActor {
-                target_actor_id: VarLong(runtime_id as i64),
-                target_runtime_id: VarULong(runtime_id),
-                item: ItemStackWrapper::from(&*item_stack),
-                position: entity.pos.load().to_f32_lossy(),
-                velocity: entity.velocity.load().to_f32_lossy(),
-                entity_data: entity.bedrock_metadata(),
-                is_from_fishing: false,
+            // The std mutex guard must be dropped before the `.await` below.
+            let data = {
+                let item_stack = self
+                    .item_stack
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let packet = CAddItemActor {
+                    target_actor_id: VarLong(runtime_id as i64),
+                    target_runtime_id: VarULong(runtime_id),
+                    item: ItemStackWrapper::from(&*item_stack),
+                    position: entity.pos.load().to_f32_lossy(),
+                    velocity: entity.velocity.load().to_f32_lossy(),
+                    entity_data: entity.bedrock_metadata(),
+                    is_from_fishing: false,
+                };
+                client.serialize_packet(&packet).ok()
             };
-            if let Ok(data) = client.serialize_packet(&packet) {
+            if let Some(data) = data {
                 client.send_game_packet(data).await;
             }
         })

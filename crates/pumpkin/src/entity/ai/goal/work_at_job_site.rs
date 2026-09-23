@@ -22,13 +22,12 @@ impl WorkAtJobSiteGoal {
             return true;
         }
         let world = mob.get_mob_entity().living_entity.entity.world.load();
-        (2_000..9_000).contains(
-            &world
-                .level_time
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .query_daytime(),
-        )
+        let daytime = world
+            .level_time
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .query_daytime();
+        (2_000..9_000).contains(&daytime)
     }
 }
 

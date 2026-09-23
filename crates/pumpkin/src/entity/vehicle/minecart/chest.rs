@@ -4,10 +4,11 @@ use pumpkin_data::translation;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::text::TextComponent;
 
-use crate::entity::{Entity, player::Player};
+use crate::entity::player::Player;
 
 use super::container::{self, MinecartInventory};
 
+#[derive(Clone)]
 pub(super) struct ChestMinecart {
     inventory: Arc<MinecartInventory>,
 }
@@ -23,9 +24,13 @@ impl ChestMinecart {
         &self.inventory
     }
 
-    pub(super) fn interact(&self, entity: &Entity, player: &Arc<Player>) -> bool {
+    pub(super) fn interact(
+        &self,
+        custom_name: Option<TextComponent>,
+        player: &Arc<Player>,
+    ) -> bool {
         container::open(
-            entity,
+            custom_name,
             player,
             &self.inventory,
             TextComponent::translate_cross(

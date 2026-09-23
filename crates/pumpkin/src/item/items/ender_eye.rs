@@ -83,7 +83,7 @@ impl ItemBehaviour for EnderEyeItem {
         let world = player.world();
 
         let (start_pos, end_pos) = self.get_start_and_end_pos(player);
-        let checker = async |pos: &BlockPos, w: &Arc<World>| {
+        let checker = |pos: &BlockPos, w: &Arc<World>| {
             w.get_block_state_id(pos) != Block::AIR.default_state.id
         };
         if let Some((hit_pos, _)) = world.raycast(start_pos, end_pos, checker)

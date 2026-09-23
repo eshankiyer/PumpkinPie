@@ -358,7 +358,7 @@ impl BrushableBlockBlockEntity {
     pub const fn new(position: BlockPos) -> Self {
         Self {
             position,
-            state: Mutex::const_new(BrushState::new()),
+            state: Mutex::new(BrushState::new()),
         }
     }
 
@@ -387,7 +387,7 @@ impl BrushableBlockBlockEntity {
     /// `BrushableBlockEntity.brush` (`BrushableBlockEntity.java:59-86`). Returns `true`
     /// when the block was fully brushed away, which is what makes the caller damage the
     /// brush (`BrushItem.java:81-87`).
-    pub async fn brush(
+    pub fn brush(
         &self,
         world: &Arc<World>,
         game_time: i64,

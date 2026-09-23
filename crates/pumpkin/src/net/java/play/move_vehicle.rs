@@ -15,7 +15,8 @@ impl JavaClient {
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_VEHICLE_MOVEMENT,
                 translation::java::MULTIPLAYER_DISCONNECT_INVALID_VEHICLE_MOVEMENT,
                 [],
-            ));
+            ))
+            .await;
             return;
         }
         // Vanilla only applies vehicle movement after the client-load and controlling-vehicle
@@ -25,12 +26,17 @@ impl JavaClient {
         }
         let entity = player.get_entity();
         let pos = Vector3::new(packet.x, packet.y, packet.z);
-        let vehicle = entity.vehicle.lock().clone();
+        let vehicle = entity
+            .vehicle
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         if let Some(vehicle) = vehicle {
             let is_controlling_passenger = vehicle
                 .get_entity()
                 .passengers
                 .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .first()
                 .is_some_and(|passenger| passenger.get_entity().entity_id == player.entity_id());
             if !is_controlling_passenger {

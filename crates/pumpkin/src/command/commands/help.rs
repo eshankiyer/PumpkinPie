@@ -152,7 +152,7 @@ impl HelpCommandExecutor {
                 TextComponent::text("-".repeat(dashes) + " ").color_named(NamedColor::Yellow),
             )
             .add_child(arrow_left.clone())
-            .add_child(TextComponent::text(header_text.clone()))
+            .add_child(TextComponent::text(header_text))
             .add_child(arrow_right.clone())
             .add_child(
                 TextComponent::text(" ".to_owned() + &"-".repeat(dashes) + "\n")
@@ -186,7 +186,7 @@ impl HelpCommandExecutor {
                 TextComponent::text("-".repeat(dashes) + " ").color_named(NamedColor::Yellow),
             )
             .add_child(arrow_left)
-            .add_child(TextComponent::text(footer_text.clone()))
+            .add_child(TextComponent::text(footer_text))
             .add_child(arrow_right)
             .add_child(
                 TextComponent::text(" ".to_owned() + &"-".repeat(dashes))
@@ -216,7 +216,7 @@ impl HelpCommandExecutor {
             .add_child(
                 TextComponent::text("-".repeat(dashes) + " ").color_named(NamedColor::Yellow),
             )
-            .add_child(TextComponent::text(header_text.clone()))
+            .add_child(TextComponent::text(header_text))
             .add_child(
                 TextComponent::text(" ".to_owned() + &"-".repeat(dashes) + "\n")
                     .color_named(NamedColor::Yellow),
@@ -278,7 +278,7 @@ impl HelpCommandExecutor {
             .add_child(
                 TextComponent::text("-".repeat(dashes) + " ").color_named(NamedColor::Yellow),
             )
-            .add_child(TextComponent::text(header_text.clone()))
+            .add_child(TextComponent::text(header_text))
             .add_child(
                 TextComponent::text(" ".to_owned() + &"-".repeat(dashes) + "\n")
                     .color_named(NamedColor::Yellow),

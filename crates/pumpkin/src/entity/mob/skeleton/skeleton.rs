@@ -35,11 +35,11 @@ impl Mob for SkeletonEntity {
         difficulty: &RegionalDifficulty,
     ) {
         self.entity
-            .populate_default_equipment_slots(world, difficulty)
+            .populate_default_equipment_slots(world, difficulty);
     }
 
     fn populate_default_equipment_enchantments(&self, difficulty: &RegionalDifficulty) {
         self.entity
-            .populate_default_equipment_enchantments(difficulty)
+            .populate_default_equipment_enchantments(difficulty);
     }
 }

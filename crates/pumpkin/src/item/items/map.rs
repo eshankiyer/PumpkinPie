@@ -14,7 +14,6 @@ use pumpkin_util::GameMode;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use std::any::Any;
-use std::future::Future;
 
 pub struct MapItem;
 

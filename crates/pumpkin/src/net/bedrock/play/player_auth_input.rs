@@ -93,7 +93,7 @@ impl BedrockClient {
                     ),
                 );
             } else if pos_changed && rot_changed {
-                world.broadcast_packet_except_editioned_sync(
+                world.broadcast_packet_except_editioned(
                     &[player.gameprofile.id],
                     &pumpkin_protocol::java::client::play::CUpdateEntityPosRot::new(
                         player.entity_id().into(),
@@ -109,7 +109,7 @@ impl BedrockClient {
                     &bedrock_move_packet,
                 );
             } else if pos_changed {
-                world.broadcast_packet_except_editioned_sync(
+                world.broadcast_packet_except_editioned(
                     &[player.gameprofile.id],
                     &pumpkin_protocol::java::client::play::CUpdateEntityPos::new(
                         player.entity_id().into(),
@@ -123,7 +123,7 @@ impl BedrockClient {
                     &bedrock_move_packet,
                 );
             } else if rot_changed {
-                world.broadcast_packet_except_editioned_sync(
+                world.broadcast_packet_except_editioned(
                     &[player.gameprofile.id],
                     &pumpkin_protocol::java::client::play::CUpdateEntityRot::new(
                         player.entity_id().into(),
@@ -173,14 +173,21 @@ impl BedrockClient {
         }
 
         if input_data.get(InputData::StartFlying as usize) {
-            let flying = { player.abilities.lock().flying };
+            let flying = {
+                player
+                    .abilities
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .flying
+            };
             if !flying {
                 send_cancellable! {{
                     server;
                     PlayerToggleFlightEvent::new(player.clone(), true);
                     'after: {
+                        player.living_entity.fall_distance.store(0.0);
                         {
-                            player.abilities.lock().flying = true;
+                            player.abilities.lock().unwrap_or_else(std::sync::PoisonError::into_inner).flying = true;
                         };
                         player.send_abilities_update();
                     }
@@ -190,14 +197,20 @@ impl BedrockClient {
                 }}
             }
         } else if input_data.get(InputData::StopFlying as usize) {
-            let flying = { player.abilities.lock().flying };
+            let flying = {
+                player
+                    .abilities
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .flying
+            };
             if flying {
                 send_cancellable! {{
                     server;
                     PlayerToggleFlightEvent::new(player.clone(), false);
                     'after: {
                         {
-                            player.abilities.lock().flying = false;
+                            player.abilities.lock().unwrap_or_else(std::sync::PoisonError::into_inner).flying = false;
                         };
                         player.send_abilities_update();
                     }

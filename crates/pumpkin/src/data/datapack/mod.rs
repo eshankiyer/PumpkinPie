@@ -23,7 +23,7 @@ use crate::server::recipe::RecipeManager;
 
 use macro_function::{InstantiationCache, InstantiationError, LoadedFunction};
 
-tokio::task_local! {
+thread_local! {
     /// Remaining command quota of the currently running function chain.
     ///
     /// Vanilla executes every function line through an `ExecutionContext` holding a
@@ -33,10 +33,28 @@ tokio::task_local! {
     /// from the `max_command_sequence_length` gamerule, read when the outermost
     /// execution context is created (`Commands.java:399-403`). Vanilla keeps that
     /// context in a thread-local so nested calls join the ambient chain instead of
-    /// getting a fresh quota (`Commands.java:396-414`). A tokio task-local is the
-    /// direct analogue here: every nesting level between `execute_function` and the
-    /// dispatcher runs on one task through inline `.await`s.
-    static REMAINING_COMMAND_QUOTA: Cell<i64>;
+    /// getting a fresh quota (`Commands.java:396-414`). A thread-local is the direct
+    /// analogue here: every nesting level between `execute_function` and the
+    /// dispatcher runs synchronously on the same thread. `None` means no chain is
+    /// currently running on this thread.
+    static REMAINING_COMMAND_QUOTA: Cell<Option<i64>> = const { Cell::new(None) };
+}
+
+/// Clears the ambient command quota when the outermost function chain ends, even if
+/// the chain unwinds.
+struct CommandQuotaScope;
+
+impl CommandQuotaScope {
+    fn enter(limit: i64) -> Self {
+        REMAINING_COMMAND_QUOTA.with(|quota| quota.set(Some(limit)));
+        Self
+    }
+}
+
+impl Drop for CommandQuotaScope {
+    fn drop(&mut self) {
+        REMAINING_COMMAND_QUOTA.with(|quota| quota.set(None));
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -283,7 +301,7 @@ impl DatapackManager {
         // A nested call (function invoking `function ...`) joins the ambient
         // chain and shares its quota, like vanilla reuses the ambient
         // ExecutionContext (`Commands.java:412-414`).
-        if REMAINING_COMMAND_QUOTA.try_with(Cell::get).is_ok() {
+        if REMAINING_COMMAND_QUOTA.with(Cell::get).is_some() {
             return self.execute_function_in_context(
                 server,
                 &function_source,
@@ -293,12 +311,8 @@ impl DatapackManager {
             );
         }
 
-        REMAINING_COMMAND_QUOTA
-            .scope(
-                Cell::new(limit),
-                self.execute_function_in_context(server, &function_source, name, arguments, limit),
-            )
-            .await
+        let _scope = CommandQuotaScope::enter(limit);
+        self.execute_function_in_context(server, &function_source, name, arguments, limit)
     }
 
     /// Runs one function or function tag inside the current command chain.
@@ -351,14 +365,14 @@ impl DatapackManager {
                 // Vanilla checks the quota before polling each queued entry and
                 // breaks out of the entire queue once it is spent
                 // (`ExecutionContext.java:89-92`).
-                let remaining = REMAINING_COMMAND_QUOTA.with(Cell::get);
+                let remaining = REMAINING_COMMAND_QUOTA.with(Cell::get).unwrap_or(0);
                 if remaining <= 0 {
                     // Vanilla logs the configured limit here
                     // (`ExecutionContext.java:89-91`).
                     info!("Command execution stopped due to limit (executed {limit} commands)");
                     return Ok(total_executed);
                 }
-                REMAINING_COMMAND_QUOTA.with(|quota| quota.set(remaining - 1));
+                REMAINING_COMMAND_QUOTA.with(|quota| quota.set(Some(remaining - 1)));
 
                 server
                     .command_dispatcher

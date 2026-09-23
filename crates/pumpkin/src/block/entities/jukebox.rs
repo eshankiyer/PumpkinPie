@@ -1,8 +1,7 @@
 use std::any::Any;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 
 use pumpkin_data::Block;
 use pumpkin_data::data_component_impl::JukeboxPlayableImpl;
@@ -12,7 +11,6 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
 use pumpkin_util::math::position::BlockPos;
 use rand::RngExt;
-use std::sync::Mutex;
 
 use crate::block::entities::BlockEntity;
 use crate::world::World;
@@ -421,7 +419,7 @@ mod tests {
     }
 
     /// `canTakeItem` requires an empty destination slot (`JukeboxBlockEntity.java:147-150`).
-    #[tokio::test]
+    #[test]
     fn extraction_requires_an_empty_destination_slot() {
         let jukebox = JukeboxBlockEntity::new(BlockPos(Vector3::new(0, 0, 0)));
         let destination = pumpkin_world::inventory::SimpleInventory::new(1);

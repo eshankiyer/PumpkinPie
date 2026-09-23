@@ -1,10 +1,9 @@
 use rand::Rng;
-use std::pin::sync::{
-    Arc,
+use std::sync::{
+    Arc, Mutex,
     atomic::{AtomicBool, AtomicI32, Ordering},
 };
 
-use futures::Future;
 use pumpkin_data::block_properties::{BlockProperties, JigsawLikeProperties, Orientation};
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::{
@@ -18,8 +17,6 @@ use pumpkin_world::generation::structure::structures::{
         DimensionPadding, JigsawPlacement, LiquidSettings, MaxDistance, PoolAliasLookup,
     },
 };
-
-use std::sync::Mutex;
 
 use crate::block::blocks::jigsaw::JigsawBlock;
 use crate::world::World;
@@ -172,16 +169,11 @@ impl JigsawBlockEntity {
         };
 
         if let Some(structure) = structure {
-            self.place_structure(world, structure, keep_jigsaws);
+            Self::place_structure(world, &structure, keep_jigsaws);
         }
     }
 
-    fn place_structure(
-        &self,
-        world: &Arc<World>,
-        structure: StructurePosition,
-        keep_jigsaws: bool,
-    ) {
+    fn place_structure(world: &Arc<World>, structure: &StructurePosition, keep_jigsaws: bool) {
         let mut pieces = std::mem::take(
             &mut structure
                 .collector
@@ -345,7 +337,7 @@ mod tests {
     use pumpkin_util::math::position::BlockPos;
     use std::sync::atomic::Ordering;
 
-    #[tokio::test]
+    #[test]
     fn setters_update_jigsaw_configuration() {
         // These fields correspond to the vanilla JigsawBlockEntity accessors
         // (`JigsawBlockEntity.java:66-104`).

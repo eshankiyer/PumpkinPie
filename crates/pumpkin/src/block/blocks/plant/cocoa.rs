@@ -108,14 +108,16 @@ impl BlockBehaviour for CocoaBlock {
     }
 
     fn perform_bonemeal(&self, args: BonemealArgs<'_>) {
-        let mut props = CocoaProperties::from_state_id(args.state_id, args.block);
-        if props.age < MAX_AGE {
-            props.age += 1;
-            args.world.set_block_state(
-                args.position,
-                props.to_state_id(args.block),
-                BlockFlags::NOTIFY_ALL,
-            );
+        {
+            let mut props = CocoaProperties::from_state_id(args.state_id, args.block);
+            if props.age < MAX_AGE {
+                props.age += 1;
+                args.world.set_block_state(
+                    args.position,
+                    props.to_state_id(args.block),
+                    BlockFlags::NOTIFY_ALL,
+                );
+            }
         }
     }
 

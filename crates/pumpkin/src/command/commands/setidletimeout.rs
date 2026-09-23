@@ -29,28 +29,25 @@ impl CommandExecutor for SetIdleTimeoutExecutor {
             .player_idle_timeout
             .store(minutes, Ordering::Relaxed);
 
-        {
-            if minutes == 0 {
-                context.source.send_feedback(
-                    TextComponent::translate_cross(
-                        "commands.setidletimeout.success.disabled",
-                        "commands.setidletimeout.success.disabled",
-                        [],
-                    ),
-                    true,
-                )
-            } else {
-                context.source.send_feedback(
-                    TextComponent::translate_cross(
-                        "commands.setidletimeout.success",
-                        "commands.setidletimeout.success",
-                        [TextComponent::text(minutes.to_string())],
-                    ),
-                    true,
-                )
-            }
+        if minutes == 0 {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    "commands.setidletimeout.success.disabled",
+                    "commands.setidletimeout.success.disabled",
+                    [],
+                ),
+                true,
+            );
+        } else {
+            context.source.send_feedback(
+                TextComponent::translate_cross(
+                    "commands.setidletimeout.success",
+                    "commands.setidletimeout.success",
+                    [TextComponent::text(minutes.to_string())],
+                ),
+                true,
+            );
         }
-        .await;
 
         Ok(minutes)
     }

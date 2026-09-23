@@ -23,7 +23,7 @@ use super::BlockEntity;
 
 pub struct BarrelBlockEntity {
     pub position: BlockPos,
-    pub items: std::sync::RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
+    pub items: RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
     pub dirty: AtomicBool,
 
     // Viewer
@@ -45,18 +45,24 @@ impl BlockEntity for BarrelBlockEntity {
     {
         let mut barrel = Self {
             position,
-            items: std::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+            items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             dirty: AtomicBool::new(false),
             viewers: ViewerCountTracker::new(),
         };
 
-        pumpkin_world::inventory::sync_read_items_from_nbt(nbt, barrel.items.get_mut());
+        pumpkin_world::inventory::sync_read_items_from_nbt(
+            nbt,
+            barrel
+                .items
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
 
         barrel
     }
 
     fn write_nbt(&self, nbt: &mut NbtCompound) {
-        self.write_inventory_nbt(nbt, true)
+        self.write_inventory_nbt(nbt, true);
     }
 
     fn tick(&self, world: &Arc<World>) {
@@ -109,7 +115,7 @@ impl BarrelBlockEntity {
     pub fn new(position: BlockPos) -> Self {
         Self {
             position,
-            items: std::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+            items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             dirty: AtomicBool::new(false),
             viewers: ViewerCountTracker::new(),
         }
@@ -156,7 +162,7 @@ impl BarrelBlockEntity {
 
         properties.open = open;
 
-        world.clone().set_block_state(
+        world.set_block_state(
             &self.position,
             properties.to_state_id(&Block::BARREL),
             BlockFlags::NOTIFY_ALL,
@@ -282,10 +288,10 @@ mod tests {
         assert_eq!(barrel.size(), BarrelBlockEntity::INVENTORY_SIZE);
         assert_eq!(barrel.viewers.get_viewer_count(), 0);
 
-        futures::executor::block_on(barrel.on_open());
+        barrel.on_open();
         assert_eq!(barrel.viewers.get_viewer_count(), 1);
 
-        futures::executor::block_on(barrel.on_close());
+        barrel.on_close();
         assert_eq!(barrel.viewers.get_viewer_count(), 0);
     }
 }

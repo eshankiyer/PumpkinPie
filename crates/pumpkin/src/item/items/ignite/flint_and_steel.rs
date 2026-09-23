@@ -57,7 +57,7 @@ impl ItemBehaviour for FlintAndSteelItem {
         }
 
         let ignited = Ignition::ignite_block(
-            |world: Arc<World>, pos: BlockPos, new_state_id: BlockStateId| async move {
+            |world: Arc<World>, pos: BlockPos, new_state_id: BlockStateId| {
                 world.set_block_state(&pos, new_state_id, BlockFlags::NOTIFY_ALL);
             },
             &world,

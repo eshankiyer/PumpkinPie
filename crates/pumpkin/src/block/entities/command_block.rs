@@ -1,4 +1,7 @@
-use std::pin::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{
+    Mutex as StdMutex,
+    atomic::{AtomicBool, AtomicU32, Ordering},
+};
 
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::{
@@ -11,9 +14,6 @@ use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::text::TextComponent;
 
-use std::sync::Mutex as StdMutex;
-use std::sync::Mutex;
-
 use super::BlockEntity;
 use crate::world::World;
 
@@ -24,8 +24,8 @@ pub struct CommandBlockEntity {
     pub condition_met: AtomicBool,
     pub auto: AtomicBool,
     pub dirty: AtomicBool,
-    pub command: Mutex<String>,
-    pub last_output: Mutex<String>,
+    pub command: StdMutex<String>,
+    pub last_output: StdMutex<String>,
     pub track_output: AtomicBool,
     pub success_count: AtomicU32,
     /// Mirrors `BaseCommandBlock.customName`, applied by the live item-component placement path.
@@ -43,8 +43,8 @@ impl CommandBlockEntity {
             condition_met: AtomicBool::new(false),
             auto: AtomicBool::new(is_chain),
             dirty: AtomicBool::new(false),
-            command: Mutex::new(String::new()),
-            last_output: Mutex::new(String::new()),
+            command: StdMutex::new(String::new()),
+            last_output: StdMutex::new(String::new()),
             track_output: AtomicBool::new(track_output),
             success_count: AtomicU32::new(0),
             custom_name: StdMutex::new(None),
@@ -102,49 +102,8 @@ impl CommandBlockEntity {
         let block_entity: std::sync::Arc<dyn BlockEntity> = self.clone();
         world.update_block_entity(&block_entity);
     }
-}
 
-impl BlockEntity for CommandBlockEntity {
-    fn resource_location(&self) -> &'static str {
-        Self::ID
-    }
-    fn get_position(&self) -> BlockPos {
-        self.position.load()
-    }
-
-    fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound, position: BlockPos) -> Self
-    where
-        Self: Sized,
-    {
-        let condition_met = AtomicBool::new(nbt.get_bool("conditionMet").unwrap_or(false));
-        let auto = AtomicBool::new(nbt.get_bool("auto").unwrap_or(false));
-        let powered = AtomicBool::new(nbt.get_bool("powered").unwrap_or(false));
-        let command = Mutex::new(nbt.get_string("Command").unwrap_or("").to_string());
-        let last_output = Mutex::new(nbt.get_string("LastOutput").unwrap_or("").to_string());
-        let track_output = AtomicBool::new(nbt.get_bool("TrackOutput").unwrap_or(false));
-        let success_count =
-            AtomicU32::new(nbt.get_int("SuccessCount").unwrap_or(0).cast_unsigned());
-        // `CommandBlockEntity.saveAdditional` delegates command state persistence to
-        // `BaseCommandBlock.save` (`CommandBlockEntity.java:69-84`).
-        let custom_name = nbt
-            .get_string("CustomName")
-            .and_then(|name| pumpkin_util::serde_json::from_str(name).ok());
-
-        Self {
-            position: AtomicCell::new(position),
-            condition_met,
-            auto,
-            powered,
-            command,
-            last_output,
-            track_output,
-            success_count,
-            dirty: AtomicBool::new(false),
-            custom_name: StdMutex::new(custom_name),
-        }
-    }
-
-    fn write_nbt(&self, nbt: &mut NbtCompound) {
+    fn write_sync_nbt(&self, nbt: &mut NbtCompound) {
         nbt.put_bool("auto", self.auto.load(Ordering::SeqCst));
         nbt.put_string(
             "Command",
@@ -178,12 +137,55 @@ impl BlockEntity for CommandBlockEntity {
             nbt.put_string("CustomName", name_json);
         }
     }
+}
+
+impl BlockEntity for CommandBlockEntity {
+    fn resource_location(&self) -> &'static str {
+        Self::ID
+    }
+    fn get_position(&self) -> BlockPos {
+        self.position.load()
+    }
+
+    fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound, position: BlockPos) -> Self
+    where
+        Self: Sized,
+    {
+        let condition_met = AtomicBool::new(nbt.get_bool("conditionMet").unwrap_or(false));
+        let auto = AtomicBool::new(nbt.get_bool("auto").unwrap_or(false));
+        let powered = AtomicBool::new(nbt.get_bool("powered").unwrap_or(false));
+        let command = StdMutex::new(nbt.get_string("Command").unwrap_or("").to_string());
+        let last_output = StdMutex::new(nbt.get_string("LastOutput").unwrap_or("").to_string());
+        let track_output = AtomicBool::new(nbt.get_bool("TrackOutput").unwrap_or(false));
+        let success_count =
+            AtomicU32::new(nbt.get_int("SuccessCount").unwrap_or(0).cast_unsigned());
+        // `CommandBlockEntity.saveAdditional` delegates command state persistence to
+        // `BaseCommandBlock.save` (`CommandBlockEntity.java:69-84`).
+        let custom_name = nbt
+            .get_string("CustomName")
+            .and_then(|name| pumpkin_util::serde_json::from_str(name).ok());
+
+        Self {
+            position: AtomicCell::new(position),
+            condition_met,
+            auto,
+            powered,
+            command,
+            last_output,
+            track_output,
+            success_count,
+            dirty: AtomicBool::new(false),
+            custom_name: StdMutex::new(custom_name),
+        }
+    }
+
+    fn write_nbt(&self, nbt: &mut NbtCompound) {
+        self.write_sync_nbt(nbt);
+    }
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
         let mut nbt = NbtCompound::new();
-        futures::executor::block_on(async {
-            self.write_nbt(&mut nbt);
-        });
+        self.write_sync_nbt(&mut nbt);
         Some(nbt)
     }
 

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use crate::block::{GetComparatorOutputArgs, OnPlaceArgs, OnScheduledTickArgs, PlacedArgs};
 use crate::block::{
@@ -21,7 +22,6 @@ use pumpkin_macros::pumpkin_block;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::Inventory;
 use pumpkin_world::tick::TickPriority;
-use std::sync::Mutex;
 
 struct BarrelScreenFactory(Arc<dyn Inventory>);
 

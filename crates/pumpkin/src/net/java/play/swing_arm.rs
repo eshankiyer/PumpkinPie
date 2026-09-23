@@ -10,7 +10,7 @@ impl JavaClient {
     ) {
         player.update_last_action_time();
         let Ok(hand) = Hand::from_packet_id(swing_arm.hand.0) else {
-            self.kick(TextComponent::text("Invalid hand"));
+            self.kick(TextComponent::text("Invalid hand")).await;
             return;
         };
 
@@ -32,7 +32,7 @@ impl JavaClient {
             player
                 .eye_position()
                 .add(&(Vector3::rotation_vector(f64::from(pitch), f64::from(yaw)) * 4.5)),
-            async |pos, world| {
+            |pos, world| {
                 let block = world.get_block(pos);
                 block != &Block::AIR && block != &Block::WATER && block != &Block::LAVA
             },

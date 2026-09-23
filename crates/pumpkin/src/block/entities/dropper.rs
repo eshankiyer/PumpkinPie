@@ -7,17 +7,18 @@ use rand::{RngExt, rng};
 use std::any::Any;
 use std::array::from_fn;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct DropperBlockEntity {
     pub position: BlockPos,
-    pub items: std::sync::RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
+    pub items: RwLock<[ItemStack; Self::INVENTORY_SIZE]>,
     pub dirty: AtomicBool,
 }
 
 impl BlockEntity for DropperBlockEntity {
     fn write_nbt(&self, nbt: &mut NbtCompound) {
-        self.write_inventory_nbt(nbt, true)
+        self.write_inventory_nbt(nbt, true);
     }
 
     fn from_nbt(nbt: &pumpkin_nbt::compound::NbtCompound, position: BlockPos) -> Self
@@ -26,11 +27,17 @@ impl BlockEntity for DropperBlockEntity {
     {
         let mut dropper = Self {
             position,
-            items: std::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+            items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             dirty: AtomicBool::new(false),
         };
 
-        pumpkin_world::inventory::sync_read_items_from_nbt(nbt, dropper.items.get_mut());
+        pumpkin_world::inventory::sync_read_items_from_nbt(
+            nbt,
+            dropper
+                .items
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
 
         dropper
     }
@@ -57,8 +64,9 @@ impl BlockEntity for DropperBlockEntity {
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
         let mut nbt = NbtCompound::new();
-        let items = futures::executor::block_on(self.items.read());
-        sync_write_items_to_nbt(items.as_slice(), &mut nbt);
+        if let Ok(items) = self.items.try_read() {
+            sync_write_items_to_nbt(items.as_slice(), &mut nbt);
+        }
         Some(nbt)
     }
 
@@ -75,7 +83,7 @@ impl DropperBlockEntity {
     pub fn new(position: BlockPos) -> Self {
         Self {
             position,
-            items: std::sync::RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
+            items: RwLock::new(from_fn(|_| ItemStack::EMPTY.clone())),
             dirty: AtomicBool::new(false),
         }
     }

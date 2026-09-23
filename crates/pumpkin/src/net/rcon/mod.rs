@@ -168,23 +168,20 @@ impl RCONClient {
             }
             ServerboundPacket::ExecCommand => {
                 if self.logged_in {
-                    let output = Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
-
-                    let server_clone = server.clone();
-                    let output_clone = output.clone();
+                    let output = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
                     let packet_body = packet.get_body().to_owned();
 
-                    let command_source = CommandSender::Rcon(output_clone).into_source(server);
+                    let command_source = CommandSender::Rcon(output.clone()).into_source(server);
 
-                    // Wait task complete before send output
-                    let _ = tokio::spawn(async move {
-                        server_clone
-                            .command_dispatcher
-                            .load()
-                            .handle_command(&command_source, &packet_body);
-                    });
+                    server
+                        .command_dispatcher
+                        .load()
+                        .handle_command(&command_source, &packet_body);
 
-                    let output = output.lock();
+                    let output = output
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .clone();
                     if config.logging.commands {
                         if output.is_empty() {
                             info!(
@@ -193,7 +190,7 @@ impl RCONClient {
                                 packet.get_body()
                             );
                         }
-                        for line in output.iter() {
+                        for line in &output {
                             info!("RCON ({}): {}", self.address, line);
                         }
                     }
@@ -205,7 +202,6 @@ impl RCONClient {
                     // command's reply.
                     let response = output.join("\n");
                     let id = packet.get_id();
-                    drop(output);
 
                     let characters: Vec<char> = response.chars().collect();
                     let mut sent_any = false;

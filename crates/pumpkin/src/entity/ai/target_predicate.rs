@@ -5,8 +5,6 @@ use pumpkin_util::Difficulty;
 use crate::entity::living::LivingEntity;
 use crate::world::World;
 use pumpkin_util::math::vector3::Vector3;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::Ordering::{Relaxed, SeqCst};
 
@@ -38,8 +36,7 @@ impl TargetData {
     }
 }
 
-pub type PredicateFn =
-    dyn Fn(TargetData, Arc<World>) -> Pin<Box<dyn Future<Output = bool> + Send>> + Send + Sync;
+pub type PredicateFn = dyn Fn(TargetData, Arc<World>) -> bool + Send + Sync;
 
 pub struct TargetPredicate {
     pub attackable: bool,
@@ -108,14 +105,11 @@ impl TargetPredicate {
         self
     }
 
-    pub fn set_predicate<F, Fut>(&mut self, predicate: F)
+    pub fn set_predicate<F>(&mut self, predicate: F)
     where
-        F: Fn(TargetData, Arc<World>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = bool> + Send + 'static,
+        F: Fn(TargetData, Arc<World>) -> bool + Send + Sync + 'static,
     {
-        self.predicate = Some(Arc::new(move |target, world| {
-            Box::pin(predicate(target, world))
-        }));
+        self.predicate = Some(Arc::new(predicate));
     }
 
     pub fn test(
@@ -133,7 +127,7 @@ impl TargetPredicate {
         }
 
         if let Some(predicate) = &self.predicate
-            && !(predicate)(TargetData::from_living(target), world.clone()).await
+            && !(predicate)(TargetData::from_living(target), world.clone())
         {
             return false;
         }
@@ -177,7 +171,7 @@ impl TargetPredicate {
                 .raycast(
                     tester_ent.entity.get_eye_pos(),
                     target.entity.get_eye_pos(),
-                    async |block_pos, world| world.get_block_state(block_pos).is_solid(),
+                    |block_pos, world| world.get_block_state(block_pos).is_solid(),
                 )
                 .is_some()
         {

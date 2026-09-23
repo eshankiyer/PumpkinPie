@@ -1,6 +1,6 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-use std::pin::sync::Arc;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use crossbeam::atomic::AtomicCell;
@@ -87,7 +87,7 @@ impl PistonBlockEntity {
 
         for entity in world.get_entities_at_box(&swept) {
             let e = entity.get_entity();
-            if e.no_clip.load(Ordering::Relaxed) {
+            if e.no_physics.load(Ordering::Relaxed) {
                 continue;
             }
             // Player movement is client-authoritative; vanilla still nudges them
@@ -216,7 +216,7 @@ impl PistonBlockEntity {
         )
     }
 
-    pub fn finish(&self, world: Arc<World>) {
+    pub fn finish(&self, world: &Arc<World>) {
         if self.last_progress.load() < 1.0 {
             let pos = self.position;
             world.remove_block_entity(&pos);
@@ -224,13 +224,9 @@ impl PistonBlockEntity {
                 let state = if self.source {
                     Block::AIR.default_state.id
                 } else {
-                    world
-                        .clone()
-                        .update_from_neighbor_shapes(self.pushed_block_state.id, &pos)
+                    world.update_from_neighbor_shapes(self.pushed_block_state.id, &pos)
                 };
-                world
-                    .clone()
-                    .set_block_state(&pos, state, BlockFlags::NOTIFY_ALL);
+                world.set_block_state(&pos, state, BlockFlags::NOTIFY_ALL);
                 world.update_neighbors(&pos, None);
             }
         }

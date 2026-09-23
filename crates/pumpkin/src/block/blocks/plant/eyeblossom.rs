@@ -90,23 +90,25 @@ impl BlockBehaviour for EyeblossomBlock {
     }
 
     fn on_entity_collision(&self, args: OnEntityCollisionArgs<'_>) {
-        if args.world.level_info.load().difficulty == Difficulty::Peaceful {
-            return;
-        }
-
-        if args.entity.get_entity().entity_type == &EntityType::BEE
-            && let Some(living_entity) = args.entity.get_living_entity()
         {
-            let effect = pumpkin_data::potion::Effect {
-                effect_type: &StatusEffect::POISON,
-                duration: 25,
-                amplifier: 0,
-                ambient: false,
-                show_particles: true,
-                show_icon: true,
-                blend: true,
-            };
-            living_entity.add_effect(effect);
+            if args.world.level_info.load().difficulty == Difficulty::Peaceful {
+                return;
+            }
+
+            if args.entity.get_entity().entity_type == &EntityType::BEE
+                && let Some(living_entity) = args.entity.get_living_entity()
+            {
+                let effect = pumpkin_data::potion::Effect {
+                    effect_type: &StatusEffect::POISON,
+                    duration: 25,
+                    amplifier: 0,
+                    ambient: false,
+                    show_particles: true,
+                    show_icon: true,
+                    blend: true,
+                };
+                living_entity.add_effect(effect);
+            }
         }
     }
 }

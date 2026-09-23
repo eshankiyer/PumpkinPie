@@ -73,7 +73,11 @@ impl BedrockClient {
             .await;
 
         // Send screen handler / Java inventory updates
-        player.player_screen_handler.lock().send_content_updates();
+        player
+            .player_screen_handler
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .send_content_updates();
 
         // Sync main hand equipment to other players
         let stack_in_hand = player.inventory().held_item();
@@ -81,16 +85,17 @@ impl BedrockClient {
         player.living_entity.send_equipment_changes(equipment);
 
         // Sync bedrock inventory updates
+        let slots = player
+            .inventory()
+            .main_inventory
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .map(NetworkItemStackDescriptor::from)
+            .collect();
         self.enqueue_client_packet(&CInventoryContent {
             container_id: VarUInt(0),
-            slots: player
-                .inventory()
-                .main_inventory
-                .read()
-                .await
-                .iter()
-                .map(NetworkItemStackDescriptor::from)
-                .collect(),
+            slots,
             full_container_name: FullContainerName {
                 container_name: ContainerName::Inventory,
                 dynamic_id: None,

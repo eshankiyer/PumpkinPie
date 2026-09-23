@@ -127,18 +127,18 @@ impl Worldborder {
     }
 
     pub fn init_client(&self, client: &JavaClient) {
-        client
-            .enqueue_client_packet(&CInitializeWorldBorder::new(
-                self.center_x,
-                self.center_z,
-                self.current_diameter,
-                self.new_diameter,
-                self.lerp_ticks_remaining.into(),
-                self.portal_teleport_boundary.into(),
-                self.warning_blocks.into(),
-                self.warning_time.into(),
-            ))
-            .await;
+        if let Ok(data) = client.serialize_packet(&CInitializeWorldBorder::new(
+            self.center_x,
+            self.center_z,
+            self.current_diameter,
+            self.new_diameter,
+            self.lerp_ticks_remaining.into(),
+            self.portal_teleport_boundary.into(),
+            self.warning_blocks.into(),
+            self.warning_time.into(),
+        )) {
+            client.try_enqueue_packet(data);
+        }
     }
 
     pub fn set_center(&mut self, world: &World, x: f64, z: f64) {

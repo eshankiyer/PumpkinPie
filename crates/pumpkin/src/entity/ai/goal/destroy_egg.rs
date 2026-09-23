@@ -116,10 +116,7 @@ impl Goal for DestroyEggGoal {
 impl Stepping for DestroyEggGoal {
     fn tick_stepping(&self, world: Arc<World>, block_pos: BlockPos) {
         let random = rng().random::<f32>();
-
-        // NOTE: block_pos.0.to_f64() is assumed to be the correct way to get Vector3<f64>
         let pos_f64 = (block_pos.0).to_f64();
-
         world.play_sound_raw(
             Sound::EntityZombieDestroyEgg as u16,
             SoundCategory::Hostile,

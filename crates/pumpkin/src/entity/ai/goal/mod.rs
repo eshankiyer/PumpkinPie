@@ -1,5 +1,5 @@
 use crate::entity::mob::Mob;
-use std::{any::TypeId, ops::BitOr, pin::Pin, ptr};
+use std::{any::TypeId, ops::BitOr, ptr};
 
 pub mod active_target;
 pub mod ambient_stand;
@@ -175,8 +175,6 @@ pub const fn to_goal_ticks(server_ticks: i32) -> i32 {
     -(-server_ticks).div_euclid(2)
 }
 
-pub type GoalFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-
 pub trait Goal: Send + Sync {
     /// How should the `Goal` initially start?
     fn can_start(&mut self, _mob: &dyn Mob) -> bool {
@@ -190,13 +188,13 @@ pub trait Goal: Send + Sync {
     }
 
     /// Call when goal start
-    fn start(&mut self, _: &dyn Mob) {}
+    fn start(&mut self, _mob: &dyn Mob) {}
 
     /// Call when goal stop
-    fn stop(&mut self, _: &dyn Mob) {}
+    fn stop(&mut self, _mob: &dyn Mob) {}
 
     /// If the `Goal` is running, this gets called every tick.
-    fn tick(&mut self, _: &dyn Mob) {}
+    fn tick(&mut self, _mob: &dyn Mob) {}
 
     fn should_run_every_tick(&self) -> bool {
         false
@@ -240,32 +238,44 @@ impl Controls {
     pub const ITER: [Self; 4] = [Self::MOVE, Self::LOOK, Self::JUMP, Self::TARGET];
 
     #[must_use]
-    pub fn empty() -> Self {
-        Self::default()
+    pub const fn empty() -> Self {
+        Self(0)
     }
 
-    pub const fn set(&mut self, control: Self, val: bool) {
-        if val {
-            self.0 |= control.0;
+    #[must_use]
+    pub const fn contains(&self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
+
+    pub const fn insert(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+
+    pub const fn remove(&mut self, other: Self) {
+        self.0 &= !other.0;
+    }
+
+    pub const fn set(&mut self, control: Self, value: bool) {
+        if value {
+            self.insert(control);
         } else {
-            self.0 &= !control.0;
+            self.remove(control);
         }
+    }
+
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.0 == 0
     }
 
     #[must_use]
     pub const fn get(&self, control: Self) -> bool {
-        self.0 & control.0 != 0
+        (self.0 & control.0) != 0
     }
 
     #[must_use]
-    pub fn idx(&self) -> usize {
-        for (i, control) in Self::ITER.into_iter().enumerate() {
-            if self.get(control) {
-                return i;
-            }
-        }
-        tracing::error!("Controls::idx called with no controls set");
-        0
+    pub const fn idx(&self) -> usize {
+        self.0.trailing_zeros() as usize
     }
 }
 

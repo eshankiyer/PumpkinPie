@@ -1,4 +1,4 @@
-use std::pin::sync::{
+use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicI8, Ordering},
 };

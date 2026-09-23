@@ -76,15 +76,11 @@ impl ArgumentConsumer for GameProfilesArgumentConsumer {
         server: &'a Server,
         args: &mut RawArgs<'a>,
     ) -> ConsumeResult<'a> {
-        let Some(raw_arg) = args.pop() else {
-            return Box::pin(async { None });
-        };
+        let raw_arg = args.pop()?;
 
-        Box::pin(async move {
-            resolve_profiles_from_token(sender, server, raw_arg)
-                .ok()
-                .map(Arg::GameProfiles)
-        })
+        resolve_profiles_from_token(sender, server, raw_arg)
+            .ok()
+            .map(Arg::GameProfiles)
     }
 
     fn consume_with_syntax<'a>(
@@ -94,13 +90,11 @@ impl ArgumentConsumer for GameProfilesArgumentConsumer {
         args: &mut RawArgs<'a>,
     ) -> ConsumeResultWithSyntax<'a> {
         let Some(raw_arg) = args.pop() else {
-            return Box::pin(async { Ok(None) });
+            return Ok(None);
         };
 
-        Box::pin(async move {
-            let resolved = resolve_profiles_from_token(sender, server, raw_arg)?;
-            Ok(Some(Arg::GameProfiles(resolved)))
-        })
+        let resolved = resolve_profiles_from_token(sender, server, raw_arg)?;
+        Ok(Some(Arg::GameProfiles(resolved)))
     }
 
     fn suggest(&self, _sender: &CommandSender, server: &Server, _input: &str) -> SuggestResult {

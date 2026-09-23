@@ -46,7 +46,7 @@ impl BlockBehaviour for WitherRoseBlock {
             // (`WitherRoseBlock.java:67-80`).
             let effect = Self::bee_interaction_effect();
             if let Some(player) = args.entity.get_player() {
-                player.send_effect(effect.clone());
+                player.send_effect(&effect);
             }
             living_entity.add_effect(effect);
         }

@@ -99,9 +99,7 @@ impl RavagerEntity {
                     false,
                     Some(
                         |target: crate::entity::ai::target_predicate::TargetData,
-                         _world: Arc<crate::world::World>| async move {
-                            target.age >= 0
-                        },
+                         _world: Arc<crate::world::World>| target.age >= 0,
                     ),
                 )),
             );

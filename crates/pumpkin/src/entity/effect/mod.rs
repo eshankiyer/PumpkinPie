@@ -9,9 +9,6 @@ pub mod weaving;
 pub mod wind_charged;
 pub mod wither;
 
-use std::future::Future;
-use std::pin::Pin;
-
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_nbt::compound::NbtCompound;
@@ -20,8 +17,6 @@ use tracing::warn;
 
 use crate::entity::living::LivingEntity;
 use crate::entity::{NBTStorage, NBTStorageInit};
-
-pub type EffectFuture<'a, T = ()> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 pub trait MobEffect: Send + Sync {
     /// Returns true if `apply_effect_tick` should be called for the current tick and duration.
@@ -103,10 +98,7 @@ impl NBTStorage for pumpkin_data::potion::Effect {
 }
 
 impl NBTStorageInit for pumpkin_data::potion::Effect {
-    fn create_from_nbt<'a>(nbt: &'a mut NbtCompound) -> Option<Self>
-    where
-        Self: 'a,
-    {
+    fn create_from_nbt(nbt: &mut NbtCompound) -> Option<Self> {
         let Some(effect_id) = nbt.get_string("id") else {
             warn!("Unable to read effect. Effect id is not present");
             return None;

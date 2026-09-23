@@ -49,7 +49,8 @@ impl CommandExecutor for TargetExecutor {
 
         let mut succeeded: i32 = 0;
         for target in targets {
-            if target.set_gamemode(gamemode) {
+            if target.gamemode.load() != gamemode {
+                target.set_gamemode(gamemode);
                 succeeded += 1;
                 let gamemode_string = format!("{gamemode:?}").to_lowercase();
                 let gamemode_string = format!("gameMode.{gamemode_string}");

@@ -76,14 +76,10 @@ impl EntityBase for SnowballEntity {
 
         // Handle entity-specific damage
         if let ProjectileHit::Entity { ref entity, .. } = hit {
-            let entity_clone = entity.clone();
+            let is_blaze = entity.get_entity().entity_type.id == EntityType::BLAZE.id;
+            let damage = if is_blaze { 3.0 } else { 0.0 }; // Only damage blazes
 
-            tokio::spawn(async move {
-                let is_blaze = entity_clone.get_entity().entity_type.id == EntityType::BLAZE.id;
-                let damage = if is_blaze { 3.0 } else { 0.0 }; // Only damage blazes
-
-                entity_clone.damage(entity_clone.as_ref(), damage, DamageType::THROWN);
-            });
+            entity.damage(entity.as_ref(), damage, DamageType::THROWN);
         }
     }
 }

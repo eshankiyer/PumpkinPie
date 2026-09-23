@@ -30,11 +30,7 @@ impl CommandExecutor for Executor {
             return Err(InvalidConsumption(Some(ARG_TARGET.into())));
         };
 
-        let mut lock = server
-            .data
-            .banned_player_list
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut lock = server.data.banned_player_list.write().unwrap();
         let mut successes = 0;
 
         for target in targets {

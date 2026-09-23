@@ -101,11 +101,8 @@ impl SlimeEntity {
                     Some(
                         move |target: crate::entity::ai::target_predicate::TargetData,
                               _world: Arc<World>| {
-                            let slime = y_check_slime.clone();
-                            async move {
-                                let slime_y = slime.entity.living_entity.entity.pos.load().y;
-                                is_within_slime_target_y_range(slime_y, target.target_y)
-                            }
+                            let slime_y = y_check_slime.entity.living_entity.entity.pos.load().y;
+                            is_within_slime_target_y_range(slime_y, target.target_y)
                         },
                     ),
                 )),
@@ -408,143 +405,128 @@ impl Mob for SlimeEntity {
     /// `set_size` runs from `new`/`randomize_size` and from NBT load, both before the entity
     /// has any viewers, so its broadcast reaches nobody. This is the first point at which
     /// nearby players exist, so publish the size here too.
-    fn mob_init_data_tracker(&self) -> crate::entity::EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            self.send_size_meta_data(self.get_size());
-        })
+    fn mob_init_data_tracker(&self) {
+        self.send_size_meta_data(self.get_size());
     }
 
-    fn mob_tick<'a>(
-        &'a self,
-        _caller: &'a Arc<dyn EntityBase>,
-    ) -> crate::entity::EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            self.o_squish.store(self.squish.load());
-            self.squish
-                .store(self.squish.load() + (self.target_squish.load() - self.squish.load()) * 0.5);
+    fn mob_tick(&self, _caller: &Arc<dyn EntityBase>) {
+        self.o_squish.store(self.squish.load());
+        self.squish
+            .store(self.squish.load() + (self.target_squish.load() - self.squish.load()) * 0.5);
 
-            let on_ground = self
+        let on_ground = self
+            .entity
+            .living_entity
+            .entity
+            .on_ground
+            .load(Ordering::Relaxed);
+        let was_on_ground = self.was_on_ground.load(Ordering::Relaxed);
+
+        if on_ground && !was_on_ground {
+            let world = self.entity.living_entity.entity.world.load();
+            // `AbstractCubeMob.tick` (`AbstractCubeMob.java:124-147`) emits size-scaled
+            // landing particles before the squish sound; keep the subclass particle choice
+            // from `MagmaCube.getParticleType` (`MagmaCube.java:73-76`) on this live path.
+            let particle_size = self
                 .entity
                 .living_entity
                 .entity
-                .on_ground
-                .load(Ordering::Relaxed);
-            let was_on_ground = self.was_on_ground.load(Ordering::Relaxed);
-
-            if on_ground && !was_on_ground {
-                let world = self.entity.living_entity.entity.world.load();
-                // `AbstractCubeMob.tick` (`AbstractCubeMob.java:124-147`) emits size-scaled
-                // landing particles before the squish sound; keep the subclass particle choice
-                // from `MagmaCube.getParticleType` (`MagmaCube.java:73-76`) on this live path.
-                let particle_size = self
-                    .entity
-                    .living_entity
-                    .entity
-                    .entity_dimension
-                    .load()
-                    .width
-                    * 2.0;
-                let radius = particle_size / 2.0;
-                let position = self.entity.living_entity.entity.pos.load();
-                let mut rng = rand::rng();
-                for _ in 0..(particle_size * 16.0) as usize {
-                    let direction = rng.random_range(0.0..(std::f32::consts::PI * 2.0));
-                    let distance = rng.random_range(0.5..1.0);
-                    let offset_x = direction.sin() * radius * distance;
-                    let offset_z = direction.cos() * radius * distance;
-                    world.spawn_particle(
-                        position.add_raw(f64::from(offset_x), 0.0, f64::from(offset_z)),
-                        Vector3::new(0.0, 0.0, 0.0),
-                        0.0,
-                        1,
-                        Self::particle_type_for(self.is_magma_cube()),
-                    );
-                }
-                world.play_sound_fine(
-                    self.get_squish_sound(),
-                    SoundCategory::Hostile,
-                    &self.entity.living_entity.entity.pos.load(),
-                    self.get_sound_volume(),
-                    ((rand::random_range(0.0..1.0) - rand::random_range(0.0..1.0)) * 0.2 + 1.0)
-                        / 0.8,
+                .entity_dimension
+                .load()
+                .width
+                * 2.0;
+            let radius = particle_size / 2.0;
+            let position = self.entity.living_entity.entity.pos.load();
+            let mut rng = rand::rng();
+            for _ in 0..(particle_size * 16.0) as usize {
+                let direction = rng.random_range(0.0..(std::f32::consts::PI * 2.0));
+                let distance = rng.random_range(0.5..1.0);
+                let offset_x = direction.sin() * radius * distance;
+                let offset_z = direction.cos() * radius * distance;
+                world.spawn_particle(
+                    position.add_raw(f64::from(offset_x), 0.0, f64::from(offset_z)),
+                    Vector3::new(0.0, 0.0, 0.0),
+                    0.0,
+                    1,
+                    Self::particle_type_for(self.is_magma_cube()),
                 );
-
-                self.target_squish.store(-0.5);
-            } else if !on_ground && was_on_ground {
-                self.target_squish.store(1.0);
             }
+            world.play_sound_fine(
+                self.get_squish_sound(),
+                SoundCategory::Hostile,
+                &self.entity.living_entity.entity.pos.load(),
+                self.get_sound_volume(),
+                ((rand::random_range(0.0..1.0) - rand::random_range(0.0..1.0)) * 0.2 + 1.0) / 0.8,
+            );
 
-            self.was_on_ground.store(on_ground, Ordering::Relaxed);
-            self.target_squish
-                .store(self.target_squish.load() * self.squish_decay());
+            self.target_squish.store(-0.5);
+        } else if !on_ground && was_on_ground {
+            self.target_squish.store(1.0);
+        }
 
-            self.is_aggressive.store(false, Ordering::Relaxed);
-            self.speed_modifier.store(0.0);
-        })
+        self.was_on_ground.store(on_ground, Ordering::Relaxed);
+        self.target_squish
+            .store(self.target_squish.load() * self.squish_decay());
+
+        self.is_aggressive.store(false, Ordering::Relaxed);
+        self.speed_modifier.store(0.0);
     }
 
-    fn mob_player_collision<'a>(
-        &'a self,
-        player: &'a Arc<crate::entity::player::Player>,
-    ) -> crate::entity::EntityBaseFuture<'a, ()> {
-        Box::pin(async move {
-            if self.is_deals_damage() {
-                // dealDamage
-                self.entity.try_attack(&**player);
-            }
-        })
+    fn mob_player_collision(&self, player: &Arc<crate::entity::player::Player>) {
+        if self.is_deals_damage() {
+            // dealDamage
+            self.entity.try_attack(&**player);
+        }
     }
 
-    fn post_tick(&self) -> crate::entity::EntityBaseFuture<'_, ()> {
-        Box::pin(async move {
-            if self.entity.living_entity.dead.load(Ordering::Relaxed)
-                && self.get_size() > 1
-                && self
-                    .has_split
-                    .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
-                    .is_ok()
-            {
-                let size = self.get_size();
-                let world = self.entity.living_entity.entity.world.load();
-                let pos = self.entity.living_entity.entity.pos.load();
-                let half_size = size / 2;
-                let count = 2 + rand::random_range(0..3);
+    fn post_tick(&self) {
+        if self.entity.living_entity.dead.load(Ordering::Relaxed)
+            && self.get_size() > 1
+            && self
+                .has_split
+                .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+        {
+            let size = self.get_size();
+            let world = self.entity.living_entity.entity.world.load();
+            let pos = self.entity.living_entity.entity.pos.load();
+            let half_size = size / 2;
+            let count = 2 + rand::random_range(0..3);
 
-                let width = self
+            let width = self
+                .entity
+                .living_entity
+                .entity
+                .entity_dimension
+                .load()
+                .width;
+            let xz_offset = width / 4.0;
+
+            for i in 0..count {
+                let xd = ((i % 2) as f32 - 0.5) * xz_offset;
+                let zd = ((i / 2) as f32 - 0.5) * xz_offset;
+
+                let new_pos = pumpkin_util::math::vector3::Vector3::new(
+                    pos.x + xd as f64,
+                    pos.y + 0.5,
+                    pos.z + zd as f64,
+                );
+                let new_entity = Entity::new(
+                    world.clone(),
+                    new_pos,
+                    self.entity.living_entity.entity.entity_type,
+                );
+                let slime_like = Self::new(new_entity);
+                slime_like.set_size(half_size, true);
+                slime_like
                     .entity
                     .living_entity
                     .entity
-                    .entity_dimension
-                    .load()
-                    .width;
-                let xz_offset = width / 4.0;
-
-                for i in 0..count {
-                    let xd = ((i % 2) as f32 - 0.5) * xz_offset;
-                    let zd = ((i / 2) as f32 - 0.5) * xz_offset;
-
-                    let new_pos = pumpkin_util::math::vector3::Vector3::new(
-                        pos.x + xd as f64,
-                        pos.y + 0.5,
-                        pos.z + zd as f64,
-                    );
-                    let new_entity = Entity::new(
-                        world.clone(),
-                        new_pos,
-                        self.entity.living_entity.entity.entity_type,
-                    );
-                    let slime_like = Self::new(new_entity);
-                    slime_like.set_size(half_size, true);
-                    slime_like
-                        .entity
-                        .living_entity
-                        .entity
-                        .yaw
-                        .store(rand::random_range(0.0..360.0));
-                    world.spawn_entity(slime_like);
-                }
+                    .yaw
+                    .store(rand::random_range(0.0..360.0));
+                world.spawn_entity(slime_like);
             }
-        })
+        }
     }
 }
 
@@ -792,6 +774,7 @@ pub struct SlimeKeepOnJumpingGoal {
 }
 
 impl SlimeKeepOnJumpingGoal {
+    #[must_use]
     pub const fn new(slime: Arc<SlimeEntity>) -> Self {
         Self { slime }
     }

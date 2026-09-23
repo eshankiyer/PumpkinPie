@@ -9,11 +9,10 @@
 //! Unlike regular inventories, crafting grids are typically cleared when
 //! the container closes, and their contents are used up when crafting.
 
-use std::{any::Any, pin::Pin};
-
-use pumpkin_data::item_stack::ItemStack;
+use std::any::Any;
 use std::sync::RwLock;
 
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_world::inventory::{Clearable, Inventory};
 
 use super::recipes::RecipeInputInventory;

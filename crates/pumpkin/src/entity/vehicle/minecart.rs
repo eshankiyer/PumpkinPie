@@ -306,11 +306,25 @@ impl EntityBase for MinecartEntity {
                                 .lock()
                                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                                 .clone();
-                            for passenger in passengers {
-                                self.vehicle
-                                    .entity
-                                    .remove_passenger(passenger.get_entity().entity_id)
-                                    .await;
+                            if !passengers.is_empty() {
+                                // `Entity.remove_passenger` is still async (it fires plugin
+                                // events), so the ejection runs as a task.
+                                let passenger_ids: Vec<i32> = passengers
+                                    .iter()
+                                    .map(|passenger| passenger.get_entity().entity_id)
+                                    .collect();
+                                let world = self.vehicle.entity.world.load_full();
+                                let vehicle_id = self.vehicle.entity.entity_id;
+                                tokio::spawn(async move {
+                                    if let Some(vehicle) = world.get_entity_by_id(vehicle_id) {
+                                        for passenger_id in passenger_ids {
+                                            vehicle
+                                                .get_entity()
+                                                .remove_passenger(passenger_id)
+                                                .await;
+                                        }
+                                    }
+                                });
                             }
                             if self.vehicle.get_hurt_time() == 0 {
                                 self.vehicle.set_hurt_dir(-self.vehicle.get_hurt_dir());
@@ -602,8 +616,8 @@ impl EntityBase for MinecartEntity {
         let self_entity = self.get_entity();
         let other_entity = entity.get_entity();
 
-        if self_entity.no_clip.load(Ordering::Relaxed)
-            || other_entity.no_clip.load(Ordering::Relaxed)
+        if self_entity.no_physics.load(Ordering::Relaxed)
+            || other_entity.no_physics.load(Ordering::Relaxed)
         {
             return;
         }

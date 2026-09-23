@@ -48,9 +48,11 @@ impl BowAttackGoal {
         mob.get_mob_entity()
             .living_entity
             .entity_equipment
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(&EquipmentSlot::MAIN_HAND)
+            .try_lock()
+            .map_or_else(
+                |_| ItemStack::EMPTY.clone(),
+                |eq| eq.get(&EquipmentSlot::MAIN_HAND),
+            )
     }
 
     fn is_holding_bow(mob: &dyn Mob) -> bool {
@@ -69,19 +71,7 @@ impl BowAttackGoal {
     fn shoot(mob: &dyn Mob, target: &Arc<dyn EntityBase>) {
         let entity = mob.get_entity();
         let world = entity.world.load();
-
-        let mut event =
-            crate::plugin::api::events::entity::entity_shoot_bow::EntityShootBowEvent::new(
-                entity.entity_id,
-                "minecraft:bow".to_string(),
-                1.0,
-            );
-        if let Some(server) = world.server.upgrade() {
-            server.plugin_manager.fire_blocking(&server, &mut event);
-        }
-        if event.cancelled {
-            return;
-        }
+        let world_full = entity.world.load_full();
 
         let arrow_entity = Entity::new(world.clone(), entity.pos.load(), &EntityType::ARROW);
         let projectile = ItemStack::new(1, &Item::ARROW);
@@ -112,7 +102,20 @@ impl BowAttackGoal {
         world.play_sound(Sound::EntityArrowShoot, SoundCategory::Hostile, &mob_pos);
 
         let arrow: Arc<dyn EntityBase> = Arc::new(arrow);
-        world.spawn_entity(arrow);
+        let entity_id = entity.entity_id;
+        if let Some(server) = world_full.server.upgrade() {
+            let mut event =
+                crate::plugin::api::events::entity::entity_shoot_bow::EntityShootBowEvent::new(
+                    entity_id,
+                    "minecraft:bow".to_string(),
+                    1.0,
+                );
+            server.plugin_manager.fire_blocking(&server, &mut event);
+            if event.cancelled {
+                return;
+            }
+        }
+        world_full.spawn_entity(arrow);
     }
 }
 

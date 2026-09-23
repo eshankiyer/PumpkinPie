@@ -36,8 +36,7 @@ impl FluidBehaviour for FlowingWater {
     }
 
     fn on_scheduled_tick(&self, world: &Arc<World>, fluid: &Fluid, block_pos: &BlockPos) {
-        self.on_scheduled_tick_internal(world, fluid, block_pos)
-            .await;
+        self.on_scheduled_tick_internal(world, fluid, block_pos);
     }
 
     fn on_neighbor_update(

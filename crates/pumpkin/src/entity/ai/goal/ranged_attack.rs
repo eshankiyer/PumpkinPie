@@ -78,7 +78,7 @@ impl Goal for RangedAttackGoal {
         }
     }
 
-    fn should_continue(&self, mob: &dyn Mob) -> bool {
+    fn should_continue(&mut self, mob: &dyn Mob) -> bool {
         if let Some(target) = &self.target {
             if !target.get_entity().is_alive() {
                 return false;

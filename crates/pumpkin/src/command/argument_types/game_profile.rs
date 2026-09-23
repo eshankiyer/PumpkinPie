@@ -237,7 +237,7 @@ impl ArgumentType for GameProfileArgumentType {
         context: &CommandContext,
         builder: SuggestionsBuilder,
     ) -> Suggestions {
-        EntitySelectorParserSuggestions::list_suggestions(context, builder)
+        EntitySelectorParserSuggestions::list_suggestions(context, &builder)
     }
 
     fn examples(&self) -> Vec<String> {

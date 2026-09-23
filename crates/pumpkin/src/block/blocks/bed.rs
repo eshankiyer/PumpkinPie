@@ -27,7 +27,7 @@ use crate::block::{
     BlockBehaviour, BrokenArgs, CanPlaceAtArgs, NormalUseArgs, OnPlaceArgs, OnStateReplacedArgs,
     PlacedArgs, PlayerPlacedArgs,
 };
-use crate::entity::EntityBase;
+use crate::entity::{EntityBase, player::Player};
 use crate::world::World;
 
 type BedProperties = pumpkin_data::block_properties::WhiteBedLikeProperties;
@@ -198,32 +198,37 @@ impl BlockBehaviour for BedBlock {
         }
     }
 
-    #[expect(clippy::too_many_lines)]
     fn normal_use(&self, args: NormalUseArgs<'_>) -> BlockActionResult {
-        let state_id = args.world.get_block_state_id(args.position);
-        let bed_props = BedProperties::from_state_id(state_id, args.block);
+        Self::use_bed(args.world, args.player, args.block, args.position)
+    }
+}
+
+impl BedBlock {
+    #[expect(clippy::too_many_lines)]
+    fn use_bed(
+        world: &Arc<World>,
+        player: &Arc<Player>,
+        block: &Block,
+        position: &BlockPos,
+    ) -> BlockActionResult {
+        let state_id = world.get_block_state_id(position);
+        let bed_props = BedProperties::from_state_id(state_id, block);
 
         let (bed_head_pos, bed_foot_pos) = if bed_props.part == BedPart::Head {
             (
-                *args.position,
-                args.position
-                    .offset(bed_props.facing.opposite().to_offset()),
+                *position,
+                position.offset(bed_props.facing.opposite().to_offset()),
             )
         } else {
-            (
-                args.position.offset(bed_props.facing.to_offset()),
-                *args.position,
-            )
+            (position.offset(bed_props.facing.to_offset()), *position)
         };
 
         // Explode if not in the overworld
-        if args.world.dimension != Dimension::OVERWORLD {
-            args.world
-                .break_block(&bed_head_pos, None, BlockFlags::SKIP_DROPS);
-            args.world
-                .break_block(&bed_foot_pos, None, BlockFlags::SKIP_DROPS);
+        if world.dimension != Dimension::OVERWORLD {
+            world.break_block(&bed_head_pos, None, BlockFlags::SKIP_DROPS);
+            world.break_block(&bed_foot_pos, None, BlockFlags::SKIP_DROPS);
 
-            args.world.explode(
+            world.explode(
                 bed_head_pos.to_centered_f64(),
                 5.0,
                 crate::world::ExplosionInteraction::Block,
@@ -234,14 +239,13 @@ impl BlockBehaviour for BedBlock {
 
         // `ServerPlayer.bedBlocked` uses `Player.freeAt`, whose suffocation predicate
         // differs from a generic solid-block check (`ServerPlayer.java:1261-1263`).
-        if !args.player.free_at(&bed_head_pos.up()) || !args.player.free_at(&bed_foot_pos.up()) {
+        if !player.free_at(&bed_head_pos.up()) || !player.free_at(&bed_foot_pos.up()) {
             // Vanilla uses `ServerPlayer.sendOverlayMessage` for bed failure feedback
             // (`ServerPlayer.java:1798-1805`).
-            args.player
-                .send_overlay_message(&pumpkin_macros::translate_cross!(
-                    translation::java::BLOCK_MINECRAFT_BED_OBSTRUCTED,
-                    translation::bedrock::TILE_BED_OBSTRUCTED
-                ));
+            player.send_overlay_message(&pumpkin_macros::translate_cross!(
+                translation::java::BLOCK_MINECRAFT_BED_OBSTRUCTED,
+                translation::bedrock::TILE_BED_OBSTRUCTED
+            ));
             return BlockActionResult::SuccessServer;
         }
 
@@ -258,7 +262,7 @@ impl BlockBehaviour for BedBlock {
                 ),
             );
             let sleeping_villager =
-                args.world
+                world
                     .get_entities_at_box(&aabb)
                     .into_iter()
                     .find_map(|entity| {
@@ -275,15 +279,14 @@ impl BlockBehaviour for BedBlock {
                     .cast_any()
                     .downcast_ref::<crate::entity::passive::villager::VillagerEntity>()
                     .unwrap();
-                villager.stop_sleeping(args.world);
+                villager.stop_sleeping(world);
                 return BlockActionResult::SuccessServer;
             }
 
-            args.player
-                .send_overlay_message(&pumpkin_macros::translate_cross!(
-                    translation::java::BLOCK_MINECRAFT_BED_OCCUPIED,
-                    translation::bedrock::TILE_BED_OCCUPIED
-                ));
+            player.send_overlay_message(&pumpkin_macros::translate_cross!(
+                translation::java::BLOCK_MINECRAFT_BED_OCCUPIED,
+                translation::bedrock::TILE_BED_OCCUPIED
+            ));
             return BlockActionResult::SuccessServer;
         }
 
@@ -297,44 +300,40 @@ impl BlockBehaviour for BedBlock {
                 .position()
                 .is_within_bounds(bed_foot_pos.to_f64(), 3.0, 2.0, 3.0)
         {
-            args.player
-                .send_overlay_message(&pumpkin_macros::translate_cross!(
-                    translation::java::BLOCK_MINECRAFT_BED_TOO_FAR_AWAY,
-                    translation::bedrock::TILE_BED_TOOFAR
-                ));
+            player.send_overlay_message(&pumpkin_macros::translate_cross!(
+                translation::java::BLOCK_MINECRAFT_BED_TOO_FAR_AWAY,
+                translation::bedrock::TILE_BED_TOOFAR
+            ));
             return BlockActionResult::SuccessServer;
         }
 
         // Set respawn point
-        if args.player.set_respawn_point(
-            args.world.dimension.clone(),
+        if player.set_respawn_point(
+            world.dimension.clone(),
             bed_head_pos,
-            args.player.get_entity().yaw.load(),
-            args.player.get_entity().pitch.load(),
+            player.get_entity().yaw.load(),
+            player.get_entity().pitch.load(),
             false,
         ) {
-            args.player
-                .send_system_message(&pumpkin_macros::translate_cross!(
-                    translation::java::BLOCK_MINECRAFT_SET_SPAWN,
-                    translation::bedrock::TILE_BED_RESPAWNSET
-                ));
+            player.send_system_message(&pumpkin_macros::translate_cross!(
+                translation::java::BLOCK_MINECRAFT_SET_SPAWN,
+                translation::bedrock::TILE_BED_RESPAWNSET
+            ));
         }
 
         // Make sure the time and weather allows sleep
-        if !can_sleep(args.world) {
-            args.player
-                .send_overlay_message(&pumpkin_macros::translate_cross!(
-                    translation::java::BLOCK_MINECRAFT_BED_NO_SLEEP,
-                    translation::bedrock::TILE_BED_NOSLEEP
-                ));
+        if !can_sleep(world) {
+            player.send_overlay_message(&pumpkin_macros::translate_cross!(
+                translation::java::BLOCK_MINECRAFT_BED_NO_SLEEP,
+                translation::bedrock::TILE_BED_NOSLEEP
+            ));
             return BlockActionResult::SuccessServer;
         }
 
         // Make sure there are no monsters nearby
-        let universal_anger = args.world.level_info.load().game_rules.universal_anger;
-        for entity in args.world.entities.load().iter() {
-            if !entity_prevents_sleep(entity.as_ref(), args.player.gameprofile.id, universal_anger)
-            {
+        let universal_anger = world.level_info.load().game_rules.universal_anger;
+        for entity in world.entities.load().iter() {
+            if !entity_prevents_sleep(entity.as_ref(), player.gameprofile.id, universal_anger) {
                 continue;
             }
 
@@ -342,19 +341,18 @@ impl BlockBehaviour for BedBlock {
             if pos.is_within_bounds(bed_head_pos.to_f64(), 8.0, 5.0, 8.0)
                 || pos.is_within_bounds(bed_foot_pos.to_f64(), 8.0, 5.0, 8.0)
             {
-                args.player
-                    .send_overlay_message(&pumpkin_macros::translate_cross!(
-                        translation::java::BLOCK_MINECRAFT_BED_NOT_SAFE,
-                        translation::bedrock::TILE_BED_NOTSAFE
-                    ));
+                player.send_overlay_message(&pumpkin_macros::translate_cross!(
+                    translation::java::BLOCK_MINECRAFT_BED_NOT_SAFE,
+                    translation::bedrock::TILE_BED_NOTSAFE
+                ));
                 return BlockActionResult::SuccessServer;
             }
         }
 
-        if let Some(server) = args.world.server.upgrade() {
+        if let Some(server) = world.server.upgrade() {
             let mut event =
                 crate::plugin::api::events::player::player_bed::PlayerBedEnterEvent::new(
-                    args.player.clone(),
+                    player.clone(),
                     bed_head_pos,
                 );
             server.plugin_manager.fire_blocking(&server, &mut event);
@@ -363,18 +361,18 @@ impl BlockBehaviour for BedBlock {
             }
         }
 
-        if !args.player.sleep(bed_head_pos) {
+        if !player.sleep(bed_head_pos) {
             return BlockActionResult::SuccessServer;
         }
-        args.player.trigger_advancement(
+        player.trigger_advancement(
             crate::entity::player::advancement::trigger::AdvancementTrigger::SleptInBed,
         );
-        args.player.increment_stat(
+        player.increment_stat(
             pumpkin_data::statistic::StatisticCategory::Custom,
             pumpkin_data::statistic::CustomStatistic::SleepInBed as i32,
             1,
         );
-        Self::set_occupied(true, args.world, args.block, args.position, state_id);
+        Self::set_occupied(true, world, block, position, state_id);
 
         BlockActionResult::SuccessServer
     }

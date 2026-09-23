@@ -10,7 +10,6 @@ use pumpkin_data::attributes::Attributes;
 use pumpkin_data::entity::EntityType;
 use pumpkin_util::math::vector3::Vector3;
 use rand::RngExt;
-use std::future::Future;
 use std::sync::Arc;
 
 const DEFAULT_RECIPROCAL_CHANCE: i32 = 10;
@@ -26,7 +25,7 @@ pub struct ActiveTargetGoal {
 }
 
 impl ActiveTargetGoal {
-    pub fn new<F, Fut>(
+    pub fn new<F>(
         mob: &MobEntity,
         target_type: &'static EntityType,
         reciprocal_chance: i32,
@@ -35,8 +34,7 @@ impl ActiveTargetGoal {
         predicate: Option<F>,
     ) -> Self
     where
-        F: Fn(TargetData, Arc<World>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = bool> + Send + 'static,
+        F: Fn(TargetData, Arc<World>) -> bool + Send + Sync + 'static,
     {
         let track_target_goal = TrackTargetGoal::new(check_visibility, check_can_navigate);
         let mut target_predicate = TargetPredicate::create_attackable();
@@ -59,7 +57,7 @@ impl ActiveTargetGoal {
         }
     }
 
-    pub fn new_types<F, Fut>(
+    pub fn new_types<F>(
         mob: &MobEntity,
         target_types: &'static [&'static EntityType],
         reciprocal_chance: i32,
@@ -68,8 +66,7 @@ impl ActiveTargetGoal {
         predicate: Option<F>,
     ) -> Self
     where
-        F: Fn(TargetData, Arc<World>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = bool> + Send + 'static,
+        F: Fn(TargetData, Arc<World>) -> bool + Send + Sync + 'static,
     {
         let track_target_goal = TrackTargetGoal::new(check_visibility, check_can_navigate);
         let mut target_predicate = TargetPredicate::create_attackable();
@@ -199,7 +196,7 @@ impl ActiveTargetGoal {
         // Vanilla evaluates the target conditions per candidate inside the search, so the result is
         // the nearest *valid* target. Testing only the nearest candidate would make a single
         // invalid entity (for example an invulnerable creative player) hide every target behind it.
-        // The predicate is async, so candidates are gathered first and tested in order.
+        // Candidates are gathered first, sorted by distance and tested in order.
         let sort_by_distance = |a: &Vector3<f64>, b: &Vector3<f64>| {
             a.squared_distance_to_vec(&search_pos)
                 .partial_cmp(&b.squared_distance_to_vec(&search_pos))
