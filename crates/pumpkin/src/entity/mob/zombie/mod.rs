@@ -16,9 +16,13 @@ use crate::entity::{
     Entity, EntityBase, NBTStorage, NbtFuture,
     ai::goal::{active_target::ActiveTargetGoal, look_at_entity::LookAtEntityGoal},
 };
+use crate::world::World;
 use crate::world::natural_spawner::is_spawn_position_ok;
 use pumpkin_data::attributes::Attributes;
+use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::item::Item;
+use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::tracked_data;
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
@@ -188,6 +192,69 @@ impl Mob for ZombieEntityBase {
                 );
             }
             self.roll_spawn_attributes().await;
+        })
+    }
+
+    /// Vanilla: `Zombie.populateDefaultEquipmentSlots` (super's armor roll, then a 5%/1% chance
+    /// of an iron sword/spear/shovel). Upstream plugin-facing hook; natural spawns are equipped
+    /// through `equipment::equip_mob_on_spawn`'s registry instead, which does not call this.
+    fn populate_default_equipment_slots<'a>(
+        &'a self,
+        _world: &'a Arc<World>,
+        difficulty: &'a RegionalDifficulty,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            // Default armor slots (super.populateDefaultEquipmentSlots)
+            if rand::random::<f32>()
+                < MobEntity::MAX_WEARING_ARMOR_CHANCE * difficulty.special_multiplier
+            {
+                let mut armor_type = rand::random_range(0..3);
+                for _ in 1..=3 {
+                    if rand::random::<f32>() < MobEntity::WEARING_ARMOR_UPGRADE_MATERIAL_CHANCE {
+                        armor_type += 1;
+                    }
+                }
+
+                let partial_chance = if difficulty.base_difficulty == Difficulty::Hard {
+                    0.1f32
+                } else {
+                    0.25f32
+                };
+
+                let living = &self.mob_entity.living_entity;
+                let mut equipment = living.entity_equipment.lock().await;
+                let mut first = true;
+
+                for slot in &MobEntity::EQUIPMENT_POPULATION_ORDER {
+                    let current = equipment.get(slot);
+                    if !first && rand::random::<f32>() < partial_chance {
+                        break;
+                    }
+                    first = false;
+                    if current.is_empty()
+                        && let Some(item) = MobEntity::get_equipment_for_slot(slot, armor_type)
+                    {
+                        equipment.put(slot, ItemStack::new(1, item));
+                    }
+                }
+            }
+
+            let weapon_chance = if difficulty.base_difficulty == Difficulty::Hard {
+                0.05f32
+            } else {
+                0.01f32
+            };
+            if rand::random::<f32>() < weapon_chance {
+                let r = rand::random_range(0..6);
+                let weapon_item = match r {
+                    0 => &Item::IRON_SWORD,
+                    1 => &Item::IRON_SPEAR,
+                    _ => &Item::IRON_SHOVEL,
+                };
+                let living = &self.mob_entity.living_entity;
+                let mut equipment = living.entity_equipment.lock().await;
+                equipment.put(&EquipmentSlot::MAIN_HAND, ItemStack::new(1, weapon_item));
+            }
         })
     }
 }

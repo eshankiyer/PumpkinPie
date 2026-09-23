@@ -33,24 +33,28 @@ impl GoalSelector {
     }
 
     pub async fn remove_goal<G: Goal + 'static>(&mut self, mob: &dyn Mob) {
-        for prioritized_goal in &mut self.goals {
-            if TypeId::of::<G>() == prioritized_goal.type_id && prioritized_goal.running {
-                prioritized_goal.stop(mob).await;
-            }
+        let mut stopped = self.remove_goal_sync::<G>();
+        for goal in &mut stopped {
+            goal.stop(mob).await;
         }
+    }
 
-        self.remove_goals_of_type(TypeId::of::<G>());
+    /// Removes every goal of type `G` without needing a `&dyn Mob`. The removed goals that were
+    /// running are returned so the caller can `stop` them afterwards (vanilla
+    /// `GoalSelector.removeGoal` stops the running wrapped goals, then `removeIf`s them).
+    pub fn remove_goal_sync<G: Goal + 'static>(&mut self) -> Vec<PrioritizedGoal> {
+        self.remove_goal_by_type_id(TypeId::of::<G>())
     }
 
     /// Removes every goal matching `type_id` and fixes up `goals_by_control` to still point at
-    /// the correct surviving goals. Split out from `remove_goal` (which additionally has to
-    /// `stop` running goals, requiring a `&dyn Mob`) so this index-remapping logic can be
-    /// exercised without one.
+    /// the correct surviving goals. Returns the removed goals that were running; the caller is
+    /// responsible for stopping them.
     ///
-    /// `Vec::retain` preserves the relative order of the surviving goals, so a goal's new index
-    /// is simply the count of surviving goals before it -- unlike `swap_remove`, this can't move
-    /// an unrelated goal into a slot that `goals_by_control` still references.
-    fn remove_goals_of_type(&mut self, type_id: TypeId) {
+    /// The surviving goals keep their relative order (vanilla keeps them in a
+    /// `LinkedHashSet`), so a goal's new index is simply the count of surviving goals before
+    /// it -- unlike `swap_remove`, this can't move an unrelated goal into a slot that
+    /// `goals_by_control` still references.
+    pub fn remove_goal_by_type_id(&mut self, type_id: TypeId) -> Vec<PrioritizedGoal> {
         let mut new_index = vec![usize::MAX; self.goals.len()];
         let mut next = 0usize;
         for (i, goal) in self.goals.iter().enumerate() {
@@ -60,13 +64,23 @@ impl GoalSelector {
             }
         }
 
-        self.goals.retain(|goal| goal.type_id != type_id);
+        let mut stopped = Vec::new();
+        let mut kept = Vec::with_capacity(next);
+        for goal in self.goals.drain(..) {
+            if goal.type_id != type_id {
+                kept.push(goal);
+            } else if goal.running {
+                stopped.push(goal);
+            }
+        }
+        self.goals = kept;
 
         for slot in &mut self.goals_by_control {
             if *slot != usize::MAX {
                 *slot = new_index[*slot];
             }
         }
+        stopped
     }
 
     pub fn clear(&mut self) -> Vec<PrioritizedGoal> {
@@ -220,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_goals_of_type_remaps_goals_by_control_after_multi_remove() {
+    fn remove_goal_by_type_id_remaps_goals_by_control_after_multi_remove() {
         let mut selector = GoalSelector::default();
         selector.add_goal(0, Box::new(RemoveMeGoal)); // index 0
         selector.add_goal(0, Box::new(RemoveMeGoal)); // index 1
@@ -237,8 +251,8 @@ mod tests {
         // uniform `*slot -= 1` fixup doesn't account for `swap_remove` moving the *last* element
         // into the removed slot, not shifting everything down by one) and then panics with an
         // out-of-bounds `swap_remove` once the vector has shrunk past a stale collected index.
-        // The retain-based remap must instead still find `KeepMeGoal` and clear the LOOK slot.
-        selector.remove_goals_of_type(TypeId::of::<RemoveMeGoal>());
+        // The order-preserving remap must instead still find `KeepMeGoal` and clear the LOOK slot.
+        selector.remove_goal_by_type_id(TypeId::of::<RemoveMeGoal>());
 
         assert_eq!(selector.goals.len(), 1);
         let kept_idx = selector.goals_by_control[Controls::MOVE.idx()];

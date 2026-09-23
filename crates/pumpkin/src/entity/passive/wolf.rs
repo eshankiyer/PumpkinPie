@@ -489,8 +489,8 @@ impl Mob for WolfEntity {
         })
     }
 
-    /// Vanilla `Wolf.wantsToAttack` (Wolf.java:638-648). The player/pvp branch checks only the
-    /// server's pvp toggle, not scoreboard team allied-friendly-fire (`Player.canHarmPlayer`,
+    /// Vanilla `Wolf.wantsToAttack` (Wolf.java:641-651). The player/pvp branch checks the `pvp`
+    /// game rule and the server's pvp toggle, not scoreboard team allied-friendly-fire (`Player.canHarmPlayer`,
     /// Player.java:727-735) since Pumpkin has no team-alliance query wired to entities yet.
     /// The tamed-horse branch (`AbstractHorse.isTamed()`) is folded into the generic
     /// "any tamed `Mob`" check below since Pumpkin does not track horse taming separately.
@@ -513,7 +513,12 @@ impl Mob for WolfEntity {
         }
 
         if target.get_player().is_some() && owner.get_player().is_some() {
+            // `ServerPlayer.canHarmPlayer` -> `ServerLevel.isPvpAllowed` (`ServerLevel.java:1997`):
+            // the `pvp` game rule, plus Pumpkin's server-wide pvp toggle.
             let world = self.get_entity().world.load_full();
+            if !world.level_info.load().game_rules.pvp {
+                return false;
+            }
             if let Some(server) = world.server.upgrade()
                 && !server.advanced_config.pvp.enabled
             {

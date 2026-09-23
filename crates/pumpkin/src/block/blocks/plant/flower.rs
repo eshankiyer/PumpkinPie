@@ -1,25 +1,26 @@
-use pumpkin_data::Block;
 use pumpkin_data::BlockStateId;
-use pumpkin_data::dimension::Dimension;
 use pumpkin_data::particle::Particle;
 use pumpkin_macros::pumpkin_block_from_tag;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::ser::NetworkWriteExt;
 use pumpkin_util::math::vector3::Vector3;
-use pumpkin_world::world::BlockFlags;
 use rand::RngExt;
 
 use crate::block::blocks::plant::PlantBlockBase;
 use crate::block::{BlockBehaviour, BlockFuture, CanPlaceAtArgs, GetStateForNeighborUpdateArgs};
 
-use crate::block::RandomTickArgs;
-
-const EYEBLOSSOM_OPEN_COLOR: i32 = 16_545_810;
-const EYEBLOSSOM_CLOSED_COLOR: i32 = 6_250_335;
+/// `EyeblossomBlock.Type.OPEN` particle color.
+pub const EYEBLOSSOM_OPEN_COLOR: i32 = 16_545_810;
+/// `EyeblossomBlock.Type.CLOSED` particle color.
+pub const EYEBLOSSOM_CLOSED_COLOR: i32 = 6_250_335;
 
 /// Vanilla `EyeblossomBlock.Type.spawnTransformParticle`: a trail particle drifting from
 /// the block's center to a random nearby point, over a random 0.5-1.5s lifetime.
-fn spawn_transform_particle(
+///
+/// The eyeblossom open/close logic itself lives in `plant::eyeblossom::EyeblossomBlock`;
+/// this helper encodes the `TrailParticleOption` payload (target, color, duration) that a
+/// bare `Particle::Trail` spawn lacks.
+pub fn spawn_transform_particle(
     world: &crate::world::World,
     position: &pumpkin_util::math::position::BlockPos,
     color: i32,
@@ -76,37 +77,6 @@ impl BlockBehaviour for FlowerBlock {
                 args.state_id,
             )
             .await
-        })
-    }
-
-    fn random_tick<'a>(&'a self, args: RandomTickArgs<'a>) -> BlockFuture<'a, ()> {
-        Box::pin(async move {
-            if (args.world.dimension.eq(&Dimension::OVERWORLD)
-                || args.world.dimension.eq(&Dimension::OVERWORLD_CAVES))
-                && args.block.eq(&Block::CLOSED_EYEBLOSSOM)
-                && args.world.level_time.lock().await.time_of_day % 24000 > 14500
-            {
-                args.world
-                    .set_block_state(
-                        args.position,
-                        Block::OPEN_EYEBLOSSOM.default_state.id,
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-                spawn_transform_particle(args.world, args.position, EYEBLOSSOM_OPEN_COLOR);
-            }
-            if args.block.eq(&Block::OPEN_EYEBLOSSOM)
-                && args.world.level_time.lock().await.time_of_day % 24000 <= 14500
-            {
-                args.world
-                    .set_block_state(
-                        args.position,
-                        Block::CLOSED_EYEBLOSSOM.default_state.id,
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
-                spawn_transform_particle(args.world, args.position, EYEBLOSSOM_CLOSED_COLOR);
-            }
         })
     }
 }

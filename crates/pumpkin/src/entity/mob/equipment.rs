@@ -786,6 +786,19 @@ fn mob_spawn_equipment_provider_enchant<R: Rng + ?Sized>(
     }
 }
 
+/// Upstream entry point for the `Mob::enchant_spawned_equipment` trait hook: runs the
+/// `minecraft:mob_spawn_equipment` provider ([`mob_spawn_equipment_provider_enchant`]) on
+/// `stack` with a fresh thread RNG. The slot takes no part in vanilla's candidate
+/// filtering (the stack's own primary-item tags drive it), so it is accepted only for
+/// signature compatibility.
+pub fn apply_vanilla_enchantments(
+    stack: &mut ItemStack,
+    _slot: &EquipmentSlot,
+    special_multiplier: f32,
+) {
+    mob_spawn_equipment_provider_enchant(&mut rand::rng(), stack, special_multiplier);
+}
+
 /// Vanilla `EnchantmentHelper.enchantItemFromProvider` with the
 /// `minecraft:mob_spawn_equipment` provider key
 /// (`VanillaEnchantmentProviders.java:24`, `EnchantmentHelper.java:613-624`):

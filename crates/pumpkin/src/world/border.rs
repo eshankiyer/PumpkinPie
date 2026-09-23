@@ -228,6 +228,31 @@ impl Worldborder {
         self.damage_per_block = damage_per_block;
     }
 
+    /// Plugin-API alias for [`Self::set_safe_zone`] (vanilla `WorldBorder.setSafeZone`).
+    pub const fn set_damage_buffer(&mut self, buffer: f32) {
+        self.set_safe_zone(buffer);
+    }
+
+    /// Restores the default border (vanilla `WorldBorder.Settings.DEFAULT`,
+    /// `WorldBorder.java:459`) and re-initializes it on every client. The absolute max size
+    /// is a server setting rather than part of the border settings, so it is kept.
+    pub fn reset(&mut self, world: &World) {
+        let absolute_max_size = self.portal_teleport_boundary;
+        *self = Self::from_settings(&WorldBorderData::default());
+        self.portal_teleport_boundary = absolute_max_size;
+
+        world.broadcast_packet_all(&CInitializeWorldBorder::new(
+            self.center_x,
+            self.center_z,
+            self.current_diameter,
+            self.new_diameter,
+            self.lerp_ticks_remaining.into(),
+            self.portal_teleport_boundary.into(),
+            self.warning_blocks.into(),
+            self.warning_time.into(),
+        ));
+    }
+
     /// Vanilla `WorldBorder.setSafeZone` (`WorldBorder.java:225-236`).
     pub const fn set_safe_zone(&mut self, safe_zone: f32) {
         self.buffer = safe_zone;

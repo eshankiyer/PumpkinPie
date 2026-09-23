@@ -17,6 +17,7 @@ use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     mob::{Mob, MobEntity},
 };
+use crate::world::World;
 
 /// `Zombie::inWaterTime` threshold (`Zombie.java` `tick`, `if (this.inWaterTime >= 600)`):
 /// ticks the zombie must have `isEyeInFluid(FluidTags.WATER)` before it starts converting.
@@ -239,6 +240,23 @@ impl Mob for ZombieEntity {
                 self.set_can_break_doors(true).await;
             }
         })
+    }
+
+    fn populate_default_equipment_slots<'a>(
+        &'a self,
+        world: &'a Arc<World>,
+        difficulty: &'a RegionalDifficulty,
+    ) -> EntityBaseFuture<'a, ()> {
+        self.entity
+            .populate_default_equipment_slots(world, difficulty)
+    }
+
+    fn populate_default_equipment_enchantments<'a>(
+        &'a self,
+        difficulty: &'a RegionalDifficulty,
+    ) -> EntityBaseFuture<'a, ()> {
+        self.entity
+            .populate_default_equipment_enchantments(difficulty)
     }
 
     /// `Zombie::hurtServer`'s reinforcement half (`Zombie.java:288-340`). `on_damage` only runs

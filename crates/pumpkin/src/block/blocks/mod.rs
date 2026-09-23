@@ -49,6 +49,7 @@ pub mod pillar;
 pub mod slabs;
 pub mod stairs;
 pub mod walls;
+pub mod weathering_copper;
 
 // Decorative & furnishings
 pub mod banners;

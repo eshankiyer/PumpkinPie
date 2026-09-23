@@ -993,7 +993,9 @@ impl Server {
             world
                 .broadcast_editioned(
                     &CChangeDifficulty::new(difficulty as u8, locked),
-                    &pumpkin_protocol::bedrock::client::CSetDifficulty::new(difficulty as u32),
+                    &pumpkin_protocol::bedrock::client::CSetDifficulty {
+                        difficulty: (difficulty as u32).into(),
+                    },
                 )
                 .await;
         }
@@ -1011,7 +1013,9 @@ impl Server {
             world
                 .broadcast_editioned(
                     &CChangeDifficulty::new(difficulty as u8, locked),
-                    &pumpkin_protocol::bedrock::client::CSetDifficulty::new(difficulty as u32),
+                    &pumpkin_protocol::bedrock::client::CSetDifficulty {
+                        difficulty: (difficulty as u32).into(),
+                    },
                 )
                 .await;
         }

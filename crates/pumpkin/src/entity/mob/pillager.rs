@@ -24,7 +24,10 @@ use crate::entity::{
         ranged_crossbow_attack::RangedCrossbowAttackGoal, revenge::RevengeGoal, swim::SwimGoal,
         wander_around::WanderAroundGoal,
     },
-    mob::{Mob, MobEntity, equipment::enchant_item_from_single_enchantment},
+    mob::{
+        Mob, MobEntity, crossbow_attack_mob::CrossbowAttackMob,
+        equipment::enchant_item_from_single_enchantment,
+    },
 };
 use crate::world::raid::num_groups_for_difficulty;
 
@@ -263,5 +266,21 @@ impl Mob for PillagerEntity {
                 None,
             );
         }
+    }
+
+    fn as_crossbow_attack_mob(&self) -> Option<&dyn CrossbowAttackMob> {
+        Some(self)
+    }
+}
+
+/// Upstream's crossbow-user seam (`CrossbowAttackMob`), backed by the same synced
+/// `IS_CHARGING_CROSSBOW` state as `Mob::set_charging_crossbow` above.
+impl CrossbowAttackMob for PillagerEntity {
+    fn set_charging_crossbow(&self, is_charging: bool) {
+        Mob::set_charging_crossbow(self, is_charging);
+    }
+
+    fn is_charging_crossbow(&self) -> bool {
+        self.is_charging_crossbow.load(Relaxed)
     }
 }

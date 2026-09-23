@@ -1,6 +1,7 @@
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::entity::EntityType;
+use pumpkin_data::sound::Sound;
 use pumpkin_nbt::compound::NbtCompound;
 
 use crate::entity::{
@@ -19,7 +20,14 @@ use crate::entity::{
         swim::SwimGoal,
         wander_around::WanderAroundGoal,
     },
-    mob::{Mob, MobEntity},
+    mob::{
+        Mob, MobEntity,
+        patrol::{LongDistancePatrolGoal, PatrolData, PatrollingMonster},
+        raider::{
+            ObtainRaidLeaderBannerGoal, Raider, RaiderCelebrationGoal, RaiderData,
+            RaiderMoveThroughVillageGoal,
+        },
+    },
 };
 
 pub struct EvokerEntity {
@@ -28,6 +36,8 @@ pub struct EvokerEntity {
     pub spellcaster: SpellcasterState,
     /// Vanilla: `Evoker.wololoTarget`.
     pub wololo_target: tokio::sync::Mutex<Option<Arc<dyn EntityBase>>>,
+    /// Vanilla `Raider`/`PatrollingMonster` fields.
+    pub raider_data: RaiderData,
 }
 
 impl EvokerEntity {
@@ -37,6 +47,7 @@ impl EvokerEntity {
             mob_entity,
             spellcaster: SpellcasterState::new(),
             wololo_target: tokio::sync::Mutex::new(None),
+            raider_data: RaiderData::default(),
         };
         let mob_arc = Arc::new(evoker);
         let mob_weak: Weak<dyn Mob> = {
@@ -52,6 +63,15 @@ impl EvokerEntity {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
+            // Inherited via `super.registerGoals()`, registered before Evoker's own goals:
+            // PatrollingMonster.java:40 then Raider.java:64-67.
+            goal_selector.add_goal(4, Box::new(LongDistancePatrolGoal::new(0.7, 0.595)));
+            goal_selector.add_goal(1, Box::new(ObtainRaidLeaderBannerGoal));
+            goal_selector.add_goal(3, PathfindToRaidGoal::new());
+            goal_selector.add_goal(4, Box::new(RaiderMoveThroughVillageGoal::new(1.05)));
+            goal_selector.add_goal(5, Box::new(RaiderCelebrationGoal));
+
+            // Evoker.java:56-65.
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
             goal_selector.add_goal(
                 1,
@@ -65,8 +85,6 @@ impl EvokerEntity {
                 3,
                 Box::new(AvoidEntityGoal::new(&EntityType::CREAKING, 8.0, 0.6, 1.0)),
             );
-            // Raider.java:65, via `super.registerGoals()`: `PathfindToRaidGoal<>(this)`.
-            goal_selector.add_goal(3, PathfindToRaidGoal::new());
             goal_selector.add_goal(4, Box::new(EvokerSummonSpellGoal::new(evoker_weak.clone())));
             goal_selector.add_goal(5, Box::new(EvokerAttackSpellGoal::new(evoker_weak.clone())));
             goal_selector.add_goal(6, Box::new(EvokerWololoSpellGoal::new(evoker_weak)));
@@ -127,6 +145,8 @@ impl NBTStorage for EvokerEntity {
     fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async move {
             self.mob_entity.living_entity.write_nbt(nbt).await;
+            // `Raider.addAdditionalSaveData` (incl. `PatrollingMonster`'s patrol fields).
+            self.write_raider_nbt(nbt);
             nbt.put_int("SpellTicks", self.spellcaster.casting_ticks_left());
         })
     }
@@ -135,6 +155,7 @@ impl NBTStorage for EvokerEntity {
     fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
         Box::pin(async move {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
+            self.read_raider_nbt(nbt);
             self.spellcaster
                 .set_casting_time(nbt.get_int("SpellTicks").unwrap_or(0));
         })
@@ -151,5 +172,30 @@ impl Mob for EvokerEntity {
         Box::pin(async move {
             self.spellcaster.tick();
         })
+    }
+
+    fn as_patrolling_monster(&self) -> Option<&dyn PatrollingMonster> {
+        Some(self)
+    }
+
+    fn as_raider(&self) -> Option<&dyn Raider> {
+        Some(self)
+    }
+}
+
+impl PatrollingMonster for EvokerEntity {
+    fn get_patrol_data(&self) -> &PatrolData {
+        &self.raider_data.patrol_data
+    }
+}
+
+impl Raider for EvokerEntity {
+    fn get_raider_data(&self) -> &RaiderData {
+        &self.raider_data
+    }
+
+    /// Vanilla `Evoker.getCelebrateSound` (`Evoker.java:77-79`).
+    fn get_celebrate_sound(&self) -> Sound {
+        Sound::EntityEvokerCelebrate
     }
 }

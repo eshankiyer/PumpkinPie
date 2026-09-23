@@ -196,7 +196,7 @@ impl BlockBehaviour for RespawnAnchorBlock {
             }
 
             let state_id = args.world.get_block_state_id(args.position);
-            let mut props = RespawnAnchorLikeProperties::from_state_id(state_id, args.block);
+            let props = RespawnAnchorLikeProperties::from_state_id(state_id, args.block);
             if props.charges == 0 {
                 args.player
                     .send_system_message(&pumpkin_macros::translate_cross!(
@@ -217,15 +217,10 @@ impl BlockBehaviour for RespawnAnchorBlock {
                     false,
                 )
                 .await;
+            // Vanilla `RespawnAnchorBlock.useWithoutItem` only sets the respawn point here; the
+            // charge is spent when the player actually respawns at the anchor
+            // (`ServerPlayer.findRespawnAndUseSpawnBlock`).
             if changed {
-                props.charges -= 1;
-                args.world
-                    .set_block_state(
-                        args.position,
-                        props.to_state_id(args.block),
-                        BlockFlags::NOTIFY_ALL,
-                    )
-                    .await;
                 args.world.play_sound(
                     Sound::BlockRespawnAnchorSetSpawn,
                     SoundCategory::Blocks,

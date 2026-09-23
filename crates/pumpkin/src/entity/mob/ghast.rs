@@ -1,10 +1,16 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::{Arc, Weak};
+
+use pumpkin_data::damage::DamageType;
+use pumpkin_data::tracked_data;
+use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::math::position::BlockPos;
 
 use crate::entity::{
-    Entity, NBTStorage,
+    Entity, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::control::ghast_move_control::GhastMoveControl,
     ai::goal::{
         Controls, Goal, GoalFuture, ghast_random_float::GhastRandomFloatAroundGoal,
@@ -12,6 +18,7 @@ use crate::entity::{
     },
     mob::{Mob, MobEntity},
 };
+use crate::world::World;
 
 pub struct GhastEntity {
     pub mob_entity: MobEntity,
@@ -20,6 +27,13 @@ pub struct GhastEntity {
 }
 
 impl GhastEntity {
+    /// `Ghast.explosionPower` default (`Ghast.java`, `ExplosionPower` NBT default 1).
+    pub const DEFAULT_EXPLOSION_POWER: u8 = 1;
+    /// `Ghast.xpReward`.
+    pub const XP_REWARD: u32 = 5;
+    /// `Attributes.FLYING_SPEED` for the ghast.
+    pub const FLYING_SPEED: f64 = 0.06;
+
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
         // Vanilla: `Ghast`'s constructor replaces the default `MoveControl` with
@@ -28,14 +42,10 @@ impl GhastEntity {
         let ghast = Self {
             mob_entity,
             is_charging: AtomicBool::new(false),
-            explosion_power: AtomicU8::new(1),
+            explosion_power: AtomicU8::new(Self::DEFAULT_EXPLOSION_POWER),
         };
 
         let mob_arc = Arc::new(ghast);
-        let mob_weak: Weak<dyn Mob> = {
-            let mob_arc: Arc<dyn Mob> = mob_arc.clone();
-            Arc::downgrade(&mob_arc)
-        };
         let ghast_weak = Arc::downgrade(&mob_arc);
 
         {
@@ -52,7 +62,7 @@ impl GhastEntity {
 
             // Vanilla: Ghast.java:57-59.
             goal_selector.add_goal(5, Box::new(GhastRandomFloatAroundGoal::new()));
-            goal_selector.add_goal(7, Box::new(GhastLookGoal::new(mob_weak.clone())));
+            goal_selector.add_goal(7, Box::new(GhastLookGoal::new()));
             goal_selector.add_goal(7, Box::new(GhastShootFireballGoal::new(ghast_weak)));
 
             // Vanilla: Ghast.java:60-61.
@@ -62,21 +72,72 @@ impl GhastEntity {
         mob_arc
     }
 
+    /// `Ghast.setCharging`: updates the synced `DATA_IS_CHARGING`.
     pub fn set_charging(&self, charging: bool) {
-        // You would also sync this to the client via EntityMetadata here
         self.is_charging.store(charging, Ordering::Relaxed);
+        let entity = &self.mob_entity.living_entity.entity;
+        entity.send_meta_data(
+            &[Metadata::new(
+                tracked_data::ghast::DATA_IS_CHARGING,
+                charging,
+            )],
+            None,
+        );
     }
 
+    #[must_use]
     pub fn is_charging(&self) -> bool {
         self.is_charging.load(Ordering::Relaxed)
     }
 
+    /// `Ghast.getExplosionPower`.
+    #[must_use]
     pub fn explosion_power(&self) -> u8 {
         self.explosion_power.load(Ordering::Relaxed)
     }
+
+    /// Upstream-named alias of [`Self::explosion_power`].
+    #[must_use]
+    pub fn get_explosion_power(&self) -> u8 {
+        self.explosion_power()
+    }
+
+    pub fn set_explosion_power(&self, power: u8) {
+        self.explosion_power.store(power, Ordering::Relaxed);
+    }
+
+    /// `Ghast.checkGhastSpawnRules` (`Ghast.java:149-153`): not in Peaceful, then a 1-in-20
+    /// roll. The trailing `checkMobSpawnRules` spawn-block test is left to the spawn
+    /// placement check, like the other Pumpkin spawn-rule predicates.
+    #[must_use]
+    pub fn check_ghast_spawn_rules(world: &World, _pos: &BlockPos) -> bool {
+        if world.level_info.load().difficulty == pumpkin_util::Difficulty::Peaceful {
+            return false;
+        }
+        rand::random_range(0..20) == 0
+    }
 }
 
-impl NBTStorage for GhastEntity {}
+impl NBTStorage for GhastEntity {
+    /// `Ghast.addAdditionalSaveData` (`Ghast.java:160-164`).
+    fn write_nbt<'a>(&'a self, nbt: &'a mut NbtCompound) -> NbtFuture<'a, ()> {
+        Box::pin(async move {
+            self.mob_entity.living_entity.write_nbt(nbt).await;
+            nbt.put_byte("ExplosionPower", self.explosion_power() as i8);
+        })
+    }
+
+    /// `Ghast.readAdditionalSaveData` (`Ghast.java:166-170`): `getByteOr("ExplosionPower", 1)`.
+    fn read_nbt_non_mut<'a>(&'a self, nbt: &'a NbtCompound) -> NbtFuture<'a, ()> {
+        Box::pin(async move {
+            self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
+            let power = nbt
+                .get_byte("ExplosionPower")
+                .map_or(Self::DEFAULT_EXPLOSION_POWER, |power| power as u8);
+            self.set_explosion_power(power);
+        })
+    }
+}
 
 impl Mob for GhastEntity {
     fn get_mob_entity(&self) -> &MobEntity {
@@ -86,21 +147,60 @@ impl Mob for GhastEntity {
     fn get_mob_gravity(&self) -> f64 {
         0.0 // Ghasts fly, no gravity applied in standard travel
     }
+
+    /// `Ghast.travel` -> `travelFlying(input, 0.02F)`: airborne velocity is scaled by the same
+    /// `0.91F` on every axis.
+    fn get_mob_y_velocity_drag(&self) -> Option<f64> {
+        Some(0.91)
+    }
+
+    /// `Ghast.defineSynchedData`: `DATA_IS_CHARGING`.
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let entity = self.get_entity();
+            if self.is_charging() {
+                entity.send_meta_data(
+                    &[Metadata::new(tracked_data::ghast::DATA_IS_CHARGING, true)],
+                    None,
+                );
+            }
+        })
+    }
+
+    /// `Ghast.hurtServer` (`Ghast.java:101-108`) turns a reflected large fireball into 1000
+    /// damage. Only the damage type reaches this hook, so every `fireball` hit counts as
+    /// reflected; a ghast is only hit by one after a player has deflected it.
+    fn modify_incoming_damage(&self, amount: f32, damage_type: DamageType) -> f32 {
+        if damage_type.id == DamageType::FIREBALL.id {
+            1000.0
+        } else {
+            amount
+        }
+    }
+
+    fn get_base_experience_reward(&self) -> u32 {
+        Self::XP_REWARD
+    }
 }
 
-#[expect(dead_code)]
+/// Vanilla: `Ghast.GhastLookGoal` (`Ghast.java:204-226`), which runs
+/// `Ghast.faceMovementDirection` every tick.
 pub struct GhastLookGoal {
     goal_control: Controls,
-    mob_weak: Weak<dyn Mob>,
+}
+
+impl Default for GhastLookGoal {
+    fn default() -> Self {
+        Self {
+            goal_control: Controls::LOOK,
+        }
+    }
 }
 
 impl GhastLookGoal {
     #[must_use]
-    pub fn new(mob_weak: Weak<dyn Mob>) -> Self {
-        Self {
-            goal_control: Controls::LOOK,
-            mob_weak,
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
@@ -113,31 +213,28 @@ impl Goal for GhastLookGoal {
         true
     }
 
+    /// `Ghast.faceMovementDirection` (`Ghast.java:187-202`): faces the target within 64 blocks,
+    /// or the movement direction without one, setting `yRot` and `yBodyRot` directly.
     fn tick<'a>(&'a mut self, mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
-        Box::pin(async {
+        Box::pin(async move {
             let mob_entity = mob.get_mob_entity();
+            let entity = &mob_entity.living_entity.entity;
             let target_opt = mob_entity.target.lock().await.clone();
 
-            if let Some(target) = target_opt {
-                let mob_pos = mob_entity.living_entity.entity.pos.load();
+            let yaw = if let Some(target) = target_opt {
+                let mob_pos = entity.pos.load();
                 let target_pos = target.get_entity().pos.load();
-
-                if mob_pos.squared_distance_to_vec(&target_pos) < 4096.0 {
-                    let mut look_control = mob_entity
-                        .look_control
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    look_control.look_at(mob, target_pos.x, target_pos.y, target_pos.z);
+                if target_pos.squared_distance_to_vec(&mob_pos) >= 4096.0 {
+                    return;
                 }
+                -(f64::atan2(target_pos.x - mob_pos.x, target_pos.z - mob_pos.z) as f32)
+                    .to_degrees()
             } else {
-                // If no target, face the movement direction
-                let velocity = mob_entity.living_entity.entity.velocity.load();
-                if velocity.x != 0.0 || velocity.z != 0.0 {
-                    let yaw = (-f64::atan2(velocity.x, velocity.z) * (180.0 / std::f64::consts::PI))
-                        as f32;
-                    mob_entity.living_entity.entity.yaw.store(yaw);
-                }
-            }
+                let velocity = entity.velocity.load();
+                -(f64::atan2(velocity.x, velocity.z) as f32).to_degrees()
+            };
+            entity.yaw.store(yaw);
+            entity.body_yaw.store(yaw);
         })
     }
 

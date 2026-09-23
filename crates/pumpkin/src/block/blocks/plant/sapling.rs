@@ -20,6 +20,7 @@ use crate::block::{
     BlockBehaviour, BlockFuture, BonemealArgs, CanPlaceAtArgs, GetStateForNeighborUpdateArgs,
     RandomTickArgs,
 };
+use crate::plugin::api::events::world::structure_grow::{StructureGrowEvent, TreeType};
 use crate::world::World;
 use crate::world::feature_placer::FeatureCache;
 
@@ -254,24 +255,45 @@ async fn grow_tree(world: &Arc<World>, pos: &BlockPos, block: &Block) -> bool {
     }
 }
 
-/// `SaplingBlock.advanceTree` (`SaplingBlock.java:51-57`): stage 0 only ticks the stage up; from
-/// stage 1 the tree grows.
-async fn advance_tree(world: &Arc<World>, pos: &BlockPos, block: &Block, state_id: BlockStateId) {
-    if stage_of(block, state_id) == Some(0) {
-        if let Some(new_state_id) = with_stage(block, state_id, "1") {
-            world
-                .set_block_state(pos, new_state_id, BlockFlags::NOTIFY_ALL)
-                .await;
-        }
-        return;
-    }
-    grow_tree(world, pos, block).await;
-}
-
 impl SaplingBlock {
-    async fn generate(&self, world: &Arc<World>, pos: &BlockPos) {
-        use crate::plugin::api::events::world::structure_grow::{StructureGrowEvent, TreeType};
-        let mut event = StructureGrowEvent::new(*pos, TreeType::Oak, false);
+    /// The `StructureGrowEvent` species for a sapling-tag block.
+    #[must_use]
+    pub fn get_tree_type(block: &Block) -> TreeType {
+        match block.name {
+            "oak_sapling" => TreeType::Oak,
+            "spruce_sapling" => TreeType::Spruce,
+            "birch_sapling" => TreeType::Birch,
+            "jungle_sapling" => TreeType::Jungle,
+            "acacia_sapling" => TreeType::Acacia,
+            "dark_oak_sapling" | "pale_oak_sapling" => TreeType::DarkOak,
+            "cherry_sapling" => TreeType::Cherry,
+            "azalea" | "flowering_azalea" => TreeType::Azalea,
+            "mangrove_propagule" => TreeType::Mangrove,
+            _ => TreeType::Custom,
+        }
+    }
+
+    /// `SaplingBlock.advanceTree` (`SaplingBlock.java:51-57`): stage 0 only ticks the stage up;
+    /// from stage 1 the tree grows. Blocks without a `stage` property (the azaleas) grow straight
+    /// away. `StructureGrowEvent` fires only when a tree is actually about to grow, and a
+    /// cancelled event leaves the sapling untouched.
+    pub async fn advance_tree(
+        world: &Arc<World>,
+        pos: &BlockPos,
+        block: &Block,
+        state_id: BlockStateId,
+        bone_meal: bool,
+    ) {
+        if stage_of(block, state_id) == Some(0) {
+            if let Some(new_state_id) = with_stage(block, state_id, "1") {
+                world
+                    .set_block_state(pos, new_state_id, BlockFlags::NOTIFY_ALL)
+                    .await;
+            }
+            return;
+        }
+
+        let mut event = StructureGrowEvent::new(*pos, Self::get_tree_type(block), bone_meal);
         if let Some(server) = world.server.upgrade() {
             server.plugin_manager.fire(&server, &mut event).await;
         }
@@ -279,8 +301,7 @@ impl SaplingBlock {
             return;
         }
 
-        let (block, state_id) = world.get_block_and_state_id(pos);
-        advance_tree(world, pos, block, state_id).await;
+        grow_tree(world, pos, block).await;
     }
 }
 
@@ -312,7 +333,8 @@ impl BlockBehaviour for SaplingBlock {
             if rand::rng().random_range(0..7) != 0 {
                 return;
             }
-            self.generate(args.world, args.position).await;
+            let (block, state_id) = args.world.get_block_and_state_id(args.position);
+            Self::advance_tree(args.world, args.position, block, state_id, false).await;
         })
     }
 
@@ -336,7 +358,7 @@ impl BlockBehaviour for SaplingBlock {
     /// `SaplingBlock.performBonemeal` (`SaplingBlock.java:74-77`).
     fn perform_bonemeal<'a>(&'a self, args: BonemealArgs<'a>) -> BlockFuture<'a, ()> {
         Box::pin(async move {
-            advance_tree(args.world, args.position, args.block, args.state_id).await;
+            Self::advance_tree(args.world, args.position, args.block, args.state_id, true).await;
         })
     }
 }

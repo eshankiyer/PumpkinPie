@@ -218,6 +218,23 @@ impl IronGolemEntity {
             None,
         );
     }
+
+    pub fn offer_flower(&self, offer: bool) {
+        let entity = self.get_entity();
+        let world = entity.world.load();
+        if offer {
+            self.offer_flower_tick.store(400, Ordering::Relaxed);
+            world.send_entity_status(entity, EntityStatus::OfferFlower, None);
+        } else {
+            self.offer_flower_tick.store(0, Ordering::Relaxed);
+            world.send_entity_status(entity, EntityStatus::StopOfferFlower, None);
+        }
+    }
+
+    #[must_use]
+    pub fn get_offer_flower_tick(&self) -> i32 {
+        self.offer_flower_tick.load(Ordering::Relaxed)
+    }
 }
 
 impl NBTStorage for IronGolemEntity {
@@ -244,6 +261,10 @@ impl NBTStorage for IronGolemEntity {
 }
 
 impl Mob for IronGolemEntity {
+    fn as_iron_golem(&self) -> Option<&IronGolemEntity> {
+        Some(self)
+    }
+
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
     }

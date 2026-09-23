@@ -10,6 +10,7 @@ use crate::entity::{
         avoid_entity::AvoidEntityGoal,
         back_up_if_too_close::BackUpIfTooCloseGoal,
         go_to_wanted_item::GoToWantedItemGoal,
+        interact_with_door::InteractWithDoorGoal,
         look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal,
         melee_attack::MeleeAttackGoal,
@@ -20,8 +21,11 @@ use crate::entity::{
         swim::SwimGoal,
         wander_around::WanderAroundGoal,
     },
+    item::ItemEntity,
     mob::{
-        Mob, MobEntity, piglin_shared,
+        Mob, MobEntity,
+        crossbow_attack_mob::CrossbowAttackMob,
+        piglin_shared,
         zombification::{self, ZombificationTimer},
         zombified_piglin::ZombifiedPiglinEntity,
     },
@@ -30,16 +34,20 @@ use crate::entity::{
 use crate::world::World;
 use pumpkin_data::tag::{self, Taggable};
 use pumpkin_data::{
+    Block,
     damage::DamageType,
     data_component_impl::{EquipmentSlot, KineticWeaponImpl},
     entity::EntityType,
     item::Item,
     item_stack::ItemStack,
-    sound::Sound,
+    sound::{Sound, SoundCategory},
+    tracked_data,
 };
 use pumpkin_nbt::compound::NbtCompound;
+use pumpkin_nbt::tag::NbtTag;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::Difficulty;
+use pumpkin_util::math::position::BlockPos;
 use rand::RngExt;
 
 use crate::entity::ai::target_predicate::TargetData;
@@ -181,9 +189,22 @@ pub struct PiglinEntity {
     /// runs from the synchronous `Mob::wants_to_pick_up_item`, which cannot await the target
     /// mutex. The sample is at most one tick stale.
     has_attack_target: AtomicBool,
+    /// `Piglin.cannotHunt` (NBT `CannotHunt`), shared with the hoglin-hunt target predicate.
+    cannot_hunt: Arc<AtomicBool>,
+    /// `Piglin.DATA_IS_CHARGING_CROSSBOW`.
+    is_charging_crossbow: AtomicBool,
+    /// `Piglin.DATA_IS_DANCING`.
+    is_dancing: AtomicBool,
+    /// `Piglin.inventory`, the 8-slot `SimpleContainer` (NBT `Inventory`).
+    pub inventory: tokio::sync::Mutex<Vec<ItemStack>>,
 }
 
 impl PiglinEntity {
+    /// `Piglin.inventory` size (`new SimpleContainer(8)`).
+    pub const INVENTORY_SIZE: usize = 8;
+    /// `Piglin.xpReward` (inherited `Monster` default).
+    pub const XP_REWARD: u32 = 5;
+
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
         let admiring_ticks = Arc::new(AtomicI32::new(0));
@@ -192,6 +213,7 @@ impl PiglinEntity {
         let hunted_recently_ticks = Arc::new(AtomicI32::new(
             rand::rng().random_range(TIME_BETWEEN_HUNTS_MIN..=TIME_BETWEEN_HUNTS_MAX),
         ));
+        let cannot_hunt = Arc::new(AtomicBool::new(false));
         let piglin = Self {
             mob_entity,
             admiring_ticks: admiring_ticks.clone(),
@@ -201,8 +223,19 @@ impl PiglinEntity {
             hunting_hoglin: AtomicBool::new(false),
             pending_offhand: std::sync::Mutex::new(None),
             has_attack_target: AtomicBool::new(false),
+            cannot_hunt: cannot_hunt.clone(),
+            is_charging_crossbow: AtomicBool::new(false),
+            is_dancing: AtomicBool::new(false),
+            inventory: tokio::sync::Mutex::new(Vec::new()),
         };
         let mob_arc = Arc::new(piglin);
+        // `AbstractPiglin.applyOpenDoorsAbility` (`AbstractPiglin.java:43-47`).
+        mob_arc
+            .mob_entity
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .set_can_open_doors(true);
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
             Arc::downgrade(&mob_arc)
@@ -215,7 +248,7 @@ impl PiglinEntity {
         };
 
         Self::register_goals(&mob_arc, mob_weak, admiring_ticks, is_baby.clone());
-        Self::register_target_goals(&mob_arc, is_baby, hunted_recently_ticks);
+        Self::register_target_goals(&mob_arc, is_baby, hunted_recently_ticks, cannot_hunt);
 
         mob_arc
     }
@@ -236,6 +269,9 @@ impl PiglinEntity {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         goal_selector.add_goal(0, Box::new(SwimGoal::default()));
+        // `InteractWithDoor.create()` in `initCoreActivity` (`PiglinAi.java:144`), with the
+        // same goal port the villager uses for its brain-based door behavior.
+        goal_selector.add_goal(0, Box::new(InteractWithDoorGoal::new(true)));
         goal_selector.add_goal(1, PiglinAdmireGoal::new(admiring_ticks));
         // `PiglinAi.avoidZombified` (`PiglinAi.java:298-302`). Note FIGHT actually outranks
         // AVOID in `updateActivity`'s first-valid list (`PiglinAi.java:307-309`); fleeing wins
@@ -302,7 +338,10 @@ impl PiglinEntity {
         // `initFightActivity` runs `MeleeAttack.create(20)` and `new CrossbowAttack()` side by
         // side (`PiglinAi.java:182-183`); the crossbow goal gates itself on the piglin actually
         // holding one, which `mob/equipment.rs` already gives it a chance of.
-        goal_selector.add_goal(4, Box::new(RangedCrossbowAttackGoal::new(CROSSBOW_RANGE)));
+        goal_selector.add_goal(
+            4,
+            Box::new(RangedCrossbowAttackGoal::new(1.0, CROSSBOW_RANGE as f32)),
+        );
         goal_selector.add_goal(4, Box::new(MeleeAttackGoal::new(1.0, true)));
         goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
         goal_selector.add_goal(
@@ -318,6 +357,7 @@ impl PiglinEntity {
         mob_arc: &Arc<Self>,
         is_baby: F,
         hunted_recently_ticks: Arc<AtomicI32>,
+        cannot_hunt: Arc<AtomicBool>,
     ) where
         F: Fn() -> bool + Clone + Send + Sync + 'static,
     {
@@ -384,21 +424,131 @@ impl PiglinEntity {
                 Some(move |target: TargetData, _world: Arc<World>| {
                     let hunt_gate = is_baby.clone();
                     let hunted = hunted_recently_ticks.clone();
+                    let cannot_hunt = cannot_hunt.clone();
                     async move {
-                        !hunt_gate() && target.age >= 0 && hunted.load(Ordering::Relaxed) <= 0
+                        !hunt_gate()
+                            && !cannot_hunt.load(Ordering::Relaxed)
+                            && target.age >= 0
+                            && hunted.load(Ordering::Relaxed) <= 0
                     }
                 }),
             )),
         );
     }
 
-    fn is_adult(&self) -> bool {
+    #[must_use]
+    pub fn is_adult(&self) -> bool {
         self.mob_entity
             .living_entity
             .entity
             .age
             .load(Ordering::Relaxed)
             >= 0
+    }
+
+    #[must_use]
+    pub fn is_baby(&self) -> bool {
+        !self.is_adult()
+    }
+
+    /// `PiglinAi.isAdmiringItem`: the `ADMIRING_ITEM` memory, here the admire countdown.
+    #[must_use]
+    pub fn is_admiring(&self) -> bool {
+        self.admiring_ticks.load(Ordering::Relaxed) > 0
+    }
+
+    /// `PiglinAi.isAdmiringDisabled`: the `ADMIRING_DISABLED` memory.
+    #[must_use]
+    pub fn is_admiring_disabled(&self) -> bool {
+        self.admiring_disabled_ticks.load(Ordering::Relaxed) > 0
+    }
+
+    /// `PiglinAi.hasEatenRecently` (the `ATE_RECENTLY` memory). The piglin eating path is not
+    /// ported, so the memory is never set.
+    #[must_use]
+    #[allow(clippy::unused_self)]
+    pub const fn has_eaten_recently(&self) -> bool {
+        false
+    }
+
+    /// `Piglin.canHunt` (`Piglin.java:258-261`).
+    #[must_use]
+    pub fn can_hunt(&self) -> bool {
+        !self.cannot_hunt.load(Ordering::Relaxed)
+    }
+
+    /// `Piglin.setCannotHunt` (`Piglin.java:254-256`).
+    pub fn set_cannot_hunt(&self, cannot_hunt: bool) {
+        self.cannot_hunt.store(cannot_hunt, Ordering::Relaxed);
+    }
+
+    #[must_use]
+    pub fn is_charging_crossbow(&self) -> bool {
+        self.is_charging_crossbow.load(Ordering::Relaxed)
+    }
+
+    /// `Piglin.setChargingCrossbow`: updates the synced `DATA_IS_CHARGING_CROSSBOW`.
+    pub fn set_charging_crossbow(&self, is_charging: bool) {
+        self.is_charging_crossbow
+            .store(is_charging, Ordering::Relaxed);
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                tracked_data::piglin::DATA_IS_CHARGING_CROSSBOW,
+                is_charging,
+            )],
+            None,
+        );
+    }
+
+    #[must_use]
+    pub fn is_dancing(&self) -> bool {
+        self.is_dancing.load(Ordering::Relaxed)
+    }
+
+    /// `Piglin.setDancing`: updates the synced `DATA_IS_DANCING`.
+    pub fn set_dancing(&self, is_dancing: bool) {
+        self.is_dancing.store(is_dancing, Ordering::Relaxed);
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                tracked_data::piglin::DATA_IS_DANCING,
+                is_dancing,
+            )],
+            None,
+        );
+    }
+
+    /// `Piglin.addToInventory` (`Piglin.java:134-137`): returns what did not fit.
+    pub async fn add_to_inventory(&self, item: ItemStack) -> Option<ItemStack> {
+        let mut inventory = self.inventory.lock().await;
+        if inventory.len() < Self::INVENTORY_SIZE {
+            inventory.push(item);
+            None
+        } else {
+            Some(item)
+        }
+    }
+
+    /// `inventory.removeAllItems().forEach(this::spawnAtLocation)`, shared by
+    /// `Piglin.dropCustomDeathLoot` (`Piglin.java:129-132`) and `Piglin.finishConversion`
+    /// (`Piglin.java:279-283`).
+    pub async fn drop_inventory(&self) {
+        let items = std::mem::take(&mut *self.inventory.lock().await);
+        let entity = &self.mob_entity.living_entity.entity;
+        let world = entity.world.load_full();
+        let pos = entity.pos.load();
+        for item in items {
+            if !item.is_empty() {
+                let item_entity =
+                    ItemEntity::new(Entity::new(world.clone(), pos, &EntityType::ITEM), item);
+                world.spawn_entity(Arc::new(item_entity)).await;
+            }
+        }
+    }
+
+    /// `Piglin.checkPiglinSpawnRules`: never on a nether wart block.
+    #[must_use]
+    pub fn check_piglin_spawn_rules(world: &World, pos: &BlockPos) -> bool {
+        world.get_block(&pos.down()) != &Block::NETHER_WART_BLOCK
     }
 
     /// `PiglinAi.isNotHoldingLovedItemInOffHand` (`PiglinAi.java:849-851`).
@@ -441,6 +591,14 @@ impl PiglinEntity {
             .send_equipment_changes(&[(EquipmentSlot::OFF_HAND, stack)]);
         self.admiring_ticks
             .store(ADMIRE_DURATION_TICKS, Ordering::Relaxed);
+        // `PiglinAi.updateActivity` plays `getSoundForCurrentActivity` on the switch into the
+        // `ADMIRE_ITEM` activity (`PiglinAi.java:307-314`): `PIGLIN_ADMIRING_ITEM`.
+        let entity = &self.mob_entity.living_entity.entity;
+        entity.world.load().play_sound(
+            Sound::EntityPiglinAdmiringItem,
+            SoundCategory::Hostile,
+            &entity.pos.load(),
+        );
     }
 }
 
@@ -450,6 +608,22 @@ impl NBTStorage for PiglinEntity {
         Box::pin(async {
             self.mob_entity.living_entity.write_nbt(nbt).await;
             self.zombification.write_nbt(nbt);
+            // `Piglin.addAdditionalSaveData` (`Piglin.java:107-112`).
+            nbt.put_bool("IsBaby", self.is_baby());
+            nbt.put_bool("CannotHunt", !self.can_hunt());
+            let items: Vec<NbtTag> = self
+                .inventory
+                .lock()
+                .await
+                .iter()
+                .filter(|item| !item.is_empty())
+                .map(|item| {
+                    let mut item_nbt = NbtCompound::new();
+                    item.write_item_stack(&mut item_nbt);
+                    NbtTag::Compound(item_nbt)
+                })
+                .collect();
+            nbt.put_list("Inventory", items);
         })
     }
 
@@ -460,6 +634,18 @@ impl NBTStorage for PiglinEntity {
         Box::pin(async {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
             self.zombification.read_nbt(nbt);
+            // `Piglin.readAdditionalSaveData` (`Piglin.java:115-120`). The baby flag is carried
+            // by the entity age here (see `is_adult`), so `IsBaby` is only written.
+            self.set_cannot_hunt(nbt.get_bool("CannotHunt").unwrap_or(false));
+            let items: Vec<ItemStack> = nbt
+                .get_list("Inventory")
+                .unwrap_or_default()
+                .iter()
+                .filter_map(NbtTag::extract_compound)
+                .filter_map(ItemStack::read_item_stack)
+                .take(Self::INVENTORY_SIZE)
+                .collect();
+            *self.inventory.lock().await = items;
             self.mob_entity.living_entity.entity.send_meta_data(
                 &[Metadata::new(
                     pumpkin_data::tracked_data::piglin::DATA_IMMUNE_TO_ZOMBIFICATION,
@@ -474,6 +660,54 @@ impl NBTStorage for PiglinEntity {
 impl Mob for PiglinEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `AbstractPiglin`/`Piglin.defineSynchedData`.
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            let mut meta = vec![Metadata::new(
+                tracked_data::piglin::DATA_IMMUNE_TO_ZOMBIFICATION,
+                self.zombification.is_immune(),
+            )];
+            if self.is_charging_crossbow() {
+                meta.push(Metadata::new(
+                    tracked_data::piglin::DATA_IS_CHARGING_CROSSBOW,
+                    true,
+                ));
+            }
+            if self.is_dancing() {
+                meta.push(Metadata::new(tracked_data::piglin::DATA_IS_DANCING, true));
+            }
+            self.get_entity().send_meta_data(&meta, None);
+        })
+    }
+
+    fn as_crossbow_attack_mob(&self) -> Option<&dyn CrossbowAttackMob> {
+        Some(self)
+    }
+
+    fn get_base_experience_reward(&self) -> u32 {
+        Self::XP_REWARD
+    }
+
+    /// The inventory half of `Piglin.dropCustomDeathLoot` (`Piglin.java:129-132`), gated like
+    /// the rest of `dropAllDeathLoot` by `mob_drops`.
+    fn on_mob_death<'a>(&'a self, _cause: Option<&'a dyn EntityBase>) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            if self
+                .mob_entity
+                .living_entity
+                .entity
+                .world
+                .load()
+                .level_info
+                .load()
+                .game_rules
+                .mob_drops
+            {
+                self.drop_inventory().await;
+            }
+        })
     }
 
     /// Vanilla `Piglin.canUseNonMeleeWeapon` (`Piglin.java:352-356`) permits crossbows and
@@ -613,6 +847,8 @@ impl Mob for PiglinEntity {
             }
 
             self.admiring_ticks.store(0, Ordering::Relaxed);
+            // `wasHurtBy` also erases `CELEBRATE_LOCATION`/`DANCING` (`PiglinAi.java:560-561`).
+            self.set_dancing(false);
             // A ground pickup taken this tick but not yet equipped is cancelled too, so a
             // piglin hit in the same tick it grabbed gold does not start admiring anyway.
             self.pending_offhand
@@ -729,6 +965,8 @@ impl Mob for PiglinEntity {
                         Sound::EntityPiglinConvertedToZombified,
                     );
                 }
+                // `Piglin.finishConversion` (`Piglin.java:279-283`) empties the inventory first.
+                self.drop_inventory().await;
                 zombification::convert_to(
                     &self.mob_entity,
                     &EntityType::ZOMBIFIED_PIGLIN,
@@ -738,5 +976,15 @@ impl Mob for PiglinEntity {
                 .await;
             }
         })
+    }
+}
+
+impl CrossbowAttackMob for PiglinEntity {
+    fn set_charging_crossbow(&self, is_charging: bool) {
+        Self::set_charging_crossbow(self, is_charging);
+    }
+
+    fn is_charging_crossbow(&self) -> bool {
+        Self::is_charging_crossbow(self)
     }
 }

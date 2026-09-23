@@ -11,7 +11,7 @@ use pumpkin_data::{
     item_stack::ItemStack, sound::Sound, sound::SoundCategory,
 };
 use pumpkin_nbt::compound::NbtCompound;
-use pumpkin_protocol::bedrock::server::actor_event::ActorEventType;
+use pumpkin_protocol::bedrock::server::actor_event::ActorEventID;
 use pumpkin_protocol::{
     codec::{item_stack_seralizer::ItemStackSerializer, optional_int::OptionalInt},
     java::client::play::Metadata,
@@ -158,7 +158,7 @@ impl FireworkRocketEntity {
         world.send_entity_status(
             entity,
             EntityStatus::FireworksExplode,
-            Some(ActorEventType::FireworksExplode),
+            Some(ActorEventID::FireworksExplode),
         );
 
         let explosion_count = self

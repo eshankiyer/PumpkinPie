@@ -1220,6 +1220,16 @@ impl Navigator {
             goal.speed,
         ))
     }
+
+    #[must_use]
+    pub const fn get_path(&self) -> Option<&Path> {
+        self.current_path.as_ref()
+    }
+
+    #[must_use]
+    pub const fn get_path_mut(&mut self) -> Option<&mut Path> {
+        self.current_path.as_mut()
+    }
 }
 
 #[cfg(test)]

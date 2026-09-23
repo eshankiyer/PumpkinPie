@@ -16,6 +16,8 @@ use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::potion::Potion;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_data::tag::{self, Taggable};
+use pumpkin_data::tracked_data;
+use pumpkin_protocol::java::client::play::Metadata;
 
 use crate::entity::attributes::{AttributeInstance, Modifier, ModifierOperation};
 use crate::entity::{
@@ -107,6 +109,15 @@ impl WitchEntity {
         self.drink_ticks_remaining.load(Relaxed) >= 0
     }
 
+    /// Vanilla: `Witch.setUsingItem` -- writes the synced `DATA_USING_ITEM` flag that drives the
+    /// client-side drinking animation.
+    fn set_using_item(&self, using: bool) {
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(tracked_data::witch::DATA_USING_ITEM, using)],
+            None,
+        );
+    }
+
     /// Vanilla `Witch.aiStep`'s potion-drinking state machine (non-client only).
     async fn tick_drinking(&self) {
         if self.is_drinking_potion() {
@@ -125,6 +136,7 @@ impl WitchEntity {
     /// and removes the drinking speed penalty.
     async fn finish_drinking(&self) {
         let living = &self.mob_entity.living_entity;
+        self.set_using_item(false);
         let item = living
             .entity_equipment
             .lock()
@@ -228,6 +240,7 @@ impl WitchEntity {
             .await
             .put(&EquipmentSlot::MAIN_HAND, stack);
         self.drink_ticks_remaining.store(use_ticks, Relaxed);
+        self.set_using_item(true);
 
         living.entity.world.load().play_sound(
             Sound::EntityWitchDrink,

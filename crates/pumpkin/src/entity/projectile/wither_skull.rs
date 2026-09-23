@@ -15,9 +15,10 @@ use crate::{
 use pumpkin_data::damage::DamageType;
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::potion::Effect;
-use pumpkin_data::{Block, tag::Taggable};
+use pumpkin_data::{Block, tag::Taggable, tracked_data};
 use pumpkin_nbt::compound::NbtCompound;
-use pumpkin_util::Difficulty;
+use pumpkin_protocol::java::client::play::Metadata;
+use pumpkin_util::{Difficulty, math::vector3::Vector3};
 
 /// `WitherSkull.getBlockExplosionResistance` (`WitherSkull.java:50-55`): a "dangerous"
 /// (charged-boss) skull caps a destructible block's resistance at 0.8, matching
@@ -79,8 +80,8 @@ const fn wither_duration_ticks(difficulty: Difficulty) -> i32 {
 
 pub struct WitherSkullEntity {
     pub thrown: ThrownItemEntity,
-    /// Fired by charged Wither boss attacks. Data-only for now: the boss AI that sets this
-    /// (and the inertia/block-resistance behavior it should drive) is out of scope here.
+    /// `WitherSkull.DATA_DANGEROUS`: set by the Wither boss's rare charged skulls. Drives
+    /// the harsher flight inertia and the capped block-explosion resistance.
     pub dangerous: AtomicBool,
 }
 
@@ -101,21 +102,52 @@ impl WitherSkullEntity {
         }
     }
 
+    /// `WitherSkull(Level, LivingEntity, Vec3)` -> `AbstractHurtingProjectile(type, mob,
+    /// direction, level)` (`AbstractHurtingProjectile.java:46-50`): the initial movement is
+    /// `direction.normalize().scale(accelerationPower)` (`assignDirectionalMovement`) and the
+    /// rotation is copied from the shooter. `WitherBoss.performRangedAttack`
+    /// (`WitherBoss.java:423-442`) then places the skull at the firing head, so the position
+    /// the caller spawned `entity` at is kept rather than the owner's eye position.
     #[must_use]
-    pub fn new_shot(entity: Entity, shooter: &Entity, dangerous: bool) -> Self {
+    pub fn new_shot(
+        entity: Entity,
+        shooter: &Entity,
+        dangerous: bool,
+        direction: Vector3<f64>,
+    ) -> Self {
+        let spawn_pos = entity.pos.load();
         let thrown = ThrownItemEntity::new(entity, shooter, GRAVITY);
+        thrown.entity.pos.store(spawn_pos);
+        thrown.entity.velocity.store(direction.normalize().multiply(
+            ACCELERATION_POWER,
+            ACCELERATION_POWER,
+            ACCELERATION_POWER,
+        ));
+        thrown
+            .entity
+            .set_rotation(shooter.yaw.load(), shooter.pitch.load());
+
         Self {
             thrown,
             dangerous: AtomicBool::new(dangerous),
         }
     }
 
+    #[must_use]
     pub fn is_dangerous(&self) -> bool {
         self.dangerous.load(Ordering::Relaxed)
     }
 
+    /// `WitherSkull.setDangerous`: updates the synced `DATA_DANGEROUS` flag.
     pub fn set_dangerous(&self, value: bool) {
         self.dangerous.store(value, Ordering::Relaxed);
+        self.thrown.entity.send_meta_data(
+            &[Metadata::new(
+                tracked_data::wither_skull::DATA_DANGEROUS,
+                value,
+            )],
+            None,
+        );
     }
 }
 
@@ -134,6 +166,18 @@ impl NBTStorage for WitherSkullEntity {
 }
 
 impl EntityBase for WitherSkullEntity {
+    fn init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            self.get_entity().send_meta_data(
+                &[Metadata::new(
+                    tracked_data::wither_skull::DATA_DANGEROUS,
+                    self.is_dangerous(),
+                )],
+                None,
+            );
+        })
+    }
+
     fn tick<'a>(
         &'a self,
         caller: &'a Arc<dyn EntityBase>,

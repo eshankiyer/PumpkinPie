@@ -1,25 +1,42 @@
 // Legacy invariant checks retained for vanilla behavior; migrate these paths before removing this allow.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+use std::borrow::Cow;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
 
 use crossbeam::atomic::AtomicCell;
+use pumpkin_data::data_component_impl::EquipmentSlot;
+use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::EntityType;
-use pumpkin_data::sound::Sound;
+use pumpkin_data::item::{Item, JavaToBedrockItemMapping};
+use pumpkin_data::item_stack::ItemStack;
+use pumpkin_data::sound::{Sound, SoundCategory};
+use pumpkin_data::villager::{
+    VillagerTrade, VillagerTradeModifier, VillagerTradeSet, WANDERING_TRADER_TRADE_SET_BUYING,
+    WANDERING_TRADER_TRADE_SET_COMMON, WANDERING_TRADER_TRADE_SET_UNCOMMON,
+};
 use pumpkin_inventory::merchant::merchant_screen_handler::MerchantScreenHandler;
 use pumpkin_inventory::screen_handler::{
     BoxFuture, InventoryPlayer, ScreenHandlerFactory, SharedScreenHandler,
 };
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_nbt::tag::NbtTag;
+use pumpkin_protocol::codec::item_stack_seralizer::ItemStackSerializer;
 use pumpkin_protocol::codec::var_int::VarInt;
 use pumpkin_protocol::java::client::play::CMerchantOffers;
 use pumpkin_util::math::position::BlockPos;
 use pumpkin_util::math::vector3::Vector3;
 use pumpkin_util::text::TextComponent;
 use pumpkin_world::inventory::SimpleInventory;
+use rand::RngExt;
+use rand::seq::IndexedRandom;
 use tokio::sync::Mutex;
 
+use super::villager::{
+    apply_potion, apply_random_dye, apply_random_stew_effect, enchant_trade_item,
+    enchanted_book_offer_items, trigger_trade_advancement,
+};
+use crate::entity::ageable::{AgeableData, AgeableMob};
 use crate::entity::player::Player;
 use crate::entity::{
     Entity, EntityBase, NBTStorage,
@@ -32,6 +49,7 @@ use crate::entity::{
     ai::pathfinder::NavigatorGoal,
     mob::{Mob, MobEntity},
 };
+use crate::world::World;
 
 /// Vanilla `WanderingTrader::despawnDelay` default (`WanderingTrader.java:52-53`): `0`,
 /// meaning "never auto-despawns" until something sets it positive (`maybeDespawn` only acts
@@ -43,6 +61,91 @@ const DEFAULT_DESPAWN_DELAY: i32 = 0;
 // (`MerchantContainer.java:79-81`).
 fn trading_player_matches(trading_player: Option<uuid::Uuid>, player_uuid: uuid::Uuid) -> bool {
     trading_player.is_some_and(|trading_player| trading_player == player_uuid)
+}
+
+/// `PotionContents.createItemStack(Items.POTION, Potions.INVISIBILITY)`
+/// (`WanderingTrader.java:66`), the stack the dusk `UseItemGoal` drinks.
+fn create_invisibility_potion() -> ItemStack {
+    let mut stack = ItemStack::new(1, &Item::POTION);
+    apply_potion(&mut stack, "invisibility");
+    stack
+}
+
+/// Vanilla `AbstractVillager.addOffersFromTradeSet` /
+/// `addOffersFromItemListingsWithoutDuplicates` (`AbstractVillager.java:232-253`): draws
+/// `amount` distinct listings at random, skipping any whose item modifier fails to produce an
+/// offer, and applies each listing's item modifier to the result.
+fn add_offers_from_trade_set(
+    offers: &mut Vec<pumpkin_protocol::java::client::play::MerchantOffer>,
+    trade_set: VillagerTradeSet,
+    rng: &mut impl rand::Rng,
+) {
+    let mut remaining: Vec<&'static VillagerTrade> = trade_set.trades.iter().collect();
+    let mut added = 0;
+    while added < trade_set.amount && !remaining.is_empty() {
+        let index = rng.random_range(0..remaining.len());
+        let trade = remaining.remove(index);
+
+        let mut base_cost_a = ItemStack::new(trade.wants.count as u8, trade.wants.item);
+        let mut output = ItemStack::new(trade.gives.count as u8, trade.gives.item);
+        let mut cost_b = trade
+            .wants_b
+            .as_ref()
+            .map(|b| ItemStack::new(b.count as u8, b.item));
+
+        match trade.modifier {
+            VillagerTradeModifier::None => {}
+            VillagerTradeModifier::EnchantRandomly => {
+                let Some(items) = enchanted_book_offer_items(rng) else {
+                    continue;
+                };
+                (base_cost_a, output, cost_b) = items;
+            }
+            VillagerTradeModifier::EnchantWithLevels { min, max } => {
+                let Some((enchanted, additional_cost)) =
+                    enchant_trade_item(rng, trade.gives.item, min, max)
+                else {
+                    continue;
+                };
+                output = enchanted;
+                let count = i32::from(base_cost_a.item_count)
+                    .saturating_add(additional_cost)
+                    .clamp(0, i32::from(base_cost_a.get_max_stack_size()));
+                if count == 0 {
+                    continue;
+                }
+                base_cost_a.set_count(count as u8);
+            }
+            // Explorer maps need a villager's structure search; no wandering-trader listing
+            // uses one.
+            VillagerTradeModifier::ExplorationMap { .. } => continue,
+            VillagerTradeModifier::RandomDyes => apply_random_dye(rng, &mut output),
+            VillagerTradeModifier::RandomPotion => {
+                let Some(potion_name) =
+                    pumpkin_data::tag::Potion::MINECRAFT_TRADEABLE.0.choose(rng)
+                else {
+                    continue;
+                };
+                apply_potion(&mut output, potion_name);
+            }
+            VillagerTradeModifier::SuspiciousStew => apply_random_stew_effect(rng, &mut output),
+            VillagerTradeModifier::Potion(potion) => apply_potion(&mut output, potion),
+        }
+
+        offers.push(pumpkin_protocol::java::client::play::MerchantOffer {
+            base_cost_a: ItemStackSerializer(Cow::Owned(base_cost_a)),
+            output: ItemStackSerializer(Cow::Owned(output)),
+            cost_b: cost_b.map(|stack| ItemStackSerializer(Cow::Owned(stack))),
+            reward_exp: true,
+            uses: 0,
+            max_uses: trade.max_uses,
+            xp: trade.xp,
+            special_price: 0,
+            price_multiplier: trade.price_multiplier,
+            demand: 0,
+        });
+        added += 1;
+    }
 }
 
 /// The seven `AvoidEntityGoal`s of `WanderingTrader.registerGoals`
@@ -75,7 +178,7 @@ const AVOIDED: &[(&EntityType, f64)] = &[
 /// `VillagerEntity` already has rather than introducing a shared base for a two-user case.
 ///
 /// The two `UseItemGoal`s (`WanderingTrader.java:62-78`, drink invisibility after dark and milk
-/// at dawn) remain deferred because vanilla's generic `UseItemGoal` has no Rust counterpart yet.
+/// at dawn) are ported as the trader-specific `WanderingTraderUseItemGoal`.
 /// `LookAtTradingPlayerGoal` (`WanderingTrader.java:88`) is ported as
 ///   [`crate::entity::ai::goal::look_at_trading_player::LookAtTradingPlayerGoal`].
 pub struct WanderingTraderEntity {
@@ -91,6 +194,7 @@ pub struct WanderingTraderEntity {
     /// is what makes `isTrading()` (`WanderingTrader.java:212`) and `TradeWithPlayerGoal`
     /// meaningful here. Mirrors `VillagerEntity::trading_player`.
     pub trading_player: std::sync::Mutex<Option<uuid::Uuid>>,
+    pub ageable_data: AgeableData,
     pub self_weak: std::sync::Mutex<Option<Weak<Self>>>,
 }
 
@@ -104,6 +208,7 @@ impl WanderingTraderEntity {
             despawn_delay: AtomicI32::new(DEFAULT_DESPAWN_DELAY),
             wander_target: AtomicCell::new(None),
             trading_player: std::sync::Mutex::new(None),
+            ageable_data: AgeableData::default(),
             self_weak: std::sync::Mutex::new(None),
         };
         let mob_arc = Arc::new(trader);
@@ -112,6 +217,7 @@ impl WanderingTraderEntity {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
             Arc::downgrade(&mob_arc)
         };
+        let trader_weak = Arc::downgrade(&mob_arc);
 
         {
             let mut goal_selector = mob_arc
@@ -122,6 +228,21 @@ impl WanderingTraderEntity {
 
             // `WanderingTrader.registerGoals` (`WanderingTrader.java:60-94`).
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
+            // `WanderingTrader.java:62-78`: the two priority-0 `UseItemGoal`s.
+            goal_selector.add_goal(
+                0,
+                Box::new(WanderingTraderUseItemGoal::new(
+                    trader_weak.clone(),
+                    UseItemKind::Invisibility,
+                )),
+            );
+            goal_selector.add_goal(
+                0,
+                Box::new(WanderingTraderUseItemGoal::new(
+                    trader_weak,
+                    UseItemKind::Milk,
+                )),
+            );
             goal_selector.add_goal(1, Box::new(TradeWithPlayerGoal::new(0.5)));
             // `WanderingTrader.java:89`: `addGoal(1, new LookAtTradingPlayerGoal(this))`.
             goal_selector.add_goal(
@@ -164,6 +285,21 @@ impl WanderingTraderEntity {
         self.despawn_delay.load(Ordering::Relaxed)
     }
 
+    /// Vanilla `AbstractVillager.isTrading`: a trading player is set.
+    #[must_use]
+    pub fn is_trading(&self) -> bool {
+        self.trading_player
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+    }
+
+    /// Vanilla `WanderingTrader.getWanderTarget` (`WanderingTrader.java:221-223`).
+    #[must_use]
+    pub fn get_wander_target(&self) -> Option<BlockPos> {
+        self.wander_target.load()
+    }
+
     /// Vanilla `WanderingTrader.setWanderTarget` (`WanderingTrader.java:217-219`).
     pub fn set_wander_target(&self, target: Option<BlockPos>) {
         self.wander_target.store(target);
@@ -181,77 +317,220 @@ impl WanderingTraderEntity {
     /// shared `AbstractVillager.addOffersFromTradeSet` helper: pulls buying, then uncommon,
     /// then common trade sets, in that fixed order.
     pub async fn update_trades(&self) {
-        use pumpkin_data::villager::{
-            WANDERING_TRADER_TRADE_SET_BUYING, WANDERING_TRADER_TRADE_SET_COMMON,
-            WANDERING_TRADER_TRADE_SET_UNCOMMON,
-        };
-        use pumpkin_protocol::codec::item_stack_seralizer::ItemStackSerializer;
-        use rand::seq::IndexedRandom;
-        use std::borrow::Cow;
-
         let mut offers = self.offers.lock().await;
         let mut rng = rand::rng();
-
         for trade_set in [
             WANDERING_TRADER_TRADE_SET_BUYING,
             WANDERING_TRADER_TRADE_SET_UNCOMMON,
             WANDERING_TRADER_TRADE_SET_COMMON,
         ] {
-            let chosen_trades = trade_set.trades.sample(&mut rng, trade_set.amount as usize);
-            for trade in chosen_trades {
-                offers.push(pumpkin_protocol::java::client::play::MerchantOffer {
-                    base_cost_a: ItemStackSerializer(Cow::Owned(
-                        pumpkin_data::item_stack::ItemStack::new(
-                            trade.wants.count as u8,
-                            trade.wants.item,
-                        ),
-                    )),
-                    output: ItemStackSerializer(Cow::Owned(
-                        pumpkin_data::item_stack::ItemStack::new(
-                            trade.gives.count as u8,
-                            trade.gives.item,
-                        ),
-                    )),
-                    cost_b: trade.wants_b.as_ref().map(|b| {
-                        ItemStackSerializer(Cow::Owned(pumpkin_data::item_stack::ItemStack::new(
-                            b.count as u8,
-                            b.item,
-                        )))
-                    }),
-                    reward_exp: true,
-                    uses: 0,
-                    max_uses: trade.max_uses,
-                    xp: trade.xp,
-                    special_price: 0,
-                    price_multiplier: trade.price_multiplier,
-                    demand: 0,
-                });
-            }
+            add_offers_from_trade_set(&mut offers, trade_set, &mut rng);
         }
+    }
+
+    /// Regenerates the offer list from scratch.
+    pub async fn generate_trades(&self) {
+        self.offers.lock().await.clear();
+        self.update_trades().await;
     }
 
     pub async fn open_trading_screen(&self, player: &Arc<Player>) {
         if let Some(sync_id) = player.open_handled_screen(self, None).await {
             let offers = self.offers.lock().await.clone();
-            player
-                .send_client_packet(&CMerchantOffers::new(
-                    VarInt(sync_id as i32),
-                    offers,
-                    // Vanilla `WanderingTrader.mobInteract` opens `openTradingScreen(player,
-                    // displayName, 1)` -- wandering traders have no level progression, so the
-                    // level is always fixed at 1.
-                    VarInt(1),
-                    VarInt(0),
-                    false,
-                    false,
-                ))
-                .await;
+            self.send_trade_offers(player, sync_id, offers).await;
+        }
+    }
+
+    fn bedrock_trade_item(stack: &ItemStack, count: u8) -> NbtCompound {
+        let mut item = NbtCompound::new();
+        if stack.is_empty() {
+            return item;
+        }
+        let Some(mapping) = JavaToBedrockItemMapping::from_java_item_id(stack.item.id) else {
+            return item;
+        };
+        item.put_byte("Count", count as i8);
+        item.put_short("Damage", mapping.bedrock_data as i16);
+        item.put_string("Name", mapping.bedrock_item.registry_key.to_owned());
+        item
+    }
+
+    fn bedrock_trade_data(
+        offers: &[pumpkin_protocol::java::client::play::MerchantOffer],
+    ) -> NbtCompound {
+        let mut recipes = Vec::with_capacity(offers.len());
+        for (index, offer) in offers.iter().enumerate() {
+            let base_cost = &offer.base_cost_a.0;
+            let demand_bonus = (i32::from(base_cost.item_count).saturating_mul(offer.demand) as f32
+                * offer.price_multiplier)
+                .floor()
+                .max(0.0) as i32;
+            let adjusted_count = i32::from(base_cost.item_count)
+                .saturating_add(demand_bonus)
+                .saturating_add(offer.special_price)
+                .clamp(1, i32::from(base_cost.get_max_stack_size()))
+                as u8;
+
+            let mut recipe = NbtCompound::new();
+            recipe.put_int("netId", index as i32 + 1);
+            recipe.put_int(
+                "maxUses",
+                if offer.is_out_of_stock() {
+                    0
+                } else {
+                    offer.max_uses
+                },
+            );
+            recipe.put_int("traderExp", offer.xp);
+            recipe.put_float("priceMultiplierA", offer.price_multiplier);
+            recipe.put_float("priceMultiplierB", 0.0);
+            recipe.put_compound(
+                "sell",
+                Self::bedrock_trade_item(&offer.output.0, offer.output.0.item_count),
+            );
+            recipe.put_int("buyCountA", i32::from(base_cost.item_count));
+            recipe.put_int(
+                "buyCountB",
+                offer
+                    .cost_b
+                    .as_ref()
+                    .map_or(0, |cost| i32::from(cost.0.item_count)),
+            );
+            recipe.put_int("demand", offer.demand);
+            recipe.put_int("tier", 0);
+            recipe.put_compound("buyA", Self::bedrock_trade_item(base_cost, adjusted_count));
+            recipe.put_compound(
+                "buyB",
+                offer.cost_b.as_ref().map_or_else(NbtCompound::new, |cost| {
+                    Self::bedrock_trade_item(&cost.0, cost.0.item_count)
+                }),
+            );
+            recipe.put_int("uses", offer.uses);
+            recipe.put_byte("rewardExp", i8::from(offer.reward_exp));
+            recipes.push(NbtTag::Compound(recipe));
+        }
+
+        let mut data = NbtCompound::new();
+        data.put_list("Recipes", recipes);
+        data.put_list(
+            "TierExpRequirements",
+            std::iter::once(0)
+                .enumerate()
+                .map(|(tier, xp)| {
+                    let mut requirement = NbtCompound::new();
+                    requirement.put_int(&tier.to_string(), xp);
+                    NbtTag::Compound(requirement)
+                })
+                .collect(),
+        );
+        data
+    }
+
+    async fn send_trade_offers(
+        &self,
+        player: &Player,
+        sync_id: u8,
+        offers: Vec<pumpkin_protocol::java::client::play::MerchantOffer>,
+    ) {
+        use pumpkin_protocol::{bedrock::client::CUpdateTrade, codec::var_long::VarLong};
+
+        let java = CMerchantOffers::new(
+            VarInt(i32::from(sync_id)),
+            offers.clone(),
+            // Vanilla `WanderingTrader.mobInteract` opens `openTradingScreen(player,
+            // displayName, 1)` -- wandering traders have no level progression, so the
+            // level is always fixed at 1.
+            VarInt(1),
+            VarInt(0),
+            false,
+            false,
+        );
+        let bedrock = CUpdateTrade {
+            container_id: sync_id,
+            r#type: 15,
+            size: VarInt(0),
+            trader_tier: VarInt(0),
+            entity_unique_id: VarLong(i64::from(self.get_entity().entity_id)),
+            last_trading_player: VarLong(i64::from(player.entity_id())),
+            display_name: ScreenHandlerFactory::get_display_name(self).to_pretty_console(),
+            use_new_trade_screen: true,
+            using_economy_trade: true,
+            data: Self::bedrock_trade_data(&offers),
+        };
+        player
+            .client
+            .enqueue_packet_editioned(&java, &bedrock)
+            .await;
+    }
+
+    /// Vanilla `AbstractVillager.stillValid` (`AbstractVillager.java:304-306`): the menu
+    /// stays open only for the current trading player, while the trader is alive and the
+    /// player is within entity interaction range + 4.
+    fn can_continue_trading(&self, inventory_player: &dyn InventoryPlayer) -> bool {
+        let Some(player) = inventory_player.as_any().downcast_ref::<Player>() else {
+            return false;
+        };
+        let trading_player = *self
+            .trading_player
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !trading_player_matches(trading_player, player.get_entity().entity_uuid) {
+            return false;
+        }
+        let entity = self.get_entity();
+        let range = player
+            .living_entity
+            .get_attribute_value(&pumpkin_data::attributes::Attributes::ENTITY_INTERACTION_RANGE)
+            + 4.0;
+        entity.is_alive()
+            && entity
+                .bounding_box
+                .load()
+                .squared_magnitude(player.eye_position())
+                < range * range
+    }
+
+    /// Vanilla `AbstractVillager.notifyTrade` (`AbstractVillager.java:135-142`) plus
+    /// `WanderingTrader.rewardTradeXp` (`WanderingTrader.java:158-163`).
+    async fn complete_trade(&self, offer_index: usize, world: &Arc<World>) {
+        let reward_exp = {
+            let mut offers = self.offers.lock().await;
+            let Some(offer) = offers.get_mut(offer_index) else {
+                return;
+            };
+            // Vanilla `MerchantOffer::increaseUses`/`shouldRewardExp`
+            // (`MerchantOffer.java:165-167,209-211`) update the completed trade.
+            offer.increase_uses();
+            offer.should_reward_exp()
+        };
+
+        // `notifyTrade`: `ambientSoundTime = -getAmbientSoundInterval()`.
+        self.mob_entity
+            .ambient_sound_time
+            .store(-self.get_ambient_sound_interval(), Ordering::Relaxed);
+
+        // `WanderingTrader::rewardTradeXp`: unlike `Villager`, no persisted XP counter or
+        // profession leveling, just a flat `3 + nextInt(4)` orb at `getY() + 0.5`, and only
+        // when `MerchantOffer::shouldRewardExp`.
+        if reward_exp {
+            let position = self.get_entity().pos.load().add_raw(0.0, 0.5, 0.0);
+            crate::entity::experience_orb::ExperienceOrbEntity::spawn(
+                world,
+                position,
+                3 + rand::random_range(0..4u32),
+            )
+            .await;
+        }
+
+        // `notifyTrade`: `CriteriaTriggers.TRADE.trigger(tradingPlayer, ...)`.
+        if let Some(player) = self.get_trading_player() {
+            trigger_trade_advancement(&player).await;
         }
     }
 }
 
 impl ScreenHandlerFactory for WanderingTraderEntity {
-    #[expect(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines)]
     fn create_screen_handler<'a>(
         &'a self,
         sync_id: u8,
@@ -310,21 +589,13 @@ impl ScreenHandlerFactory for WanderingTraderEntity {
                     Some(server_player.get_entity().entity_uuid);
             }
 
-            // Vanilla `MerchantMenu.stillValid` delegates to the merchant and only remains
-            // valid for its current trading player (`MerchantContainer.java:79-81`,
-            // `MerchantMenu.java:62-65`).
+            // Vanilla `MerchantMenu.stillValid` delegates to the merchant
+            // (`MerchantMenu.java:68-70`, `AbstractVillager.java:304-306`).
             let validity_weak = self_weak.clone();
             handler.validity_check = Some(Box::new(move |inventory_player| {
-                let Some(player) = inventory_player.as_any().downcast_ref::<Player>() else {
-                    return false;
-                };
-                validity_weak.upgrade().is_some_and(|trader| {
-                    let trading_player = *trader
-                        .trading_player
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    trading_player_matches(trading_player, player.get_entity().entity_uuid)
-                })
+                validity_weak
+                    .upgrade()
+                    .is_some_and(|trader| trader.can_continue_trading(inventory_player))
             }));
 
             let close_weak = self_weak.clone();
@@ -340,34 +611,13 @@ impl ScreenHandlerFactory for WanderingTraderEntity {
                 })
             }));
 
+            let world = self.get_entity().world.load_full();
             handler.on_trade = Some(Box::new(move |offer_index| {
                 let self_weak = self_weak.clone();
+                let world = world.clone();
                 Box::pin(async move {
                     if let Some(trader) = self_weak.upgrade() {
-                        let reward_exp = {
-                            let mut offers = trader.offers.lock().await;
-                            if offer_index >= offers.len() {
-                                return;
-                            }
-                            let offer = &mut offers[offer_index];
-                            // Vanilla `MerchantOffer::increaseUses`/`shouldRewardExp`
-                            // (`MerchantOffer.java:165-167,209-211`) update the completed trade.
-                            offer.increase_uses();
-                            offer.should_reward_exp()
-                        };
-
-                        // `WanderingTrader::rewardTradeXp` (WanderingTrader.java:158-163): unlike
-                        // `Villager`, no persisted XP counter or profession leveling, just a flat
-                        // orb, and only when `MerchantOffer::shouldRewardExp`.
-                        if reward_exp {
-                            let entity = trader.get_entity();
-                            crate::entity::experience_orb::ExperienceOrbEntity::spawn(
-                                &entity.world.load(),
-                                entity.pos.load(),
-                                3 + rand::random_range(0..4u32),
-                            )
-                            .await;
-                        }
+                        trader.complete_trade(offer_index, &world).await;
                     }
                 })
             }));
@@ -388,7 +638,7 @@ impl ScreenHandlerFactory for WanderingTraderEntity {
     }
 
     fn get_display_name(&self) -> TextComponent {
-        TextComponent::text("Wandering Trader")
+        TextComponent::translate("entity.minecraft.wandering_trader", [])
     }
 }
 
@@ -454,6 +704,11 @@ impl NBTStorage for WanderingTraderEntity {
                     };
                     Some(BlockPos::new(x, y, z))
                 }));
+            // `WanderingTrader.readAdditionalSaveData` (`WanderingTrader.java:149`):
+            // `setAge(Math.max(0, getAge()))`.
+            if self.get_age() < 0 {
+                self.set_age(0);
+            }
 
             if let Some(offers_compound) = nbt.get_compound("Offers")
                 && let Some(recipes) = offers_compound.get_list("Recipes")
@@ -599,9 +854,181 @@ impl Goal for WanderToPositionGoal {
     }
 }
 
+impl AgeableMob for WanderingTraderEntity {
+    fn get_ageable_data(&self) -> &AgeableData {
+        &self.ageable_data
+    }
+
+    fn can_be_a_baby(&self) -> bool {
+        false
+    }
+}
+
+/// Which of the two `UseItemGoal`s (`WanderingTrader.java:62-78`) this is.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UseItemKind {
+    /// Drink an invisibility potion once it is dark outside and the trader is visible.
+    Invisibility,
+    /// Drink milk once it is bright outside and the trader is invisible.
+    Milk,
+}
+
+/// `UseItemGoal.java`, specialized for the wandering trader. Vanilla's generic goal runs the
+/// item's own use/finish logic through `startUsingItem`; Pumpkin mobs have no item-use pipeline,
+/// so this goal holds the stack in the main hand for the item's 32-tick use duration, plays the
+/// trader's drinking sound (`WanderingTrader.getDrinkingSound`) on the living-entity use-effect
+/// cadence, then applies the item's effect and the finish sound (`UseItemGoal.stop`).
+struct WanderingTraderUseItemGoal {
+    trader: Weak<WanderingTraderEntity>,
+    kind: UseItemKind,
+    remaining_ticks: i32,
+}
+
+impl WanderingTraderUseItemGoal {
+    /// Potion and milk `Consumable` use duration (1.6s).
+    const USE_DURATION: i32 = 32;
+
+    const fn new(trader: Weak<WanderingTraderEntity>, kind: UseItemKind) -> Self {
+        Self {
+            trader,
+            kind,
+            remaining_ticks: 0,
+        }
+    }
+
+    /// `Level.isBrightOutside` (`Level.java:372-374`).
+    fn is_bright_outside(world: &World) -> bool {
+        world.dimension.fixed_time.is_none() && world.sky_darken.load(Ordering::Relaxed) < 4
+    }
+
+    /// `Level.isDarkOutside` (`Level.java:376-378`).
+    fn is_dark_outside(world: &World) -> bool {
+        world.dimension.fixed_time.is_none() && !Self::is_bright_outside(world)
+    }
+
+    fn item(&self) -> ItemStack {
+        match self.kind {
+            UseItemKind::Invisibility => create_invisibility_potion(),
+            UseItemKind::Milk => ItemStack::new(1, &Item::MILK_BUCKET),
+        }
+    }
+
+    async fn set_main_hand(trader: &WanderingTraderEntity, stack: ItemStack) {
+        let living = &trader.mob_entity.living_entity;
+        living
+            .entity_equipment
+            .lock()
+            .await
+            .put(&EquipmentSlot::MAIN_HAND, stack.clone());
+        living.send_equipment_changes(&[(EquipmentSlot::MAIN_HAND, stack)]);
+    }
+}
+
+impl Goal for WanderingTraderUseItemGoal {
+    fn can_start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        Box::pin(async move {
+            let Some(trader) = self.trader.upgrade() else {
+                return false;
+            };
+            let living = &trader.mob_entity.living_entity;
+            let world = living.entity.world.load();
+            let is_invisible = living.has_effect(&StatusEffect::INVISIBILITY).await;
+            match self.kind {
+                UseItemKind::Invisibility => Self::is_dark_outside(&world) && !is_invisible,
+                UseItemKind::Milk => Self::is_bright_outside(&world) && is_invisible,
+            }
+        })
+    }
+
+    /// `UseItemGoal.canContinueToUse`: `mob.isUsingItem()`.
+    fn should_continue<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, bool> {
+        Box::pin(async move {
+            self.remaining_ticks > 0
+                && self
+                    .trader
+                    .upgrade()
+                    .is_some_and(|trader| trader.get_entity().is_alive())
+        })
+    }
+
+    fn start<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            let Some(trader) = self.trader.upgrade() else {
+                return;
+            };
+            self.remaining_ticks = Self::USE_DURATION;
+            Self::set_main_hand(&trader, self.item()).await;
+        })
+    }
+
+    fn tick<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            let Some(trader) = self.trader.upgrade() else {
+                return;
+            };
+            self.remaining_ticks -= 1;
+            let entity = trader.get_entity();
+            // `LivingEntity.shouldTriggerItemUseEffects`: past the first 21.875% of the use
+            // duration, every 4 ticks.
+            let ticks_used = Self::USE_DURATION - self.remaining_ticks;
+            if self.remaining_ticks > 0
+                && ticks_used as f32 > Self::USE_DURATION as f32 * 0.218_75
+                && self.remaining_ticks % 4 == 0
+            {
+                entity.play_sound(match self.kind {
+                    UseItemKind::Invisibility => Sound::EntityWanderingTraderDrinkPotion,
+                    UseItemKind::Milk => Sound::EntityWanderingTraderDrinkMilk,
+                });
+            }
+            if self.remaining_ticks == 0 {
+                let living = &trader.mob_entity.living_entity;
+                match self.kind {
+                    // `Potions.INVISIBILITY`: invisibility for 3600 ticks.
+                    UseItemKind::Invisibility => {
+                        for effect in pumpkin_data::potion::Potion::INVISIBILITY.effects {
+                            living.add_effect(effect.clone()).await;
+                        }
+                    }
+                    // Milk clears every status effect.
+                    UseItemKind::Milk => {
+                        living.remove_all_effects().await;
+                    }
+                }
+            }
+        })
+    }
+
+    /// `UseItemGoal.stop`: empty the main hand and play the finish sound.
+    fn stop<'a>(&'a mut self, _mob: &'a dyn Mob) -> GoalFuture<'a, ()> {
+        Box::pin(async move {
+            if let Some(trader) = self.trader.upgrade() {
+                Self::set_main_hand(&trader, ItemStack::EMPTY.clone()).await;
+                let entity = trader.get_entity();
+                entity.world.load().play_sound(
+                    match self.kind {
+                        UseItemKind::Invisibility => Sound::EntityWanderingTraderDisappeared,
+                        UseItemKind::Milk => Sound::EntityWanderingTraderReappeared,
+                    },
+                    SoundCategory::Neutral,
+                    &entity.pos.load(),
+                );
+            }
+            self.remaining_ticks = 0;
+        })
+    }
+
+    fn controls(&self) -> Controls {
+        Controls::empty()
+    }
+}
+
 impl Mob for WanderingTraderEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    fn as_ageable(&self) -> Option<&dyn AgeableMob> {
+        Some(self)
     }
 
     fn get_trading_player(&self) -> Option<Arc<Player>> {
@@ -648,16 +1075,29 @@ impl Mob for WanderingTraderEntity {
         })
     }
 
+    /// Vanilla `WanderingTrader.mobInteract` (`WanderingTrader.java:107-127`).
     fn mob_interact<'a>(
         &'a self,
         player: &'a Arc<Player>,
-        _item_stack: &'a mut pumpkin_data::item_stack::ItemStack,
+        item_stack: &'a mut ItemStack,
     ) -> crate::entity::EntityBaseFuture<'a, bool> {
         let player = player.clone();
         Box::pin(async move {
-            if self.get_entity().age.load(Ordering::Relaxed) < 0 {
-                return true;
+            if item_stack.item == &Item::VILLAGER_SPAWN_EGG
+                || !self.get_entity().is_alive()
+                || self.is_trading()
+                || self.is_baby()
+            {
+                return false;
             }
+
+            player
+                .increment_stat(
+                    pumpkin_data::statistic::StatisticCategory::Custom,
+                    pumpkin_data::statistic::CustomStatistic::TalkedToVillager as i32,
+                    1,
+                )
+                .await;
 
             let mut offers = self.offers.lock().await;
             if offers.is_empty() {
@@ -672,14 +1112,6 @@ impl Mob for WanderingTraderEntity {
             }
             drop(offers);
 
-            player
-                .increment_stat(
-                    pumpkin_data::statistic::StatisticCategory::Custom,
-                    pumpkin_data::statistic::CustomStatistic::TalkedToVillager as i32,
-                    1,
-                )
-                .await;
-
             self.open_trading_screen(&player).await;
 
             true
@@ -689,7 +1121,10 @@ impl Mob for WanderingTraderEntity {
 
 #[cfg(test)]
 mod tests {
-    use super::{AVOIDED, trading_player_matches};
+    use super::{
+        AVOIDED, WANDERING_TRADER_TRADE_SET_BUYING, WANDERING_TRADER_TRADE_SET_COMMON,
+        WANDERING_TRADER_TRADE_SET_UNCOMMON, add_offers_from_trade_set, trading_player_matches,
+    };
     use pumpkin_data::entity::EntityType;
 
     /// `WanderingTrader.registerGoals` (`WanderingTrader.java:80-86`) registers exactly seven
@@ -733,5 +1168,20 @@ mod tests {
         assert!(trading_player_matches(Some(current), current));
         assert!(!trading_player_matches(Some(current), other));
         assert!(!trading_player_matches(None, current));
+    }
+
+    /// `WanderingTrader.updateTrades` pulls 2 buying, 2 uncommon and 5 common offers.
+    #[test]
+    fn update_trades_creates_expected_trade_count() {
+        let mut offers = Vec::new();
+        let mut rng = rand::rng();
+        for trade_set in [
+            WANDERING_TRADER_TRADE_SET_BUYING,
+            WANDERING_TRADER_TRADE_SET_UNCOMMON,
+            WANDERING_TRADER_TRADE_SET_COMMON,
+        ] {
+            add_offers_from_trade_set(&mut offers, trade_set, &mut rng);
+        }
+        assert_eq!(offers.len(), 9);
     }
 }

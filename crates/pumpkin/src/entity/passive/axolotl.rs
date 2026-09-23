@@ -18,7 +18,7 @@ use crate::entity::{
         axolotl_play_dead::AxolotlPlayDeadGoal, look_around::RandomLookAroundGoal,
         look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal,
         non_tame_random_target::NonTameRandomTargetGoal, swim::SwimGoal,
-        wander_around::WanderAroundGoal,
+        try_find_water::TryFindWaterGoal, wander_around::WanderAroundGoal,
     },
     mob::{Mob, MobEntity},
     player::Player,
@@ -150,6 +150,10 @@ impl AxolotlEntity {
             // Vanilla `MeleeAttack.create(20)`: 20-tick attack cooldown, matched by
             // `MeleeAttackGoal`'s fixed `attack_interval_ticks`.
             goal_selector.add_goal(2, Box::new(MeleeAttackGoal::new(1.0, true)));
+            // Vanilla `AxolotlAi.initIdleActivity`: `TryFindLiquid.create(6, 0.15F,
+            // AXOLOTL_TRIES_TO_FIND)` runs in the idle activity, below fighting. Approximated
+            // with the goal-based `TryFindWaterGoal` (water tag, smaller search box).
+            goal_selector.add_goal(3, Box::new(TryFindWaterGoal));
             goal_selector.add_goal(3, Box::new(WanderAroundGoal::new(1.0)));
             goal_selector.add_goal(
                 4,

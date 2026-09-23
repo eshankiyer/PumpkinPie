@@ -298,7 +298,6 @@ pub fn from_type(
         id if id == EntityType::DRAGON_FIREBALL.id => Arc::new(DragonFireballEntity::new(entity)),
         id if id == EntityType::SMALL_FIREBALL.id => Arc::new(SmallFireballEntity::new(entity)),
         id if id == EntityType::WITHER_SKULL.id => Arc::new(WitherSkullEntity::new(entity)),
-        id if id == EntityType::LLAMA_SPIT.id => Arc::new(LlamaSpitEntity::new(entity)),
         id if id == EntityType::WIND_CHARGE.id => {
             let thrown = ThrownItemEntity {
                 entity,
@@ -326,6 +325,7 @@ pub fn from_type(
         id if id == EntityType::FIREWORK_ROCKET.id => Arc::new(FireworkRocketEntity::new(entity)),
         id if id == EntityType::SPLASH_POTION.id => Arc::new(SplashPotionEntity::new(entity)),
         id if id == EntityType::LINGERING_POTION.id => Arc::new(LingeringPotionEntity::new(entity)),
+        id if id == EntityType::LLAMA_SPIT.id => Arc::new(LlamaSpitEntity::new(entity)),
         id if id == EntityType::EYE_OF_ENDER.id => Arc::new(EyeOfEnder::new(entity)),
         id if id == EntityType::ACACIA_BOAT.id
             || id == EntityType::BIRCH_BOAT.id

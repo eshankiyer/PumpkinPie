@@ -97,6 +97,7 @@ use crate::block::blocks::plant::crop::sweet_berry_bush::SweetBerryBushBlock;
 use crate::block::blocks::plant::crop::torch_flower::TorchFlowerBlock;
 use crate::block::blocks::plant::crop::wheat::WheatBlock;
 use crate::block::blocks::plant::dry_vegetation::DryVegetationBlock;
+use crate::block::blocks::plant::eyeblossom::EyeblossomBlock;
 use crate::block::blocks::plant::flower::FlowerBlock;
 use crate::block::blocks::plant::flowerbed::FlowerbedBlock;
 use crate::block::blocks::plant::fungus::FungusBlock;
@@ -314,6 +315,9 @@ pub fn default_registry() -> Arc<BlockRegistry> {
     manager.register(BrushableBlock);
     manager.register(BushBlock);
     manager.register(FlowerBlock);
+    // Registered after FlowerBlock: the open/closed eyeblossoms are also in
+    // `minecraft:small_flowers`, and EyeblossomBlock must win for them.
+    manager.register(EyeblossomBlock);
     manager.register(PotatoBlock);
     manager.register(BeetrootBlock);
     manager.register(TorchFlowerBlock);

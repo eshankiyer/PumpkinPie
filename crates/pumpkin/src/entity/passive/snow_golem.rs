@@ -4,18 +4,19 @@ use std::sync::{
 };
 
 use pumpkin_data::entity::EntityType;
-use pumpkin_data::sound::Sound;
+use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::vector3::Vector3;
 
 use crate::entity::{
-    Entity, NBTStorage,
+    Entity, EntityBase, EntityBaseFuture, NBTStorage,
     ai::goal::{
         look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
         nearest_hostile_target::NearestHostileTargetGoal,
         ranged_snowball_attack::RangedSnowballAttackGoal, wander_around::WanderAroundGoal,
     },
-    mob::{Mob, MobEntity},
+    mob::{Mob, MobEntity, RangedAttackMob},
+    projectile::snowball::SnowballEntity,
 };
 
 pub struct SnowGolemEntity {
@@ -108,6 +109,42 @@ impl SnowGolemEntity {
 
         mob_arc
     }
+
+    /// Vanilla `SnowGolem.performRangedAttack` (`SnowGolem.java:118-134`): aims at the
+    /// target's eye height minus 1.1 with a horizontal-distance lead, shot at speed 1.6 with
+    /// `rangedAttackUncertainty` 12.
+    pub async fn throw_snowball(&self, target: &Arc<dyn EntityBase>) {
+        let entity = self.get_entity();
+        let world = entity.world.load();
+
+        let snowball_entity = Entity::new(world.clone(), entity.pos.load(), &EntityType::SNOWBALL);
+        let snowball = SnowballEntity::new_shot(snowball_entity, entity);
+
+        let mob_pos = entity.pos.load();
+        let target_entity = target.get_entity();
+        let target_pos = target_entity.pos.load();
+
+        let dx = target_pos.x - mob_pos.x;
+        let dy = target_pos.y + target_entity.get_eye_height() - 1.1;
+        let dz = target_pos.z - mob_pos.z;
+        let yo = dx.hypot(dz) * 0.2;
+        let projectile_y = snowball.get_entity().pos.load().y;
+
+        snowball
+            .thrown
+            .set_velocity(dx, dy + yo - projectile_y, dz, 1.6, 12.0);
+
+        let snowball_arc: Arc<dyn EntityBase> = Arc::new(snowball);
+        world.spawn_entity(snowball_arc).await;
+
+        if !entity.silent.load(Ordering::Relaxed) {
+            world.play_sound(
+                Sound::EntitySnowGolemShoot,
+                SoundCategory::Neutral,
+                &mob_pos,
+            );
+        }
+    }
 }
 
 impl NBTStorage for SnowGolemEntity {}
@@ -126,5 +163,17 @@ impl Mob for SnowGolemEntity {
     /// `SnowGolem.isSensitiveToWater` (`SnowGolem.java:86-88`).
     fn mob_is_sensitive_to_water(&self) -> bool {
         true
+    }
+}
+
+impl RangedAttackMob for SnowGolemEntity {
+    fn perform_ranged_attack<'a>(
+        &'a self,
+        target: &'a Arc<dyn EntityBase>,
+        _power: f32,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            self.throw_snowball(target).await;
+        })
     }
 }

@@ -3,9 +3,10 @@ use std::collections::{HashMap, HashSet};
 use pumpkin_data::scoreboard::ScoreboardDisplaySlot;
 use pumpkin_protocol::{
     BClientPacket, ClientPacket, NumberFormat,
-    bedrock::client::scoreboard::{
-        CRemoveObjective as BRemoveObjective, CSetDisplayObjective as BSetDisplayObjective,
-        CSetScore as BSetScore, ScoreEntry as BScoreEntry,
+    bedrock::client::{
+        remove_objective::CRemoveObjective as BRemoveObjective,
+        set_display_objective::CSetDisplayObjective as BSetDisplayObjective,
+        set_score::{CSetScore as BSetScore, ScoreEntry as BScoreEntry},
     },
     codec::var_int::VarInt,
     java::client::play::{
@@ -402,9 +403,9 @@ impl Scoreboard {
         );
 
         let be_update = BSetDisplayObjective {
-            display_slot: "sidebar".to_string(),
+            display_slot_name: "sidebar".to_string(),
             objective_name: objective.name.clone(),
-            display_name: objective.display_name.clone().get_text(),
+            objective_display_name: objective.display_name.clone().get_text(),
             criteria_name: "dummy".to_string(),
             sort_order: VarInt(0),
         };
@@ -437,9 +438,9 @@ impl Scoreboard {
 
         let je_display = CDisplayObjective::new(slot, obj_name_str.to_string());
         let be_display = BSetDisplayObjective {
-            display_slot: slot_str.to_string(),
+            display_slot_name: slot_str.to_string(),
             objective_name: obj_name_str.to_string(),
-            display_name,
+            objective_display_name: display_name,
             criteria_name: "dummy".to_string(),
             sort_order: VarInt(0),
         };
@@ -459,9 +460,9 @@ impl Scoreboard {
                 objective.number_format.clone(),
             );
             let be_update = BSetDisplayObjective {
-                display_slot: slot_str.to_string(),
+                display_slot_name: slot_str.to_string(),
                 objective_name: objective.name.clone(),
-                display_name: objective.display_name.clone().get_text(),
+                objective_display_name: objective.display_name.clone().get_text(),
                 criteria_name: "dummy".to_string(),
                 sort_order: VarInt(0),
             };
@@ -846,9 +847,9 @@ impl Scoreboard {
                 objective.number_format.clone(),
             );
             let be_update = BSetDisplayObjective {
-                display_slot: "sidebar".to_string(),
+                display_slot_name: "sidebar".to_string(),
                 objective_name: objective.name.clone(),
-                display_name: objective.display_name.clone().get_text(),
+                objective_display_name: objective.display_name.clone().get_text(),
                 criteria_name: "dummy".to_string(),
                 sort_order: VarInt(0),
             };
@@ -867,9 +868,9 @@ impl Scoreboard {
             );
             let je_display = CDisplayObjective::new(*slot, objective_name.clone());
             let be_display = BSetDisplayObjective {
-                display_slot: slot_str.to_string(),
+                display_slot_name: slot_str.to_string(),
                 objective_name: objective_name.clone(),
-                display_name,
+                objective_display_name: display_name,
                 criteria_name: "dummy".to_string(),
                 sort_order: VarInt(0),
             };
@@ -1670,9 +1671,9 @@ pub struct BedrockScoreboard {
 impl BedrockScoreboard {
     pub async fn add_objective(&mut self, player: &Player, objective: BedrockObjective) {
         let be_update = BSetDisplayObjective {
-            display_slot: "sidebar".to_string(),
+            display_slot_name: "sidebar".to_string(),
             objective_name: objective.name.clone(),
-            display_name: objective.display_name.clone(),
+            objective_display_name: objective.display_name.clone(),
             criteria_name: "dummy".to_string(),
             sort_order: VarInt(match objective.sort_order {
                 BedrockSortOrder::Ascending => 0,
@@ -1697,9 +1698,9 @@ impl BedrockScoreboard {
 
     pub async fn update_objective(&mut self, player: &Player, objective: BedrockObjective) {
         let be_update = BSetDisplayObjective {
-            display_slot: "sidebar".to_string(),
+            display_slot_name: "sidebar".to_string(),
             objective_name: objective.name.clone(),
-            display_name: objective.display_name.clone(),
+            objective_display_name: objective.display_name.clone(),
             criteria_name: "dummy".to_string(),
             sort_order: VarInt(match objective.sort_order {
                 BedrockSortOrder::Ascending => 0,
@@ -1755,9 +1756,9 @@ impl BedrockScoreboard {
             .map_or_else(|| obj_name_str.to_string(), |o| o.display_name.clone());
 
         let be_display = BSetDisplayObjective {
-            display_slot: slot.to_str().to_string(),
+            display_slot_name: slot.to_str().to_string(),
             objective_name: obj_name_str.to_string(),
-            display_name,
+            objective_display_name: display_name,
             criteria_name: "dummy".to_string(),
             sort_order: VarInt(0),
         };
@@ -1878,9 +1879,9 @@ impl BedrockScoreboard {
     pub async fn send_to_player(&self, player: &Player) {
         for objective in self.objectives.values() {
             let be_update = BSetDisplayObjective {
-                display_slot: "sidebar".to_string(),
+                display_slot_name: "sidebar".to_string(),
                 objective_name: objective.name.clone(),
-                display_name: objective.display_name.clone(),
+                objective_display_name: objective.display_name.clone(),
                 criteria_name: "dummy".to_string(),
                 sort_order: VarInt(match objective.sort_order {
                     BedrockSortOrder::Ascending => 0,
@@ -1907,9 +1908,9 @@ impl BedrockScoreboard {
                 .get(objective_name)
                 .map_or_else(|| objective_name.clone(), |o| o.display_name.clone());
             let be_display = BSetDisplayObjective {
-                display_slot: slot.to_str().to_string(),
+                display_slot_name: slot.to_str().to_string(),
                 objective_name: objective_name.clone(),
-                display_name,
+                objective_display_name: display_name,
                 criteria_name: "dummy".to_string(),
                 sort_order: VarInt(0),
             };

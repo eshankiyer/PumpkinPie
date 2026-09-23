@@ -12,7 +12,7 @@ use crate::{
 use pumpkin_data::entity::{EntityStatus, EntityType};
 use pumpkin_data::item::Item;
 use pumpkin_data::item_stack::ItemStack;
-use pumpkin_protocol::bedrock::server::actor_event::ActorEventType;
+use pumpkin_protocol::bedrock::server::actor_event::ActorEventID;
 use pumpkin_protocol::codec::item_stack_seralizer::ItemStackSerializer;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::math::vector3::Vector3;
@@ -115,7 +115,7 @@ impl EntityBase for EggEntity {
             world.send_entity_status(
                 self.get_entity(),
                 EntityStatus::Death,
-                Some(ActorEventType::Death),
+                Some(ActorEventID::Death),
             );
 
             // `ThrownEgg.onHitEntity`: a zero-damage hurt still flinches the target, plays its

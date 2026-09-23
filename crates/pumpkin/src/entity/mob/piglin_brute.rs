@@ -1,20 +1,23 @@
 use std::sync::{Arc, Weak};
 
 use pumpkin_data::{
+    Block,
     damage::DamageType,
     entity::EntityType,
     sound::{Sound, SoundCategory},
+    tracked_data,
 };
 use pumpkin_nbt::compound::NbtCompound;
 use pumpkin_protocol::java::client::play::Metadata;
 use pumpkin_util::Difficulty;
+use pumpkin_util::math::position::BlockPos;
 
 use crate::entity::{
     Entity, EntityBase, EntityBaseFuture, NBTStorage, NbtFuture,
     ai::goal::{
-        active_target::ActiveTargetGoal, look_around::RandomLookAroundGoal,
-        look_at_entity::LookAtEntityGoal, melee_attack::MeleeAttackGoal, swim::SwimGoal,
-        wander_around::WanderAroundGoal,
+        active_target::ActiveTargetGoal, interact_with_door::InteractWithDoorGoal,
+        look_around::RandomLookAroundGoal, look_at_entity::LookAtEntityGoal,
+        melee_attack::MeleeAttackGoal, swim::SwimGoal, wander_around::WanderAroundGoal,
     },
     mob::{
         Mob, MobEntity, piglin_shared,
@@ -22,6 +25,7 @@ use crate::entity::{
         zombified_piglin::ZombifiedPiglinEntity,
     },
 };
+use crate::world::World;
 
 pub struct PiglinBruteEntity {
     pub mob_entity: MobEntity,
@@ -32,6 +36,9 @@ pub struct PiglinBruteEntity {
 }
 
 impl PiglinBruteEntity {
+    /// `PiglinBrute.xpReward` (`PiglinBrute.java:46`).
+    pub const XP_REWARD: u32 = 20;
+
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
         let piglin = Self {
@@ -39,6 +46,13 @@ impl PiglinBruteEntity {
             zombification: ZombificationTimer::new(),
         };
         let mob_arc = Arc::new(piglin);
+        // `AbstractPiglin.applyOpenDoorsAbility` (`AbstractPiglin.java:43-47`).
+        mob_arc
+            .mob_entity
+            .navigator
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .set_can_open_doors(true);
         let mob_weak: Weak<dyn Mob> = {
             let mob_arc: Arc<dyn Mob> = mob_arc.clone();
             Arc::downgrade(&mob_arc)
@@ -52,6 +66,9 @@ impl PiglinBruteEntity {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
 
             goal_selector.add_goal(0, Box::new(SwimGoal::default()));
+            // `InteractWithDoor.create()` in `PiglinBruteAi.initCoreActivity`
+            // (`PiglinBruteAi.java:58`), with the villager's goal port of that behavior.
+            goal_selector.add_goal(0, Box::new(InteractWithDoorGoal::new(true)));
             goal_selector.add_goal(2, Box::new(MeleeAttackGoal::new(1.0, true)));
             goal_selector.add_goal(5, Box::new(WanderAroundGoal::new(1.0)));
             goal_selector.add_goal(
@@ -85,6 +102,41 @@ impl PiglinBruteEntity {
 
         mob_arc
     }
+
+    #[must_use]
+    pub fn is_immune_to_zombification(&self) -> bool {
+        self.zombification.is_immune()
+    }
+
+    /// `AbstractPiglin.setImmuneToZombification`: updates the synced
+    /// `DATA_IMMUNE_TO_ZOMBIFICATION`.
+    pub fn set_immune_to_zombification(&self, immune: bool) {
+        self.zombification.set_immune(immune);
+        self.send_immune_to_zombification();
+    }
+
+    fn send_immune_to_zombification(&self) {
+        self.mob_entity.living_entity.entity.send_meta_data(
+            &[Metadata::new(
+                tracked_data::piglin_brute::DATA_IMMUNE_TO_ZOMBIFICATION,
+                self.zombification.is_immune(),
+            )],
+            None,
+        );
+    }
+
+    /// `AbstractPiglin.isConverting` (`AbstractPiglin.java:103-107`).
+    #[must_use]
+    pub fn is_converting(&self) -> bool {
+        self.zombification.is_converting(&self.mob_entity)
+    }
+
+    /// Mirrors `Piglin.checkPiglinSpawnRules` (never on a nether wart block). Vanilla registers
+    /// no `SpawnPlacements` entry for brutes, which only spawn with bastion structures.
+    #[must_use]
+    pub fn check_piglin_brute_spawn_rules(world: &World, pos: &BlockPos) -> bool {
+        world.get_block(&pos.down()) != &Block::NETHER_WART_BLOCK
+    }
 }
 
 impl NBTStorage for PiglinBruteEntity {
@@ -101,13 +153,7 @@ impl NBTStorage for PiglinBruteEntity {
         Box::pin(async {
             self.mob_entity.living_entity.read_nbt_non_mut(nbt).await;
             self.zombification.read_nbt(nbt);
-            self.mob_entity.living_entity.entity.send_meta_data(
-                &[Metadata::new(
-                    pumpkin_data::tracked_data::piglin_brute::DATA_IMMUNE_TO_ZOMBIFICATION,
-                    self.zombification.is_immune(),
-                )],
-                None,
-            );
+            self.send_immune_to_zombification();
         })
     }
 }
@@ -115,6 +161,17 @@ impl NBTStorage for PiglinBruteEntity {
 impl Mob for PiglinBruteEntity {
     fn get_mob_entity(&self) -> &MobEntity {
         &self.mob_entity
+    }
+
+    /// `AbstractPiglin.defineSynchedData`: `DATA_IMMUNE_TO_ZOMBIFICATION`.
+    fn mob_init_data_tracker(&self) -> EntityBaseFuture<'_, ()> {
+        Box::pin(async move {
+            self.send_immune_to_zombification();
+        })
+    }
+
+    fn get_base_experience_reward(&self) -> u32 {
+        Self::XP_REWARD
     }
 
     /// `PiglinBrute.getAmbientSound` (`PiglinBrute.java:117-120`).

@@ -11,7 +11,7 @@ use pumpkin_inventory::build_equipment_slots;
 use pumpkin_inventory::player::player_inventory::PlayerInventory;
 use pumpkin_inventory::screen_handler::InventoryPlayer;
 use pumpkin_protocol::bedrock::client::take_item_actor::CTakeItemActor;
-use pumpkin_protocol::bedrock::server::actor_event::{ActorEventType, SActorEvent};
+use pumpkin_protocol::bedrock::server::actor_event::{ActorEventID, SActorEvent};
 use pumpkin_protocol::codec::var_ulong::VarULong;
 use pumpkin_util::GameMode;
 use pumpkin_util::Hand;
@@ -58,6 +58,7 @@ use pumpkin_data::data_component_impl::{
 };
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::{EntityPose, EntityStatus, EntityType, MobCategory};
+use pumpkin_data::fluid::Fluid;
 use pumpkin_data::item_stack::{DamageResult, ItemStack};
 use pumpkin_data::sound::SoundCategory;
 use pumpkin_data::{Block, Enchantment, translation};
@@ -82,7 +83,6 @@ use pumpkin_util::text::TextComponent;
 use rand::{RngExt, SeedableRng, rngs::StdRng};
 use std::sync::RwLock;
 use tokio::sync::Mutex;
-use uuid::Uuid;
 
 fn knockback_strength_with_resistance(strength: f64, resistance: f64) -> f64 {
     strength * (1.0 - resistance.clamp(0.0, 1.0))
@@ -580,6 +580,8 @@ impl LivingEntity {
 
     const USING_ITEM_FLAG: u8 = 1;
     const OFF_HAND_ACTIVE_FLAG: u8 = 2;
+    /// `TeleportRandomlyConsumeEffect.apply`'s attempt count.
+    const RANDOM_TELEPORT_ATTEMPTS: usize = 16;
     const USING_RIPTIDE_FLAG: u8 = 4;
 
     const PREVENT_AREA_FALL_DAMAGE_BLOCKS: [&'static Block; 4] = [
@@ -1091,15 +1093,16 @@ impl LivingEntity {
                 } else {
                     0
                 };
-                let be_packet = pumpkin_protocol::bedrock::client::CMobEquipment::new(
-                    self.entity_id() as u64,
-                    pumpkin_protocol::bedrock::network_item::NetworkItemStackDescriptor::from(
+
+                let be_packet = pumpkin_protocol::bedrock::client::CMobEquipment {
+                    target_runtime_id: (self.entity_id() as u64).into(),
+                    item: pumpkin_protocol::bedrock::network_item::NetworkItemStackDescriptor::from(
                         stack,
                     ),
-                    0,
-                    0,
-                    window_id,
-                );
+                    slot: 0,
+                    selected_slot: 0,
+                    container_id: window_id,
+                };
                 self.entity
                     .world
                     .load()
@@ -1208,10 +1211,10 @@ impl LivingEntity {
                 self.entity.entity_id.into(),
                 VarInt(stack_amount as i32),
             ),
-            &CTakeItemActor::new(
-                VarULong(item.entity_id as u64),
-                VarULong(self.entity.entity_id as u64),
-            ),
+            &CTakeItemActor {
+                item_runtime_id: VarULong(item.entity_id as u64),
+                actor_runtime_id: VarULong(self.entity.entity_id as u64),
+            },
         );
     }
 
@@ -1272,10 +1275,11 @@ impl LivingEntity {
                     .fetch_and(!mask, Ordering::Relaxed);
             }
 
-            let mut meta = pumpkin_protocol::bedrock::client::set_actor_data::EntityMetadata::new();
+            let mut meta =
+                pumpkin_protocol::bedrock::client::set_actor_data::SyncedActorDataList::new();
             meta.set(
                 pumpkin_protocol::bedrock::client::set_actor_data::entity_data_key::FLAGS,
-                pumpkin_protocol::bedrock::client::set_actor_data::MetadataValue::Long(
+                pumpkin_protocol::bedrock::client::set_actor_data::MetadataValue::Int64(
                     self.entity.bedrock_flags.load(Ordering::Relaxed),
                 ),
             );
@@ -2033,16 +2037,16 @@ impl LivingEntity {
             flag,
         );
 
-        let be_packet = pumpkin_protocol::bedrock::client::CMobEffect::new(
-            VarULong(self.entity.entity_id as u64),
-            pumpkin_protocol::bedrock::client::CMobEffect::EVENT_ADD,
-            VarInt(effect.effect_type.to_bedrock_id()),
-            VarInt(i32::from(effect.amplifier)),
-            effect.show_particles,
-            VarInt(effect.duration),
-            VarULong(0),
-            effect.ambient,
-        );
+        let be_packet = pumpkin_protocol::bedrock::client::CMobEffect {
+            target_runtime_id: VarULong(self.entity.entity_id as u64),
+            event_id: pumpkin_protocol::bedrock::client::CMobEffect::EVENT_ADD,
+            effect_id: VarInt(effect.effect_type.to_bedrock_id()),
+            effect_amplifier: VarInt(i32::from(effect.amplifier)),
+            show_particles: effect.show_particles,
+            effect_duration_ticks: VarInt(effect.duration),
+            tick: VarULong(0),
+            ambient: effect.ambient,
+        };
 
         let chunk_pos = self.entity.chunk_pos.load();
         self.entity
@@ -2327,7 +2331,7 @@ impl LivingEntity {
         );
         let be_packet = pumpkin_protocol::bedrock::server::animate::SAnimate {
             action: pumpkin_protocol::bedrock::server::animate::AnimateAction::SwingArm,
-            runtime_entity_id: pumpkin_protocol::codec::var_ulong::VarULong(entity_id as u64),
+            target_actor_runtime_id: pumpkin_protocol::codec::var_ulong::VarULong(entity_id as u64),
             data: 0.0,
             swing_source: None,
         };
@@ -3496,11 +3500,7 @@ impl LivingEntity {
             }
 
             // Plays the death sound
-            world.send_entity_status(
-                &self.entity,
-                EntityStatus::Death,
-                Some(ActorEventType::Death),
-            );
+            world.send_entity_status(&self.entity, EntityStatus::Death, Some(ActorEventID::Death));
             let looting_level;
             let tool = if let Some(cause_ent) = cause {
                 if let Some(player) = cause_ent
@@ -3620,6 +3620,20 @@ impl LivingEntity {
             // Broadcast death message if it's a player and the gamerule is enabled
             self.broadcast_death_message(&*dyn_self, damage_type, source, cause)
                 .await;
+
+            // Trigger on_mob_death for active status effects
+            let active_effects_vec: Vec<_> = {
+                let effects = self.active_effects.lock().await;
+                effects
+                    .values()
+                    .map(|e| (e.effect_type, e.amplifier))
+                    .collect()
+            };
+            for (effect_type, amplifier) in active_effects_vec {
+                if let Some(mob_effect) = crate::entity::effect::get_mob_effect(effect_type) {
+                    mob_effect.on_mob_death(self, amplifier, &damage_type).await;
+                }
+            }
 
             self.reset_effects_and_attributes().await;
         }
@@ -4189,7 +4203,6 @@ impl LivingEntity {
         }
 
         // Call the central removal function for each expired effect
-        // This will now trigger your logs and absorption resets!
         for effect_type in effects_to_remove {
             self.expire_effect(effect_type).await;
         }
@@ -4229,8 +4242,10 @@ impl LivingEntity {
             // natural expiry.
             duration == 1
         } else {
-            // Other effects that don't tick
-            false
+            // Effects without a PumpkinPie tick port defer to the `MobEffect` registry.
+            crate::entity::effect::get_mob_effect(effect_type).is_some_and(|mob_effect| {
+                mob_effect.should_apply_effect_tick(duration, effect.amplifier)
+            })
         }
     }
 
@@ -4339,6 +4354,8 @@ impl LivingEntity {
                 let mut raids = world.raids.lock().await;
                 raids.create_or_extend_raid(&world, player, pos).await;
             }
+        } else if let Some(mob_effect) = crate::entity::effect::get_mob_effect(effect_type) {
+            mob_effect.apply_effect_tick(self, amplifier).await;
         }
     }
 
@@ -4387,7 +4404,7 @@ impl LivingEntity {
                 self.entity.world.load().send_entity_status(
                     &self.entity,
                     EntityStatus::ProtectedFromDeath,
-                    Some(ActorEventType::TalismanActivate),
+                    Some(ActorEventID::TalismanActivate),
                 );
 
                 self.remove_all_effects().await;
@@ -4714,63 +4731,6 @@ impl LivingEntity {
         }
 
         self.dead.store(false, Relaxed);
-    }
-
-    /// Try to spawn silverfish when this entity is infested and hurt.
-    async fn try_spawn_infested_silverfish(&self) {
-        if !self.has_effect(&StatusEffect::INFESTED).await {
-            return;
-        }
-
-        // Wither, ender dragon and silverfish are immune
-        if self.entity.entity_type == &EntityType::WITHER
-            || self.entity.entity_type == &EntityType::ENDER_DRAGON
-            || self.entity.entity_type == &EntityType::SILVERFISH
-        {
-            return;
-        }
-
-        let world = self.entity.world.load();
-
-        // 10% chance
-        if rand::rng().random::<f32>() <= 0.1 {
-            let count = rand::rng().random_range(1..3);
-            for _ in 0..count {
-                // Spawn at center of entity
-                let bbox = self.entity.bounding_box.load();
-                let center = Vector3::new(
-                    f64::midpoint(bbox.min.x, bbox.max.x),
-                    f64::midpoint(bbox.min.y, bbox.max.y),
-                    f64::midpoint(bbox.min.z, bbox.max.z),
-                );
-
-                // Random direction
-                let yaw_rad = self.entity.yaw.load().to_radians() as f64;
-                let random_angle = rand::rng().random::<f64>() * std::f64::consts::PI
-                    - std::f64::consts::FRAC_PI_2;
-                let angle = yaw_rad + random_angle;
-                let speed = 0.3f64;
-                let dx = -angle.sin() * speed;
-                let dz = angle.cos() * speed;
-                let dy = 0.1f64;
-
-                // Spawn
-                let silver = crate::entity::r#type::from_type(
-                    &EntityType::SILVERFISH,
-                    center,
-                    &world,
-                    Uuid::new_v4(),
-                );
-
-                silver.get_entity().set_pos(center);
-                silver.get_entity().velocity.store(Vector3::new(dx, dy, dz));
-
-                world.spawn_entity(silver).await;
-
-                // Play sound
-                world.play_sound(Sound::EntitySilverfishHurt, SoundCategory::Players, &center);
-            }
-        }
     }
 
     pub fn is_player(&self) -> bool {
@@ -6388,9 +6348,9 @@ impl EntityBase for LivingEntity {
                         - self.entity.yaw.load()
                 });
                 let hurt_event = SActorEvent {
-                    entity_runtime_id: VarULong(entity_id as u64),
-                    event_type: ActorEventType::Hurt,
-                    event_data: VarInt(0),
+                    target_runtime_id: VarULong(entity_id as u64),
+                    event_id: ActorEventID::Hurt,
+                    data: VarInt(0),
                     fire_at_position: None,
                 };
                 world
@@ -6410,8 +6370,21 @@ impl EntityBase for LivingEntity {
                 position,
             ));
 
-            // Try to spawn infested silverfish
-            self.try_spawn_infested_silverfish().await;
+            // Trigger on_mob_hurt for active status effects
+            let active_effects_vec: Vec<_> = {
+                let effects = self.active_effects.lock().await;
+                effects
+                    .values()
+                    .map(|e| (e.effect_type, e.amplifier))
+                    .collect()
+            };
+            for (effect_type, amplifier) in active_effects_vec {
+                if let Some(mob_effect) = crate::entity::effect::get_mob_effect(effect_type) {
+                    mob_effect
+                        .on_mob_hurt(self, amplifier, &damage_type, amount)
+                        .await;
+                }
+            }
 
             if play_sound {
                 // `LivingEntity.hurtServer` calls `Entity.markHurt` for a full-impact hit
@@ -6908,7 +6881,7 @@ impl EntityBase for LivingEntity {
                         );
                     }
 
-                    self.apply_consumable_effects(item).await;
+                    self.apply_consumable_effects(caller, item).await;
 
                     if let Some(consumable) = item.get_data_component::<ConsumableImpl>() {
                         let world = self.entity.world.load();
@@ -7138,7 +7111,7 @@ impl EntityBase for LivingEntity {
                         self.entity.world.load().send_entity_status(
                             &self.entity,
                             EntityStatus::Death,
-                            Some(ActorEventType::Death),
+                            Some(ActorEventID::Death),
                         );
                         self.entity.remove().await;
                     }
@@ -7178,7 +7151,7 @@ const fn equipment_slot_for_hand(hand: Hand) -> EquipmentSlot {
 impl LivingEntity {
     /// Applies data-driven `apply_effects` consume effects after an item completes use.
     /// Vanilla: `Consumable.onConsume` invokes every configured effect server-side.
-    async fn apply_consumable_effects(&self, item: &ItemStack) {
+    async fn apply_consumable_effects(&self, caller: &Arc<dyn EntityBase>, item: &ItemStack) {
         let Some(consumable) = item.get_data_component::<ConsumableImpl>() else {
             return;
         };
@@ -7227,7 +7200,7 @@ impl LivingEntity {
                     world.play_sound_event(sound, SoundCategory::Players, &self.entity.pos.load());
                 }
                 ConsumeEffect::TeleportRandomly(diameter) => {
-                    self.teleport_randomly_on_consume(*diameter).await;
+                    self.teleport_randomly_on_consume(caller, *diameter).await;
                 }
             }
         }
@@ -7236,7 +7209,10 @@ impl LivingEntity {
     /// `TeleportRandomlyConsumeEffect.apply` (26.2 decompile,
     /// world/item/consume_effects/TeleportRandomlyConsumeEffect.java:38-72): tries up to 16
     /// random offsets within `diameter` and stops at the first successful landing.
-    async fn teleport_randomly_on_consume(&self, diameter: f32) {
+    ///
+    /// The destination is validated before anything moves, then the move goes through
+    /// `caller`'s `EntityBase::teleport` so a player consumer gets its client position synced.
+    async fn teleport_randomly_on_consume(&self, caller: &Arc<dyn EntityBase>, diameter: f32) {
         let pos = self.entity.pos.load();
 
         let (min_y, max_y) = {
@@ -7247,55 +7223,81 @@ impl LivingEntity {
             )
         };
 
-        for _ in 0..16 {
-            let (dx, dy, dz) = {
+        for _ in 0..Self::RANDOM_TELEPORT_ATTEMPTS {
+            let (target_x, target_y, target_z) = {
                 let mut rng = rand::rng();
                 (
-                    (rng.random_range(0.0..1.0) - 0.5) * f64::from(diameter),
-                    (rng.random_range(0.0..1.0) - 0.5) * f64::from(diameter),
-                    (rng.random_range(0.0..1.0) - 0.5) * f64::from(diameter),
+                    random_teleport_coordinate(pos.x, diameter, rng.random_range(0.0..1.0)),
+                    random_teleport_coordinate(pos.y, diameter, rng.random_range(0.0..1.0)),
+                    random_teleport_coordinate(pos.z, diameter, rng.random_range(0.0..1.0)),
                 )
             };
             // Clamp to the dimension's playable Y range before randomTeleport searches for ground.
-            let target_y = (pos.y + dy).clamp(min_y, max_y);
+            let target_y = target_y.clamp(min_y, max_y);
 
-            // Clone out of the lock first: holding the guard as the `if let` scrutinee would
-            // keep it alive for the whole block, across the `.await` below.
-            let vehicle = self.entity.vehicle.lock().await.clone();
+            // `if (user.isPassenger()) user.stopRiding();`. Clone out of the lock first: holding
+            // the guard as the `if let` scrutinee would keep it alive across the `.await` below.
+            let vehicle = caller.get_entity().vehicle.lock().await.clone();
             if let Some(vehicle) = vehicle {
                 vehicle
                     .get_entity()
-                    .remove_passenger(self.entity.entity_id)
+                    .remove_passenger_before_teleport(caller.get_entity().entity_id)
                     .await;
+                // A plugin cancelled the dismount.
+                if caller.get_entity().has_vehicle().await {
+                    continue;
+                }
             }
 
-            if self.random_teleport(pos.x + dx, target_y, pos.z + dz, true) {
-                let world = self.entity.world.load();
-                let is_fox = self.entity.entity_type == &EntityType::FOX;
-                let (sound, category) = if is_fox {
-                    (Sound::EntityFoxTeleport, SoundCategory::Neutral)
-                } else {
-                    (Sound::ItemChorusFruitTeleport, SoundCategory::Players)
-                };
-                world.play_sound(sound, category, &self.entity.pos.load());
-                self.fall_distance.store(0.0);
+            let Some(destination) = self.random_teleport_target(target_x, target_y, target_z)
+            else {
+                continue;
+            };
+
+            let world = self.entity.world.load_full();
+            caller
+                .clone()
+                .teleport(destination, None, None, world.clone())
+                .await;
+            if self.entity.pos.load() == pos {
+                // A plugin cancelled the teleport.
                 break;
             }
+
+            // `randomTeleport(..., showParticles = true)`: entity event 46.
+            world.send_entity_status(&self.entity, EntityStatus::Teleport, None);
+            // `level.gameEvent(GameEvent.TELEPORT, oldPos, GameEvent.Context.of(user))`.
+            crate::world::game_event::emit_game_event(
+                &world,
+                pumpkin_data::game_event::GameEvent::Teleport,
+                pos,
+                crate::world::game_event::GameEventContext::of_entity(caller.clone()),
+            )
+            .await;
+            world.emit_game_event("teleport", pos).await;
+            let is_fox = self.entity.entity_type == &EntityType::FOX;
+            let (sound, category) = if is_fox {
+                (Sound::EntityFoxTeleport, SoundCategory::Neutral)
+            } else {
+                (Sound::ItemChorusFruitTeleport, SoundCategory::Players)
+            };
+            world.play_sound(sound, category, &self.entity.pos.load());
+            self.fall_distance.store(0.0);
+            break;
         }
     }
 
-    /// `LivingEntity.randomTeleport` (26.2 decompile,
+    /// The destination search of `LivingEntity.randomTeleport` (26.2 decompile,
     /// world/entity/LivingEntity.java:3665-3709): walks down from `(x, y, z)` to the first
-    /// block that blocks motion, then teleports there if the destination is free of block
-    /// collision and liquid, reverting otherwise.
-    fn random_teleport(&self, x: f64, y: f64, z: f64, show_particles: bool) -> bool {
-        let origin = self.entity.pos.load();
+    /// block that blocks motion, and accepts the landing only if it is free of block collision
+    /// and liquid. Returns the landing position without moving the entity.
+    fn random_teleport_target(&self, x: f64, y: f64, z: f64) -> Option<Vector3<f64>> {
         let world = self.entity.world.load();
         let dimension = self.entity.entity_dimension.load();
 
         let target_block = BlockPos::new(x.floor() as i32, y.floor() as i32, z.floor() as i32);
         if !world.is_loaded(&target_block) {
-            return false;
+            return None;
         }
 
         let mut target_y = y;
@@ -7312,28 +7314,22 @@ impl LivingEntity {
         }
 
         if !landed {
-            return false;
+            return None;
         }
-
-        self.entity
-            .teleport(Vector3::new(x, target_y, z), None, None, world.clone());
 
         let bb = BoundingBox::new_from_pos(x, target_y, z, &dimension);
         let space_free = world.is_space_empty(bb);
         let liquid_free = !BlockPos::iterate(bb.min_block_pos(), bb.max_block_pos())
-            .any(|pos| world.get_fluid(&pos) != &pumpkin_data::fluid::Fluid::EMPTY);
+            .any(|pos| world.get_fluid(&pos) != &Fluid::EMPTY);
 
-        if !space_free || !liquid_free {
-            self.entity.teleport(origin, None, None, world.clone());
-            return false;
-        }
-
-        if show_particles {
-            world.send_entity_status(&self.entity, EntityStatus::Teleport, None);
-        }
-
-        true
+        (space_free && liquid_free).then(|| Vector3::new(x, target_y, z))
     }
+}
+
+/// One axis of `TeleportRandomlyConsumeEffect.apply`'s offset:
+/// `center + (nextDouble() - 0.5) * diameter`.
+fn random_teleport_coordinate(center: f64, diameter: f32, random: f64) -> f64 {
+    center + (random - 0.5) * f64::from(diameter)
 }
 
 const fn spider_climbing_state(
@@ -7862,7 +7858,7 @@ mod effect_chain_tests {
 mod milk_bucket_tests {
     use super::{
         consumable_clears_all_effects, consumable_remainder, consume_effect_probability_applies,
-        is_consumed_on_finish,
+        is_consumed_on_finish, random_teleport_coordinate,
     };
     use pumpkin_data::{item::Item, item_stack::ItemStack};
 
@@ -7926,6 +7922,13 @@ mod milk_bucket_tests {
         let apple = ItemStack::new(1, &Item::APPLE);
         assert!(is_consumed_on_finish(&milk));
         assert!(is_consumed_on_finish(&apple));
+    }
+
+    #[test]
+    fn random_teleport_coordinate_uses_full_diameter() {
+        assert_eq!(random_teleport_coordinate(10.0, 16.0, 0.0), 2.0);
+        assert_eq!(random_teleport_coordinate(10.0, 16.0, 0.5), 10.0);
+        assert_eq!(random_teleport_coordinate(10.0, 16.0, 1.0), 18.0);
     }
 }
 

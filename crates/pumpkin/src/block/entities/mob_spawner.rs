@@ -138,34 +138,51 @@ impl BlockEntity for MobSpawnerBlockEntity {
     where
         Self: Sized,
     {
-        let delay = nbt.get_short("Delay").unwrap_or(Self::DEFAULT_DELAY as i16) as i32;
-        let min_delay = nbt
-            .get_short("MinSpawnDelay")
-            .unwrap_or(Self::DEFAULT_MIN_SPAWN_DELAY as i16) as i32;
-        let max_delay = nbt
-            .get_short("MaxSpawnDelay")
-            .unwrap_or(Self::DEFAULT_MAX_SPAWN_DELAY as i16) as i32;
-        let spawn_count = nbt
-            .get_short("SpawnCount")
-            .unwrap_or(Self::DEFAULT_SPAWN_COUNT as i16) as i32;
+        let get_num = |name: &str| {
+            nbt.get_short(name)
+                .map(i32::from)
+                .or_else(|| nbt.get_int(name))
+                .or_else(|| nbt.get_byte(name).map(i32::from))
+        };
+
+        let delay = get_num("Delay").unwrap_or(Self::DEFAULT_DELAY);
+        let min_delay = get_num("MinSpawnDelay").unwrap_or(Self::DEFAULT_MIN_SPAWN_DELAY);
+        let max_delay = get_num("MaxSpawnDelay").unwrap_or(Self::DEFAULT_MAX_SPAWN_DELAY);
+        let spawn_count = get_num("SpawnCount").unwrap_or(Self::DEFAULT_SPAWN_COUNT);
+        let spawn_range = get_num("SpawnRange").unwrap_or(Self::DEFAULT_SPAWN_RANGE);
         let max_nearby_entities =
-            nbt.get_short("MaxNearbyEntities")
-                .unwrap_or(Self::DEFAULT_MAX_NEARBY_ENTITIES as i16) as i32;
+            get_num("MaxNearbyEntities").unwrap_or(Self::DEFAULT_MAX_NEARBY_ENTITIES);
         let required_player_range =
-            nbt.get_short("RequiredPlayerRange")
-                .unwrap_or(Self::DEFAULT_REQUIRED_PLAYER_RANGE as i16) as i32;
-        let spawn_range = nbt
-            .get_short("SpawnRange")
-            .unwrap_or(Self::DEFAULT_SPAWN_RANGE as i16) as i32;
+            get_num("RequiredPlayerRange").unwrap_or(Self::DEFAULT_REQUIRED_PLAYER_RANGE);
 
         let entity_type = nbt
             .get_compound("SpawnData")
-            .and_then(|data| data.get_compound("entity"))
-            .and_then(|entity| entity.get_string("id"))
-            .and_then(|id| {
-                let name = id.strip_prefix("minecraft:").unwrap_or(id);
-                EntityType::from_name(name)
-            });
+            .and_then(|data| {
+                data.get_compound("entity")
+                    .and_then(|entity| entity.get_string("id"))
+                    .or_else(|| data.get_string("id"))
+            })
+            .or_else(|| {
+                nbt.get_list("SpawnPotentials")
+                    .and_then(|list| list.first())
+                    .and_then(|tag| tag.extract_compound())
+                    .and_then(|entry| {
+                        entry
+                            .get_compound("data")
+                            .and_then(|data| {
+                                data.get_compound("entity")
+                                    .and_then(|entity| entity.get_string("id"))
+                                    .or_else(|| data.get_string("id"))
+                            })
+                            .or_else(|| {
+                                entry
+                                    .get_compound("entity")
+                                    .and_then(|entity| entity.get_string("id"))
+                            })
+                    })
+            })
+            .or_else(|| nbt.get_string("EntityId"))
+            .and_then(EntityType::from_name);
 
         Self {
             position,
@@ -191,6 +208,14 @@ impl BlockEntity for MobSpawnerBlockEntity {
 
     fn chunk_data_nbt(&self) -> Option<NbtCompound> {
         let mut final_nbt = NbtCompound::new();
+        final_nbt.put_short("Delay", self.delay.load(Ordering::Relaxed) as i16);
+        final_nbt.put_short("MinSpawnDelay", self.min_delay as i16);
+        final_nbt.put_short("MaxSpawnDelay", self.max_delay as i16);
+        final_nbt.put_short("SpawnCount", self.spawn_count as i16);
+        final_nbt.put_short("MaxNearbyEntities", self.max_nearby_entities as i16);
+        final_nbt.put_short("RequiredPlayerRange", self.required_player_range as i16);
+        final_nbt.put_short("SpawnRange", self.spawn_range as i16);
+
         if let Some(entity_type) = self.entity_type.load() {
             let mut spawn_entry = NbtCompound::new();
 

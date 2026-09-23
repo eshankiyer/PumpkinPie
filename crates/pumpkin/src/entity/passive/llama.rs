@@ -27,12 +27,13 @@ use crate::entity::{
         run_around_like_crazy::RunAroundLikeCrazyGoal, swim::SwimGoal, tempt::TemptGoal,
         wander_around::WanderAroundGoal,
     },
-    mob::{Mob, MobEntity},
+    mob::{Mob, MobEntity, RangedAttackMob},
     passive::{
         animal::Animal,
         equine::{AbstractChestedHorse, AbstractHorse, AbstractHorseData, ChestedHorseData},
     },
     player::Player,
+    projectile::llama_spit::LlamaSpitEntity,
 };
 
 /// Vanilla `TemptGoal(this, 1.25, i -> i.is(ItemTags.LLAMA_TEMPT_ITEMS), false)` -- hay bales
@@ -425,6 +426,37 @@ impl LlamaEntity {
 
         mob_arc
     }
+
+    /// `Llama.spit` (`Llama.java:340-365`), also reachable through [`RangedAttackMob`].
+    pub async fn spit(&self, target: &Arc<dyn EntityBase>) {
+        let entity = self.get_entity();
+        let world = entity.world.load();
+
+        let spit_entity = Entity::new(world.clone(), entity.pos.load(), &EntityType::LLAMA_SPIT);
+        let spit = LlamaSpitEntity::new_shot(spit_entity, entity);
+
+        let mob_pos = entity.pos.load();
+        let target_entity = target.get_entity();
+        let target_pos = target_entity.pos.load();
+        let target_height = f64::from(target_entity.entity_dimension.load().height);
+
+        let dx = target_pos.x - mob_pos.x;
+        let dy = (target_pos.y + target_height / 3.0) - spit.get_entity().pos.load().y;
+        let dz = target_pos.z - mob_pos.z;
+        let horizontal_distance = dx.hypot(dz);
+        let yo = horizontal_distance * 0.2;
+
+        spit.thrown.set_velocity(dx, dy + yo, dz, 1.5, 10.0);
+
+        let spit_arc: Arc<dyn EntityBase> = Arc::new(spit);
+        world.spawn_entity(spit_arc).await;
+
+        if !entity.silent.load(Relaxed) {
+            world.play_sound(Sound::EntityLlamaSpit, SoundCategory::Neutral, &mob_pos);
+        }
+        // `Llama.spit` (`Llama.java:363`).
+        self.llama_data.did_spit.store(true, Relaxed);
+    }
 }
 
 impl NBTStorage for LlamaEntity {
@@ -579,6 +611,18 @@ impl Mob for LlamaEntity {
         world: &'a Arc<crate::world::World>,
     ) -> EntityBaseFuture<'a, Option<Arc<dyn EntityBase>>> {
         self.create_llama_offspring(mate, world)
+    }
+}
+
+impl RangedAttackMob for LlamaEntity {
+    fn perform_ranged_attack<'a>(
+        &'a self,
+        target: &'a Arc<dyn EntityBase>,
+        _power: f32,
+    ) -> EntityBaseFuture<'a, ()> {
+        Box::pin(async move {
+            self.spit(target).await;
+        })
     }
 }
 

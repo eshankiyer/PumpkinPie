@@ -8,8 +8,8 @@ use crate::server::Server;
 use crate::world::game_event::{GameEventContext, emit_game_event};
 use pumpkin_data::block_properties::BlockProperties;
 use pumpkin_data::block_properties::{
-    ChestLikeProperties, ChestType, OakDoorLikeProperties, OakTrapdoorLikeProperties,
-    PaleOakWoodLikeProperties,
+    ChestLikeProperties, ChestType, DoubleBlockHalf, OakDoorLikeProperties,
+    OakTrapdoorLikeProperties, PaleOakWoodLikeProperties,
 };
 use pumpkin_data::game_event::GameEvent;
 use pumpkin_data::item_stack::ItemStack;
@@ -71,9 +71,34 @@ impl ItemBehaviour for AxeItem {
                 // Let's check if It's a door
                 else if block.has_tag(&tag::Block::MINECRAFT_DOORS) {
                     // get block state of the old log.
+                    // get block state of the old log.
                     let door_information = world.get_block_state_id(&location);
-                    // get the log properties
+                    // get the door properties
                     let door_props = OakDoorLikeProperties::from_state_id(door_information, block);
+                    // Upstream fix for Pumpkin#3029: the other half of the door is swapped
+                    // to the new block too. Vanilla gets this from `DoorBlock.updateShape`
+                    // accepting any `DoorBlock` neighbour, but this port's door neighbour
+                    // update only accepts the same block and would otherwise break the door.
+                    let other_half_pos = match door_props.half {
+                        DoubleBlockHalf::Lower => location.up(),
+                        DoubleBlockHalf::Upper => location.down(),
+                    };
+                    let (other_block, other_state_id) =
+                        world.get_block_and_state_id(&other_half_pos);
+                    if other_block == block {
+                        let other_new_state_id = crate::item::items::state_with_properties_of(
+                            other_block,
+                            other_state_id,
+                            new_block,
+                        );
+                        world
+                            .set_block_state(
+                                &other_half_pos,
+                                other_new_state_id,
+                                BlockFlags::NOTIFY_ALL,
+                            )
+                            .await;
+                    }
                     // create new properties for the new log.
                     let mut new_door_properties = OakDoorLikeProperties::default(new_block);
                     // Set old axis to the new log.
@@ -264,12 +289,6 @@ const fn get_deoxidized_equivalent(id: BlockId) -> Option<BlockId> {
         BlockId::OXIDIZED_COPPER_TRAPDOOR => Some(BlockId::WEATHERED_COPPER_TRAPDOOR),
         BlockId::WEATHERED_COPPER_TRAPDOOR => Some(BlockId::EXPOSED_COPPER_TRAPDOOR),
         BlockId::EXPOSED_COPPER_TRAPDOOR => Some(BlockId::COPPER_TRAPDOOR),
-        BlockId::OXIDIZED_COPPER_BARS => Some(BlockId::WEATHERED_COPPER_BARS),
-        BlockId::WEATHERED_COPPER_BARS => Some(BlockId::EXPOSED_COPPER_BARS),
-        BlockId::EXPOSED_COPPER_BARS => Some(BlockId::COPPER_BARS),
-        BlockId::OXIDIZED_COPPER_CHAIN => Some(BlockId::WEATHERED_COPPER_CHAIN),
-        BlockId::WEATHERED_COPPER_CHAIN => Some(BlockId::EXPOSED_COPPER_CHAIN),
-        BlockId::EXPOSED_COPPER_CHAIN => Some(BlockId::COPPER_CHAIN),
         BlockId::OXIDIZED_COPPER_LANTERN => Some(BlockId::WEATHERED_COPPER_LANTERN),
         BlockId::WEATHERED_COPPER_LANTERN => Some(BlockId::EXPOSED_COPPER_LANTERN),
         BlockId::EXPOSED_COPPER_LANTERN => Some(BlockId::COPPER_LANTERN),
@@ -279,6 +298,12 @@ const fn get_deoxidized_equivalent(id: BlockId) -> Option<BlockId> {
         BlockId::OXIDIZED_COPPER_GOLEM_STATUE => Some(BlockId::WEATHERED_COPPER_GOLEM_STATUE),
         BlockId::WEATHERED_COPPER_GOLEM_STATUE => Some(BlockId::EXPOSED_COPPER_GOLEM_STATUE),
         BlockId::EXPOSED_COPPER_GOLEM_STATUE => Some(BlockId::COPPER_GOLEM_STATUE),
+        BlockId::OXIDIZED_COPPER_BARS => Some(BlockId::WEATHERED_COPPER_BARS),
+        BlockId::WEATHERED_COPPER_BARS => Some(BlockId::EXPOSED_COPPER_BARS),
+        BlockId::EXPOSED_COPPER_BARS => Some(BlockId::COPPER_BARS),
+        BlockId::OXIDIZED_COPPER_CHAIN => Some(BlockId::WEATHERED_COPPER_CHAIN),
+        BlockId::WEATHERED_COPPER_CHAIN => Some(BlockId::EXPOSED_COPPER_CHAIN),
+        BlockId::EXPOSED_COPPER_CHAIN => Some(BlockId::COPPER_CHAIN),
         BlockId::OXIDIZED_LIGHTNING_ROD => Some(BlockId::WEATHERED_LIGHTNING_ROD),
         BlockId::WEATHERED_LIGHTNING_ROD => Some(BlockId::EXPOSED_LIGHTNING_ROD),
         BlockId::EXPOSED_LIGHTNING_ROD => Some(BlockId::LIGHTNING_ROD),

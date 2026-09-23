@@ -25,8 +25,9 @@
 //!   a relog while `RAID_OMEN` is active drops the pending raid trigger instead of resuming it.
 //! - `Raid.findRandomSpawnPos` drops the `isVillage`/chunk-loaded/`SpawnPlacements` legality
 //!   checks and only checks the vertical-distance bound (`Raid.java` line 675).
-//! - No banner-pattern rendering: the wave leader is equipped with a plain white banner
-//!   instead of the ominous banner's exact pattern layers (`Raid.getBannerComponentPatch`).
+//! - No banner-pattern rendering: the wave leader is equipped with a named white banner
+//!   (`create_ominous_banner`) instead of the ominous banner's exact pattern layers
+//!   (`Raid.getBannerComponentPatch`).
 //! - `ObtainRaidLeaderBannerGoal`/`RaiderMoveThroughVillageGoal`/`RaiderCelebration` AI goals
 //!   (`Raider.java`) are not ported: raiders fight using their existing hostile-mob goals only.
 //! - Advancement/statistics hooks (`CriteriaTriggers.RAID_OMEN`/`RAID_WIN`, `Stats.RAID_TRIGGER`/
@@ -44,8 +45,6 @@ use uuid::Uuid;
 use pumpkin_data::data_component_impl::EquipmentSlot;
 use pumpkin_data::effect::StatusEffect;
 use pumpkin_data::entity::EntityType;
-use pumpkin_data::item::Item;
-use pumpkin_data::item_stack::ItemStack;
 use pumpkin_data::potion::Effect;
 use pumpkin_data::sound::{Sound, SoundCategory};
 use pumpkin_util::Difficulty;
@@ -57,6 +56,7 @@ use super::World;
 use super::bossbar::{Bossbar, BossbarColor, BossbarDivisions, BossbarFlags};
 use crate::entity::EntityBase;
 use crate::entity::living::RaidMembership;
+use crate::entity::mob::raider::create_ominous_banner;
 use crate::entity::mob::equipment::RegionalDifficulty;
 use crate::entity::player::Player;
 use crate::world::natural_spawner::{is_spawn_position_ok, is_valid_empty_spawn_block};
@@ -283,6 +283,12 @@ impl Raid {
         self.omen_level
     }
 
+    /// `Raid.getRaidOmenLevel` (`Raid.java`).
+    #[must_use]
+    pub const fn get_raid_omen_level(&self) -> i32 {
+        self.omen_level
+    }
+
     /// `Raid.getMaxRaidOmenLevel` (`Raid.java:235-237`).
     #[must_use]
     pub const fn get_max_raid_omen_level(&self) -> i32 {
@@ -334,6 +340,12 @@ impl Raid {
         self.group_raiders.values().map(HashSet::len).sum::<usize>() as i32
     }
 
+    /// `Raid.getTotalRaidersAlive` (`Raid.java`).
+    #[must_use]
+    pub fn get_total_raiders_alive(&self) -> i32 {
+        self.total_raiders_alive()
+    }
+
     const fn is_final_wave(&self) -> bool {
         self.groups_spawned == self.num_groups
     }
@@ -378,8 +390,10 @@ impl Raid {
         }
     }
 
-    const fn stop(&mut self) {
+    /// `Raid.stop` (`Raid.java`): deactivates the raid and drops every player from its boss bar.
+    pub async fn stop(&mut self, world: &Arc<World>) {
         self.active = false;
+        self.remove_all_bossbars(world).await;
         self.status = RaidStatus::Stopped;
     }
 
@@ -585,7 +599,15 @@ impl Raid {
         self.groups_spawned
     }
 
-    fn health_of_living_raiders(&self, world: &Arc<World>) -> f32 {
+    /// `Raid.getGroupsSpawned` (`Raid.java:207`), public for the `/raid` command.
+    #[must_use]
+    pub const fn get_groups_spawned(&self) -> i32 {
+        self.groups_spawned
+    }
+
+    /// `Raid.getHealthOfLivingRaiders` (`Raid.java`).
+    #[must_use]
+    pub fn get_health_of_living_raiders(&self, world: &Arc<World>) -> f32 {
         let mut health = 0.0;
         for raiders in self.group_raiders.values() {
             for uuid in raiders {
@@ -601,7 +623,7 @@ impl Raid {
 
     async fn update_bossbar_health(&self, world: &Arc<World>) {
         let fraction = if self.total_health > 0.0 {
-            (self.health_of_living_raiders(world) / self.total_health).clamp(0.0, 1.0)
+            (self.get_health_of_living_raiders(world) / self.total_health).clamp(0.0, 1.0)
         } else {
             0.0
         };
@@ -754,13 +776,13 @@ impl Raid {
 
         if self.status == RaidStatus::Ongoing {
             if world.level_info.load().difficulty == Difficulty::Peaceful {
-                self.stop();
+                self.stop(world).await;
                 return;
             }
 
             self.ticks_active += 1;
             if self.ticks_active >= RAID_TIMEOUT_TICKS {
-                self.stop();
+                self.stop(world).await;
                 return;
             }
 
@@ -786,7 +808,7 @@ impl Raid {
                 let Some(spawn_pos) = self.find_random_spawn_pos(world, 20) else {
                     attempts += 1;
                     if attempts > NUM_SPAWN_ATTEMPTS {
-                        self.stop();
+                        self.stop(world).await;
                         break;
                     }
                     continue;
@@ -818,7 +840,7 @@ impl Raid {
         } else if self.is_over() {
             self.celebration_ticks += 1;
             if self.celebration_ticks >= MAX_CELEBRATION_TICKS {
-                self.stop();
+                self.stop(world).await;
             }
         }
     }
@@ -839,7 +861,7 @@ async fn equip_ominous_banner(mob_entity: &crate::entity::mob::MobEntity) {
         .entity_equipment
         .lock()
         .await
-        .put(&EquipmentSlot::HEAD, ItemStack::new(1, &Item::WHITE_BANNER));
+        .put(&EquipmentSlot::HEAD, create_ominous_banner());
 }
 
 /// `PatrolSpawner` (PatrolSpawner.java:16-91): the world-tick spawner that seeds illager
@@ -1056,6 +1078,42 @@ impl RaidManager {
         self.raids.get(&id)
     }
 
+    /// Alias of [`Self::raid`].
+    #[must_use]
+    pub fn get(&self, id: i32) -> Option<&Raid> {
+        self.raid(id)
+    }
+
+    /// Alias of [`Self::raid_mut`].
+    pub fn get_mut(&mut self, id: i32) -> Option<&mut Raid> {
+        self.raid_mut(id)
+    }
+
+    /// `Raids.getNearbyRaid` (`Raids.java`): the closest active raid whose center lies strictly
+    /// within `max_dist_sqr` of `pos`.
+    #[must_use]
+    pub fn get_nearby_raid(&self, pos: &BlockPos, max_dist_sqr: f64) -> Option<&Raid> {
+        self.raids
+            .values()
+            .filter(|raid| raid.is_active())
+            .map(|raid| (raid, raid.center.squared_distance(pos) as f64))
+            .filter(|&(_, dist_sqr)| dist_sqr < max_dist_sqr)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(raid, _)| raid)
+    }
+
+    /// `ServerLevel.getRaidAt`: `Raids.getNearbyRaid(pos, 9216)`.
+    #[must_use]
+    pub fn get_raid_at(&self, pos: &BlockPos) -> Option<&Raid> {
+        self.get_nearby_raid(pos, VALID_RAID_RADIUS_SQR)
+    }
+
+    /// Mutable [`Self::get_raid_at`].
+    pub fn get_raid_at_mut(&mut self, pos: &BlockPos) -> Option<&mut Raid> {
+        let id = self.find_active_raid_near(*pos)?;
+        self.raids.get_mut(&id)
+    }
+
     /// `ServerLevel.getRaidAt` plus the pre-raid activity selection used by
     /// `VillagerGoalPackages.getPreRaidPackage` (`VillagerGoalPackages.java:231-245`).
     #[must_use]
@@ -1094,12 +1152,12 @@ impl RaidManager {
         world: &Arc<World>,
         player: &Player,
         raid_position: BlockPos,
-    ) {
+    ) -> Option<i32> {
         if player.gamemode.load() == pumpkin_util::GameMode::Spectator {
-            return;
+            return None;
         }
         if !world.level_info.load().game_rules.raids {
-            return;
+            return None;
         }
 
         let poi_positions = world
@@ -1140,6 +1198,7 @@ impl RaidManager {
             let raid = self.raids.get_mut(&raid_id).unwrap();
             raid.absorb_raid_omen(player).await;
         }
+        Some(raid_id)
     }
 
     /// Raids.tick (Raids.java:79-100).
@@ -1152,7 +1211,7 @@ impl RaidManager {
 
         if !world.level_info.load().game_rules.raids {
             for raid in mgr.raids.values_mut() {
-                raid.stop();
+                raid.stop(world).await;
             }
         }
 

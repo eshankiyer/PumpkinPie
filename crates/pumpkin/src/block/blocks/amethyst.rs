@@ -40,7 +40,7 @@ impl BlockBehaviour for AmethystBlock {
                 args.block.default_state.id,
                 args.block,
             );
-            props.facing = args.direction.to_facing().opposite();
+            props.facing = args.direction.to_facing();
             props.waterlogged = args.replacing.water_source();
             props.to_state_id(args.block)
         })
@@ -70,7 +70,7 @@ impl BlockBehaviour for AmethystBlock {
 impl WallMountedBlock for AmethystBlock {
     fn get_direction(&self, state_id: BlockStateId, block: &Block) -> BlockDirection {
         let props = AmethystClusterLikeProperties::from_state_id(state_id, block);
-        props.facing.to_block_direction()
+        props.facing.to_block_direction().opposite()
     }
 }
 
@@ -118,13 +118,16 @@ impl BlockMetadata for BuddingAmethystBlock {
     }
 }
 
-/// `BuddingAmethystBlock.canClusterGrowAtState`: air, or a full (source) water block.
-fn can_cluster_grow_at_state(block: &Block, state_id: BlockStateId) -> bool {
-    if block == &Block::AIR {
+/// `BuddingAmethystBlock.canClusterGrowAtState`: `state.isAir()` (air, cave air, void air), or
+/// water whose fluid state `isFull()` (a source, or falling water at level 8+).
+#[must_use]
+pub fn can_cluster_grow_at_state(block: &Block, state_id: BlockStateId) -> bool {
+    if block.default_state.is_air() {
         return true;
     }
     if block == &Block::WATER {
-        return WaterLikeProperties::from_state_id(state_id, block).level == 0;
+        let level = WaterLikeProperties::from_state_id(state_id, block).level;
+        return level == 0 || level >= 8;
     }
     false
 }

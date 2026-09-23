@@ -39,6 +39,7 @@ pub struct VindicatorEntity {
 }
 
 impl VindicatorEntity {
+    #[must_use]
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
         let vindicator = Self {

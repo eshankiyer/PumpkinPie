@@ -40,6 +40,7 @@ pub struct RavagerEntity {
 }
 
 impl RavagerEntity {
+    #[must_use]
     pub fn new(entity: Entity) -> Arc<Self> {
         let mob_entity = MobEntity::new(entity);
         let ravager = Self {

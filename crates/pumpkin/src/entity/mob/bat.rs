@@ -73,7 +73,8 @@ impl BatEntity {
         true
     }
 
-    fn is_roosting(&self) -> bool {
+    #[must_use]
+    pub fn is_roosting(&self) -> bool {
         self.roosting.load(Relaxed)
     }
 

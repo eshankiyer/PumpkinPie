@@ -80,7 +80,7 @@ async fn grow_tree(world: &Arc<World>, pos: &BlockPos, waterlogged: bool) -> boo
 }
 
 /// `SaplingBlock.advanceTree` (`SaplingBlock.java:51-57`): stage 0 only ticks the stage up; from
-/// stage 1 the tree grows. Fires `StructureGrowEvent` the same way `SaplingBlock::generate` does.
+/// stage 1 the tree grows. Fires `StructureGrowEvent` before advancing.
 async fn advance_tree(world: &Arc<World>, pos: &BlockPos, bone_meal: bool) {
     use crate::plugin::api::events::world::structure_grow::{StructureGrowEvent, TreeType};
     let mut event = StructureGrowEvent::new(*pos, TreeType::Mangrove, bone_meal);
